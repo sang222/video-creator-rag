@@ -1,0 +1,53 @@
+workflow_modes:
+  MONETIZATION_VALIDATION_MODE:
+    budget:
+      target: 1.00
+      hard_max: 2.50
+    media_policy:
+      max_new_ai_video_scenes: 0
+      reuse_first: true
+      fallback: image_motion
+    required_outputs_per_video:
+      - monetization_hypothesis
+      - target_metric
+      - CTA_strategy
+      - expected_revenue_path
+    prohibited:
+      - premium_spend_without_preapproval
+      - confirmed_pattern_from_single_video
+      - AI_spam_mass_production
+  FAST_TRACK:
+    budget:
+      target: 1.50
+      hard_max: 2.50
+    media_policy:
+      max_new_ai_video_scenes: 0
+      reuse_first: true
+      fallback: image_motion
+  NORMAL_REUSE_FIRST:
+    budget:
+      target: 3.50
+      hard_max: 5.50
+    media_policy:
+      max_new_ai_video_scenes: 2
+      reuse_first: true
+      fallback: image_motion
+  PREMIUM_HYBRID:
+    budget:
+      target: 8.00
+      hard_max: 12.00
+    media_policy:
+      max_new_ai_video_scenes: 6
+      reuse_first: true
+      fallback: hybrid_generation
+    requires_preapproval_if_estimated_cost_gt: 5.00
+  FULL_AI_CINEMATIC:
+    disabled_by_default: true
+    requires_human_preapproval: true
+    budget:
+      target: 25.00
+      hard_max: 50.00
+    media_policy:
+      max_new_ai_video_scenes: 99
+      reuse_first: false
+      fallback: none

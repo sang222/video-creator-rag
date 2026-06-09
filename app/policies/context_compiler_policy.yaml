@@ -1,0 +1,10 @@
+context_compiler_policy:
+  enabled: true
+  compile_scope: workspace
+  target_tokens: 1500
+  invalidate_when:
+    - company_policy_updated
+    - workspace_profile_updated
+    - workspace_playbook_updated
+    - compliance_policy_updated
+  authority_reads_raw_policy: false

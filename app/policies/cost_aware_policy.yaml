@@ -1,0 +1,38 @@
+cost_aware_policy:
+  default_strategy: reuse_first_lowfi_first
+  semantic_cache:
+    enabled: true
+    backend: redis_optional
+    invalidate_on_memory_version_change: true
+  agent_skipping:
+    enabled: true
+    rule_engine_required: true
+    never_skip:
+      - authority_final_gate
+      - compliance_check
+      - budget_guard
+  media_reuse:
+    search_before_generate: true
+    min_reuse_score: 0.78
+    min_asset_qa_score: 7.5
+    compliance_required: true
+  ai_video_budget:
+    max_new_ai_video_scenes:
+      monetization_validation: 0
+      fast_track: 0
+      normal: 2
+      premium: 6
+  smart_retry:
+    same_prompt_retry_forbidden: true
+    qa_specific_failure_required: true
+    seed_lock_if_supported: true
+    max_regen_per_scene: 2
+    max_regen_cost_per_scene: 0.60
+  lowfi_preview:
+    required_before_hifi_render: true
+    renderer: ffmpeg_local_or_mock
+  media_qa:
+    frame_sampling_required: true
+    full_video_vision_review: premium_only
+  human_preapproval:
+    required_for_viral_or_expensive: true
