@@ -8,6 +8,13 @@ from app.db.models.foundation import (
     User,
     UserRole,
 )
+from app.db.models.channel import (
+    ChannelMembership,
+    ChannelProfileCompileRun,
+    ChannelProfileVersion,
+    ChannelWorkspace,
+    CompiledChannelPolicySnapshot,
+)
 
 __all__ = [
     "AuditEvent",
@@ -18,4 +25,9 @@ __all__ = [
     "Role",
     "User",
     "UserRole",
+    "ChannelMembership",
+    "ChannelProfileCompileRun",
+    "ChannelProfileVersion",
+    "ChannelWorkspace",
+    "CompiledChannelPolicySnapshot",
 ]

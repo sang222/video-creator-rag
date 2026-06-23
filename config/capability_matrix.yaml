@@ -1,0 +1,15 @@
+catalog_key: capability_matrix
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - matrix_key: default
+    profile_compiler_available: true
+    policy_snapshot_available: true
+    artifact_workflow_available: false
+    media_pipeline_available: false
+    publish_pipeline_available: false
+    analytics_available: false
+    no_view_diagnostic_available: false
+    envato_manual_asset_pilot_documented: true
+    ffmpeg_renderer_planned: true

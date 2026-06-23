@@ -1,0 +1,57 @@
+catalog_key: niche_profile_templates
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - template_key: saas_digital_leverage
+    template_version: "1.0.0"
+    display_name: SaaS Digital Leverage AI Automation
+    target_market: US/EU professional_dense
+    audience_segment: professional_dense
+    monetization_model:
+      primary: mixed
+      channels:
+        - adsense
+        - saas_affiliate
+    format_strategy:
+      long_form_minutes: "6-12"
+      shorts_role: tofu
+      cadence_bias: practical walkthroughs and concise explainers
+    risk_tolerance: low_to_medium
+    media_style:
+      visual_bias:
+        - screenshots
+        - workflow_diagrams
+        - ui_callouts
+        - manual_external_broll
+      external_assets: Envato/manual external assets for B-roll
+    voice_style:
+      tone: professional calm documentary explainer
+      pacing: measured
+    evidence_requirement:
+      claims: practical software and business claims
+      cite_when: claim is non-obvious
+    platform_strategy:
+      primary: youtube_long_form
+      secondary: youtube_shorts
+    human_review_strictness: moderate
+    default_content_pillars:
+      - AI automation workflows
+      - SaaS operator leverage
+      - Tool comparisons and implementation notes
+    default_series_plan:
+      - key: workflow_teardown
+        name: Workflow Teardown
+        format: screen-led explainer
+      - key: operator_playbook
+        name: Operator Playbook
+        format: practical business walkthrough
+    default_runway:
+      - title: AI automation stack for solo SaaS operators
+        format: long_form
+      - title: Three workflow diagrams that reduce support load
+        format: shorts
+    default_policies:
+      review: human_review_for_non_obvious_claims
+      safety: avoid unsupported revenue or performance guarantees
+      sourcing: cite software/business claims when non-obvious

@@ -1,0 +1,35 @@
+catalog_key: profile_compiler_policy
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - compiler_version: m1.compiler.v1
+    allowed_template_keys:
+      - saas_digital_leverage
+    allowed_audience_segments:
+      - professional_dense
+    allowed_risk_tolerance:
+      - low
+      - low_to_medium
+      - medium
+    required_output_sections:
+      - channel_constitution
+      - operating_blueprint
+      - content_pillars
+      - series_plan
+      - editorial_calendar_defaults
+      - initial_content_runway
+      - default_playbook
+      - render_policy
+      - gate_policy
+      - voice_policy
+      - evidence_policy
+      - monetization_policy
+      - kpi_profile
+      - editorial_promise
+      - distinctiveness_profile
+      - format_bible
+      - capability_status
+    hash_canonicalization_policy: json_sort_keys_compact_ascii_sha256
+    no_llm_policy_truth: true
+    no_niche_specific_pipeline: true

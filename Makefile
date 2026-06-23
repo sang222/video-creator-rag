@@ -7,7 +7,7 @@ BIN := $(VENV)/bin
 install:
 	$(PYTHON) -m venv $(VENV)
 	$(BIN)/python -m pip install --upgrade pip
-	$(BIN)/python -m pip install -e ".[dev]"
+	$(BIN)/python -m pip install ".[dev]"
 
 db-up:
 	docker-compose up -d postgres

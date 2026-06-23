@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -13,6 +14,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 ADMIN_URL = os.getenv(
     "VCOS_TEST_ADMIN_DATABASE_URL",
     "postgresql+psycopg://vcos:vcos@localhost:55432/postgres",
@@ -93,6 +95,11 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    compiled_channel_policy_snapshots,
+                    channel_profile_compile_runs,
+                    channel_profile_versions,
+                    channel_memberships,
+                    channel_workspaces,
                     audit_events,
                     domain_events,
                     llm_run_snapshots,

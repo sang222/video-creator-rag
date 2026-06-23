@@ -24,3 +24,7 @@ class ValidationFailureError(VCOSError):
 
 class ForbiddenError(VCOSError):
     pass
+
+
+class ConflictError(VCOSError):
+    pass

@@ -28,6 +28,23 @@ make test
 make health
 ```
 
+## M1 Commands
+
+```bash
+vcos db migrate
+vcos config seed
+vcos company create --name "Example Co"
+vcos channel create --company-id <company-id> --key saas-ai --name "SaaS AI"
+vcos profile create --channel-id <channel-id> --template-key saas_digital_leverage
+vcos profile compile --profile-version-id <profile-version-id>
+vcos profile activate --snapshot-id <snapshot-id>
+vcos profile active --channel-id <channel-id>
+```
+
+M1 adds channel profile and immutable policy snapshot backbone only. `NicheProfileTemplate` initializes channel setup; `ChannelProfileVersion` is channel-level profile truth; `CompiledChannelPolicySnapshot` is immutable runtime policy truth.
+
+Future `VideoProject` records must reference an explicit policy snapshot id. Runtime execution must not lookup latest profile or latest snapshot.
+
 ## Boundaries
 
-M0 does not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, or LLM calls.
+M0 and M1 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, or LLM calls. CapCut pilot notes do not make CapCut a production dependency.

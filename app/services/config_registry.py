@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.config_catalog import CatalogDocument
+from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
 from app.core.errors import ConfigVersionConflictError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import ConfigCatalogVersion, Role
@@ -148,6 +149,9 @@ class ConfigRegistryService:
             "reason_codes": ReasonCodeItem,
             "event_types": EventTypeItem,
             "role_catalog": RoleCatalogItem,
+            "niche_profile_templates": NicheProfileTemplate,
+            "capability_matrix": CapabilityMatrix,
+            "profile_compiler_policy": ProfileCompilerPolicy,
         }
         item_model = validators.get(document.catalog_key)
         if item_model is None:
@@ -155,7 +159,14 @@ class ConfigRegistryService:
         seen: set[str] = set()
         for item in document.items:
             parsed = item_model.model_validate(item)
-            key = getattr(parsed, "code", None) or getattr(parsed, "event_type", None) or getattr(parsed, "key")
+            key = (
+                getattr(parsed, "code", None)
+                or getattr(parsed, "event_type", None)
+                or getattr(parsed, "key", None)
+                or getattr(parsed, "template_key", None)
+                or getattr(parsed, "matrix_key", None)
+                or getattr(parsed, "compiler_version", None)
+            )
             if key in seen:
                 raise ValidationFailureError(f"duplicate catalog item: {key}")
             seen.add(key)
