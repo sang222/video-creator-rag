@@ -1,0 +1,14 @@
+catalog_key: event_types
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - event_type: audit.event_recorded
+    event_version: 1
+    description: Audit event persisted.
+  - event_type: domain.event_recorded
+    event_version: 1
+    description: Domain event persisted to local outbox.
+  - event_type: config.catalog_seeded
+    event_version: 1
+    description: Config catalog version persisted.

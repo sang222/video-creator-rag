@@ -1,0 +1,27 @@
+catalog_key: reason_codes
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: SYSTEM_OK
+    description: System check completed successfully.
+  - code: DATABASE_UNAVAILABLE
+    description: Database connectivity check failed.
+  - code: CONFIG_VALID
+    description: Configuration catalog validated successfully.
+  - code: CONFIG_SCHEMA_INVALID
+    description: Configuration catalog failed schema validation.
+  - code: CONFIG_VERSION_CONFLICT
+    description: Catalog key and version already exist with different content.
+  - code: AUDIT_EVENT_RECORDED
+    description: Audit event was recorded.
+  - code: DOMAIN_EVENT_RECORDED
+    description: Domain event was recorded.
+  - code: VALIDATION_FAILED
+    description: Request or catalog validation failed.
+  - code: UNAUTHORIZED
+    description: Actor is not authenticated.
+  - code: FORBIDDEN
+    description: Actor lacks the required permission.
+  - code: INTERNAL_ERROR
+    description: Unexpected internal error.

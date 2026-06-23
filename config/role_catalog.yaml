@@ -1,0 +1,24 @@
+catalog_key: role_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: company_admin
+    name: Company Admin
+    description: Manages company users, roles, and M0 operational records.
+    permissions:
+      - audit:read
+      - config:read
+      - config:seed
+      - rbac:assign
+  - key: operator
+    name: Operator
+    description: Runs operational M0 checks and reads runtime records.
+    permissions:
+      - audit:read
+      - config:read
+  - key: auditor
+    name: Auditor
+    description: Reads audit and source-of-truth records.
+    permissions:
+      - audit:read
