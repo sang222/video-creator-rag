@@ -1,0 +1,123 @@
+catalog_key: provider_registry_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - provider_key: mock_llm
+    provider_name: Mock LLM Provider
+    provider_type: LLM
+    status: ACTIVE
+    capability_blob:
+      supports_streaming: false
+      supports_json_mode: true
+    policy_fit_blob:
+      mock_only: true
+      production_enabled: false
+    cost_model_blob:
+      unit: TOKENS
+      mock_cost_usd: 0
+    quota_model_blob:
+      unit: REQUESTS
+      mock_limit: 1000
+    retry_policy_blob:
+      max_attempts: 2
+    metadata:
+      mock: true
+  - provider_key: mock_tts
+    provider_name: Mock TTS Provider
+    provider_type: TTS
+    status: ACTIVE
+    capability_blob:
+      supports_tts: true
+      audio_rights_risk_class: mock
+    policy_fit_blob:
+      mock_only: true
+      production_enabled: false
+    cost_model_blob:
+      unit: SECONDS
+      mock_cost_usd: 0
+    quota_model_blob:
+      unit: REQUESTS
+      mock_limit: 1000
+    retry_policy_blob:
+      max_attempts: 2
+    metadata:
+      mock: true
+  - provider_key: mock_media
+    provider_name: Mock Media Provider
+    provider_type: MEDIA
+    status: ACTIVE
+    capability_blob:
+      preserves_metadata: true
+      license_evidence_required: true
+    policy_fit_blob:
+      mock_only: true
+      production_enabled: false
+    cost_model_blob:
+      unit: REQUESTS
+      mock_cost_usd: 0
+    quota_model_blob:
+      unit: REQUESTS
+      mock_limit: 1000
+    retry_policy_blob:
+      max_attempts: 2
+    metadata:
+      mock: true
+  - provider_key: mock_storage
+    provider_name: Mock Storage Provider
+    provider_type: STORAGE
+    status: ACTIVE
+    capability_blob:
+      preserves_metadata: true
+    policy_fit_blob:
+      mock_only: true
+      production_enabled: false
+    cost_model_blob:
+      unit: BYTES
+      mock_cost_usd: 0
+    quota_model_blob:
+      unit: BYTES
+      mock_limit: 1048576
+    retry_policy_blob:
+      max_attempts: 2
+    metadata:
+      mock: true
+  - provider_key: mock_platform
+    provider_name: Mock Platform Provider
+    provider_type: PLATFORM
+    status: ACTIVE
+    capability_blob:
+      commercial_use_declared: true
+      provenance_fidelity: mock
+    policy_fit_blob:
+      mock_only: true
+      production_enabled: false
+    cost_model_blob:
+      unit: REQUESTS
+      mock_cost_usd: 0
+    quota_model_blob:
+      unit: REQUESTS
+      mock_limit: 1000
+    retry_policy_blob:
+      max_attempts: 2
+    metadata:
+      mock: true
+  - provider_key: mock_analytics
+    provider_name: Mock Analytics Provider
+    provider_type: ANALYTICS
+    status: ACTIVE
+    capability_blob:
+      metrics_fixture_only: true
+    policy_fit_blob:
+      mock_only: true
+      production_enabled: false
+    cost_model_blob:
+      unit: REQUESTS
+      mock_cost_usd: 0
+    quota_model_blob:
+      unit: REQUESTS
+      mock_limit: 1000
+    retry_policy_blob:
+      max_attempts: 2
+    metadata:
+      mock: true

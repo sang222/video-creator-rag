@@ -1,0 +1,21 @@
+catalog_key: health_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HEALTHY
+    description: Component or provider is healthy.
+  - key: DEGRADED
+    description: Component or provider is degraded.
+  - key: UNAVAILABLE
+    description: Component or provider is unavailable.
+  - key: RATE_LIMITED
+    description: Provider is rate limited.
+  - key: QUOTA_EXHAUSTED
+    description: Provider quota is exhausted.
+  - key: CREDENTIAL_MISSING
+    description: Provider credential is missing.
+  - key: BLOCKED
+    description: System health is blocked.
+  - key: UNKNOWN
+    description: Health state is unknown.

@@ -1,0 +1,13 @@
+catalog_key: provider_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ACTIVE
+    description: Provider is active.
+  - key: DISABLED
+    description: Provider is disabled.
+  - key: DEPRECATED
+    description: Provider is deprecated.
+  - key: EXPERIMENTAL
+    description: Provider is experimental.

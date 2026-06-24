@@ -1,0 +1,21 @@
+catalog_key: ops_incident_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PROVIDER_OUTAGE
+    description: Provider outage incident.
+  - key: CREDENTIAL_MISSING
+    description: Credential missing incident.
+  - key: QUOTA_EXHAUSTED
+    description: Quota exhausted incident.
+  - key: COST_LIMIT_REACHED
+    description: Cost limit reached incident.
+  - key: DEAD_LETTER_JOB
+    description: Dead-letter job incident.
+  - key: HEALTH_DEGRADED
+    description: Health degraded incident.
+  - key: CONFIG_ERROR
+    description: Config error incident.
+  - key: UNKNOWN
+    description: Unknown incident.

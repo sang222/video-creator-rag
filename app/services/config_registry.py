@@ -85,6 +85,29 @@ class PlatformPolicyCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class ProviderRegistryCatalogItem(BaseModel):
+    provider_key: str
+    provider_name: str
+    provider_type: str
+    status: str = "ACTIVE"
+    capability_blob: dict[str, Any] = Field(default_factory=dict)
+    policy_fit_blob: dict[str, Any] = Field(default_factory=dict)
+    cost_model_blob: dict[str, Any] = Field(default_factory=dict)
+    quota_model_blob: dict[str, Any] = Field(default_factory=dict)
+    retry_policy_blob: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+class RetryPolicyCatalogItem(BaseModel):
+    policy_key: str
+    provider_key: str | None = None
+    target_type: str | None = None
+    policy_blob: dict[str, Any] = Field(default_factory=dict)
+    status: str = "ACTIVE"
+
+    model_config = ConfigDict(extra="forbid")
+
 class DecisionRightsPolicyItem(BaseModel):
     key: str
     description: str
@@ -213,6 +236,20 @@ class ConfigRegistryService:
             "policy_domain_catalog": SimpleKeyCatalogItem,
             "gate_definition_catalog": GateDefinitionCatalogItem,
             "platform_policy_catalog": PlatformPolicyCatalogItem,
+            "provider_registry_catalog": ProviderRegistryCatalogItem,
+            "provider_type_catalog": SimpleKeyCatalogItem,
+            "provider_status_catalog": SimpleKeyCatalogItem,
+            "credential_type_catalog": SimpleKeyCatalogItem,
+            "credential_status_catalog": SimpleKeyCatalogItem,
+            "quota_unit_catalog": SimpleKeyCatalogItem,
+            "quota_event_type_catalog": SimpleKeyCatalogItem,
+            "cost_event_type_catalog": SimpleKeyCatalogItem,
+            "health_state_catalog": SimpleKeyCatalogItem,
+            "component_type_catalog": SimpleKeyCatalogItem,
+            "retry_policy_catalog": RetryPolicyCatalogItem,
+            "ops_incident_type_catalog": SimpleKeyCatalogItem,
+            "manual_action_type_catalog": SimpleKeyCatalogItem,
+            "m4_reason_code_catalog": ReasonCodeItem,
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,
@@ -229,6 +266,8 @@ class ConfigRegistryService:
                 or getattr(parsed, "key", None)
                 or getattr(parsed, "gate_key", None)
                 or getattr(parsed, "catalog_key", None)
+                or getattr(parsed, "provider_key", None)
+                or getattr(parsed, "policy_key", None)
                 or getattr(parsed, "template_key", None)
                 or getattr(parsed, "matrix_key", None)
                 or getattr(parsed, "compiler_version", None)

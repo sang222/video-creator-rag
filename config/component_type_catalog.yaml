@@ -1,0 +1,25 @@
+catalog_key: component_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PROVIDER
+    description: Provider component.
+  - key: CREDENTIAL
+    description: Credential component.
+  - key: QUOTA
+    description: Quota component.
+  - key: DATABASE
+    description: Database component.
+  - key: QUEUE
+    description: Queue component.
+  - key: STORAGE
+    description: Storage component.
+  - key: API
+    description: API component.
+  - key: CLI
+    description: CLI component.
+  - key: CONFIG
+    description: Config component.
+  - key: OTHER
+    description: Other component.

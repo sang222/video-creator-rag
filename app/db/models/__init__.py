@@ -33,6 +33,23 @@ from app.db.models.gates import (
     PolicyRevalidationBatch,
     PolicySourceRef,
 )
+from app.db.models.ops import (
+    BudgetPolicy,
+    ComponentHealthSnapshot,
+    CostEvent,
+    CredentialHealthSnapshot,
+    CredentialReference,
+    DeadLetterJob,
+    ManualAction,
+    OpsIncident,
+    ProviderAttempt,
+    ProviderHealthSnapshot,
+    ProviderRegistryEntry,
+    QuotaAccount,
+    QuotaEvent,
+    RetryPolicy,
+    SystemHealthSnapshot,
+)
 
 __all__ = [
     "AuditEvent",
@@ -62,4 +79,19 @@ __all__ = [
     "PolicyChangeRecord",
     "PolicyRevalidationBatch",
     "PolicySourceRef",
+    "BudgetPolicy",
+    "ComponentHealthSnapshot",
+    "CostEvent",
+    "CredentialHealthSnapshot",
+    "CredentialReference",
+    "DeadLetterJob",
+    "ManualAction",
+    "OpsIncident",
+    "ProviderAttempt",
+    "ProviderHealthSnapshot",
+    "ProviderRegistryEntry",
+    "QuotaAccount",
+    "QuotaEvent",
+    "RetryPolicy",
+    "SystemHealthSnapshot",
 ]

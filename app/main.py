@@ -11,6 +11,10 @@ from app.contracts import (
     ArtifactRead,
     ArtifactVersionCreate,
     ArtifactVersionRead,
+    BudgetGateCheckRequest,
+    BudgetGateDecisionRead,
+    BudgetPolicyCreate,
+    BudgetPolicyRead,
     ChannelMembershipCreate,
     ChannelMembershipRead,
     ChannelProfileCompileRequest,
@@ -19,8 +23,22 @@ from app.contracts import (
     ChannelProfileVersionRead,
     ChannelWorkspaceCreate,
     ChannelWorkspaceRead,
+    ComponentHealthSnapshotCreate,
+    ComponentHealthSnapshotRead,
+    CostEventCreate,
+    CostEventRead,
+    CredentialHealthSnapshotCreate,
+    CredentialHealthSnapshotRead,
+    CredentialReferenceCreate,
+    CredentialReferenceRead,
+    DeadLetterJobCreate,
+    DeadLetterJobRead,
     GateRunCreate,
     GateRunRead,
+    ManualActionCreate,
+    ManualActionRead,
+    OpsIncidentCreate,
+    OpsIncidentRead,
     PlatformPolicyCatalogCreate,
     PlatformPolicyCatalogRead,
     PlatformPolicyVersionCreate,
@@ -32,6 +50,16 @@ from app.contracts import (
     PolicyRevalidationBatchRead,
     PolicySourceRefCreate,
     PolicySourceRefRead,
+    ProviderAttemptMockRequest,
+    ProviderAttemptRead,
+    ProviderHealthCheckRequest,
+    ProviderHealthSnapshotRead,
+    ProviderRegistryEntryCreate,
+    ProviderRegistryEntryRead,
+    QuotaAccountCreate,
+    QuotaAccountRead,
+    QuotaEventRead,
+    QuotaEventRequest,
     ReviewFindingCreate,
     ReviewFindingRead,
     ReviewTaskCreate,
@@ -39,6 +67,9 @@ from app.contracts import (
     RevisionRequestCreate,
     RevisionRequestRead,
     RevisionResolveRequest,
+    RetryPolicyCreate,
+    RetryPolicyRead,
+    SystemHealthSnapshotRead,
     VideoProjectCreate,
     VideoProjectRead,
 )
@@ -60,9 +91,21 @@ from app.services import (
     VideoProjectService,
     GateDefinitionService,
     GateRunnerService,
+    BudgetGateService,
+    ComponentHealthService,
+    CostService,
+    CredentialReferenceService,
+    DeadLetterService,
+    ManualActionService,
+    OpsIncidentService,
     PolicyCatalogService,
     PolicyChangeService,
     PolicyRevalidationService,
+    ProviderHealthService,
+    ProviderRegistryService,
+    QuotaService,
+    RetryOpsService,
+    SystemHealthService,
     WorkflowReadinessService,
 )
 
@@ -428,6 +471,320 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/providers/seed-mocks")
+    def seed_mock_providers() -> dict[str, int]:
+        try:
+            with session_scope() as session:
+                records = ProviderRegistryService(session).seed_mock_providers()
+                return {"count": len(records)}
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/providers", response_model=ProviderRegistryEntryRead)
+    def create_provider(data: ProviderRegistryEntryCreate) -> ProviderRegistryEntryRead:
+        try:
+            with session_scope() as session:
+                entry = ProviderRegistryService(session).create_entry(data=data)
+                return ProviderRegistryEntryRead.model_validate(_provider_registry_entry(entry))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/providers", response_model=list[ProviderRegistryEntryRead])
+    def list_providers() -> list[ProviderRegistryEntryRead]:
+        try:
+            with session_scope() as session:
+                return [
+                    ProviderRegistryEntryRead.model_validate(_provider_registry_entry(entry))
+                    for entry in ProviderRegistryService(session).list_entries()
+                ]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/providers/{provider_key}", response_model=ProviderRegistryEntryRead)
+    def get_provider(provider_key: str) -> ProviderRegistryEntryRead:
+        try:
+            with session_scope() as session:
+                entry = ProviderRegistryService(session).require_entry(provider_key)
+                return ProviderRegistryEntryRead.model_validate(_provider_registry_entry(entry))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/providers/{provider_key}/health-check", response_model=ProviderHealthSnapshotRead)
+    def provider_health_check(provider_key: str, data: ProviderHealthCheckRequest) -> ProviderHealthSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = ProviderHealthService(session).check_provider(
+                    provider_key=provider_key,
+                    mode=data.mode,
+                    next_action=data.next_action,
+                    metadata=data.metadata,
+                )
+                return ProviderHealthSnapshotRead.model_validate(_provider_health(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/providers/{provider_key}/health", response_model=list[ProviderHealthSnapshotRead])
+    def list_provider_health(provider_key: str) -> list[ProviderHealthSnapshotRead]:
+        try:
+            with session_scope() as session:
+                return [ProviderHealthSnapshotRead.model_validate(_provider_health(item)) for item in ProviderHealthService(session).list_health(provider_key)]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/credential-references", response_model=CredentialReferenceRead)
+    def create_credential_reference(data: CredentialReferenceCreate) -> CredentialReferenceRead:
+        try:
+            with session_scope() as session:
+                reference = CredentialReferenceService(session).create_reference(data=data)
+                return CredentialReferenceRead.model_validate(_credential_reference(reference))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/credential-references/{credential_reference_id}", response_model=CredentialReferenceRead)
+    def get_credential_reference(credential_reference_id: uuid.UUID) -> CredentialReferenceRead:
+        try:
+            with session_scope() as session:
+                reference = CredentialReferenceService(session).require_reference(credential_reference_id)
+                return CredentialReferenceRead.model_validate(_credential_reference(reference))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/credential-references/{credential_reference_id}/health-check", response_model=CredentialHealthSnapshotRead)
+    def credential_health_check(credential_reference_id: uuid.UUID, data: CredentialHealthSnapshotCreate | None = None) -> CredentialHealthSnapshotRead:
+        try:
+            with session_scope() as session:
+                request = data or CredentialHealthSnapshotCreate(credential_reference_id=credential_reference_id)
+                request = request.model_copy(update={"credential_reference_id": credential_reference_id})
+                snapshot = CredentialReferenceService(session).check_health(data=request)
+                return CredentialHealthSnapshotRead.model_validate(_credential_health(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/quota-accounts", response_model=QuotaAccountRead)
+    def create_quota_account(data: QuotaAccountCreate) -> QuotaAccountRead:
+        try:
+            with session_scope() as session:
+                account = QuotaService(session).create_account(data=data)
+                return QuotaAccountRead.model_validate(_quota_account(account))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/quota-accounts/{quota_account_id}", response_model=QuotaAccountRead)
+    def get_quota_account(quota_account_id: uuid.UUID) -> QuotaAccountRead:
+        try:
+            with session_scope() as session:
+                account = QuotaService(session).require_account(quota_account_id)
+                return QuotaAccountRead.model_validate(_quota_account(account))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/quota-events/reserve", response_model=QuotaEventRead)
+    def reserve_quota(data: QuotaEventRequest) -> QuotaEventRead:
+        try:
+            with session_scope() as session:
+                event = QuotaService(session).reserve_quota(data=data)
+                return QuotaEventRead.model_validate(_quota_event(event))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/quota-events/consume", response_model=QuotaEventRead)
+    def consume_quota(data: QuotaEventRequest) -> QuotaEventRead:
+        try:
+            with session_scope() as session:
+                event = QuotaService(session).consume_quota(data=data)
+                return QuotaEventRead.model_validate(_quota_event(event))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/quota-events/release", response_model=QuotaEventRead)
+    def release_quota(data: QuotaEventRequest) -> QuotaEventRead:
+        try:
+            with session_scope() as session:
+                event = QuotaService(session).release_quota(data=data)
+                return QuotaEventRead.model_validate(_quota_event(event))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/cost-events", response_model=CostEventRead)
+    def create_cost_event(data: CostEventCreate) -> CostEventRead:
+        try:
+            with session_scope() as session:
+                event = CostService(session).record_event(data=data)
+                return CostEventRead.model_validate(_cost_event(event))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/cost-events", response_model=list[CostEventRead])
+    def list_cost_events(
+        provider_key: str | None = None,
+        cost_scope_type: str | None = None,
+        cost_scope_id: uuid.UUID | None = None,
+    ) -> list[CostEventRead]:
+        try:
+            with session_scope() as session:
+                return [
+                    CostEventRead.model_validate(_cost_event(event))
+                    for event in CostService(session).list_events(
+                        provider_key=provider_key,
+                        cost_scope_type=cost_scope_type,
+                        cost_scope_id=cost_scope_id,
+                    )
+                ]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/budget-policies", response_model=BudgetPolicyRead)
+    def create_budget_policy(data: BudgetPolicyCreate) -> BudgetPolicyRead:
+        try:
+            with session_scope() as session:
+                policy = BudgetGateService(session).create_policy(data=data)
+                return BudgetPolicyRead.model_validate(_budget_policy(policy))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/budget-gates/check", response_model=BudgetGateDecisionRead)
+    def check_budget_gate(data: BudgetGateCheckRequest) -> BudgetGateDecisionRead:
+        try:
+            with session_scope() as session:
+                return BudgetGateService(session).check(data=data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/component-health/snapshot", response_model=ComponentHealthSnapshotRead)
+    def create_component_health(data: ComponentHealthSnapshotCreate) -> ComponentHealthSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = ComponentHealthService(session).create_snapshot(data=data)
+                return ComponentHealthSnapshotRead.model_validate(_component_health(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/system-health/snapshot", response_model=SystemHealthSnapshotRead)
+    def create_system_health_snapshot() -> SystemHealthSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = SystemHealthService(session).create_snapshot()
+                return SystemHealthSnapshotRead.model_validate(_system_health(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/system-health/latest", response_model=SystemHealthSnapshotRead | None)
+    def get_latest_system_health() -> SystemHealthSnapshotRead | None:
+        try:
+            with session_scope() as session:
+                snapshot = SystemHealthService(session).latest()
+                return SystemHealthSnapshotRead.model_validate(_system_health(snapshot)) if snapshot is not None else None
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/retry-policies", response_model=RetryPolicyRead)
+    def create_retry_policy(data: RetryPolicyCreate) -> RetryPolicyRead:
+        try:
+            with session_scope() as session:
+                policy = RetryOpsService(session).create_policy(data=data)
+                return RetryPolicyRead.model_validate(_retry_policy(policy))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/provider-attempts/mock", response_model=ProviderAttemptRead)
+    def create_provider_attempt_mock(data: ProviderAttemptMockRequest) -> ProviderAttemptRead:
+        try:
+            with session_scope() as session:
+                attempt = RetryOpsService(session).record_mock_attempt(data=data)
+                return ProviderAttemptRead.model_validate(_provider_attempt(attempt))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/provider-attempts/{attempt_id}", response_model=ProviderAttemptRead)
+    def get_provider_attempt(attempt_id: uuid.UUID) -> ProviderAttemptRead:
+        try:
+            with session_scope() as session:
+                attempt = RetryOpsService(session).get_attempt(attempt_id)
+                if attempt is None:
+                    raise NotFoundError(f"provider attempt not found: {attempt_id}")
+                return ProviderAttemptRead.model_validate(_provider_attempt(attempt))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/dead-letter-jobs", response_model=DeadLetterJobRead)
+    def create_dead_letter_job(data: DeadLetterJobCreate) -> DeadLetterJobRead:
+        try:
+            with session_scope() as session:
+                job = DeadLetterService(session).create_job(data=data)
+                return DeadLetterJobRead.model_validate(_dead_letter_job(job))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/dead-letter-jobs/{job_id}/replay", response_model=DeadLetterJobRead)
+    def replay_dead_letter_job(job_id: uuid.UUID) -> DeadLetterJobRead:
+        try:
+            with session_scope() as session:
+                job = DeadLetterService(session).replay_job(job_id)
+                return DeadLetterJobRead.model_validate(_dead_letter_job(job))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/ops-incidents", response_model=OpsIncidentRead)
+    def create_ops_incident(data: OpsIncidentCreate) -> OpsIncidentRead:
+        try:
+            with session_scope() as session:
+                incident = OpsIncidentService(session).create_incident(data=data)
+                return OpsIncidentRead.model_validate(_ops_incident(incident))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/ops-incidents", response_model=list[OpsIncidentRead])
+    def list_ops_incidents() -> list[OpsIncidentRead]:
+        try:
+            with session_scope() as session:
+                return [OpsIncidentRead.model_validate(_ops_incident(item)) for item in OpsIncidentService(session).list_incidents()]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/ops-incidents/{incident_id}/acknowledge", response_model=OpsIncidentRead)
+    def acknowledge_ops_incident(incident_id: uuid.UUID) -> OpsIncidentRead:
+        try:
+            with session_scope() as session:
+                incident = OpsIncidentService(session).transition(incident_id, "ACKNOWLEDGED")
+                return OpsIncidentRead.model_validate(_ops_incident(incident))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/ops-incidents/{incident_id}/resolve", response_model=OpsIncidentRead)
+    def resolve_ops_incident(incident_id: uuid.UUID) -> OpsIncidentRead:
+        try:
+            with session_scope() as session:
+                incident = OpsIncidentService(session).transition(incident_id, "RESOLVED")
+                return OpsIncidentRead.model_validate(_ops_incident(incident))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/manual-actions", response_model=ManualActionRead)
+    def create_manual_action(data: ManualActionCreate) -> ManualActionRead:
+        try:
+            with session_scope() as session:
+                action = ManualActionService(session).create_action(data=data)
+                return ManualActionRead.model_validate(_manual_action(action))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/manual-actions", response_model=list[ManualActionRead])
+    def list_manual_actions() -> list[ManualActionRead]:
+        try:
+            with session_scope() as session:
+                return [ManualActionRead.model_validate(_manual_action(item)) for item in ManualActionService(session).list_actions()]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/manual-actions/{action_id}/complete", response_model=ManualActionRead)
+    def complete_manual_action(action_id: uuid.UUID) -> ManualActionRead:
+        try:
+            with session_scope() as session:
+                action = ManualActionService(session).complete_action(action_id)
+                return ManualActionRead.model_validate(_manual_action(action))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -727,6 +1084,240 @@ def _policy_revalidation_batch(batch: Any) -> dict[str, Any]:
         "completed_at": batch.completed_at,
         "created_by_user_id": batch.created_by_user_id,
         "created_at": batch.created_at,
+    }
+
+def _provider_registry_entry(entry: Any) -> dict[str, Any]:
+    return {
+        "id": entry.id,
+        "provider_key": entry.provider_key,
+        "provider_name": entry.provider_name,
+        "provider_type": entry.provider_type,
+        "status": entry.status,
+        "capability_blob": entry.capability_blob,
+        "policy_fit_blob": entry.policy_fit_blob,
+        "cost_model_blob": entry.cost_model_blob,
+        "quota_model_blob": entry.quota_model_blob,
+        "retry_policy_blob": entry.retry_policy_blob,
+        "metadata": entry.metadata_,
+        "created_at": entry.created_at,
+        "updated_at": entry.updated_at,
+    }
+
+def _credential_reference(reference: Any) -> dict[str, Any]:
+    return {
+        "id": reference.id,
+        "provider_key": reference.provider_key,
+        "credential_key": reference.credential_key,
+        "credential_type": reference.credential_type,
+        "secret_ref": reference.secret_ref,
+        "scope_blob": reference.scope_blob,
+        "status": reference.status,
+        "expires_at": reference.expires_at,
+        "last_checked_at": reference.last_checked_at,
+        "metadata": reference.metadata_,
+        "created_at": reference.created_at,
+        "updated_at": reference.updated_at,
+    }
+
+def _credential_health(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "credential_reference_id": snapshot.credential_reference_id,
+        "provider_key": snapshot.provider_key,
+        "health_state": snapshot.health_state,
+        "checked_at": snapshot.checked_at,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
+        "metadata": snapshot.metadata_,
+        "created_at": snapshot.created_at,
+    }
+
+def _quota_account(account: Any) -> dict[str, Any]:
+    return {
+        "id": account.id,
+        "provider_key": account.provider_key,
+        "quota_scope_type": account.quota_scope_type,
+        "quota_scope_id": account.quota_scope_id,
+        "quota_window": account.quota_window,
+        "quota_limit": account.quota_limit,
+        "quota_used": account.quota_used,
+        "quota_reserved": account.quota_reserved,
+        "unit": account.unit,
+        "reset_at": account.reset_at,
+        "status": account.status,
+        "metadata": account.metadata_,
+        "created_at": account.created_at,
+        "updated_at": account.updated_at,
+    }
+
+def _quota_event(event: Any) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "quota_account_id": event.quota_account_id,
+        "provider_key": event.provider_key,
+        "event_type": event.event_type,
+        "amount": event.amount,
+        "unit": event.unit,
+        "target_type": event.target_type,
+        "target_id": event.target_id,
+        "reason_code": event.reason_code,
+        "metadata": event.metadata_,
+        "created_at": event.created_at,
+    }
+
+def _cost_event(event: Any) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "provider_key": event.provider_key,
+        "cost_scope_type": event.cost_scope_type,
+        "cost_scope_id": event.cost_scope_id,
+        "amount": event.amount,
+        "currency": event.currency,
+        "cost_type": event.cost_type,
+        "unit_count": event.unit_count,
+        "unit_type": event.unit_type,
+        "provider_run_ref": event.provider_run_ref,
+        "metadata": event.metadata_,
+        "created_at": event.created_at,
+    }
+
+def _budget_policy(policy: Any) -> dict[str, Any]:
+    return {
+        "id": policy.id,
+        "policy_key": policy.policy_key,
+        "scope_type": policy.scope_type,
+        "scope_id": policy.scope_id,
+        "policy_blob": policy.policy_blob,
+        "status": policy.status,
+        "created_at": policy.created_at,
+        "updated_at": policy.updated_at,
+    }
+
+def _provider_health(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "provider_key": snapshot.provider_key,
+        "provider_type": snapshot.provider_type,
+        "health_state": snapshot.health_state,
+        "checked_at": snapshot.checked_at,
+        "latency_ms": snapshot.latency_ms,
+        "error_rate": snapshot.error_rate,
+        "quota_state": snapshot.quota_state,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
+        "metadata": snapshot.metadata_,
+        "created_at": snapshot.created_at,
+    }
+
+def _component_health(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "component_type": snapshot.component_type,
+        "component_key": snapshot.component_key,
+        "health_state": snapshot.health_state,
+        "checked_at": snapshot.checked_at,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
+        "metadata": snapshot.metadata_,
+        "created_at": snapshot.created_at,
+    }
+
+def _system_health(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "captured_at": snapshot.captured_at,
+        "overall_state": snapshot.overall_state,
+        "component_counts": snapshot.component_counts,
+        "active_incident_count": snapshot.active_incident_count,
+        "action_required": snapshot.action_required,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
+        "metadata": snapshot.metadata_,
+        "created_at": snapshot.created_at,
+    }
+
+def _retry_policy(policy: Any) -> dict[str, Any]:
+    return {
+        "id": policy.id,
+        "policy_key": policy.policy_key,
+        "provider_key": policy.provider_key,
+        "target_type": policy.target_type,
+        "policy_blob": policy.policy_blob,
+        "status": policy.status,
+        "created_at": policy.created_at,
+        "updated_at": policy.updated_at,
+    }
+
+def _provider_attempt(attempt: Any) -> dict[str, Any]:
+    return {
+        "id": attempt.id,
+        "provider_key": attempt.provider_key,
+        "operation_key": attempt.operation_key,
+        "target_type": attempt.target_type,
+        "target_id": attempt.target_id,
+        "attempt_number": attempt.attempt_number,
+        "status": attempt.status,
+        "error_code": attempt.error_code,
+        "error_message_redacted": attempt.error_message_redacted,
+        "started_at": attempt.started_at,
+        "finished_at": attempt.finished_at,
+        "latency_ms": attempt.latency_ms,
+        "cost_event_id": attempt.cost_event_id,
+        "quota_event_id": attempt.quota_event_id,
+        "metadata": attempt.metadata_,
+    }
+
+def _dead_letter_job(job: Any) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "queue_name": job.queue_name,
+        "job_type": job.job_type,
+        "payload_ref": job.payload_ref,
+        "target_type": job.target_type,
+        "target_id": job.target_id,
+        "fail_count": job.fail_count,
+        "first_failed_at": job.first_failed_at,
+        "last_failed_at": job.last_failed_at,
+        "replay_state": job.replay_state,
+        "reason_code": job.reason_code,
+        "next_action": job.next_action,
+        "metadata": job.metadata_,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+    }
+
+def _ops_incident(incident: Any) -> dict[str, Any]:
+    return {
+        "id": incident.id,
+        "incident_type": incident.incident_type,
+        "severity": incident.severity,
+        "state": incident.state,
+        "impacted_refs": incident.impacted_refs,
+        "reason_codes": incident.reason_codes,
+        "next_action": incident.next_action,
+        "owner_user_id": incident.owner_user_id,
+        "opened_at": incident.opened_at,
+        "acknowledged_at": incident.acknowledged_at,
+        "resolved_at": incident.resolved_at,
+        "metadata": incident.metadata_,
+        "created_at": incident.created_at,
+        "updated_at": incident.updated_at,
+    }
+
+def _manual_action(action: Any) -> dict[str, Any]:
+    return {
+        "id": action.id,
+        "action_type": action.action_type,
+        "target_type": action.target_type,
+        "target_id": action.target_id,
+        "priority": action.priority,
+        "state": action.state,
+        "reason_code": action.reason_code,
+        "next_action": action.next_action,
+        "assignee_user_id": action.assignee_user_id,
+        "due_at": action.due_at,
+        "created_at": action.created_at,
+        "updated_at": action.updated_at,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

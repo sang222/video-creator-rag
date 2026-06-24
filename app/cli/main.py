@@ -1,5 +1,6 @@
 import json
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -14,35 +15,61 @@ from app.contracts import (
     ApprovalDecisionCreate,
     ArtifactCreate,
     ArtifactVersionCreate,
+    BudgetGateCheckRequest,
+    BudgetPolicyCreate,
     ChannelProfileVersionCreate,
     ChannelWorkspaceCreate,
+    ComponentHealthSnapshotCreate,
+    CostEventCreate,
+    CredentialHealthSnapshotCreate,
+    CredentialReferenceCreate,
+    DeadLetterJobCreate,
     GateRunCreate,
+    ManualActionCreate,
+    OpsIncidentCreate,
     PlatformPolicyCatalogCreate,
     PlatformPolicyVersionCreate,
     PolicyChangeRecordCreate,
     PolicyRevalidationBatchCreate,
     PolicySourceRefCreate,
+    ProviderAttemptMockRequest,
+    ProviderRegistryEntryCreate,
+    QuotaAccountCreate,
+    QuotaEventRequest,
     ReviewFindingCreate,
     ReviewTaskCreate,
     RevisionRequestCreate,
+    RetryPolicyCreate,
     VideoProjectCreate,
 )
 from app.services import (
     ApprovalService,
     ArtifactService,
     AuditService,
+    BudgetGateService,
     ChannelProfileCompiler,
     ChannelProfileService,
     ChannelWorkspaceService,
     CompanyService,
+    ComponentHealthService,
     ConfigRegistryService,
+    CostService,
+    CredentialReferenceService,
+    DeadLetterService,
     GateDefinitionService,
     GateRunnerService,
+    ManualActionService,
+    OpsIncidentService,
     PolicySnapshotService,
     PolicyCatalogService,
     PolicyChangeService,
     PolicyRevalidationService,
+    ProviderHealthService,
+    ProviderRegistryService,
+    QuotaService,
+    RetryOpsService,
     ReviewService,
+    SystemHealthService,
     VideoProjectService,
     WorkflowReadinessService,
 )
@@ -63,6 +90,15 @@ workflow_app = typer.Typer(no_args_is_help=True)
 gate_app = typer.Typer(no_args_is_help=True)
 policy_app = typer.Typer(no_args_is_help=True)
 readiness_app = typer.Typer(no_args_is_help=True)
+provider_app = typer.Typer(no_args_is_help=True)
+credential_app = typer.Typer(no_args_is_help=True)
+quota_app = typer.Typer(no_args_is_help=True)
+cost_app = typer.Typer(no_args_is_help=True)
+budget_app = typer.Typer(no_args_is_help=True)
+dead_letter_app = typer.Typer(no_args_is_help=True)
+incident_app = typer.Typer(no_args_is_help=True)
+manual_action_app = typer.Typer(no_args_is_help=True)
+system_health_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
@@ -78,6 +114,15 @@ app.add_typer(workflow_app, name="workflow")
 app.add_typer(gate_app, name="gate")
 app.add_typer(policy_app, name="policy")
 app.add_typer(readiness_app, name="readiness")
+app.add_typer(provider_app, name="provider")
+app.add_typer(credential_app, name="credential")
+app.add_typer(quota_app, name="quota")
+app.add_typer(cost_app, name="cost")
+app.add_typer(budget_app, name="budget")
+app.add_typer(dead_letter_app, name="dead-letter")
+app.add_typer(incident_app, name="incident")
+app.add_typer(manual_action_app, name="manual-action")
+app.add_typer(system_health_app, name="system-health")
 
 
 def _fail(message: str) -> None:
@@ -595,6 +640,404 @@ def readiness_inspect(project_id: uuid.UUID = typer.Option(..., "--project-id"))
     except Exception as exc:
         _fail(f"readiness inspect failed: {exc}")
 
+@provider_app.command("seed-mocks")
+def provider_seed_mocks() -> None:
+    try:
+        with session_scope() as session:
+            records = ProviderRegistryService(session).seed_mock_providers()
+            typer.echo(json.dumps({"count": len(records)}))
+    except Exception as exc:
+        _fail(f"provider seed failed: {exc}")
+
+@provider_app.command("register")
+def provider_register(
+    provider_key: str = typer.Option(..., "--provider-key"),
+    provider_name: str = typer.Option(..., "--provider-name"),
+    provider_type: str = typer.Option(..., "--provider-type"),
+    status: str = typer.Option("ACTIVE", "--status"),
+    capability_json: str = typer.Option("{}", "--capability-json"),
+) -> None:
+    try:
+        with session_scope() as session:
+            entry = ProviderRegistryService(session).create_entry(
+                data=ProviderRegistryEntryCreate(
+                    provider_key=provider_key,
+                    provider_name=provider_name,
+                    provider_type=provider_type,
+                    status=status,
+                    capability_blob=_json_object(capability_json),
+                )
+            )
+            typer.echo(json.dumps(_provider_to_dict(entry)))
+    except Exception as exc:
+        _fail(f"provider register failed: {exc}")
+
+@provider_app.command("list")
+def provider_list() -> None:
+    try:
+        with session_scope() as session:
+            entries = ProviderRegistryService(session).list_entries()
+            typer.echo(json.dumps([_provider_to_dict(entry) for entry in entries]))
+    except Exception as exc:
+        _fail(f"provider list failed: {exc}")
+
+@provider_app.command("health-check")
+def provider_health_check(
+    provider_key: str = typer.Option(..., "--provider-key"),
+    mode: str = typer.Option("success", "--mode"),
+) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = ProviderHealthService(session).check_provider(provider_key=provider_key, mode=mode)
+            typer.echo(json.dumps(_provider_health_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"provider health-check failed: {exc}")
+
+@provider_app.command("attempt-mock")
+def provider_attempt_mock(
+    provider_key: str = typer.Option(..., "--provider-key"),
+    operation_key: str = typer.Option("contract_test", "--operation-key"),
+    mode: str = typer.Option("success", "--mode"),
+    attempt_number: int = typer.Option(1, "--attempt-number"),
+) -> None:
+    try:
+        with session_scope() as session:
+            attempt = RetryOpsService(session).record_mock_attempt(
+                data=ProviderAttemptMockRequest(
+                    provider_key=provider_key,
+                    operation_key=operation_key,
+                    mode=mode,
+                    attempt_number=attempt_number,
+                )
+            )
+            typer.echo(json.dumps(_provider_attempt_to_dict(attempt)))
+    except Exception as exc:
+        _fail(f"provider attempt-mock failed: {exc}")
+
+@credential_app.command("ref-create")
+def credential_ref_create(
+    provider_key: str = typer.Option(..., "--provider-key"),
+    credential_key: str = typer.Option(..., "--credential-key"),
+    credential_type: str = typer.Option("API_KEY", "--credential-type"),
+    secret_ref: str | None = typer.Option(None, "--secret-ref"),
+    status: str = typer.Option("UNKNOWN", "--status"),
+) -> None:
+    try:
+        with session_scope() as session:
+            reference = CredentialReferenceService(session).create_reference(
+                data=CredentialReferenceCreate(
+                    provider_key=provider_key,
+                    credential_key=credential_key,
+                    credential_type=credential_type,
+                    secret_ref=secret_ref,
+                    status=status,
+                )
+            )
+            typer.echo(json.dumps(_credential_to_dict(reference)))
+    except Exception as exc:
+        _fail(f"credential ref-create failed: {exc}")
+
+@credential_app.command("health-check")
+def credential_health_check(
+    credential_reference_id: uuid.UUID = typer.Option(..., "--credential-reference-id"),
+    health_state: str | None = typer.Option(None, "--health-state"),
+    next_action: str | None = typer.Option(None, "--next-action"),
+) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = CredentialReferenceService(session).check_health(
+                data=CredentialHealthSnapshotCreate(
+                    credential_reference_id=credential_reference_id,
+                    health_state=health_state,
+                    next_action=next_action,
+                )
+            )
+            typer.echo(json.dumps(_credential_health_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"credential health-check failed: {exc}")
+
+@quota_app.command("account-create")
+def quota_account_create(
+    provider_key: str = typer.Option(..., "--provider-key"),
+    quota_scope_type: str = typer.Option("GLOBAL", "--quota-scope-type"),
+    quota_window: str = typer.Option("DAILY", "--quota-window"),
+    quota_limit: str | None = typer.Option(None, "--quota-limit"),
+    unit: str = typer.Option("REQUESTS", "--unit"),
+) -> None:
+    try:
+        with session_scope() as session:
+            account = QuotaService(session).create_account(
+                data=QuotaAccountCreate(
+                    provider_key=provider_key,
+                    quota_scope_type=quota_scope_type,
+                    quota_window=quota_window,
+                    quota_limit=Decimal(quota_limit) if quota_limit is not None else None,
+                    unit=unit,
+                )
+            )
+            typer.echo(json.dumps(_quota_account_to_dict(account)))
+    except Exception as exc:
+        _fail(f"quota account-create failed: {exc}")
+
+@quota_app.command("reserve")
+def quota_reserve(
+    quota_account_id: uuid.UUID = typer.Option(..., "--quota-account-id"),
+    amount: str = typer.Option(..., "--amount"),
+) -> None:
+    _quota_event_command("reserve", quota_account_id, Decimal(amount))
+
+@quota_app.command("consume")
+def quota_consume(
+    quota_account_id: uuid.UUID = typer.Option(..., "--quota-account-id"),
+    amount: str = typer.Option(..., "--amount"),
+) -> None:
+    _quota_event_command("consume", quota_account_id, Decimal(amount))
+
+@quota_app.command("release")
+def quota_release(
+    quota_account_id: uuid.UUID = typer.Option(..., "--quota-account-id"),
+    amount: str = typer.Option(..., "--amount"),
+) -> None:
+    _quota_event_command("release", quota_account_id, Decimal(amount))
+
+def _quota_event_command(kind: str, quota_account_id: uuid.UUID, amount: Decimal) -> None:
+    try:
+        with session_scope() as session:
+            service = QuotaService(session)
+            request = QuotaEventRequest(quota_account_id=quota_account_id, amount=amount)
+            if kind == "reserve":
+                event = service.reserve_quota(data=request)
+            elif kind == "consume":
+                event = service.consume_quota(data=request)
+            else:
+                event = service.release_quota(data=request)
+            typer.echo(json.dumps(_quota_event_to_dict(event)))
+    except Exception as exc:
+        _fail(f"quota {kind} failed: {exc}")
+
+@cost_app.command("record")
+def cost_record(
+    provider_key: str = typer.Option(..., "--provider-key"),
+    cost_scope_type: str = typer.Option("GLOBAL", "--cost-scope-type"),
+    amount: str = typer.Option(..., "--amount"),
+    cost_type: str = typer.Option("ESTIMATED", "--cost-type"),
+    currency: str = typer.Option("USD", "--currency"),
+) -> None:
+    try:
+        with session_scope() as session:
+            event = CostService(session).record_event(
+                data=CostEventCreate(
+                    provider_key=provider_key,
+                    cost_scope_type=cost_scope_type,
+                    amount=Decimal(amount),
+                    cost_type=cost_type,
+                    currency=currency,
+                )
+            )
+            typer.echo(json.dumps(_cost_event_to_dict(event)))
+    except Exception as exc:
+        _fail(f"cost record failed: {exc}")
+
+@budget_app.command("policy-create")
+def budget_policy_create(
+    policy_key: str = typer.Option(..., "--policy-key"),
+    scope_type: str = typer.Option("GLOBAL", "--scope-type"),
+    policy_json: str = typer.Option("{}", "--policy-json"),
+    status: str = typer.Option("ACTIVE", "--status"),
+) -> None:
+    try:
+        with session_scope() as session:
+            policy = BudgetGateService(session).create_policy(
+                data=BudgetPolicyCreate(
+                    policy_key=policy_key,
+                    scope_type=scope_type,
+                    policy_blob=_json_object(policy_json),
+                    status=status,
+                )
+            )
+            typer.echo(json.dumps({"id": str(policy.id), "policy_key": policy.policy_key, "status": policy.status}))
+    except Exception as exc:
+        _fail(f"budget policy-create failed: {exc}")
+
+@budget_app.command("check")
+def budget_check(
+    policy_key: str = typer.Option(..., "--policy-key"),
+    estimated_cost: str | None = typer.Option(None, "--estimated-cost"),
+    quota_account_id: uuid.UUID | None = typer.Option(None, "--quota-account-id"),
+    quota_amount: str | None = typer.Option(None, "--quota-amount"),
+) -> None:
+    try:
+        with session_scope() as session:
+            decision = BudgetGateService(session).check(
+                data=BudgetGateCheckRequest(
+                    policy_key=policy_key,
+                    estimated_cost=Decimal(estimated_cost) if estimated_cost is not None else None,
+                    quota_account_id=quota_account_id,
+                    quota_amount=Decimal(quota_amount) if quota_amount is not None else None,
+                )
+            )
+            typer.echo(json.dumps(decision.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"budget check failed: {exc}")
+
+@dead_letter_app.command("create")
+def dead_letter_create(
+    queue_name: str = typer.Option(..., "--queue-name"),
+    job_type: str = typer.Option(..., "--job-type"),
+    payload_ref: str | None = typer.Option(None, "--payload-ref"),
+    fail_count: int = typer.Option(1, "--fail-count"),
+    reason_code: str | None = typer.Option("DEAD_LETTER_CREATED", "--reason-code"),
+    next_action: str | None = typer.Option("Review and replay if safe.", "--next-action"),
+) -> None:
+    try:
+        with session_scope() as session:
+            job = DeadLetterService(session).create_job(
+                data=DeadLetterJobCreate(
+                    queue_name=queue_name,
+                    job_type=job_type,
+                    payload_ref=payload_ref,
+                    fail_count=fail_count,
+                    reason_code=reason_code,
+                    next_action=next_action,
+                )
+            )
+            typer.echo(json.dumps(_dead_letter_to_dict(job)))
+    except Exception as exc:
+        _fail(f"dead-letter create failed: {exc}")
+
+@dead_letter_app.command("replay")
+def dead_letter_replay(job_id: uuid.UUID = typer.Option(..., "--job-id")) -> None:
+    try:
+        with session_scope() as session:
+            job = DeadLetterService(session).replay_job(job_id)
+            typer.echo(json.dumps(_dead_letter_to_dict(job)))
+    except Exception as exc:
+        _fail(f"dead-letter replay failed: {exc}")
+
+@incident_app.command("create")
+def incident_create(
+    incident_type: str = typer.Option(..., "--incident-type"),
+    severity: str = typer.Option("WARNING", "--severity"),
+    next_action: str = typer.Option(..., "--next-action"),
+    reason_code: str | None = typer.Option(None, "--reason-code"),
+) -> None:
+    try:
+        with session_scope() as session:
+            incident = OpsIncidentService(session).create_incident(
+                data=OpsIncidentCreate(
+                    incident_type=incident_type,
+                    severity=severity,
+                    next_action=next_action,
+                    reason_codes=[reason_code] if reason_code else [],
+                )
+            )
+            typer.echo(json.dumps(_incident_to_dict(incident)))
+    except Exception as exc:
+        _fail(f"incident create failed: {exc}")
+
+@incident_app.command("list")
+def incident_list() -> None:
+    try:
+        with session_scope() as session:
+            typer.echo(json.dumps([_incident_to_dict(item) for item in OpsIncidentService(session).list_incidents()]))
+    except Exception as exc:
+        _fail(f"incident list failed: {exc}")
+
+@incident_app.command("ack")
+def incident_ack(incident_id: uuid.UUID = typer.Option(..., "--incident-id")) -> None:
+    _incident_transition_command(incident_id, "ACKNOWLEDGED")
+
+@incident_app.command("resolve")
+def incident_resolve(incident_id: uuid.UUID = typer.Option(..., "--incident-id")) -> None:
+    _incident_transition_command(incident_id, "RESOLVED")
+
+def _incident_transition_command(incident_id: uuid.UUID, state: str) -> None:
+    try:
+        with session_scope() as session:
+            incident = OpsIncidentService(session).transition(incident_id, state)
+            typer.echo(json.dumps(_incident_to_dict(incident)))
+    except Exception as exc:
+        _fail(f"incident transition failed: {exc}")
+
+@manual_action_app.command("create")
+def manual_action_create(
+    action_type: str = typer.Option(..., "--action-type"),
+    target_type: str = typer.Option(..., "--target-type"),
+    next_action: str = typer.Option(..., "--next-action"),
+    priority: str = typer.Option("MEDIUM", "--priority"),
+    reason_code: str | None = typer.Option(None, "--reason-code"),
+) -> None:
+    try:
+        with session_scope() as session:
+            action = ManualActionService(session).create_action(
+                data=ManualActionCreate(
+                    action_type=action_type,
+                    target_type=target_type,
+                    priority=priority,
+                    next_action=next_action,
+                    reason_code=reason_code,
+                )
+            )
+            typer.echo(json.dumps(_manual_action_to_dict(action)))
+    except Exception as exc:
+        _fail(f"manual-action create failed: {exc}")
+
+@manual_action_app.command("list")
+def manual_action_list() -> None:
+    try:
+        with session_scope() as session:
+            typer.echo(json.dumps([_manual_action_to_dict(item) for item in ManualActionService(session).list_actions()]))
+    except Exception as exc:
+        _fail(f"manual-action list failed: {exc}")
+
+@manual_action_app.command("complete")
+def manual_action_complete(action_id: uuid.UUID = typer.Option(..., "--action-id")) -> None:
+    try:
+        with session_scope() as session:
+            action = ManualActionService(session).complete_action(action_id)
+            typer.echo(json.dumps(_manual_action_to_dict(action)))
+    except Exception as exc:
+        _fail(f"manual-action complete failed: {exc}")
+
+@system_health_app.command("component")
+def system_health_component(
+    component_type: str = typer.Option(..., "--component-type"),
+    component_key: str = typer.Option(..., "--component-key"),
+    health_state: str = typer.Option(..., "--health-state"),
+    next_action: str | None = typer.Option(None, "--next-action"),
+) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = ComponentHealthService(session).create_snapshot(
+                data=ComponentHealthSnapshotCreate(
+                    component_type=component_type,
+                    component_key=component_key,
+                    health_state=health_state,
+                    next_action=next_action,
+                )
+            )
+            typer.echo(json.dumps({"id": str(snapshot.id), "health_state": snapshot.health_state}))
+    except Exception as exc:
+        _fail(f"system-health component failed: {exc}")
+
+@system_health_app.command("snapshot")
+def system_health_snapshot() -> None:
+    try:
+        with session_scope() as session:
+            snapshot = SystemHealthService(session).create_snapshot()
+            typer.echo(json.dumps(_system_health_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"system-health snapshot failed: {exc}")
+
+@system_health_app.command("latest")
+def system_health_latest() -> None:
+    try:
+        with session_scope() as session:
+            snapshot = SystemHealthService(session).latest()
+            typer.echo("null" if snapshot is None else json.dumps(_system_health_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"system-health latest failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -647,6 +1090,131 @@ def _gate_run_to_dict(gate_run: Any) -> dict[str, Any]:
         "decision_basis": gate_run.decision_basis,
         "created_review_task_id": str(gate_run.created_review_task_id) if gate_run.created_review_task_id else None,
         "created_at": gate_run.created_at.isoformat(),
+    }
+
+def _provider_to_dict(entry: Any) -> dict[str, Any]:
+    return {
+        "id": str(entry.id),
+        "provider_key": entry.provider_key,
+        "provider_name": entry.provider_name,
+        "provider_type": entry.provider_type,
+        "status": entry.status,
+    }
+
+def _provider_health_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "provider_key": snapshot.provider_key,
+        "health_state": snapshot.health_state,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
+        "checked_at": snapshot.checked_at.isoformat(),
+    }
+
+def _provider_attempt_to_dict(attempt: Any) -> dict[str, Any]:
+    return {
+        "id": str(attempt.id),
+        "provider_key": attempt.provider_key,
+        "operation_key": attempt.operation_key,
+        "attempt_number": attempt.attempt_number,
+        "status": attempt.status,
+        "error_code": attempt.error_code,
+        "error_message_redacted": attempt.error_message_redacted,
+    }
+
+def _credential_to_dict(reference: Any) -> dict[str, Any]:
+    return {
+        "id": str(reference.id),
+        "provider_key": reference.provider_key,
+        "credential_key": reference.credential_key,
+        "credential_type": reference.credential_type,
+        "secret_ref": reference.secret_ref,
+        "status": reference.status,
+    }
+
+def _credential_health_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "credential_reference_id": str(snapshot.credential_reference_id),
+        "provider_key": snapshot.provider_key,
+        "health_state": snapshot.health_state,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
+    }
+
+def _quota_account_to_dict(account: Any) -> dict[str, Any]:
+    return {
+        "id": str(account.id),
+        "provider_key": account.provider_key,
+        "quota_limit": str(account.quota_limit) if account.quota_limit is not None else None,
+        "quota_used": str(account.quota_used),
+        "quota_reserved": str(account.quota_reserved),
+        "unit": account.unit,
+        "status": account.status,
+    }
+
+def _quota_event_to_dict(event: Any) -> dict[str, Any]:
+    return {
+        "id": str(event.id),
+        "quota_account_id": str(event.quota_account_id) if event.quota_account_id else None,
+        "provider_key": event.provider_key,
+        "event_type": event.event_type,
+        "amount": str(event.amount),
+        "unit": event.unit,
+        "reason_code": event.reason_code,
+    }
+
+def _cost_event_to_dict(event: Any) -> dict[str, Any]:
+    return {
+        "id": str(event.id),
+        "provider_key": event.provider_key,
+        "cost_scope_type": event.cost_scope_type,
+        "amount": str(event.amount),
+        "currency": event.currency,
+        "cost_type": event.cost_type,
+    }
+
+def _dead_letter_to_dict(job: Any) -> dict[str, Any]:
+    return {
+        "id": str(job.id),
+        "queue_name": job.queue_name,
+        "job_type": job.job_type,
+        "fail_count": job.fail_count,
+        "replay_state": job.replay_state,
+        "reason_code": job.reason_code,
+        "next_action": job.next_action,
+    }
+
+def _incident_to_dict(incident: Any) -> dict[str, Any]:
+    return {
+        "id": str(incident.id),
+        "incident_type": incident.incident_type,
+        "severity": incident.severity,
+        "state": incident.state,
+        "reason_codes": incident.reason_codes,
+        "next_action": incident.next_action,
+    }
+
+def _manual_action_to_dict(action: Any) -> dict[str, Any]:
+    return {
+        "id": str(action.id),
+        "action_type": action.action_type,
+        "target_type": action.target_type,
+        "priority": action.priority,
+        "state": action.state,
+        "reason_code": action.reason_code,
+        "next_action": action.next_action,
+    }
+
+def _system_health_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "overall_state": snapshot.overall_state,
+        "component_counts": snapshot.component_counts,
+        "active_incident_count": snapshot.active_incident_count,
+        "action_required": snapshot.action_required,
+        "reason_codes": snapshot.reason_codes,
+        "next_action": snapshot.next_action,
     }
 
 def _json_object(value: str) -> dict[str, Any]:

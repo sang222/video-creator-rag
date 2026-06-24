@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, and M3 policy/gate/readiness foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, and M4 provider/cost/quota/ops health foundation.
 
 ## Stack
 
@@ -78,6 +78,32 @@ vcos policy revalidate --scope-json '{"targets":[{"target_type":"artifact_versio
 
 M3 converts M2 allowance JSONB into deterministic gate/evidence contracts. `GateRun` rows are immutable exact-target decision artifacts. Platform policy is a versioned external dependency. M3 performs no LLM/provider calls and does not mutate artifact content or approval decisions.
 
+## M4 Commands
+
+```bash
+vcos provider seed-mocks
+vcos provider list
+vcos provider health-check --provider-key mock_llm
+vcos credential ref-create --provider-key mock_llm --credential-key primary --credential-type API_KEY --secret-ref vault://vcos/mock_llm/primary
+vcos credential health-check --credential-reference-id <credential-reference-id>
+vcos quota account-create --provider-key mock_llm --quota-limit 100 --unit REQUESTS
+vcos quota reserve --quota-account-id <quota-account-id> --amount 1
+vcos quota consume --quota-account-id <quota-account-id> --amount 1
+vcos cost record --provider-key mock_llm --amount 0 --cost-type ESTIMATED
+vcos budget policy-create --policy-key mock_budget --policy-json '{"require_manual_approval_above_usd":5}'
+vcos budget check --policy-key mock_budget --estimated-cost 1
+vcos provider attempt-mock --provider-key mock_llm --mode success
+vcos dead-letter create --queue-name provider_attempts --job-type contract_test
+vcos incident create --incident-type HEALTH_DEGRADED --severity WARNING --next-action "Review health."
+vcos manual-action create --action-type INVESTIGATE_PROVIDER --target-type provider --next-action "Inspect provider."
+vcos system-health snapshot
+vcos system-health latest
+```
+
+M4 adds provider registry, mock provider interfaces, credential references, quota/cost ledgers, deterministic budget gates, health snapshots, retry/dead-letter records, incidents, manual actions, API, CLI, config catalogs, and tests.
+
+M4 performs no real provider calls and no LLM/content workflow execution.
+
 ## Boundaries
 
-M0, M1, M2, and M3 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, RAG, source scraping, OPA/Cedar, or LLM calls. CapCut pilot notes do not make CapCut a production dependency.
+M0, M1, M2, M3, and M4 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, RAG, source scraping, OPA/Cedar, or LLM content workflow calls. M4 adds mock provider rails only. CapCut pilot notes do not make CapCut a production dependency.

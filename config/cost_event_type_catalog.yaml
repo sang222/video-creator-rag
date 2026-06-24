@@ -1,0 +1,15 @@
+catalog_key: cost_event_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ESTIMATED
+    description: Estimated provider cost.
+  - key: RESERVED
+    description: Reserved provider cost.
+  - key: ACTUAL
+    description: Actual provider cost.
+  - key: ADJUSTED
+    description: Adjusted provider cost.
+  - key: REFUNDED
+    description: Refunded provider cost.

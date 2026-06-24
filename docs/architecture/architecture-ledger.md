@@ -15,6 +15,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M1 builds channel profile and policy snapshot backbone.
 - M2 builds artifact workflow, review, revision, approval, decision rights, audit, and allowance schema backbone only.
 - M3 builds policy catalog, deterministic gates, evidence contracts, review-required integration, policy revalidation, and readiness inspection only.
+- M4 builds provider registry, mock provider interfaces, credential references, quota/cost ledgers, budget gates, health snapshots, retry/dead-letter, incident, and manual-action foundation only.
 
 ## Scope Guardrails
 
@@ -30,6 +31,10 @@ M3 adds GateDefinitionVersion, GateRun, PlatformPolicyCatalog, PlatformPolicyVer
 
 M3 does not build M5 ResourceResolver/RAG/vector/ContextPack/RetrievalPlan, M6 media/render/QC pipeline, M7 publish/upload/manual publish, M8 analytics/semantic layer, M9 no-view/recovery/self-funding, M10 memory promotion, or M11 dashboard/operator cockpit.
 
+M4 adds ProviderRegistryEntry, CredentialReference, CredentialHealthSnapshot, QuotaAccount, QuotaEvent, CostEvent, BudgetPolicy, ProviderHealthSnapshot, ComponentHealthSnapshot, SystemHealthSnapshot, RetryPolicy, ProviderAttempt, DeadLetterJob, OpsIncident, ManualActionQueue, deterministic mock providers, and API/CLI read paths.
+
+M4 does not build M5 ResourceResolver/RAG/vector/ContextPack/RetrievalPlan, M5 DailyRun/Authority execution/project admission, M6 media/render/QC pipeline, M7 publish/upload/manual publish, M8 analytics/semantic layer, M9 no-view/recovery/self-funding, M10 memory promotion, M11 dashboard/operator cockpit, source scraping/parser, OPA/Cedar/general policy engine, or Algorithm/Growth/View agents.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -38,6 +43,10 @@ M3 does not build M5 ResourceResolver/RAG/vector/ContextPack/RetrievalPlan, M6 m
 - Critique accuracy patch maps to M3 evidence/reason contracts, M5 retrieval, M6 QC, M7 publish checks, M8 metric truth, M9 recovery, and M10 memory review.
 - Retrieval/Memory Governance maps to M3 privacy contracts, M5 retrieval objects, M8 metric truth, and M10 memory promotion.
 - M11 dashboard remains M11 only; M3 only supplies future readiness output shape.
+- M4 complete means provider/cost/quota/ops health rails exist.
+- M5 first real LLM workflow may use the M4 provider, credential, quota, and cost foundation.
+- M6 can use mock/local fixture providers for media tests.
+- Pre-M7 M0-M6 Qualification Gate will be required after M6.
 
 ## Pilot Notes
 

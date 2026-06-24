@@ -95,6 +95,21 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    manual_action_queue,
+                    ops_incidents,
+                    dead_letter_jobs,
+                    provider_attempts,
+                    retry_policies,
+                    system_health_snapshots,
+                    component_health_snapshots,
+                    provider_health_snapshots,
+                    budget_policies,
+                    cost_events,
+                    quota_events,
+                    quota_accounts,
+                    credential_health_snapshots,
+                    credential_references,
+                    provider_registry_entries,
                     policy_revalidation_batches,
                     policy_source_refs,
                     policy_change_records,

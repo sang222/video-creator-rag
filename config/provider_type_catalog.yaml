@@ -1,0 +1,25 @@
+catalog_key: provider_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LLM
+    description: Large language model provider.
+  - key: TTS
+    description: Text-to-speech provider.
+  - key: MEDIA
+    description: Media asset provider.
+  - key: IMAGE
+    description: Image provider.
+  - key: VIDEO
+    description: Video provider.
+  - key: STORAGE
+    description: Storage provider.
+  - key: ANALYTICS
+    description: Analytics provider.
+  - key: PLATFORM
+    description: External platform provider.
+  - key: AFFILIATE
+    description: Affiliate provider.
+  - key: OTHER
+    description: Other provider type.

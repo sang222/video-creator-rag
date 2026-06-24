@@ -110,6 +110,24 @@ EXPECTED_M0_M3_TABLES = {
     "policy_revalidation_batches",
 }
 
+EXPECTED_M4_TABLES = {
+    "provider_registry_entries",
+    "credential_references",
+    "credential_health_snapshots",
+    "quota_accounts",
+    "quota_events",
+    "cost_events",
+    "budget_policies",
+    "provider_health_snapshots",
+    "component_health_snapshots",
+    "system_health_snapshots",
+    "retry_policies",
+    "provider_attempts",
+    "dead_letter_jobs",
+    "ops_incidents",
+    "manual_action_queue",
+}
+
 FORBIDDEN_FUTURE_TERMS = {
     "ResourceResolver",
     "ContextPackSnapshot",
@@ -251,12 +269,14 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0002_m1_channel_profile_backbone",
         "0003_m2_workflow",
         "0004_m3_policy_gate_readiness",
+        "0005_m4_ops_foundation",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
         {"channel_workspaces", "compiled_channel_policy_snapshots"},
         {"video_projects", "artifact_versions", "approval_decisions"},
         {"gate_runs", "platform_policy_versions", "policy_revalidation_batches"},
+        {"provider_registry_entries", "quota_events", "system_health_snapshots"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:
@@ -269,10 +289,13 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         command.upgrade(config, "head")
         command.upgrade(config, "head")
         assert EXPECTED_M0_M3_TABLES <= set(inspect(engine).get_table_names())
+        assert EXPECTED_M4_TABLES <= set(inspect(engine).get_table_names())
         command.downgrade(config, "0003_m2_workflow")
         assert "gate_runs" not in set(inspect(engine).get_table_names())
+        assert "provider_registry_entries" not in set(inspect(engine).get_table_names())
         command.upgrade(config, "head")
         assert EXPECTED_M0_M3_TABLES <= set(inspect(engine).get_table_names())
+        assert EXPECTED_M4_TABLES <= set(inspect(engine).get_table_names())
     finally:
         engine.dispose()
 
@@ -297,7 +320,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 16
+    assert second["config"] == 30
     assert second["gates"] == 15
 
 
@@ -620,6 +643,7 @@ def test_no_network_provider_llm_possible_on_compile_and_gate(monkeypatch, db_se
 def test_scope_guard_scans_schema_routes_cli_services_and_imports(engine) -> None:
     tables = set(inspect(engine).get_table_names())
     assert EXPECTED_M0_M3_TABLES <= tables
+    assert EXPECTED_M4_TABLES <= tables
     assert not {table for table in tables for fragment in FORBIDDEN_TABLE_FRAGMENTS if fragment in table}
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
     for term in FORBIDDEN_FUTURE_TERMS:

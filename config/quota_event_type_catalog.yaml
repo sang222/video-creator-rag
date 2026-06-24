@@ -1,0 +1,17 @@
+catalog_key: quota_event_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: RESERVE
+    description: Quota reserved.
+  - key: CONSUME
+    description: Quota consumed.
+  - key: RELEASE
+    description: Quota released.
+  - key: ADJUST
+    description: Quota adjusted.
+  - key: RESET
+    description: Quota reset.
+  - key: REJECT
+    description: Quota request rejected.

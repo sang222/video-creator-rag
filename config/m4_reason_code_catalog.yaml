@@ -1,0 +1,61 @@
+catalog_key: m4_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: PROVIDER_UNAVAILABLE
+    description: Provider is unavailable.
+  - code: PROVIDER_DEGRADED
+    description: Provider is degraded.
+  - code: PROVIDER_RATE_LIMITED
+    description: Provider is rate limited.
+  - code: PROVIDER_QUOTA_EXHAUSTED
+    description: Provider quota is exhausted.
+  - code: PROVIDER_CREDENTIAL_MISSING
+    description: Provider credential is missing.
+  - code: PROVIDER_CREDENTIAL_EXPIRED
+    description: Provider credential is expired.
+  - code: PROVIDER_POLICY_FIT_UNKNOWN
+    description: Provider policy fit is unknown.
+  - code: PROVIDER_CAPABILITY_MISSING
+    description: Provider capability is missing.
+  - code: QUOTA_ACCOUNT_MISSING
+    description: Quota account is missing.
+  - code: QUOTA_EXHAUSTED
+    description: Quota is exhausted.
+  - code: QUOTA_RESERVED
+    description: Quota is reserved.
+  - code: QUOTA_RELEASED
+    description: Quota is released.
+  - code: COST_LIMIT_REACHED
+    description: Cost limit is reached.
+  - code: COST_ESTIMATE_MISSING
+    description: Cost estimate is missing.
+  - code: COST_EVENT_RECORDED
+    description: Cost event recorded.
+  - code: BUDGET_REVIEW_REQUIRED
+    description: Budget review is required.
+  - code: RETRYABLE_PROVIDER_ERROR
+    description: Retryable provider error.
+  - code: NON_RETRYABLE_PROVIDER_ERROR
+    description: Non-retryable provider error.
+  - code: CIRCUIT_BREAKER_OPEN
+    description: Circuit breaker is open.
+  - code: MAX_RETRY_EXCEEDED
+    description: Maximum retry count exceeded.
+  - code: DEAD_LETTER_CREATED
+    description: Dead-letter job created.
+  - code: DEAD_LETTER_REPLAY_REQUIRED
+    description: Dead-letter replay is required.
+  - code: SYSTEM_HEALTH_DEGRADED
+    description: System health is degraded.
+  - code: SYSTEM_HEALTH_BLOCKED
+    description: System health is blocked.
+  - code: MANUAL_ACTION_REQUIRED
+    description: Manual action is required.
+  - code: INCIDENT_OPENED
+    description: Incident opened.
+  - code: INCIDENT_RESOLVED
+    description: Incident resolved.
+  - code: SECRET_VALUE_REDACTED
+    description: Secret value was redacted.

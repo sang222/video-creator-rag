@@ -1,0 +1,21 @@
+catalog_key: manual_action_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CHECK_CREDENTIAL
+    description: Check credential health.
+  - key: UPDATE_CREDENTIAL_REF
+    description: Update credential reference.
+  - key: REVIEW_COST_LIMIT
+    description: Review cost limit.
+  - key: REVIEW_QUOTA
+    description: Review quota.
+  - key: INVESTIGATE_PROVIDER
+    description: Investigate provider.
+  - key: REPLAY_DEAD_LETTER
+    description: Replay dead-letter job.
+  - key: RESOLVE_INCIDENT
+    description: Resolve incident.
+  - key: OTHER
+    description: Other manual action.
