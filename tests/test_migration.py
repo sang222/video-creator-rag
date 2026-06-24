@@ -11,13 +11,20 @@ REQUIRED_TABLES = {
     "domain_events",
     "llm_run_snapshots",
     "config_catalog_versions",
+    "video_projects",
+    "artifacts",
+    "artifact_versions",
+    "review_tasks",
+    "review_findings",
+    "revision_requests",
+    "approval_decisions",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0002_m1_channel_profile_backbone"
+    assert revision == "0003_m2_workflow"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

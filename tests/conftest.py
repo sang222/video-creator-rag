@@ -95,6 +95,13 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    approval_decisions,
+                    revision_requests,
+                    review_findings,
+                    review_tasks,
+                    artifact_versions,
+                    artifacts,
+                    video_projects,
                     compiled_channel_policy_snapshots,
                     channel_profile_compile_runs,
                     channel_profile_versions,

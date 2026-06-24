@@ -7,6 +7,13 @@ from app.services.domain_events import DomainEventBus
 from app.services.policy_snapshot import PolicySnapshotService
 from app.services.profile_compiler import ChannelProfileCompiler
 from app.services.rbac import RBACService, require_permission
+from app.services.workflow import (
+    ApprovalService,
+    ArtifactService,
+    DecisionRightsService,
+    ReviewService,
+    VideoProjectService,
+)
 
 __all__ = [
     "AuditService",
@@ -18,5 +25,10 @@ __all__ = [
     "DomainEventBus",
     "PolicySnapshotService",
     "RBACService",
+    "ApprovalService",
+    "ArtifactService",
+    "DecisionRightsService",
+    "ReviewService",
+    "VideoProjectService",
     "require_permission",
 ]

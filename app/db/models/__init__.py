@@ -15,6 +15,15 @@ from app.db.models.channel import (
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
 )
+from app.db.models.workflow import (
+    ApprovalDecision,
+    Artifact,
+    ArtifactVersion,
+    ReviewFinding,
+    ReviewTask,
+    RevisionRequest,
+    VideoProject,
+)
 
 __all__ = [
     "AuditEvent",
@@ -30,4 +39,11 @@ __all__ = [
     "ChannelProfileVersion",
     "ChannelWorkspace",
     "CompiledChannelPolicySnapshot",
+    "ApprovalDecision",
+    "Artifact",
+    "ArtifactVersion",
+    "ReviewFinding",
+    "ReviewTask",
+    "RevisionRequest",
+    "VideoProject",
 ]

@@ -1,5 +1,5 @@
 catalog_key: reason_codes
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -25,3 +25,17 @@ items:
     description: Actor lacks the required permission.
   - code: INTERNAL_ERROR
     description: Unexpected internal error.
+  - code: WORKFLOW_CREATED
+    description: M2 workflow record was created.
+  - code: SNAPSHOT_NOT_ACTIVE
+    description: Explicit policy snapshot is not active for the project channel.
+  - code: EXACT_VERSION_REQUIRED
+    description: Workflow action must target an exact artifact version or exact review target.
+  - code: SELF_APPROVAL_BLOCKED
+    description: Creator attempted to approve their own artifact version.
+  - code: STALE_APPROVAL
+    description: Approval applies to a superseded artifact version only.
+  - code: REVISION_REQUIRES_NEW_VERSION
+    description: Revision resolution must point to a newer artifact version.
+  - code: DECISION_RIGHTS_DENIED
+    description: Actor lacks workflow decision rights.

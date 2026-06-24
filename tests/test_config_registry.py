@@ -13,11 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_config_yaml_validates(db_session) -> None:
     loaded = ConfigRegistryService(db_session).load_catalog_files([ROOT / "config"])
     assert {catalog.catalog_key for catalog in loaded} == {
+        "artifact_type_registry",
         "capability_matrix",
+        "decision_rights_policy",
         "event_types",
         "niche_profile_templates",
         "profile_compiler_policy",
         "reason_codes",
+        "review_type_registry",
         "role_catalog",
     }
 
@@ -35,7 +38,7 @@ def test_config_seed_idempotent(db_session) -> None:
     service.seed([ROOT / "config"])
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
-    assert catalog_count == 6
+    assert catalog_count == 9
     assert role_count == 3
 
 
@@ -46,7 +49,7 @@ def test_config_version_conflict_is_blocked(db_session, tmp_path) -> None:
     conflict.write_text(
         """
 catalog_key: reason_codes
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:

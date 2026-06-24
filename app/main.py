@@ -5,6 +5,12 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
 from app.contracts import (
+    ApprovalDecisionCreate,
+    ApprovalDecisionRead,
+    ArtifactCreate,
+    ArtifactRead,
+    ArtifactVersionCreate,
+    ArtifactVersionRead,
     ChannelMembershipCreate,
     ChannelMembershipRead,
     ChannelProfileCompileRequest,
@@ -13,11 +19,20 @@ from app.contracts import (
     ChannelProfileVersionRead,
     ChannelWorkspaceCreate,
     ChannelWorkspaceRead,
+    ReviewFindingCreate,
+    ReviewFindingRead,
+    ReviewTaskCreate,
+    ReviewTaskRead,
+    RevisionRequestCreate,
+    RevisionRequestRead,
+    RevisionResolveRequest,
+    VideoProjectCreate,
+    VideoProjectRead,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
 from app.core.config import get_settings
 from app.core.db import check_database
-from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailureError
 from app.core.logging import configure_logging
 from app.db.session import session_scope
 from app.services import (
@@ -26,6 +41,10 @@ from app.services import (
     ChannelWorkspaceService,
     CompanyService,
     PolicySnapshotService,
+    ApprovalService,
+    ArtifactService,
+    ReviewService,
+    VideoProjectService,
 )
 
 
@@ -187,6 +206,92 @@ def create_app() -> FastAPI:
             snapshot = PolicySnapshotService(session).get_active_snapshot_for_channel(channel_id)
             return SnapshotRead.model_validate(_snapshot(snapshot)) if snapshot is not None else None
 
+    @application.post("/video-projects", response_model=VideoProjectRead)
+    def create_video_project(data: VideoProjectCreate) -> VideoProjectRead:
+        try:
+            with session_scope() as session:
+                project = VideoProjectService(session).create_project(data=data)
+                return VideoProjectRead.model_validate(_video_project(project))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-projects/{project_id}/workflow-state")
+    def inspect_video_project_workflow(project_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return VideoProjectService(session).inspect_workflow_state(project_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/artifacts", response_model=ArtifactRead)
+    def create_artifact(data: ArtifactCreate) -> ArtifactRead:
+        try:
+            with session_scope() as session:
+                artifact = ArtifactService(session).create_artifact(data=data)
+                return ArtifactRead.model_validate(_artifact(artifact))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/artifact-versions", response_model=ArtifactVersionRead)
+    def create_artifact_version(data: ArtifactVersionCreate) -> ArtifactVersionRead:
+        try:
+            with session_scope() as session:
+                version = ArtifactService(session).create_artifact_version(data=data)
+                return ArtifactVersionRead.model_validate(_artifact_version(version))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/review-tasks", response_model=ReviewTaskRead)
+    def create_review_task(data: ReviewTaskCreate) -> ReviewTaskRead:
+        try:
+            with session_scope() as session:
+                review_task = ReviewService(session).create_review_task(data=data)
+                return ReviewTaskRead.model_validate(_review_task(review_task))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/review-findings", response_model=ReviewFindingRead)
+    def add_review_finding(data: ReviewFindingCreate) -> ReviewFindingRead:
+        try:
+            with session_scope() as session:
+                finding = ReviewService(session).add_finding(data=data)
+                return ReviewFindingRead.model_validate(_review_finding(finding))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/revision-requests", response_model=RevisionRequestRead)
+    def create_revision_request(data: RevisionRequestCreate) -> RevisionRequestRead:
+        try:
+            with session_scope() as session:
+                revision = ReviewService(session).create_revision_request(data=data)
+                return RevisionRequestRead.model_validate(_revision_request(revision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/revision-requests/{revision_request_id}/resolve", response_model=RevisionRequestRead)
+    def resolve_revision_request(
+        revision_request_id: uuid.UUID,
+        data: RevisionResolveRequest,
+    ) -> RevisionRequestRead:
+        try:
+            with session_scope() as session:
+                revision = ReviewService(session).resolve_revision_request(
+                    revision_request_id=revision_request_id,
+                    resolved_by_artifact_version_id=data.resolved_by_artifact_version_id,
+                )
+                return RevisionRequestRead.model_validate(_revision_request(revision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/approval-decisions", response_model=ApprovalDecisionRead)
+    def create_approval_decision(data: ApprovalDecisionCreate) -> ApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ApprovalService(session).create_approval_decision(data=data)
+                return ApprovalDecisionRead.model_validate(_approval_decision(decision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -266,9 +371,130 @@ def _snapshot(snapshot: Any) -> dict[str, Any]:
     }
 
 
+def _video_project(project: Any) -> dict[str, Any]:
+    return {
+        "id": project.id,
+        "company_id": project.company_id,
+        "channel_workspace_id": project.channel_workspace_id,
+        "policy_snapshot_id": project.policy_snapshot_id,
+        "title": project.title,
+        "description": project.description,
+        "status": project.status,
+        "project_type": project.project_type,
+        "priority": project.priority,
+        "owner_user_id": project.owner_user_id,
+        "created_by_user_id": project.created_by_user_id,
+        "financial_summary": project.financial_summary,
+        "brand_safety_summary": project.brand_safety_summary,
+        "legal_compliance_summary": project.legal_compliance_summary,
+        "audience_delivery_summary": project.audience_delivery_summary,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+    }
+
+def _artifact(artifact: Any) -> dict[str, Any]:
+    return {
+        "id": artifact.id,
+        "video_project_id": artifact.video_project_id,
+        "artifact_type": artifact.artifact_type,
+        "current_version_id": artifact.current_version_id,
+        "status": artifact.status,
+        "created_by_user_id": artifact.created_by_user_id,
+        "created_at": artifact.created_at,
+        "updated_at": artifact.updated_at,
+    }
+
+def _artifact_version(version: Any) -> dict[str, Any]:
+    return {
+        "id": version.id,
+        "artifact_id": version.artifact_id,
+        "version_number": version.version_number,
+        "parent_version_id": version.parent_version_id,
+        "content": version.content,
+        "content_hash": version.content_hash,
+        "status": version.status,
+        "created_by_user_id": version.created_by_user_id,
+        "external_entity_refs": version.external_entity_refs,
+        "packaging_metadata": version.packaging_metadata,
+        "media_qc_metadata": version.media_qc_metadata,
+        "source_manifest": version.source_manifest,
+        "evidence_refs": version.evidence_refs,
+        "context_refs": version.context_refs,
+        "claim_refs": version.claim_refs,
+        "retrieval_plan_ref": version.retrieval_plan_ref,
+        "created_at": version.created_at,
+    }
+
+def _review_task(review_task: Any) -> dict[str, Any]:
+    return {
+        "id": review_task.id,
+        "video_project_id": review_task.video_project_id,
+        "target_type": review_task.target_type,
+        "target_id": review_task.target_id,
+        "target_artifact_version_id": review_task.target_artifact_version_id,
+        "review_type": review_task.review_type,
+        "status": review_task.status,
+        "assigned_to_user_id": review_task.assigned_to_user_id,
+        "requested_by_user_id": review_task.requested_by_user_id,
+        "due_at": review_task.due_at,
+        "review_reason_codes": review_task.review_reason_codes,
+        "evidence_required": review_task.evidence_required,
+        "evidence_refs": review_task.evidence_refs,
+        "review_scope": review_task.review_scope,
+        "context_pack_ref": review_task.context_pack_ref,
+        "created_at": review_task.created_at,
+        "updated_at": review_task.updated_at,
+    }
+
+def _review_finding(finding: Any) -> dict[str, Any]:
+    return {
+        "id": finding.id,
+        "review_task_id": finding.review_task_id,
+        "severity": finding.severity,
+        "reason_code": finding.reason_code,
+        "finding_text": finding.finding_text,
+        "evidence_refs": finding.evidence_refs,
+        "created_by_user_id": finding.created_by_user_id,
+        "created_at": finding.created_at,
+    }
+
+def _revision_request(revision: Any) -> dict[str, Any]:
+    return {
+        "id": revision.id,
+        "review_task_id": revision.review_task_id,
+        "target_artifact_version_id": revision.target_artifact_version_id,
+        "requested_by_user_id": revision.requested_by_user_id,
+        "reason": revision.reason,
+        "status": revision.status,
+        "resolved_by_artifact_version_id": revision.resolved_by_artifact_version_id,
+        "created_at": revision.created_at,
+        "resolved_at": revision.resolved_at,
+    }
+
+def _approval_decision(decision: Any) -> dict[str, Any]:
+    return {
+        "id": decision.id,
+        "target_type": decision.target_type,
+        "target_id": decision.target_id,
+        "target_artifact_version_id": decision.target_artifact_version_id,
+        "decision": decision.decision,
+        "decided_by_user_id": decision.decided_by_user_id,
+        "decided_at": decision.decided_at,
+        "rationale": decision.rationale,
+        "metadata": decision.metadata_,
+        "decision_basis": decision.decision_basis,
+        "evidence_basis": decision.evidence_basis,
+        "policy_basis": decision.policy_basis,
+        "context_pack_ref": decision.context_pack_ref,
+        "human_decision_note": decision.human_decision_note,
+        "created_at": decision.created_at,
+    }
+
 def _as_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (NotFoundError, KeyError)):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, ForbiddenError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     if isinstance(exc, ConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, (ValidationFailureError, ValueError)):

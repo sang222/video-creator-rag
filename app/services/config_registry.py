@@ -39,6 +39,26 @@ class RoleCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class ArtifactTypeRegistryItem(BaseModel):
+    key: str
+    description: str
+
+    model_config = ConfigDict(extra="forbid")
+
+class ReviewTypeRegistryItem(BaseModel):
+    key: str
+    description: str
+
+    model_config = ConfigDict(extra="forbid")
+
+class DecisionRightsPolicyItem(BaseModel):
+    key: str
+    description: str
+    required_permission: str
+    allowed_role_keys: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
 
 @dataclass(frozen=True)
 class LoadedCatalog:
@@ -149,6 +169,9 @@ class ConfigRegistryService:
             "reason_codes": ReasonCodeItem,
             "event_types": EventTypeItem,
             "role_catalog": RoleCatalogItem,
+            "artifact_type_registry": ArtifactTypeRegistryItem,
+            "review_type_registry": ReviewTypeRegistryItem,
+            "decision_rights_policy": DecisionRightsPolicyItem,
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,

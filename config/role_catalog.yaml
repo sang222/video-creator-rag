@@ -1,5 +1,5 @@
 catalog_key: role_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -11,14 +11,25 @@ items:
       - config:read
       - config:seed
       - rbac:assign
+      - workflow:read
+      - workflow:approval:decide
   - key: operator
     name: Operator
-    description: Runs operational M0 checks and reads runtime records.
+    description: Runs operational checks and M2 artifact workflow actions.
     permissions:
       - audit:read
       - config:read
+      - workflow:read
+      - workflow:project:create
+      - workflow:artifact:create
+      - workflow:artifact_version:create
+      - workflow:review:create
+      - workflow:review:perform
+      - workflow:revision:create
+      - workflow:revision:resolve
   - key: auditor
     name: Auditor
     description: Reads audit and source-of-truth records.
     permissions:
       - audit:read
+      - workflow:read

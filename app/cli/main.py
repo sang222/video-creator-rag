@@ -10,8 +10,20 @@ from alembic.config import Config
 from app.core.config import get_settings
 from app.core.db import check_database
 from app.db.session import session_scope
-from app.contracts import ChannelProfileVersionCreate, ChannelWorkspaceCreate
+from app.contracts import (
+    ApprovalDecisionCreate,
+    ArtifactCreate,
+    ArtifactVersionCreate,
+    ChannelProfileVersionCreate,
+    ChannelWorkspaceCreate,
+    ReviewFindingCreate,
+    ReviewTaskCreate,
+    RevisionRequestCreate,
+    VideoProjectCreate,
+)
 from app.services import (
+    ApprovalService,
+    ArtifactService,
     AuditService,
     ChannelProfileCompiler,
     ChannelProfileService,
@@ -19,6 +31,8 @@ from app.services import (
     CompanyService,
     ConfigRegistryService,
     PolicySnapshotService,
+    ReviewService,
+    VideoProjectService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -28,12 +42,24 @@ audit_app = typer.Typer(no_args_is_help=True)
 company_app = typer.Typer(no_args_is_help=True)
 channel_app = typer.Typer(no_args_is_help=True)
 profile_app = typer.Typer(no_args_is_help=True)
+project_app = typer.Typer(no_args_is_help=True)
+artifact_app = typer.Typer(no_args_is_help=True)
+review_app = typer.Typer(no_args_is_help=True)
+revision_app = typer.Typer(no_args_is_help=True)
+approval_app = typer.Typer(no_args_is_help=True)
+workflow_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
 app.add_typer(company_app, name="company")
 app.add_typer(channel_app, name="channel")
 app.add_typer(profile_app, name="profile")
+app.add_typer(project_app, name="project")
+app.add_typer(artifact_app, name="artifact")
+app.add_typer(review_app, name="review")
+app.add_typer(revision_app, name="revision")
+app.add_typer(approval_app, name="approval")
+app.add_typer(workflow_app, name="workflow")
 
 
 def _fail(message: str) -> None:
@@ -197,6 +223,191 @@ def profile_active(channel_id: uuid.UUID = typer.Option(..., "--channel-id")) ->
         _fail(f"profile active failed: {exc}")
 
 
+@project_app.command("create")
+def project_create(
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
+    title: str = typer.Option(..., "--title"),
+    created_by_user_id: uuid.UUID = typer.Option(..., "--created-by-user-id"),
+    description: str | None = typer.Option(None, "--description"),
+) -> None:
+    try:
+        with session_scope() as session:
+            project = VideoProjectService(session).create_project(
+                data=VideoProjectCreate(
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    policy_snapshot_id=policy_snapshot_id,
+                    title=title,
+                    description=description,
+                    created_by_user_id=created_by_user_id,
+                )
+            )
+            typer.echo(json.dumps({"id": str(project.id), "policy_snapshot_id": str(project.policy_snapshot_id)}))
+    except Exception as exc:
+        _fail(f"project create failed: {exc}")
+
+@artifact_app.command("create")
+def artifact_create(
+    project_id: uuid.UUID = typer.Option(..., "--project-id"),
+    artifact_type: str = typer.Option(..., "--artifact-type"),
+    created_by_user_id: uuid.UUID = typer.Option(..., "--created-by-user-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            artifact = ArtifactService(session).create_artifact(
+                data=ArtifactCreate(
+                    video_project_id=project_id,
+                    artifact_type=artifact_type,
+                    created_by_user_id=created_by_user_id,
+                )
+            )
+            typer.echo(json.dumps({"id": str(artifact.id), "artifact_type": artifact.artifact_type}))
+    except Exception as exc:
+        _fail(f"artifact create failed: {exc}")
+
+@artifact_app.command("version-create")
+def artifact_version_create(
+    artifact_id: uuid.UUID = typer.Option(..., "--artifact-id"),
+    created_by_user_id: uuid.UUID = typer.Option(..., "--created-by-user-id"),
+    content_json: str = typer.Option("{}", "--content-json"),
+    parent_version_id: uuid.UUID | None = typer.Option(None, "--parent-version-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            version = ArtifactService(session).create_artifact_version(
+                data=ArtifactVersionCreate(
+                    artifact_id=artifact_id,
+                    parent_version_id=parent_version_id,
+                    content=_json_object(content_json),
+                    created_by_user_id=created_by_user_id,
+                )
+            )
+            typer.echo(json.dumps({"id": str(version.id), "version_number": version.version_number, "content_hash": version.content_hash}))
+    except Exception as exc:
+        _fail(f"artifact version create failed: {exc}")
+
+@review_app.command("create-task")
+def review_create_task(
+    project_id: uuid.UUID = typer.Option(..., "--project-id"),
+    target_type: str = typer.Option(..., "--target-type"),
+    target_id: uuid.UUID = typer.Option(..., "--target-id"),
+    review_type: str = typer.Option(..., "--review-type"),
+    requested_by_user_id: uuid.UUID = typer.Option(..., "--requested-by-user-id"),
+    target_artifact_version_id: uuid.UUID | None = typer.Option(None, "--target-artifact-version-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            task = ReviewService(session).create_review_task(
+                data=ReviewTaskCreate(
+                    video_project_id=project_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    target_artifact_version_id=target_artifact_version_id,
+                    review_type=review_type,
+                    requested_by_user_id=requested_by_user_id,
+                )
+            )
+            typer.echo(json.dumps({"id": str(task.id), "target_id": str(task.target_id)}))
+    except Exception as exc:
+        _fail(f"review task create failed: {exc}")
+
+@review_app.command("add-finding")
+def review_add_finding(
+    review_task_id: uuid.UUID = typer.Option(..., "--review-task-id"),
+    severity: str = typer.Option(..., "--severity"),
+    reason_code: str = typer.Option(..., "--reason-code"),
+    finding_text: str = typer.Option(..., "--finding-text"),
+    created_by_user_id: uuid.UUID = typer.Option(..., "--created-by-user-id"),
+    evidence_json: str = typer.Option("[]", "--evidence-json"),
+) -> None:
+    try:
+        with session_scope() as session:
+            finding = ReviewService(session).add_finding(
+                data=ReviewFindingCreate(
+                    review_task_id=review_task_id,
+                    severity=severity,
+                    reason_code=reason_code,
+                    finding_text=finding_text,
+                    created_by_user_id=created_by_user_id,
+                    evidence_refs=_json_list(evidence_json),
+                )
+            )
+            typer.echo(json.dumps({"id": str(finding.id), "severity": finding.severity}))
+    except Exception as exc:
+        _fail(f"review finding create failed: {exc}")
+
+@revision_app.command("create")
+def revision_create(
+    review_task_id: uuid.UUID = typer.Option(..., "--review-task-id"),
+    target_artifact_version_id: uuid.UUID = typer.Option(..., "--target-artifact-version-id"),
+    requested_by_user_id: uuid.UUID = typer.Option(..., "--requested-by-user-id"),
+    reason: str = typer.Option(..., "--reason"),
+) -> None:
+    try:
+        with session_scope() as session:
+            revision = ReviewService(session).create_revision_request(
+                data=RevisionRequestCreate(
+                    review_task_id=review_task_id,
+                    target_artifact_version_id=target_artifact_version_id,
+                    requested_by_user_id=requested_by_user_id,
+                    reason=reason,
+                )
+            )
+            typer.echo(json.dumps({"id": str(revision.id), "status": revision.status}))
+    except Exception as exc:
+        _fail(f"revision create failed: {exc}")
+
+@revision_app.command("resolve")
+def revision_resolve(
+    revision_request_id: uuid.UUID = typer.Option(..., "--revision-request-id"),
+    resolved_by_artifact_version_id: uuid.UUID = typer.Option(..., "--resolved-by-artifact-version-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            revision = ReviewService(session).resolve_revision_request(
+                revision_request_id=revision_request_id,
+                resolved_by_artifact_version_id=resolved_by_artifact_version_id,
+            )
+            typer.echo(json.dumps({"id": str(revision.id), "status": revision.status}))
+    except Exception as exc:
+        _fail(f"revision resolve failed: {exc}")
+
+@approval_app.command("decide")
+def approval_decide(
+    target_type: str = typer.Option(..., "--target-type"),
+    target_id: uuid.UUID = typer.Option(..., "--target-id"),
+    decision: str = typer.Option(..., "--decision"),
+    decided_by_user_id: uuid.UUID = typer.Option(..., "--decided-by-user-id"),
+    target_artifact_version_id: uuid.UUID | None = typer.Option(None, "--target-artifact-version-id"),
+    rationale: str | None = typer.Option(None, "--rationale"),
+) -> None:
+    try:
+        with session_scope() as session:
+            result = ApprovalService(session).create_approval_decision(
+                data=ApprovalDecisionCreate(
+                    target_type=target_type,
+                    target_id=target_id,
+                    target_artifact_version_id=target_artifact_version_id,
+                    decision=decision,
+                    decided_by_user_id=decided_by_user_id,
+                    rationale=rationale,
+                )
+            )
+            typer.echo(json.dumps({"id": str(result.id), "decision": result.decision}))
+    except Exception as exc:
+        _fail(f"approval decision failed: {exc}")
+
+@workflow_app.command("inspect")
+def workflow_inspect(project_id: uuid.UUID = typer.Option(..., "--project-id")) -> None:
+    try:
+        with session_scope() as session:
+            state = VideoProjectService(session).inspect_workflow_state(project_id)
+            typer.echo(json.dumps(state))
+    except Exception as exc:
+        _fail(f"workflow inspect failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -226,6 +437,18 @@ def _audit_event_to_dict(event: Any) -> dict[str, Any]:
         "created_at": event.created_at.isoformat(),
     }
 
+
+def _json_object(value: str) -> dict[str, Any]:
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError("expected JSON object")
+    return parsed
+
+def _json_list(value: str) -> list[dict[str, Any]]:
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise ValueError("expected JSON list")
+    return parsed
 
 def main() -> None:
     app()

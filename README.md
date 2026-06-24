@@ -1,8 +1,8 @@
-# VCOS M0 Foundation
+# VCOS
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository currently contains M0 only: repo skeleton, architecture ledger, source-of-truth foundation, initial database schema, config catalogs, contracts, services, CLI, and tests.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, and M2 artifact workflow backbone.
 
 ## Stack
 
@@ -45,6 +45,22 @@ M1 adds channel profile and immutable policy snapshot backbone only. `NicheProfi
 
 Future `VideoProject` records must reference an explicit policy snapshot id. Runtime execution must not lookup latest profile or latest snapshot.
 
+## M2 Commands
+
+```bash
+vcos project create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --title "Video" --created-by-user-id <user-id>
+vcos artifact create --project-id <project-id> --artifact-type script --created-by-user-id <user-id>
+vcos artifact version-create --artifact-id <artifact-id> --created-by-user-id <user-id> --content-json '{"draft":"v1"}'
+vcos review create-task --project-id <project-id> --target-type artifact_version --target-id <version-id> --target-artifact-version-id <version-id> --review-type editorial --requested-by-user-id <user-id>
+vcos review add-finding --review-task-id <review-task-id> --severity medium --reason-code VALIDATION_FAILED --finding-text "Needs revision" --created-by-user-id <user-id>
+vcos revision create --review-task-id <review-task-id> --target-artifact-version-id <version-id> --requested-by-user-id <user-id> --reason "Address finding"
+vcos revision resolve --revision-request-id <revision-id> --resolved-by-artifact-version-id <new-version-id>
+vcos approval decide --target-type artifact_version --target-id <version-id> --target-artifact-version-id <version-id> --decision approved --decided-by-user-id <approver-user-id>
+vcos workflow inspect --project-id <project-id>
+```
+
+M2 adds only workflow, review, revision, approval, decision rights, audit/domain event wiring, and future allowance schema fields. `ArtifactVersion` rows are immutable. Approval applies only to exact target versions.
+
 ## Boundaries
 
-M0 and M1 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, or LLM calls. CapCut pilot notes do not make CapCut a production dependency.
+M0, M1, and M2 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, RAG, policy gates, or LLM calls. CapCut pilot notes do not make CapCut a production dependency.

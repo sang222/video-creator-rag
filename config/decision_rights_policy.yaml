@@ -1,0 +1,41 @@
+catalog_key: decision_rights_policy
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: video_project.create
+    description: Create a video project with explicit active policy snapshot.
+    required_permission: workflow:project:create
+    allowed_role_keys: [operator, company_admin]
+  - key: artifact.create
+    description: Create an artifact shell.
+    required_permission: workflow:artifact:create
+    allowed_role_keys: [operator, company_admin]
+  - key: artifact_version.create
+    description: Create immutable artifact versions.
+    required_permission: workflow:artifact_version:create
+    allowed_role_keys: [operator, company_admin]
+  - key: review_task.create
+    description: Create review tasks for exact targets.
+    required_permission: workflow:review:create
+    allowed_role_keys: [operator, company_admin]
+  - key: review_finding.create
+    description: Add findings to review tasks.
+    required_permission: workflow:review:perform
+    allowed_role_keys: [operator, company_admin]
+  - key: revision_request.create
+    description: Request revision on an exact artifact version.
+    required_permission: workflow:revision:create
+    allowed_role_keys: [operator, company_admin]
+  - key: revision_request.resolve
+    description: Resolve revision with a newer artifact version.
+    required_permission: workflow:revision:resolve
+    allowed_role_keys: [operator, company_admin]
+  - key: approval_decision.create
+    description: Create approval decisions for exact targets.
+    required_permission: workflow:approval:decide
+    allowed_role_keys: [company_admin]
+  - key: workflow.read
+    description: Inspect project workflow state.
+    required_permission: workflow:read
+    allowed_role_keys: [operator, auditor, company_admin]

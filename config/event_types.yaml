@@ -1,5 +1,5 @@
 catalog_key: event_types
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -12,3 +12,30 @@ items:
   - event_type: config.catalog_seeded
     event_version: 1
     description: Config catalog version persisted.
+  - event_type: video_project.created
+    event_version: 1
+    description: Video project created with explicit policy snapshot.
+  - event_type: artifact.created
+    event_version: 1
+    description: Workflow artifact created.
+  - event_type: artifact_version.created
+    event_version: 1
+    description: Immutable artifact version created.
+  - event_type: review_task.created
+    event_version: 1
+    description: Review task created for an exact target.
+  - event_type: review_finding.created
+    event_version: 1
+    description: Review finding recorded.
+  - event_type: revision_request.created
+    event_version: 1
+    description: Revision request created for an exact artifact version.
+  - event_type: revision_request.resolved
+    event_version: 1
+    description: Revision request resolved by a newer artifact version.
+  - event_type: approval_decision.created
+    event_version: 1
+    description: Approval decision recorded for an exact target.
+  - event_type: approval_decision.rejected_or_blocked
+    event_version: 1
+    description: Approval decision was rejected or blocked before approval.

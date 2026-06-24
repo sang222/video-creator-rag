@@ -22,6 +22,23 @@ from app.contracts.profile import (
     ProfileCompilerPolicy,
 )
 from app.contracts.snapshots import LLMRunSnapshotCreate
+from app.contracts.workflow import (
+    ApprovalDecisionCreate,
+    ApprovalDecisionRead,
+    ArtifactCreate,
+    ArtifactRead,
+    ArtifactVersionCreate,
+    ArtifactVersionRead,
+    ReviewFindingCreate,
+    ReviewFindingRead,
+    ReviewTaskCreate,
+    ReviewTaskRead,
+    RevisionRequestCreate,
+    RevisionRequestRead,
+    RevisionResolveRequest,
+    VideoProjectCreate,
+    VideoProjectRead,
+)
 
 __all__ = [
     "AuditEnvelope",
@@ -44,4 +61,19 @@ __all__ = [
     "NicheProfileTemplate",
     "ProfileCompilerPolicy",
     "ReasonCodeDefinition",
+    "ApprovalDecisionCreate",
+    "ApprovalDecisionRead",
+    "ArtifactCreate",
+    "ArtifactRead",
+    "ArtifactVersionCreate",
+    "ArtifactVersionRead",
+    "ReviewFindingCreate",
+    "ReviewFindingRead",
+    "ReviewTaskCreate",
+    "ReviewTaskRead",
+    "RevisionRequestCreate",
+    "RevisionRequestRead",
+    "RevisionResolveRequest",
+    "VideoProjectCreate",
+    "VideoProjectRead",
 ]
