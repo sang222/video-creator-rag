@@ -1,0 +1,17 @@
+catalog_key: daily_run_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PENDING
+    description: Daily run is created and waiting for manual execution.
+  - key: RUNNING
+    description: Daily run execution is in progress.
+  - key: COMPLETED
+    description: Daily run completed with an auditable proposal.
+  - key: BLOCKED
+    description: Daily run was blocked by deterministic provider, cost, quota, or scope checks.
+  - key: FAILED
+    description: Daily run failed safely and produced no project.
+  - key: CANCELLED
+    description: Daily run was cancelled before completion.

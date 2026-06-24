@@ -95,6 +95,17 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    project_admission_decisions,
+                    daily_idea_decisions,
+                    idea_market_preflights,
+                    audience_target_packs,
+                    search_intent_maps,
+                    search_demand_evidence,
+                    channel_state_pack_snapshots,
+                    channel_daily_runs,
+                    context_pack_snapshots,
+                    retrieval_plan_snapshots,
+                    editorial_calendar_slots,
                     manual_action_queue,
                     ops_incidents,
                     dead_letter_jobs,

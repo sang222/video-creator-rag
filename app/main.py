@@ -31,10 +31,17 @@ from app.contracts import (
     CredentialHealthSnapshotRead,
     CredentialReferenceCreate,
     CredentialReferenceRead,
+    DailyIdeaDecisionCreate,
+    DailyIdeaDecisionRead,
+    DailyRunExecuteRequest,
     DeadLetterJobCreate,
     DeadLetterJobRead,
+    EditorialCalendarSlotCreate,
+    EditorialCalendarSlotRead,
     GateRunCreate,
     GateRunRead,
+    IdeaMarketPreflightCreate,
+    IdeaMarketPreflightRead,
     ManualActionCreate,
     ManualActionRead,
     OpsIncidentCreate,
@@ -56,10 +63,14 @@ from app.contracts import (
     ProviderHealthSnapshotRead,
     ProviderRegistryEntryCreate,
     ProviderRegistryEntryRead,
+    ProjectAdmissionDecisionCreate,
+    ProjectAdmissionDecisionRead,
     QuotaAccountCreate,
     QuotaAccountRead,
     QuotaEventRead,
     QuotaEventRequest,
+    RetrievalPlanSnapshotCreate,
+    RetrievalPlanSnapshotRead,
     ReviewFindingCreate,
     ReviewFindingRead,
     ReviewTaskCreate,
@@ -69,9 +80,17 @@ from app.contracts import (
     RevisionResolveRequest,
     RetryPolicyCreate,
     RetryPolicyRead,
+    SearchDemandEvidenceCreate,
+    SearchDemandEvidenceRead,
     SystemHealthSnapshotRead,
     VideoProjectCreate,
     VideoProjectRead,
+    ChannelDailyRunCreate,
+    ChannelDailyRunRead,
+    ChannelStatePackSnapshotCreate,
+    ChannelStatePackSnapshotRead,
+    ContextPackSnapshotCreate,
+    ContextPackSnapshotRead,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
 from app.core.config import get_settings
@@ -92,19 +111,27 @@ from app.services import (
     GateDefinitionService,
     GateRunnerService,
     BudgetGateService,
+    ChannelAuthorityService,
+    ChannelDailyRunService,
+    ChannelStatePackService,
     ComponentHealthService,
     CostService,
     CredentialReferenceService,
     DeadLetterService,
+    EditorialCalendarService,
     ManualActionService,
     OpsIncidentService,
     PolicyCatalogService,
     PolicyChangeService,
     PolicyRevalidationService,
+    IdeaMarketPreflightService,
+    ProjectAdmissionService,
     ProviderHealthService,
     ProviderRegistryService,
     QuotaService,
+    ResourceResolverService,
     RetryOpsService,
+    SearchDemandEvidenceService,
     SystemHealthService,
     WorkflowReadinessService,
 )
@@ -785,6 +812,156 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/editorial-calendar-slots", response_model=EditorialCalendarSlotRead)
+    def create_editorial_calendar_slot(data: EditorialCalendarSlotCreate) -> EditorialCalendarSlotRead:
+        try:
+            with session_scope() as session:
+                slot = EditorialCalendarService(session).create_slot(data=data)
+                return EditorialCalendarSlotRead.model_validate(_editorial_slot(slot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/editorial-calendar-slots/{slot_id}", response_model=EditorialCalendarSlotRead)
+    def get_editorial_calendar_slot(slot_id: uuid.UUID) -> EditorialCalendarSlotRead:
+        try:
+            with session_scope() as session:
+                slot = EditorialCalendarService(session).get_slot(slot_id)
+                if slot is None:
+                    raise NotFoundError(f"editorial slot not found: {slot_id}")
+                return EditorialCalendarSlotRead.model_validate(_editorial_slot(slot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/search-demand-evidence", response_model=SearchDemandEvidenceRead)
+    def create_search_demand_evidence(data: SearchDemandEvidenceCreate) -> SearchDemandEvidenceRead:
+        try:
+            with session_scope() as session:
+                evidence = SearchDemandEvidenceService(session).create_evidence(data=data)
+                return SearchDemandEvidenceRead.model_validate(_search_demand_evidence(evidence))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/context/retrieval-plans", response_model=RetrievalPlanSnapshotRead)
+    def create_retrieval_plan(data: RetrievalPlanSnapshotCreate) -> RetrievalPlanSnapshotRead:
+        try:
+            with session_scope() as session:
+                plan = ResourceResolverService(session).create_retrieval_plan(data=data)
+                return RetrievalPlanSnapshotRead.model_validate(_retrieval_plan(plan))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/context/context-packs", response_model=ContextPackSnapshotRead)
+    def create_context_pack(data: ContextPackSnapshotCreate) -> ContextPackSnapshotRead:
+        try:
+            with session_scope() as session:
+                pack = ResourceResolverService(session).build_context_pack(data=data)
+                return ContextPackSnapshotRead.model_validate(_context_pack(pack))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/context/context-packs/{context_pack_id}", response_model=ContextPackSnapshotRead)
+    def get_context_pack(context_pack_id: uuid.UUID) -> ContextPackSnapshotRead:
+        try:
+            with session_scope() as session:
+                pack = ResourceResolverService(session).get_context_pack(context_pack_id)
+                if pack is None:
+                    raise NotFoundError(f"context pack not found: {context_pack_id}")
+                return ContextPackSnapshotRead.model_validate(_context_pack(pack))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channel-state-packs", response_model=ChannelStatePackSnapshotRead)
+    def create_channel_state_pack(data: ChannelStatePackSnapshotCreate) -> ChannelStatePackSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = ChannelStatePackService(session).build_snapshot(data=data)
+                return ChannelStatePackSnapshotRead.model_validate(_channel_state_pack(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channel-daily-runs", response_model=ChannelDailyRunRead)
+    def create_channel_daily_run(data: ChannelDailyRunCreate) -> ChannelDailyRunRead:
+        try:
+            with session_scope() as session:
+                daily_run = ChannelDailyRunService(session).create_run(data=data)
+                return ChannelDailyRunRead.model_validate(_channel_daily_run(daily_run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channel-daily-runs/{daily_run_id}/execute", response_model=ChannelDailyRunRead)
+    def execute_channel_daily_run(daily_run_id: uuid.UUID, data: DailyRunExecuteRequest | None = None) -> ChannelDailyRunRead:
+        try:
+            with session_scope() as session:
+                daily_run = ChannelDailyRunService(session).execute_run(
+                    daily_run_id=daily_run_id,
+                    data=data or DailyRunExecuteRequest(),
+                )
+                return ChannelDailyRunRead.model_validate(_channel_daily_run(daily_run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channel-daily-runs/{daily_run_id}", response_model=ChannelDailyRunRead)
+    def get_channel_daily_run(daily_run_id: uuid.UUID) -> ChannelDailyRunRead:
+        try:
+            with session_scope() as session:
+                daily_run = ChannelDailyRunService(session).get_run(daily_run_id)
+                if daily_run is None:
+                    raise NotFoundError(f"daily run not found: {daily_run_id}")
+                return ChannelDailyRunRead.model_validate(_channel_daily_run(daily_run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/daily-idea-decisions", response_model=DailyIdeaDecisionRead)
+    def create_daily_idea_decision(data: DailyIdeaDecisionCreate) -> DailyIdeaDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ChannelAuthorityService(session).create_decision(data=data)
+                return DailyIdeaDecisionRead.model_validate(_daily_idea_decision(decision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/daily-idea-decisions/{decision_id}", response_model=DailyIdeaDecisionRead)
+    def get_daily_idea_decision(decision_id: uuid.UUID) -> DailyIdeaDecisionRead:
+        try:
+            with session_scope() as session:
+                from app.db.models import DailyIdeaDecision
+
+                decision = session.get(DailyIdeaDecision, decision_id)
+                if decision is None:
+                    raise NotFoundError(f"daily idea decision not found: {decision_id}")
+                return DailyIdeaDecisionRead.model_validate(_daily_idea_decision(decision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/idea-market-preflights", response_model=IdeaMarketPreflightRead)
+    def create_idea_market_preflight(data: IdeaMarketPreflightCreate) -> IdeaMarketPreflightRead:
+        try:
+            with session_scope() as session:
+                preflight = IdeaMarketPreflightService(session).create_preflight(data=data)
+                return IdeaMarketPreflightRead.model_validate(_idea_market_preflight(preflight))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/project-admission-decisions", response_model=ProjectAdmissionDecisionRead)
+    def create_project_admission_decision(data: ProjectAdmissionDecisionCreate) -> ProjectAdmissionDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ProjectAdmissionService(session).create_decision(data=data)
+                return ProjectAdmissionDecisionRead.model_validate(_project_admission_decision(decision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/project-admission-decisions/{decision_id}", response_model=ProjectAdmissionDecisionRead)
+    def get_project_admission_decision(decision_id: uuid.UUID) -> ProjectAdmissionDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ProjectAdmissionService(session).get_decision(decision_id)
+                if decision is None:
+                    raise NotFoundError(f"project admission decision not found: {decision_id}")
+                return ProjectAdmissionDecisionRead.model_validate(_project_admission_decision(decision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -1318,6 +1495,199 @@ def _manual_action(action: Any) -> dict[str, Any]:
         "due_at": action.due_at,
         "created_at": action.created_at,
         "updated_at": action.updated_at,
+    }
+
+def _editorial_slot(slot: Any) -> dict[str, Any]:
+    return {
+        "id": slot.id,
+        "company_id": slot.company_id,
+        "channel_workspace_id": slot.channel_workspace_id,
+        "policy_snapshot_id": slot.policy_snapshot_id,
+        "slot_date": slot.slot_date,
+        "slot_type": slot.slot_type,
+        "status": slot.status,
+        "production_goal": slot.production_goal,
+        "target_platforms": slot.target_platforms,
+        "content_pillar": slot.content_pillar,
+        "series_key": slot.series_key,
+        "format_hint": slot.format_hint,
+        "risk_level": slot.risk_level,
+        "operational_envelope": slot.operational_envelope,
+        "created_by_user_id": slot.created_by_user_id,
+        "created_at": slot.created_at,
+        "updated_at": slot.updated_at,
+    }
+
+def _channel_daily_run(daily_run: Any) -> dict[str, Any]:
+    return {
+        "id": daily_run.id,
+        "company_id": daily_run.company_id,
+        "channel_workspace_id": daily_run.channel_workspace_id,
+        "policy_snapshot_id": daily_run.policy_snapshot_id,
+        "editorial_calendar_slot_id": daily_run.editorial_calendar_slot_id,
+        "run_date": daily_run.run_date,
+        "status": daily_run.status,
+        "run_mode": daily_run.run_mode,
+        "trigger_type": daily_run.trigger_type,
+        "started_at": daily_run.started_at,
+        "completed_at": daily_run.completed_at,
+        "context_pack_snapshot_id": daily_run.context_pack_snapshot_id,
+        "channel_state_pack_snapshot_id": daily_run.channel_state_pack_snapshot_id,
+        "daily_idea_decision_id": daily_run.daily_idea_decision_id,
+        "project_admission_decision_id": daily_run.project_admission_decision_id,
+        "reason_codes": daily_run.reason_codes,
+        "metadata": daily_run.metadata_,
+        "created_at": daily_run.created_at,
+        "updated_at": daily_run.updated_at,
+    }
+
+def _retrieval_plan(plan: Any) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "purpose": plan.purpose,
+        "company_id": plan.company_id,
+        "channel_workspace_id": plan.channel_workspace_id,
+        "channel_profile_version_id": plan.channel_profile_version_id,
+        "policy_snapshot_id": plan.policy_snapshot_id,
+        "video_project_id": plan.video_project_id,
+        "editorial_calendar_slot_id": plan.editorial_calendar_slot_id,
+        "allowed_sources": plan.allowed_sources,
+        "excluded_sources": plan.excluded_sources,
+        "redaction_rules": plan.redaction_rules,
+        "token_budget": plan.token_budget,
+        "source_order": plan.source_order,
+        "plan_hash": plan.plan_hash,
+        "created_by_user_id": plan.created_by_user_id,
+        "created_at": plan.created_at,
+    }
+
+def _context_pack(pack: Any) -> dict[str, Any]:
+    return {
+        "id": pack.id,
+        "retrieval_plan_snapshot_id": pack.retrieval_plan_snapshot_id,
+        "purpose": pack.purpose,
+        "company_id": pack.company_id,
+        "channel_workspace_id": pack.channel_workspace_id,
+        "channel_profile_version_id": pack.channel_profile_version_id,
+        "policy_snapshot_id": pack.policy_snapshot_id,
+        "video_project_id": pack.video_project_id,
+        "editorial_calendar_slot_id": pack.editorial_calendar_slot_id,
+        "input_refs": pack.input_refs,
+        "policy_refs": pack.policy_refs,
+        "evidence_refs": pack.evidence_refs,
+        "metric_refs": pack.metric_refs,
+        "memory_refs": pack.memory_refs,
+        "pack_content": pack.pack_content,
+        "freshness_state": pack.freshness_state,
+        "confidence_level": pack.confidence_level,
+        "pack_hash": pack.pack_hash,
+        "created_by_user_id": pack.created_by_user_id,
+        "created_at": pack.created_at,
+    }
+
+def _channel_state_pack(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "channel_daily_run_id": snapshot.channel_daily_run_id,
+        "company_id": snapshot.company_id,
+        "channel_workspace_id": snapshot.channel_workspace_id,
+        "policy_snapshot_id": snapshot.policy_snapshot_id,
+        "context_pack_snapshot_id": snapshot.context_pack_snapshot_id,
+        "state_blob": snapshot.state_blob,
+        "active_project_refs": snapshot.active_project_refs,
+        "pending_review_refs": snapshot.pending_review_refs,
+        "readiness_summary": snapshot.readiness_summary,
+        "provider_health_summary": snapshot.provider_health_summary,
+        "quota_summary": snapshot.quota_summary,
+        "evidence_summary": snapshot.evidence_summary,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "state_hash": snapshot.state_hash,
+        "created_at": snapshot.created_at,
+    }
+
+def _search_demand_evidence(evidence: Any) -> dict[str, Any]:
+    return {
+        "id": evidence.id,
+        "company_id": evidence.company_id,
+        "channel_workspace_id": evidence.channel_workspace_id,
+        "evidence_source_type": evidence.evidence_source_type,
+        "source_ref": evidence.source_ref,
+        "query": evidence.query,
+        "platform": evidence.platform,
+        "geo": evidence.geo,
+        "language": evidence.language,
+        "lookback_window_days": evidence.lookback_window_days,
+        "search_volume_30d": evidence.search_volume_30d,
+        "relative_interest_index": evidence.relative_interest_index,
+        "competition_index": evidence.competition_index,
+        "trending_velocity": evidence.trending_velocity,
+        "evidence_confidence": evidence.evidence_confidence,
+        "captured_at": evidence.captured_at,
+        "metadata": evidence.metadata_,
+        "created_at": evidence.created_at,
+    }
+
+def _daily_idea_decision(decision: Any) -> dict[str, Any]:
+    return {
+        "id": decision.id,
+        "channel_daily_run_id": decision.channel_daily_run_id,
+        "company_id": decision.company_id,
+        "channel_workspace_id": decision.channel_workspace_id,
+        "policy_snapshot_id": decision.policy_snapshot_id,
+        "context_pack_snapshot_id": decision.context_pack_snapshot_id,
+        "channel_state_pack_snapshot_id": decision.channel_state_pack_snapshot_id,
+        "llm_run_snapshot_id": decision.llm_run_snapshot_id,
+        "decision_status": decision.decision_status,
+        "proposed_title": decision.proposed_title,
+        "proposed_angle": decision.proposed_angle,
+        "proposed_format": decision.proposed_format,
+        "proposed_pillar": decision.proposed_pillar,
+        "proposed_series_key": decision.proposed_series_key,
+        "rationale": decision.rationale,
+        "evidence_refs": decision.evidence_refs,
+        "reason_codes": decision.reason_codes,
+        "confidence_level": decision.confidence_level,
+        "created_at": decision.created_at,
+    }
+
+def _idea_market_preflight(preflight: Any) -> dict[str, Any]:
+    return {
+        "id": preflight.id,
+        "company_id": preflight.company_id,
+        "channel_workspace_id": preflight.channel_workspace_id,
+        "channel_daily_run_id": preflight.channel_daily_run_id,
+        "daily_idea_decision_id": preflight.daily_idea_decision_id,
+        "search_intent_map_id": preflight.search_intent_map_id,
+        "audience_target_pack_id": preflight.audience_target_pack_id,
+        "demand_score": preflight.demand_score,
+        "channel_fit_score": preflight.channel_fit_score,
+        "policy_fit_state": preflight.policy_fit_state,
+        "confidence_state": preflight.confidence_state,
+        "evidence_blob": preflight.evidence_blob,
+        "reason_codes": preflight.reason_codes,
+        "decision": preflight.decision,
+        "created_at": preflight.created_at,
+    }
+
+def _project_admission_decision(decision: Any) -> dict[str, Any]:
+    return {
+        "id": decision.id,
+        "channel_daily_run_id": decision.channel_daily_run_id,
+        "daily_idea_decision_id": decision.daily_idea_decision_id,
+        "idea_market_preflight_id": decision.idea_market_preflight_id,
+        "budget_policy_key": decision.budget_gate_result.get("policy_key"),
+        "quota_account_id": None,
+        "estimated_cost": 0,
+        "created_by_user_id": decision.created_by_user_id,
+        "budget_gate_result": decision.budget_gate_result,
+        "readiness_gate_refs": decision.readiness_gate_refs,
+        "decision": decision.decision,
+        "reason_codes": decision.reason_codes,
+        "evidence_refs": decision.evidence_refs,
+        "admitted_video_project_id": decision.admitted_video_project_id,
+        "created_artifact_refs": decision.created_artifact_refs,
+        "created_at": decision.created_at,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

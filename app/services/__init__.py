@@ -37,6 +37,18 @@ from app.services.ops import (
     RetryOpsService,
     SystemHealthService,
 )
+from app.services.m5 import (
+    AudienceTargetService,
+    ChannelAuthorityService,
+    ChannelDailyRunService,
+    ChannelStatePackService,
+    EditorialCalendarService,
+    IdeaMarketPreflightService,
+    ProjectAdmissionService,
+    ResourceResolverService,
+    SearchDemandEvidenceService,
+    SearchIntentService,
+)
 
 __all__ = [
     "AuditService",
@@ -68,6 +80,16 @@ __all__ = [
     "QuotaService",
     "RetryOpsService",
     "SystemHealthService",
+    "AudienceTargetService",
+    "ChannelAuthorityService",
+    "ChannelDailyRunService",
+    "ChannelStatePackService",
+    "EditorialCalendarService",
+    "IdeaMarketPreflightService",
+    "ProjectAdmissionService",
+    "ResourceResolverService",
+    "SearchDemandEvidenceService",
+    "SearchIntentService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

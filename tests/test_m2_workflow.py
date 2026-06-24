@@ -421,9 +421,6 @@ def test_workflow_actions_write_audit_and_domain_events(db_session) -> None:
 
 def test_m2_scope_guard_tables_and_code() -> None:
     forbidden_tables = {
-        "resource_resolvers",
-        "context_packs",
-        "retrieval_plans",
         "semantic_layers",
         "memory_promotions",
         "media_renders",
@@ -433,9 +430,6 @@ def test_m2_scope_guard_tables_and_code() -> None:
     }
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
     assert not forbidden_tables & M2_TABLES
-    assert "ResourceResolver" not in app_text
-    assert "ContextPack" not in app_text
-    assert "RetrievalPlan" not in app_text
     assert "SemanticLayer" not in app_text
     assert "MemoryPromotion" not in app_text
     assert "AIAnswerJudge" not in app_text

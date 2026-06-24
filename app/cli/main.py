@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -23,8 +24,12 @@ from app.contracts import (
     CostEventCreate,
     CredentialHealthSnapshotCreate,
     CredentialReferenceCreate,
+    DailyIdeaDecisionCreate,
+    DailyRunExecuteRequest,
     DeadLetterJobCreate,
+    EditorialCalendarSlotCreate,
     GateRunCreate,
+    IdeaMarketPreflightCreate,
     ManualActionCreate,
     OpsIncidentCreate,
     PlatformPolicyCatalogCreate,
@@ -34,19 +39,28 @@ from app.contracts import (
     PolicySourceRefCreate,
     ProviderAttemptMockRequest,
     ProviderRegistryEntryCreate,
+    ProjectAdmissionDecisionCreate,
     QuotaAccountCreate,
     QuotaEventRequest,
+    RetrievalPlanSnapshotCreate,
     ReviewFindingCreate,
     ReviewTaskCreate,
     RevisionRequestCreate,
     RetryPolicyCreate,
+    SearchDemandEvidenceCreate,
     VideoProjectCreate,
+    ChannelDailyRunCreate,
+    ChannelStatePackSnapshotCreate,
+    ContextPackSnapshotCreate,
 )
 from app.services import (
     ApprovalService,
     ArtifactService,
     AuditService,
     BudgetGateService,
+    ChannelAuthorityService,
+    ChannelDailyRunService,
+    ChannelStatePackService,
     ChannelProfileCompiler,
     ChannelProfileService,
     ChannelWorkspaceService,
@@ -56,8 +70,10 @@ from app.services import (
     CostService,
     CredentialReferenceService,
     DeadLetterService,
+    EditorialCalendarService,
     GateDefinitionService,
     GateRunnerService,
+    IdeaMarketPreflightService,
     ManualActionService,
     OpsIncidentService,
     PolicySnapshotService,
@@ -66,9 +82,12 @@ from app.services import (
     PolicyRevalidationService,
     ProviderHealthService,
     ProviderRegistryService,
+    ProjectAdmissionService,
     QuotaService,
+    ResourceResolverService,
     RetryOpsService,
     ReviewService,
+    SearchDemandEvidenceService,
     SystemHealthService,
     VideoProjectService,
     WorkflowReadinessService,
@@ -90,6 +109,12 @@ workflow_app = typer.Typer(no_args_is_help=True)
 gate_app = typer.Typer(no_args_is_help=True)
 policy_app = typer.Typer(no_args_is_help=True)
 readiness_app = typer.Typer(no_args_is_help=True)
+calendar_app = typer.Typer(no_args_is_help=True)
+search_app = typer.Typer(no_args_is_help=True)
+context_app = typer.Typer(no_args_is_help=True)
+channel_state_app = typer.Typer(no_args_is_help=True)
+daily_app = typer.Typer(no_args_is_help=True)
+idea_app = typer.Typer(no_args_is_help=True)
 provider_app = typer.Typer(no_args_is_help=True)
 credential_app = typer.Typer(no_args_is_help=True)
 quota_app = typer.Typer(no_args_is_help=True)
@@ -114,6 +139,12 @@ app.add_typer(workflow_app, name="workflow")
 app.add_typer(gate_app, name="gate")
 app.add_typer(policy_app, name="policy")
 app.add_typer(readiness_app, name="readiness")
+app.add_typer(calendar_app, name="calendar")
+app.add_typer(search_app, name="search")
+app.add_typer(context_app, name="context")
+app.add_typer(channel_state_app, name="channel-state")
+app.add_typer(daily_app, name="daily")
+app.add_typer(idea_app, name="idea")
 app.add_typer(provider_app, name="provider")
 app.add_typer(credential_app, name="credential")
 app.add_typer(quota_app, name="quota")
@@ -1038,6 +1069,259 @@ def system_health_latest() -> None:
     except Exception as exc:
         _fail(f"system-health latest failed: {exc}")
 
+@calendar_app.command("slot-create")
+def calendar_slot_create(
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
+    slot_date: str = typer.Option(..., "--slot-date"),
+    production_goal: str | None = typer.Option(None, "--production-goal"),
+    slot_type: str = typer.Option("DAILY", "--slot-type"),
+    target_platforms_json: str = typer.Option("[]", "--target-platforms-json"),
+    created_by_user_id: uuid.UUID | None = typer.Option(None, "--created-by-user-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            slot = EditorialCalendarService(session).create_slot(
+                data=EditorialCalendarSlotCreate(
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    policy_snapshot_id=policy_snapshot_id,
+                    slot_date=date.fromisoformat(slot_date),
+                    slot_type=slot_type,
+                    production_goal=production_goal,
+                    target_platforms=_json_string_list(target_platforms_json),
+                    created_by_user_id=created_by_user_id,
+                )
+            )
+            typer.echo(json.dumps(_editorial_slot_to_dict(slot)))
+    except Exception as exc:
+        _fail(f"calendar slot-create failed: {exc}")
+
+@search_app.command("evidence-create")
+def search_evidence_create(
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    query: str = typer.Option(..., "--query"),
+    source_type: str = typer.Option("MOCK", "--source-type"),
+    platform: str = typer.Option("YOUTUBE", "--platform"),
+    search_volume_30d: int | None = typer.Option(None, "--search-volume-30d"),
+    relative_interest_index: str | None = typer.Option(None, "--relative-interest-index"),
+    competition_index: str | None = typer.Option(None, "--competition-index"),
+    confidence: str = typer.Option("UNKNOWN", "--confidence"),
+) -> None:
+    try:
+        with session_scope() as session:
+            evidence = SearchDemandEvidenceService(session).create_evidence(
+                data=SearchDemandEvidenceCreate(
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    evidence_source_type=source_type,
+                    query=query,
+                    platform=platform,
+                    search_volume_30d=search_volume_30d,
+                    relative_interest_index=Decimal(relative_interest_index) if relative_interest_index is not None else None,
+                    competition_index=Decimal(competition_index) if competition_index is not None else None,
+                    evidence_confidence=confidence,
+                )
+            )
+            typer.echo(json.dumps(_search_evidence_to_dict(evidence)))
+    except Exception as exc:
+        _fail(f"search evidence-create failed: {exc}")
+
+@context_app.command("plan-create")
+def context_plan_create(
+    purpose: str = typer.Option("DAILY_IDEA", "--purpose"),
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID | None = typer.Option(None, "--channel-id"),
+    policy_snapshot_id: uuid.UUID | None = typer.Option(None, "--policy-snapshot-id"),
+    slot_id: uuid.UUID | None = typer.Option(None, "--slot-id"),
+    allowed_sources_json: str = typer.Option("[]", "--allowed-sources-json"),
+) -> None:
+    try:
+        with session_scope() as session:
+            sources = _json_string_list(allowed_sources_json)
+            plan = ResourceResolverService(session).create_retrieval_plan(
+                data=RetrievalPlanSnapshotCreate(
+                    purpose=purpose,
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    policy_snapshot_id=policy_snapshot_id,
+                    editorial_calendar_slot_id=slot_id,
+                    allowed_sources=sources,
+                    source_order=sources,
+                )
+            )
+            typer.echo(json.dumps(_retrieval_plan_to_dict(plan)))
+    except Exception as exc:
+        _fail(f"context plan-create failed: {exc}")
+
+@context_app.command("pack-create")
+def context_pack_create(
+    retrieval_plan_snapshot_id: uuid.UUID = typer.Option(..., "--retrieval-plan-snapshot-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            pack = ResourceResolverService(session).build_context_pack(
+                data=ContextPackSnapshotCreate(retrieval_plan_snapshot_id=retrieval_plan_snapshot_id)
+            )
+            typer.echo(json.dumps(_context_pack_to_dict(pack)))
+    except Exception as exc:
+        _fail(f"context pack-create failed: {exc}")
+
+@channel_state_app.command("build")
+def channel_state_build(
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
+    context_pack_snapshot_id: uuid.UUID | None = typer.Option(None, "--context-pack-snapshot-id"),
+    daily_run_id: uuid.UUID | None = typer.Option(None, "--daily-run-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = ChannelStatePackService(session).build_snapshot(
+                data=ChannelStatePackSnapshotCreate(
+                    channel_daily_run_id=daily_run_id,
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    policy_snapshot_id=policy_snapshot_id,
+                    context_pack_snapshot_id=context_pack_snapshot_id,
+                )
+            )
+            typer.echo(json.dumps(_channel_state_pack_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"channel-state build failed: {exc}")
+
+@daily_app.command("run-create")
+def daily_run_create(
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
+    run_date: str = typer.Option(..., "--run-date"),
+    slot_id: uuid.UUID | None = typer.Option(None, "--slot-id"),
+    trigger_type: str = typer.Option("MANUAL", "--trigger-type"),
+) -> None:
+    try:
+        with session_scope() as session:
+            daily_run = ChannelDailyRunService(session).create_run(
+                data=ChannelDailyRunCreate(
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    policy_snapshot_id=policy_snapshot_id,
+                    editorial_calendar_slot_id=slot_id,
+                    run_date=date.fromisoformat(run_date),
+                    trigger_type=trigger_type,
+                )
+            )
+            typer.echo(json.dumps(_daily_run_to_dict(daily_run)))
+    except Exception as exc:
+        _fail(f"daily run-create failed: {exc}")
+
+@daily_app.command("execute")
+def daily_execute(
+    daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
+    mock_mode: str = typer.Option("success", "--mock-mode"),
+    quota_account_id: uuid.UUID | None = typer.Option(None, "--quota-account-id"),
+    budget_policy_key: str | None = typer.Option(None, "--budget-policy-key"),
+    estimated_cost: str = typer.Option("0", "--estimated-cost"),
+) -> None:
+    try:
+        with session_scope() as session:
+            daily_run = ChannelDailyRunService(session).execute_run(
+                daily_run_id=daily_run_id,
+                data=DailyRunExecuteRequest(
+                    mock_mode=mock_mode,
+                    quota_account_id=quota_account_id,
+                    budget_policy_key=budget_policy_key,
+                    estimated_cost=Decimal(estimated_cost),
+                ),
+            )
+            typer.echo(json.dumps(_daily_run_to_dict(daily_run)))
+    except Exception as exc:
+        _fail(f"daily execute failed: {exc}")
+
+@daily_app.command("inspect")
+def daily_inspect(daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id")) -> None:
+    try:
+        with session_scope() as session:
+            daily_run = ChannelDailyRunService(session).get_run(daily_run_id)
+            if daily_run is None:
+                _fail(f"daily run not found: {daily_run_id}")
+            typer.echo(json.dumps(_daily_run_to_dict(daily_run)))
+    except Exception as exc:
+        _fail(f"daily inspect failed: {exc}")
+
+@idea_app.command("decide")
+def idea_decide(
+    daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
+    context_pack_snapshot_id: uuid.UUID = typer.Option(..., "--context-pack-snapshot-id"),
+    channel_state_pack_snapshot_id: uuid.UUID | None = typer.Option(None, "--channel-state-pack-snapshot-id"),
+    mock_mode: str = typer.Option("success", "--mock-mode"),
+) -> None:
+    try:
+        with session_scope() as session:
+            decision = ChannelAuthorityService(session).create_decision(
+                data=DailyIdeaDecisionCreate(
+                    channel_daily_run_id=daily_run_id,
+                    context_pack_snapshot_id=context_pack_snapshot_id,
+                    channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
+                    mock_mode=mock_mode,
+                )
+            )
+            typer.echo(json.dumps(_daily_idea_to_dict(decision)))
+    except Exception as exc:
+        _fail(f"idea decide failed: {exc}")
+
+@idea_app.command("preflight")
+def idea_preflight(
+    company_id: uuid.UUID = typer.Option(..., "--company-id"),
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    daily_run_id: uuid.UUID | None = typer.Option(None, "--daily-run-id"),
+    daily_idea_decision_id: uuid.UUID | None = typer.Option(None, "--daily-idea-decision-id"),
+    evidence_json: str = typer.Option("{}", "--evidence-json"),
+) -> None:
+    try:
+        with session_scope() as session:
+            preflight = IdeaMarketPreflightService(session).create_preflight(
+                data=IdeaMarketPreflightCreate(
+                    company_id=company_id,
+                    channel_workspace_id=channel_id,
+                    channel_daily_run_id=daily_run_id,
+                    daily_idea_decision_id=daily_idea_decision_id,
+                    evidence_blob=_json_object(evidence_json),
+                )
+            )
+            typer.echo(json.dumps(_idea_preflight_to_dict(preflight)))
+    except Exception as exc:
+        _fail(f"idea preflight failed: {exc}")
+
+@project_app.command("admit")
+def project_admit(
+    daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
+    daily_idea_decision_id: uuid.UUID = typer.Option(..., "--daily-idea-decision-id"),
+    created_by_user_id: uuid.UUID = typer.Option(..., "--created-by-user-id"),
+    idea_market_preflight_id: uuid.UUID | None = typer.Option(None, "--idea-market-preflight-id"),
+    budget_policy_key: str | None = typer.Option(None, "--budget-policy-key"),
+    quota_account_id: uuid.UUID | None = typer.Option(None, "--quota-account-id"),
+    estimated_cost: str = typer.Option("0", "--estimated-cost"),
+) -> None:
+    try:
+        with session_scope() as session:
+            decision = ProjectAdmissionService(session).create_decision(
+                data=ProjectAdmissionDecisionCreate(
+                    channel_daily_run_id=daily_run_id,
+                    daily_idea_decision_id=daily_idea_decision_id,
+                    idea_market_preflight_id=idea_market_preflight_id,
+                    budget_policy_key=budget_policy_key,
+                    quota_account_id=quota_account_id,
+                    estimated_cost=Decimal(estimated_cost),
+                    created_by_user_id=created_by_user_id,
+                )
+            )
+            typer.echo(json.dumps(_project_admission_to_dict(decision)))
+    except Exception as exc:
+        _fail(f"project admit failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -1217,6 +1501,102 @@ def _system_health_to_dict(snapshot: Any) -> dict[str, Any]:
         "next_action": snapshot.next_action,
     }
 
+def _editorial_slot_to_dict(slot: Any) -> dict[str, Any]:
+    return {
+        "id": str(slot.id),
+        "company_id": str(slot.company_id),
+        "channel_workspace_id": str(slot.channel_workspace_id),
+        "policy_snapshot_id": str(slot.policy_snapshot_id),
+        "slot_date": slot.slot_date.isoformat(),
+        "slot_type": slot.slot_type,
+        "status": slot.status,
+    }
+
+def _search_evidence_to_dict(evidence: Any) -> dict[str, Any]:
+    return {
+        "id": str(evidence.id),
+        "query": evidence.query,
+        "platform": evidence.platform,
+        "evidence_source_type": evidence.evidence_source_type,
+        "search_volume_30d": evidence.search_volume_30d,
+        "evidence_confidence": evidence.evidence_confidence,
+    }
+
+def _retrieval_plan_to_dict(plan: Any) -> dict[str, Any]:
+    return {
+        "id": str(plan.id),
+        "purpose": plan.purpose,
+        "company_id": str(plan.company_id),
+        "channel_workspace_id": str(plan.channel_workspace_id) if plan.channel_workspace_id else None,
+        "policy_snapshot_id": str(plan.policy_snapshot_id) if plan.policy_snapshot_id else None,
+        "allowed_sources": plan.allowed_sources,
+        "plan_hash": plan.plan_hash,
+    }
+
+def _context_pack_to_dict(pack: Any) -> dict[str, Any]:
+    return {
+        "id": str(pack.id),
+        "retrieval_plan_snapshot_id": str(pack.retrieval_plan_snapshot_id),
+        "purpose": pack.purpose,
+        "pack_hash": pack.pack_hash,
+        "freshness_state": pack.freshness_state,
+        "confidence_level": pack.confidence_level,
+        "evidence_refs": pack.evidence_refs,
+        "metric_refs": pack.metric_refs,
+    }
+
+def _channel_state_pack_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "channel_daily_run_id": str(snapshot.channel_daily_run_id) if snapshot.channel_daily_run_id else None,
+        "state_hash": snapshot.state_hash,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "evidence_summary": snapshot.evidence_summary,
+    }
+
+def _daily_run_to_dict(daily_run: Any) -> dict[str, Any]:
+    return {
+        "id": str(daily_run.id),
+        "status": daily_run.status,
+        "run_mode": daily_run.run_mode,
+        "run_date": daily_run.run_date.isoformat(),
+        "context_pack_snapshot_id": str(daily_run.context_pack_snapshot_id) if daily_run.context_pack_snapshot_id else None,
+        "channel_state_pack_snapshot_id": str(daily_run.channel_state_pack_snapshot_id) if daily_run.channel_state_pack_snapshot_id else None,
+        "daily_idea_decision_id": str(daily_run.daily_idea_decision_id) if daily_run.daily_idea_decision_id else None,
+        "project_admission_decision_id": str(daily_run.project_admission_decision_id) if daily_run.project_admission_decision_id else None,
+        "reason_codes": daily_run.reason_codes,
+    }
+
+def _daily_idea_to_dict(decision: Any) -> dict[str, Any]:
+    return {
+        "id": str(decision.id),
+        "channel_daily_run_id": str(decision.channel_daily_run_id),
+        "llm_run_snapshot_id": str(decision.llm_run_snapshot_id) if decision.llm_run_snapshot_id else None,
+        "decision_status": decision.decision_status,
+        "proposed_title": decision.proposed_title,
+        "confidence_level": decision.confidence_level,
+        "reason_codes": decision.reason_codes,
+    }
+
+def _idea_preflight_to_dict(preflight: Any) -> dict[str, Any]:
+    return {
+        "id": str(preflight.id),
+        "decision": preflight.decision,
+        "demand_score": str(preflight.demand_score) if preflight.demand_score is not None else None,
+        "confidence_state": preflight.confidence_state,
+        "reason_codes": preflight.reason_codes,
+    }
+
+def _project_admission_to_dict(decision: Any) -> dict[str, Any]:
+    return {
+        "id": str(decision.id),
+        "decision": decision.decision,
+        "reason_codes": decision.reason_codes,
+        "admitted_video_project_id": str(decision.admitted_video_project_id) if decision.admitted_video_project_id else None,
+        "created_artifact_refs": decision.created_artifact_refs,
+    }
+
 def _json_object(value: str) -> dict[str, Any]:
     parsed = json.loads(value)
     if not isinstance(parsed, dict):
@@ -1227,6 +1607,12 @@ def _json_list(value: str) -> list[dict[str, Any]]:
     parsed = json.loads(value)
     if not isinstance(parsed, list):
         raise ValueError("expected JSON list")
+    return parsed
+
+def _json_string_list(value: str) -> list[str]:
+    parsed = json.loads(value)
+    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+        raise ValueError("expected JSON string list")
     return parsed
 
 def main() -> None:

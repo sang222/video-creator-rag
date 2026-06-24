@@ -40,13 +40,24 @@ REQUIRED_TABLES = {
     "dead_letter_jobs",
     "ops_incidents",
     "manual_action_queue",
+    "editorial_calendar_slots",
+    "channel_daily_runs",
+    "retrieval_plan_snapshots",
+    "context_pack_snapshots",
+    "channel_state_pack_snapshots",
+    "search_demand_evidence",
+    "search_intent_maps",
+    "audience_target_packs",
+    "idea_market_preflights",
+    "daily_idea_decisions",
+    "project_admission_decisions",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0005_m4_ops_foundation"
+    assert revision == "0006_m5_daily_run"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

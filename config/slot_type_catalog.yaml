@@ -1,0 +1,17 @@
+catalog_key: slot_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DAILY
+    description: Daily production slot.
+  - key: WEEKLY
+    description: Weekly production slot.
+  - key: CAMPAIGN
+    description: Campaign slot.
+  - key: EVERGREEN
+    description: Evergreen slot.
+  - key: EXPERIMENT
+    description: Experiment slot.
+  - key: MANUAL
+    description: Manual operator-created slot.

@@ -1,0 +1,15 @@
+catalog_key: context_pack_purpose_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DAILY_IDEA
+    description: Context for a daily idea proposal.
+  - key: PROJECT_ADMISSION
+    description: Context for deterministic project admission.
+  - key: AUTHORITY_REVIEW
+    description: Context for channel authority review.
+  - key: SEARCH_DEMAND
+    description: Context for search demand preflight.
+  - key: TEST
+    description: Test-only scoped context.

@@ -14,7 +14,10 @@ def test_config_yaml_validates(db_session) -> None:
     loaded = ConfigRegistryService(db_session).load_catalog_files([ROOT / "config"])
     assert {catalog.catalog_key for catalog in loaded} == {
         "artifact_type_registry",
+        "admission_decision_catalog",
         "capability_matrix",
+        "context_pack_purpose_catalog",
+        "daily_run_status_catalog",
         "decision_rights_policy",
         "evidence_type_catalog",
         "event_types",
@@ -26,11 +29,14 @@ def test_config_yaml_validates(db_session) -> None:
         "credential_type_catalog",
         "gate_definition_catalog",
         "health_state_catalog",
+        "idea_decision_status_catalog",
         "m4_reason_code_catalog",
+        "m5_reason_code_catalog",
         "manual_action_type_catalog",
         "niche_profile_templates",
         "ops_incident_type_catalog",
         "platform_policy_catalog",
+        "platform_surface_catalog",
         "policy_domain_catalog",
         "provider_registry_catalog",
         "provider_status_catalog",
@@ -43,6 +49,8 @@ def test_config_yaml_validates(db_session) -> None:
         "review_type_registry",
         "role_catalog",
         "retry_policy_catalog",
+        "search_demand_source_type_catalog",
+        "slot_type_catalog",
     }
 
 
@@ -59,7 +67,7 @@ def test_config_seed_idempotent(db_session) -> None:
     service.seed([ROOT / "config"])
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
-    assert catalog_count == 30
+    assert catalog_count == 38
     assert role_count == 3
 
 

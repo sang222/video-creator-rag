@@ -1,0 +1,79 @@
+catalog_key: m5_reason_code_catalog
+catalog_version: "1.0.1"
+schema_version: catalog.v1
+status: active
+items:
+  - code: CONTEXT_SCOPE_MISSING
+    description: Required explicit context scope is missing.
+  - code: CONTEXT_SCOPE_INVALID
+    description: Explicit context scope is invalid.
+  - code: CONTEXT_PACK_CREATED
+    description: Scoped context artifact was created.
+  - code: CONTEXT_PACK_STALE
+    description: Context pack is stale.
+  - code: CONTEXT_PACK_CONFIDENCE_LOW
+    description: Context pack confidence is low.
+  - code: RETRIEVAL_SOURCE_NOT_ALLOWED
+    description: Retrieval source is not allowed.
+  - code: NUMERIC_TRUTH_MISSING
+    description: Required numeric truth is missing.
+  - code: METRIC_REF_UNKNOWN
+    description: Metric reference is unknown or absent.
+  - code: MOCK_LLM_USED
+    description: Mock LLM provider was used.
+  - code: LLM_OUTPUT_MALFORMED
+    description: Mock LLM output was malformed.
+  - code: LLM_SCHEMA_VALIDATION_FAILED
+    description: LLM-derived structured output failed strict schema validation.
+  - code: AUTHORITY_CONTEXT_INSUFFICIENT
+    description: Authority context is missing or too weak to propose an idea.
+  - code: AUTHORITY_IDEA_SOURCE_MISSING
+    description: No allowed source exists for an authority idea proposal.
+  - code: PROVIDER_HEALTH_BLOCKED
+    description: Provider health blocked execution.
+  - code: PROVIDER_QUOTA_BLOCKED
+    description: Provider quota blocked execution.
+  - code: COST_BUDGET_BLOCKED
+    description: Cost or budget gate blocked execution.
+  - code: LLM_RUN_SNAPSHOT_CREATED
+    description: LLM run snapshot was created.
+  - code: SEARCH_DEMAND_EVIDENCE_MISSING
+    description: Search demand evidence is missing.
+  - code: SEARCH_VOLUME_UNKNOWN
+    description: Search volume is unknown.
+  - code: SEARCH_VOLUME_LOW
+    description: Search volume is low.
+  - code: COMPETITION_HIGH
+    description: Competition appears high from evidence.
+  - code: TRENDING_VELOCITY_WEAK
+    description: Trending velocity appears weak from evidence.
+  - code: LLM_ONLY_KEYWORD_RISK
+    description: Keyword proposal depends only on LLM output.
+  - code: DEMAND_EVIDENCE_WEAK
+    description: Demand evidence is weak.
+  - code: IDEA_ADMITTED
+    description: Idea passed deterministic admission.
+  - code: IDEA_REVIEW_REQUIRED
+    description: Idea requires review.
+  - code: IDEA_BLOCKED
+    description: Idea was blocked.
+  - code: POLICY_READINESS_BLOCKED
+    description: Policy readiness blocked admission.
+  - code: BUDGET_REVIEW_REQUIRED
+    description: Budget gate requires review.
+  - code: PROJECT_CREATED_FROM_DAILY_RUN
+    description: VideoProject was created from daily run.
+  - code: INITIAL_ARTIFACTS_CREATED
+    description: Initial M5 artifacts were created.
+  - code: DAILY_RUN_COMPLETED
+    description: Daily run completed.
+  - code: DAILY_RUN_FAILED
+    description: Daily run failed safely.
+  - code: RENDER_SPEC_SCENE_TIMING_INVALID
+    description: RenderSpec scene timing is invalid.
+  - code: RENDER_SPEC_SCENE_OVERLAP
+    description: RenderSpec scenes overlap without explicit allowance.
+  - code: RENDER_SPEC_MISSING_NARRATION_SEGMENT
+    description: RenderSpec scene is missing a narration segment reference.
+  - code: VOICE_AS_MASTER_CONTRACT_REQUIRED
+    description: RenderSpec draft must use the voice timeline as master and make gaps explicit.

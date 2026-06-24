@@ -1,0 +1,17 @@
+catalog_key: idea_decision_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PROPOSED
+    description: Mock LLM produced a proposal only.
+  - key: ADMITTED
+    description: Proposal is represented by a separate admission decision.
+  - key: REVIEW_REQUIRED
+    description: Proposal needs review.
+  - key: BLOCKED
+    description: Proposal was blocked.
+  - key: REJECTED
+    description: Proposal was rejected.
+  - key: SKIPPED
+    description: Proposal was skipped.

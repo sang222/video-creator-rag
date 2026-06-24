@@ -50,6 +50,19 @@ from app.db.models.ops import (
     RetryPolicy,
     SystemHealthSnapshot,
 )
+from app.db.models.m5 import (
+    AudienceTargetPack,
+    ChannelDailyRun,
+    ChannelStatePackSnapshot,
+    ContextPackSnapshot,
+    DailyIdeaDecision,
+    EditorialCalendarSlot,
+    IdeaMarketPreflight,
+    ProjectAdmissionDecision,
+    RetrievalPlanSnapshot,
+    SearchDemandEvidence,
+    SearchIntentMap,
+)
 
 __all__ = [
     "AuditEvent",
@@ -94,4 +107,15 @@ __all__ = [
     "QuotaEvent",
     "RetryPolicy",
     "SystemHealthSnapshot",
+    "AudienceTargetPack",
+    "ChannelDailyRun",
+    "ChannelStatePackSnapshot",
+    "ContextPackSnapshot",
+    "DailyIdeaDecision",
+    "EditorialCalendarSlot",
+    "IdeaMarketPreflight",
+    "ProjectAdmissionDecision",
+    "RetrievalPlanSnapshot",
+    "SearchDemandEvidence",
+    "SearchIntentMap",
 ]

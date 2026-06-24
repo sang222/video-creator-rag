@@ -350,9 +350,6 @@ def test_m3_api_and_cli_smoke(db_session) -> None:
 
 def test_m3_scope_guards_and_docs() -> None:
     forbidden_tables = {
-        "resource_resolvers",
-        "context_packs",
-        "retrieval_plans",
         "semantic_layers",
         "media_renders",
         "publish_uploads",
@@ -364,9 +361,6 @@ def test_m3_scope_guards_and_docs() -> None:
     }
     assert not forbidden_tables & M3_TABLES
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
-    assert "ResourceResolver" not in app_text
-    assert "ContextPack" not in app_text
-    assert "RetrievalPlan" not in app_text
     assert "SemanticLayer" not in app_text
     assert "MediaRender" not in app_text
     assert "PublishUpload" not in app_text

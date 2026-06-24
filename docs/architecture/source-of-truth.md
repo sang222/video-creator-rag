@@ -4,7 +4,7 @@
 
 Runtime traceability state belongs in PostgreSQL when it must be queried, audited, replayed, correlated, or joined with operational records.
 
-Runtime tables through M4 are companies, users, roles, user_roles, audit_events, domain_events, llm_run_snapshots, config_catalog_versions, channel workspaces, profile versions, compiled policy snapshots, video projects, artifacts, artifact versions, review tasks, review findings, revision requests, approval decisions, gate definition versions, gate runs, platform policy catalogs, platform policy versions, policy source refs, policy change records, policy revalidation batches, provider registry entries, credential references, credential health snapshots, quota accounts, quota events, cost events, budget policies, provider health snapshots, component health snapshots, system health snapshots, retry policies, provider attempts, dead-letter jobs, ops incidents, and manual action queue records.
+Runtime tables through M5 are companies, users, roles, user_roles, audit_events, domain_events, llm_run_snapshots, config_catalog_versions, channel workspaces, profile versions, compiled policy snapshots, video projects, artifacts, artifact versions, review tasks, review findings, revision requests, approval decisions, gate definition versions, gate runs, platform policy catalogs, platform policy versions, policy source refs, policy change records, policy revalidation batches, provider registry entries, credential references, credential health snapshots, quota accounts, quota events, cost events, budget policies, provider health snapshots, component health snapshots, system health snapshots, retry policies, provider attempts, dead-letter jobs, ops incidents, manual action queue records, editorial calendar slots, channel daily runs, retrieval plan snapshots, context pack snapshots, channel state pack snapshots, search demand evidence, search intent maps, audience target packs, idea market preflights, daily idea decisions, and project admission decisions.
 
 `VideoProject.policy_snapshot_id` is explicit runtime truth. Project execution must not resolve latest profile or latest policy snapshot.
 
@@ -26,6 +26,16 @@ Health truth is snapshot history. Provider, component, and system health snapsho
 
 Ops truth is explicit action state. Incidents and manual actions must carry owner/assignee where available, severity/priority, reason, and next action.
 
+Editorial slot truth is demand-envelope truth. Slots carry explicit channel and policy snapshot scope and are not TopicBank items.
+
+Retrieval truth is scoped snapshot truth. RetrievalPlanSnapshot and ContextPackSnapshot are immutable records created through ResourceResolverService only; M5 has no vector/RAG engine and no default all-company memory retrieval.
+
+Channel state truth is derived snapshot truth. ChannelStatePackSnapshot is derived from M1-M4 SQL state and represents unknown analytics explicitly instead of inventing metrics.
+
+Search demand truth is evidence-reference truth. SearchDemandEvidence can be manual, CSV, internal, official, or mock evidence; M5 does not scrape or use autosuggest as truth.
+
+Idea and admission truth is decision artifact truth. DailyIdeaDecision stores proposal/rationale/evidence refs/context refs/LLM run refs. ProjectAdmissionDecision stores deterministic admission outcome and the admitted VideoProject/artifact refs when ADMIT occurs.
+
 ## Repo Catalogs
 
 Versioned policy catalogs live in `config/` as YAML or JSON. M0 catalogs are loaded, schema validated, canonicalized, hashed, and seeded idempotently into `config_catalog_versions`.
@@ -46,4 +56,4 @@ M4 provider, credential, quota, cost, budget, retry, health, dead-letter, incide
 
 ## LLM Runs
 
-`llm_run_snapshots` is inert persistence only. M4 adds nullable future provider/cost/quota references but performs no real LLM or content workflow calls.
+`llm_run_snapshots` captures M5 mock LLM proposal attempts. M5 uses MockLLMProvider only; LLM output is proposal/draft/rationale only and cannot approve, publish, compute metrics, or become numeric truth. Real provider calls remain out of scope.

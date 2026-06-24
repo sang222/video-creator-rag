@@ -1,0 +1,21 @@
+catalog_key: search_demand_source_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: OFFICIAL_MANUAL
+    description: Manually captured official source evidence.
+  - key: PAID_TOOL_CSV
+    description: Operator-imported paid tool CSV evidence.
+  - key: GOOGLE_TRENDS_CSV
+    description: Operator-imported Google Trends CSV evidence.
+  - key: YOUTUBE_ANALYTICS
+    description: System or operator supplied YouTube Analytics evidence.
+  - key: TIKTOK_CREATOR_SEARCH_INSIGHTS_MANUAL
+    description: Manually captured TikTok Creator Search Insights evidence.
+  - key: INTERNAL_ANALYTICS
+    description: Internal analytics snapshot evidence.
+  - key: MOCK
+    description: Mock evidence for tests.
+  - key: MANUAL_RESEARCH
+    description: Manual research evidence reference.

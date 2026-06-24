@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, and M4 provider/cost/quota/ops health foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, and M5 daily run/context/admission foundation.
 
 ## Stack
 
@@ -104,6 +104,23 @@ M4 adds provider registry, mock provider interfaces, credential references, quot
 
 M4 performs no real provider calls and no LLM/content workflow execution.
 
+## M5 Commands
+
+```bash
+vcos calendar slot-create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --slot-date 2026-06-24 --production-goal "Idea envelope"
+vcos search evidence-create --company-id <company-id> --channel-id <channel-id> --query "audience query" --source-type MOCK --platform YOUTUBE --search-volume-30d 500
+vcos context plan-create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --slot-id <slot-id> --allowed-sources-json '["channel_profile","policy_snapshot","editorial_slot","search_demand_evidence"]'
+vcos context pack-create --retrieval-plan-snapshot-id <plan-id>
+vcos channel-state build --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --context-pack-snapshot-id <context-pack-id>
+vcos daily run-create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --slot-id <slot-id> --run-date 2026-06-24
+vcos daily execute --daily-run-id <daily-run-id> --mock-mode success
+vcos daily inspect --daily-run-id <daily-run-id>
+vcos idea preflight --company-id <company-id> --channel-id <channel-id> --daily-run-id <daily-run-id> --daily-idea-decision-id <decision-id> --evidence-json '{"search_demand_evidence_ids":["<evidence-id>"]}'
+vcos project admit --daily-run-id <daily-run-id> --daily-idea-decision-id <decision-id> --idea-market-preflight-id <preflight-id> --created-by-user-id <user-id>
+```
+
+M5 adds manual daily runs, ResourceResolver MVP, immutable context/state snapshots, safe search-demand evidence, mock LLM proposal capture, deterministic market preflight, and budgeted project admission. M5 uses MockLLMProvider only. LLM output is proposal/draft/rationale only and is captured in `llm_run_snapshots`.
+
 ## Boundaries
 
-M0, M1, M2, M3, and M4 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, RAG, source scraping, OPA/Cedar, or LLM content workflow calls. M4 adds mock provider rails only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M5 do not implement media pipelines, publishing, analytics, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, or platform evasion systems. M5 adds mock-first scoped LLM proposal workflow only. CapCut pilot notes do not make CapCut a production dependency.

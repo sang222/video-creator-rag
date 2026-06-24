@@ -129,9 +129,6 @@ EXPECTED_M4_TABLES = {
 }
 
 FORBIDDEN_FUTURE_TERMS = {
-    "ResourceResolver",
-    "ContextPackSnapshot",
-    "RetrievalPlanSnapshot",
     "VectorStore",
     "MediaRender",
     "PublishPackage",
@@ -151,9 +148,6 @@ FORBIDDEN_FUTURE_TERMS = {
 }
 
 FORBIDDEN_TABLE_FRAGMENTS = {
-    "resource_resolver",
-    "context_pack",
-    "retrieval_plan",
     "vector",
     "embedding",
     "media_render",
@@ -270,6 +264,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0003_m2_workflow",
         "0004_m3_policy_gate_readiness",
         "0005_m4_ops_foundation",
+        "0006_m5_daily_run",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -277,6 +272,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         {"video_projects", "artifact_versions", "approval_decisions"},
         {"gate_runs", "platform_policy_versions", "policy_revalidation_batches"},
         {"provider_registry_entries", "quota_events", "system_health_snapshots"},
+        {"channel_daily_runs", "context_pack_snapshots", "project_admission_decisions"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:
@@ -320,7 +316,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 30
+    assert second["config"] == 38
     assert second["gates"] == 15
 
 

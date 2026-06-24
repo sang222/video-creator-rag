@@ -87,9 +87,6 @@ M4_TABLES = {
 }
 
 FORBIDDEN_SCOPE_FRAGMENTS = {
-    "resource_resolver",
-    "context_pack",
-    "retrieval_plan",
     "vector",
     "embedding",
     "media_render",
@@ -137,7 +134,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0005_m4_ops_foundation"
+    assert revision == "0006_m5_daily_run"
 
 
 def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:
@@ -431,9 +428,6 @@ def test_m4_scope_guard_no_m5_plus_tables_or_services(engine) -> None:
     assert not {table for table in tables for fragment in FORBIDDEN_SCOPE_FRAGMENTS if fragment in table}
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
     forbidden_terms = {
-        "ResourceResolver",
-        "ContextPackSnapshot",
-        "RetrievalPlanSnapshot",
         "VectorStore",
         "MediaRender",
         "PublishPackage",

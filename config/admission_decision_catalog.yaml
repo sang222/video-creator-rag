@@ -1,0 +1,13 @@
+catalog_key: admission_decision_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ADMIT
+    description: Deterministically admit proposal into a VideoProject.
+  - key: REVIEW_REQUIRED
+    description: Admission requires human review.
+  - key: BLOCK
+    description: Admission is blocked.
+  - key: SKIP
+    description: Admission is skipped.

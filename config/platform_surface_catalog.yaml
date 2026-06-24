@@ -1,0 +1,17 @@
+catalog_key: platform_surface_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: YOUTUBE
+    description: YouTube surface.
+  - key: TIKTOK
+    description: TikTok surface.
+  - key: FACEBOOK
+    description: Facebook surface.
+  - key: INSTAGRAM
+    description: Instagram surface.
+  - key: GOOGLE
+    description: Google Search surface.
+  - key: GENERIC
+    description: Generic or platform-agnostic surface.
