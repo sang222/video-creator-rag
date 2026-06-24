@@ -16,9 +16,16 @@ def test_config_yaml_validates(db_session) -> None:
         "artifact_type_registry",
         "capability_matrix",
         "decision_rights_policy",
+        "evidence_type_catalog",
         "event_types",
+        "freshness_state_catalog",
+        "confidence_reason_code_catalog",
+        "gate_definition_catalog",
         "niche_profile_templates",
+        "platform_policy_catalog",
+        "policy_domain_catalog",
         "profile_compiler_policy",
+        "reason_code_catalog",
         "reason_codes",
         "review_type_registry",
         "role_catalog",
@@ -38,7 +45,7 @@ def test_config_seed_idempotent(db_session) -> None:
     service.seed([ROOT / "config"])
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
-    assert catalog_count == 9
+    assert catalog_count == 16
     assert role_count == 3
 
 
@@ -49,7 +56,7 @@ def test_config_version_conflict_is_blocked(db_session, tmp_path) -> None:
     conflict.write_text(
         """
 catalog_key: reason_codes
-catalog_version: "1.1.0"
+catalog_version: "1.2.0"
 schema_version: catalog.v1
 status: active
 items:

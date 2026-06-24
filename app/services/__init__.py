@@ -14,6 +14,15 @@ from app.services.workflow import (
     ReviewService,
     VideoProjectService,
 )
+from app.services.gates import (
+    GateDefinitionService,
+    GateReviewIntegrationService,
+    GateRunnerService,
+    PolicyCatalogService,
+    PolicyChangeService,
+    PolicyRevalidationService,
+    WorkflowReadinessService,
+)
 
 __all__ = [
     "AuditService",
@@ -30,5 +39,12 @@ __all__ = [
     "DecisionRightsService",
     "ReviewService",
     "VideoProjectService",
+    "GateDefinitionService",
+    "GateReviewIntegrationService",
+    "GateRunnerService",
+    "PolicyCatalogService",
+    "PolicyChangeService",
+    "PolicyRevalidationService",
+    "WorkflowReadinessService",
     "require_permission",
 ]

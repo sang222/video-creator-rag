@@ -1,0 +1,13 @@
+catalog_key: confidence_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: EVIDENCE_REQUIRED
+    description: Confidence depends on missing or required evidence.
+  - code: GATE_INPUT_INSUFFICIENT
+    description: Input fields are insufficient for high confidence.
+  - code: POLICY_VERSION_STALE
+    description: Policy dependency may be stale.
+  - code: MANUAL_REVIEW_REQUIRED
+    description: Human review is required to raise confidence.

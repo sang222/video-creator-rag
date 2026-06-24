@@ -24,6 +24,15 @@ from app.db.models.workflow import (
     RevisionRequest,
     VideoProject,
 )
+from app.db.models.gates import (
+    GateDefinitionVersion,
+    GateRun,
+    PlatformPolicyCatalog,
+    PlatformPolicyVersion,
+    PolicyChangeRecord,
+    PolicyRevalidationBatch,
+    PolicySourceRef,
+)
 
 __all__ = [
     "AuditEvent",
@@ -46,4 +55,11 @@ __all__ = [
     "ReviewTask",
     "RevisionRequest",
     "VideoProject",
+    "GateDefinitionVersion",
+    "GateRun",
+    "PlatformPolicyCatalog",
+    "PlatformPolicyVersion",
+    "PolicyChangeRecord",
+    "PolicyRevalidationBatch",
+    "PolicySourceRef",
 ]

@@ -1,0 +1,13 @@
+catalog_key: freshness_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: FRESH
+    description: Evidence is fresh enough for the gate.
+  - key: STALE
+    description: Evidence exists but is stale.
+  - key: UNKNOWN
+    description: Evidence freshness is unknown.
+  - key: NOT_REQUIRED
+    description: Freshness is not required for this gate result.

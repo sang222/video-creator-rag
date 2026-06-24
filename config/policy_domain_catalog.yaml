@@ -1,0 +1,19 @@
+catalog_key: policy_domain_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ai_policy
+    description: AI disclosure, labeling, and provenance policy.
+  - key: legal_compliance
+    description: Rights, copyright, affiliate, and commercial disclosures.
+  - key: originality
+    description: Originality, reused content, and repetitive template policy.
+  - key: brand_safety
+    description: Brand, sponsor, affiliate, and restricted entity conflicts.
+  - key: audience_delivery
+    description: Search demand, packaging, and distribution readiness policy.
+  - key: privacy
+    description: Privacy, retention, and raw community data handling.
+  - key: readiness
+    description: Aggregate readiness and publish risk policy.

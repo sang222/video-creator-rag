@@ -51,6 +51,40 @@ class ReviewTypeRegistryItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class SimpleKeyCatalogItem(BaseModel):
+    key: str
+    description: str
+
+    model_config = ConfigDict(extra="forbid")
+
+class ConfidenceReasonCodeItem(BaseModel):
+    code: str
+    description: str
+
+    model_config = ConfigDict(extra="forbid")
+
+class GateDefinitionCatalogItem(BaseModel):
+    gate_key: str
+    gate_name: str
+    gate_domain: str
+    version: str
+    status: str = "active"
+    input_schema_version: str
+    output_schema_version: str
+    definition: dict[str, Any] = Field(default_factory=dict)
+    reason_code_refs: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+class PlatformPolicyCatalogItem(BaseModel):
+    catalog_key: str
+    platform: str
+    policy_domain: str
+    status: str = "active"
+    description: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
 class DecisionRightsPolicyItem(BaseModel):
     key: str
     description: str
@@ -172,6 +206,13 @@ class ConfigRegistryService:
             "artifact_type_registry": ArtifactTypeRegistryItem,
             "review_type_registry": ReviewTypeRegistryItem,
             "decision_rights_policy": DecisionRightsPolicyItem,
+            "reason_code_catalog": ReasonCodeItem,
+            "evidence_type_catalog": SimpleKeyCatalogItem,
+            "freshness_state_catalog": SimpleKeyCatalogItem,
+            "confidence_reason_code_catalog": ConfidenceReasonCodeItem,
+            "policy_domain_catalog": SimpleKeyCatalogItem,
+            "gate_definition_catalog": GateDefinitionCatalogItem,
+            "platform_policy_catalog": PlatformPolicyCatalogItem,
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,
@@ -186,6 +227,8 @@ class ConfigRegistryService:
                 getattr(parsed, "code", None)
                 or getattr(parsed, "event_type", None)
                 or getattr(parsed, "key", None)
+                or getattr(parsed, "gate_key", None)
+                or getattr(parsed, "catalog_key", None)
                 or getattr(parsed, "template_key", None)
                 or getattr(parsed, "matrix_key", None)
                 or getattr(parsed, "compiler_version", None)

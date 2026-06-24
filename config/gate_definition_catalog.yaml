@@ -1,0 +1,184 @@
+catalog_key: gate_definition_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - gate_key: ai_use_disclosure_gate
+    gate_name: AI Use Disclosure Gate
+    gate_domain: ai_policy
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: ai_use_disclosure_gate
+      review_required: true
+      review_type: ai_disclosure
+    reason_code_refs: [AI_DISCLOSURE_REQUIRED, AI_DISCLOSURE_MISSING, AI_DISCLOSURE_NOT_REQUIRED]
+  - gate_key: ai_provenance_gate
+    gate_name: AI Provenance Gate
+    gate_domain: ai_policy
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: ai_provenance_gate
+      review_required: true
+      review_type: ai_disclosure
+    reason_code_refs: [PROVENANCE_MISSING, CONTENT_CREDENTIALS_DETECTED, C2PA_METADATA_PRESENT, C2PA_METADATA_ABSENT]
+  - gate_key: rights_copyright_gate
+    gate_name: Rights Copyright Gate
+    gate_domain: legal_compliance
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: rights_copyright_gate
+      review_required: true
+      review_type: rights
+    reason_code_refs: [RIGHTS_BASIS_MISSING, RIGHTS_EVIDENCE_WEAK]
+  - gate_key: affiliate_disclosure_gate
+    gate_name: Affiliate Disclosure Gate
+    gate_domain: legal_compliance
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: affiliate_disclosure_gate
+      review_required: true
+      review_type: commercial_disclosure
+    reason_code_refs: [AFFILIATE_DISCLOSURE_REQUIRED, AFFILIATE_DISCLOSURE_MISSING]
+  - gate_key: commercial_disclosure_gate
+    gate_name: Commercial Disclosure Gate
+    gate_domain: legal_compliance
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: commercial_disclosure_gate
+      review_required: true
+      review_type: commercial_disclosure
+    reason_code_refs: [COMMERCIAL_DISCLOSURE_REQUIRED, COMMERCIAL_DISCLOSURE_MISSING]
+  - gate_key: platform_originality_gate
+    gate_name: Platform Originality Gate
+    gate_domain: originality
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: platform_originality_gate
+      review_required: true
+      review_type: originality
+    reason_code_refs: [ORIGINALITY_RISK_HIGH, REUSED_CONTENT_TRANSFORMATION_INSUFFICIENT, HUMAN_VALUE_CONTRIBUTION_WEAK]
+  - gate_key: repetitive_template_risk_gate
+    gate_name: Repetitive Template Risk Gate
+    gate_domain: originality
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: repetitive_template_risk_gate
+      review_required: true
+      review_type: originality
+    reason_code_refs: [REPETITIVE_TEMPLATE_RISK, TEMPLATE_SATURATION_RISK, STOCK_VISUAL_OVERUSE_RISK]
+  - gate_key: brand_conflict_gate
+    gate_name: Brand Conflict Gate
+    gate_domain: brand_safety
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: brand_conflict_gate
+      review_required: true
+      review_type: brand_conflict_review
+    reason_code_refs: [ENTITY_RESTRICTED]
+  - gate_key: commercial_conflict_gate
+    gate_name: Commercial Conflict Gate
+    gate_domain: brand_safety
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: commercial_conflict_gate
+      review_required: true
+      review_type: brand_conflict_review
+    reason_code_refs: [AFFILIATE_CONFLICT_WITH_CLAIM, SPONSOR_CONFLICT_WITH_CONTENT]
+  - gate_key: disclosure_placement_gate
+    gate_name: Disclosure Placement Gate
+    gate_domain: legal_compliance
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: disclosure_placement_gate
+      review_required: true
+      review_type: disclosure_review
+    reason_code_refs: [DISCLOSURE_PLACEMENT_INSUFFICIENT, DISCLOSURE_NOT_CLEAR_AND_CONSPICUOUS]
+  - gate_key: search_demand_gate
+    gate_name: Search Demand Gate
+    gate_domain: audience_delivery
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: search_demand_gate
+      review_required: true
+      review_type: search_demand_review
+    reason_code_refs: [SEARCH_DEMAND_EVIDENCE_MISSING, SEARCH_VOLUME_UNKNOWN]
+  - gate_key: distribution_readiness_gate
+    gate_name: Distribution Readiness Gate
+    gate_domain: audience_delivery
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: distribution_readiness_gate
+      review_required: true
+      review_type: distribution_readiness
+    reason_code_refs: [DISTRIBUTION_READINESS_MISSING, METADATA_READINESS_MISSING]
+  - gate_key: packaging_expectation_gate
+    gate_name: Packaging Expectation Gate
+    gate_domain: audience_delivery
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: packaging_expectation_gate
+      review_required: true
+      review_type: packaging_review
+    reason_code_refs: [PACKAGING_PROMISE_MISMATCH]
+  - gate_key: privacy_retention_gate
+    gate_name: Privacy Retention Gate
+    gate_domain: privacy
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: privacy_retention_gate
+      review_required: true
+      review_type: policy_review
+    reason_code_refs: [RAW_COMMENT_STORAGE_BLOCKED, MEMORY_PROMOTION_REQUIRES_REVIEW, CONTEXT_SCOPE_MISSING]
+  - gate_key: publish_risk_gate
+    gate_name: Publish Risk Gate
+    gate_domain: readiness
+    version: "1.0.0"
+    status: active
+    input_schema_version: gate-input.m3.v1
+    output_schema_version: gate-output.m3.v1
+    definition:
+      logic: publish_risk_gate
+      review_required: false
+    reason_code_refs: [MANUAL_REVIEW_REQUIRED, SYSTEM_OK]

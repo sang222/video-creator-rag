@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, and M2 artifact workflow backbone.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, and M3 policy/gate/readiness foundation.
 
 ## Stack
 
@@ -61,6 +61,23 @@ vcos workflow inspect --project-id <project-id>
 
 M2 adds only workflow, review, revision, approval, decision rights, audit/domain event wiring, and future allowance schema fields. `ArtifactVersion` rows are immutable. Approval applies only to exact target versions.
 
+## M3 Commands
+
+```bash
+vcos gate seed-definitions
+vcos gate run --gate-key rights_copyright_gate --target-type artifact_version --target-id <artifact-version-id>
+vcos gate inspect --gate-run-id <gate-run-id>
+vcos readiness inspect --project-id <project-id>
+vcos policy catalog-create --catalog-key generic_privacy_retention --platform generic --policy-domain privacy
+vcos policy version-create --catalog-id <catalog-id> --version 1.0.0 --policy-json '{"rules":[]}'
+vcos policy version-activate --policy-version-id <policy-version-id>
+vcos policy source-ref-create --policy-version-id <policy-version-id> --source-type OFFICIAL --reliability OFFICIAL --source-url https://example.test/policy
+vcos policy change-create --change-key policy-change-1 --platform generic --policy-domain privacy --summary "Manual policy update"
+vcos policy revalidate --scope-json '{"targets":[{"target_type":"artifact_version","target_id":"<artifact-version-id>","gate_key":"rights_copyright_gate"}]}'
+```
+
+M3 converts M2 allowance JSONB into deterministic gate/evidence contracts. `GateRun` rows are immutable exact-target decision artifacts. Platform policy is a versioned external dependency. M3 performs no LLM/provider calls and does not mutate artifact content or approval decisions.
+
 ## Boundaries
 
-M0, M1, and M2 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, RAG, policy gates, or LLM calls. CapCut pilot notes do not make CapCut a production dependency.
+M0, M1, M2, and M3 do not implement media pipelines, agent runtime, publishing, analytics, dashboard UI, provider integrations, queue brokers, RAG, source scraping, OPA/Cedar, or LLM calls. CapCut pilot notes do not make CapCut a production dependency.

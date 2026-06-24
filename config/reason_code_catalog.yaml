@@ -1,62 +1,26 @@
-catalog_key: reason_codes
-catalog_version: "1.2.0"
+catalog_key: reason_code_catalog
+catalog_version: "1.0.0"
 schema_version: catalog.v1
 status: active
 items:
-  - code: SYSTEM_OK
-    description: System check completed successfully.
-  - code: DATABASE_UNAVAILABLE
-    description: Database connectivity check failed.
-  - code: CONFIG_VALID
-    description: Configuration catalog validated successfully.
-  - code: CONFIG_SCHEMA_INVALID
-    description: Configuration catalog failed schema validation.
-  - code: CONFIG_VERSION_CONFLICT
-    description: Catalog key and version already exist with different content.
-  - code: AUDIT_EVENT_RECORDED
-    description: Audit event was recorded.
-  - code: DOMAIN_EVENT_RECORDED
-    description: Domain event was recorded.
-  - code: VALIDATION_FAILED
-    description: Request or catalog validation failed.
-  - code: UNAUTHORIZED
-    description: Actor is not authenticated.
-  - code: FORBIDDEN
-    description: Actor lacks the required permission.
-  - code: INTERNAL_ERROR
-    description: Unexpected internal error.
-  - code: WORKFLOW_CREATED
-    description: M2 workflow record was created.
-  - code: SNAPSHOT_NOT_ACTIVE
-    description: Explicit policy snapshot is not active for the project channel.
-  - code: EXACT_VERSION_REQUIRED
-    description: Workflow action must target an exact artifact version or exact review target.
-  - code: SELF_APPROVAL_BLOCKED
-    description: Creator attempted to approve their own artifact version.
-  - code: STALE_APPROVAL
-    description: Approval applies to a superseded artifact version only.
-  - code: REVISION_REQUIRES_NEW_VERSION
-    description: Revision resolution must point to a newer artifact version.
-  - code: DECISION_RIGHTS_DENIED
-    description: Actor lacks workflow decision rights.
   - code: AI_DISCLOSURE_REQUIRED
-    description: AI disclosure is required for the target.
+    description: AI disclosure is required.
   - code: AI_DISCLOSURE_NOT_REQUIRED
-    description: AI disclosure is not required for the current target data.
+    description: AI disclosure is not required.
   - code: AI_DISCLOSURE_MISSING
-    description: Required AI disclosure evidence is missing.
+    description: AI disclosure evidence is missing.
   - code: REALISTIC_AI_SIMULATION
-    description: Content declares a realistic AI simulation.
+    description: Realistic AI simulation is declared.
   - code: SYNTHETIC_VOICE_USED
-    description: Content declares synthetic voice usage.
+    description: Synthetic voice is declared.
   - code: VOICE_CLONE_USED
-    description: Content declares voice clone usage.
+    description: Voice clone is declared.
   - code: PROVENANCE_MISSING
     description: Provenance evidence is missing.
   - code: PROVENANCE_WEAK
     description: Provenance evidence is weak.
   - code: CONTENT_CREDENTIALS_DETECTED
-    description: Content credentials evidence is present.
+    description: Content credentials are detected.
   - code: C2PA_METADATA_PRESENT
     description: C2PA metadata is present.
   - code: C2PA_METADATA_ABSENT
@@ -84,15 +48,15 @@ items:
   - code: REPETITIVE_TEMPLATE_RISK
     description: Repetitive template risk is present.
   - code: REUSED_CONTENT_TRANSFORMATION_INSUFFICIENT
-    description: Reused content transformation appears insufficient.
+    description: Reused content transformation is insufficient.
   - code: HUMAN_VALUE_CONTRIBUTION_WEAK
-    description: Human value contribution appears weak.
+    description: Human value contribution is weak.
   - code: ENTITY_RESTRICTED
     description: Restricted entity is referenced.
   - code: AFFILIATE_CONFLICT_WITH_CLAIM
-    description: Affiliate relationship conflicts with a claim.
+    description: Affiliate conflict with claim is present.
   - code: SPONSOR_CONFLICT_WITH_CONTENT
-    description: Sponsor relationship conflicts with content.
+    description: Sponsor conflict with content is present.
   - code: TEMPLATE_SATURATION_RISK
     description: Template saturation risk is present.
   - code: STOCK_VISUAL_OVERUSE_RISK
@@ -104,13 +68,13 @@ items:
   - code: SEARCH_VOLUME_LOW
     description: Search volume is low.
   - code: COMPETITION_HIGH
-    description: Search competition is high.
+    description: Competition is high.
   - code: TRENDING_VELOCITY_WEAK
-    description: Trend velocity is weak.
+    description: Trending velocity is weak.
   - code: LLM_ONLY_KEYWORD_RISK
-    description: Keyword evidence appears LLM-only.
+    description: Keyword basis appears LLM-only.
   - code: PRIVACY_PII_REMOVED
-    description: PII removal evidence is present or not required.
+    description: PII removal is present or not required.
   - code: RAW_COMMENT_STORAGE_BLOCKED
     description: Raw comment storage is blocked or requires review.
   - code: MEMORY_PROMOTION_REQUIRES_REVIEW
@@ -118,21 +82,21 @@ items:
   - code: CONTEXT_SCOPE_MISSING
     description: Context scope is missing.
   - code: EVIDENCE_REQUIRED
-    description: Evidence is required for this decision.
+    description: Evidence is required.
   - code: ESTIMATED_REVENUE_NOT_CASH
     description: Estimated revenue is not cash.
   - code: CASHFLOW_LAG_RISK
     description: Cashflow lag risk is present.
   - code: FIXED_COST_UNDERALLOCATED
-    description: Fixed cost appears underallocated.
+    description: Fixed cost is underallocated.
   - code: PAYMENT_NOT_FINALIZED
     description: Payment is not finalized.
   - code: DISTRIBUTION_READINESS_MISSING
-    description: Distribution readiness evidence is missing.
+    description: Distribution readiness is missing.
   - code: METADATA_READINESS_MISSING
-    description: Metadata readiness evidence is missing.
+    description: Metadata readiness is missing.
   - code: PACKAGING_PROMISE_MISMATCH
-    description: Packaging promise mismatches content evidence.
+    description: Packaging promise mismatch is present.
   - code: MANUAL_REVIEW_REQUIRED
     description: Manual review is required.
   - code: POLICY_VERSION_STALE

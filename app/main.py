@@ -19,6 +19,19 @@ from app.contracts import (
     ChannelProfileVersionRead,
     ChannelWorkspaceCreate,
     ChannelWorkspaceRead,
+    GateRunCreate,
+    GateRunRead,
+    PlatformPolicyCatalogCreate,
+    PlatformPolicyCatalogRead,
+    PlatformPolicyVersionCreate,
+    PlatformPolicyVersionRead,
+    PolicyChangeRecordCreate,
+    PolicyChangeRecordRead,
+    PolicyChangeStateRequest,
+    PolicyRevalidationBatchCreate,
+    PolicyRevalidationBatchRead,
+    PolicySourceRefCreate,
+    PolicySourceRefRead,
     ReviewFindingCreate,
     ReviewFindingRead,
     ReviewTaskCreate,
@@ -45,6 +58,12 @@ from app.services import (
     ArtifactService,
     ReviewService,
     VideoProjectService,
+    GateDefinitionService,
+    GateRunnerService,
+    PolicyCatalogService,
+    PolicyChangeService,
+    PolicyRevalidationService,
+    WorkflowReadinessService,
 )
 
 
@@ -292,6 +311,123 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/gates/seed-definitions")
+    def seed_gate_definitions() -> dict[str, int]:
+        try:
+            with session_scope() as session:
+                records = GateDefinitionService(session).seed_definitions()
+                return {"count": len(records)}
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/gates/run", response_model=GateRunRead)
+    def run_gate(data: GateRunCreate) -> GateRunRead:
+        try:
+            with session_scope() as session:
+                gate_run = GateRunnerService(session).run_gate(data=data)
+                return GateRunRead.model_validate(_gate_run(gate_run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/gate-runs/{gate_run_id}", response_model=GateRunRead)
+    def get_gate_run(gate_run_id: uuid.UUID) -> GateRunRead:
+        try:
+            with session_scope() as session:
+                gate_run = GateRunnerService(session).get_gate_run(gate_run_id)
+                if gate_run is None:
+                    raise NotFoundError(f"gate run not found: {gate_run_id}")
+                return GateRunRead.model_validate(_gate_run(gate_run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-projects/{project_id}/gate-runs", response_model=list[GateRunRead])
+    def list_project_gate_runs(project_id: uuid.UUID) -> list[GateRunRead]:
+        try:
+            with session_scope() as session:
+                return [GateRunRead.model_validate(_gate_run(run)) for run in GateRunnerService(session).list_project_gate_runs(project_id)]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-projects/{project_id}/readiness")
+    def inspect_project_readiness(project_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return WorkflowReadinessService(session).inspect_project(project_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-catalogs", response_model=PlatformPolicyCatalogRead)
+    def create_policy_catalog(data: PlatformPolicyCatalogCreate) -> PlatformPolicyCatalogRead:
+        try:
+            with session_scope() as session:
+                catalog = PolicyCatalogService(session).create_catalog(data=data)
+                return PlatformPolicyCatalogRead.model_validate(_policy_catalog(catalog))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-versions", response_model=PlatformPolicyVersionRead)
+    def create_policy_version(data: PlatformPolicyVersionCreate) -> PlatformPolicyVersionRead:
+        try:
+            with session_scope() as session:
+                version = PolicyCatalogService(session).create_version(data=data)
+                return PlatformPolicyVersionRead.model_validate(_policy_version(version))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-versions/{policy_version_id}/activate", response_model=PlatformPolicyVersionRead)
+    def activate_policy_version(policy_version_id: uuid.UUID) -> PlatformPolicyVersionRead:
+        try:
+            with session_scope() as session:
+                version = PolicyCatalogService(session).activate_version(policy_version_id)
+                return PlatformPolicyVersionRead.model_validate(_policy_version(version))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-source-refs", response_model=PolicySourceRefRead)
+    def create_policy_source_ref(data: PolicySourceRefCreate) -> PolicySourceRefRead:
+        try:
+            with session_scope() as session:
+                ref = PolicyCatalogService(session).attach_source_ref(data=data)
+                return PolicySourceRefRead.model_validate(_policy_source_ref(ref))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-change-records", response_model=PolicyChangeRecordRead)
+    def create_policy_change_record(data: PolicyChangeRecordCreate) -> PolicyChangeRecordRead:
+        try:
+            with session_scope() as session:
+                record = PolicyChangeService(session).create_change_record(data=data)
+                return PolicyChangeRecordRead.model_validate(_policy_change_record(record))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-change-records/{policy_change_record_id}/state", response_model=PolicyChangeRecordRead)
+    def transition_policy_change(policy_change_record_id: uuid.UUID, data: PolicyChangeStateRequest) -> PolicyChangeRecordRead:
+        try:
+            with session_scope() as session:
+                record = PolicyChangeService(session).transition_state(policy_change_record_id, data.state)
+                return PolicyChangeRecordRead.model_validate(_policy_change_record(record))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-revalidation-batches", response_model=PolicyRevalidationBatchRead)
+    def create_policy_revalidation_batch(data: PolicyRevalidationBatchCreate) -> PolicyRevalidationBatchRead:
+        try:
+            with session_scope() as session:
+                batch = PolicyRevalidationService(session).create_batch(data=data)
+                return PolicyRevalidationBatchRead.model_validate(_policy_revalidation_batch(batch))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/policy-revalidation-batches/{batch_id}/run", response_model=PolicyRevalidationBatchRead)
+    def run_policy_revalidation_batch(batch_id: uuid.UUID) -> PolicyRevalidationBatchRead:
+        try:
+            with session_scope() as session:
+                batch = PolicyRevalidationService(session).run_batch(batch_id)
+                return PolicyRevalidationBatchRead.model_validate(_policy_revalidation_batch(batch))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -488,6 +624,109 @@ def _approval_decision(decision: Any) -> dict[str, Any]:
         "context_pack_ref": decision.context_pack_ref,
         "human_decision_note": decision.human_decision_note,
         "created_at": decision.created_at,
+    }
+
+def _gate_run(gate_run: Any) -> dict[str, Any]:
+    return {
+        "id": gate_run.id,
+        "gate_definition_version_id": gate_run.gate_definition_version_id,
+        "gate_key": gate_run.gate_key,
+        "target_type": gate_run.target_type,
+        "target_id": gate_run.target_id,
+        "video_project_id": gate_run.video_project_id,
+        "artifact_version_id": gate_run.artifact_version_id,
+        "review_task_id": gate_run.review_task_id,
+        "policy_snapshot_id": gate_run.policy_snapshot_id,
+        "input_snapshot": gate_run.input_snapshot,
+        "input_snapshot_hash": gate_run.input_snapshot_hash,
+        "result": gate_run.result,
+        "reason_codes": gate_run.reason_codes,
+        "evidence_refs": gate_run.evidence_refs,
+        "metric_refs": gate_run.metric_refs,
+        "freshness_state": gate_run.freshness_state,
+        "confidence_level": gate_run.confidence_level,
+        "confidence_reason_codes": gate_run.confidence_reason_codes,
+        "decision_basis": gate_run.decision_basis,
+        "created_review_task_id": gate_run.created_review_task_id,
+        "created_by_user_id": gate_run.created_by_user_id,
+        "created_at": gate_run.created_at,
+    }
+
+def _policy_catalog(catalog: Any) -> dict[str, Any]:
+    return {
+        "id": catalog.id,
+        "catalog_key": catalog.catalog_key,
+        "platform": catalog.platform,
+        "policy_domain": catalog.policy_domain,
+        "current_version_id": catalog.current_version_id,
+        "status": catalog.status,
+        "created_at": catalog.created_at,
+        "updated_at": catalog.updated_at,
+    }
+
+def _policy_version(version: Any) -> dict[str, Any]:
+    return {
+        "id": version.id,
+        "catalog_id": version.catalog_id,
+        "version": version.version,
+        "status": version.status,
+        "effective_at": version.effective_at,
+        "observed_at": version.observed_at,
+        "policy_blob": version.policy_blob,
+        "interpretation_notes": version.interpretation_notes,
+        "created_by_user_id": version.created_by_user_id,
+        "created_at": version.created_at,
+        "activated_at": version.activated_at,
+        "superseded_at": version.superseded_at,
+    }
+
+def _policy_source_ref(ref: Any) -> dict[str, Any]:
+    return {
+        "id": ref.id,
+        "policy_version_id": ref.policy_version_id,
+        "policy_change_record_id": ref.policy_change_record_id,
+        "source_type": ref.source_type,
+        "source_title": ref.source_title,
+        "source_url": ref.source_url,
+        "captured_at": ref.captured_at,
+        "reliability": ref.reliability,
+        "notes": ref.notes,
+        "created_at": ref.created_at,
+    }
+
+def _policy_change_record(record: Any) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "change_key": record.change_key,
+        "platform": record.platform,
+        "policy_domain": record.policy_domain,
+        "state": record.state,
+        "summary": record.summary,
+        "old_policy_version_id": record.old_policy_version_id,
+        "new_policy_version_id": record.new_policy_version_id,
+        "impact_classification": record.impact_classification,
+        "diff_summary": record.diff_summary,
+        "affected_gate_keys": record.affected_gate_keys,
+        "affected_domains": record.affected_domains,
+        "requires_revalidation": record.requires_revalidation,
+        "rollback_available": record.rollback_available,
+        "created_by_user_id": record.created_by_user_id,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
+
+def _policy_revalidation_batch(batch: Any) -> dict[str, Any]:
+    return {
+        "id": batch.id,
+        "policy_change_record_id": batch.policy_change_record_id,
+        "gate_definition_version_id": batch.gate_definition_version_id,
+        "scope": batch.scope,
+        "status": batch.status,
+        "counts": batch.counts,
+        "started_at": batch.started_at,
+        "completed_at": batch.completed_at,
+        "created_by_user_id": batch.created_by_user_id,
+        "created_at": batch.created_at,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

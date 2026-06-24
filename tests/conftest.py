@@ -95,6 +95,13 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    policy_revalidation_batches,
+                    policy_source_refs,
+                    policy_change_records,
+                    gate_runs,
+                    platform_policy_catalogs,
+                    platform_policy_versions,
+                    gate_definition_versions,
                     approval_decisions,
                     revision_requests,
                     review_findings,

@@ -1,5 +1,5 @@
 catalog_key: event_types
-catalog_version: "1.1.0"
+catalog_version: "1.2.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -39,3 +39,39 @@ items:
   - event_type: approval_decision.rejected_or_blocked
     event_version: 1
     description: Approval decision was rejected or blocked before approval.
+  - event_type: gate_definition_version.created
+    event_version: 1
+    description: Gate definition version created.
+  - event_type: gate_definition_version.activated
+    event_version: 1
+    description: Gate definition version activated.
+  - event_type: gate_run.created
+    event_version: 1
+    description: Deterministic gate run created.
+  - event_type: gate_run.review_task_created
+    event_version: 1
+    description: Gate run created a linked review task.
+  - event_type: platform_policy_catalog.created
+    event_version: 1
+    description: Platform policy catalog created.
+  - event_type: platform_policy_version.created
+    event_version: 1
+    description: Platform policy version created.
+  - event_type: platform_policy_version.activated
+    event_version: 1
+    description: Platform policy version activated.
+  - event_type: policy_source_ref.created
+    event_version: 1
+    description: Policy source reference created.
+  - event_type: policy_change_record.created
+    event_version: 1
+    description: Policy change record created.
+  - event_type: policy_change_record.state_changed
+    event_version: 1
+    description: Policy change record state changed.
+  - event_type: policy_revalidation_batch.created
+    event_version: 1
+    description: Policy revalidation batch created.
+  - event_type: policy_revalidation_batch.completed
+    event_version: 1
+    description: Policy revalidation batch completed.

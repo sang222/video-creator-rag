@@ -1,0 +1,17 @@
+catalog_key: evidence_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: policy_source_ref
+    description: Reference to policy source evidence.
+  - key: rights_license_ref
+    description: Reference proving license or rights basis.
+  - key: disclosure_evidence_ref
+    description: Reference proving disclosure presence or placement.
+  - key: provenance_ref
+    description: Reference proving provenance or content credentials.
+  - key: demand_metric_ref
+    description: Reference to demand or keyword metric evidence.
+  - key: privacy_scrub_ref
+    description: Reference proving privacy scrub or retention handling.

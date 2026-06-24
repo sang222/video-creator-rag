@@ -18,13 +18,20 @@ REQUIRED_TABLES = {
     "review_findings",
     "revision_requests",
     "approval_decisions",
+    "gate_definition_versions",
+    "gate_runs",
+    "platform_policy_catalogs",
+    "platform_policy_versions",
+    "policy_source_refs",
+    "policy_change_records",
+    "policy_revalidation_batches",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0003_m2_workflow"
+    assert revision == "0004_m3_policy_gate_readiness"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

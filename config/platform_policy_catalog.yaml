@@ -1,0 +1,55 @@
+catalog_key: platform_policy_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - catalog_key: youtube_ai_disclosure
+    platform: youtube
+    policy_domain: ai_policy
+    status: active
+    description: YouTube AI disclosure interpretation catalog.
+  - catalog_key: youtube_paid_promotion
+    platform: youtube
+    policy_domain: legal_compliance
+    status: active
+    description: YouTube paid promotion interpretation catalog.
+  - catalog_key: youtube_reused_content
+    platform: youtube
+    policy_domain: originality
+    status: active
+    description: YouTube reused content interpretation catalog.
+  - catalog_key: youtube_inauthentic_content
+    platform: youtube
+    policy_domain: originality
+    status: active
+    description: YouTube inauthentic content interpretation catalog.
+  - catalog_key: tiktok_aigc_labeling
+    platform: tiktok
+    policy_domain: ai_policy
+    status: active
+    description: TikTok AIGC labeling interpretation catalog.
+  - catalog_key: tiktok_commercial_disclosure
+    platform: tiktok
+    policy_domain: legal_compliance
+    status: active
+    description: TikTok commercial disclosure interpretation catalog.
+  - catalog_key: tiktok_creator_rewards_originality
+    platform: tiktok
+    policy_domain: originality
+    status: active
+    description: TikTok originality interpretation catalog.
+  - catalog_key: generic_privacy_retention
+    platform: generic
+    policy_domain: privacy
+    status: active
+    description: Generic privacy retention interpretation catalog.
+  - catalog_key: generic_affiliate_disclosure
+    platform: generic
+    policy_domain: legal_compliance
+    status: active
+    description: Generic affiliate disclosure interpretation catalog.
+  - catalog_key: generic_brand_conflict
+    platform: generic
+    policy_domain: brand_safety
+    status: active
+    description: Generic brand conflict interpretation catalog.
