@@ -64,7 +64,9 @@ EXPECTED_M0_M6_TABLES = {
     "llm_run_snapshots",
     "config_catalog_versions",
     "channel_workspaces",
+    "channel_memberships",
     "channel_profile_versions",
+    "channel_profile_compile_runs",
     "compiled_channel_policy_snapshots",
     "video_projects",
     "artifacts",
@@ -119,6 +121,26 @@ EXPECTED_M0_M6_TABLES = {
     "media_qc_reports",
     "accessibility_qc_reports",
     "pronunciation_dictionary_entries",
+}
+
+FORBIDDEN_M7_PLUS_TABLES = {
+    "publish_packages",
+    "publish_handoff_packages",
+    "manual_publish_confirmations",
+    "upload_jobs",
+    "upload_attempts",
+    "uploaded_videos",
+    "uploaded_video_publication_summaries",
+    "platform_processing_statuses",
+    "analytics_snapshots",
+    "analytics_events",
+    "analytics_semantic_layers",
+    "performance_summaries",
+    "no_view_diagnostic_runs",
+    "no_view_incidents",
+    "recovery_actions",
+    "learning_candidates",
+    "memory_promotions",
 }
 
 RAW_SECRET_MARKERS = (

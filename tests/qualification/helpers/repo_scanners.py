@@ -16,6 +16,7 @@ EXECUTABLE_SCAN_ROOTS = ("app", "alembic")
 
 FORBIDDEN_ROUTE_FRAGMENTS = {
     "publish",
+    "publish-handoff",
     "upload",
     "manual-publish",
     "analytics",
@@ -30,8 +31,11 @@ FORBIDDEN_ROUTE_FRAGMENTS = {
 }
 
 FORBIDDEN_TABLE_FRAGMENTS = {
+    "publish_packages",
+    "publish_handoff",
     "publish_upload",
     "manual_publish",
+    "uploaded_video",
     "analytics_event",
     "analytics_semantic",
     "no_view",
@@ -52,11 +56,23 @@ FORBIDDEN_TABLE_FRAGMENTS = {
 }
 
 FORBIDDEN_SYMBOL_PATTERNS = {
+    r"\bPublisher\b",
+    r"\bPublishService\b",
     r"\bPublishUpload\b",
     r"\bPublishPackage\b",
+    r"\bPublishHandoff\b",
+    r"\bPublishHandoffPackage\b",
+    r"\bPublishHandoffService\b",
     r"\bPublisherService\b",
+    r"\bManualPublishHandoff\b",
+    r"\bManualPublishHandoffService\b",
     r"\bManualPublish\b",
+    r"\bManualPublishConfirmation\b",
     r"\bUploadService\b",
+    r"\bUploadedVideo\b",
+    r"\bUploadedVideoPublicationSummary\b",
+    r"\bPlatformPublishInstruction\b",
+    r"\bPlatformPublishAdapter\b",
     r"\bAnalyticsSemanticLayer\b",
     r"\bAnalyticsEventService\b",
     r"\bNoViewRecovery\b",
@@ -82,6 +98,8 @@ FORBIDDEN_SYMBOL_PATTERNS = {
     r"\bBotEngagement\b",
     r"\bOPAPolicyEngine\b",
     r"\bCedarPolicyEngine\b",
+    r"\b0008_m7_manual_publish\b",
+    r"\bm7_manual_publish\b",
 }
 
 FORBIDDEN_IMPORT_PATTERNS = {
