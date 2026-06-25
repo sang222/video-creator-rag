@@ -49,6 +49,18 @@ from app.services.m5 import (
     SearchDemandEvidenceService,
     SearchIntentService,
 )
+from app.services.m6 import (
+    AccessibilityQCService,
+    AssetPlanningService,
+    CaptionCompilerService,
+    LocalFixtureRendererService,
+    MediaQCService,
+    ProductionArtifactRunService,
+    RenderSpecCompilerService,
+    SceneSourceDecisionService,
+    ScriptNarrationService,
+    VisualPlanService,
+)
 
 __all__ = [
     "AuditService",
@@ -90,6 +102,16 @@ __all__ = [
     "ResourceResolverService",
     "SearchDemandEvidenceService",
     "SearchIntentService",
+    "AccessibilityQCService",
+    "AssetPlanningService",
+    "CaptionCompilerService",
+    "LocalFixtureRendererService",
+    "MediaQCService",
+    "ProductionArtifactRunService",
+    "RenderSpecCompilerService",
+    "SceneSourceDecisionService",
+    "ScriptNarrationService",
+    "VisualPlanService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

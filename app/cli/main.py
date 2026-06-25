@@ -40,6 +40,7 @@ from app.contracts import (
     ProviderAttemptMockRequest,
     ProviderRegistryEntryCreate,
     ProjectAdmissionDecisionCreate,
+    ProductionArtifactRunCreate,
     QuotaAccountCreate,
     QuotaEventRequest,
     RetrievalPlanSnapshotCreate,
@@ -53,7 +54,9 @@ from app.contracts import (
     ChannelStatePackSnapshotCreate,
     ContextPackSnapshotCreate,
 )
+from app.contracts.m6 import QCRunRequest
 from app.services import (
+    AccessibilityQCService,
     ApprovalService,
     ArtifactService,
     AuditService,
@@ -74,6 +77,8 @@ from app.services import (
     GateDefinitionService,
     GateRunnerService,
     IdeaMarketPreflightService,
+    LocalFixtureRendererService,
+    MediaQCService,
     ManualActionService,
     OpsIncidentService,
     PolicySnapshotService,
@@ -83,6 +88,7 @@ from app.services import (
     ProviderHealthService,
     ProviderRegistryService,
     ProjectAdmissionService,
+    ProductionArtifactRunService,
     QuotaService,
     ResourceResolverService,
     RetryOpsService,
@@ -91,6 +97,7 @@ from app.services import (
     SystemHealthService,
     VideoProjectService,
     WorkflowReadinessService,
+    RenderSpecCompilerService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -124,6 +131,10 @@ dead_letter_app = typer.Typer(no_args_is_help=True)
 incident_app = typer.Typer(no_args_is_help=True)
 manual_action_app = typer.Typer(no_args_is_help=True)
 system_health_app = typer.Typer(no_args_is_help=True)
+production_app = typer.Typer(no_args_is_help=True)
+media_app = typer.Typer(no_args_is_help=True)
+captions_app = typer.Typer(no_args_is_help=True)
+render_spec_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
@@ -154,6 +165,10 @@ app.add_typer(dead_letter_app, name="dead-letter")
 app.add_typer(incident_app, name="incident")
 app.add_typer(manual_action_app, name="manual-action")
 app.add_typer(system_health_app, name="system-health")
+app.add_typer(production_app, name="production")
+app.add_typer(media_app, name="media")
+app.add_typer(captions_app, name="captions")
+app.add_typer(render_spec_app, name="render-spec")
 
 
 def _fail(message: str) -> None:
@@ -1322,6 +1337,128 @@ def project_admit(
     except Exception as exc:
         _fail(f"project admit failed: {exc}")
 
+@production_app.command("run-create")
+def production_run_create(
+    project_id: uuid.UUID = typer.Option(..., "--project-id"),
+    source_project_admission_decision_id: uuid.UUID | None = typer.Option(None, "--source-project-admission-decision-id"),
+    run_mode: str = typer.Option("MOCK", "--run-mode"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = ProductionArtifactRunService(session).create_run(
+                data=ProductionArtifactRunCreate(
+                    video_project_id=project_id,
+                    source_project_admission_decision_id=source_project_admission_decision_id,
+                    run_mode=run_mode,
+                )
+            )
+            typer.echo(json.dumps(_production_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"production run-create failed: {exc}")
+
+@production_app.command("execute")
+def production_execute(
+    production_run_id: uuid.UUID = typer.Option(..., "--production-run-id"),
+    output_dir: Path | None = typer.Option(None, "--output-dir"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = ProductionArtifactRunService(session).execute_local_mock_flow(
+                run_id=production_run_id,
+                output_dir=output_dir,
+            )
+            typer.echo(json.dumps(_production_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"production execute failed: {exc}")
+
+@production_app.command("inspect")
+def production_inspect(
+    production_run_id: uuid.UUID = typer.Option(..., "--production-run-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = ProductionArtifactRunService(session).get_run(production_run_id)
+            if run is None:
+                _fail(f"production run not found: {production_run_id}")
+            typer.echo(json.dumps(_production_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"production inspect failed: {exc}")
+
+@media_app.command("render-local-smoke")
+def media_render_local_smoke(
+    render_spec_snapshot_id: uuid.UUID = typer.Option(..., "--render-spec-snapshot-id"),
+    output_dir: Path | None = typer.Option(None, "--output-dir"),
+) -> None:
+    try:
+        with session_scope() as session:
+            result = LocalFixtureRendererService(session).render_local_smoke(
+                render_spec_snapshot_id=render_spec_snapshot_id,
+                output_dir=output_dir,
+            )
+            typer.echo(
+                json.dumps(
+                    {
+                        "job": _render_job_to_dict(result.job),
+                        "render_package": _render_package_to_dict(result.package) if result.package else None,
+                    }
+                )
+            )
+    except Exception as exc:
+        _fail(f"media render-local-smoke failed: {exc}")
+
+@media_app.command("qc-run")
+def media_qc_run(
+    render_package_id: uuid.UUID = typer.Option(..., "--render-package-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            package = LocalFixtureRendererService(session).get_package(render_package_id)
+            if package is None:
+                _fail(f"render package not found: {render_package_id}")
+            report = MediaQCService(session).run_qc(render_package_snapshot=package)
+            typer.echo(json.dumps(_media_qc_to_dict(report)))
+    except Exception as exc:
+        _fail(f"media qc-run failed: {exc}")
+
+@media_app.command("package-inspect")
+def media_package_inspect(
+    render_package_id: uuid.UUID = typer.Option(..., "--render-package-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            package = LocalFixtureRendererService(session).get_package(render_package_id)
+            if package is None:
+                _fail(f"render package not found: {render_package_id}")
+            typer.echo(json.dumps(_render_package_to_dict(package)))
+    except Exception as exc:
+        _fail(f"media package-inspect failed: {exc}")
+
+@captions_app.command("export-srt")
+def captions_export_srt(
+    caption_track_snapshot_id: uuid.UUID = typer.Option(..., "--caption-track-snapshot-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            from app.db.models import CaptionTrackSnapshot
+
+            snapshot = session.get(CaptionTrackSnapshot, caption_track_snapshot_id)
+            if snapshot is None:
+                _fail(f"caption track snapshot not found: {caption_track_snapshot_id}")
+            typer.echo(snapshot.srt_text or "")
+    except Exception as exc:
+        _fail(f"captions export-srt failed: {exc}")
+
+@render_spec_app.command("validate")
+def render_spec_validate(
+    render_spec_snapshot_id: uuid.UUID = typer.Option(..., "--render-spec-snapshot-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            render_spec = RenderSpecCompilerService(session).validate_snapshot(render_spec_snapshot_id)
+            typer.echo(json.dumps({"status": "PASS", "render_spec_hash": render_spec.render_spec_hash}))
+    except Exception as exc:
+        _fail(f"render-spec validate failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -1595,6 +1732,64 @@ def _project_admission_to_dict(decision: Any) -> dict[str, Any]:
         "reason_codes": decision.reason_codes,
         "admitted_video_project_id": str(decision.admitted_video_project_id) if decision.admitted_video_project_id else None,
         "created_artifact_refs": decision.created_artifact_refs,
+    }
+
+def _production_run_to_dict(run: Any) -> dict[str, Any]:
+    return {
+        "id": str(run.id),
+        "video_project_id": str(run.video_project_id),
+        "policy_snapshot_id": str(run.policy_snapshot_id),
+        "run_mode": run.run_mode,
+        "status": run.status,
+        "script_artifact_version_id": str(run.script_artifact_version_id) if run.script_artifact_version_id else None,
+        "voice_timeline_snapshot_id": str(run.voice_timeline_snapshot_id) if run.voice_timeline_snapshot_id else None,
+        "caption_track_snapshot_id": str(run.caption_track_snapshot_id) if run.caption_track_snapshot_id else None,
+        "visual_plan_snapshot_id": str(run.visual_plan_snapshot_id) if run.visual_plan_snapshot_id else None,
+        "scene_manifest_snapshot_id": str(run.scene_manifest_snapshot_id) if run.scene_manifest_snapshot_id else None,
+        "render_spec_snapshot_id": str(run.render_spec_snapshot_id) if run.render_spec_snapshot_id else None,
+        "asset_manifest_snapshot_id": str(run.asset_manifest_snapshot_id) if run.asset_manifest_snapshot_id else None,
+        "source_manifest_snapshot_id": str(run.source_manifest_snapshot_id) if run.source_manifest_snapshot_id else None,
+        "render_package_snapshot_id": str(run.render_package_snapshot_id) if run.render_package_snapshot_id else None,
+        "media_qc_report_id": str(run.media_qc_report_id) if run.media_qc_report_id else None,
+        "accessibility_qc_report_id": str(run.accessibility_qc_report_id) if run.accessibility_qc_report_id else None,
+        "reason_codes": run.reason_codes,
+    }
+
+def _render_job_to_dict(job: Any) -> dict[str, Any]:
+    return {
+        "id": str(job.id),
+        "production_artifact_run_id": str(job.production_artifact_run_id) if job.production_artifact_run_id else None,
+        "render_spec_snapshot_id": str(job.render_spec_snapshot_id),
+        "renderer_key": job.renderer_key,
+        "status": job.status,
+        "render_variant_id": job.render_variant_id,
+        "output_ref": job.output_ref,
+        "error_code": job.error_code,
+        "reason_codes": job.reason_codes,
+    }
+
+def _render_package_to_dict(package: Any) -> dict[str, Any]:
+    return {
+        "id": str(package.id),
+        "production_artifact_run_id": str(package.production_artifact_run_id) if package.production_artifact_run_id else None,
+        "render_spec_snapshot_id": str(package.render_spec_snapshot_id),
+        "media_render_job_id": str(package.media_render_job_id),
+        "final_video_ref": package.final_video_ref,
+        "caption_ref": package.caption_ref,
+        "manifest_ref": package.manifest_ref,
+        "checksum_manifest": package.checksum_manifest,
+        "duration_seconds": str(package.duration_seconds) if package.duration_seconds is not None else None,
+        "package_state": package.package_state,
+    }
+
+def _media_qc_to_dict(report: Any) -> dict[str, Any]:
+    return {
+        "id": str(report.id),
+        "qc_state": report.qc_state,
+        "reason_codes": report.reason_codes,
+        "duration_check": report.duration_check,
+        "file_integrity_check": report.file_integrity_check,
+        "manifest_check": report.manifest_check,
     }
 
 def _json_object(value: str) -> dict[str, Any]:

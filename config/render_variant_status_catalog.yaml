@@ -1,0 +1,17 @@
+catalog_key: render_variant_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PLANNED
+    description: Render variant is planned.
+  - key: READY
+    description: Render variant is ready.
+  - key: BLOCKED
+    description: Render variant is blocked.
+  - key: RENDERED
+    description: Render variant was rendered.
+  - key: QC_PASSED
+    description: Render variant passed QC.
+  - key: QC_REVIEW_REQUIRED
+    description: Render variant requires QC review.

@@ -1,0 +1,15 @@
+catalog_key: asset_source_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LOCAL_FIXTURE
+    description: Local fixture asset source.
+  - key: MOCK
+    description: Mock asset source.
+  - key: MANUAL_PLACEHOLDER
+    description: Manual placeholder asset source.
+  - key: MANUAL_ENVATO_PLACEHOLDER
+    description: Manual Envato placeholder asset source.
+  - key: EXTERNAL_DISABLED
+    description: External asset source is disabled.

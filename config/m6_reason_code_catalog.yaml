@@ -1,0 +1,103 @@
+catalog_key: m6_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: VOICE_TIMELINE_CREATED
+    description: Voice timeline was created.
+  - code: VOICE_TIMELINE_INVALID
+    description: Voice timeline is invalid.
+  - code: NARRATION_SEGMENT_MISSING
+    description: Narration segment is missing.
+  - code: NARRATION_TIMING_INVALID
+    description: Narration timing is invalid.
+  - code: CAPTION_TRACK_CREATED
+    description: Caption track was created.
+  - code: CAPTION_TIMING_INVALID
+    description: Caption timing is invalid.
+  - code: SRT_EXPORT_FAILED
+    description: SRT export failed.
+  - code: VISUAL_PLAN_CREATED
+    description: Visual plan was created.
+  - code: SCENE_MANIFEST_CREATED
+    description: Scene manifest was created.
+  - code: SCENE_SOURCE_DECISION_CREATED
+    description: Scene source decision was created.
+  - code: SCENE_SPEC_TIMING_INVALID
+    description: SceneSpec timing is invalid.
+  - code: SCENE_SPEC_OVERLAP
+    description: SceneSpec overlaps another scene.
+  - code: SCENE_SPEC_GAP_UNDECLARED
+    description: SceneSpec has undeclared gap.
+  - code: SCENE_MISSING_NARRATION_REF
+    description: Scene is missing narration reference.
+  - code: RENDER_SPEC_CREATED
+    description: RenderSpec was created.
+  - code: RENDER_SPEC_VALIDATION_FAILED
+    description: RenderSpec validation failed.
+  - code: RENDER_VARIANT_CREATED
+    description: Render variant was created.
+  - code: RENDER_VARIANT_INVALID
+    description: Render variant is invalid.
+  - code: VOICE_AS_MASTER_CONTRACT_REQUIRED
+    description: Voice timeline must be master timing contract.
+  - code: ASSET_REQUIREMENT_CREATED
+    description: Asset requirement was created.
+  - code: APPROVED_ASSET_POOL_LOOKUP_PLACEHOLDER
+    description: Approved asset pool lookup is placeholder-only.
+  - code: LOCAL_FIXTURE_ASSET_USED
+    description: Local fixture asset was used.
+  - code: MANUAL_ENVATO_PLACEHOLDER_CREATED
+    description: Manual Envato placeholder was created.
+  - code: BATCH_PROCUREMENT_REQUIRED
+    description: Batch procurement is required later.
+  - code: ASSET_REF_MISSING
+    description: Asset reference is missing.
+  - code: LICENSE_EVIDENCE_REQUIRED
+    description: License evidence is required.
+  - code: SOURCE_MANIFEST_CREATED
+    description: Source manifest was created.
+  - code: INTERNAL_TEST_ONLY_ASSET
+    description: Asset is internal test only.
+  - code: LOCAL_RENDER_STARTED
+    description: Local render started.
+  - code: LOCAL_RENDER_COMPLETED
+    description: Local render completed.
+  - code: LOCAL_RENDER_FAILED
+    description: Local render failed.
+  - code: FFMPEG_UNAVAILABLE
+    description: FFmpeg is unavailable.
+  - code: FFPROBE_UNAVAILABLE
+    description: FFprobe is unavailable.
+  - code: FINAL_VIDEO_CREATED
+    description: Final dummy video was created.
+  - code: FINAL_VIDEO_NOT_PLAYABLE
+    description: Final video is not playable.
+  - code: MEDIA_QC_PASSED
+    description: Media QC passed.
+  - code: MEDIA_QC_REVIEW_REQUIRED
+    description: Media QC requires review.
+  - code: MEDIA_QC_BLOCKED
+    description: Media QC blocked output.
+  - code: ACCESSIBILITY_QC_PASSED
+    description: Accessibility QC passed.
+  - code: ACCESSIBILITY_QC_REVIEW_REQUIRED
+    description: Accessibility QC requires review.
+  - code: CAPTION_ALIGNMENT_FAILED
+    description: Caption alignment failed.
+  - code: DURATION_MISMATCH
+    description: Duration mismatch detected.
+  - code: MANIFEST_CHECKSUM_MISSING
+    description: Manifest or checksum is missing.
+  - code: MOCK_PROVIDER_ONLY
+    description: Mock providers only were used.
+  - code: REAL_PROVIDER_BLOCKED
+    description: Real provider execution was blocked.
+  - code: EXTERNAL_NETWORK_BLOCKED
+    description: External network execution was blocked.
+  - code: ENVATO_API_NOT_SUPPORTED
+    description: Envato API is not supported in M6.
+  - code: BAD_ARTIFACT_REJECTED
+    description: Bad artifact was rejected.
+  - code: GENERATED_MEDIA_NOT_STAGED
+    description: Generated media is not staged.

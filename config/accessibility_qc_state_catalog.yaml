@@ -1,0 +1,13 @@
+catalog_key: accessibility_qc_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PASS
+    description: Accessibility QC passed.
+  - key: REVIEW_REQUIRED
+    description: Accessibility QC requires review.
+  - key: BLOCK
+    description: Accessibility QC blocks the package.
+  - key: FAILED
+    description: Accessibility QC failed safely.

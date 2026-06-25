@@ -76,8 +76,7 @@ M5_TABLES = {
     "project_admission_decisions",
 }
 
-FORBIDDEN_M6_PLUS_FRAGMENTS = {
-    "media_render",
+FORBIDDEN_M7_PLUS_FRAGMENTS = {
     "thumbnail_compositor",
     "tts_generation",
     "video_generation",
@@ -159,7 +158,7 @@ def _evidence(db_session, company, channel, *, volume: int | None = 800):
 def test_m5_migration_tables_defaults_and_scope_guard(engine, db_session) -> None:
     tables = set(inspect(engine).get_table_names())
     assert M5_TABLES <= tables
-    assert not {table for table in tables for fragment in FORBIDDEN_M6_PLUS_FRAGMENTS if fragment in table}
+    assert not {table for table in tables for fragment in FORBIDDEN_M7_PLUS_FRAGMENTS if fragment in table}
     company, channel, snapshot, _, operator, slot = _slot(db_session)
     daily_run = ChannelDailyRunService(db_session).create_run(
         data=ChannelDailyRunCreate(
@@ -176,7 +175,7 @@ def test_m5_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert daily_run.metadata_ == {}
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0006_m5_daily_run"
+    assert revision == "0007_m6_production"
 
 
 def test_resource_resolver_enforces_scope_sources_and_deterministic_pack(db_session) -> None:

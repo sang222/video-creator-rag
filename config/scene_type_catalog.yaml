@@ -1,0 +1,23 @@
+catalog_key: scene_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: GENERIC_BROLL
+    description: Generic b-roll scene.
+  - key: HERO_SHOT
+    description: Hero shot scene.
+  - key: MECHANISM
+    description: Mechanism explanation scene.
+  - key: PROCESS
+    description: Process explanation scene.
+  - key: DATA
+    description: Data scene.
+  - key: UI_SCREENSHOT
+    description: UI screenshot scene.
+  - key: BRANDED_TEMPLATE
+    description: Branded template scene.
+  - key: PREMIUM_MANUAL
+    description: Premium manual scene.
+  - key: PLACEHOLDER
+    description: Placeholder scene.

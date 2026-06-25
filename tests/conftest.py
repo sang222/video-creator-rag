@@ -95,6 +95,19 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    accessibility_qc_reports,
+                    media_qc_reports,
+                    render_package_snapshots,
+                    media_render_jobs,
+                    render_spec_snapshots,
+                    source_manifest_snapshots,
+                    asset_manifest_snapshots,
+                    scene_manifest_snapshots,
+                    visual_plan_snapshots,
+                    caption_track_snapshots,
+                    voice_timeline_snapshots,
+                    production_artifact_runs,
+                    pronunciation_dictionary_entries,
                     project_admission_decisions,
                     daily_idea_decisions,
                     idea_market_preflights,

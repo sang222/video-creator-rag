@@ -1,0 +1,17 @@
+catalog_key: media_render_job_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PENDING
+    description: Media render job has not started.
+  - key: RUNNING
+    description: Media render job is running.
+  - key: COMPLETED
+    description: Media render job completed.
+  - key: REVIEW_REQUIRED
+    description: Media render job requires review.
+  - key: BLOCKED
+    description: Media render job is blocked.
+  - key: FAILED
+    description: Media render job failed safely.

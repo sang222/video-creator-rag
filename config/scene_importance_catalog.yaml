@@ -1,0 +1,13 @@
+catalog_key: scene_importance_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LOW
+    description: Low scene importance.
+  - key: MEDIUM
+    description: Medium scene importance.
+  - key: HIGH
+    description: High scene importance.
+  - key: CRITICAL
+    description: Critical scene importance.

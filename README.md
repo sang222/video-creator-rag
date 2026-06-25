@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, and M5 daily run/context/admission foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, and M6 production artifact/local media QC foundation.
 
 ## Stack
 
@@ -121,6 +121,21 @@ vcos project admit --daily-run-id <daily-run-id> --daily-idea-decision-id <decis
 
 M5 adds manual daily runs, ResourceResolver MVP, immutable context/state snapshots, safe search-demand evidence, mock LLM proposal capture, deterministic market preflight, and budgeted project admission. M5 uses MockLLMProvider only. LLM output is proposal/draft/rationale only and is captured in `llm_run_snapshots`.
 
+## M6 Commands
+
+```bash
+vcos production run-create --project-id <project-id>
+vcos production execute --production-run-id <production-run-id>
+vcos production inspect --production-run-id <production-run-id>
+vcos media render-local-smoke --render-spec-snapshot-id <render-spec-snapshot-id>
+vcos media qc-run --render-package-id <render-package-id>
+vcos media package-inspect --render-package-id <render-package-id>
+vcos captions export-srt --caption-track-snapshot-id <caption-track-snapshot-id>
+vcos render-spec validate --render-spec-snapshot-id <render-spec-snapshot-id>
+```
+
+M6 adds production artifact runs, strict script/narration/caption/visual plan/scene manifest/RenderSpec contracts, source and rights manifests, platform render variants, local fixture rendering, render packages, and MediaQC/AccessibilityQC. M6 uses MockLLMProvider plus local FFmpeg only when available. If FFmpeg/ffprobe is unavailable, local video smoke is BLOCKED with a reason code instead of faking a pass.
+
 ## Boundaries
 
-M0-M5 do not implement media pipelines, publishing, analytics, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, or platform evasion systems. M5 adds mock-first scoped LLM proposal workflow only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M6 do not implement publishing, analytics, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, or platform evasion systems. M6 adds local/mock media package and QC foundation only. CapCut pilot notes do not make CapCut a production dependency.

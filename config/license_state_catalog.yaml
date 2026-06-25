@@ -1,0 +1,13 @@
+catalog_key: license_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: INTERNAL_TEST_ONLY
+    description: Asset is internal test only.
+  - key: LICENSE_REQUIRED
+    description: Asset requires license evidence.
+  - key: LICENSE_VERIFIED
+    description: Asset license evidence is verified.
+  - key: UNKNOWN
+    description: Asset license state is unknown.

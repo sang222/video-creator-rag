@@ -1,0 +1,15 @@
+catalog_key: render_package_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CREATED
+    description: Render package was created.
+  - key: QC_PASSED
+    description: Render package passed QC.
+  - key: QC_REVIEW_REQUIRED
+    description: Render package requires QC review.
+  - key: QC_BLOCKED
+    description: Render package is blocked by QC.
+  - key: FAILED
+    description: Render package failed safely.

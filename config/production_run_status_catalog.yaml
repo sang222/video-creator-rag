@@ -1,0 +1,19 @@
+catalog_key: production_run_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PENDING
+    description: Production artifact run has not started.
+  - key: RUNNING
+    description: Production artifact run is running.
+  - key: COMPLETED
+    description: Production artifact run completed.
+  - key: REVIEW_REQUIRED
+    description: Production artifact run produced review-required output.
+  - key: BLOCKED
+    description: Production artifact run is blocked.
+  - key: FAILED
+    description: Production artifact run failed safely.
+  - key: CANCELLED
+    description: Production artifact run was cancelled.

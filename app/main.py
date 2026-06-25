@@ -65,10 +65,14 @@ from app.contracts import (
     ProviderRegistryEntryRead,
     ProjectAdmissionDecisionCreate,
     ProjectAdmissionDecisionRead,
+    ProductionArtifactRunCreate,
+    ProductionArtifactRunRead,
+    QCRunRequest,
     QuotaAccountCreate,
     QuotaAccountRead,
     QuotaEventRead,
     QuotaEventRequest,
+    RenderLocalSmokeRequest,
     RetrievalPlanSnapshotCreate,
     RetrievalPlanSnapshotRead,
     ReviewFindingCreate,
@@ -99,6 +103,7 @@ from app.core.errors import ConflictError, ForbiddenError, NotFoundError, Valida
 from app.core.logging import configure_logging
 from app.db.session import session_scope
 from app.services import (
+    AccessibilityQCService,
     ChannelProfileCompiler,
     ChannelProfileService,
     ChannelWorkspaceService,
@@ -125,9 +130,12 @@ from app.services import (
     PolicyChangeService,
     PolicyRevalidationService,
     IdeaMarketPreflightService,
+    LocalFixtureRendererService,
+    MediaQCService,
     ProjectAdmissionService,
     ProviderHealthService,
     ProviderRegistryService,
+    ProductionArtifactRunService,
     QuotaService,
     ResourceResolverService,
     RetryOpsService,
@@ -962,6 +970,105 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/production-runs", response_model=ProductionArtifactRunRead)
+    def create_production_run(data: ProductionArtifactRunCreate) -> ProductionArtifactRunRead:
+        try:
+            with session_scope() as session:
+                run = ProductionArtifactRunService(session).create_run(data=data)
+                return ProductionArtifactRunRead.model_validate(_production_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/production-runs/{run_id}/execute", response_model=ProductionArtifactRunRead)
+    def execute_production_run(run_id: uuid.UUID) -> ProductionArtifactRunRead:
+        try:
+            with session_scope() as session:
+                run = ProductionArtifactRunService(session).execute_local_mock_flow(run_id=run_id)
+                return ProductionArtifactRunRead.model_validate(_production_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/production-runs/{run_id}", response_model=ProductionArtifactRunRead)
+    def get_production_run(run_id: uuid.UUID) -> ProductionArtifactRunRead:
+        try:
+            with session_scope() as session:
+                run = ProductionArtifactRunService(session).get_run(run_id)
+                if run is None:
+                    raise NotFoundError(f"production artifact run not found: {run_id}")
+                return ProductionArtifactRunRead.model_validate(_production_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/render-jobs/local-smoke")
+    def create_local_smoke_render(data: RenderLocalSmokeRequest) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                result = LocalFixtureRendererService(session).render_local_smoke(
+                    render_spec_snapshot_id=data.render_spec_snapshot_id,
+                )
+                return {
+                    "job": _render_job(result.job),
+                    "render_package": _render_package(result.package) if result.package else None,
+                }
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/render-jobs/{render_job_id}")
+    def get_render_job(render_job_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                job = LocalFixtureRendererService(session).get_job(render_job_id)
+                if job is None:
+                    raise NotFoundError(f"render job not found: {render_job_id}")
+                return _render_job(job)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/render-packages/{render_package_id}")
+    def get_render_package(render_package_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                package = LocalFixtureRendererService(session).get_package(render_package_id)
+                if package is None:
+                    raise NotFoundError(f"render package not found: {render_package_id}")
+                return _render_package(package)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/media-qc/run")
+    def run_media_qc(data: QCRunRequest) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                if data.render_package_snapshot_id is None:
+                    raise ValidationFailureError("render_package_snapshot_id is required for media QC API")
+                package = LocalFixtureRendererService(session).get_package(data.render_package_snapshot_id)
+                if package is None:
+                    raise NotFoundError(f"render package not found: {data.render_package_snapshot_id}")
+                report = MediaQCService(session).run_qc(render_package_snapshot=package)
+                return _media_qc_report(report)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/accessibility-qc/run")
+    def run_accessibility_qc(data: QCRunRequest) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                from app.db.models import CaptionTrackSnapshot, RenderPackageSnapshot
+
+                if data.caption_track_snapshot_id is None:
+                    raise ValidationFailureError("caption_track_snapshot_id is required for accessibility QC API")
+                caption = session.get(CaptionTrackSnapshot, data.caption_track_snapshot_id)
+                if caption is None:
+                    raise NotFoundError(f"caption track snapshot not found: {data.caption_track_snapshot_id}")
+                package = session.get(RenderPackageSnapshot, data.render_package_snapshot_id) if data.render_package_snapshot_id else None
+                report = AccessibilityQCService(session).run_qc(
+                    caption_track_snapshot=caption,
+                    render_package_snapshot=package,
+                )
+                return _accessibility_qc_report(report)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -1688,6 +1795,92 @@ def _project_admission_decision(decision: Any) -> dict[str, Any]:
         "admitted_video_project_id": decision.admitted_video_project_id,
         "created_artifact_refs": decision.created_artifact_refs,
         "created_at": decision.created_at,
+    }
+
+def _production_run(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "company_id": run.company_id,
+        "channel_workspace_id": run.channel_workspace_id,
+        "video_project_id": run.video_project_id,
+        "policy_snapshot_id": run.policy_snapshot_id,
+        "source_project_admission_decision_id": run.source_project_admission_decision_id,
+        "run_mode": run.run_mode,
+        "status": run.status,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "script_artifact_version_id": run.script_artifact_version_id,
+        "voice_timeline_snapshot_id": run.voice_timeline_snapshot_id,
+        "caption_track_snapshot_id": run.caption_track_snapshot_id,
+        "visual_plan_snapshot_id": run.visual_plan_snapshot_id,
+        "scene_manifest_snapshot_id": run.scene_manifest_snapshot_id,
+        "render_spec_snapshot_id": run.render_spec_snapshot_id,
+        "asset_manifest_snapshot_id": run.asset_manifest_snapshot_id,
+        "source_manifest_snapshot_id": run.source_manifest_snapshot_id,
+        "render_package_snapshot_id": run.render_package_snapshot_id,
+        "media_qc_report_id": run.media_qc_report_id,
+        "accessibility_qc_report_id": run.accessibility_qc_report_id,
+        "reason_codes": run.reason_codes,
+        "metadata": run.metadata_,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+    }
+
+def _render_job(job: Any) -> dict[str, Any]:
+    return {
+        "id": str(job.id),
+        "production_artifact_run_id": str(job.production_artifact_run_id) if job.production_artifact_run_id else None,
+        "video_project_id": str(job.video_project_id),
+        "render_spec_snapshot_id": str(job.render_spec_snapshot_id),
+        "render_variant_id": job.render_variant_id,
+        "renderer_key": job.renderer_key,
+        "status": job.status,
+        "output_ref": job.output_ref,
+        "error_code": job.error_code,
+        "reason_codes": job.reason_codes,
+    }
+
+def _render_package(package: Any) -> dict[str, Any]:
+    return {
+        "id": str(package.id),
+        "production_artifact_run_id": str(package.production_artifact_run_id) if package.production_artifact_run_id else None,
+        "video_project_id": str(package.video_project_id),
+        "media_render_job_id": str(package.media_render_job_id),
+        "render_spec_snapshot_id": str(package.render_spec_snapshot_id),
+        "final_video_ref": package.final_video_ref,
+        "caption_ref": package.caption_ref,
+        "manifest_ref": package.manifest_ref,
+        "file_manifest": package.file_manifest,
+        "checksum_manifest": package.checksum_manifest,
+        "duration_seconds": str(package.duration_seconds) if package.duration_seconds is not None else None,
+        "package_state": package.package_state,
+    }
+
+def _media_qc_report(report: Any) -> dict[str, Any]:
+    return {
+        "id": str(report.id),
+        "production_artifact_run_id": str(report.production_artifact_run_id) if report.production_artifact_run_id else None,
+        "video_project_id": str(report.video_project_id),
+        "render_package_snapshot_id": str(report.render_package_snapshot_id) if report.render_package_snapshot_id else None,
+        "render_spec_snapshot_id": str(report.render_spec_snapshot_id),
+        "qc_state": report.qc_state,
+        "reason_codes": report.reason_codes,
+        "duration_check": report.duration_check,
+        "file_integrity_check": report.file_integrity_check,
+        "manifest_check": report.manifest_check,
+    }
+
+def _accessibility_qc_report(report: Any) -> dict[str, Any]:
+    return {
+        "id": str(report.id),
+        "production_artifact_run_id": str(report.production_artifact_run_id) if report.production_artifact_run_id else None,
+        "video_project_id": str(report.video_project_id),
+        "caption_track_snapshot_id": str(report.caption_track_snapshot_id) if report.caption_track_snapshot_id else None,
+        "render_package_snapshot_id": str(report.render_package_snapshot_id) if report.render_package_snapshot_id else None,
+        "qc_state": report.qc_state,
+        "reason_codes": report.reason_codes,
+        "caption_presence_check": report.caption_presence_check,
+        "caption_readability_check": report.caption_readability_check,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

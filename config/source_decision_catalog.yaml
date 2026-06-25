@@ -1,0 +1,15 @@
+catalog_key: source_decision_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: USE_LOCAL_FIXTURE
+    description: Use local fixture source.
+  - key: USE_DIAGRAM_PLACEHOLDER
+    description: Use diagram placeholder source.
+  - key: USE_SCREENSHOT_PLACEHOLDER
+    description: Use screenshot placeholder source.
+  - key: USE_AI_PLACEHOLDER
+    description: Use future AI placeholder source.
+  - key: USE_MANUAL_PREMIUM_PLACEHOLDER
+    description: Use manual premium placeholder source.

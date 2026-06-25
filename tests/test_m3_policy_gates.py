@@ -362,7 +362,7 @@ def test_m3_scope_guards_and_docs() -> None:
     assert not forbidden_tables & M3_TABLES
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
     assert "SemanticLayer" not in app_text
-    assert "MediaRender" not in app_text
+    assert "PublishUpload" not in app_text
     assert "PublishUpload" not in app_text
     assert "Dashboard" not in app_text
     doc = (ROOT / "docs/architecture/m3-policy-gate-readiness.md").read_text(encoding="utf-8")

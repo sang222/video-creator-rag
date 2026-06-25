@@ -83,6 +83,12 @@ from app.contracts.m5 import (
     SearchIntentMapCreate,
     SearchIntentMapRead,
 )
+from app.contracts.m6 import (
+    ProductionArtifactRunCreate,
+    ProductionArtifactRunRead,
+    QCRunRequest,
+    RenderLocalSmokeRequest,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -213,8 +219,12 @@ __all__ = [
     "IdeaMarketPreflightRead",
     "ProjectAdmissionDecisionCreate",
     "ProjectAdmissionDecisionRead",
+    "ProductionArtifactRunCreate",
+    "ProductionArtifactRunRead",
+    "QCRunRequest",
     "RetrievalPlanSnapshotCreate",
     "RetrievalPlanSnapshotRead",
+    "RenderLocalSmokeRequest",
     "SearchDemandEvidenceCreate",
     "SearchDemandEvidenceRead",
     "SearchIntentMapCreate",

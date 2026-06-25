@@ -1,0 +1,19 @@
+catalog_key: provider_source_class_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: API_NATIVE_PROVIDER
+    description: Future official API-native provider class.
+  - key: MANUAL_ASSET_LIBRARY
+    description: Manual asset library provider class.
+  - key: BATCH_PROCUREMENT_SOURCE
+    description: Batch procurement provider class.
+  - key: LOCAL_RENDERER
+    description: Local renderer provider class.
+  - key: MOCK_PROVIDER
+    description: Mock provider class.
+  - key: PREMIUM_FALLBACK_PROVIDER
+    description: Premium fallback provider class.
+  - key: APPROVED_ASSET_POOL
+    description: Approved asset pool provider class.

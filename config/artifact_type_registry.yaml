@@ -1,5 +1,5 @@
 catalog_key: artifact_type_registry
-catalog_version: "1.0.0"
+catalog_version: "1.0.1"
 schema_version: catalog.v1
 status: active
 items:
@@ -13,8 +13,26 @@ items:
     description: Script artifact allowance.
   - key: visual_plan
     description: Visual plan artifact allowance.
+  - key: narration_timeline
+    description: M6 voice timeline artifact allowance.
+  - key: caption_track
+    description: M6 caption track artifact allowance.
+  - key: scene_manifest
+    description: M6 scene manifest artifact allowance.
   - key: render_spec
     description: Render specification artifact allowance.
+  - key: asset_manifest
+    description: M6 asset manifest artifact allowance.
+  - key: source_manifest
+    description: M6 source manifest artifact allowance.
+  - key: render_package
+    description: M6 local render package artifact allowance.
+  - key: media_qc_report
+    description: M6 media QC report artifact allowance.
+  - key: accessibility_qc_report
+    description: M6 accessibility QC report artifact allowance.
+  - key: thumbnail_package_draft
+    description: M6 thumbnail package draft allowance for contract-only drafts.
   - key: publish_package_draft
     description: Publish package draft artifact allowance.
   - key: thumbnail_package

@@ -63,6 +63,21 @@ from app.db.models.m5 import (
     SearchDemandEvidence,
     SearchIntentMap,
 )
+from app.db.models.m6 import (
+    AccessibilityQCReport,
+    AssetManifestSnapshot,
+    CaptionTrackSnapshot,
+    MediaQCReport,
+    MediaRenderJob,
+    ProductionArtifactRun,
+    PronunciationDictionaryEntry,
+    RenderPackageSnapshot,
+    RenderSpecSnapshot,
+    SceneManifestSnapshot,
+    SourceManifestSnapshot,
+    VisualPlanSnapshot,
+    VoiceTimelineSnapshot,
+)
 
 __all__ = [
     "AuditEvent",
@@ -118,4 +133,17 @@ __all__ = [
     "RetrievalPlanSnapshot",
     "SearchDemandEvidence",
     "SearchIntentMap",
+    "AccessibilityQCReport",
+    "AssetManifestSnapshot",
+    "CaptionTrackSnapshot",
+    "MediaQCReport",
+    "MediaRenderJob",
+    "ProductionArtifactRun",
+    "PronunciationDictionaryEntry",
+    "RenderPackageSnapshot",
+    "RenderSpecSnapshot",
+    "SceneManifestSnapshot",
+    "SourceManifestSnapshot",
+    "VisualPlanSnapshot",
+    "VoiceTimelineSnapshot",
 ]

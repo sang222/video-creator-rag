@@ -51,13 +51,26 @@ REQUIRED_TABLES = {
     "idea_market_preflights",
     "daily_idea_decisions",
     "project_admission_decisions",
+    "production_artifact_runs",
+    "voice_timeline_snapshots",
+    "caption_track_snapshots",
+    "visual_plan_snapshots",
+    "scene_manifest_snapshots",
+    "asset_manifest_snapshots",
+    "source_manifest_snapshots",
+    "render_spec_snapshots",
+    "media_render_jobs",
+    "render_package_snapshots",
+    "media_qc_reports",
+    "accessibility_qc_reports",
+    "pronunciation_dictionary_entries",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0006_m5_daily_run"
+    assert revision == "0007_m6_production"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

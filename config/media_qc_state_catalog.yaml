@@ -1,0 +1,13 @@
+catalog_key: media_qc_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PASS
+    description: Media QC passed.
+  - key: REVIEW_REQUIRED
+    description: Media QC requires review.
+  - key: BLOCK
+    description: Media QC blocks the package.
+  - key: FAILED
+    description: Media QC failed safely.

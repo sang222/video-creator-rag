@@ -1,0 +1,23 @@
+catalog_key: render_source_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: APPROVED_ASSET_POOL
+    description: Approved local asset pool source.
+  - key: LOCAL_FIXTURE
+    description: Local fixture source.
+  - key: MOCK_MEDIA
+    description: Mock media source.
+  - key: STOCK_PLACEHOLDER
+    description: Stock placeholder source.
+  - key: DIAGRAM_PLACEHOLDER
+    description: Diagram placeholder source.
+  - key: SCREENSHOT_PLACEHOLDER
+    description: Screenshot placeholder source.
+  - key: AI_PLACEHOLDER
+    description: Future AI media placeholder source.
+  - key: MANUAL_ENVATO_PLACEHOLDER
+    description: Manual Envato placeholder source.
+  - key: MANUAL_PREMIUM_PLACEHOLDER
+    description: Manual premium placeholder source.

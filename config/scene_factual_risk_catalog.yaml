@@ -1,0 +1,11 @@
+catalog_key: scene_factual_risk_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LOW
+    description: Low factual risk.
+  - key: MEDIUM
+    description: Medium factual risk.
+  - key: HIGH
+    description: High factual risk.

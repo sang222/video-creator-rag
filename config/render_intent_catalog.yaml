@@ -1,0 +1,11 @@
+catalog_key: render_intent_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LOCAL_SMOKE
+    description: Local smoke render intent.
+  - key: DRAFT_PREVIEW
+    description: Draft preview render intent.
+  - key: PRODUCTION_DISABLED
+    description: Production render is disabled.
