@@ -78,6 +78,12 @@ from app.db.models.m6 import (
     VisualPlanSnapshot,
     VoiceTimelineSnapshot,
 )
+from app.db.models.m7 import (
+    ManualPublishConfirmation,
+    PublishHandoffPackage,
+    UploadedVideo,
+    UploadedVideoPublicationSummary,
+)
 
 __all__ = [
     "AuditEvent",
@@ -146,4 +152,8 @@ __all__ = [
     "SourceManifestSnapshot",
     "VisualPlanSnapshot",
     "VoiceTimelineSnapshot",
+    "ManualPublishConfirmation",
+    "PublishHandoffPackage",
+    "UploadedVideo",
+    "UploadedVideoPublicationSummary",
 ]

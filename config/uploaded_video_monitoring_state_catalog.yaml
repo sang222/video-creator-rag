@@ -1,0 +1,13 @@
+catalog_key: uploaded_video_monitoring_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_STARTED
+    description: Analytics monitoring has not started.
+  - key: READY_FOR_ANALYTICS
+    description: Uploaded video has valid external id and URL for future analytics.
+  - key: PAUSED
+    description: Future monitoring is paused.
+  - key: NOT_SUPPORTED
+    description: Monitoring is not supported for the target.

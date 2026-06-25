@@ -18,6 +18,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M4 builds provider registry, mock provider interfaces, credential references, quota/cost ledgers, budget gates, health snapshots, retry/dead-letter, incident, and manual-action foundation only.
 - M5 builds daily run, ResourceResolver MVP, ContextPack, ChannelStatePack, safe search-demand evidence, mock LLM proposal capture, deterministic preflight, and budgeted project admission only.
 - M6 builds production artifact runs, script/narration/caption contracts, voice-as-master visual plans, scene/source manifests, RenderSpec, platform render variants, local/mock render package foundation, and MediaQC/AccessibilityQC only.
+- M7 builds manual publish handoff packages, operator checklists/instructions, human-entered publish confirmations, uploaded video records, lineage, and publication summaries only.
 
 ## Scope Guardrails
 
@@ -45,6 +46,10 @@ M6 adds ProductionArtifactRun, VoiceTimelineSnapshot, CaptionTrackSnapshot, Visu
 
 M6 does not build M7 publish/upload/manual publish, M8 analytics/semantic layer, M9 no-view/recovery/self-funding, M10 memory promotion, M11 dashboard/operator cockpit, real provider integrations, Envato API/download/generation, marketplace scraping, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, or platform evasion systems.
 
+M7 adds PublishHandoffPackage, ManualPublishConfirmation, UploadedVideo, and UploadedVideoPublicationSummary for manual human upload handoff and confirmation capture.
+
+M7 does not build auto upload, YouTube/TikTok/Facebook/Instagram publish APIs, OAuth upload flows, scheduled upload automation, analytics sync/snapshots/semantic layer, no-view/recovery diagnostics, memory promotion, dashboard/operator cockpit UI, real provider integrations, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, IP/VPS tricks, or auto-reupload spam.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -58,6 +63,10 @@ M6 does not build M7 publish/upload/manual publish, M8 analytics/semantic layer,
 - M6 complete means an admitted project can produce validated production artifact snapshots, RenderSpec, local/mock media package refs, and QC reports. A playable dummy MP4 smoke requires local FFmpeg/ffprobe.
 - M6 can use mock/local fixture providers for media tests.
 - Pre-M7 M0-M6 Qualification Gate will be required after M6.
+- M7 complete means VCOS can hand off an M6 render package to a human operator for manual upload, then capture actual publish metadata, disclosures, external id/URL, uploaded video lineage, and a metrics-free publication summary.
+- M8 will sync analytics later.
+- M9 will diagnose no-view or underperformance later.
+- M11 will display uploaded videos in an operator dashboard later.
 
 ## Pilot Notes
 

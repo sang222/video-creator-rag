@@ -61,6 +61,10 @@ from app.services.m6 import (
     ScriptNarrationService,
     VisualPlanService,
 )
+from app.services.m7 import (
+    ManualPublishConfirmationService,
+    PublishHandoffService,
+)
 
 __all__ = [
     "AuditService",
@@ -112,6 +116,8 @@ __all__ = [
     "SceneSourceDecisionService",
     "ScriptNarrationService",
     "VisualPlanService",
+    "ManualPublishConfirmationService",
+    "PublishHandoffService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

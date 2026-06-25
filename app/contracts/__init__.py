@@ -89,6 +89,14 @@ from app.contracts.m6 import (
     QCRunRequest,
     RenderLocalSmokeRequest,
 )
+from app.contracts.m7 import (
+    ManualPublishConfirmationCreate,
+    ManualPublishConfirmationRead,
+    PublishHandoffCreate,
+    PublishHandoffRead,
+    UploadedVideoPublicationSummaryRead,
+    UploadedVideoRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -229,6 +237,12 @@ __all__ = [
     "SearchDemandEvidenceRead",
     "SearchIntentMapCreate",
     "SearchIntentMapRead",
+    "ManualPublishConfirmationCreate",
+    "ManualPublishConfirmationRead",
+    "PublishHandoffCreate",
+    "PublishHandoffRead",
+    "UploadedVideoPublicationSummaryRead",
+    "UploadedVideoRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

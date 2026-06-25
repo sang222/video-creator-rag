@@ -44,6 +44,8 @@ from app.contracts import (
     IdeaMarketPreflightRead,
     ManualActionCreate,
     ManualActionRead,
+    ManualPublishConfirmationCreate,
+    ManualPublishConfirmationRead,
     OpsIncidentCreate,
     OpsIncidentRead,
     PlatformPolicyCatalogCreate,
@@ -67,6 +69,8 @@ from app.contracts import (
     ProjectAdmissionDecisionRead,
     ProductionArtifactRunCreate,
     ProductionArtifactRunRead,
+    PublishHandoffCreate,
+    PublishHandoffRead,
     QCRunRequest,
     QuotaAccountCreate,
     QuotaAccountRead,
@@ -87,6 +91,8 @@ from app.contracts import (
     SearchDemandEvidenceCreate,
     SearchDemandEvidenceRead,
     SystemHealthSnapshotRead,
+    UploadedVideoPublicationSummaryRead,
+    UploadedVideoRead,
     VideoProjectCreate,
     VideoProjectRead,
     ChannelDailyRunCreate,
@@ -125,6 +131,7 @@ from app.services import (
     DeadLetterService,
     EditorialCalendarService,
     ManualActionService,
+    ManualPublishConfirmationService,
     OpsIncidentService,
     PolicyCatalogService,
     PolicyChangeService,
@@ -136,6 +143,7 @@ from app.services import (
     ProviderHealthService,
     ProviderRegistryService,
     ProductionArtifactRunService,
+    PublishHandoffService,
     QuotaService,
     ResourceResolverService,
     RetryOpsService,
@@ -1069,6 +1077,93 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/publish-handoffs", response_model=PublishHandoffRead)
+    def create_publish_handoff(data: PublishHandoffCreate) -> PublishHandoffRead:
+        try:
+            with session_scope() as session:
+                handoff = PublishHandoffService(session).create_from_render_package(data=data)
+                return PublishHandoffRead.model_validate(_publish_handoff(handoff))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/publish-handoffs/{handoff_id}", response_model=PublishHandoffRead)
+    def get_publish_handoff(handoff_id: uuid.UUID) -> PublishHandoffRead:
+        try:
+            with session_scope() as session:
+                handoff = PublishHandoffService(session).require(handoff_id)
+                return PublishHandoffRead.model_validate(_publish_handoff(handoff))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/publish-handoffs/{handoff_id}/mark-ready", response_model=PublishHandoffRead)
+    def mark_publish_handoff_ready(handoff_id: uuid.UUID) -> PublishHandoffRead:
+        try:
+            with session_scope() as session:
+                handoff = PublishHandoffService(session).mark_ready(handoff_id=handoff_id)
+                return PublishHandoffRead.model_validate(_publish_handoff(handoff))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/manual-publish-confirmations", response_model=ManualPublishConfirmationRead)
+    def create_manual_publish_confirmation(data: ManualPublishConfirmationCreate) -> ManualPublishConfirmationRead:
+        try:
+            with session_scope() as session:
+                confirmation = ManualPublishConfirmationService(session).create_confirmation(data=data)
+                return ManualPublishConfirmationRead.model_validate(_manual_publish_confirmation(confirmation))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/manual-publish-confirmations/{confirmation_id}", response_model=ManualPublishConfirmationRead)
+    def get_manual_publish_confirmation(confirmation_id: uuid.UUID) -> ManualPublishConfirmationRead:
+        try:
+            with session_scope() as session:
+                confirmation = ManualPublishConfirmationService(session).require_confirmation(confirmation_id)
+                return ManualPublishConfirmationRead.model_validate(_manual_publish_confirmation(confirmation))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/manual-publish-confirmations/{confirmation_id}/accept", response_model=UploadedVideoRead)
+    def accept_manual_publish_confirmation(confirmation_id: uuid.UUID) -> UploadedVideoRead:
+        try:
+            with session_scope() as session:
+                uploaded = ManualPublishConfirmationService(session).accept_confirmation(confirmation_id=confirmation_id)
+                return UploadedVideoRead.model_validate(_uploaded_video(uploaded))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}", response_model=UploadedVideoRead)
+    def get_uploaded_video(uploaded_video_id: uuid.UUID) -> UploadedVideoRead:
+        try:
+            with session_scope() as session:
+                uploaded = ManualPublishConfirmationService(session).get_uploaded_video(uploaded_video_id)
+                if uploaded is None:
+                    raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
+                return UploadedVideoRead.model_validate(_uploaded_video(uploaded))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-projects/{project_id}/uploaded-videos", response_model=list[UploadedVideoRead])
+    def list_project_uploaded_videos(project_id: uuid.UUID) -> list[UploadedVideoRead]:
+        try:
+            with session_scope() as session:
+                return [
+                    UploadedVideoRead.model_validate(_uploaded_video(uploaded))
+                    for uploaded in ManualPublishConfirmationService(session).list_uploaded_videos_by_project(project_id)
+                ]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/publication-summary", response_model=UploadedVideoPublicationSummaryRead)
+    def get_uploaded_video_publication_summary(uploaded_video_id: uuid.UUID) -> UploadedVideoPublicationSummaryRead:
+        try:
+            with session_scope() as session:
+                summary = ManualPublishConfirmationService(session).get_publication_summary(uploaded_video_id)
+                if summary is None:
+                    raise NotFoundError(f"uploaded video publication summary not found: {uploaded_video_id}")
+                return UploadedVideoPublicationSummaryRead.model_validate(_uploaded_video_summary(summary))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -1881,6 +1976,113 @@ def _accessibility_qc_report(report: Any) -> dict[str, Any]:
         "reason_codes": report.reason_codes,
         "caption_presence_check": report.caption_presence_check,
         "caption_readability_check": report.caption_readability_check,
+    }
+
+def _publish_handoff(handoff: Any) -> dict[str, Any]:
+    return {
+        "id": handoff.id,
+        "company_id": handoff.company_id,
+        "channel_workspace_id": handoff.channel_workspace_id,
+        "video_project_id": handoff.video_project_id,
+        "policy_snapshot_id": handoff.policy_snapshot_id,
+        "production_artifact_run_id": handoff.production_artifact_run_id,
+        "render_package_snapshot_id": handoff.render_package_snapshot_id,
+        "render_spec_snapshot_id": handoff.render_spec_snapshot_id,
+        "media_qc_report_id": handoff.media_qc_report_id,
+        "accessibility_qc_report_id": handoff.accessibility_qc_report_id,
+        "source_manifest_snapshot_id": handoff.source_manifest_snapshot_id,
+        "asset_manifest_snapshot_id": handoff.asset_manifest_snapshot_id,
+        "target_platform": handoff.target_platform,
+        "target_surface": handoff.target_surface,
+        "destination_binding_id": handoff.destination_binding_id,
+        "render_variant_id": handoff.render_variant_id,
+        "package_state": handoff.package_state,
+        "planned_metadata": handoff.planned_metadata,
+        "planned_disclosures": handoff.planned_disclosures,
+        "planned_files": handoff.planned_files,
+        "checklist_snapshot": handoff.checklist_snapshot,
+        "operator_instructions": handoff.operator_instructions,
+        "risk_summary": handoff.risk_summary,
+        "reason_codes": handoff.reason_codes,
+        "next_action": handoff.next_action,
+        "created_by_user_id": handoff.created_by_user_id,
+        "created_at": handoff.created_at,
+        "updated_at": handoff.updated_at,
+    }
+
+def _manual_publish_confirmation(confirmation: Any) -> dict[str, Any]:
+    return {
+        "id": confirmation.id,
+        "publish_handoff_package_id": confirmation.publish_handoff_package_id,
+        "company_id": confirmation.company_id,
+        "channel_workspace_id": confirmation.channel_workspace_id,
+        "video_project_id": confirmation.video_project_id,
+        "policy_snapshot_id": confirmation.policy_snapshot_id,
+        "target_platform": confirmation.target_platform,
+        "target_surface": confirmation.target_surface,
+        "confirmed_by_user_id": confirmation.confirmed_by_user_id,
+        "confirmation_state": confirmation.confirmation_state,
+        "actual_video_id": confirmation.actual_video_id,
+        "actual_video_url": confirmation.actual_video_url,
+        "actual_published_at": confirmation.actual_published_at,
+        "actual_metadata": confirmation.actual_metadata,
+        "actual_disclosures": confirmation.actual_disclosures,
+        "actual_files": confirmation.actual_files,
+        "operator_notes": confirmation.operator_notes,
+        "validation_summary": confirmation.validation_summary,
+        "metadata_diff": confirmation.metadata_diff,
+        "reason_codes": confirmation.reason_codes,
+        "next_action": confirmation.next_action,
+        "created_at": confirmation.created_at,
+        "updated_at": confirmation.updated_at,
+    }
+
+def _uploaded_video(uploaded: Any) -> dict[str, Any]:
+    return {
+        "id": uploaded.id,
+        "company_id": uploaded.company_id,
+        "channel_workspace_id": uploaded.channel_workspace_id,
+        "video_project_id": uploaded.video_project_id,
+        "policy_snapshot_id": uploaded.policy_snapshot_id,
+        "publish_handoff_package_id": uploaded.publish_handoff_package_id,
+        "manual_publish_confirmation_id": uploaded.manual_publish_confirmation_id,
+        "render_package_snapshot_id": uploaded.render_package_snapshot_id,
+        "source_manifest_snapshot_id": uploaded.source_manifest_snapshot_id,
+        "rights_envelope_ref": uploaded.rights_envelope_ref,
+        "platform": uploaded.platform,
+        "platform_video_id": uploaded.platform_video_id,
+        "video_url": uploaded.video_url,
+        "published_at": uploaded.published_at,
+        "publish_status": uploaded.publish_status,
+        "actual_metadata": uploaded.actual_metadata,
+        "actual_disclosures": uploaded.actual_disclosures,
+        "lineage_refs": uploaded.lineage_refs,
+        "monitoring_state": uploaded.monitoring_state,
+        "operator_summary": uploaded.operator_summary,
+        "created_at": uploaded.created_at,
+        "updated_at": uploaded.updated_at,
+    }
+
+def _uploaded_video_summary(summary: Any) -> dict[str, Any]:
+    return {
+        "id": summary.id,
+        "uploaded_video_id": summary.uploaded_video_id,
+        "company_id": summary.company_id,
+        "channel_workspace_id": summary.channel_workspace_id,
+        "video_project_id": summary.video_project_id,
+        "platform": summary.platform,
+        "platform_video_id": summary.platform_video_id,
+        "video_url": summary.video_url,
+        "published_at": summary.published_at,
+        "title": summary.title,
+        "publish_status": summary.publish_status,
+        "monitoring_state": summary.monitoring_state,
+        "operator_status": summary.operator_status,
+        "operator_summary": summary.operator_summary,
+        "next_action": summary.next_action,
+        "freshness_state": summary.freshness_state,
+        "created_at": summary.created_at,
+        "updated_at": summary.updated_at,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

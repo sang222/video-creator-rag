@@ -1,0 +1,17 @@
+catalog_key: publish_target_surface_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LONG_FORM
+    description: Long-form surface.
+  - key: SHORT_FORM
+    description: Short-form surface.
+  - key: REELS
+    description: Reels surface.
+  - key: FEED
+    description: Feed surface.
+  - key: STORY
+    description: Story surface.
+  - key: GENERIC
+    description: Generic surface.

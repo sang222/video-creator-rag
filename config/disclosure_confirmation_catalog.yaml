@@ -1,0 +1,17 @@
+catalog_key: disclosure_confirmation_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: AI_DISCLOSURE_CONFIRMED
+    description: AI disclosure choice was confirmed by the human operator.
+  - key: PAID_PROMOTION_DISCLOSURE_CONFIRMED
+    description: Paid promotion disclosure choice was confirmed.
+  - key: MUSIC_LICENSE_CONFIRMED
+    description: Music license was confirmed.
+  - key: STOCK_LICENSE_CONFIRMED
+    description: Stock license was confirmed.
+  - key: RIGHTS_CONFIRMED
+    description: Rights envelope was confirmed.
+  - key: NO_UNLICENSED_ASSETS_CONFIRMED
+    description: Operator confirmed no unlicensed assets were used.

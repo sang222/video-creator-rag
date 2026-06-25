@@ -64,13 +64,17 @@ REQUIRED_TABLES = {
     "media_qc_reports",
     "accessibility_qc_reports",
     "pronunciation_dictionary_entries",
+    "publish_handoff_packages",
+    "manual_publish_confirmations",
+    "uploaded_videos",
+    "uploaded_video_publication_summaries",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0007_m6_production"
+    assert revision == "0008_m7_publish_handoff"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

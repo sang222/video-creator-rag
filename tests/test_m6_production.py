@@ -67,9 +67,7 @@ M6_TABLES = {
     "pronunciation_dictionary_entries",
 }
 
-FORBIDDEN_M7_PLUS_FRAGMENTS = {
-    "publish",
-    "upload",
+FORBIDDEN_M8_PLUS_FRAGMENTS = {
     "analytics_semantic",
     "no_view",
     "memory_promotion",
@@ -148,7 +146,7 @@ def _project_with_m5_inputs(db_session):
 def test_m6_migration_tables_defaults_and_scope_guard(engine, db_session) -> None:
     tables = set(inspect(engine).get_table_names())
     assert M6_TABLES <= tables
-    assert not {table for table in tables for fragment in FORBIDDEN_M7_PLUS_FRAGMENTS if fragment in table}
+    assert not {table for table in tables for fragment in FORBIDDEN_M8_PLUS_FRAGMENTS if fragment in table}
     _, _, _, _, project = _project_with_m5_inputs(db_session)
     run = ProductionArtifactRunService(db_session).create_run(
         data=ProductionArtifactRunCreate(video_project_id=project.id)

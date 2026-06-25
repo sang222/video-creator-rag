@@ -1,0 +1,29 @@
+catalog_key: publish_checklist_category_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: FILE_READY
+    description: Final video file readiness.
+  - key: METADATA_READY
+    description: Planned publish metadata readiness.
+  - key: THUMBNAIL_READY
+    description: Thumbnail readiness.
+  - key: CAPTIONS_READY
+    description: Caption file readiness.
+  - key: AI_DISCLOSURE
+    description: AI disclosure review.
+  - key: PAID_PROMOTION_DISCLOSURE
+    description: Paid promotion disclosure review.
+  - key: MUSIC_LICENSE
+    description: Music license confirmation.
+  - key: STOCK_LICENSE
+    description: Stock license confirmation.
+  - key: RIGHTS_ENVELOPE
+    description: Rights envelope confirmation.
+  - key: PRIVACY_STATUS
+    description: Platform privacy status selection.
+  - key: PLATFORM_SURFACE
+    description: Target platform and surface confirmation.
+  - key: FINAL_HUMAN_REVIEW
+    description: Human final review before pressing publish.

@@ -1,0 +1,15 @@
+catalog_key: publish_handoff_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Handoff package is compiled but not marked ready.
+  - key: READY_FOR_OPERATOR
+    description: Handoff package is ready for human manual upload.
+  - key: BLOCKED
+    description: Handoff package has blocking readiness issues.
+  - key: CONFIRMED_PUBLISHED
+    description: Human publication was confirmed back into VCOS.
+  - key: CANCELLED
+    description: Handoff package was cancelled.

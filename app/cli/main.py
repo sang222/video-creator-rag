@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from app.contracts import (
     GateRunCreate,
     IdeaMarketPreflightCreate,
     ManualActionCreate,
+    ManualPublishConfirmationCreate,
     OpsIncidentCreate,
     PlatformPolicyCatalogCreate,
     PlatformPolicyVersionCreate,
@@ -41,6 +42,7 @@ from app.contracts import (
     ProviderRegistryEntryCreate,
     ProjectAdmissionDecisionCreate,
     ProductionArtifactRunCreate,
+    PublishHandoffCreate,
     QuotaAccountCreate,
     QuotaEventRequest,
     RetrievalPlanSnapshotCreate,
@@ -80,6 +82,7 @@ from app.services import (
     LocalFixtureRendererService,
     MediaQCService,
     ManualActionService,
+    ManualPublishConfirmationService,
     OpsIncidentService,
     PolicySnapshotService,
     PolicyCatalogService,
@@ -89,6 +92,7 @@ from app.services import (
     ProviderRegistryService,
     ProjectAdmissionService,
     ProductionArtifactRunService,
+    PublishHandoffService,
     QuotaService,
     ResourceResolverService,
     RetryOpsService,
@@ -135,6 +139,8 @@ production_app = typer.Typer(no_args_is_help=True)
 media_app = typer.Typer(no_args_is_help=True)
 captions_app = typer.Typer(no_args_is_help=True)
 render_spec_app = typer.Typer(no_args_is_help=True)
+publish_app = typer.Typer(no_args_is_help=True)
+uploaded_video_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
@@ -169,6 +175,8 @@ app.add_typer(production_app, name="production")
 app.add_typer(media_app, name="media")
 app.add_typer(captions_app, name="captions")
 app.add_typer(render_spec_app, name="render-spec")
+app.add_typer(publish_app, name="publish")
+app.add_typer(uploaded_video_app, name="uploaded-video")
 
 
 def _fail(message: str) -> None:
@@ -1459,6 +1467,131 @@ def render_spec_validate(
     except Exception as exc:
         _fail(f"render-spec validate failed: {exc}")
 
+@publish_app.command("handoff-create")
+def publish_handoff_create(
+    render_package_id: uuid.UUID = typer.Option(..., "--render-package-id"),
+    target_platform: str = typer.Option("YOUTUBE", "--target-platform"),
+    target_surface: str = typer.Option("LONG_FORM", "--target-surface"),
+    destination_binding_id: uuid.UUID | None = typer.Option(None, "--destination-binding-id"),
+    render_variant_id: str | None = typer.Option(None, "--render-variant-id"),
+    created_by_user_id: uuid.UUID | None = typer.Option(None, "--created-by-user-id"),
+    planned_metadata_json: str = typer.Option("{}", "--planned-metadata-json"),
+) -> None:
+    try:
+        with session_scope() as session:
+            handoff = PublishHandoffService(session).create_from_render_package(
+                data=PublishHandoffCreate(
+                    render_package_snapshot_id=render_package_id,
+                    target_platform=target_platform,
+                    target_surface=target_surface,
+                    destination_binding_id=destination_binding_id,
+                    render_variant_id=render_variant_id,
+                    created_by_user_id=created_by_user_id,
+                    planned_metadata_overrides=_json_object(planned_metadata_json),
+                )
+            )
+            typer.echo(json.dumps(_publish_handoff_to_dict(handoff)))
+    except Exception as exc:
+        _fail(f"publish handoff-create failed: {exc}")
+
+@publish_app.command("handoff-inspect")
+def publish_handoff_inspect(handoff_id: uuid.UUID = typer.Option(..., "--handoff-id")) -> None:
+    try:
+        with session_scope() as session:
+            handoff = PublishHandoffService(session).require(handoff_id)
+            typer.echo(json.dumps(_publish_handoff_to_dict(handoff)))
+    except Exception as exc:
+        _fail(f"publish handoff-inspect failed: {exc}")
+
+@publish_app.command("handoff-ready")
+def publish_handoff_ready(handoff_id: uuid.UUID = typer.Option(..., "--handoff-id")) -> None:
+    try:
+        with session_scope() as session:
+            handoff = PublishHandoffService(session).mark_ready(handoff_id=handoff_id)
+            typer.echo(json.dumps(_publish_handoff_to_dict(handoff)))
+    except Exception as exc:
+        _fail(f"publish handoff-ready failed: {exc}")
+
+@publish_app.command("confirm-manual")
+def publish_confirm_manual(
+    handoff_id: uuid.UUID = typer.Option(..., "--handoff-id"),
+    actual_video_id: str = typer.Option(..., "--actual-video-id"),
+    actual_video_url: str = typer.Option(..., "--actual-video-url"),
+    actual_published_at: str = typer.Option(..., "--actual-published-at"),
+    actual_metadata_json: str = typer.Option(..., "--actual-metadata-json"),
+    actual_disclosures_json: str = typer.Option(..., "--actual-disclosures-json"),
+    actual_files_json: str = typer.Option("{}", "--actual-files-json"),
+    confirmed_by_user_id: uuid.UUID | None = typer.Option(None, "--confirmed-by-user-id"),
+    operator_notes: str | None = typer.Option(None, "--operator-notes"),
+) -> None:
+    try:
+        with session_scope() as session:
+            confirmation = ManualPublishConfirmationService(session).create_confirmation(
+                data=ManualPublishConfirmationCreate(
+                    publish_handoff_package_id=handoff_id,
+                    confirmed_by_user_id=confirmed_by_user_id,
+                    actual_video_id=actual_video_id,
+                    actual_video_url=actual_video_url,
+                    actual_published_at=datetime.fromisoformat(actual_published_at),
+                    actual_metadata=_json_object(actual_metadata_json),
+                    actual_disclosures=_json_object(actual_disclosures_json),
+                    actual_files=_json_object(actual_files_json),
+                    operator_notes=operator_notes,
+                )
+            )
+            typer.echo(json.dumps(_manual_publish_confirmation_to_dict(confirmation)))
+    except Exception as exc:
+        _fail(f"publish confirm-manual failed: {exc}")
+
+@publish_app.command("confirmation-inspect")
+def publish_confirmation_inspect(confirmation_id: uuid.UUID = typer.Option(..., "--confirmation-id")) -> None:
+    try:
+        with session_scope() as session:
+            confirmation = ManualPublishConfirmationService(session).require_confirmation(confirmation_id)
+            typer.echo(json.dumps(_manual_publish_confirmation_to_dict(confirmation)))
+    except Exception as exc:
+        _fail(f"publish confirmation-inspect failed: {exc}")
+
+@publish_app.command("confirmation-accept")
+def publish_confirmation_accept(confirmation_id: uuid.UUID = typer.Option(..., "--confirmation-id")) -> None:
+    try:
+        with session_scope() as session:
+            uploaded = ManualPublishConfirmationService(session).accept_confirmation(confirmation_id=confirmation_id)
+            typer.echo(json.dumps(_uploaded_video_to_dict(uploaded)))
+    except Exception as exc:
+        _fail(f"publish confirmation-accept failed: {exc}")
+
+@uploaded_video_app.command("inspect")
+def uploaded_video_inspect(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            uploaded = ManualPublishConfirmationService(session).get_uploaded_video(uploaded_video_id)
+            if uploaded is None:
+                _fail(f"uploaded video not found: {uploaded_video_id}")
+            typer.echo(json.dumps(_uploaded_video_to_dict(uploaded)))
+    except Exception as exc:
+        _fail(f"uploaded-video inspect failed: {exc}")
+
+@uploaded_video_app.command("list-by-project")
+def uploaded_video_list_by_project(project_id: uuid.UUID = typer.Option(..., "--project-id")) -> None:
+    try:
+        with session_scope() as session:
+            uploaded = ManualPublishConfirmationService(session).list_uploaded_videos_by_project(project_id)
+            typer.echo(json.dumps([_uploaded_video_to_dict(item) for item in uploaded]))
+    except Exception as exc:
+        _fail(f"uploaded-video list-by-project failed: {exc}")
+
+@uploaded_video_app.command("summary")
+def uploaded_video_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            summary = ManualPublishConfirmationService(session).get_publication_summary(uploaded_video_id)
+            if summary is None:
+                _fail(f"uploaded video summary not found: {uploaded_video_id}")
+            typer.echo(json.dumps(_uploaded_video_summary_to_dict(summary)))
+    except Exception as exc:
+        _fail(f"uploaded-video summary failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -1790,6 +1923,91 @@ def _media_qc_to_dict(report: Any) -> dict[str, Any]:
         "duration_check": report.duration_check,
         "file_integrity_check": report.file_integrity_check,
         "manifest_check": report.manifest_check,
+    }
+
+def _publish_handoff_to_dict(handoff: Any) -> dict[str, Any]:
+    return {
+        "id": str(handoff.id),
+        "video_project_id": str(handoff.video_project_id),
+        "policy_snapshot_id": str(handoff.policy_snapshot_id),
+        "render_package_snapshot_id": str(handoff.render_package_snapshot_id),
+        "render_spec_snapshot_id": str(handoff.render_spec_snapshot_id) if handoff.render_spec_snapshot_id else None,
+        "media_qc_report_id": str(handoff.media_qc_report_id) if handoff.media_qc_report_id else None,
+        "accessibility_qc_report_id": str(handoff.accessibility_qc_report_id) if handoff.accessibility_qc_report_id else None,
+        "source_manifest_snapshot_id": str(handoff.source_manifest_snapshot_id) if handoff.source_manifest_snapshot_id else None,
+        "asset_manifest_snapshot_id": str(handoff.asset_manifest_snapshot_id) if handoff.asset_manifest_snapshot_id else None,
+        "target_platform": handoff.target_platform,
+        "target_surface": handoff.target_surface,
+        "package_state": handoff.package_state,
+        "planned_metadata": handoff.planned_metadata,
+        "planned_disclosures": handoff.planned_disclosures,
+        "planned_files": handoff.planned_files,
+        "checklist_snapshot": handoff.checklist_snapshot,
+        "operator_instructions": handoff.operator_instructions,
+        "risk_summary": handoff.risk_summary,
+        "reason_codes": handoff.reason_codes,
+        "next_action": handoff.next_action,
+    }
+
+def _manual_publish_confirmation_to_dict(confirmation: Any) -> dict[str, Any]:
+    return {
+        "id": str(confirmation.id),
+        "publish_handoff_package_id": str(confirmation.publish_handoff_package_id),
+        "video_project_id": str(confirmation.video_project_id),
+        "policy_snapshot_id": str(confirmation.policy_snapshot_id),
+        "target_platform": confirmation.target_platform,
+        "target_surface": confirmation.target_surface,
+        "confirmation_state": confirmation.confirmation_state,
+        "actual_video_id": confirmation.actual_video_id,
+        "actual_video_url": confirmation.actual_video_url,
+        "actual_published_at": confirmation.actual_published_at.isoformat() if confirmation.actual_published_at else None,
+        "actual_metadata": confirmation.actual_metadata,
+        "actual_disclosures": confirmation.actual_disclosures,
+        "actual_files": confirmation.actual_files,
+        "validation_summary": confirmation.validation_summary,
+        "metadata_diff": confirmation.metadata_diff,
+        "reason_codes": confirmation.reason_codes,
+        "next_action": confirmation.next_action,
+    }
+
+def _uploaded_video_to_dict(uploaded: Any) -> dict[str, Any]:
+    return {
+        "id": str(uploaded.id),
+        "video_project_id": str(uploaded.video_project_id),
+        "policy_snapshot_id": str(uploaded.policy_snapshot_id),
+        "publish_handoff_package_id": str(uploaded.publish_handoff_package_id),
+        "manual_publish_confirmation_id": str(uploaded.manual_publish_confirmation_id),
+        "render_package_snapshot_id": str(uploaded.render_package_snapshot_id),
+        "source_manifest_snapshot_id": str(uploaded.source_manifest_snapshot_id) if uploaded.source_manifest_snapshot_id else None,
+        "rights_envelope_ref": uploaded.rights_envelope_ref,
+        "platform": uploaded.platform,
+        "platform_video_id": uploaded.platform_video_id,
+        "video_url": uploaded.video_url,
+        "published_at": uploaded.published_at.isoformat(),
+        "publish_status": uploaded.publish_status,
+        "actual_metadata": uploaded.actual_metadata,
+        "actual_disclosures": uploaded.actual_disclosures,
+        "lineage_refs": uploaded.lineage_refs,
+        "monitoring_state": uploaded.monitoring_state,
+        "operator_summary": uploaded.operator_summary,
+    }
+
+def _uploaded_video_summary_to_dict(summary: Any) -> dict[str, Any]:
+    return {
+        "id": str(summary.id),
+        "uploaded_video_id": str(summary.uploaded_video_id),
+        "video_project_id": str(summary.video_project_id),
+        "platform": summary.platform,
+        "platform_video_id": summary.platform_video_id,
+        "video_url": summary.video_url,
+        "published_at": summary.published_at.isoformat(),
+        "title": summary.title,
+        "publish_status": summary.publish_status,
+        "monitoring_state": summary.monitoring_state,
+        "operator_status": summary.operator_status,
+        "operator_summary": summary.operator_summary,
+        "next_action": summary.next_action,
+        "freshness_state": summary.freshness_state,
     }
 
 def _json_object(value: str) -> dict[str, Any]:

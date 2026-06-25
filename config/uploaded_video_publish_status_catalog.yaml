@@ -1,0 +1,13 @@
+catalog_key: uploaded_video_publish_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CONFIRMED
+    description: Human confirmed the external published video.
+  - key: REVIEW_REQUIRED
+    description: Published video record needs operator review.
+  - key: REMOVED
+    description: External video is removed.
+  - key: UNKNOWN
+    description: External publish status is unknown.

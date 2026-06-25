@@ -89,8 +89,10 @@ M4_TABLES = {
 FORBIDDEN_SCOPE_FRAGMENTS = {
     "vector",
     "embedding",
-    "publish",
-    "upload",
+    "publish_upload",
+    "upload_jobs",
+    "upload_attempts",
+    "auto_reupload",
     "semantic",
     "memory_promotion",
     "dashboard",
@@ -133,7 +135,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0007_m6_production"
+    assert revision == "0008_m7_publish_handoff"
 
 
 def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:
@@ -445,4 +447,4 @@ def test_m4_scope_guard_no_m5_plus_tables_or_services(engine) -> None:
     for term in forbidden_terms:
         assert term not in app_text
     routes = {route.path for route in create_app().routes}
-    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "publish", "dashboard"])}
+    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "analytics", "dashboard"])}

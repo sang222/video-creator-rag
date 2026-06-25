@@ -1,0 +1,13 @@
+catalog_key: metadata_diff_severity_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NONE
+    description: No planned-vs-actual metadata change.
+  - key: LOW
+    description: Low severity metadata change.
+  - key: MEDIUM
+    description: Medium severity metadata change requiring review.
+  - key: HIGH
+    description: High severity disclosure or rights change requiring review.

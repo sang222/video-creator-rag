@@ -1,0 +1,17 @@
+catalog_key: manual_publish_confirmation_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Confirmation data is not submitted.
+  - key: SUBMITTED
+    description: Confirmation data is submitted and can be accepted.
+  - key: ACCEPTED
+    description: Confirmation was accepted and uploaded video was recorded.
+  - key: REVIEW_REQUIRED
+    description: Confirmation requires disclosure, license, or metadata review.
+  - key: REJECTED
+    description: Confirmation was rejected.
+  - key: CANCELLED
+    description: Confirmation was cancelled.

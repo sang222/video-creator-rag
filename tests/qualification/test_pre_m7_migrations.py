@@ -7,13 +7,13 @@ from app.contracts import ProviderRegistryEntryCreate
 from app.db.models import AuditEvent, DomainEvent, ProviderRegistryEntry, VideoProject
 from app.services import ProviderRegistryService
 
-from .helpers.qualification_asserts import EXPECTED_ALEMBIC_HEAD, EXPECTED_M0_M6_TABLES, FORBIDDEN_M7_PLUS_TABLES
+from .helpers.qualification_asserts import EXPECTED_ALEMBIC_HEAD, EXPECTED_M0_M6_TABLES, FORBIDDEN_M8_PLUS_TABLES
 
 
 def test_m0_to_m6_schema_head_tables_and_json_defaults(engine, qualification_factory) -> None:
     tables = set(inspect(engine).get_table_names())
     assert EXPECTED_M0_M6_TABLES <= tables
-    assert tables.isdisjoint(FORBIDDEN_M7_PLUS_TABLES)
+    assert tables.isdisjoint(FORBIDDEN_M8_PLUS_TABLES)
     assert tables <= EXPECTED_M0_M6_TABLES | {"alembic_version"}
     with engine.connect() as connection:
         assert connection.execute(text("select version_num from alembic_version")).scalar_one() == EXPECTED_ALEMBIC_HEAD

@@ -10,9 +10,10 @@ ROOT = Path(__file__).resolve().parents[3]
 REQUIRED_TAGS = {
     "m5-daily-run-context-admission",
     "m6-production-media-qc-foundation",
+    "pre-m7-m0-m6-qualification-pass",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0007_m6_production"
+EXPECTED_ALEMBIC_HEAD = "0008_m7_publish_handoff"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -25,6 +26,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m4-ops-foundation.md",
     "docs/architecture/m5-daily-run-context-admission.md",
     "docs/architecture/m6-production-artifacts.md",
+    "docs/architecture/m7-manual-publish-handoff.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -32,6 +34,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m4-final-report.md",
     "reports/m5-final-report.md",
     "reports/m6-final-report.md",
+    "reports/m7-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }
@@ -121,16 +124,16 @@ EXPECTED_M0_M6_TABLES = {
     "media_qc_reports",
     "accessibility_qc_reports",
     "pronunciation_dictionary_entries",
-}
-
-FORBIDDEN_M7_PLUS_TABLES = {
-    "publish_packages",
     "publish_handoff_packages",
     "manual_publish_confirmations",
-    "upload_jobs",
-    "upload_attempts",
     "uploaded_videos",
     "uploaded_video_publication_summaries",
+}
+
+FORBIDDEN_M8_PLUS_TABLES = {
+    "publish_packages",
+    "upload_jobs",
+    "upload_attempts",
     "platform_processing_statuses",
     "analytics_snapshots",
     "analytics_events",

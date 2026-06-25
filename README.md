@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, and M6 production artifact/local media QC foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, and M7 manual publish handoff foundation.
 
 ## Stack
 
@@ -136,6 +136,22 @@ vcos render-spec validate --render-spec-snapshot-id <render-spec-snapshot-id>
 
 M6 adds production artifact runs, strict script/narration/caption/visual plan/scene manifest/RenderSpec contracts, source and rights manifests, platform render variants, local fixture rendering, render packages, and MediaQC/AccessibilityQC. M6 uses MockLLMProvider plus local FFmpeg only when available. If FFmpeg/ffprobe is unavailable, local video smoke is BLOCKED with a reason code instead of faking a pass.
 
+## M7 Commands
+
+```bash
+vcos publish handoff-create --render-package-id <render-package-id>
+vcos publish handoff-inspect --handoff-id <handoff-id>
+vcos publish handoff-ready --handoff-id <handoff-id>
+vcos publish confirm-manual --handoff-id <handoff-id> --actual-video-id <platform-video-id> --actual-video-url <url> --actual-published-at <iso-datetime> --actual-metadata-json '{"actual_title":"Title","actual_privacy_status":"PUBLIC"}' --actual-disclosures-json '{"ai_disclosure_confirmed":false,"rights_confirmed":true}'
+vcos publish confirmation-inspect --confirmation-id <confirmation-id>
+vcos publish confirmation-accept --confirmation-id <confirmation-id>
+vcos uploaded-video inspect --uploaded-video-id <uploaded-video-id>
+vcos uploaded-video list-by-project --project-id <project-id>
+vcos uploaded-video summary --uploaded-video-id <uploaded-video-id>
+```
+
+M7 turns an M6 render package into an operator-friendly manual publish handoff and captures the human-entered actual publish result. `vcos publish` means handoff/confirmation only. VCOS does not upload, auto-publish, call platform APIs, run OAuth upload flow, schedule uploads, or collect analytics in M7.
+
 ## Boundaries
 
-M0-M6 do not implement publishing, analytics, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, or platform evasion systems. M6 adds local/mock media package and QC foundation only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M7 do not implement auto upload, platform publish APIs, analytics, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, no-view diagnostics, or platform evasion systems. M7 adds manual handoff and human confirmation capture only. CapCut pilot notes do not make CapCut a production dependency.

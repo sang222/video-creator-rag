@@ -1,0 +1,17 @@
+catalog_key: publish_target_platform_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: YOUTUBE
+    description: YouTube long-form video target.
+  - key: YOUTUBE_SHORTS
+    description: YouTube Shorts target.
+  - key: TIKTOK
+    description: TikTok video target.
+  - key: FACEBOOK
+    description: Facebook video target.
+  - key: INSTAGRAM
+    description: Instagram video target.
+  - key: GENERIC
+    description: Generic manual publish target.

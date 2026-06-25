@@ -1,0 +1,59 @@
+catalog_key: m7_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: PUBLISH_HANDOFF_CREATED
+    description: Manual publish handoff package was created.
+  - code: PUBLISH_HANDOFF_READY
+    description: Handoff package is ready for a human operator.
+  - code: PUBLISH_HANDOFF_BLOCKED
+    description: Handoff package is blocked.
+  - code: RENDER_PACKAGE_NOT_READY
+    description: Render package is missing or not ready for handoff.
+  - code: MEDIA_QC_NOT_PASSING
+    description: Media QC is missing or not passing.
+  - code: ACCESSIBILITY_QC_REVIEW_REQUIRED
+    description: Accessibility QC requires review.
+  - code: CAPTION_FILE_MISSING
+    description: Caption file is missing.
+  - code: THUMBNAIL_REF_MISSING
+    description: Thumbnail reference is missing or optional.
+  - code: RIGHTS_CONFIRMATION_REQUIRED
+    description: Rights confirmation is required.
+  - code: AI_DISCLOSURE_REQUIRED
+    description: AI disclosure is required.
+  - code: AI_DISCLOSURE_NOT_CONFIRMED
+    description: Required AI disclosure was not confirmed.
+  - code: PAID_PROMOTION_DISCLOSURE_REQUIRED
+    description: Paid promotion disclosure is required.
+  - code: MUSIC_LICENSE_CONFIRMATION_REQUIRED
+    description: Music license confirmation is required.
+  - code: STOCK_LICENSE_CONFIRMATION_REQUIRED
+    description: Stock license confirmation is required.
+  - code: ACTUAL_VIDEO_ID_REQUIRED
+    description: Actual platform video id is required.
+  - code: ACTUAL_VIDEO_URL_REQUIRED
+    description: Actual video URL is required.
+  - code: ACTUAL_PUBLISHED_AT_REQUIRED
+    description: Actual published timestamp is required.
+  - code: PLATFORM_VIDEO_ID_DUPLICATE
+    description: Platform video id already exists for the channel and platform.
+  - code: INVALID_VIDEO_URL
+    description: Actual video URL is syntactically invalid.
+  - code: ACTUAL_METADATA_CAPTURED
+    description: Actual manual publish metadata was captured.
+  - code: METADATA_DIFF_DETECTED
+    description: Planned-vs-actual metadata diff was detected.
+  - code: MANUAL_PUBLISH_CONFIRMED
+    description: Human manual publish confirmation was accepted.
+  - code: UPLOADED_VIDEO_CREATED
+    description: Uploaded video record was created.
+  - code: READY_FOR_ANALYTICS
+    description: Uploaded video is ready for a future analytics milestone.
+  - code: OPERATOR_REVIEW_REQUIRED
+    description: Operator review is required.
+  - code: NO_PLATFORM_API_CALL
+    description: No platform publish API call was made.
+  - code: AUTO_PUBLISH_NOT_SUPPORTED
+    description: Auto publish is not supported in M7.

@@ -21,6 +21,7 @@ def test_config_yaml_validates(db_session) -> None:
         "context_pack_purpose_catalog",
         "daily_run_status_catalog",
         "decision_rights_policy",
+        "disclosure_confirmation_catalog",
         "evidence_type_catalog",
         "event_types",
         "export_profile_catalog",
@@ -37,7 +38,10 @@ def test_config_yaml_validates(db_session) -> None:
         "m4_reason_code_catalog",
         "m5_reason_code_catalog",
         "m6_reason_code_catalog",
+        "m7_reason_code_catalog",
         "manual_action_type_catalog",
+        "manual_publish_confirmation_state_catalog",
+        "metadata_diff_severity_catalog",
         "media_qc_state_catalog",
         "media_render_job_status_catalog",
         "niche_profile_templates",
@@ -45,6 +49,10 @@ def test_config_yaml_validates(db_session) -> None:
         "platform_policy_catalog",
         "platform_surface_catalog",
         "policy_domain_catalog",
+        "publish_checklist_category_catalog",
+        "publish_handoff_state_catalog",
+        "publish_target_platform_catalog",
+        "publish_target_surface_catalog",
         "provider_registry_catalog",
         "provider_source_class_catalog",
         "provider_status_catalog",
@@ -68,6 +76,8 @@ def test_config_yaml_validates(db_session) -> None:
         "search_demand_source_type_catalog",
         "slot_type_catalog",
         "source_decision_catalog",
+        "uploaded_video_monitoring_state_catalog",
+        "uploaded_video_publish_status_catalog",
     }
 
 
@@ -84,7 +94,7 @@ def test_config_seed_idempotent(db_session) -> None:
     service.seed([ROOT / "config"])
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
-    assert catalog_count == 55
+    assert catalog_count == 65
     assert role_count == 3
 
 
