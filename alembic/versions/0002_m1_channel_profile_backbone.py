@@ -132,9 +132,38 @@ def upgrade() -> None:
     op.create_index("ix_compiled_channel_policy_snapshots_channel_workspace_id", "compiled_channel_policy_snapshots", ["channel_workspace_id"])
     op.create_index("ix_compiled_channel_policy_snapshots_channel_profile_version_id", "compiled_channel_policy_snapshots", ["channel_profile_version_id"])
     op.create_index("ix_compiled_channel_policy_snapshots_created_at", "compiled_channel_policy_snapshots", ["created_at"])
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION prevent_policy_snapshot_immutable_field_update()
+        RETURNS trigger AS $$
+        BEGIN
+            IF OLD.channel_workspace_id IS DISTINCT FROM NEW.channel_workspace_id
+                OR OLD.channel_profile_version_id IS DISTINCT FROM NEW.channel_profile_version_id
+                OR OLD.compile_run_id IS DISTINCT FROM NEW.compile_run_id
+                OR OLD.snapshot_version IS DISTINCT FROM NEW.snapshot_version
+                OR OLD.compiler_version IS DISTINCT FROM NEW.compiler_version
+                OR OLD.capability_matrix_version IS DISTINCT FROM NEW.capability_matrix_version
+                OR OLD.compiled_payload IS DISTINCT FROM NEW.compiled_payload
+                OR OLD.content_hash IS DISTINCT FROM NEW.content_hash
+                OR OLD.profile_input_hash IS DISTINCT FROM NEW.profile_input_hash
+                OR OLD.created_at IS DISTINCT FROM NEW.created_at
+            THEN
+                RAISE EXCEPTION 'compiled_channel_policy_snapshots immutable fields cannot be changed after creation';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        CREATE TRIGGER trg_prevent_policy_snapshot_immutable_field_update
+        BEFORE UPDATE ON compiled_channel_policy_snapshots
+        FOR EACH ROW EXECUTE FUNCTION prevent_policy_snapshot_immutable_field_update();
+        """
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS trg_prevent_policy_snapshot_immutable_field_update ON compiled_channel_policy_snapshots")
+    op.execute("DROP FUNCTION IF EXISTS prevent_policy_snapshot_immutable_field_update()")
     op.drop_index("ix_compiled_channel_policy_snapshots_created_at", table_name="compiled_channel_policy_snapshots")
     op.drop_index("ix_compiled_channel_policy_snapshots_channel_profile_version_id", table_name="compiled_channel_policy_snapshots")
     op.drop_index("ix_compiled_channel_policy_snapshots_channel_workspace_id", table_name="compiled_channel_policy_snapshots")
