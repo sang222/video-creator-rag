@@ -1,0 +1,17 @@
+catalog_key: analytics_sync_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PENDING
+    description: Sync run is created and waiting.
+  - key: RUNNING
+    description: Sync run is executing locally.
+  - key: COMPLETED
+    description: Sync run completed and created a snapshot.
+  - key: BLOCKED
+    description: Sync run is blocked and requires an operational next action.
+  - key: FAILED
+    description: Sync run failed validation or provider contract execution.
+  - key: CANCELLED
+    description: Sync run was cancelled before completion.

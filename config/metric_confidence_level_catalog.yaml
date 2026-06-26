@@ -1,0 +1,13 @@
+catalog_key: metric_confidence_level_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HIGH
+    description: Metric source confidence is high.
+  - key: MEDIUM
+    description: Metric source confidence is medium.
+  - key: LOW
+    description: Metric source confidence is low.
+  - key: UNKNOWN
+    description: Metric source confidence is unknown.

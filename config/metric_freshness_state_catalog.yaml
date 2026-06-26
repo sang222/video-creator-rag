@@ -1,0 +1,13 @@
+catalog_key: metric_freshness_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: FRESH
+    description: Metric data is current enough for diagnostics later.
+  - key: STALE
+    description: Metric data exists but is stale.
+  - key: UNKNOWN
+    description: Metric freshness is unknown.
+  - key: NOT_AVAILABLE
+    description: Metric freshness is not available.

@@ -1,0 +1,19 @@
+catalog_key: analytics_observation_window_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: T_PLUS_1H
+    description: One hour after publication.
+  - key: T_PLUS_6H
+    description: Six hours after publication.
+  - key: T_PLUS_24H
+    description: Twenty-four hours after publication.
+  - key: T_PLUS_48H
+    description: Forty-eight hours after publication.
+  - key: T_PLUS_7D
+    description: Seven days after publication.
+  - key: CUSTOM
+    description: Custom observed window.
+  - key: UNKNOWN
+    description: Observed window is unknown.

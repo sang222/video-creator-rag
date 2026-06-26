@@ -1,0 +1,53 @@
+catalog_key: m8_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: ANALYTICS_SYNC_CREATED
+    description: Analytics sync run was created.
+  - code: ANALYTICS_SYNC_COMPLETED
+    description: Analytics sync run completed.
+  - code: ANALYTICS_SYNC_BLOCKED
+    description: Analytics sync run was blocked.
+  - code: ANALYTICS_SYNC_FAILED
+    description: Analytics sync run failed.
+  - code: ANALYTICS_PROVIDER_MOCK_USED
+    description: Mock analytics provider was used.
+  - code: ANALYTICS_PROVIDER_REAL_DISABLED
+    description: Real analytics provider placeholder is disabled.
+  - code: MANUAL_ANALYTICS_IMPORTED
+    description: Manual analytics import was accepted.
+  - code: ANALYTICS_SNAPSHOT_CREATED
+    description: Analytics snapshot was created.
+  - code: TRAFFIC_SOURCE_SNAPSHOT_CREATED
+    description: Traffic source snapshot was created.
+  - code: RETENTION_CURVE_SNAPSHOT_CREATED
+    description: Retention curve snapshot was created.
+  - code: ENGAGEMENT_SNAPSHOT_CREATED
+    description: Engagement snapshot was created.
+  - code: METRIC_AVAILABILITY_CREATED
+    description: Metric availability snapshot was created.
+  - code: METRIC_UNAVAILABLE
+    description: Metric is explicitly unavailable.
+  - code: METRIC_UNKNOWN
+    description: Metric availability is unknown.
+  - code: METRIC_VALUE_INVALID
+    description: Metric value is invalid.
+  - code: PLATFORM_VIDEO_ID_MISMATCH
+    description: Import platform video id does not match uploaded video.
+  - code: UPLOADED_VIDEO_NOT_READY_FOR_ANALYTICS
+    description: Uploaded video is not ready for analytics.
+  - code: ANALYTICS_FRESH
+    description: Analytics data is fresh.
+  - code: ANALYTICS_STALE
+    description: Analytics data is stale.
+  - code: PARTIAL_ANALYTICS_DATA
+    description: Some analytics metrics are unknown or unavailable.
+  - code: NO_ANALYTICS_DATA_YET
+    description: No analytics data exists yet.
+  - code: READY_FOR_DIAGNOSTICS
+    description: Snapshot exists for later diagnostics.
+  - code: NO_DIAGNOSIS_IN_M8
+    description: M8 stores metrics only and performs no diagnosis.
+  - code: NO_NETWORK_ANALYTICS_CALL
+    description: Analytics sync made no external network call.

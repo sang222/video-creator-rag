@@ -97,6 +97,19 @@ from app.contracts.m7 import (
     UploadedVideoPublicationSummaryRead,
     UploadedVideoRead,
 )
+from app.contracts.m8 import (
+    AnalyticsSnapshotRead,
+    AnalyticsSyncRunCreate,
+    AnalyticsSyncRunExecuteRequest,
+    AnalyticsSyncRunRead,
+    EngagementSnapshotRead,
+    ManualAnalyticsImportContract,
+    MetricAvailabilitySnapshotRead,
+    MetricDefinitionVersionRead,
+    RetentionCurveSnapshotRead,
+    TrafficSourceSnapshotRead,
+    UploadedVideoMetricsSummaryRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -243,6 +256,17 @@ __all__ = [
     "PublishHandoffRead",
     "UploadedVideoPublicationSummaryRead",
     "UploadedVideoRead",
+    "AnalyticsSnapshotRead",
+    "AnalyticsSyncRunCreate",
+    "AnalyticsSyncRunExecuteRequest",
+    "AnalyticsSyncRunRead",
+    "EngagementSnapshotRead",
+    "ManualAnalyticsImportContract",
+    "MetricAvailabilitySnapshotRead",
+    "MetricDefinitionVersionRead",
+    "RetentionCurveSnapshotRead",
+    "TrafficSourceSnapshotRead",
+    "UploadedVideoMetricsSummaryRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

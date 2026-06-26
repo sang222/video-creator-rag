@@ -153,7 +153,6 @@ FORBIDDEN_TABLE_FRAGMENTS = {
     "upload_jobs",
     "upload_attempts",
     "auto_reupload",
-    "analytics",
     "semantic",
     "memory_promotion",
     "dashboard",
@@ -265,7 +264,9 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0004_m3_policy_gate_readiness",
         "0005_m4_ops_foundation",
         "0006_m5_daily_run",
+        "0007_m6_production",
         "0008_m7_publish_handoff",
+        "0009_m8_analytics_sync",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -275,6 +276,8 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         {"provider_registry_entries", "quota_events", "system_health_snapshots"},
         {"channel_daily_runs", "context_pack_snapshots", "project_admission_decisions"},
         {"production_artifact_runs", "render_spec_snapshots", "media_qc_reports"},
+        {"publish_handoff_packages", "manual_publish_confirmations", "uploaded_videos"},
+        {"analytics_sync_runs", "analytics_snapshots", "uploaded_video_metrics_summaries"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:
@@ -318,7 +321,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 65
+    assert second["config"] == 74
     assert second["gates"] == 15
 
 
@@ -651,4 +654,4 @@ def test_scope_guard_scans_schema_routes_cli_services_and_imports(engine) -> Non
         assert f"import {forbidden}" not in app_text
         assert f"from {forbidden}" not in app_text
     routes = {route.path for route in create_app().routes}
-    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "analytics", "dashboard"])}
+    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "dashboard"])}

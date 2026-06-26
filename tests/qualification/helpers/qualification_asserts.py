@@ -11,9 +11,10 @@ REQUIRED_TAGS = {
     "m5-daily-run-context-admission",
     "m6-production-media-qc-foundation",
     "pre-m7-m0-m6-qualification-pass",
+    "m7-manual-publish-handoff",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0008_m7_publish_handoff"
+EXPECTED_ALEMBIC_HEAD = "0009_m8_analytics_sync"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -27,6 +28,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m5-daily-run-context-admission.md",
     "docs/architecture/m6-production-artifacts.md",
     "docs/architecture/m7-manual-publish-handoff.md",
+    "docs/architecture/m8-analytics-sync.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -35,6 +37,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m5-final-report.md",
     "reports/m6-final-report.md",
     "reports/m7-final-report.md",
+    "reports/m8-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }
@@ -128,6 +131,14 @@ EXPECTED_M0_M6_TABLES = {
     "manual_publish_confirmations",
     "uploaded_videos",
     "uploaded_video_publication_summaries",
+    "analytics_sync_runs",
+    "metric_definition_versions",
+    "metric_availability_snapshots",
+    "analytics_snapshots",
+    "traffic_source_snapshots",
+    "retention_curve_snapshots",
+    "engagement_snapshots",
+    "uploaded_video_metrics_summaries",
 }
 
 FORBIDDEN_M8_PLUS_TABLES = {
@@ -135,7 +146,6 @@ FORBIDDEN_M8_PLUS_TABLES = {
     "upload_jobs",
     "upload_attempts",
     "platform_processing_statuses",
-    "analytics_snapshots",
     "analytics_events",
     "analytics_semantic_layers",
     "performance_summaries",

@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.errors import ConfigVersionConflictError
-from app.db.models import ConfigCatalogVersion, Role
+from app.db.models import ConfigCatalogVersion, MetricDefinitionVersion, Role
 from app.services.config_registry import ConfigRegistryService
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +15,9 @@ def test_config_yaml_validates(db_session) -> None:
     assert {catalog.catalog_key for catalog in loaded} == {
         "artifact_type_registry",
         "admission_decision_catalog",
+        "analytics_observation_window_catalog",
+        "analytics_sync_mode_catalog",
+        "analytics_sync_state_catalog",
         "accessibility_qc_state_catalog",
         "asset_source_type_catalog",
         "capability_matrix",
@@ -39,9 +42,15 @@ def test_config_yaml_validates(db_session) -> None:
         "m5_reason_code_catalog",
         "m6_reason_code_catalog",
         "m7_reason_code_catalog",
+        "m8_reason_code_catalog",
         "manual_action_type_catalog",
         "manual_publish_confirmation_state_catalog",
         "metadata_diff_severity_catalog",
+        "metric_confidence_level_catalog",
+        "metric_definition_catalog",
+        "metric_freshness_state_catalog",
+        "metric_group_catalog",
+        "metric_unit_catalog",
         "media_qc_state_catalog",
         "media_render_job_status_catalog",
         "niche_profile_templates",
@@ -94,8 +103,10 @@ def test_config_seed_idempotent(db_session) -> None:
     service.seed([ROOT / "config"])
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
-    assert catalog_count == 65
+    metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
+    assert catalog_count == 74
     assert role_count == 3
+    assert metric_definition_count == 16
 
 
 def test_config_version_conflict_is_blocked(db_session, tmp_path) -> None:

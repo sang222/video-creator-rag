@@ -84,6 +84,16 @@ from app.db.models.m7 import (
     UploadedVideo,
     UploadedVideoPublicationSummary,
 )
+from app.db.models.m8 import (
+    AnalyticsSnapshot,
+    AnalyticsSyncRun,
+    EngagementSnapshot,
+    MetricAvailabilitySnapshot,
+    MetricDefinitionVersion,
+    RetentionCurveSnapshot,
+    TrafficSourceSnapshot,
+    UploadedVideoMetricsSummary,
+)
 
 __all__ = [
     "AuditEvent",
@@ -156,4 +166,12 @@ __all__ = [
     "PublishHandoffPackage",
     "UploadedVideo",
     "UploadedVideoPublicationSummary",
+    "AnalyticsSnapshot",
+    "AnalyticsSyncRun",
+    "EngagementSnapshot",
+    "MetricAvailabilitySnapshot",
+    "MetricDefinitionVersion",
+    "RetentionCurveSnapshot",
+    "TrafficSourceSnapshot",
+    "UploadedVideoMetricsSummary",
 ]

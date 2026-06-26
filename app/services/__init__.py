@@ -65,6 +65,7 @@ from app.services.m7 import (
     ManualPublishConfirmationService,
     PublishHandoffService,
 )
+from app.services.m8 import AnalyticsSyncService
 
 __all__ = [
     "AuditService",
@@ -118,6 +119,7 @@ __all__ = [
     "VisualPlanService",
     "ManualPublishConfirmationService",
     "PublishHandoffService",
+    "AnalyticsSyncService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

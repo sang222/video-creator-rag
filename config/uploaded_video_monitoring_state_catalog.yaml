@@ -1,5 +1,5 @@
 catalog_key: uploaded_video_monitoring_state_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -7,6 +7,16 @@ items:
     description: Analytics monitoring has not started.
   - key: READY_FOR_ANALYTICS
     description: Uploaded video has valid external id and URL for future analytics.
+  - key: SYNCED
+    description: Latest analytics snapshot is synced in the M8 read model.
+  - key: PARTIAL_DATA
+    description: Latest analytics snapshot has some unknown metrics.
+  - key: NO_DATA_YET
+    description: No analytics snapshot exists yet.
+  - key: STALE
+    description: Latest analytics snapshot exists but is stale.
+  - key: BLOCKED
+    description: Analytics sync is operationally blocked.
   - key: PAUSED
     description: Future monitoring is paused.
   - key: NOT_SUPPORTED

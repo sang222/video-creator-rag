@@ -135,7 +135,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0008_m7_publish_handoff"
+    assert revision == "0009_m8_analytics_sync"
 
 
 def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:
@@ -258,7 +258,8 @@ def test_cost_events_are_append_only_and_not_pnl(db_session) -> None:
         db_session.commit()
     db_session.rollback()
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
-    assert "revenue" not in app_text.lower()
+    app_text_without_disabled_placeholder = app_text.lower().replace("revenue_disabled", "")
+    assert "revenue" not in app_text_without_disabled_placeholder
     assert "pnl" not in app_text.lower()
 
 
@@ -447,4 +448,4 @@ def test_m4_scope_guard_no_m5_plus_tables_or_services(engine) -> None:
     for term in forbidden_terms:
         assert term not in app_text
     routes = {route.path for route in create_app().routes}
-    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "analytics", "dashboard"])}
+    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "dashboard"])}

@@ -1,0 +1,19 @@
+catalog_key: metric_unit_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: COUNT
+    description: Count value.
+  - key: PERCENT
+    description: Percent value.
+  - key: SECONDS
+    description: Seconds value.
+  - key: MINUTES
+    description: Minutes value.
+  - key: RATIO
+    description: Ratio value.
+  - key: CURRENCY
+    description: Currency placeholder disabled in M8.
+  - key: UNKNOWN
+    description: Unknown unit.

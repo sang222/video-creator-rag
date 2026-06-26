@@ -1,0 +1,19 @@
+catalog_key: metric_group_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: REACH
+    description: Reach and distribution metrics.
+  - key: ENGAGEMENT
+    description: Audience interaction metrics.
+  - key: RETENTION
+    description: Watch duration and retention metrics.
+  - key: TRAFFIC
+    description: Traffic source metrics.
+  - key: AUDIENCE
+    description: Audience growth metrics.
+  - key: REVENUE_DISABLED
+    description: Revenue metric placeholder disabled in M8.
+  - key: OTHER
+    description: Other metric group.

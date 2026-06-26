@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict
 from app.contracts import (
     ApprovalDecisionCreate,
     ApprovalDecisionRead,
+    AnalyticsSnapshotRead,
+    AnalyticsSyncRunCreate,
+    AnalyticsSyncRunExecuteRequest,
+    AnalyticsSyncRunRead,
     ArtifactCreate,
     ArtifactRead,
     ArtifactVersionCreate,
@@ -44,6 +48,7 @@ from app.contracts import (
     IdeaMarketPreflightRead,
     ManualActionCreate,
     ManualActionRead,
+    ManualAnalyticsImportContract,
     ManualPublishConfirmationCreate,
     ManualPublishConfirmationRead,
     OpsIncidentCreate,
@@ -77,6 +82,7 @@ from app.contracts import (
     QuotaEventRead,
     QuotaEventRequest,
     RenderLocalSmokeRequest,
+    RetentionCurveSnapshotRead,
     RetrievalPlanSnapshotCreate,
     RetrievalPlanSnapshotRead,
     ReviewFindingCreate,
@@ -91,7 +97,9 @@ from app.contracts import (
     SearchDemandEvidenceCreate,
     SearchDemandEvidenceRead,
     SystemHealthSnapshotRead,
+    TrafficSourceSnapshotRead,
     UploadedVideoPublicationSummaryRead,
+    UploadedVideoMetricsSummaryRead,
     UploadedVideoRead,
     VideoProjectCreate,
     VideoProjectRead,
@@ -110,6 +118,7 @@ from app.core.logging import configure_logging
 from app.db.session import session_scope
 from app.services import (
     AccessibilityQCService,
+    AnalyticsSyncService,
     ChannelProfileCompiler,
     ChannelProfileService,
     ChannelWorkspaceService,
@@ -1164,6 +1173,94 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/analytics-sync-runs", response_model=AnalyticsSyncRunRead)
+    def create_analytics_sync_run(data: AnalyticsSyncRunCreate) -> AnalyticsSyncRunRead:
+        try:
+            with session_scope() as session:
+                run = AnalyticsSyncService(session).create_sync_run(data=data)
+                return AnalyticsSyncRunRead.model_validate(_analytics_sync_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/analytics-sync-runs/{sync_run_id}/execute", response_model=AnalyticsSyncRunRead)
+    def execute_analytics_sync_run(
+        sync_run_id: uuid.UUID,
+        data: AnalyticsSyncRunExecuteRequest | None = None,
+    ) -> AnalyticsSyncRunRead:
+        try:
+            with session_scope() as session:
+                run = AnalyticsSyncService(session).execute_sync_run(sync_run_id=sync_run_id, data=data)
+                return AnalyticsSyncRunRead.model_validate(_analytics_sync_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/analytics-sync-runs/{sync_run_id}", response_model=AnalyticsSyncRunRead)
+    def get_analytics_sync_run(sync_run_id: uuid.UUID) -> AnalyticsSyncRunRead:
+        try:
+            with session_scope() as session:
+                run = AnalyticsSyncService(session).require_sync_run(sync_run_id)
+                return AnalyticsSyncRunRead.model_validate(_analytics_sync_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/analytics/import-manual", response_model=AnalyticsSnapshotRead)
+    def import_manual_analytics(data: ManualAnalyticsImportContract) -> AnalyticsSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = AnalyticsSyncService(session).import_manual(data=data)
+                return AnalyticsSnapshotRead.model_validate(_analytics_snapshot(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/analytics-snapshots/{snapshot_id}", response_model=AnalyticsSnapshotRead)
+    def get_analytics_snapshot(snapshot_id: uuid.UUID) -> AnalyticsSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = AnalyticsSyncService(session).require_snapshot(snapshot_id)
+                return AnalyticsSnapshotRead.model_validate(_analytics_snapshot(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/analytics-snapshots", response_model=list[AnalyticsSnapshotRead])
+    def list_uploaded_video_analytics_snapshots(uploaded_video_id: uuid.UUID) -> list[AnalyticsSnapshotRead]:
+        try:
+            with session_scope() as session:
+                snapshots = AnalyticsSyncService(session).list_snapshots_by_uploaded_video(uploaded_video_id)
+                return [AnalyticsSnapshotRead.model_validate(_analytics_snapshot(snapshot)) for snapshot in snapshots]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/metrics-summary", response_model=UploadedVideoMetricsSummaryRead)
+    def get_uploaded_video_metrics_summary(uploaded_video_id: uuid.UUID) -> UploadedVideoMetricsSummaryRead:
+        try:
+            with session_scope() as session:
+                summary = AnalyticsSyncService(session).get_metrics_summary(uploaded_video_id)
+                return UploadedVideoMetricsSummaryRead.model_validate(_uploaded_video_metrics_summary(summary))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/retention", response_model=RetentionCurveSnapshotRead)
+    def get_uploaded_video_retention(uploaded_video_id: uuid.UUID) -> RetentionCurveSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = AnalyticsSyncService(session).latest_retention(uploaded_video_id)
+                if snapshot is None:
+                    raise NotFoundError(f"retention snapshot not found: {uploaded_video_id}")
+                return RetentionCurveSnapshotRead.model_validate(_retention_curve_snapshot(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/traffic-sources", response_model=TrafficSourceSnapshotRead)
+    def get_uploaded_video_traffic_sources(uploaded_video_id: uuid.UUID) -> TrafficSourceSnapshotRead:
+        try:
+            with session_scope() as session:
+                snapshot = AnalyticsSyncService(session).latest_traffic_sources(uploaded_video_id)
+                if snapshot is None:
+                    raise NotFoundError(f"traffic source snapshot not found: {uploaded_video_id}")
+                return TrafficSourceSnapshotRead.model_validate(_traffic_source_snapshot(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -2081,6 +2178,116 @@ def _uploaded_video_summary(summary: Any) -> dict[str, Any]:
         "operator_summary": summary.operator_summary,
         "next_action": summary.next_action,
         "freshness_state": summary.freshness_state,
+        "created_at": summary.created_at,
+        "updated_at": summary.updated_at,
+    }
+
+def _analytics_sync_run(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "company_id": run.company_id,
+        "channel_workspace_id": run.channel_workspace_id,
+        "uploaded_video_id": run.uploaded_video_id,
+        "video_project_id": run.video_project_id,
+        "policy_snapshot_id": run.policy_snapshot_id,
+        "platform": run.platform,
+        "platform_video_id": run.platform_video_id,
+        "sync_mode": run.sync_mode,
+        "sync_state": run.sync_state,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "observed_from": run.observed_from,
+        "observed_to": run.observed_to,
+        "provider_key": run.provider_key,
+        "provider_attempt_id": run.provider_attempt_id,
+        "analytics_snapshot_id": run.analytics_snapshot_id,
+        "reason_codes": run.reason_codes,
+        "next_action": run.next_action,
+        "metadata": run.metadata_,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+    }
+
+def _analytics_snapshot(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "analytics_sync_run_id": snapshot.analytics_sync_run_id,
+        "uploaded_video_id": snapshot.uploaded_video_id,
+        "company_id": snapshot.company_id,
+        "channel_workspace_id": snapshot.channel_workspace_id,
+        "video_project_id": snapshot.video_project_id,
+        "policy_snapshot_id": snapshot.policy_snapshot_id,
+        "platform": snapshot.platform,
+        "platform_video_id": snapshot.platform_video_id,
+        "captured_at": snapshot.captured_at,
+        "observed_from": snapshot.observed_from,
+        "observed_to": snapshot.observed_to,
+        "observation_window": snapshot.observation_window,
+        "metrics_blob": snapshot.metrics_blob,
+        "normalized_metrics_blob": snapshot.normalized_metrics_blob,
+        "metric_availability": snapshot.metric_availability,
+        "source_metadata": snapshot.source_metadata,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "reason_codes": snapshot.reason_codes,
+        "created_at": snapshot.created_at,
+    }
+
+def _traffic_source_snapshot(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "analytics_snapshot_id": snapshot.analytics_snapshot_id,
+        "uploaded_video_id": snapshot.uploaded_video_id,
+        "platform": snapshot.platform,
+        "platform_video_id": snapshot.platform_video_id,
+        "captured_at": snapshot.captured_at,
+        "traffic_sources": snapshot.traffic_sources,
+        "source_summary": snapshot.source_summary,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "created_at": snapshot.created_at,
+    }
+
+def _retention_curve_snapshot(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "analytics_snapshot_id": snapshot.analytics_snapshot_id,
+        "uploaded_video_id": snapshot.uploaded_video_id,
+        "video_project_id": snapshot.video_project_id,
+        "render_package_snapshot_id": snapshot.render_package_snapshot_id,
+        "platform": snapshot.platform,
+        "platform_video_id": snapshot.platform_video_id,
+        "captured_at": snapshot.captured_at,
+        "curve_points": snapshot.curve_points,
+        "curve_summary": snapshot.curve_summary,
+        "duration_seconds": snapshot.duration_seconds,
+        "timeline_alignment": snapshot.timeline_alignment,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "created_at": snapshot.created_at,
+    }
+
+def _uploaded_video_metrics_summary(summary: Any) -> dict[str, Any]:
+    return {
+        "id": summary.id,
+        "uploaded_video_id": summary.uploaded_video_id,
+        "company_id": summary.company_id,
+        "channel_workspace_id": summary.channel_workspace_id,
+        "video_project_id": summary.video_project_id,
+        "platform": summary.platform,
+        "platform_video_id": summary.platform_video_id,
+        "latest_analytics_snapshot_id": summary.latest_analytics_snapshot_id,
+        "latest_retention_curve_snapshot_id": summary.latest_retention_curve_snapshot_id,
+        "latest_traffic_source_snapshot_id": summary.latest_traffic_source_snapshot_id,
+        "latest_engagement_snapshot_id": summary.latest_engagement_snapshot_id,
+        "latest_captured_at": summary.latest_captured_at,
+        "metrics_summary": summary.metrics_summary,
+        "availability_summary": summary.availability_summary,
+        "freshness_state": summary.freshness_state,
+        "confidence_level": summary.confidence_level,
+        "monitoring_state": summary.monitoring_state,
+        "operator_summary": summary.operator_summary,
+        "next_action": summary.next_action,
         "created_at": summary.created_at,
         "updated_at": summary.updated_at,
     }

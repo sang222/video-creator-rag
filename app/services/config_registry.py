@@ -99,6 +99,19 @@ class ProviderRegistryCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class MetricDefinitionCatalogItem(BaseModel):
+    metric_key: str
+    metric_name: str
+    metric_group: str
+    platform: str
+    unit: str
+    description: str
+    status: str = "ACTIVE"
+    version: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
 class RetryPolicyCatalogItem(BaseModel):
     policy_key: str
     provider_key: str | None = None
@@ -183,6 +196,8 @@ class ConfigRegistryService:
                 self.session.flush()
             if loaded.catalog_key == "role_catalog":
                 self._seed_roles(loaded.content)
+            if loaded.catalog_key == "metric_definition_catalog":
+                self._seed_metric_definitions(loaded.content)
             records.append(record)
         self.session.commit()
         return records
@@ -285,6 +300,15 @@ class ConfigRegistryService:
             "disclosure_confirmation_catalog": SimpleKeyCatalogItem,
             "metadata_diff_severity_catalog": SimpleKeyCatalogItem,
             "m7_reason_code_catalog": ReasonCodeItem,
+            "analytics_sync_mode_catalog": SimpleKeyCatalogItem,
+            "analytics_sync_state_catalog": SimpleKeyCatalogItem,
+            "analytics_observation_window_catalog": SimpleKeyCatalogItem,
+            "metric_group_catalog": SimpleKeyCatalogItem,
+            "metric_unit_catalog": SimpleKeyCatalogItem,
+            "metric_freshness_state_catalog": SimpleKeyCatalogItem,
+            "metric_confidence_level_catalog": SimpleKeyCatalogItem,
+            "m8_reason_code_catalog": ReasonCodeItem,
+            "metric_definition_catalog": MetricDefinitionCatalogItem,
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,
@@ -303,6 +327,7 @@ class ConfigRegistryService:
                 or getattr(parsed, "catalog_key", None)
                 or getattr(parsed, "provider_key", None)
                 or getattr(parsed, "policy_key", None)
+                or getattr(parsed, "metric_key", None)
                 or getattr(parsed, "template_key", None)
                 or getattr(parsed, "matrix_key", None)
                 or getattr(parsed, "compiler_version", None)
@@ -310,6 +335,36 @@ class ConfigRegistryService:
             if key in seen:
                 raise ValidationFailureError(f"duplicate catalog item: {key}")
             seen.add(key)
+
+    def _seed_metric_definitions(self, content: dict[str, Any]) -> None:
+        from app.db.models import MetricDefinitionVersion
+
+        for item in content["items"]:
+            statement = select(MetricDefinitionVersion).where(
+                MetricDefinitionVersion.metric_key == item["metric_key"],
+                MetricDefinitionVersion.platform == item["platform"],
+                MetricDefinitionVersion.version == item["version"],
+            )
+            existing = self.session.scalars(statement).one_or_none()
+            if existing is None:
+                existing = MetricDefinitionVersion(
+                    metric_key=item["metric_key"],
+                    metric_name=item["metric_name"],
+                    metric_group=item["metric_group"],
+                    platform=item["platform"],
+                    unit=item["unit"],
+                    description=item["description"],
+                    status=item.get("status", "ACTIVE"),
+                    version=item["version"],
+                    metadata_=item.get("metadata", {}),
+                )
+                self.session.add(existing)
+            else:
+                existing.metric_name = item["metric_name"]
+                existing.description = item["description"]
+                existing.status = item.get("status", "ACTIVE")
+                existing.metadata_ = item.get("metadata", {})
+        self.session.flush()
 
     def _discover(self, paths: Iterable[str | Path]) -> list[Path]:
         files: list[Path] = []

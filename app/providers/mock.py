@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.providers.base import ProviderResponse
@@ -123,6 +124,82 @@ class MockAnalyticsProvider(_MockProviderBase):
                 "provider_key": self.provider_key,
                 "metric_key": metric_key,
                 "metrics": [{"name": "views", "value": 0, "freshness": "MOCK"}],
+            },
+        )
+
+    def fetch_video_metrics(
+        self,
+        *,
+        platform: str,
+        platform_video_id: str,
+        published_at: datetime,
+        mode: str = "success",
+    ) -> ProviderResponse:
+        captured_at = datetime.now(UTC)
+        observed_from = published_at
+        observed_to = min(captured_at, published_at + timedelta(hours=24))
+        metrics = {
+            "views": 120,
+            "impressions": 2400,
+            "click_through_rate": 5.0,
+            "average_view_duration_seconds": 42.0,
+            "average_view_percentage": 64.0,
+            "watch_time_minutes": 84.0,
+            "likes": 12,
+            "comments": 3,
+            "shares": 2,
+            "subscribers_gained": 1,
+            "subscribers_lost": 0,
+            "reach": 2100,
+            "completion_rate": 52.0,
+        }
+        if platform in {"TIKTOK", "INSTAGRAM", "FACEBOOK", "GENERIC"}:
+            metrics["saves"] = 4
+        return self._response(
+            mode=mode,
+            output={
+                "platform": platform,
+                "platform_video_id": platform_video_id,
+                "captured_at": captured_at.isoformat(),
+                "observed_from": observed_from.isoformat(),
+                "observed_to": observed_to.isoformat(),
+                "observation_window": "T_PLUS_24H",
+                "metrics": metrics,
+                "metric_availability": {},
+                "traffic_sources": [
+                    {
+                        "source_key": "browse",
+                        "source_label": "Browse features",
+                        "views": 60,
+                        "impressions": 1200,
+                        "watch_time_minutes": 42,
+                        "percentage": 50,
+                        "metadata": {"mock": True},
+                    },
+                    {
+                        "source_key": "search",
+                        "source_label": "Search",
+                        "views": 60,
+                        "impressions": 1200,
+                        "watch_time_minutes": 42,
+                        "percentage": 50,
+                        "metadata": {"mock": True},
+                    },
+                ],
+                "retention_curve": [
+                    {"time_seconds": 0, "retention_percent": 100, "viewers_remaining_estimate": 120, "source_metric": "mock_retention"},
+                    {"time_seconds": 5, "retention_percent": 72, "viewers_remaining_estimate": 86, "source_metric": "mock_retention"},
+                    {"time_seconds": 10, "retention_percent": 58, "viewers_remaining_estimate": 69, "source_metric": "mock_retention"},
+                ],
+                "engagement": {},
+                "provider_metadata": {
+                    "provider_key": self.provider_key,
+                    "mock": True,
+                    "network_call": False,
+                    "credentials_used": False,
+                },
+                "freshness_state": "FRESH",
+                "confidence_level": "HIGH",
             },
         )
 

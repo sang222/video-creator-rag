@@ -18,7 +18,6 @@ FORBIDDEN_ROUTE_FRAGMENTS = {
     "upload-jobs",
     "upload-attempts",
     "auto-upload",
-    "analytics",
     "no-view",
     "dashboard",
     "operator-cockpit",

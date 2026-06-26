@@ -19,6 +19,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M5 builds daily run, ResourceResolver MVP, ContextPack, ChannelStatePack, safe search-demand evidence, mock LLM proposal capture, deterministic preflight, and budgeted project admission only.
 - M6 builds production artifact runs, script/narration/caption contracts, voice-as-master visual plans, scene/source manifests, RenderSpec, platform render variants, local/mock render package foundation, and MediaQC/AccessibilityQC only.
 - M7 builds manual publish handoff packages, operator checklists/instructions, human-entered publish confirmations, uploaded video records, lineage, and publication summaries only.
+- M8 builds analytics sync runs, local mock/manual/import analytics snapshots, metric definitions/availability, traffic/retention/engagement snapshots, and uploaded video metrics summaries only.
 
 ## Scope Guardrails
 
@@ -50,6 +51,10 @@ M7 adds PublishHandoffPackage, ManualPublishConfirmation, UploadedVideo, and Upl
 
 M7 does not build auto upload, YouTube/TikTok/Facebook/Instagram publish APIs, OAuth upload flows, scheduled upload automation, analytics sync/snapshots/semantic layer, no-view/recovery diagnostics, memory promotion, dashboard/operator cockpit UI, real provider integrations, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, IP/VPS tricks, or auto-reupload spam.
 
+M8 adds AnalyticsSyncRun, MetricDefinitionVersion, MetricAvailabilitySnapshot, AnalyticsSnapshot, TrafficSourceSnapshot, RetentionCurveSnapshot, EngagementSnapshot, and UploadedVideoMetricsSummary for local analytics measurement.
+
+M8 does not build NoViewService, PostPublishHealthMonitor, underperformance diagnosis, recovery proposal, title/thumbnail recommendation, dashboard/operator cockpit UI, auto-publish, real analytics provider integration, OAuth, token refresh, analytics page scraping, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, IP/VPS tricks, or auto-reupload.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -64,7 +69,7 @@ M7 does not build auto upload, YouTube/TikTok/Facebook/Instagram publish APIs, O
 - M6 can use mock/local fixture providers for media tests.
 - Pre-M7 M0-M6 Qualification Gate will be required after M6.
 - M7 complete means VCOS can hand off an M6 render package to a human operator for manual upload, then capture actual publish metadata, disclosures, external id/URL, uploaded video lineage, and a metrics-free publication summary.
-- M8 will sync analytics later.
+- M8 complete means UploadedVideo has local analytics snapshots, metric availability, freshness/confidence, traffic/retention/engagement snapshots, and a latest metrics read model.
 - M9 will diagnose no-view or underperformance later.
 - M11 will display uploaded videos in an operator dashboard later.
 

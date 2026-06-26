@@ -95,6 +95,14 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    uploaded_video_metrics_summaries,
+                    engagement_snapshots,
+                    retention_curve_snapshots,
+                    traffic_source_snapshots,
+                    analytics_snapshots,
+                    metric_availability_snapshots,
+                    metric_definition_versions,
+                    analytics_sync_runs,
                     uploaded_video_publication_summaries,
                     uploaded_videos,
                     manual_publish_confirmations,

@@ -14,6 +14,8 @@ from app.core.db import check_database
 from app.db.session import session_scope
 from app.contracts import (
     ApprovalDecisionCreate,
+    AnalyticsSyncRunCreate,
+    AnalyticsSyncRunExecuteRequest,
     ArtifactCreate,
     ArtifactVersionCreate,
     BudgetGateCheckRequest,
@@ -31,6 +33,7 @@ from app.contracts import (
     GateRunCreate,
     IdeaMarketPreflightCreate,
     ManualActionCreate,
+    ManualAnalyticsImportContract,
     ManualPublishConfirmationCreate,
     OpsIncidentCreate,
     PlatformPolicyCatalogCreate,
@@ -59,6 +62,7 @@ from app.contracts import (
 from app.contracts.m6 import QCRunRequest
 from app.services import (
     AccessibilityQCService,
+    AnalyticsSyncService,
     ApprovalService,
     ArtifactService,
     AuditService,
@@ -141,6 +145,7 @@ captions_app = typer.Typer(no_args_is_help=True)
 render_spec_app = typer.Typer(no_args_is_help=True)
 publish_app = typer.Typer(no_args_is_help=True)
 uploaded_video_app = typer.Typer(no_args_is_help=True)
+analytics_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
@@ -177,6 +182,7 @@ app.add_typer(captions_app, name="captions")
 app.add_typer(render_spec_app, name="render-spec")
 app.add_typer(publish_app, name="publish")
 app.add_typer(uploaded_video_app, name="uploaded-video")
+app.add_typer(analytics_app, name="analytics")
 
 
 def _fail(message: str) -> None:
@@ -1592,6 +1598,149 @@ def uploaded_video_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--u
     except Exception as exc:
         _fail(f"uploaded-video summary failed: {exc}")
 
+@analytics_app.command("sync-create")
+def analytics_sync_create(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+    sync_mode: str = typer.Option("MOCK", "--sync-mode"),
+    provider_key: str | None = typer.Option(None, "--provider-key"),
+    observed_from: str | None = typer.Option(None, "--observed-from"),
+    observed_to: str | None = typer.Option(None, "--observed-to"),
+    metadata_json: str = typer.Option("{}", "--metadata-json"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = AnalyticsSyncService(session).create_sync_run(
+                data=AnalyticsSyncRunCreate(
+                    uploaded_video_id=uploaded_video_id,
+                    sync_mode=sync_mode,  # type: ignore[arg-type]
+                    provider_key=provider_key,
+                    observed_from=_optional_datetime(observed_from),
+                    observed_to=_optional_datetime(observed_to),
+                    metadata=_json_object(metadata_json),
+                )
+            )
+            typer.echo(json.dumps(_analytics_sync_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"analytics sync-create failed: {exc}")
+
+@analytics_app.command("sync-execute")
+def analytics_sync_execute(
+    sync_run_id: uuid.UUID = typer.Option(..., "--sync-run-id"),
+    mock_mode: str = typer.Option("success", "--mock-mode"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = AnalyticsSyncService(session).execute_sync_run(
+                sync_run_id=sync_run_id,
+                data=AnalyticsSyncRunExecuteRequest(mock_mode=mock_mode),
+            )
+            typer.echo(json.dumps(_analytics_sync_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"analytics sync-execute failed: {exc}")
+
+@analytics_app.command("sync-inspect")
+def analytics_sync_inspect(sync_run_id: uuid.UUID = typer.Option(..., "--sync-run-id")) -> None:
+    try:
+        with session_scope() as session:
+            run = AnalyticsSyncService(session).require_sync_run(sync_run_id)
+            typer.echo(json.dumps(_analytics_sync_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"analytics sync-inspect failed: {exc}")
+
+@analytics_app.command("import-manual")
+def analytics_import_manual(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+    platform: str = typer.Option(..., "--platform"),
+    platform_video_id: str = typer.Option(..., "--platform-video-id"),
+    captured_at: str = typer.Option(..., "--captured-at"),
+    observed_from: str | None = typer.Option(None, "--observed-from"),
+    observed_to: str | None = typer.Option(None, "--observed-to"),
+    observation_window: str = typer.Option("UNKNOWN", "--observation-window"),
+    metrics_json: str = typer.Option("{}", "--metrics-json"),
+    traffic_sources_json: str = typer.Option("[]", "--traffic-sources-json"),
+    retention_curve_json: str = typer.Option("[]", "--retention-curve-json"),
+    engagement_json: str = typer.Option("{}", "--engagement-json"),
+    duration_seconds: float | None = typer.Option(None, "--duration-seconds"),
+    timeline_alignment_json: str = typer.Option("{}", "--timeline-alignment-json"),
+    source_note: str | None = typer.Option(None, "--source-note"),
+    imported_by_user_id: uuid.UUID | None = typer.Option(None, "--imported-by-user-id"),
+) -> None:
+    try:
+        traffic_sources = _json_list(traffic_sources_json)
+        retention_curve = _json_list(retention_curve_json)
+        with session_scope() as session:
+            snapshot = AnalyticsSyncService(session).import_manual(
+                data=ManualAnalyticsImportContract(
+                    uploaded_video_id=uploaded_video_id,
+                    platform=platform,  # type: ignore[arg-type]
+                    platform_video_id=platform_video_id,
+                    captured_at=datetime.fromisoformat(captured_at),
+                    observed_from=_optional_datetime(observed_from),
+                    observed_to=_optional_datetime(observed_to),
+                    observation_window=observation_window,  # type: ignore[arg-type]
+                    metrics=_json_object(metrics_json),
+                    traffic_sources=traffic_sources or None,
+                    retention_curve=retention_curve or None,
+                    engagement=_json_object(engagement_json) or None,
+                    duration_seconds=duration_seconds,
+                    timeline_alignment=_json_object(timeline_alignment_json),
+                    source_note=source_note,
+                    imported_by_user_id=imported_by_user_id,
+                )
+            )
+            typer.echo(json.dumps(_analytics_snapshot_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"analytics import-manual failed: {exc}")
+
+@analytics_app.command("snapshot-inspect")
+def analytics_snapshot_inspect(snapshot_id: uuid.UUID = typer.Option(..., "--snapshot-id")) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = AnalyticsSyncService(session).require_snapshot(snapshot_id)
+            typer.echo(json.dumps(_analytics_snapshot_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"analytics snapshot-inspect failed: {exc}")
+
+@analytics_app.command("list-by-uploaded-video")
+def analytics_list_by_uploaded_video(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            snapshots = AnalyticsSyncService(session).list_snapshots_by_uploaded_video(uploaded_video_id)
+            typer.echo(json.dumps([_analytics_snapshot_to_dict(snapshot) for snapshot in snapshots]))
+    except Exception as exc:
+        _fail(f"analytics list-by-uploaded-video failed: {exc}")
+
+@analytics_app.command("metrics-summary")
+def analytics_metrics_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            summary = AnalyticsSyncService(session).get_metrics_summary(uploaded_video_id)
+            typer.echo(json.dumps(_uploaded_video_metrics_summary_to_dict(summary)))
+    except Exception as exc:
+        _fail(f"analytics metrics-summary failed: {exc}")
+
+@analytics_app.command("retention")
+def analytics_retention(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = AnalyticsSyncService(session).latest_retention(uploaded_video_id)
+            if snapshot is None:
+                _fail(f"retention snapshot not found: {uploaded_video_id}")
+            typer.echo(json.dumps(_retention_curve_snapshot_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"analytics retention failed: {exc}")
+
+@analytics_app.command("traffic-sources")
+def analytics_traffic_sources(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            snapshot = AnalyticsSyncService(session).latest_traffic_sources(uploaded_video_id)
+            if snapshot is None:
+                _fail(f"traffic source snapshot not found: {uploaded_video_id}")
+            typer.echo(json.dumps(_traffic_source_snapshot_to_dict(snapshot)))
+    except Exception as exc:
+        _fail(f"analytics traffic-sources failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -2010,6 +2159,116 @@ def _uploaded_video_summary_to_dict(summary: Any) -> dict[str, Any]:
         "freshness_state": summary.freshness_state,
     }
 
+def _analytics_sync_run_to_dict(run: Any) -> dict[str, Any]:
+    return {
+        "id": str(run.id),
+        "company_id": str(run.company_id),
+        "channel_workspace_id": str(run.channel_workspace_id),
+        "uploaded_video_id": str(run.uploaded_video_id),
+        "video_project_id": str(run.video_project_id),
+        "policy_snapshot_id": str(run.policy_snapshot_id),
+        "platform": run.platform,
+        "platform_video_id": run.platform_video_id,
+        "sync_mode": run.sync_mode,
+        "sync_state": run.sync_state,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "observed_from": run.observed_from.isoformat() if run.observed_from else None,
+        "observed_to": run.observed_to.isoformat() if run.observed_to else None,
+        "provider_key": run.provider_key,
+        "provider_attempt_id": str(run.provider_attempt_id) if run.provider_attempt_id else None,
+        "analytics_snapshot_id": str(run.analytics_snapshot_id) if run.analytics_snapshot_id else None,
+        "reason_codes": run.reason_codes,
+        "next_action": run.next_action,
+        "metadata": run.metadata_,
+        "created_at": run.created_at.isoformat(),
+        "updated_at": run.updated_at.isoformat(),
+    }
+
+def _analytics_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "analytics_sync_run_id": str(snapshot.analytics_sync_run_id),
+        "uploaded_video_id": str(snapshot.uploaded_video_id),
+        "company_id": str(snapshot.company_id),
+        "channel_workspace_id": str(snapshot.channel_workspace_id),
+        "video_project_id": str(snapshot.video_project_id),
+        "policy_snapshot_id": str(snapshot.policy_snapshot_id),
+        "platform": snapshot.platform,
+        "platform_video_id": snapshot.platform_video_id,
+        "captured_at": snapshot.captured_at.isoformat(),
+        "observed_from": snapshot.observed_from.isoformat() if snapshot.observed_from else None,
+        "observed_to": snapshot.observed_to.isoformat() if snapshot.observed_to else None,
+        "observation_window": snapshot.observation_window,
+        "metrics_blob": snapshot.metrics_blob,
+        "normalized_metrics_blob": snapshot.normalized_metrics_blob,
+        "metric_availability": snapshot.metric_availability,
+        "source_metadata": snapshot.source_metadata,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "reason_codes": snapshot.reason_codes,
+        "created_at": snapshot.created_at.isoformat(),
+    }
+
+def _traffic_source_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "analytics_snapshot_id": str(snapshot.analytics_snapshot_id),
+        "uploaded_video_id": str(snapshot.uploaded_video_id),
+        "platform": snapshot.platform,
+        "platform_video_id": snapshot.platform_video_id,
+        "captured_at": snapshot.captured_at.isoformat(),
+        "traffic_sources": snapshot.traffic_sources,
+        "source_summary": snapshot.source_summary,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "created_at": snapshot.created_at.isoformat(),
+    }
+
+def _retention_curve_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "analytics_snapshot_id": str(snapshot.analytics_snapshot_id),
+        "uploaded_video_id": str(snapshot.uploaded_video_id),
+        "video_project_id": str(snapshot.video_project_id),
+        "render_package_snapshot_id": str(snapshot.render_package_snapshot_id) if snapshot.render_package_snapshot_id else None,
+        "platform": snapshot.platform,
+        "platform_video_id": snapshot.platform_video_id,
+        "captured_at": snapshot.captured_at.isoformat(),
+        "curve_points": snapshot.curve_points,
+        "curve_summary": snapshot.curve_summary,
+        "duration_seconds": snapshot.duration_seconds,
+        "timeline_alignment": snapshot.timeline_alignment,
+        "freshness_state": snapshot.freshness_state,
+        "confidence_level": snapshot.confidence_level,
+        "created_at": snapshot.created_at.isoformat(),
+    }
+
+def _uploaded_video_metrics_summary_to_dict(summary: Any) -> dict[str, Any]:
+    return {
+        "id": str(summary.id),
+        "uploaded_video_id": str(summary.uploaded_video_id),
+        "company_id": str(summary.company_id),
+        "channel_workspace_id": str(summary.channel_workspace_id),
+        "video_project_id": str(summary.video_project_id),
+        "platform": summary.platform,
+        "platform_video_id": summary.platform_video_id,
+        "latest_analytics_snapshot_id": str(summary.latest_analytics_snapshot_id) if summary.latest_analytics_snapshot_id else None,
+        "latest_retention_curve_snapshot_id": str(summary.latest_retention_curve_snapshot_id) if summary.latest_retention_curve_snapshot_id else None,
+        "latest_traffic_source_snapshot_id": str(summary.latest_traffic_source_snapshot_id) if summary.latest_traffic_source_snapshot_id else None,
+        "latest_engagement_snapshot_id": str(summary.latest_engagement_snapshot_id) if summary.latest_engagement_snapshot_id else None,
+        "latest_captured_at": summary.latest_captured_at.isoformat() if summary.latest_captured_at else None,
+        "metrics_summary": summary.metrics_summary,
+        "availability_summary": summary.availability_summary,
+        "freshness_state": summary.freshness_state,
+        "confidence_level": summary.confidence_level,
+        "monitoring_state": summary.monitoring_state,
+        "operator_summary": summary.operator_summary,
+        "next_action": summary.next_action,
+        "created_at": summary.created_at.isoformat(),
+        "updated_at": summary.updated_at.isoformat(),
+    }
+
 def _json_object(value: str) -> dict[str, Any]:
     parsed = json.loads(value)
     if not isinstance(parsed, dict):
@@ -2027,6 +2286,9 @@ def _json_string_list(value: str) -> list[str]:
     if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
         raise ValueError("expected JSON string list")
     return parsed
+
+def _optional_datetime(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
 
 def main() -> None:
     app()

@@ -68,13 +68,21 @@ REQUIRED_TABLES = {
     "manual_publish_confirmations",
     "uploaded_videos",
     "uploaded_video_publication_summaries",
+    "analytics_sync_runs",
+    "metric_definition_versions",
+    "metric_availability_snapshots",
+    "analytics_snapshots",
+    "traffic_source_snapshots",
+    "retention_curve_snapshots",
+    "engagement_snapshots",
+    "uploaded_video_metrics_summaries",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0008_m7_publish_handoff"
+    assert revision == "0009_m8_analytics_sync"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, and M7 manual publish handoff foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, and M8 analytics sync foundation.
 
 ## Stack
 
@@ -152,6 +152,22 @@ vcos uploaded-video summary --uploaded-video-id <uploaded-video-id>
 
 M7 turns an M6 render package into an operator-friendly manual publish handoff and captures the human-entered actual publish result. `vcos publish` means handoff/confirmation only. VCOS does not upload, auto-publish, call platform APIs, run OAuth upload flow, schedule uploads, or collect analytics in M7.
 
+## M8 Commands
+
+```bash
+vcos analytics sync-create --uploaded-video-id <uploaded-video-id> --sync-mode MOCK
+vcos analytics sync-execute --sync-run-id <sync-run-id>
+vcos analytics sync-inspect --sync-run-id <sync-run-id>
+vcos analytics import-manual --uploaded-video-id <uploaded-video-id> --platform YOUTUBE --platform-video-id <platform-video-id> --captured-at <iso-datetime> --metrics-json '{"views":10}'
+vcos analytics snapshot-inspect --snapshot-id <snapshot-id>
+vcos analytics list-by-uploaded-video --uploaded-video-id <uploaded-video-id>
+vcos analytics metrics-summary --uploaded-video-id <uploaded-video-id>
+vcos analytics retention --uploaded-video-id <uploaded-video-id>
+vcos analytics traffic-sources --uploaded-video-id <uploaded-video-id>
+```
+
+M8 adds local-only analytics sync/import snapshots and an uploaded video metrics read model. `vcos analytics` means snapshot/import/sync only. VCOS does not diagnose no-view, recommend title/thumbnail changes, recover videos, build a dashboard, call real analytics APIs, use OAuth, scrape analytics pages, or fake engagement in M8.
+
 ## Boundaries
 
-M0-M7 do not implement auto upload, platform publish APIs, analytics, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, no-view diagnostics, or platform evasion systems. M7 adds manual handoff and human confirmation capture only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M8 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, no-view diagnostics, recovery proposals, title/thumbnail recommendations, or platform evasion systems. M8 adds analytics snapshots/read models only. CapCut pilot notes do not make CapCut a production dependency.

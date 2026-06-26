@@ -1,0 +1,133 @@
+catalog_key: metric_definition_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - metric_key: views
+    metric_name: Views
+    metric_group: REACH
+    platform: GENERIC
+    unit: COUNT
+    description: Platform-reported view count for the observed window.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: impressions
+    metric_name: Impressions
+    metric_group: REACH
+    platform: GENERIC
+    unit: COUNT
+    description: Platform-reported impressions for the observed window.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: click_through_rate
+    metric_name: Click Through Rate
+    metric_group: REACH
+    platform: GENERIC
+    unit: PERCENT
+    description: Platform-reported or imported impression click-through rate.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: average_view_duration_seconds
+    metric_name: Average View Duration
+    metric_group: RETENTION
+    platform: GENERIC
+    unit: SECONDS
+    description: Average watch duration in seconds.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: average_view_percentage
+    metric_name: Average View Percentage
+    metric_group: RETENTION
+    platform: GENERIC
+    unit: PERCENT
+    description: Average percentage watched.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: watch_time_minutes
+    metric_name: Watch Time
+    metric_group: RETENTION
+    platform: GENERIC
+    unit: MINUTES
+    description: Total watch time in minutes.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: likes
+    metric_name: Likes
+    metric_group: ENGAGEMENT
+    platform: GENERIC
+    unit: COUNT
+    description: Like reactions.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: comments
+    metric_name: Comments
+    metric_group: ENGAGEMENT
+    platform: GENERIC
+    unit: COUNT
+    description: Comment count.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: shares
+    metric_name: Shares
+    metric_group: ENGAGEMENT
+    platform: GENERIC
+    unit: COUNT
+    description: Share count.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: subscribers_gained
+    metric_name: Subscribers Gained
+    metric_group: AUDIENCE
+    platform: GENERIC
+    unit: COUNT
+    description: Subscribers or followers gained where available.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: subscribers_lost
+    metric_name: Subscribers Lost
+    metric_group: AUDIENCE
+    platform: GENERIC
+    unit: COUNT
+    description: Subscribers or followers lost where available.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: reach
+    metric_name: Reach
+    metric_group: REACH
+    platform: GENERIC
+    unit: COUNT
+    description: Unique reached audience when supplied by the platform or import.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: engagement_rate
+    metric_name: Engagement Rate
+    metric_group: ENGAGEMENT
+    platform: GENERIC
+    unit: RATIO
+    description: Simple engagement ratio when supplied or computed from available numerator and denominator.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: saves
+    metric_name: Saves
+    metric_group: ENGAGEMENT
+    platform: GENERIC
+    unit: COUNT
+    description: Saved item count when the platform provides it.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: bookmarks
+    metric_name: Bookmarks
+    metric_group: ENGAGEMENT
+    platform: GENERIC
+    unit: COUNT
+    description: Bookmark count when the platform provides it.
+    status: ACTIVE
+    version: "1.0.0"
+  - metric_key: completion_rate
+    metric_name: Completion Rate
+    metric_group: RETENTION
+    platform: GENERIC
+    unit: PERCENT
+    description: Completion percentage when supplied by the platform or import.
+    status: ACTIVE
+    version: "1.0.0"
