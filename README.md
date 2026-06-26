@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, and M10 learning review queue foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, and M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation.
 
 ## Stack
 
@@ -27,6 +27,17 @@ make seed
 make test
 make health
 ```
+
+Optional local Ollama container:
+
+```bash
+make ollama-up
+make ollama-health
+make ollama-pull-cloud-models
+make ollama-logs
+```
+
+The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. `OLLAMA_API_KEY` and `VCOS_LLM_MODEL_<LANE>_<ROLE>` are env-driven; put the real key in local `.env` only, never in tracked files. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
 ## M1 Commands
 
@@ -199,6 +210,38 @@ GET /playbook-candidate-drafts/{draft_id}
 
 M10 reads M8/M9 evidence and creates learning candidates, evidence bundles, eligibility gate results, review queue items, and playbook candidate drafts for M11 human review. M10 does not approve learning, promote playbooks, mutate channel profile/policy config, build dashboard UI, add approve/reject CLI, call real providers, or change daily workflow behavior.
 
+## M10.1 API
+
+```bash
+GET /llm-router/profiles
+GET /llm-router/profiles/{profile_key}
+GET /llm-router/lanes
+POST /llm-router/smoke-test
+POST /video-projects/{video_project_id}/short-candidates/extract
+GET /video-projects/{video_project_id}/short-candidates
+GET /short-candidates/{short_candidate_id}
+POST /short-candidates/{short_candidate_id}/rank
+GET /video-projects/{video_project_id}/derivative-graph
+GET /derivative-graph/edges/{edge_id}
+POST /derivative-originality-checks
+GET /derivative-originality-checks/{check_id}
+GET /reusable-artifacts
+POST /reusable-artifacts
+GET /reusable-artifacts/{artifact_id}
+POST /asset-reuse-index/search
+POST /cross-platform-funnel-packages
+GET /cross-platform-funnel-packages/{package_id}
+POST /cross-platform-funnel-packages/{package_id}/build-upload-cards
+GET /upload-cards/{upload_card_id}
+GET /human-upload-tasks
+GET /human-upload-tasks/{task_id}
+POST /promote-short-to-long-candidates
+GET /promote-short-to-long-candidates
+GET /promote-short-to-long-candidates/{candidate_id}
+```
+
+M10.1 adds guarded Ollama LLMRouter lanes, route attempts, ProviderAttempt/LLMRunSnapshot logging, long-form to selected Shorts candidates, deterministic ShortValueScore, derivative originality checks, reusable artifact rights/reuse governance, cross-platform funnel packages, upload cards, and manual human upload tasks. Real Ollama execution is disabled by default and real smoke is skipped unless explicitly enabled. `UploadedVideo` remains canonical published video truth. YouTube analytics remains the learning authority; TikTok/Facebook are export/support surfaces only in M10.1.
+
 ## Boundaries
 
-M0-M10 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M10.1 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, media provider routing, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. CapCut pilot notes do not make CapCut a production dependency.

@@ -1,0 +1,13 @@
+catalog_key: release_plan_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Release plan is draft.
+  - key: READY_FOR_HUMAN_REVIEW
+    description: Release plan is ready for human review.
+  - key: BLOCKED
+    description: Release plan is blocked.
+  - key: CANCELLED
+    description: Release plan is cancelled.

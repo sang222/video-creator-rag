@@ -135,7 +135,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0011_m10_learning_review_queue"
+    assert revision == "0012_m10_1_router_derivatives"
 
 
 def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:

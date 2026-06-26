@@ -1,0 +1,15 @@
+catalog_key: human_upload_task_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: READY
+    description: Manual upload task is ready.
+  - key: UPLOADED
+    description: Human marked the task uploaded.
+  - key: NEEDS_FIX
+    description: Task needs a fix before completion.
+  - key: SKIPPED
+    description: Task was skipped.
+  - key: CANCELLED
+    description: Task was cancelled.

@@ -38,8 +38,11 @@ def test_config_yaml_validates(db_session) -> None:
         "cost_event_type_catalog",
         "credential_status_catalog",
         "credential_type_catalog",
+        "cta_type_catalog",
+        "derivative_type_catalog",
         "gate_definition_catalog",
         "health_state_catalog",
+        "human_upload_task_state_catalog",
         "idea_decision_status_catalog",
         "license_state_catalog",
         "m4_reason_code_catalog",
@@ -49,6 +52,7 @@ def test_config_yaml_validates(db_session) -> None:
         "m8_reason_code_catalog",
         "m9_reason_code_catalog",
         "m10_reason_code_catalog",
+        "m10_1_reason_code_catalog",
         "learning_candidate_state_catalog",
         "learning_candidate_type_catalog",
         "learning_confidence_label_catalog",
@@ -56,6 +60,9 @@ def test_config_yaml_validates(db_session) -> None:
         "learning_recommended_scope_catalog",
         "learning_review_queue_state_catalog",
         "learning_risk_level_catalog",
+        "llm_model_profile_catalog",
+        "llm_route_status_catalog",
+        "llm_router_lane_catalog",
         "manual_action_type_catalog",
         "manual_publish_confirmation_state_catalog",
         "metadata_diff_severity_catalog",
@@ -66,8 +73,10 @@ def test_config_yaml_validates(db_session) -> None:
         "metric_unit_catalog",
         "media_qc_state_catalog",
         "media_render_job_status_catalog",
+        "music_policy_catalog",
         "niche_profile_templates",
         "ops_incident_type_catalog",
+        "originality_check_result_catalog",
         "platform_policy_catalog",
         "platform_surface_catalog",
         "playbook_candidate_category_catalog",
@@ -89,6 +98,9 @@ def test_config_yaml_validates(db_session) -> None:
         "quota_unit_catalog",
         "recovery_proposal_state_catalog",
         "recovery_proposal_type_catalog",
+        "release_plan_state_catalog",
+        "reusable_artifact_state_catalog",
+        "reusable_artifact_type_catalog",
         "reason_code_catalog",
         "reason_codes",
         "render_intent_catalog",
@@ -102,10 +114,14 @@ def test_config_yaml_validates(db_session) -> None:
         "scene_importance_catalog",
         "scene_type_catalog",
         "search_demand_source_type_catalog",
+        "short_candidate_state_catalog",
+        "short_crop_strategy_catalog",
+        "short_visual_source_catalog",
         "slot_type_catalog",
         "source_decision_catalog",
         "uploaded_video_monitoring_state_catalog",
         "uploaded_video_publish_status_catalog",
+        "upload_card_state_catalog",
     }
 
 
@@ -123,7 +139,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 93
+    assert catalog_count == 109
     assert role_count == 3
     assert metric_definition_count == 16
 

@@ -1,0 +1,15 @@
+catalog_key: upload_card_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Upload card is draft.
+  - key: READY
+    description: Upload card is ready for manual task.
+  - key: BLOCKED
+    description: Upload card is blocked.
+  - key: USED
+    description: Upload card was used by a human.
+  - key: CANCELLED
+    description: Upload card is cancelled.

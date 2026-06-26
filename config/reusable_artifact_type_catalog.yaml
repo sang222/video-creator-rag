@@ -1,0 +1,31 @@
+catalog_key: reusable_artifact_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: SCRIPT_BLOCK
+    description: Reusable script block.
+  - key: RESEARCH_PACKET
+    description: Reusable research packet.
+  - key: DIAGRAM_TEMPLATE
+    description: Reusable diagram template.
+  - key: MOTION_TEMPLATE
+    description: Reusable motion template.
+  - key: STOCK_CLIP
+    description: Reusable licensed stock clip.
+  - key: AI_VIDEO_CLIP
+    description: Reusable AI video clip.
+  - key: MUSIC_BED
+    description: Reusable music bed.
+  - key: SFX
+    description: Reusable sound effect.
+  - key: VOICE_LINE
+    description: Reusable voice line.
+  - key: CAPTION_STYLE
+    description: Reusable caption style.
+  - key: PROMPT_PREFIX
+    description: Reusable prompt prefix.
+  - key: THUMBNAIL_TEMPLATE
+    description: Reusable thumbnail template.
+  - key: OTHER
+    description: Other reusable artifact.

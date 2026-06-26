@@ -92,13 +92,31 @@ REQUIRED_TABLES = {
     "learning_promotion_eligibility_runs",
     "learning_review_queue_items",
     "playbook_candidate_drafts",
+    "llm_router_profiles",
+    "llm_router_lanes",
+    "llm_model_profiles",
+    "llm_route_attempts",
+    "content_derivative_graph_edges",
+    "short_candidates",
+    "short_candidate_scores",
+    "short_render_plans",
+    "promote_short_to_long_candidates",
+    "reusable_artifacts",
+    "asset_reuse_index_entries",
+    "derivative_originality_checks",
+    "originality_budgets",
+    "derivative_release_plans",
+    "cross_platform_funnel_packages",
+    "upload_cards",
+    "human_upload_tasks",
+    "usage_savings_ledger_entries",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0011_m10_learning_review_queue"
+    assert revision == "0012_m10_1_router_derivatives"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

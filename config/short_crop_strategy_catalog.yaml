@@ -1,0 +1,15 @@
+catalog_key: short_crop_strategy_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: VERTICAL_9_16
+    description: Native vertical 9:16 composition.
+  - key: CENTER_CROP
+    description: Center crop from source frame.
+  - key: SMART_CROP
+    description: Smart crop plan for future renderer.
+  - key: TEMPLATE_CARD
+    description: Template card layout.
+  - key: DIAGRAM_CARD
+    description: Diagram card layout.

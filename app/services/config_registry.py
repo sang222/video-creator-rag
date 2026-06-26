@@ -122,6 +122,35 @@ class DiagnosticTaxonomyCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class LLMRouterLaneCatalogItem(BaseModel):
+    lane_name: str
+    lane_description: str
+    allowed_task_types: list[str] = Field(default_factory=list)
+    primary_model: str
+    fallback_models: list[str] = Field(default_factory=list)
+    premium_model: str | None = None
+    emergency_model: str | None = None
+    backup_model: str | None = None
+    cost_tier: str
+    latency_tier: str
+    critical_path_allowed: bool = False
+    requires_human_approval_for_premium: bool = True
+    route_priority: int
+
+    model_config = ConfigDict(extra="forbid")
+
+class LLMModelProfileCatalogItem(BaseModel):
+    provider_key: str
+    model_id: str
+    model_role: str
+    lane_names: list[str] = Field(default_factory=list)
+    role_bindings: list[dict[str, str]] = Field(default_factory=list)
+    is_enabled: bool = True
+    critical_path_allowed: bool = False
+    notes: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
 class RetryPolicyCatalogItem(BaseModel):
     policy_key: str
     provider_key: str | None = None
@@ -340,6 +369,22 @@ class ConfigRegistryService:
             "playbook_candidate_category_catalog": SimpleKeyCatalogItem,
             "playbook_candidate_state_catalog": SimpleKeyCatalogItem,
             "m10_reason_code_catalog": ReasonCodeItem,
+            "llm_router_lane_catalog": LLMRouterLaneCatalogItem,
+            "llm_model_profile_catalog": LLMModelProfileCatalogItem,
+            "llm_route_status_catalog": SimpleKeyCatalogItem,
+            "derivative_type_catalog": SimpleKeyCatalogItem,
+            "short_candidate_state_catalog": SimpleKeyCatalogItem,
+            "short_crop_strategy_catalog": SimpleKeyCatalogItem,
+            "short_visual_source_catalog": SimpleKeyCatalogItem,
+            "originality_check_result_catalog": SimpleKeyCatalogItem,
+            "reusable_artifact_type_catalog": SimpleKeyCatalogItem,
+            "reusable_artifact_state_catalog": SimpleKeyCatalogItem,
+            "release_plan_state_catalog": SimpleKeyCatalogItem,
+            "upload_card_state_catalog": SimpleKeyCatalogItem,
+            "human_upload_task_state_catalog": SimpleKeyCatalogItem,
+            "music_policy_catalog": SimpleKeyCatalogItem,
+            "cta_type_catalog": SimpleKeyCatalogItem,
+            "m10_1_reason_code_catalog": ReasonCodeItem,
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,
@@ -356,6 +401,8 @@ class ConfigRegistryService:
                 or getattr(parsed, "key", None)
                 or getattr(parsed, "gate_key", None)
                 or getattr(parsed, "catalog_key", None)
+                or getattr(parsed, "lane_name", None)
+                or getattr(parsed, "model_id", None)
                 or getattr(parsed, "provider_key", None)
                 or getattr(parsed, "policy_key", None)
                 or getattr(parsed, "metric_key", None)

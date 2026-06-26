@@ -1,0 +1,15 @@
+catalog_key: cta_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NONE
+    description: No call to action.
+  - key: SEARCH_YOUTUBE
+    description: Suggest searching YouTube for the full video.
+  - key: BRAND_CTA
+    description: Brand call to action.
+  - key: LINK_IN_BIO
+    description: Link-in-bio call to action.
+  - key: PINNED_COMMENT
+    description: Pinned comment call to action.

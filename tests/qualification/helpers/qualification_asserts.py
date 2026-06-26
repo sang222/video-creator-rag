@@ -14,9 +14,10 @@ REQUIRED_TAGS = {
     "m7-manual-publish-handoff",
     "m8-analytics-sync-foundation",
     "m9-post-publish-diagnostics",
+    "m10-learning-review-queue",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0011_m10_learning_review_queue"
+EXPECTED_ALEMBIC_HEAD = "0012_m10_1_router_derivatives"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -33,6 +34,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m8-analytics-sync.md",
     "docs/architecture/m9-post-publish-diagnostics.md",
     "docs/architecture/m10-learning-review-queue.md",
+    "docs/architecture/m10-1-llm-router-derivative-funnel.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -44,6 +46,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m8-final-report.md",
     "reports/m9-final-report.md",
     "reports/m10-final-report.md",
+    "reports/m10_1-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }

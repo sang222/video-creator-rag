@@ -1,0 +1,19 @@
+catalog_key: short_visual_source_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PARENT_HERO_REUSE
+    description: Reuse parent hero visual.
+  - key: PARENT_SCENE_REUSE
+    description: Reuse parent scene visual.
+  - key: TEMPLATE_CARD
+    description: Use template card.
+  - key: DIAGRAM_CARD
+    description: Use diagram card.
+  - key: SCREENSHOT
+    description: Use screenshot source.
+  - key: NEW_AI_HERO_REQUIRED
+    description: New AI hero asset is required later.
+  - key: UNKNOWN
+    description: Visual source unknown.

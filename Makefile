@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: install db-up db-down migrate seed test run health
+.PHONY: install db-up db-down ollama-up ollama-logs ollama-health ollama-pull-cloud-models migrate seed test run health
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -14,6 +14,19 @@ db-up:
 
 db-down:
 	docker-compose down
+
+ollama-up:
+	docker-compose up -d ollama
+
+ollama-logs:
+	docker-compose logs -f ollama
+
+ollama-health:
+	curl -fsS http://localhost:11434/api/tags
+
+ollama-pull-cloud-models:
+	docker-compose up -d ollama
+	docker-compose exec -T ollama sh -lc 'set -u; test -n "$$OLLAMA_API_KEY"; models="$$(env | awk -F= '\''/^VCOS_LLM_MODEL_/ {print $$2}'\'' | sort -u)"; test -n "$$models"; failed=""; for model in $$models; do echo "Pulling $$model"; if OLLAMA_HOST=http://127.0.0.1:11434 ollama pull "$$model"; then echo "Pulled $$model"; else echo "Failed $$model"; failed="$$failed $$model"; fi; done; OLLAMA_HOST=http://127.0.0.1:11434 ollama list; if test -n "$$failed"; then echo "Failed models:$$failed"; exit 1; fi'
 
 migrate:
 	$(BIN)/alembic upgrade head

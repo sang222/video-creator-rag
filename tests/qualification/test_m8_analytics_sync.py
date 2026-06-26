@@ -153,7 +153,7 @@ def test_m8_preflight_tags_migration_tables_defaults_and_metric_seed(engine, db_
     assert M8_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_m10_learning_review_queue"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_m10_1_router_derivatives"
         defaults = connection.execute(
             text(
                 """

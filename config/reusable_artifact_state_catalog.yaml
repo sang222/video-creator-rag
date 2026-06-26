@@ -1,0 +1,13 @@
+catalog_key: reusable_artifact_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ACTIVE
+    description: Artifact is active.
+  - key: NEEDS_REVIEW
+    description: Artifact needs review.
+  - key: RETIRED
+    description: Artifact is retired.
+  - key: BLOCKED
+    description: Artifact is blocked.

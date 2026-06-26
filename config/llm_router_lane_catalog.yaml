@@ -1,0 +1,58 @@
+catalog_key: llm_router_lane_catalog
+catalog_version: "1.0.1"
+schema_version: catalog.v1
+status: active
+items:
+  - lane_name: cheap_structured
+    lane_description: JSON schema output, metadata, small classification, and low-cost repair text.
+    allowed_task_types: [json_schema_output, metadata_generation, small_classification, repair_validation]
+    primary_model: gpt-oss:20b-cloud
+    fallback_models: [qwen3.5:cloud]
+    cost_tier: LOW
+    latency_tier: FAST
+    route_priority: 10
+  - lane_name: default_multimodal
+    lane_description: General multimodal reasoning and non-critical creative checks.
+    allowed_task_types: [multimodal_reasoning, creative_check]
+    primary_model: qwen3.5:cloud
+    fallback_models: [gemma4:31b-cloud]
+    cost_tier: MEDIUM
+    latency_tier: NORMAL
+    route_priority: 20
+  - lane_name: visual_creative_review
+    lane_description: Visual plan, scene concept, creative consistency, and thumbnail direction review.
+    allowed_task_types: [visual_plan_review, scene_concept_review, thumbnail_direction_review]
+    primary_model: minimax-m3:cloud
+    fallback_models: [qwen3.5:cloud]
+    emergency_model: gemma4:31b-cloud
+    cost_tier: MEDIUM
+    latency_tier: NORMAL
+    route_priority: 30
+  - lane_name: long_context_text
+    lane_description: Long-form script outline, generation, synthesis, research-to-script, and deep rewrite/review.
+    allowed_task_types: [long_form_script, long_context_synthesis, research_pack_to_script, deep_rewrite]
+    primary_model: deepseek-v4-flash:cloud
+    fallback_models: [nemotron-3-super:cloud]
+    premium_model: deepseek-v4-flash:cloud
+    cost_tier: MEDIUM
+    latency_tier: NORMAL
+    route_priority: 40
+  - lane_name: engineering_architect
+    lane_description: Internal engineering design review, code architecture reasoning, test planning, and implementation prompts.
+    allowed_task_types: [engineering_design_review, code_architecture, test_planning, implementation_prompt]
+    primary_model: qwen3-coder:480b-cloud
+    fallback_models: [kimi-k2.7-code:cloud]
+    backup_model: deepseek-v4-flash:cloud
+    cost_tier: HIGH
+    latency_tier: SLOW
+    critical_path_allowed: false
+    route_priority: 50
+  - lane_name: gatekeeper_soft_review
+    lane_description: Policy/compliance, monetization risk, factuality/risk, and final content soft review.
+    allowed_task_types: [policy_soft_review, monetization_risk_review, script_risk_review, factuality_review]
+    primary_model: nemotron-3-super:cloud
+    fallback_models: [deepseek-v4-flash:cloud]
+    premium_model: deepseek-v4-flash:cloud
+    cost_tier: HIGH
+    latency_tier: NORMAL
+    route_priority: 60

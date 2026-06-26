@@ -1,0 +1,13 @@
+catalog_key: llm_route_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: SUCCESS
+    description: Route attempt completed successfully.
+  - key: FAILED
+    description: Route attempt called the provider but failed.
+  - key: SKIPPED
+    description: Route attempt was skipped by execution guard.
+  - key: BLOCKED
+    description: Route attempt was blocked before execution.

@@ -1,0 +1,17 @@
+catalog_key: short_candidate_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: GENERATED
+    description: Candidate was extracted.
+  - key: SCORED
+    description: Candidate was scored.
+  - key: SELECTED_FOR_RENDER
+    description: Candidate passed score threshold for future render planning.
+  - key: REJECTED
+    description: Candidate was rejected.
+  - key: NEEDS_REWRITE
+    description: Candidate needs rewrite before use.
+  - key: BLOCKED
+    description: Candidate is blocked by risk or duration constraints.

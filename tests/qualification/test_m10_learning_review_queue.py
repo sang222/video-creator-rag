@@ -40,17 +40,10 @@ M10_TABLES = {
     "playbook_candidate_drafts",
 }
 
-FORBIDDEN_M10_1_M10_2_M11_TABLES = {
+FORBIDDEN_M10_2_M11_TABLES = {
     "content_derivative_graphs",
-    "short_candidates",
-    "cross_platform_funnel_packages",
-    "human_upload_tasks",
-    "upload_cards",
     "reusable_artifact_stores",
     "derivative_originality_gates",
-    "llm_router_profiles",
-    "llm_router_lanes",
-    "llm_model_profiles",
     "ollama_llm_providers",
     "media_provider_routers",
     "provider_capability_matrices",
@@ -190,9 +183,9 @@ def test_m10_preflight_schema_catalogs_defaults_and_scope(engine, db_session, qu
     assert status.required_tags["m9-post-publish-diagnostics"] is True
     tables = set(inspect(engine).get_table_names())
     assert M10_TABLES <= tables
-    assert tables.isdisjoint(FORBIDDEN_M10_1_M10_2_M11_TABLES)
+    assert tables.isdisjoint(FORBIDDEN_M10_2_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_m10_learning_review_queue"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_m10_1_router_derivatives"
         defaults = connection.execute(
             text(
                 """

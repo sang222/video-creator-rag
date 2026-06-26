@@ -1,0 +1,11 @@
+catalog_key: music_policy_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: SAFE_MODE
+    description: Use conservative music handling.
+  - key: PLATFORM_NATIVE_MODE
+    description: Human may use platform-native music.
+  - key: NO_MUSIC_MODE
+    description: No music should be used.

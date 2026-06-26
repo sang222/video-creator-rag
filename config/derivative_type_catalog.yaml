@@ -1,0 +1,19 @@
+catalog_key: derivative_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: SHORT
+    description: Short-form derivative from a parent long-form asset.
+  - key: CLIP
+    description: Clip derivative.
+  - key: FOLLOW_UP_LONG
+    description: Follow-up long-form opportunity with new narrative value.
+  - key: COMPILATION
+    description: Compilation requiring new framing and context before publish.
+  - key: UPDATE
+    description: Updated derivative.
+  - key: TRANSLATION
+    description: Translation derivative.
+  - key: OTHER
+    description: Other derivative type.

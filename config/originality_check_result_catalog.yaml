@@ -1,0 +1,11 @@
+catalog_key: originality_check_result_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PASS
+    description: Originality check passed.
+  - key: REVIEW_REQUIRED
+    description: Human review is required before publish.
+  - key: BLOCK
+    description: Originality check blocks publish.

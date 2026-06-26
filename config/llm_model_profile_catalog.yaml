@@ -1,0 +1,85 @@
+catalog_key: llm_model_profile_catalog
+catalog_version: "1.0.1"
+schema_version: catalog.v1
+status: active
+items:
+  - provider_key: OLLAMA
+    model_id: gpt-oss:20b-cloud
+    model_role: PRIMARY
+    lane_names: [cheap_structured]
+    role_bindings:
+      - lane_name: cheap_structured
+        role: PRIMARY
+    notes: Structured JSON, metadata, small classification, and low-cost repair primary.
+  - provider_key: OLLAMA
+    model_id: qwen3.5:cloud
+    model_role: PRIMARY_FALLBACK
+    lane_names: [cheap_structured, default_multimodal, visual_creative_review]
+    role_bindings:
+      - lane_name: cheap_structured
+        role: FALLBACK
+      - lane_name: default_multimodal
+        role: PRIMARY
+      - lane_name: visual_creative_review
+        role: FALLBACK
+    notes: Cheap structured fallback, default multimodal primary, and visual review fallback.
+  - provider_key: OLLAMA
+    model_id: gemma4:31b-cloud
+    model_role: FALLBACK_EMERGENCY
+    lane_names: [default_multimodal, visual_creative_review]
+    role_bindings:
+      - lane_name: default_multimodal
+        role: FALLBACK
+      - lane_name: visual_creative_review
+        role: EMERGENCY
+    notes: Default multimodal fallback and visual creative emergency model.
+  - provider_key: OLLAMA
+    model_id: minimax-m3:cloud
+    model_role: PRIMARY
+    lane_names: [visual_creative_review]
+    role_bindings:
+      - lane_name: visual_creative_review
+        role: PRIMARY
+    notes: Visual plan, scene concept, creative consistency, and thumbnail direction review primary.
+  - provider_key: OLLAMA
+    model_id: deepseek-v4-flash:cloud
+    model_role: PRIMARY_FALLBACK_PREMIUM_BACKUP
+    lane_names: [long_context_text, engineering_architect, gatekeeper_soft_review]
+    role_bindings:
+      - lane_name: long_context_text
+        role: PRIMARY
+      - lane_name: long_context_text
+        role: PREMIUM
+      - lane_name: engineering_architect
+        role: BACKUP
+      - lane_name: gatekeeper_soft_review
+        role: FALLBACK
+      - lane_name: gatekeeper_soft_review
+        role: PREMIUM
+    notes: Long-context primary and premium replacement for unavailable nemotron ultra; engineering backup; gatekeeper fallback and premium replacement.
+  - provider_key: OLLAMA
+    model_id: nemotron-3-super:cloud
+    model_role: PRIMARY_FALLBACK
+    lane_names: [long_context_text, gatekeeper_soft_review]
+    role_bindings:
+      - lane_name: long_context_text
+        role: FALLBACK
+      - lane_name: gatekeeper_soft_review
+        role: PRIMARY
+    notes: Long-context fallback and gatekeeper soft review primary.
+  - provider_key: OLLAMA
+    model_id: qwen3-coder:480b-cloud
+    model_role: PRIMARY
+    lane_names: [engineering_architect]
+    role_bindings:
+      - lane_name: engineering_architect
+        role: PRIMARY
+    notes: Internal engineering architecture primary.
+  - provider_key: OLLAMA
+    model_id: kimi-k2.7-code:cloud
+    model_role: FALLBACK
+    lane_names: [engineering_architect]
+    role_bindings:
+      - lane_name: engineering_architect
+        role: FALLBACK
+    notes: Internal engineering architecture fallback.
