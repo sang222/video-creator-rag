@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, and M9 post-publish diagnostic foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, and M10 learning review queue foundation.
 
 ## Stack
 
@@ -183,6 +183,22 @@ vcos post-publish proposal-reject --proposal-id <proposal-id>
 
 M9 reads M7 UploadedVideo and M8 analytics snapshots/summaries to create deterministic observation-window diagnostics, failure trace reports, recovery proposals, and manual review actions. `vcos post-publish` is diagnostic and recommendation only. VCOS does not sync analytics, publish, edit platform metadata, auto-reupload, scrape analytics pages, call platform APIs, or use fake engagement in M9.
 
+## M10 API
+
+```bash
+POST /learning-candidate-generation-runs
+POST /learning-candidate-generation-runs/{run_id}/execute
+GET /learning-candidate-generation-runs/{run_id}
+GET /learning-candidates
+GET /learning-candidates/{candidate_id}
+GET /learning-candidates/{candidate_id}/evidence-bundle
+GET /learning-review-queue
+GET /learning-review-queue/{queue_item_id}
+GET /playbook-candidate-drafts/{draft_id}
+```
+
+M10 reads M8/M9 evidence and creates learning candidates, evidence bundles, eligibility gate results, review queue items, and playbook candidate drafts for M11 human review. M10 does not approve learning, promote playbooks, mutate channel profile/policy config, build dashboard UI, add approve/reject CLI, call real providers, or change daily workflow behavior.
+
 ## Boundaries
 
-M0-M9 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M10 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. CapCut pilot notes do not make CapCut a production dependency.

@@ -1,0 +1,13 @@
+catalog_key: learning_promotion_eligibility_result_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ELIGIBLE_FOR_REVIEW
+    description: Candidate can enter M11 human review.
+  - key: NEEDS_MORE_EVIDENCE
+    description: Candidate needs more evidence before review can approve it.
+  - key: BLOCKED
+    description: Candidate is blocked by risk.
+  - key: INELIGIBLE
+    description: Candidate is not eligible for review.

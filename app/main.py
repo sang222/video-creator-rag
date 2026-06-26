@@ -73,6 +73,12 @@ from app.contracts import (
     ProjectAdmissionDecisionCreate,
     ProjectAdmissionDecisionRead,
     FailureTraceReportRead,
+    LearningCandidateGenerationRunCreate,
+    LearningCandidateGenerationRunExecuteRequest,
+    LearningCandidateGenerationRunRead,
+    LearningCandidateRead,
+    LearningEvidenceBundleRead,
+    LearningReviewQueueItemRead,
     ProductionArtifactRunCreate,
     ProductionArtifactRunRead,
     PostPublishHealthRunCreate,
@@ -107,6 +113,7 @@ from app.contracts import (
     VideoProjectCreate,
     VideoProjectRead,
     RecoveryProposalRead,
+    PlaybookCandidateDraftRead,
     ChannelDailyRunCreate,
     ChannelDailyRunRead,
     ChannelStatePackSnapshotCreate,
@@ -151,6 +158,9 @@ from app.services import (
     PolicyRevalidationService,
     IdeaMarketPreflightService,
     LocalFixtureRendererService,
+    LearningCandidateGenerationService,
+    LearningReadService,
+    LearningReviewQueueService,
     MediaQCService,
     ProjectAdmissionService,
     ProviderHealthService,
@@ -1347,6 +1357,107 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/learning-candidate-generation-runs", response_model=LearningCandidateGenerationRunRead)
+    def create_learning_candidate_generation_run(
+        data: LearningCandidateGenerationRunCreate,
+    ) -> LearningCandidateGenerationRunRead:
+        try:
+            with session_scope() as session:
+                run = LearningCandidateGenerationService(session).create_run(data=data)
+                return LearningCandidateGenerationRunRead.model_validate(_learning_generation_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/learning-candidate-generation-runs/{run_id}/execute", response_model=LearningCandidateGenerationRunRead)
+    def execute_learning_candidate_generation_run(
+        run_id: uuid.UUID,
+        data: LearningCandidateGenerationRunExecuteRequest | None = None,
+    ) -> LearningCandidateGenerationRunRead:
+        try:
+            with session_scope() as session:
+                request = data or LearningCandidateGenerationRunExecuteRequest()
+                run = LearningCandidateGenerationService(session).execute_run(
+                    run_id=run_id,
+                    correlation_id=request.correlation_id or "api-m10-learning-generation-execute",
+                )
+                return LearningCandidateGenerationRunRead.model_validate(_learning_generation_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-candidate-generation-runs/{run_id}", response_model=LearningCandidateGenerationRunRead)
+    def get_learning_candidate_generation_run(run_id: uuid.UUID) -> LearningCandidateGenerationRunRead:
+        try:
+            with session_scope() as session:
+                run = LearningCandidateGenerationService(session).require_run(run_id)
+                return LearningCandidateGenerationRunRead.model_validate(_learning_generation_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-candidates", response_model=list[LearningCandidateRead])
+    def list_learning_candidates(
+        candidate_state: str | None = None,
+        company_id: uuid.UUID | None = None,
+        uploaded_video_id: uuid.UUID | None = None,
+    ) -> list[LearningCandidateRead]:
+        try:
+            with session_scope() as session:
+                candidates = LearningReadService(session).list_candidates(
+                    candidate_state=candidate_state,
+                    company_id=company_id,
+                    uploaded_video_id=uploaded_video_id,
+                )
+                return [LearningCandidateRead.model_validate(_learning_candidate(candidate)) for candidate in candidates]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-candidates/{candidate_id}", response_model=LearningCandidateRead)
+    def get_learning_candidate(candidate_id: uuid.UUID) -> LearningCandidateRead:
+        try:
+            with session_scope() as session:
+                candidate = LearningReadService(session).require_candidate(candidate_id)
+                return LearningCandidateRead.model_validate(_learning_candidate(candidate))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-candidates/{candidate_id}/evidence-bundle", response_model=LearningEvidenceBundleRead)
+    def get_learning_candidate_evidence_bundle(candidate_id: uuid.UUID) -> LearningEvidenceBundleRead:
+        try:
+            with session_scope() as session:
+                bundle = LearningReadService(session).require_evidence_bundle_for_candidate(candidate_id)
+                return LearningEvidenceBundleRead.model_validate(_learning_evidence_bundle(bundle))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-review-queue", response_model=list[LearningReviewQueueItemRead])
+    def list_learning_review_queue(
+        queue_state: str | None = None,
+        company_id: uuid.UUID | None = None,
+    ) -> list[LearningReviewQueueItemRead]:
+        try:
+            with session_scope() as session:
+                items = LearningReviewQueueService(session).list_queue(queue_state=queue_state, company_id=company_id)
+                return [LearningReviewQueueItemRead.model_validate(_learning_review_queue_item(item)) for item in items]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-review-queue/{queue_item_id}", response_model=LearningReviewQueueItemRead)
+    def get_learning_review_queue_item(queue_item_id: uuid.UUID) -> LearningReviewQueueItemRead:
+        try:
+            with session_scope() as session:
+                item = LearningReadService(session).require_queue_item(queue_item_id)
+                return LearningReviewQueueItemRead.model_validate(_learning_review_queue_item(item))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/playbook-candidate-drafts/{draft_id}", response_model=PlaybookCandidateDraftRead)
+    def get_playbook_candidate_draft(draft_id: uuid.UUID) -> PlaybookCandidateDraftRead:
+        try:
+            with session_scope() as session:
+                draft = LearningReadService(session).require_playbook_candidate_draft(draft_id)
+                return PlaybookCandidateDraftRead.model_validate(_playbook_candidate_draft(draft))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -2446,6 +2557,128 @@ def _recovery_proposal(proposal: Any) -> dict[str, Any]:
         "requires_human_approval": proposal.requires_human_approval,
         "created_at": proposal.created_at,
         "updated_at": proposal.updated_at,
+    }
+
+def _learning_generation_run(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "company_id": run.company_id,
+        "channel_workspace_id": run.channel_workspace_id,
+        "video_project_id": run.video_project_id,
+        "uploaded_video_id": run.uploaded_video_id,
+        "source_failure_trace_report_id": run.source_failure_trace_report_id,
+        "source_recovery_proposal_id": run.source_recovery_proposal_id,
+        "source_analytics_snapshot_id": run.source_analytics_snapshot_id,
+        "source_uploaded_video_metrics_summary_id": run.source_uploaded_video_metrics_summary_id,
+        "run_mode": run.run_mode,
+        "run_state": run.run_state,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "generated_candidate_count": run.generated_candidate_count,
+        "reason_codes": run.reason_codes,
+        "next_action": run.next_action,
+        "metadata": run.metadata_,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+    }
+
+def _learning_candidate(candidate: Any) -> dict[str, Any]:
+    return {
+        "id": candidate.id,
+        "generation_run_id": candidate.generation_run_id,
+        "company_id": candidate.company_id,
+        "channel_workspace_id": candidate.channel_workspace_id,
+        "video_project_id": candidate.video_project_id,
+        "uploaded_video_id": candidate.uploaded_video_id,
+        "candidate_type": candidate.candidate_type,
+        "candidate_state": candidate.candidate_state,
+        "operator_summary": candidate.operator_summary,
+        "friendly_status": candidate.friendly_status,
+        "candidate_summary": candidate.candidate_summary,
+        "suggested_learning": candidate.suggested_learning,
+        "suggested_playbook_text": candidate.suggested_playbook_text,
+        "recommended_scope": candidate.recommended_scope,
+        "confidence_label": candidate.confidence_label,
+        "risk_level": candidate.risk_level,
+        "evidence_bundle_id": candidate.evidence_bundle_id,
+        "eligibility_run_id": candidate.eligibility_run_id,
+        "source_refs": candidate.source_refs,
+        "diagnostic_refs": candidate.diagnostic_refs,
+        "recovery_refs": candidate.recovery_refs,
+        "metric_refs": candidate.metric_refs,
+        "policy_flags": candidate.policy_flags,
+        "rights_flags": candidate.rights_flags,
+        "limitations": candidate.limitations,
+        "counter_evidence": candidate.counter_evidence,
+        "technical_appendix": candidate.technical_appendix,
+        "created_at": candidate.created_at,
+        "updated_at": candidate.updated_at,
+    }
+
+def _learning_evidence_bundle(bundle: Any) -> dict[str, Any]:
+    return {
+        "id": bundle.id,
+        "learning_candidate_id": bundle.learning_candidate_id,
+        "company_id": bundle.company_id,
+        "channel_workspace_id": bundle.channel_workspace_id,
+        "evidence_summary": bundle.evidence_summary,
+        "source_video_refs": bundle.source_video_refs,
+        "source_project_refs": bundle.source_project_refs,
+        "analytics_snapshot_refs": bundle.analytics_snapshot_refs,
+        "diagnostic_refs": bundle.diagnostic_refs,
+        "recovery_refs": bundle.recovery_refs,
+        "metric_support": bundle.metric_support,
+        "counter_evidence": bundle.counter_evidence,
+        "limitations": bundle.limitations,
+        "freshness_summary": bundle.freshness_summary,
+        "confidence_summary": bundle.confidence_summary,
+        "policy_rights_summary": bundle.policy_rights_summary,
+        "created_at": bundle.created_at,
+    }
+
+def _learning_review_queue_item(item: Any) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "learning_candidate_id": item.learning_candidate_id,
+        "evidence_bundle_id": item.evidence_bundle_id,
+        "eligibility_run_id": item.eligibility_run_id,
+        "company_id": item.company_id,
+        "channel_workspace_id": item.channel_workspace_id,
+        "video_project_id": item.video_project_id,
+        "uploaded_video_id": item.uploaded_video_id,
+        "queue_state": item.queue_state,
+        "priority": item.priority,
+        "operator_summary": item.operator_summary,
+        "friendly_status": item.friendly_status,
+        "evidence_summary": item.evidence_summary,
+        "recommended_scope": item.recommended_scope,
+        "confidence_label": item.confidence_label,
+        "risk_level": item.risk_level,
+        "next_action": item.next_action,
+        "approval_actions_allowed": item.approval_actions_allowed,
+        "source_refs": item.source_refs,
+        "audit_refs": item.audit_refs,
+        "technical_appendix": item.technical_appendix,
+        "due_at": item.due_at,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+def _playbook_candidate_draft(draft: Any) -> dict[str, Any]:
+    return {
+        "id": draft.id,
+        "learning_candidate_id": draft.learning_candidate_id,
+        "company_id": draft.company_id,
+        "channel_workspace_id": draft.channel_workspace_id,
+        "candidate_scope": draft.candidate_scope,
+        "playbook_category": draft.playbook_category,
+        "draft_text": draft.draft_text,
+        "rationale": draft.rationale,
+        "evidence_refs": draft.evidence_refs,
+        "risk_notes": draft.risk_notes,
+        "state": draft.state,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

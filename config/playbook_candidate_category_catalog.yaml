@@ -1,0 +1,25 @@
+catalog_key: playbook_candidate_category_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: TOPIC
+    description: Topic draft.
+  - key: PACKAGING
+    description: Packaging draft.
+  - key: HOOK
+    description: Hook draft.
+  - key: RETENTION
+    description: Retention draft.
+  - key: VISUAL_SOURCE
+    description: Visual source draft.
+  - key: VOICE
+    description: Voice draft.
+  - key: POLICY
+    description: Policy draft.
+  - key: COST
+    description: Cost draft.
+  - key: RECOVERY
+    description: Recovery draft.
+  - key: OTHER
+    description: Other draft.

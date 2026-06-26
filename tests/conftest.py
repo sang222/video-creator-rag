@@ -95,6 +95,12 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    playbook_candidate_drafts,
+                    learning_review_queue_items,
+                    learning_promotion_eligibility_runs,
+                    learning_evidence_bundles,
+                    learning_candidates,
+                    learning_candidate_generation_runs,
                     recovery_proposals,
                     failure_trace_reports,
                     policy_rights_diagnostic_runs,

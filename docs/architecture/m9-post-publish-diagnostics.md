@@ -56,4 +56,4 @@ Forbidden actions are automatic reupload, automatic platform edit, fake engageme
 
 ## Future Milestones
 
-M10 may consume M9 evidence for learning/memory promotion later. M11 may display M9 summaries in a dashboard later.
+M10 consumes M9 evidence to prepare learning candidates and M11-ready review queue items. M10 does not approve or promote those candidates. M11 may display M9/M10 summaries in a dashboard later.

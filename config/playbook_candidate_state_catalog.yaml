@@ -1,0 +1,13 @@
+catalog_key: playbook_candidate_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Draft was created but is not ready.
+  - key: READY_FOR_REVIEW
+    description: Draft is ready for M11 review.
+  - key: BLOCKED
+    description: Draft is blocked.
+  - key: EXPIRED
+    description: Draft expired.

@@ -48,6 +48,14 @@ def test_config_yaml_validates(db_session) -> None:
         "m7_reason_code_catalog",
         "m8_reason_code_catalog",
         "m9_reason_code_catalog",
+        "m10_reason_code_catalog",
+        "learning_candidate_state_catalog",
+        "learning_candidate_type_catalog",
+        "learning_confidence_label_catalog",
+        "learning_promotion_eligibility_result_catalog",
+        "learning_recommended_scope_catalog",
+        "learning_review_queue_state_catalog",
+        "learning_risk_level_catalog",
         "manual_action_type_catalog",
         "manual_publish_confirmation_state_catalog",
         "metadata_diff_severity_catalog",
@@ -62,6 +70,8 @@ def test_config_yaml_validates(db_session) -> None:
         "ops_incident_type_catalog",
         "platform_policy_catalog",
         "platform_surface_catalog",
+        "playbook_candidate_category_catalog",
+        "playbook_candidate_state_catalog",
         "policy_domain_catalog",
         "post_publish_health_state_catalog",
         "post_publish_observation_window_catalog",
@@ -113,7 +123,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 83
+    assert catalog_count == 93
     assert role_count == 3
     assert metric_definition_count == 16
 

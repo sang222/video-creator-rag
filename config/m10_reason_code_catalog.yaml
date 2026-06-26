@@ -1,0 +1,49 @@
+catalog_key: m10_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: LEARNING_CANDIDATE_GENERATED
+    description: Learning candidate was generated.
+  - code: LEARNING_EVIDENCE_BUNDLE_CREATED
+    description: Learning evidence bundle was created.
+  - code: PROMOTION_ELIGIBILITY_RUN_CREATED
+    description: Promotion eligibility run was created.
+  - code: LEARNING_READY_FOR_HUMAN_REVIEW
+    description: Learning candidate is ready for M11 human review.
+  - code: LEARNING_NEEDS_MORE_EVIDENCE
+    description: Learning candidate needs more evidence.
+  - code: LEARNING_INELIGIBLE_LOW_EVIDENCE
+    description: Learning candidate is ineligible because evidence is too low.
+  - code: LEARNING_BLOCKED_POLICY_RISK
+    description: Learning candidate is blocked by policy risk.
+  - code: LEARNING_BLOCKED_RIGHTS_RISK
+    description: Learning candidate is blocked by rights risk.
+  - code: PLAYBOOK_CANDIDATE_DRAFT_CREATED
+    description: Playbook candidate draft was created.
+  - code: DASHBOARD_QUEUE_ITEM_CREATED
+    description: Review queue item was created for the M11 dashboard.
+  - code: ANALYTICS_FRESHNESS_INSUFFICIENT
+    description: Analytics freshness is insufficient.
+  - code: METRIC_SUPPORT_INSUFFICIENT
+    description: Metric support is insufficient.
+  - code: COUNTER_EVIDENCE_PRESENT
+    description: Counter evidence is present.
+  - code: POLICY_FLAG_BLOCKING
+    description: Policy flag blocks candidate promotion eligibility.
+  - code: RIGHTS_FLAG_BLOCKING
+    description: Rights flag blocks candidate promotion eligibility.
+  - code: NO_AUTO_PROMOTION
+    description: No automatic learning promotion is allowed in M10.
+  - code: M11_APPROVAL_REQUIRED
+    description: M11 human approval is required.
+  - code: DERIVATIVE_REUSE_DEFERRED_TO_M10_1
+    description: Derivative and reuse scope is deferred to M10.1.
+  - code: CROSS_PLATFORM_FUNNEL_DEFERRED_TO_M10_1
+    description: Cross-platform funnel scope is deferred to M10.1.
+  - code: REAL_OLLAMA_ROUTER_DEFERRED_TO_M10_1
+    description: Real Ollama router scope is deferred to M10.1.
+  - code: MEDIA_PROVIDER_ROUTING_DEFERRED_TO_M10_2
+    description: Media provider routing is deferred to M10.2.
+  - code: CONFIG_EDITING_DEFERRED_TO_M11
+    description: Human configuration editing is deferred to M11.

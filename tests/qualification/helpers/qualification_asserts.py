@@ -13,9 +13,10 @@ REQUIRED_TAGS = {
     "pre-m7-m0-m6-qualification-pass",
     "m7-manual-publish-handoff",
     "m8-analytics-sync-foundation",
+    "m9-post-publish-diagnostics",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0010_m9_post_publish_diagnostics"
+EXPECTED_ALEMBIC_HEAD = "0011_m10_learning_review_queue"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -31,6 +32,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m7-manual-publish-handoff.md",
     "docs/architecture/m8-analytics-sync.md",
     "docs/architecture/m9-post-publish-diagnostics.md",
+    "docs/architecture/m10-learning-review-queue.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -41,6 +43,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m7-final-report.md",
     "reports/m8-final-report.md",
     "reports/m9-final-report.md",
+    "reports/m10-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }

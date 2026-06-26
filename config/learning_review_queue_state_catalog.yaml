@@ -1,0 +1,15 @@
+catalog_key: learning_review_queue_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: READY_FOR_HUMAN_REVIEW
+    description: Queue item is ready for M11 human review.
+  - key: NEEDS_MORE_EVIDENCE
+    description: Queue item requires more evidence before final review.
+  - key: BLOCKED
+    description: Queue item is blocked by risk or policy.
+  - key: EXPIRED
+    description: Queue item expired.
+  - key: CANCELLED
+    description: Queue item was cancelled.

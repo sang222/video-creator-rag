@@ -1,5 +1,5 @@
 catalog_key: event_types
-catalog_version: "1.5.0"
+catalog_version: "1.6.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -207,3 +207,33 @@ items:
   - event_type: manual_action.created_from_post_publish_diagnostic
     event_version: 1
     description: Manual action created from a post-publish diagnostic.
+  - event_type: learning_candidate_generation_run.created
+    event_version: 1
+    description: Learning candidate generation run created.
+  - event_type: learning_candidate_generation_run.completed
+    event_version: 1
+    description: Learning candidate generation run completed.
+  - event_type: learning_candidate_generation_run.blocked
+    event_version: 1
+    description: Learning candidate generation run blocked.
+  - event_type: learning_candidate.generated
+    event_version: 1
+    description: Learning candidate generated.
+  - event_type: learning_evidence_bundle.created
+    event_version: 1
+    description: Learning evidence bundle created.
+  - event_type: learning_promotion_eligibility_run.created
+    event_version: 1
+    description: Learning promotion eligibility run created.
+  - event_type: learning_review_queue_item.created
+    event_version: 1
+    description: Learning review queue item created.
+  - event_type: playbook_candidate_draft.created
+    event_version: 1
+    description: Playbook candidate draft created.
+  - event_type: learning_candidate.blocked_policy_risk
+    event_version: 1
+    description: Learning candidate blocked by policy or rights risk.
+  - event_type: learning_candidate.needs_more_evidence
+    event_version: 1
+    description: Learning candidate needs more evidence.

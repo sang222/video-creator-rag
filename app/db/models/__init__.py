@@ -106,6 +106,14 @@ from app.db.models.m9 import (
     RecoveryProposal,
     RetentionDiagnosticRun,
 )
+from app.db.models.m10 import (
+    LearningCandidate,
+    LearningCandidateGenerationRun,
+    LearningEvidenceBundle,
+    LearningPromotionEligibilityRun,
+    LearningReviewQueueItem,
+    PlaybookCandidateDraft,
+)
 
 __all__ = [
     "AuditEvent",
@@ -196,4 +204,10 @@ __all__ = [
     "PostPublishObservationWindow",
     "RecoveryProposal",
     "RetentionDiagnosticRun",
+    "LearningCandidate",
+    "LearningCandidateGenerationRun",
+    "LearningEvidenceBundle",
+    "LearningPromotionEligibilityRun",
+    "LearningReviewQueueItem",
+    "PlaybookCandidateDraft",
 ]

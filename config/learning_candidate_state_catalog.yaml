@@ -1,0 +1,21 @@
+catalog_key: learning_candidate_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: GENERATED
+    description: Candidate was generated and is awaiting eligibility evaluation.
+  - key: NEEDS_MORE_EVIDENCE
+    description: Candidate needs more evidence before human review can approve it.
+  - key: INELIGIBLE_LOW_EVIDENCE
+    description: Candidate is ineligible because evidence is too weak.
+  - key: BLOCKED_POLICY_RISK
+    description: Candidate is blocked by unresolved policy or disclosure risk.
+  - key: BLOCKED_RIGHTS_RISK
+    description: Candidate is blocked by unresolved rights risk.
+  - key: READY_FOR_HUMAN_REVIEW
+    description: Candidate is ready for M11 human review.
+  - key: EXPIRED
+    description: Candidate expired before review.
+  - key: CANCELLED
+    description: Candidate was cancelled.

@@ -67,6 +67,14 @@ from app.services.m7 import (
 )
 from app.services.m8 import AnalyticsSyncService
 from app.services.m9 import ObservationWindowService, PostPublishHealthMonitorService
+from app.services.m10 import (
+    EvidenceBundleService,
+    LearningCandidateGenerationService,
+    LearningReadService,
+    LearningReviewQueueService,
+    PlaybookCandidateDraftService,
+    PromotionEligibilityGateService,
+)
 
 __all__ = [
     "AuditService",
@@ -123,6 +131,12 @@ __all__ = [
     "AnalyticsSyncService",
     "ObservationWindowService",
     "PostPublishHealthMonitorService",
+    "EvidenceBundleService",
+    "LearningCandidateGenerationService",
+    "LearningReadService",
+    "LearningReviewQueueService",
+    "PlaybookCandidateDraftService",
+    "PromotionEligibilityGateService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

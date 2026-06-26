@@ -86,13 +86,19 @@ REQUIRED_TABLES = {
     "policy_rights_diagnostic_runs",
     "failure_trace_reports",
     "recovery_proposals",
+    "learning_candidate_generation_runs",
+    "learning_candidates",
+    "learning_evidence_bundles",
+    "learning_promotion_eligibility_runs",
+    "learning_review_queue_items",
+    "playbook_candidate_drafts",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0010_m9_post_publish_diagnostics"
+    assert revision == "0011_m10_learning_review_queue"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

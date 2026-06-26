@@ -123,6 +123,16 @@ from app.contracts.m9 import (
     RecoveryProposalRead,
     RetentionDiagnosticRunRead,
 )
+from app.contracts.m10 import (
+    LearningCandidateGenerationRunCreate,
+    LearningCandidateGenerationRunExecuteRequest,
+    LearningCandidateGenerationRunRead,
+    LearningCandidateRead,
+    LearningEvidenceBundleRead,
+    LearningPromotionEligibilityRunRead,
+    LearningReviewQueueItemRead,
+    PlaybookCandidateDraftRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -291,6 +301,14 @@ __all__ = [
     "PostPublishObservationWindowRead",
     "RecoveryProposalRead",
     "RetentionDiagnosticRunRead",
+    "LearningCandidateGenerationRunCreate",
+    "LearningCandidateGenerationRunExecuteRequest",
+    "LearningCandidateGenerationRunRead",
+    "LearningCandidateRead",
+    "LearningEvidenceBundleRead",
+    "LearningPromotionEligibilityRunRead",
+    "LearningReviewQueueItemRead",
+    "PlaybookCandidateDraftRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

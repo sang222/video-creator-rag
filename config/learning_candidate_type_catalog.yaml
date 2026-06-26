@@ -1,0 +1,27 @@
+catalog_key: learning_candidate_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: TOPIC_DEMAND_PATTERN
+    description: Topic demand learning candidate.
+  - key: PACKAGING_PATTERN
+    description: Packaging learning candidate.
+  - key: HOOK_PATTERN
+    description: Hook learning candidate.
+  - key: RETENTION_PATTERN
+    description: Retention learning candidate.
+  - key: VISUAL_SOURCE_PATTERN
+    description: Visual source learning candidate.
+  - key: VOICE_NARRATION_PATTERN
+    description: Voice or narration learning candidate.
+  - key: POLICY_RIGHTS_PATTERN
+    description: Policy, rights, or disclosure learning candidate.
+  - key: COST_EFFICIENCY_PATTERN
+    description: Cost efficiency learning candidate.
+  - key: RECOVERY_PATTERN
+    description: Recovery learning candidate.
+  - key: CHANNEL_FIT_PATTERN
+    description: Channel fit learning candidate.
+  - key: OTHER
+    description: Other learning candidate.

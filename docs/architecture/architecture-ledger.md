@@ -21,6 +21,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M7 builds manual publish handoff packages, operator checklists/instructions, human-entered publish confirmations, uploaded video records, lineage, and publication summaries only.
 - M8 builds analytics sync runs, local mock/manual/import analytics snapshots, metric definitions/availability, traffic/retention/engagement snapshots, and uploaded video metrics summaries only.
 - M9 builds deterministic post-publish observation windows, no-view/packaging/retention/engagement/policy diagnostics, failure trace reports, recovery proposals, and manual review actions only.
+- M10 builds evidence-backed learning candidates, evidence bundles, deterministic promotion eligibility runs, M11-ready learning review queue items, and playbook candidate drafts only.
 
 ## Scope Guardrails
 
@@ -60,13 +61,17 @@ M9 adds PostPublishObservationWindow, PostPublishHealthRun, DiagnosticTaxonomyVe
 
 M9 does not build analytics sync, dashboard/operator cockpit UI, memory promotion, auto publish/upload, auto reupload, platform metadata editing, real provider/platform integrations, OAuth/token refresh, analytics scraping, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
+M10 adds LearningCandidateGenerationRun, LearningCandidate, LearningEvidenceBundle, LearningPromotionEligibilityRun, LearningReviewQueueItem, and PlaybookCandidateDraft.
+
+M10 does not build dashboard/operator cockpit UI, approval/reject CLI, human approval actions, approved playbook promotion, automatic ChannelProfileVersion or CompiledPolicySnapshot changes, automatic pipeline/config/title/thumbnail changes, derivative/reuse/shorts/cross-platform funnel entities, real Ollama/LLMRouter execution, media provider routing, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, analytics sync, no-view diagnostics, auto publish/upload/reupload, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
 - Proactive Audience Delivery maps to M3 readiness gates, M5 retrieval/context, M6 packaging/QC, M7 distribution, M8 analytics, and M9 recovery.
 - Policy drift maps to M3 policy source refs, policy change records, and revalidation backbone.
 - Critique accuracy patch maps to M3 evidence/reason contracts, M5 retrieval, M6 QC, M7 publish checks, M8 metric truth, M9 recovery, and M10 memory review.
-- Retrieval/Memory Governance maps to M3 privacy contracts, M5 retrieval objects, M8 metric truth, and M10 memory promotion.
+- Retrieval/Memory Governance maps to M3 privacy contracts, M5 retrieval objects, M8 metric truth, and M10 learning review governance.
 - M11 dashboard remains M11 only; M3 only supplies future readiness output shape.
 - M4 complete means provider/cost/quota/ops health rails exist.
 - M5 complete means daily run/admission/context foundation exists with mock-first LLM proposal capture.
@@ -76,8 +81,10 @@ M9 does not build analytics sync, dashboard/operator cockpit UI, memory promotio
 - M7 complete means VCOS can hand off an M6 render package to a human operator for manual upload, then capture actual publish metadata, disclosures, external id/URL, uploaded video lineage, and a metrics-free publication summary.
 - M8 complete means UploadedVideo has local analytics snapshots, metric availability, freshness/confidence, traffic/retention/engagement snapshots, and a latest metrics read model.
 - M9 complete means VCOS can diagnose uploaded video health and propose human-approved actions without automatic recovery.
-- M10 will handle learning/memory promotion later.
-- M11 will display uploaded videos in an operator dashboard later.
+- M10 complete means VCOS can create evidence-backed learning candidates and queue them for M11 review without approval or promotion.
+- M10.1 will handle real Ollama LLMRouter and derivative/reuse/shorts/cross-platform funnel governance later.
+- M10.2 will handle Media Provider Role Matrix and provider routing later.
+- M11 will display uploaded videos, learning approvals, playbook promotion UX, and human-owned channel config editing in an operator dashboard later.
 
 ## Pilot Notes
 

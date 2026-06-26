@@ -1,0 +1,15 @@
+catalog_key: learning_recommended_scope_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CHANNEL
+    description: Candidate should be reviewed only for the channel scope.
+  - key: SERIES
+    description: Candidate should be reviewed only for a series scope.
+  - key: COMPANY_DEBRANDED
+    description: Candidate should be reviewed for debranded company-level reuse.
+  - key: DO_NOT_PROMOTE
+    description: Candidate should not be promoted.
+  - key: UNKNOWN
+    description: Scope unknown.

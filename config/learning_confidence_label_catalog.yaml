@@ -1,0 +1,13 @@
+catalog_key: learning_confidence_label_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HIGH
+    description: High confidence.
+  - key: MEDIUM
+    description: Medium confidence.
+  - key: LOW
+    description: Low confidence.
+  - key: UNKNOWN
+    description: Confidence unknown.

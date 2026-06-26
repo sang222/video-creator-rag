@@ -1,0 +1,15 @@
+catalog_key: learning_risk_level_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LOW
+    description: Low learning reuse risk.
+  - key: MEDIUM
+    description: Medium learning reuse risk.
+  - key: HIGH
+    description: High learning reuse risk.
+  - key: BLOCKED
+    description: Learning reuse is blocked.
+  - key: UNKNOWN
+    description: Risk unknown.
