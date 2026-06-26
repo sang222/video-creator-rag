@@ -95,6 +95,16 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    recovery_proposals,
+                    failure_trace_reports,
+                    policy_rights_diagnostic_runs,
+                    engagement_diagnostic_runs,
+                    retention_diagnostic_runs,
+                    packaging_diagnostic_runs,
+                    no_view_diagnostic_runs,
+                    post_publish_health_runs,
+                    diagnostic_taxonomy_versions,
+                    post_publish_observation_windows,
                     uploaded_video_metrics_summaries,
                     engagement_snapshots,
                     retention_curve_snapshots,

@@ -1,0 +1,15 @@
+catalog_key: diagnostic_severity_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: INFO
+    description: Informational severity.
+  - key: LOW
+    description: Low severity.
+  - key: MEDIUM
+    description: Medium severity.
+  - key: HIGH
+    description: High severity.
+  - key: CRITICAL
+    description: Critical severity.

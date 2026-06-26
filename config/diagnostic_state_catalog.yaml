@@ -1,0 +1,35 @@
+catalog_key: diagnostic_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_APPLICABLE
+    description: Diagnostic does not apply.
+  - key: INSUFFICIENT_DATA
+    description: Not enough data to diagnose.
+  - key: DATA_UNAVAILABLE
+    description: Required metric or snapshot is unavailable.
+  - key: NO_VIEW_RISK
+    description: No-view risk detected.
+  - key: LOW_IMPRESSIONS
+    description: Impressions are below deterministic threshold.
+  - key: LOW_CTR
+    description: CTR is below deterministic threshold.
+  - key: EARLY_DROP
+    description: Retention drop occurs near the hook.
+  - key: MID_VIDEO_DROP
+    description: Retention drop occurs in the middle section.
+  - key: LOW_ENGAGEMENT
+    description: Engagement is low on enough sample.
+  - key: WATCH
+    description: Watch state.
+  - key: HEALTHY
+    description: Diagnostic is healthy.
+  - key: REVIEW_REQUIRED
+    description: Human review is required.
+  - key: BLOCKED
+    description: Diagnostic is blocked.
+  - key: PASS
+    description: Diagnostic passed.
+  - key: UNKNOWN
+    description: Diagnostic state is unknown.

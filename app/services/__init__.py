@@ -66,6 +66,7 @@ from app.services.m7 import (
     PublishHandoffService,
 )
 from app.services.m8 import AnalyticsSyncService
+from app.services.m9 import ObservationWindowService, PostPublishHealthMonitorService
 
 __all__ = [
     "AuditService",
@@ -120,6 +121,8 @@ __all__ = [
     "ManualPublishConfirmationService",
     "PublishHandoffService",
     "AnalyticsSyncService",
+    "ObservationWindowService",
+    "PostPublishHealthMonitorService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

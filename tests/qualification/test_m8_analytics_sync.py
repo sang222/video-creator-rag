@@ -46,13 +46,10 @@ M8_TABLES = {
     "uploaded_video_metrics_summaries",
 }
 
-FORBIDDEN_M9_PLUS_TABLES = {
-    "no_view_diagnostic_runs",
-    "no_view_incidents",
+FORBIDDEN_M10_PLUS_TABLES = {
+    "memory_promotion_candidates",
     "recovery_actions",
-    "recovery_proposals",
     "dashboard_widgets",
-    "post_publish_health_monitors",
     "algorithm_agents",
     "growth_agents",
     "view_agents",
@@ -154,9 +151,9 @@ def test_m8_preflight_tags_migration_tables_defaults_and_metric_seed(engine, db_
     assert status.required_tags["m7-manual-publish-handoff"] is True
     tables = set(inspect(engine).get_table_names())
     assert M8_TABLES <= tables
-    assert tables.isdisjoint(FORBIDDEN_M9_PLUS_TABLES)
+    assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0009_m8_analytics_sync"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0010_m9_post_publish_diagnostics"
         defaults = connection.execute(
             text(
                 """
@@ -323,7 +320,7 @@ def test_m8_api_cli_smoke_and_scope_guard(db_session, qualification_factory, tmp
     assert all_scope_violations() == []
     forbidden_text = " ".join(route.path for route in create_app().routes).lower()
     assert "dashboard" not in forbidden_text
-    assert "recover" not in forbidden_text
+    assert "growth" not in forbidden_text
     assert "no-view" not in forbidden_text
 
 

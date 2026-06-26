@@ -1,0 +1,13 @@
+catalog_key: diagnostic_confidence_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HIGH
+    description: High diagnostic confidence.
+  - key: MEDIUM
+    description: Medium diagnostic confidence.
+  - key: LOW
+    description: Low diagnostic confidence.
+  - key: UNKNOWN
+    description: Unknown diagnostic confidence.

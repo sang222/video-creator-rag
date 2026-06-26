@@ -36,7 +36,6 @@ FORBIDDEN_TABLE_FRAGMENTS = {
     "oauth",
     "analytics_event",
     "analytics_semantic",
-    "no_view",
     "memory_promotion",
     "dashboard",
     "operator_cockpit",

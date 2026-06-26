@@ -267,6 +267,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0007_m6_production",
         "0008_m7_publish_handoff",
         "0009_m8_analytics_sync",
+        "0010_m9_post_publish_diagnostics",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -278,6 +279,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         {"production_artifact_runs", "render_spec_snapshots", "media_qc_reports"},
         {"publish_handoff_packages", "manual_publish_confirmations", "uploaded_videos"},
         {"analytics_sync_runs", "analytics_snapshots", "uploaded_video_metrics_summaries"},
+        {"post_publish_health_runs", "failure_trace_reports", "recovery_proposals"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:
@@ -321,7 +323,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 74
+    assert second["config"] == 83
     assert second["gates"] == 15
 
 

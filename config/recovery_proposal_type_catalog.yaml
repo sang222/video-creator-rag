@@ -1,0 +1,21 @@
+catalog_key: recovery_proposal_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: WAIT_AND_MONITOR
+    description: Wait until the next observation window.
+  - key: REVIEW_TITLE_THUMBNAIL
+    description: Human reviews title and thumbnail.
+  - key: REVIEW_HOOK
+    description: Human reviews the hook section.
+  - key: REVIEW_RETENTION_SECTION
+    description: Human reviews a retention-drop section.
+  - key: REVIEW_RIGHTS_DISCLOSURE
+    description: Human reviews rights and disclosure evidence.
+  - key: REVIEW_SOURCE_QUALITY
+    description: Human reviews source quality.
+  - key: CREATE_FUTURE_VARIANT
+    description: Create a future variant proposal.
+  - key: NO_ACTION
+    description: No action recommended.

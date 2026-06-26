@@ -1,0 +1,19 @@
+catalog_key: post_publish_health_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HEALTHY
+    description: Video is healthy in available data.
+  - key: WATCH
+    description: Watch state; no immediate action.
+  - key: NO_VIEW_RISK
+    description: Video has no-view or low-reach risk.
+  - key: UNDERPERFORMING
+    description: Video is underperforming with enough supporting evidence.
+  - key: POLICY_REVIEW_REQUIRED
+    description: Policy, rights, or disclosure evidence needs review.
+  - key: INSUFFICIENT_DATA
+    description: Not enough data to diagnose.
+  - key: UNKNOWN
+    description: Health state is unknown.

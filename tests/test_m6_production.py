@@ -69,7 +69,6 @@ M6_TABLES = {
 
 FORBIDDEN_M8_PLUS_FRAGMENTS = {
     "analytics_semantic",
-    "no_view",
     "memory_promotion",
     "dashboard",
     "source_scrap",

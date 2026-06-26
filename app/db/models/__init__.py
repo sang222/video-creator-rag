@@ -94,6 +94,18 @@ from app.db.models.m8 import (
     TrafficSourceSnapshot,
     UploadedVideoMetricsSummary,
 )
+from app.db.models.m9 import (
+    DiagnosticTaxonomyVersion,
+    EngagementDiagnosticRun,
+    FailureTraceReport,
+    NoViewDiagnosticRun,
+    PackagingDiagnosticRun,
+    PolicyRightsDiagnosticRun,
+    PostPublishHealthRun,
+    PostPublishObservationWindow,
+    RecoveryProposal,
+    RetentionDiagnosticRun,
+)
 
 __all__ = [
     "AuditEvent",
@@ -174,4 +186,14 @@ __all__ = [
     "RetentionCurveSnapshot",
     "TrafficSourceSnapshot",
     "UploadedVideoMetricsSummary",
+    "DiagnosticTaxonomyVersion",
+    "EngagementDiagnosticRun",
+    "FailureTraceReport",
+    "NoViewDiagnosticRun",
+    "PackagingDiagnosticRun",
+    "PolicyRightsDiagnosticRun",
+    "PostPublishHealthRun",
+    "PostPublishObservationWindow",
+    "RecoveryProposal",
+    "RetentionDiagnosticRun",
 ]

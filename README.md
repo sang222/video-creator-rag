@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, and M8 analytics sync foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, and M9 post-publish diagnostic foundation.
 
 ## Stack
 
@@ -168,6 +168,21 @@ vcos analytics traffic-sources --uploaded-video-id <uploaded-video-id>
 
 M8 adds local-only analytics sync/import snapshots and an uploaded video metrics read model. `vcos analytics` means snapshot/import/sync only. VCOS does not diagnose no-view, recommend title/thumbnail changes, recover videos, build a dashboard, call real analytics APIs, use OAuth, scrape analytics pages, or fake engagement in M8.
 
+## M9 Commands
+
+```bash
+vcos post-publish health-create --uploaded-video-id <uploaded-video-id> --observation-window T_PLUS_24H
+vcos post-publish health-execute --run-id <run-id>
+vcos post-publish health-inspect --run-id <run-id>
+vcos post-publish reports-by-video --uploaded-video-id <uploaded-video-id>
+vcos post-publish report-inspect --report-id <report-id>
+vcos post-publish proposals-by-video --uploaded-video-id <uploaded-video-id>
+vcos post-publish proposal-accept --proposal-id <proposal-id>
+vcos post-publish proposal-reject --proposal-id <proposal-id>
+```
+
+M9 reads M7 UploadedVideo and M8 analytics snapshots/summaries to create deterministic observation-window diagnostics, failure trace reports, recovery proposals, and manual review actions. `vcos post-publish` is diagnostic and recommendation only. VCOS does not sync analytics, publish, edit platform metadata, auto-reupload, scrape analytics pages, call platform APIs, or use fake engagement in M9.
+
 ## Boundaries
 
-M0-M8 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, no-view diagnostics, recovery proposals, title/thumbnail recommendations, or platform evasion systems. M8 adds analytics snapshots/read models only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M9 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real provider integrations, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. CapCut pilot notes do not make CapCut a production dependency.

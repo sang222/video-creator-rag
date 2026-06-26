@@ -112,6 +112,16 @@ class MetricDefinitionCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class DiagnosticTaxonomyCatalogItem(BaseModel):
+    key: str
+    description: str
+    friendly_label: str | None = None
+    status: str = "ACTIVE"
+    version: str = "1.0.0"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
 class RetryPolicyCatalogItem(BaseModel):
     policy_key: str
     provider_key: str | None = None
@@ -198,6 +208,8 @@ class ConfigRegistryService:
                 self._seed_roles(loaded.content)
             if loaded.catalog_key == "metric_definition_catalog":
                 self._seed_metric_definitions(loaded.content)
+            if loaded.catalog_key == "diagnostic_taxonomy_catalog":
+                self._seed_diagnostic_taxonomy(loaded.content)
             records.append(record)
         self.session.commit()
         return records
@@ -309,6 +321,15 @@ class ConfigRegistryService:
             "metric_confidence_level_catalog": SimpleKeyCatalogItem,
             "m8_reason_code_catalog": ReasonCodeItem,
             "metric_definition_catalog": MetricDefinitionCatalogItem,
+            "post_publish_observation_window_catalog": SimpleKeyCatalogItem,
+            "post_publish_health_state_catalog": SimpleKeyCatalogItem,
+            "diagnostic_state_catalog": SimpleKeyCatalogItem,
+            "diagnostic_taxonomy_catalog": DiagnosticTaxonomyCatalogItem,
+            "recovery_proposal_type_catalog": SimpleKeyCatalogItem,
+            "recovery_proposal_state_catalog": SimpleKeyCatalogItem,
+            "diagnostic_confidence_catalog": SimpleKeyCatalogItem,
+            "diagnostic_severity_catalog": SimpleKeyCatalogItem,
+            "m9_reason_code_catalog": ReasonCodeItem,
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,
@@ -364,6 +385,36 @@ class ConfigRegistryService:
                 existing.description = item["description"]
                 existing.status = item.get("status", "ACTIVE")
                 existing.metadata_ = item.get("metadata", {})
+        self.session.flush()
+
+    def _seed_diagnostic_taxonomy(self, content: dict[str, Any]) -> None:
+        from app.db.models import DiagnosticTaxonomyVersion
+
+        for item in content["items"]:
+            version = item.get("version", content["catalog_version"])
+            existing = self.session.scalars(
+                select(DiagnosticTaxonomyVersion).where(
+                    DiagnosticTaxonomyVersion.taxonomy_key == item["key"],
+                    DiagnosticTaxonomyVersion.version == version,
+                )
+            ).one_or_none()
+            blob = {
+                "code": item["key"],
+                "description": item["description"],
+                "friendly_label": item.get("friendly_label") or item["description"],
+                "metadata": item.get("metadata", {}),
+            }
+            if existing is None:
+                existing = DiagnosticTaxonomyVersion(
+                    taxonomy_key=item["key"],
+                    version=version,
+                    taxonomy_blob=blob,
+                    status=item.get("status", "ACTIVE"),
+                )
+                self.session.add(existing)
+            else:
+                if existing.taxonomy_blob != blob or existing.status != item.get("status", "ACTIVE"):
+                    raise ConfigVersionConflictError(f"diagnostic taxonomy version conflict: {item['key']} {version}")
         self.session.flush()
 
     def _discover(self, paths: Iterable[str | Path]) -> list[Path]:

@@ -72,8 +72,11 @@ from app.contracts import (
     ProviderRegistryEntryRead,
     ProjectAdmissionDecisionCreate,
     ProjectAdmissionDecisionRead,
+    FailureTraceReportRead,
     ProductionArtifactRunCreate,
     ProductionArtifactRunRead,
+    PostPublishHealthRunCreate,
+    PostPublishHealthRunRead,
     PublishHandoffCreate,
     PublishHandoffRead,
     QCRunRequest,
@@ -103,6 +106,7 @@ from app.contracts import (
     UploadedVideoRead,
     VideoProjectCreate,
     VideoProjectRead,
+    RecoveryProposalRead,
     ChannelDailyRunCreate,
     ChannelDailyRunRead,
     ChannelStatePackSnapshotCreate,
@@ -152,6 +156,7 @@ from app.services import (
     ProviderHealthService,
     ProviderRegistryService,
     ProductionArtifactRunService,
+    PostPublishHealthMonitorService,
     PublishHandoffService,
     QuotaService,
     ResourceResolverService,
@@ -1261,6 +1266,87 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/post-publish-health-runs", response_model=PostPublishHealthRunRead)
+    def create_post_publish_health_run(data: PostPublishHealthRunCreate) -> PostPublishHealthRunRead:
+        try:
+            with session_scope() as session:
+                run = PostPublishHealthMonitorService(session).create_health_run(data=data)
+                return PostPublishHealthRunRead.model_validate(_post_publish_health_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/post-publish-health-runs/{run_id}/execute", response_model=PostPublishHealthRunRead)
+    def execute_post_publish_health_run(run_id: uuid.UUID) -> PostPublishHealthRunRead:
+        try:
+            with session_scope() as session:
+                run = PostPublishHealthMonitorService(session).execute_health_run(run_id=run_id)
+                return PostPublishHealthRunRead.model_validate(_post_publish_health_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/post-publish-health-runs/{run_id}", response_model=PostPublishHealthRunRead)
+    def get_post_publish_health_run(run_id: uuid.UUID) -> PostPublishHealthRunRead:
+        try:
+            with session_scope() as session:
+                run = PostPublishHealthMonitorService(session).require_health_run(run_id)
+                return PostPublishHealthRunRead.model_validate(_post_publish_health_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/post-publish-health", response_model=list[PostPublishHealthRunRead])
+    def list_uploaded_video_post_publish_health(uploaded_video_id: uuid.UUID) -> list[PostPublishHealthRunRead]:
+        try:
+            with session_scope() as session:
+                runs = PostPublishHealthMonitorService(session).list_health_runs_by_uploaded_video(uploaded_video_id)
+                return [PostPublishHealthRunRead.model_validate(_post_publish_health_run(run)) for run in runs]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/failure-trace-reports", response_model=list[FailureTraceReportRead])
+    def list_uploaded_video_failure_trace_reports(uploaded_video_id: uuid.UUID) -> list[FailureTraceReportRead]:
+        try:
+            with session_scope() as session:
+                reports = PostPublishHealthMonitorService(session).list_failure_trace_reports_by_uploaded_video(uploaded_video_id)
+                return [FailureTraceReportRead.model_validate(_failure_trace_report(report)) for report in reports]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/failure-trace-reports/{report_id}", response_model=FailureTraceReportRead)
+    def get_failure_trace_report(report_id: uuid.UUID) -> FailureTraceReportRead:
+        try:
+            with session_scope() as session:
+                report = PostPublishHealthMonitorService(session).require_failure_trace_report(report_id)
+                return FailureTraceReportRead.model_validate(_failure_trace_report(report))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/recovery-proposals", response_model=list[RecoveryProposalRead])
+    def list_uploaded_video_recovery_proposals(uploaded_video_id: uuid.UUID) -> list[RecoveryProposalRead]:
+        try:
+            with session_scope() as session:
+                proposals = PostPublishHealthMonitorService(session).list_recovery_proposals_by_uploaded_video(uploaded_video_id)
+                return [RecoveryProposalRead.model_validate(_recovery_proposal(proposal)) for proposal in proposals]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/recovery-proposals/{proposal_id}/accept", response_model=RecoveryProposalRead)
+    def accept_recovery_proposal(proposal_id: uuid.UUID) -> RecoveryProposalRead:
+        try:
+            with session_scope() as session:
+                proposal = PostPublishHealthMonitorService(session).accept_recovery_proposal(proposal_id=proposal_id)
+                return RecoveryProposalRead.model_validate(_recovery_proposal(proposal))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/recovery-proposals/{proposal_id}/reject", response_model=RecoveryProposalRead)
+    def reject_recovery_proposal(proposal_id: uuid.UUID) -> RecoveryProposalRead:
+        try:
+            with session_scope() as session:
+                proposal = PostPublishHealthMonitorService(session).reject_recovery_proposal(proposal_id=proposal_id)
+                return RecoveryProposalRead.model_validate(_recovery_proposal(proposal))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     return application
 
 
@@ -2290,6 +2376,76 @@ def _uploaded_video_metrics_summary(summary: Any) -> dict[str, Any]:
         "next_action": summary.next_action,
         "created_at": summary.created_at,
         "updated_at": summary.updated_at,
+    }
+
+def _post_publish_health_run(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "uploaded_video_id": run.uploaded_video_id,
+        "company_id": run.company_id,
+        "channel_workspace_id": run.channel_workspace_id,
+        "video_project_id": run.video_project_id,
+        "policy_snapshot_id": run.policy_snapshot_id,
+        "platform": run.platform,
+        "platform_video_id": run.platform_video_id,
+        "observation_window": run.observation_window,
+        "analytics_snapshot_id": run.analytics_snapshot_id,
+        "uploaded_video_metrics_summary_id": run.uploaded_video_metrics_summary_id,
+        "retention_curve_snapshot_id": run.retention_curve_snapshot_id,
+        "traffic_source_snapshot_id": run.traffic_source_snapshot_id,
+        "engagement_snapshot_id": run.engagement_snapshot_id,
+        "run_state": run.run_state,
+        "health_state": run.health_state,
+        "severity": run.severity,
+        "confidence_level": run.confidence_level,
+        "evidence_refs": run.evidence_refs,
+        "reason_codes": run.reason_codes,
+        "operator_summary": run.operator_summary,
+        "next_action": run.next_action,
+        "do_not_do": run.do_not_do,
+        "technical_appendix": run.technical_appendix,
+        "created_at": run.created_at,
+    }
+
+def _failure_trace_report(report: Any) -> dict[str, Any]:
+    return {
+        "id": report.id,
+        "post_publish_health_run_id": report.post_publish_health_run_id,
+        "uploaded_video_id": report.uploaded_video_id,
+        "video_project_id": report.video_project_id,
+        "platform": report.platform,
+        "platform_video_id": report.platform_video_id,
+        "observation_window": report.observation_window,
+        "primary_status": report.primary_status,
+        "primary_suspected_cause": report.primary_suspected_cause,
+        "secondary_suspected_causes": report.secondary_suspected_causes,
+        "confidence_level": report.confidence_level,
+        "severity": report.severity,
+        "evidence_plain_text": report.evidence_plain_text,
+        "operator_summary": report.operator_summary,
+        "operator_report": report.operator_report,
+        "next_action": report.next_action,
+        "do_not_do": report.do_not_do,
+        "technical_appendix": report.technical_appendix,
+        "created_at": report.created_at,
+    }
+
+def _recovery_proposal(proposal: Any) -> dict[str, Any]:
+    return {
+        "id": proposal.id,
+        "failure_trace_report_id": proposal.failure_trace_report_id,
+        "uploaded_video_id": proposal.uploaded_video_id,
+        "video_project_id": proposal.video_project_id,
+        "proposal_type": proposal.proposal_type,
+        "proposal_state": proposal.proposal_state,
+        "operator_summary": proposal.operator_summary,
+        "recommended_actions": proposal.recommended_actions,
+        "do_not_do": proposal.do_not_do,
+        "evidence_refs": proposal.evidence_refs,
+        "risk_level": proposal.risk_level,
+        "requires_human_approval": proposal.requires_human_approval,
+        "created_at": proposal.created_at,
+        "updated_at": proposal.updated_at,
     }
 
 def _as_http_error(exc: Exception) -> HTTPException:

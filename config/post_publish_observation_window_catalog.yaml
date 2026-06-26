@@ -1,0 +1,17 @@
+catalog_key: post_publish_observation_window_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: T_PLUS_1H
+    description: Check one hour after publish.
+  - key: T_PLUS_6H
+    description: Check six hours after publish.
+  - key: T_PLUS_24H
+    description: Check twenty-four hours after publish.
+  - key: T_PLUS_48H
+    description: Check forty-eight hours after publish.
+  - key: T_PLUS_7D
+    description: Check seven days after publish.
+  - key: CUSTOM
+    description: Custom observation window.

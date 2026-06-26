@@ -45,6 +45,7 @@ from app.contracts import (
     ProviderRegistryEntryCreate,
     ProjectAdmissionDecisionCreate,
     ProductionArtifactRunCreate,
+    PostPublishHealthRunCreate,
     PublishHandoffCreate,
     QuotaAccountCreate,
     QuotaEventRequest,
@@ -96,6 +97,7 @@ from app.services import (
     ProviderRegistryService,
     ProjectAdmissionService,
     ProductionArtifactRunService,
+    PostPublishHealthMonitorService,
     PublishHandoffService,
     QuotaService,
     ResourceResolverService,
@@ -146,6 +148,7 @@ render_spec_app = typer.Typer(no_args_is_help=True)
 publish_app = typer.Typer(no_args_is_help=True)
 uploaded_video_app = typer.Typer(no_args_is_help=True)
 analytics_app = typer.Typer(no_args_is_help=True)
+post_publish_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
@@ -183,6 +186,7 @@ app.add_typer(render_spec_app, name="render-spec")
 app.add_typer(publish_app, name="publish")
 app.add_typer(uploaded_video_app, name="uploaded-video")
 app.add_typer(analytics_app, name="analytics")
+app.add_typer(post_publish_app, name="post-publish")
 
 
 def _fail(message: str) -> None:
@@ -1741,6 +1745,83 @@ def analytics_traffic_sources(uploaded_video_id: uuid.UUID = typer.Option(..., "
     except Exception as exc:
         _fail(f"analytics traffic-sources failed: {exc}")
 
+@post_publish_app.command("health-create")
+def post_publish_health_create(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+    observation_window: str = typer.Option("T_PLUS_24H", "--observation-window"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = PostPublishHealthMonitorService(session).create_health_run(
+                data=PostPublishHealthRunCreate(uploaded_video_id=uploaded_video_id, observation_window=observation_window)  # type: ignore[arg-type]
+            )
+            typer.echo(json.dumps(_post_publish_health_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"post-publish health-create failed: {exc}")
+
+@post_publish_app.command("health-execute")
+def post_publish_health_execute(run_id: uuid.UUID = typer.Option(..., "--run-id")) -> None:
+    try:
+        with session_scope() as session:
+            run = PostPublishHealthMonitorService(session).execute_health_run(run_id=run_id)
+            typer.echo(json.dumps(_post_publish_health_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"post-publish health-execute failed: {exc}")
+
+@post_publish_app.command("health-inspect")
+def post_publish_health_inspect(run_id: uuid.UUID = typer.Option(..., "--run-id")) -> None:
+    try:
+        with session_scope() as session:
+            run = PostPublishHealthMonitorService(session).require_health_run(run_id)
+            typer.echo(json.dumps(_post_publish_health_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"post-publish health-inspect failed: {exc}")
+
+@post_publish_app.command("reports-by-video")
+def post_publish_reports_by_video(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            reports = PostPublishHealthMonitorService(session).list_failure_trace_reports_by_uploaded_video(uploaded_video_id)
+            typer.echo(json.dumps([_failure_trace_report_to_dict(report) for report in reports]))
+    except Exception as exc:
+        _fail(f"post-publish reports-by-video failed: {exc}")
+
+@post_publish_app.command("report-inspect")
+def post_publish_report_inspect(report_id: uuid.UUID = typer.Option(..., "--report-id")) -> None:
+    try:
+        with session_scope() as session:
+            report = PostPublishHealthMonitorService(session).require_failure_trace_report(report_id)
+            typer.echo(json.dumps(_failure_trace_report_to_dict(report)))
+    except Exception as exc:
+        _fail(f"post-publish report-inspect failed: {exc}")
+
+@post_publish_app.command("proposals-by-video")
+def post_publish_proposals_by_video(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            proposals = PostPublishHealthMonitorService(session).list_recovery_proposals_by_uploaded_video(uploaded_video_id)
+            typer.echo(json.dumps([_recovery_proposal_to_dict(proposal) for proposal in proposals]))
+    except Exception as exc:
+        _fail(f"post-publish proposals-by-video failed: {exc}")
+
+@post_publish_app.command("proposal-accept")
+def post_publish_proposal_accept(proposal_id: uuid.UUID = typer.Option(..., "--proposal-id")) -> None:
+    try:
+        with session_scope() as session:
+            proposal = PostPublishHealthMonitorService(session).accept_recovery_proposal(proposal_id=proposal_id)
+            typer.echo(json.dumps(_recovery_proposal_to_dict(proposal)))
+    except Exception as exc:
+        _fail(f"post-publish proposal-accept failed: {exc}")
+
+@post_publish_app.command("proposal-reject")
+def post_publish_proposal_reject(proposal_id: uuid.UUID = typer.Option(..., "--proposal-id")) -> None:
+    try:
+        with session_scope() as session:
+            proposal = PostPublishHealthMonitorService(session).reject_recovery_proposal(proposal_id=proposal_id)
+            typer.echo(json.dumps(_recovery_proposal_to_dict(proposal)))
+    except Exception as exc:
+        _fail(f"post-publish proposal-reject failed: {exc}")
+
 @audit_app.command("tail")
 def audit_tail(
     limit: int = typer.Option(50, "--limit", min=1, max=500),
@@ -2267,6 +2348,76 @@ def _uploaded_video_metrics_summary_to_dict(summary: Any) -> dict[str, Any]:
         "next_action": summary.next_action,
         "created_at": summary.created_at.isoformat(),
         "updated_at": summary.updated_at.isoformat(),
+    }
+
+def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:
+    return {
+        "id": str(run.id),
+        "uploaded_video_id": str(run.uploaded_video_id),
+        "company_id": str(run.company_id),
+        "channel_workspace_id": str(run.channel_workspace_id),
+        "video_project_id": str(run.video_project_id),
+        "policy_snapshot_id": str(run.policy_snapshot_id),
+        "platform": run.platform,
+        "platform_video_id": run.platform_video_id,
+        "observation_window": run.observation_window,
+        "analytics_snapshot_id": str(run.analytics_snapshot_id) if run.analytics_snapshot_id else None,
+        "uploaded_video_metrics_summary_id": str(run.uploaded_video_metrics_summary_id) if run.uploaded_video_metrics_summary_id else None,
+        "retention_curve_snapshot_id": str(run.retention_curve_snapshot_id) if run.retention_curve_snapshot_id else None,
+        "traffic_source_snapshot_id": str(run.traffic_source_snapshot_id) if run.traffic_source_snapshot_id else None,
+        "engagement_snapshot_id": str(run.engagement_snapshot_id) if run.engagement_snapshot_id else None,
+        "run_state": run.run_state,
+        "health_state": run.health_state,
+        "severity": run.severity,
+        "confidence_level": run.confidence_level,
+        "evidence_refs": run.evidence_refs,
+        "reason_codes": run.reason_codes,
+        "operator_summary": run.operator_summary,
+        "next_action": run.next_action,
+        "do_not_do": run.do_not_do,
+        "technical_appendix": run.technical_appendix,
+        "created_at": run.created_at.isoformat(),
+    }
+
+def _failure_trace_report_to_dict(report: Any) -> dict[str, Any]:
+    return {
+        "id": str(report.id),
+        "post_publish_health_run_id": str(report.post_publish_health_run_id),
+        "uploaded_video_id": str(report.uploaded_video_id),
+        "video_project_id": str(report.video_project_id),
+        "platform": report.platform,
+        "platform_video_id": report.platform_video_id,
+        "observation_window": report.observation_window,
+        "primary_status": report.primary_status,
+        "primary_suspected_cause": report.primary_suspected_cause,
+        "secondary_suspected_causes": report.secondary_suspected_causes,
+        "confidence_level": report.confidence_level,
+        "severity": report.severity,
+        "evidence_plain_text": report.evidence_plain_text,
+        "operator_summary": report.operator_summary,
+        "operator_report": report.operator_report,
+        "next_action": report.next_action,
+        "do_not_do": report.do_not_do,
+        "technical_appendix": report.technical_appendix,
+        "created_at": report.created_at.isoformat(),
+    }
+
+def _recovery_proposal_to_dict(proposal: Any) -> dict[str, Any]:
+    return {
+        "id": str(proposal.id),
+        "failure_trace_report_id": str(proposal.failure_trace_report_id),
+        "uploaded_video_id": str(proposal.uploaded_video_id),
+        "video_project_id": str(proposal.video_project_id),
+        "proposal_type": proposal.proposal_type,
+        "proposal_state": proposal.proposal_state,
+        "operator_summary": proposal.operator_summary,
+        "recommended_actions": proposal.recommended_actions,
+        "do_not_do": proposal.do_not_do,
+        "evidence_refs": proposal.evidence_refs,
+        "risk_level": proposal.risk_level,
+        "requires_human_approval": proposal.requires_human_approval,
+        "created_at": proposal.created_at.isoformat(),
+        "updated_at": proposal.updated_at.isoformat(),
     }
 
 def _json_object(value: str) -> dict[str, Any]:

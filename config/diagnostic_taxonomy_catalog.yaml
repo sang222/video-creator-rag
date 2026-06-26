@@ -1,0 +1,62 @@
+catalog_key: diagnostic_taxonomy_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HEALTHY
+    description: Video is healthy in available data.
+    friendly_label: Video đang ổn trong dữ liệu hiện có
+  - key: INSUFFICIENT_DATA
+    description: Not enough data to conclude.
+    friendly_label: Chưa đủ dữ liệu để kết luận
+  - key: DATA_UNAVAILABLE
+    description: Required data is unavailable.
+    friendly_label: Dữ liệu cần thiết chưa có hoặc không khả dụng
+  - key: NO_VIEW_RISK
+    description: Video has no-view risk.
+    friendly_label: Video có rủi ro rất ít lượt xem
+  - key: LOW_IMPRESSIONS
+    description: Low impressions detected.
+    friendly_label: Video đang có ít impressions
+  - key: LOW_CTR
+    description: Low CTR detected.
+    friendly_label: Tiêu đề/thumbnail có thể chưa kéo click
+  - key: EARLY_RETENTION_DROP
+    description: Early retention drop detected.
+    friendly_label: Người xem rời sớm ở đoạn mở đầu
+  - key: MID_VIDEO_RETENTION_DROP
+    description: Mid-video retention drop detected.
+    friendly_label: Người xem rời ở phần giữa video
+  - key: LOW_ENGAGEMENT
+    description: Low engagement detected.
+    friendly_label: Tương tác thấp trên lượng xem đủ mẫu
+  - key: PACKAGING_FAILURE
+    description: Packaging may be weak.
+    friendly_label: Tiêu đề/thumbnail có thể chưa kéo click
+  - key: HOOK_FAILURE
+    description: Hook may be weak.
+    friendly_label: Người xem rời sớm ở đoạn mở đầu
+  - key: RETENTION_PACING_FAILURE
+    description: Retention pacing may be weak.
+    friendly_label: Nhịp video có thể bị chậm hoặc lặp
+  - key: VISUAL_RELEVANCE_RISK
+    description: Visual relevance risk.
+    friendly_label: Hình ảnh có thể chưa đủ liên quan
+  - key: TOPIC_DEMAND_UNCERTAIN
+    description: Topic demand is uncertain.
+    friendly_label: Chủ đề có thể chưa đủ nhu cầu hoặc chưa được phân phối
+  - key: DISTRIBUTION_UNCERTAIN
+    description: Distribution is uncertain.
+    friendly_label: Phân phối ban đầu còn chưa rõ
+  - key: POLICY_RIGHTS_REVIEW_REQUIRED
+    description: Policy or rights review required.
+    friendly_label: Cần kiểm tra quyền, nhạc, disclosure hoặc policy
+  - key: DISCLOSURE_REVIEW_REQUIRED
+    description: Disclosure review required.
+    friendly_label: Cần kiểm tra disclosure đã xác nhận
+  - key: SOURCE_QUALITY_REVIEW_REQUIRED
+    description: Source quality review required.
+    friendly_label: Cần kiểm tra chất lượng nguồn
+  - key: COST_EFFICIENCY_REVIEW_REQUIRED
+    description: Cost efficiency review required.
+    friendly_label: Cần kiểm tra hiệu quả chi phí

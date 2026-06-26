@@ -1,0 +1,55 @@
+catalog_key: m9_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: POST_PUBLISH_HEALTH_RUN_CREATED
+    description: Post-publish health run was created.
+  - code: POST_PUBLISH_HEALTH_COMPLETED
+    description: Post-publish health run completed.
+  - code: POST_PUBLISH_HEALTH_BLOCKED
+    description: Post-publish health run was blocked.
+  - code: OBSERVATION_WINDOW_NOT_READY
+    description: Observation window is not ready.
+  - code: INSUFFICIENT_ANALYTICS_DATA
+    description: Analytics data is insufficient.
+  - code: ANALYTICS_DATA_UNAVAILABLE
+    description: Analytics data is unavailable.
+  - code: NO_VIEW_RISK_DETECTED
+    description: No-view risk detected.
+  - code: LOW_IMPRESSIONS_DETECTED
+    description: Low impressions detected.
+  - code: LOW_CTR_DETECTED
+    description: Low CTR detected.
+  - code: EARLY_RETENTION_DROP_DETECTED
+    description: Early retention drop detected.
+  - code: MID_VIDEO_RETENTION_DROP_DETECTED
+    description: Mid-video retention drop detected.
+  - code: LOW_ENGAGEMENT_DETECTED
+    description: Low engagement detected.
+  - code: POLICY_REVIEW_REQUIRED
+    description: Policy review is required.
+  - code: DISCLOSURE_REVIEW_REQUIRED
+    description: Disclosure review is required.
+  - code: RIGHTS_REVIEW_REQUIRED
+    description: Rights review is required.
+  - code: FAILURE_TRACE_REPORT_CREATED
+    description: Failure trace report was created.
+  - code: RECOVERY_PROPOSAL_CREATED
+    description: Recovery proposal was created.
+  - code: WAIT_AND_MONITOR_RECOMMENDED
+    description: Wait and monitor was recommended.
+  - code: REVIEW_TITLE_THUMBNAIL_RECOMMENDED
+    description: Title/thumbnail review was recommended.
+  - code: REVIEW_HOOK_RECOMMENDED
+    description: Hook review was recommended.
+  - code: REVIEW_RETENTION_SECTION_RECOMMENDED
+    description: Retention section review was recommended.
+  - code: NO_REUPLOAD_RECOMMENDED
+    description: Reupload is explicitly not recommended.
+  - code: NO_FAKE_ENGAGEMENT
+    description: Fake engagement is explicitly forbidden.
+  - code: NO_PLATFORM_EVASION
+    description: Platform evasion is explicitly forbidden.
+  - code: NO_DIAGNOSIS_WITHOUT_DATA
+    description: M9 will not diagnose without enough data.

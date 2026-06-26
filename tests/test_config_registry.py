@@ -24,6 +24,10 @@ def test_config_yaml_validates(db_session) -> None:
         "context_pack_purpose_catalog",
         "daily_run_status_catalog",
         "decision_rights_policy",
+        "diagnostic_confidence_catalog",
+        "diagnostic_severity_catalog",
+        "diagnostic_state_catalog",
+        "diagnostic_taxonomy_catalog",
         "disclosure_confirmation_catalog",
         "evidence_type_catalog",
         "event_types",
@@ -43,6 +47,7 @@ def test_config_yaml_validates(db_session) -> None:
         "m6_reason_code_catalog",
         "m7_reason_code_catalog",
         "m8_reason_code_catalog",
+        "m9_reason_code_catalog",
         "manual_action_type_catalog",
         "manual_publish_confirmation_state_catalog",
         "metadata_diff_severity_catalog",
@@ -58,6 +63,8 @@ def test_config_yaml_validates(db_session) -> None:
         "platform_policy_catalog",
         "platform_surface_catalog",
         "policy_domain_catalog",
+        "post_publish_health_state_catalog",
+        "post_publish_observation_window_catalog",
         "publish_checklist_category_catalog",
         "publish_handoff_state_catalog",
         "publish_target_platform_catalog",
@@ -70,6 +77,8 @@ def test_config_yaml_validates(db_session) -> None:
         "profile_compiler_policy",
         "quota_event_type_catalog",
         "quota_unit_catalog",
+        "recovery_proposal_state_catalog",
+        "recovery_proposal_type_catalog",
         "reason_code_catalog",
         "reason_codes",
         "render_intent_catalog",
@@ -104,7 +113,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 74
+    assert catalog_count == 83
     assert role_count == 3
     assert metric_definition_count == 16
 

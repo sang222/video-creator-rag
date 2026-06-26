@@ -1,0 +1,15 @@
+catalog_key: recovery_proposal_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PROPOSED
+    description: Proposal is waiting for human decision.
+  - key: ACCEPTED
+    description: Proposal was accepted.
+  - key: REJECTED
+    description: Proposal was rejected.
+  - key: SUPERSEDED
+    description: Proposal was superseded.
+  - key: CANCELLED
+    description: Proposal was cancelled.

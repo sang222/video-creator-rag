@@ -29,7 +29,21 @@ DeadLetterReplayState = Literal["NOT_REPLAYABLE", "REPLAYABLE", "REPLAYED", "DIS
 OpsIncidentType = Literal["PROVIDER_OUTAGE", "CREDENTIAL_MISSING", "QUOTA_EXHAUSTED", "COST_LIMIT_REACHED", "DEAD_LETTER_JOB", "HEALTH_DEGRADED", "CONFIG_ERROR", "UNKNOWN"]
 OpsSeverity = Literal["INFO", "WARNING", "ERROR", "CRITICAL"]
 OpsIncidentState = Literal["OPEN", "ACKNOWLEDGED", "RESOLVED", "DISMISSED"]
-ManualActionType = Literal["CHECK_CREDENTIAL", "UPDATE_CREDENTIAL_REF", "REVIEW_COST_LIMIT", "REVIEW_QUOTA", "INVESTIGATE_PROVIDER", "REPLAY_DEAD_LETTER", "RESOLVE_INCIDENT", "OTHER"]
+ManualActionType = Literal[
+    "CHECK_CREDENTIAL",
+    "UPDATE_CREDENTIAL_REF",
+    "REVIEW_COST_LIMIT",
+    "REVIEW_QUOTA",
+    "INVESTIGATE_PROVIDER",
+    "REPLAY_DEAD_LETTER",
+    "RESOLVE_INCIDENT",
+    "REVIEW_TITLE_THUMBNAIL_VARIANT",
+    "REVIEW_DISCLOSURE",
+    "REVIEW_RIGHTS_EVIDENCE",
+    "REVIEW_RETENTION_DROP_SECTION",
+    "WAIT_FOR_NEXT_WINDOW",
+    "OTHER",
+]
 ManualActionPriority = Literal["LOW", "MEDIUM", "HIGH", "URGENT"]
 ManualActionState = Literal["OPEN", "IN_PROGRESS", "DONE", "CANCELLED"]
 MockProviderMode = Literal["success", "timeout", "quota_exceeded", "malformed", "unavailable", "retryable_error", "non_retryable_error", "circuit_open"]

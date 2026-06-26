@@ -28,10 +28,9 @@ M7_TABLES = {
     "uploaded_video_publication_summaries",
 }
 
-FORBIDDEN_M8_PLUS_TABLES = {
+FORBIDDEN_M10_PLUS_TABLES = {
     "analytics_events",
     "analytics_semantic_layers",
-    "no_view_diagnostic_runs",
     "no_view_incidents",
     "recovery_actions",
     "learning_candidates",
@@ -92,9 +91,9 @@ def _create_confirmation(db_session, handoff: PublishHandoffPackage, *, video_id
 def test_m7_migration_tables_defaults_unique_and_scope(engine, db_session, qualification_factory, tmp_path) -> None:
     tables = set(inspect(engine).get_table_names())
     assert M7_TABLES <= tables
-    assert tables.isdisjoint(FORBIDDEN_M8_PLUS_TABLES)
+    assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0009_m8_analytics_sync"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0010_m9_post_publish_diagnostics"
 
     flow = qualification_factory.m6_full_flow(output_dir=tmp_path)
     handoff = PublishHandoffService(db_session).create_from_render_package(

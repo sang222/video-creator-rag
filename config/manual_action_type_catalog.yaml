@@ -1,5 +1,5 @@
 catalog_key: manual_action_type_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -17,5 +17,15 @@ items:
     description: Replay dead-letter job.
   - key: RESOLVE_INCIDENT
     description: Resolve incident.
+  - key: REVIEW_TITLE_THUMBNAIL_VARIANT
+    description: Human reviews a post-publish title or thumbnail variant proposal.
+  - key: REVIEW_DISCLOSURE
+    description: Human reviews disclosure confirmation after publish.
+  - key: REVIEW_RIGHTS_EVIDENCE
+    description: Human reviews rights or license evidence after publish.
+  - key: REVIEW_RETENTION_DROP_SECTION
+    description: Human reviews a retention drop scene or time range.
+  - key: WAIT_FOR_NEXT_WINDOW
+    description: Human waits until the next deterministic observation window.
   - key: OTHER
     description: Other manual action.

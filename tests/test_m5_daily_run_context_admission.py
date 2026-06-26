@@ -82,7 +82,6 @@ FORBIDDEN_M7_PLUS_FRAGMENTS = {
     "video_generation",
     "publish_upload",
     "analytics_semantic",
-    "no_view",
     "memory_promotion",
     "dashboard",
     "source_scrap",
@@ -175,7 +174,7 @@ def test_m5_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert daily_run.metadata_ == {}
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0009_m8_analytics_sync"
+    assert revision == "0010_m9_post_publish_diagnostics"
 
 
 def test_resource_resolver_enforces_scope_sources_and_deterministic_pack(db_session) -> None:

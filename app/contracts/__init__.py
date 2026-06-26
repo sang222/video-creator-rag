@@ -110,6 +110,19 @@ from app.contracts.m8 import (
     TrafficSourceSnapshotRead,
     UploadedVideoMetricsSummaryRead,
 )
+from app.contracts.m9 import (
+    DiagnosticTaxonomyVersionRead,
+    EngagementDiagnosticRunRead,
+    FailureTraceReportRead,
+    NoViewDiagnosticRunRead,
+    PackagingDiagnosticRunRead,
+    PolicyRightsDiagnosticRunRead,
+    PostPublishHealthRunCreate,
+    PostPublishHealthRunRead,
+    PostPublishObservationWindowRead,
+    RecoveryProposalRead,
+    RetentionDiagnosticRunRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -267,6 +280,17 @@ __all__ = [
     "RetentionCurveSnapshotRead",
     "TrafficSourceSnapshotRead",
     "UploadedVideoMetricsSummaryRead",
+    "DiagnosticTaxonomyVersionRead",
+    "EngagementDiagnosticRunRead",
+    "FailureTraceReportRead",
+    "NoViewDiagnosticRunRead",
+    "PackagingDiagnosticRunRead",
+    "PolicyRightsDiagnosticRunRead",
+    "PostPublishHealthRunCreate",
+    "PostPublishHealthRunRead",
+    "PostPublishObservationWindowRead",
+    "RecoveryProposalRead",
+    "RetentionDiagnosticRunRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]
