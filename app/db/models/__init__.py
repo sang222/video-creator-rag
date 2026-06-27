@@ -181,6 +181,16 @@ from app.db.models.m12 import (
     ProviderReadinessSnapshot,
     RealSmokeRun,
 )
+from app.db.models.m12_1 import (
+    AgentPromptProfile,
+    PromptAuditSnapshot,
+    PromptContractVersion,
+    PromptEvaluationCase,
+    PromptEvaluationRun,
+    PromptRenderRun,
+    PromptTemplateRecord,
+    StructuredOutputSchema,
+)
 
 __all__ = [
     "AuditEvent",
@@ -330,4 +340,12 @@ __all__ = [
     "ProviderReadinessCheck",
     "ProviderReadinessSnapshot",
     "RealSmokeRun",
+    "AgentPromptProfile",
+    "PromptAuditSnapshot",
+    "PromptContractVersion",
+    "PromptEvaluationCase",
+    "PromptEvaluationRun",
+    "PromptRenderRun",
+    "PromptTemplateRecord",
+    "StructuredOutputSchema",
 ]

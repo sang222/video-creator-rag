@@ -16,8 +16,10 @@ Transport = Callable[[str, str, dict[str, Any] | None, int], tuple[int, dict[str
 @dataclass(frozen=True)
 class OllamaChatRequest:
     model: str
-    prompt: str
+    prompt: str | None = None
     response_format: str = "text"
+    messages: list[dict[str, str]] | None = None
+    system: str | None = None
 
 
 class OllamaLLMProvider:
@@ -66,9 +68,10 @@ class OllamaLLMProvider:
         return ProviderResponse(ok=True, output=output, latency_ms=_latency_ms(started))
 
     def build_chat_payload(self, *, request: OllamaChatRequest) -> dict[str, Any]:
+        messages = _request_messages(request)
         payload: dict[str, Any] = {
             "model": request.model,
-            "messages": [{"role": "user", "content": request.prompt}],
+            "messages": messages,
             "stream": False,
         }
         if request.response_format == "json":
@@ -116,6 +119,16 @@ def _parse_json_content(content: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else {"value": parsed}
+
+
+def _request_messages(request: OllamaChatRequest) -> list[dict[str, str]]:
+    if request.messages is not None:
+        return [{"role": str(message["role"]), "content": str(message["content"])} for message in request.messages]
+    messages: list[dict[str, str]] = []
+    if request.system:
+        messages.append({"role": "system", "content": request.system})
+    messages.append({"role": "user", "content": request.prompt or ""})
+    return messages
 
 
 def _maybe_int(value: Any) -> int | None:

@@ -105,6 +105,10 @@ M12 adds `provider_readiness_checks`, `provider_readiness_snapshots`, `real_smok
 
 M12 shows Cloud Final Renderer as `REQUIRED_GAP` and keeps long-form final render blocked until a later milestone selects/configures a provider. Creatomate remains `CLOUD_TEMPLATE_RENDERER_LIGHT` for shorts/cards/thumbnails, not the final long-form renderer. M12 does not build real final long-form rendering, YouTube upload/publish/reupload APIs, unguarded Veo generation, real paid ElevenLabs voice generation by default, real Creatomate rendering by default, dashboard scraping/browser automation, config upgrade suggestions, TikTok/Facebook analytics loops, fake traffic, bot engagement, or platform evasion.
 
+M12.1 adds repo-first prompt authoring under `app/prompts/`, DB-backed prompt template/profile/contract/schema records, prompt render runs, prompt audit snapshots, prompt evaluation cases/runs, frozen channel contract binding, common VCOS skills, agent-specific deltas for required production roles, BaseEnvelope JSON output validation, safe syntax-only JSON repair, and Ollama chat message support.
+
+M12.1 does not build real provider calls, provider strategy changes, YouTube upload/publish/reupload APIs, channel config mutation, prompt self-mutation, DB-only canonical prompt blobs, dashboard scraping/browser automation, fake traffic, bot engagement, platform evasion, auto learning promotion, or TikTok/Facebook analytics learning loops.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -130,6 +134,7 @@ M12 shows Cloud Final Renderer as `REQUIRED_GAP` and keeps long-form final rende
 - M11 complete means VCOS has an operator dashboard for channel setup, production tracking, approvals, publish handoff queues, uploaded video monitoring, recovery review, learning review, media Drive links, and provider/storage status.
 - M11.1 complete means dashboard has Vietnamese UI, login/local auth shell, localization/subtitle package support, localized metadata package support, localization readiness, and configured publish timing by channel location/timezone.
 - M12 complete means VCOS can validate credentials/provider readiness, display hard-env AI budget caps, show the Cloud Final Renderer required gap, and run guarded real smoke tests before production. Next milestones can focus on production dry-run, first real video package, or final renderer selection.
+- M12.1 complete means VCOS can render deterministic, versioned, channel-contract-bound chat prompts for production agents, persist prompt audit snapshots, validate BaseEnvelope JSON outputs, and run prompt eval cases without real provider calls.
 
 ## Pilot Notes
 

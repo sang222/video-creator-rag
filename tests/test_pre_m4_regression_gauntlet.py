@@ -273,6 +273,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0015_m10_5_drive_offload",
         "0016_m11_operator_dashboard",
         "0018_m12_provider_readiness",
+        "0019_m12_1_prompt_registry",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -290,6 +291,8 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         {"youtube_public_sync_runs", "youtube_owner_analytics_sync_runs", "uploaded_video_youtube_public_monitor_snapshots"},
         {"channel_lifecycle_decisions", "learning_review_decisions", "approved_playbook_entries"},
         {"operator_users", "localized_subtitle_packages", "channel_publish_timing_policies"},
+        {"provider_readiness_checks", "provider_readiness_snapshots", "real_smoke_runs"},
+        {"prompt_template_records", "prompt_render_runs", "prompt_audit_snapshots"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:

@@ -1,0 +1,30 @@
+{
+  "case_key": "m12_1_base_envelope_validates",
+  "agent_key": "PublishingMetadataAgent",
+  "template_key": "publishing_metadata_agent.production",
+  "template_version": "1.0.0",
+  "raw_output": {
+    "contract_version": "m12.1.0",
+    "agent_key": "PublishingMetadataAgent",
+    "status": "OK",
+    "confidence_label": "HIGH",
+    "risk_level": "LOW",
+    "evidence_refs": [],
+    "limitations": [],
+    "next_action": null,
+    "operator_summary_vi": "Metadata đã khớp hợp đồng kênh.",
+    "technical_appendix": {
+      "schema_ref": "base_agent_envelope"
+    },
+    "artifact": {
+      "title": "Example title"
+    }
+  },
+  "expected_outcome": {
+    "status": "OK"
+  },
+  "pass_criteria": {
+    "type": "base_envelope_schema"
+  },
+  "status": "ACTIVE"
+}

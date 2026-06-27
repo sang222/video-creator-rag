@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vcos://schemas/base_agent_envelope/1.0.0",
+  "title": "VCOS Base Agent Envelope",
+  "type": "object",
+  "x-vcos-schema-version": "1.0.0",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "agent_key",
+    "status",
+    "confidence_label",
+    "risk_level",
+    "evidence_refs",
+    "limitations",
+    "next_action",
+    "operator_summary_vi",
+    "technical_appendix",
+    "artifact"
+  ],
+  "properties": {
+    "contract_version": {"type": "string"},
+    "agent_key": {"type": "string"},
+    "status": {"enum": ["OK", "REVIEW_REQUIRED", "BLOCK", "REFUSAL", "ERROR"]},
+    "confidence_label": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+    "risk_level": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", null]},
+    "evidence_refs": {"type": "array", "items": {"type": "object"}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "next_action": {"type": ["string", "null"]},
+    "operator_summary_vi": {"type": "string"},
+    "technical_appendix": {"type": "object"},
+    "artifact": {"type": ["object", "null"]}
+  }
+}

@@ -169,6 +169,13 @@ from app.services.m12 import (
     YouTubeOwnerAnalyticsReadinessCheck,
     YouTubePublicReadinessCheck,
 )
+from app.services.m12_1 import (
+    PromptRegistryRepository,
+    PromptRegistryService,
+    build_channel_contract_from_profile,
+    prompt_context_hash,
+    prompt_template_hash,
+)
 
 __all__ = [
     "AuditService",
@@ -303,6 +310,11 @@ __all__ = [
     "IntegrationDashboardReadService",
     "ProviderNextActionService",
     "SecurityRedactionService",
+    "PromptRegistryRepository",
+    "PromptRegistryService",
+    "build_channel_contract_from_profile",
+    "prompt_context_hash",
+    "prompt_template_hash",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

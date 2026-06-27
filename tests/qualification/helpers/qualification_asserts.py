@@ -24,7 +24,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0018_m12_provider_readiness"
+EXPECTED_ALEMBIC_HEAD = "0019_m12_1_prompt_registry"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -49,6 +49,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m11-operator-dashboard.md",
     "docs/architecture/m11-1-localization-auth-timing.md",
     "docs/architecture/m12-production-credential-readiness.md",
+    "docs/architecture/m12-1-prompt-registry.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -68,6 +69,8 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m11-final-report.md",
     "reports/m11_1-final-report.md",
     "reports/m12-final-report.md",
+    "reports/m12_1-final-report.md",
+    "reports/m12_1_prompt_registry_source_spec.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }

@@ -95,6 +95,14 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    prompt_evaluation_runs,
+                    prompt_evaluation_cases,
+                    prompt_audit_snapshots,
+                    prompt_render_runs,
+                    prompt_contract_versions,
+                    agent_prompt_profiles,
+                    prompt_template_records,
+                    structured_output_schemas,
                     real_smoke_runs,
                     provider_readiness_snapshots,
                     provider_readiness_checks,

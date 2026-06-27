@@ -128,7 +128,8 @@ class LLMRouteAttemptRead(_ReadModel):
 
 class LLMRouteRequest(BaseModel):
     lane_name: str
-    prompt: str
+    prompt: str | None = None
+    messages: list[dict[str, str]] | None = None
     requested_task_type: str | None = None
     response_format: Literal["text", "json"] = "text"
     profile_key: str = "default"

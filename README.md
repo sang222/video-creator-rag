@@ -392,4 +392,17 @@ M11 adds an action-first operator cockpit for Command Center, channel setup/work
 
 ## Boundaries
 
-M0-M11 do not implement auto upload, platform publish APIs, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/cloud final renderer execution, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. Real Veo execution and real Drive upload smoke are guarded and off by default. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, or scrape YouTube Studio. M10.5 adds Drive archive/offload only; it does not add backend download/preview proxy. M11 adds dashboard UI/read models and human review decisions only; it does not auto mutate channel profiles or suggest config upgrades. CapCut pilot notes do not make CapCut a production dependency.
+## M12.1 Prompt Registry
+
+```bash
+POST /prompt-registry/sync
+POST /prompt-registry/render
+POST /prompt-registry/validate-output
+POST /prompt-registry/evaluations/run
+```
+
+M12.1 stores canonical prompt assets in `app/prompts/`, syncs versioned prompt/profile/schema records to DB, renders production prompts as `system` + `user` chat messages, binds every content prompt to frozen ChannelProfileVersion/CompiledChannelPolicySnapshot contract refs, stores prompt render/audit snapshots, and validates BaseEnvelope JSON output with safe syntax-only repair.
+
+## Boundaries
+
+M0-M12.1 do not implement auto upload, platform publish APIs, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/cloud final renderer execution, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. Real Veo execution and real Drive/provider smoke are guarded and off by default. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, or scrape YouTube Studio. M10.5 adds Drive archive/offload only; it does not add backend download/preview proxy. M11 adds dashboard UI/read models and human review decisions only; it does not auto mutate channel profiles or suggest config upgrades. M12.1 adds prompt contracts only; it does not call real providers or mutate channel config. CapCut pilot notes do not make CapCut a production dependency.

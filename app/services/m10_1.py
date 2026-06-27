@@ -144,6 +144,17 @@ AGENT_ROUTER_MAPPING: dict[str, list[str]] = {
     "EvidenceBundleSummarizer": ["cheap_structured", "long_context_text"],
     "PostPublishSummaryAgent": ["cheap_structured"],
     "EngineeringArchitectAgent": ["engineering_architect"],
+    "ShortCandidateExtractor": ["cheap_structured", "long_context_text"],
+    "ShortCandidateRanker": ["cheap_structured"],
+    "DerivativeOriginalityReviewer": ["gatekeeper_soft_review", "cheap_structured"],
+    "RecoveryProposalReviewer": ["gatekeeper_soft_review"],
+    "LocalizationSubtitleAgent": ["long_context_text"],
+    "LocalizedMetadataAgent": ["cheap_structured"],
+    "PublishTimingSummaryAgent": ["cheap_structured"],
+    "ProviderReadinessSummaryAgent": ["cheap_structured"],
+    "MediaQCExplanationAgent": ["cheap_structured"],
+    "RightsDisclosureReviewer": ["gatekeeper_soft_review"],
+    "UploadCardCopyAgent": ["cheap_structured"],
 }
 
 
@@ -340,17 +351,21 @@ class LLMRouterService:
         self,
         *,
         lane_name: str,
-        prompt: str,
+        prompt: str | None = None,
+        messages: list[dict[str, str]] | None = None,
         requested_task_type: str | None = None,
         response_format: str = "text",
         profile_key: str = "default",
         correlation_id: str = "m10-1-llm-router",
     ) -> LLMRouteResponse:
+        if prompt is None and messages is None:
+            raise ValidationFailureError("LLM route requires either prompt or chat messages.")
         profile, lane = LLMRouterConfigLoader(self.session).require_lane(profile_key=profile_key, lane_name=lane_name)
         request_payload = {
             "lane_name": lane_name,
             "requested_task_type": requested_task_type,
             "prompt": prompt,
+            "messages": messages,
             "response_format": response_format,
             "profile_key": profile.profile_key,
         }
@@ -399,7 +414,7 @@ class LLMRouterService:
         last_response: ProviderResponse | None = None
         for choice in _model_choices(lane):
             response = provider.chat(
-                request=OllamaChatRequest(model=choice.model_id, prompt=prompt, response_format=response_format)
+                request=OllamaChatRequest(model=choice.model_id, prompt=prompt, messages=messages, response_format=response_format)
             )
             status = "SUCCESS" if response.ok else "FAILED"
             provider_attempt = _create_provider_attempt(
@@ -411,6 +426,8 @@ class LLMRouterService:
                 response=response,
                 model_id=choice.model_id,
                 correlation_id=correlation_id,
+                router_lane=lane.lane_name,
+                request_hash=request_hash,
             )
             llm_run = _create_llm_run_snapshot(
                 self.session,
@@ -1187,7 +1204,10 @@ def _create_provider_attempt(
     response: ProviderResponse,
     model_id: str,
     correlation_id: str,
+    router_lane: str,
+    request_hash: str,
 ) -> ProviderAttempt:
+    response_hash = _hash_payload(response.output) if response.ok else None
     attempt = ProviderAttempt(
         provider_key=provider_key,
         operation_key=operation_key,
@@ -1202,9 +1222,14 @@ def _create_provider_attempt(
         latency_ms=response.latency_ms,
         metadata_={
             "model_id": model_id,
+            "router_lane": router_lane,
+            "request_hash": request_hash,
+            "response_hash": response_hash,
             "ollama_local_endpoint": True,
             "no_dollar_cost_reported": True,
             "response_usage": response.output.get("usage") if response.ok else {},
+            "validation_outcome": "VCOS_VALIDATION_PENDING",
+            "repair_outcome": "NOT_ATTEMPTED",
         },
     )
     session.add(attempt)
@@ -1257,7 +1282,14 @@ def _create_llm_run_snapshot(
         token_estimate=token_total,
         quota_event_id=None,
         cost_event_id=None,
-        cost_payload={"provider_price_unavailable": True, "no_dollar_cost_invented": True},
+        cost_payload={
+            "provider_price_unavailable": True,
+            "no_dollar_cost_invented": True,
+            "validation_outcome": "VCOS_VALIDATION_PENDING",
+            "repair_outcome": "NOT_ATTEMPTED",
+            "router_lane": lane.lane_name,
+            "selected_model": selected_model,
+        },
         correlation_id=correlation_id,
         completed_at=utc_now(),
     )

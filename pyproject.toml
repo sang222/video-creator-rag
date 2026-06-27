@@ -35,6 +35,9 @@ vcos = "app.cli.main:main"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+app = ["prompts/**/*.md", "prompts/**/*.yaml", "prompts/**/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

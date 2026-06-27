@@ -209,6 +209,12 @@ from app.contracts import (
     IntegrationReadinessRead,
     ProviderReadinessSnapshotRead,
     ProviderSmokeRequest,
+    PromptEvaluationRunRead,
+    PromptOutputValidationRequest,
+    PromptOutputValidationResult,
+    PromptRegistrySyncSummary,
+    PromptRenderRequest,
+    PromptRenderResult,
     ReadinessRunRequest,
     RealSmokeRunRead,
 )
@@ -323,6 +329,7 @@ from app.services import (
     PublishTimingPolicyService,
     PublishTimingSuggestionService,
     ProviderReadinessService,
+    PromptRegistryService,
     RealSmokeOrchestratorService,
 )
 from app.services.m11 import (
@@ -2191,6 +2198,7 @@ def create_app() -> FastAPI:
                 return LLMRouterService(session).route(
                     lane_name=data.lane_name,
                     prompt=data.prompt,
+                    messages=data.messages,
                     requested_task_type=data.requested_task_type,
                     response_format=data.response_format,
                     profile_key=data.profile_key,
@@ -2205,6 +2213,39 @@ def create_app() -> FastAPI:
             with session_scope() as session:
                 request = data or LLMRouterSmokeTestRequest()
                 return LLMRouterSmokeTestRead.model_validate(LLMRouterService(session).run_smoke_test(profile_key=request.profile_key))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/prompt-registry/sync", response_model=PromptRegistrySyncSummary)
+    def sync_prompt_registry() -> PromptRegistrySyncSummary:
+        try:
+            with session_scope() as session:
+                return PromptRegistryService(session).sync_repo_registry()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/prompt-registry/render", response_model=PromptRenderResult)
+    def render_prompt(data: PromptRenderRequest) -> PromptRenderResult:
+        try:
+            with session_scope() as session:
+                return PromptRegistryService(session).render_prompt(data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/prompt-registry/validate-output", response_model=PromptOutputValidationResult)
+    def validate_prompt_output(data: PromptOutputValidationRequest) -> PromptOutputValidationResult:
+        try:
+            with session_scope() as session:
+                return PromptRegistryService(session).validate_output(data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/prompt-registry/evaluations/run", response_model=list[PromptEvaluationRunRead])
+    def run_prompt_evaluations() -> list[PromptEvaluationRunRead]:
+        try:
+            with session_scope() as session:
+                runs = PromptRegistryService(session).run_evaluation_cases()
+                return [PromptEvaluationRunRead.model_validate(run) for run in runs]
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

@@ -1,0 +1,14 @@
+{
+  "case_key": "m12_1_channel_contract_missing_blocks_render",
+  "agent_key": "ScriptWriterAgent",
+  "template_key": "script_writer_agent.production",
+  "template_version": "1.0.0",
+  "expected_outcome": {
+    "status": "REVIEW_REQUIRED",
+    "next_action": "Bổ sung hoặc compile lại ChannelProfileVersion trước khi render prompt."
+  },
+  "pass_criteria": {
+    "type": "missing_channel_contract"
+  },
+  "status": "ACTIVE"
+}
