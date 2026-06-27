@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from app.contracts import (
@@ -162,8 +163,16 @@ from app.contracts import (
     UploadedVideoPublicationSummaryRead,
     UploadedVideoMetricsSummaryRead,
     UploadedVideoRead,
+    UploadedVideoYouTubeFollowSummaryRead,
     VideoProjectCreate,
     VideoProjectRead,
+    YouTubeConnectionStatusRead,
+    YouTubeOAuthSessionRead,
+    YouTubeOwnerAnalyticsSnapshotRead,
+    YouTubeOwnerAnalyticsSyncRequest,
+    YouTubeOwnerAnalyticsSyncRunRead,
+    YouTubePublicMonitorSnapshotRead,
+    YouTubePublicSyncRunRead,
     RecoveryProposalRead,
     PlaybookCandidateDraftRead,
     ChannelDailyRunCreate,
@@ -251,6 +260,11 @@ from app.services import (
     SystemHealthService,
     UploadCardService,
     WorkflowReadinessService,
+    UploadedVideoYouTubeFollowReadService,
+    YouTubeCredentialHealthService,
+    YouTubeOAuthSessionService,
+    YouTubeOwnerAnalyticsSyncService,
+    YouTubePublicStatsSyncService,
 )
 
 
@@ -1350,6 +1364,100 @@ def create_app() -> FastAPI:
                 if snapshot is None:
                     raise NotFoundError(f"traffic source snapshot not found: {uploaded_video_id}")
                 return TrafficSourceSnapshotRead.model_validate(_traffic_source_snapshot(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/auth/youtube/start")
+    def start_youtube_auth(
+        company_id: uuid.UUID | None = None,
+        channel_workspace_id: uuid.UUID | None = None,
+    ) -> RedirectResponse:
+        try:
+            with session_scope() as session:
+                result = YouTubeOAuthSessionService(session).start(
+                    company_id=company_id,
+                    channel_workspace_id=channel_workspace_id,
+                )
+                return RedirectResponse(result.authorization_url)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/auth/youtube/callback", response_model=YouTubeOAuthSessionRead)
+    def youtube_auth_callback(
+        state: str,
+        code: str | None = None,
+        error: str | None = None,
+    ) -> YouTubeOAuthSessionRead:
+        try:
+            with session_scope() as session:
+                oauth_session = YouTubeOAuthSessionService(session).handle_callback(state=state, code=code, error=error)
+                return YouTubeOAuthSessionRead.model_validate(_youtube_oauth_session(oauth_session))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/youtube/connection-status", response_model=YouTubeConnectionStatusRead)
+    def get_youtube_connection_status() -> YouTubeConnectionStatusRead:
+        try:
+            with session_scope() as session:
+                return YouTubeCredentialHealthService(session).connection_status()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/uploaded-videos/{uploaded_video_id}/youtube/public-sync", response_model=YouTubePublicSyncRunRead)
+    def sync_uploaded_video_youtube_public(uploaded_video_id: uuid.UUID) -> YouTubePublicSyncRunRead:
+        try:
+            with session_scope() as session:
+                run = YouTubePublicStatsSyncService(session).sync_uploaded_video(uploaded_video_id=uploaded_video_id)
+                return YouTubePublicSyncRunRead.model_validate(_youtube_public_sync_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/youtube/public-monitor", response_model=YouTubePublicMonitorSnapshotRead | None)
+    def get_uploaded_video_youtube_public_monitor(uploaded_video_id: uuid.UUID) -> YouTubePublicMonitorSnapshotRead | None:
+        try:
+            with session_scope() as session:
+                snapshot = YouTubePublicStatsSyncService(session).latest_snapshot(uploaded_video_id)
+                return YouTubePublicMonitorSnapshotRead.model_validate(_youtube_public_snapshot(snapshot)) if snapshot else None
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/uploaded-videos/{uploaded_video_id}/youtube/owner-analytics-sync", response_model=YouTubeOwnerAnalyticsSyncRunRead)
+    def sync_uploaded_video_youtube_owner_analytics(
+        uploaded_video_id: uuid.UUID,
+        data: YouTubeOwnerAnalyticsSyncRequest | None = None,
+    ) -> YouTubeOwnerAnalyticsSyncRunRead:
+        try:
+            with session_scope() as session:
+                run = YouTubeOwnerAnalyticsSyncService(session).sync_uploaded_video(
+                    uploaded_video_id=uploaded_video_id,
+                    request=data or YouTubeOwnerAnalyticsSyncRequest(),
+                )
+                return YouTubeOwnerAnalyticsSyncRunRead.model_validate(_youtube_owner_sync_run(run))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/youtube/owner-analytics", response_model=YouTubeOwnerAnalyticsSnapshotRead | None)
+    def get_uploaded_video_youtube_owner_analytics(uploaded_video_id: uuid.UUID) -> YouTubeOwnerAnalyticsSnapshotRead | None:
+        try:
+            with session_scope() as session:
+                snapshot = YouTubeOwnerAnalyticsSyncService(session).latest_snapshot(uploaded_video_id)
+                return YouTubeOwnerAnalyticsSnapshotRead.model_validate(_youtube_owner_snapshot(snapshot)) if snapshot else None
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/youtube/follow-summary", response_model=list[UploadedVideoYouTubeFollowSummaryRead])
+    def list_uploaded_video_youtube_follow_summaries() -> list[UploadedVideoYouTubeFollowSummaryRead]:
+        try:
+            with session_scope() as session:
+                return UploadedVideoYouTubeFollowReadService(session).list_summaries()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/youtube/follow-summary", response_model=UploadedVideoYouTubeFollowSummaryRead)
+    def get_uploaded_video_youtube_follow_summary(uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubeFollowSummaryRead:
+        try:
+            with session_scope() as session:
+                return UploadedVideoYouTubeFollowReadService(session).get_summary(uploaded_video_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -3024,6 +3132,130 @@ def _uploaded_video_metrics_summary(summary: Any) -> dict[str, Any]:
         "next_action": summary.next_action,
         "created_at": summary.created_at,
         "updated_at": summary.updated_at,
+    }
+
+def _youtube_oauth_session(session: Any) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "company_id": session.company_id,
+        "channel_workspace_id": session.channel_workspace_id,
+        "redirect_uri": session.redirect_uri,
+        "scopes": session.scopes,
+        "status": session.status,
+        "credential_reference_id": session.credential_reference_id,
+        "error_code": session.error_code,
+        "error_message": session.error_message,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+    }
+
+def _youtube_public_sync_run(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "uploaded_video_id": run.uploaded_video_id,
+        "company_id": run.company_id,
+        "channel_workspace_id": run.channel_workspace_id,
+        "platform_video_id": run.platform_video_id,
+        "run_state": run.run_state,
+        "source": run.source,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "http_status": run.http_status,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+        "metrics_found": run.metrics_found,
+        "created_snapshot_id": run.created_snapshot_id,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+    }
+
+def _youtube_owner_sync_run(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "uploaded_video_id": run.uploaded_video_id,
+        "company_id": run.company_id,
+        "channel_workspace_id": run.channel_workspace_id,
+        "platform_video_id": run.platform_video_id,
+        "credential_reference_id": run.credential_reference_id,
+        "run_state": run.run_state,
+        "source": run.source,
+        "start_date": run.start_date,
+        "end_date": run.end_date,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "http_status": run.http_status,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+        "metrics_found": run.metrics_found,
+        "created_snapshot_id": run.created_snapshot_id,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+    }
+
+def _youtube_public_snapshot(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "uploaded_video_id": snapshot.uploaded_video_id,
+        "company_id": snapshot.company_id,
+        "channel_workspace_id": snapshot.channel_workspace_id,
+        "platform_video_id": snapshot.platform_video_id,
+        "video_url": snapshot.video_url,
+        "views": snapshot.views,
+        "likes": snapshot.likes,
+        "comments": snapshot.comments,
+        "youtube_title": snapshot.youtube_title,
+        "youtube_published_at": snapshot.youtube_published_at,
+        "youtube_channel_id": snapshot.youtube_channel_id,
+        "youtube_channel_title": snapshot.youtube_channel_title,
+        "thumbnail_url": snapshot.thumbnail_url,
+        "duration_seconds": snapshot.duration_seconds,
+        "definition": snapshot.definition,
+        "caption_status": snapshot.caption_status,
+        "privacy_status": snapshot.privacy_status,
+        "public_stats_viewable": snapshot.public_stats_viewable,
+        "title_matches_confirmed_metadata": snapshot.title_matches_confirmed_metadata,
+        "duration_matches_render_package": snapshot.duration_matches_render_package,
+        "views_availability": snapshot.views_availability,
+        "likes_availability": snapshot.likes_availability,
+        "comments_availability": snapshot.comments_availability,
+        "freshness_state": snapshot.freshness_state,
+        "sync_status": snapshot.sync_status,
+        "sync_error_code": snapshot.sync_error_code,
+        "learning_authority": snapshot.learning_authority,
+        "last_synced_at": snapshot.last_synced_at,
+        "unknown_metrics": snapshot.unknown_metrics,
+        "unavailable_metrics": snapshot.unavailable_metrics,
+        "technical_appendix": snapshot.technical_appendix,
+        "created_at": snapshot.created_at,
+    }
+
+def _youtube_owner_snapshot(snapshot: Any) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "uploaded_video_id": snapshot.uploaded_video_id,
+        "company_id": snapshot.company_id,
+        "channel_workspace_id": snapshot.channel_workspace_id,
+        "platform_video_id": snapshot.platform_video_id,
+        "analytics_start_date": snapshot.analytics_start_date,
+        "analytics_end_date": snapshot.analytics_end_date,
+        "learning_authority": snapshot.learning_authority,
+        "views": snapshot.views,
+        "likes": snapshot.likes,
+        "comments": snapshot.comments,
+        "impressions": snapshot.impressions,
+        "impression_click_through_rate": snapshot.impression_click_through_rate,
+        "average_view_duration_seconds": snapshot.average_view_duration_seconds,
+        "average_view_percentage": snapshot.average_view_percentage,
+        "estimated_minutes_watched": snapshot.estimated_minutes_watched,
+        "subscribers_gained": snapshot.subscribers_gained,
+        "subscribers_lost": snapshot.subscribers_lost,
+        "metric_availability": snapshot.metric_availability,
+        "freshness_state": snapshot.freshness_state,
+        "sync_status": snapshot.sync_status,
+        "sync_error_code": snapshot.sync_error_code,
+        "last_synced_at": snapshot.last_synced_at,
+        "technical_appendix": snapshot.technical_appendix,
+        "created_at": snapshot.created_at,
     }
 
 def _post_publish_health_run(run: Any) -> dict[str, Any]:

@@ -1,0 +1,11 @@
+catalog_key: youtube_metric_availability_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: AVAILABLE
+    description: Metric is available; zero remains a real value.
+  - key: UNKNOWN
+    description: Metric is missing or not returned yet.
+  - key: NOT_AVAILABLE
+    description: Metric is unsupported or unavailable from the source.

@@ -1,0 +1,9 @@
+catalog_key: youtube_sync_source_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: YOUTUBE_DATA_API
+    description: Public YouTube Data API source.
+  - key: YOUTUBE_ANALYTICS_API
+    description: OAuth YouTube Analytics API source.

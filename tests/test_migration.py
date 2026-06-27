@@ -122,13 +122,19 @@ REQUIRED_TABLES = {
     "thumbnail_variants",
     "final_media_refs",
     "license_evidence_records",
+    "youtube_monitoring_credentials",
+    "youtube_oauth_sessions",
+    "youtube_public_sync_runs",
+    "youtube_owner_analytics_sync_runs",
+    "uploaded_video_youtube_public_monitor_snapshots",
+    "uploaded_video_youtube_owner_analytics_snapshots",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0013_m10_2_provider_routing"
+    assert revision == "0014_m10_3_youtube_follow"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

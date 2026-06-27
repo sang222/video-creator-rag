@@ -109,6 +109,18 @@ from app.services.m10_2 import (
     ThumbnailVariantPlanningService,
     YouTubeOnlyAnalyticsGateService,
 )
+from app.services.m10_3 import (
+    UploadedVideoYouTubeFollowReadService,
+    YouTubeCredentialHealthService,
+    YouTubeMetricMappingService,
+    YouTubeMonitoringConfigService,
+    YouTubeOAuthCredentialService,
+    YouTubeOAuthSessionService,
+    YouTubeOwnerAnalyticsProvider,
+    YouTubeOwnerAnalyticsSyncService,
+    YouTubePublicStatsProvider,
+    YouTubePublicStatsSyncService,
+)
 
 __all__ = [
     "AuditService",
@@ -201,6 +213,16 @@ __all__ = [
     "ShortRenderPackageService",
     "ThumbnailVariantPlanningService",
     "YouTubeOnlyAnalyticsGateService",
+    "UploadedVideoYouTubeFollowReadService",
+    "YouTubeCredentialHealthService",
+    "YouTubeMetricMappingService",
+    "YouTubeMonitoringConfigService",
+    "YouTubeOAuthCredentialService",
+    "YouTubeOAuthSessionService",
+    "YouTubeOwnerAnalyticsProvider",
+    "YouTubeOwnerAnalyticsSyncService",
+    "YouTubePublicStatsProvider",
+    "YouTubePublicStatsSyncService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

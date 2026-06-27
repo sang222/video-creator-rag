@@ -59,6 +59,7 @@ from app.contracts import (
     ChannelDailyRunCreate,
     ChannelStatePackSnapshotCreate,
     ContextPackSnapshotCreate,
+    YouTubeOwnerAnalyticsSyncRequest,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -108,6 +109,10 @@ from app.services import (
     VideoProjectService,
     WorkflowReadinessService,
     RenderSpecCompilerService,
+    UploadedVideoYouTubeFollowReadService,
+    YouTubeCredentialHealthService,
+    YouTubeOwnerAnalyticsSyncService,
+    YouTubePublicStatsSyncService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -148,6 +153,7 @@ render_spec_app = typer.Typer(no_args_is_help=True)
 publish_app = typer.Typer(no_args_is_help=True)
 uploaded_video_app = typer.Typer(no_args_is_help=True)
 analytics_app = typer.Typer(no_args_is_help=True)
+youtube_app = typer.Typer(no_args_is_help=True)
 post_publish_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
@@ -186,6 +192,7 @@ app.add_typer(render_spec_app, name="render-spec")
 app.add_typer(publish_app, name="publish")
 app.add_typer(uploaded_video_app, name="uploaded-video")
 app.add_typer(analytics_app, name="analytics")
+app.add_typer(youtube_app, name="youtube")
 app.add_typer(post_publish_app, name="post-publish")
 
 
@@ -1745,6 +1752,52 @@ def analytics_traffic_sources(uploaded_video_id: uuid.UUID = typer.Option(..., "
     except Exception as exc:
         _fail(f"analytics traffic-sources failed: {exc}")
 
+@youtube_app.command("connection-status")
+def youtube_connection_status() -> None:
+    try:
+        with session_scope() as session:
+            status_read = YouTubeCredentialHealthService(session).connection_status()
+            typer.echo(json.dumps(status_read.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"youtube connection-status failed: {exc}")
+
+@youtube_app.command("public-sync")
+def youtube_public_sync(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            run = YouTubePublicStatsSyncService(session).sync_uploaded_video(uploaded_video_id=uploaded_video_id)
+            typer.echo(json.dumps(_youtube_public_sync_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"youtube public-sync failed: {exc}")
+
+@youtube_app.command("owner-sync")
+def youtube_owner_sync(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+    start_date: str | None = typer.Option(None, "--start-date"),
+    end_date: str | None = typer.Option(None, "--end-date"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = YouTubeOwnerAnalyticsSyncService(session).sync_uploaded_video(
+                uploaded_video_id=uploaded_video_id,
+                request=YouTubeOwnerAnalyticsSyncRequest(
+                    start_date=date.fromisoformat(start_date) if start_date else None,
+                    end_date=date.fromisoformat(end_date) if end_date else None,
+                ),
+            )
+            typer.echo(json.dumps(_youtube_owner_sync_run_to_dict(run)))
+    except Exception as exc:
+        _fail(f"youtube owner-sync failed: {exc}")
+
+@youtube_app.command("follow-summary")
+def youtube_follow_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            summary = UploadedVideoYouTubeFollowReadService(session).get_summary(uploaded_video_id)
+            typer.echo(json.dumps(summary.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"youtube follow-summary failed: {exc}")
+
 @post_publish_app.command("health-create")
 def post_publish_health_create(
     uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
@@ -2348,6 +2401,49 @@ def _uploaded_video_metrics_summary_to_dict(summary: Any) -> dict[str, Any]:
         "next_action": summary.next_action,
         "created_at": summary.created_at.isoformat(),
         "updated_at": summary.updated_at.isoformat(),
+    }
+
+def _youtube_public_sync_run_to_dict(run: Any) -> dict[str, Any]:
+    return {
+        "id": str(run.id),
+        "uploaded_video_id": str(run.uploaded_video_id),
+        "company_id": str(run.company_id),
+        "channel_workspace_id": str(run.channel_workspace_id) if run.channel_workspace_id else None,
+        "platform_video_id": run.platform_video_id,
+        "run_state": run.run_state,
+        "source": run.source,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "http_status": run.http_status,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+        "metrics_found": run.metrics_found,
+        "created_snapshot_id": str(run.created_snapshot_id) if run.created_snapshot_id else None,
+        "created_at": run.created_at.isoformat(),
+        "updated_at": run.updated_at.isoformat(),
+    }
+
+def _youtube_owner_sync_run_to_dict(run: Any) -> dict[str, Any]:
+    return {
+        "id": str(run.id),
+        "uploaded_video_id": str(run.uploaded_video_id),
+        "company_id": str(run.company_id),
+        "channel_workspace_id": str(run.channel_workspace_id) if run.channel_workspace_id else None,
+        "platform_video_id": run.platform_video_id,
+        "credential_reference_id": str(run.credential_reference_id) if run.credential_reference_id else None,
+        "run_state": run.run_state,
+        "source": run.source,
+        "start_date": run.start_date.isoformat(),
+        "end_date": run.end_date.isoformat(),
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "http_status": run.http_status,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+        "metrics_found": run.metrics_found,
+        "created_snapshot_id": str(run.created_snapshot_id) if run.created_snapshot_id else None,
+        "created_at": run.created_at.isoformat(),
+        "updated_at": run.updated_at.isoformat(),
     }
 
 def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:

@@ -15,9 +15,11 @@ REQUIRED_TAGS = {
     "m8-analytics-sync-foundation",
     "m9-post-publish-diagnostics",
     "m10-learning-review-queue",
+    "m10-1-router-derivative-funnel",
+    "m10-2-media-provider-routing",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0013_m10_2_provider_routing"
+EXPECTED_ALEMBIC_HEAD = "0014_m10_3_youtube_follow"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -36,6 +38,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m10-learning-review-queue.md",
     "docs/architecture/m10-1-llm-router-derivative-funnel.md",
     "docs/architecture/m10-2-media-provider-role-matrix.md",
+    "docs/architecture/m10-3-youtube-follow.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -49,6 +52,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m10-final-report.md",
     "reports/m10_1-final-report.md",
     "reports/m10_2-final-report.md",
+    "reports/m10_3-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }

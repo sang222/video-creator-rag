@@ -54,6 +54,7 @@ def test_config_yaml_validates(db_session) -> None:
         "m10_reason_code_catalog",
         "m10_1_reason_code_catalog",
         "m10_2_reason_code_catalog",
+        "m10_3_reason_code_catalog",
         "media_provider_type_catalog",
         "media_provider_recommendation_catalog",
         "media_job_type_catalog",
@@ -137,6 +138,14 @@ def test_config_yaml_validates(db_session) -> None:
         "uploaded_video_monitoring_state_catalog",
         "uploaded_video_publish_status_catalog",
         "upload_card_state_catalog",
+        "youtube_auth_mode_catalog",
+        "youtube_connection_state_catalog",
+        "youtube_follow_freshness_state_catalog",
+        "youtube_follow_sync_status_catalog",
+        "youtube_metric_authority_catalog",
+        "youtube_metric_availability_catalog",
+        "youtube_sync_run_state_catalog",
+        "youtube_sync_source_catalog",
     }
 
 
@@ -154,7 +163,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 124
+    assert catalog_count == 133
     assert role_count == 3
     assert metric_definition_count == 16
 

@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, and M10.2 media provider role/routing foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, and M10.3 YouTube public/owner analytics follow foundation.
 
 ## Stack
 
@@ -40,6 +40,8 @@ make ollama-logs
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. `OLLAMA_API_KEY` and `VCOS_LLM_MODEL_<LANE>_<ROLE>` are env-driven; put the real key in local `.env` only, never in tracked files. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
 Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `CINEMATIC_AI_API_KEY`, `CLOUD_FINAL_RENDERER_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M10.2 still does not call these real providers; credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
+
+YouTube follow configuration is env-driven. `.env.example` declares `YOUTUBE_PUBLIC_MONITOR_ENABLED`, `YOUTUBE_DATA_API_KEY`, `YOUTUBE_OWNER_ANALYTICS_ENABLED`, `YOUTUBE_OAUTH_CLIENT_SECRETS_FILE`, `YOUTUBE_OAUTH_CLIENT_ID`, `YOUTUBE_OAUTH_CLIENT_SECRET`, `YOUTUBE_OAUTH_REDIRECT_URI`, and `YOUTUBE_OAUTH_SCOPES`. M10.3 stores API keys and OAuth tokens only through safe references/local ignored dev token files, never as raw DB fields.
 
 ## M1 Commands
 
@@ -274,6 +276,29 @@ POST /media-provider-gates/media-qc/check
 
 M10.2 adds the Quality-First $250 media provider role matrix, provider capability entries, deterministic render routing, provider/budget/license/reuse/QC gates, long-form and Short render package planning, AI hero planning, Creatomate template asset planning, thumbnail variant planning, final media refs, and license evidence records. Creatomate Essential 2K routes only light template work and Shorts; it cannot route `LONG_FORM_FINAL_RENDER` by default. Full long-form final MP4 assembly requires a configured `CLOUD_FINAL_ASSEMBLY_RENDERER`. M10.2 does not call real ElevenLabs, Creatomate, AI Hero, or cloud final renderer APIs.
 
+## M10.3 API
+
+```bash
+GET /auth/youtube/start
+GET /auth/youtube/callback
+GET /youtube/connection-status
+POST /uploaded-videos/{uploaded_video_id}/youtube/public-sync
+GET /uploaded-videos/{uploaded_video_id}/youtube/public-monitor
+POST /uploaded-videos/{uploaded_video_id}/youtube/owner-analytics-sync
+GET /uploaded-videos/{uploaded_video_id}/youtube/owner-analytics
+GET /uploaded-videos/{uploaded_video_id}/youtube/follow-summary
+GET /uploaded-videos/youtube/follow-summary
+```
+
+```bash
+vcos youtube connection-status
+vcos youtube public-sync --uploaded-video-id <uploaded-video-id>
+vcos youtube owner-sync --uploaded-video-id <uploaded-video-id>
+vcos youtube follow-summary --uploaded-video-id <uploaded-video-id>
+```
+
+M10.3 follows existing M7 `UploadedVideo` records with YouTube Data API public stats and OAuth-backed YouTube Analytics owner metrics. Public monitor data has WEAK authority. Owner analytics has STRONG authority. Zero values remain zero, missing metrics remain UNKNOWN, unsupported metrics remain NOT_AVAILABLE, and M8 metric truth is updated without inventing metrics. M10.3 does not build dashboard UI, YouTube upload/publish API, YouTube Studio scraping, browser automation, TikTok/Facebook analytics loops, or M10.4 Veo provider binding.
+
 ## Boundaries
 
-M0-M10.2 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/AI Hero/cloud renderer execution, Envato API/download/generation, YouTube follow sync, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M10.3 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/AI Hero/cloud renderer execution, Envato API/download/generation, M10.4 Veo binding, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, scrape YouTube Studio, or build dashboard UI. CapCut pilot notes do not make CapCut a production dependency.

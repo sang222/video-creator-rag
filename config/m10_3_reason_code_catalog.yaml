@@ -1,0 +1,51 @@
+catalog_key: m10_3_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: YOUTUBE_PUBLIC_MONITOR_CONFIGURED
+    description: YouTube public monitor configuration is present.
+  - code: YOUTUBE_PUBLIC_MONITOR_NOT_CONFIGURED
+    description: YouTube public monitor configuration is missing or disabled.
+  - code: YOUTUBE_OWNER_ANALYTICS_CONFIGURED
+    description: YouTube owner analytics configuration is present.
+  - code: YOUTUBE_OWNER_ANALYTICS_NOT_CONFIGURED
+    description: YouTube owner analytics configuration is missing or disabled.
+  - code: YOUTUBE_OAUTH_SESSION_STARTED
+    description: YouTube OAuth authorization session started.
+  - code: YOUTUBE_OAUTH_CALLBACK_RECEIVED
+    description: YouTube OAuth callback was received.
+  - code: YOUTUBE_OAUTH_TOKEN_EXCHANGED
+    description: YouTube OAuth authorization code was exchanged for a credential reference.
+  - code: YOUTUBE_OAUTH_TOKEN_REFRESHED
+    description: YouTube OAuth access token was refreshed using local credential storage.
+  - code: YOUTUBE_OAUTH_NEEDS_REAUTH
+    description: YouTube OAuth needs reauthorization.
+  - code: YOUTUBE_PUBLIC_SYNC_COMPLETED
+    description: YouTube public monitor sync completed.
+  - code: YOUTUBE_PUBLIC_SYNC_FAILED
+    description: YouTube public monitor sync failed.
+  - code: YOUTUBE_OWNER_ANALYTICS_SYNC_COMPLETED
+    description: YouTube owner analytics sync completed.
+  - code: YOUTUBE_OWNER_ANALYTICS_SYNC_FAILED
+    description: YouTube owner analytics sync failed.
+  - code: YOUTUBE_OWNER_ANALYTICS_NEEDS_AUTH
+    description: YouTube owner analytics sync needs OAuth authorization.
+  - code: YOUTUBE_VIDEO_NOT_FOUND
+    description: YouTube video was not found.
+  - code: YOUTUBE_API_QUOTA_OR_AUTH_ERROR
+    description: YouTube API quota or authentication error occurred.
+  - code: YOUTUBE_METRIC_UNKNOWN
+    description: YouTube metric is unknown.
+  - code: YOUTUBE_METRIC_UNAVAILABLE
+    description: YouTube metric is unavailable.
+  - code: YOUTUBE_ZERO_VALUE_CONFIRMED
+    description: YouTube returned a confirmed zero metric value.
+  - code: PUBLIC_MONITOR_WEAK_AUTHORITY
+    description: Public monitor metrics have weak learning authority.
+  - code: OWNER_ANALYTICS_STRONG_AUTHORITY
+    description: Owner analytics metrics have strong learning authority.
+  - code: DASHBOARD_UI_DEFERRED_TO_M11
+    description: Dashboard UI remains deferred to M11.
+  - code: VEO_PROVIDER_BINDING_DEFERRED_TO_M10_4
+    description: Google Vertex Veo provider binding remains deferred to M10.4.

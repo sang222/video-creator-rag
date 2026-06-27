@@ -43,6 +43,38 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("PIXABAY_API_KEY", "VCOS_PIXABAY_API_KEY"),
     )
+    youtube_public_monitor_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("YOUTUBE_PUBLIC_MONITOR_ENABLED", "VCOS_YOUTUBE_PUBLIC_MONITOR_ENABLED"),
+    )
+    youtube_data_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("YOUTUBE_DATA_API_KEY", "VCOS_YOUTUBE_DATA_API_KEY"),
+    )
+    youtube_owner_analytics_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("YOUTUBE_OWNER_ANALYTICS_ENABLED", "VCOS_YOUTUBE_OWNER_ANALYTICS_ENABLED"),
+    )
+    youtube_oauth_client_secrets_file: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("YOUTUBE_OAUTH_CLIENT_SECRETS_FILE", "VCOS_YOUTUBE_OAUTH_CLIENT_SECRETS_FILE"),
+    )
+    youtube_oauth_client_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("YOUTUBE_OAUTH_CLIENT_ID", "VCOS_YOUTUBE_OAUTH_CLIENT_ID"),
+    )
+    youtube_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("YOUTUBE_OAUTH_CLIENT_SECRET", "VCOS_YOUTUBE_OAUTH_CLIENT_SECRET"),
+    )
+    youtube_oauth_redirect_uri: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("YOUTUBE_OAUTH_REDIRECT_URI", "VCOS_YOUTUBE_OAUTH_REDIRECT_URI"),
+    )
+    youtube_oauth_scopes: str = Field(
+        default="https://www.googleapis.com/auth/youtube.readonly,https://www.googleapis.com/auth/yt-analytics.readonly",
+        validation_alias=AliasChoices("YOUTUBE_OAUTH_SCOPES", "VCOS_YOUTUBE_OAUTH_SCOPES"),
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -65,6 +97,8 @@ class Settings(BaseSettings):
         "cloud_final_renderer_api_key",
         "pexels_api_key",
         "pixabay_api_key",
+        "youtube_data_api_key",
+        "youtube_oauth_client_secret",
         mode="before",
     )
     @classmethod

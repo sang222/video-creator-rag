@@ -148,6 +148,14 @@ from app.db.models.m10_2 import (
     ShortRenderPackage,
     ThumbnailVariant,
 )
+from app.db.models.m10_3 import (
+    UploadedVideoYouTubeOwnerAnalyticsSnapshot,
+    UploadedVideoYouTubePublicMonitorSnapshot,
+    YouTubeMonitoringCredential,
+    YouTubeOAuthSession,
+    YouTubeOwnerAnalyticsSyncRun,
+    YouTubePublicSyncRun,
+)
 
 __all__ = [
     "AuditEvent",
@@ -274,4 +282,10 @@ __all__ = [
     "ProviderCapabilityMatrixEntry",
     "ShortRenderPackage",
     "ThumbnailVariant",
+    "UploadedVideoYouTubeOwnerAnalyticsSnapshot",
+    "UploadedVideoYouTubePublicMonitorSnapshot",
+    "YouTubeMonitoringCredential",
+    "YouTubeOAuthSession",
+    "YouTubeOwnerAnalyticsSyncRun",
+    "YouTubePublicSyncRun",
 ]

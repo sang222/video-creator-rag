@@ -6,7 +6,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 
 AnalyticsPlatform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
-AnalyticsSyncMode = Literal["MOCK", "MANUAL_IMPORT", "CSV_IMPORT", "REAL_DISABLED"]
+AnalyticsSyncMode = Literal["MOCK", "MANUAL_IMPORT", "CSV_IMPORT", "REAL_DISABLED", "YOUTUBE_PUBLIC_MONITOR", "YOUTUBE_OWNER_ANALYTICS"]
 AnalyticsSyncState = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
 AnalyticsObservationWindow = Literal["T_PLUS_1H", "T_PLUS_6H", "T_PLUS_24H", "T_PLUS_48H", "T_PLUS_7D", "CUSTOM", "UNKNOWN"]
 MetricGroup = Literal["REACH", "ENGAGEMENT", "RETENTION", "TRAFFIC", "AUDIENCE", "REVENUE_DISABLED", "OTHER"]

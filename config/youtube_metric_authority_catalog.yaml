@@ -1,0 +1,13 @@
+catalog_key: youtube_metric_authority_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: WEAK
+    description: Public monitor metric authority is weak.
+  - key: STRONG
+    description: Owner analytics metric authority is strong.
+  - key: MIXED
+    description: Read model combines public and owner analytics sources.
+  - key: NONE
+    description: No YouTube follow metric authority is available yet.

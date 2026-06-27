@@ -12,7 +12,10 @@ dist/
 build/
 *.egg-info/
 var/generated/
+var/credentials/
 test-render-output/
+client_secret*.json
+*_client_secret.json
 *.mp4
 *.mov
 *.wav

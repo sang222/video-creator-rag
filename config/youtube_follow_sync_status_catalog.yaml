@@ -1,0 +1,19 @@
+catalog_key: youtube_follow_sync_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: OK
+    description: YouTube follow sync succeeded.
+  - key: FAILED
+    description: YouTube follow sync failed.
+  - key: PARTIAL
+    description: YouTube follow sync returned partial metrics.
+  - key: NOT_CONFIGURED
+    description: YouTube follow sync is not configured.
+  - key: NEEDS_AUTH
+    description: YouTube owner analytics sync needs OAuth.
+  - key: NOT_FOUND
+    description: YouTube video was not found.
+  - key: UNAVAILABLE
+    description: YouTube follow source is unavailable.

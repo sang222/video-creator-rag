@@ -1,0 +1,17 @@
+catalog_key: youtube_connection_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_CONFIGURED
+    description: YouTube monitoring credential is not configured.
+  - key: CONFIGURED
+    description: YouTube monitoring credential reference is configured.
+  - key: CONNECTED
+    description: YouTube OAuth owner analytics credential is connected.
+  - key: NEEDS_REAUTH
+    description: YouTube OAuth owner analytics needs reauthorization.
+  - key: REVOKED
+    description: YouTube OAuth owner analytics credential was revoked.
+  - key: ERROR
+    description: YouTube monitoring credential has an error.

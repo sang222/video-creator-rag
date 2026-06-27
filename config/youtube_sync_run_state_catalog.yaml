@@ -1,0 +1,17 @@
+catalog_key: youtube_sync_run_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PENDING
+    description: YouTube sync run is pending.
+  - key: RUNNING
+    description: YouTube sync run is running.
+  - key: COMPLETED
+    description: YouTube sync run completed.
+  - key: FAILED
+    description: YouTube sync run failed without creating fake data.
+  - key: SKIPPED
+    description: YouTube sync run was skipped because config is unavailable.
+  - key: NEEDS_AUTH
+    description: YouTube owner analytics sync needs OAuth authorization.

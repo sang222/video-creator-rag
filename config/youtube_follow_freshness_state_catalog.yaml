@@ -1,0 +1,11 @@
+catalog_key: youtube_follow_freshness_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: FRESH
+    description: YouTube follow data is fresh enough for the read model.
+  - key: STALE
+    description: YouTube follow data exists but should be refreshed.
+  - key: UNKNOWN
+    description: YouTube follow freshness is unknown.

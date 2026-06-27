@@ -1,0 +1,9 @@
+catalog_key: youtube_auth_mode_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: API_KEY
+    description: YouTube Data API public monitor uses an API key reference.
+  - key: OAUTH2
+    description: YouTube owner analytics uses OAuth 2.0 credential reference.

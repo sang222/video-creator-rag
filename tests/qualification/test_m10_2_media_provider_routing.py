@@ -84,7 +84,7 @@ def test_m10_2_preflight_migration_defaults_catalogs_and_scope(engine, db_sessio
     assert M10_2_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_3_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0013_m10_2_provider_routing"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0014_m10_3_youtube_follow"
         defaults = connection.execute(
             text(
                 """

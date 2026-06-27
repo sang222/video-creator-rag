@@ -95,6 +95,12 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    youtube_owner_analytics_sync_runs,
+                    youtube_public_sync_runs,
+                    uploaded_video_youtube_owner_analytics_snapshots,
+                    uploaded_video_youtube_public_monitor_snapshots,
+                    youtube_oauth_sessions,
+                    youtube_monitoring_credentials,
                     license_evidence_records,
                     final_media_refs,
                     thumbnail_variants,

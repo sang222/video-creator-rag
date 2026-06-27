@@ -1,5 +1,5 @@
 catalog_key: analytics_sync_mode_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -11,3 +11,7 @@ items:
     description: Local CSV-shaped analytics import.
   - key: REAL_DISABLED
     description: Disabled real provider placeholder with no network call.
+  - key: YOUTUBE_PUBLIC_MONITOR
+    description: YouTube Data API public monitor sync.
+  - key: YOUTUBE_OWNER_ANALYTICS
+    description: OAuth YouTube owner analytics sync.
