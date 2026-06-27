@@ -60,6 +60,7 @@ from app.contracts import (
     ChannelStatePackSnapshotCreate,
     ContextPackSnapshotCreate,
     YouTubeOwnerAnalyticsSyncRequest,
+    AIHeroGenerationExecuteRequest,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -113,6 +114,7 @@ from app.services import (
     YouTubeCredentialHealthService,
     YouTubeOwnerAnalyticsSyncService,
     YouTubePublicStatsSyncService,
+    AIHeroGenerationService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -1457,6 +1459,21 @@ def media_package_inspect(
             typer.echo(json.dumps(_render_package_to_dict(package)))
     except Exception as exc:
         _fail(f"media package-inspect failed: {exc}")
+
+@media_app.command("ai-hero-generate")
+def media_ai_hero_generate(
+    asset_id: uuid.UUID = typer.Option(..., "--asset-id"),
+    output_gcs_uri: str | None = typer.Option(None, "--output-gcs-uri"),
+) -> None:
+    try:
+        with session_scope() as session:
+            result = AIHeroGenerationService(session).execute(
+                asset_id=asset_id,
+                data=AIHeroGenerationExecuteRequest(output_gcs_uri=output_gcs_uri),
+            )
+            typer.echo(json.dumps(result.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"media ai-hero-generate failed: {exc}")
 
 @captions_app.command("export-srt")
 def captions_export_srt(

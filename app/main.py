@@ -92,6 +92,8 @@ from app.contracts import (
     HumanUploadTaskRead,
     AIHeroAssetPlanRequest,
     AIHeroAssetRead,
+    AIHeroGenerationExecuteRequest,
+    AIHeroGenerationJobRead,
     CreatomateRenderAssetPlanRequest,
     CreatomateRenderAssetRead,
     LicenseEvidenceGateCheckRequest,
@@ -228,6 +230,7 @@ from app.services import (
     DerivativeOriginalityService,
     HumanUploadTaskService,
     AIHeroAssetPlanningService,
+    AIHeroGenerationService,
     CreatomateRenderAssetPlanningService,
     LicenseEvidenceGateService,
     LongFormRenderPackageService,
@@ -2008,6 +2011,17 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return AIHeroAssetRead.model_validate(AIHeroAssetPlanningService(session).require(asset_id))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/ai-hero-assets/{asset_id}/generate", response_model=AIHeroGenerationJobRead)
+    def generate_ai_hero_asset(
+        asset_id: uuid.UUID,
+        data: AIHeroGenerationExecuteRequest | None = None,
+    ) -> AIHeroGenerationJobRead:
+        try:
+            with session_scope() as session:
+                return AIHeroGenerationService(session).execute(asset_id=asset_id, data=data)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

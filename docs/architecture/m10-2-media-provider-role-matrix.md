@@ -2,7 +2,7 @@
 
 M10.2 builds the VCOS Media Provider Role Matrix for Quality-First $250 mode. It adds backend contracts, provider classifications, routing decisions, capability gates, budget gates, license evidence gates, package states, and planning APIs.
 
-M10.2 is a routing and planning foundation only. It does not call ElevenLabs, Creatomate, cinematic AI providers, or a cloud final renderer. It does not add dashboard UI, YouTube follow/sync, auto upload, auto publish, auto reupload, TikTok/Facebook analytics learning loops, Envato automation, scraping, vector/RAG, OPA/Cedar, fake traffic, bot engagement, or platform evasion.
+M10.2 is a routing and planning foundation only. M10.4 binds the AI hero role to Google Vertex Veo, but real execution remains guarded and disabled by default. It does not call ElevenLabs, Creatomate, Veo, or a cloud final renderer unless an explicit real smoke guard is enabled. It does not add dashboard UI, YouTube follow/sync, auto upload, auto publish, auto reupload, TikTok/Facebook analytics learning loops, Envato automation, scraping, vector/RAG, OPA/Cedar, fake traffic, bot engagement, or platform evasion.
 
 ## Production Mode
 
@@ -23,7 +23,7 @@ M10.2 is a routing and planning foundation only. It does not call ElevenLabs, Cr
 | Existing LLM source / LLMRouter | `LLM_SCRIPT_ENGINE` | `CORE` | Script/planning language tasks through guarded M10.1 router contracts. |
 | ElevenLabs Flash/Turbo | `API_NATIVE_TTS` | `CORE_QUALITY_LAYER` | Voice generation only. |
 | VCOS caption timeline service | `CAPTION_TIMELINE_ENGINE` | `CORE` | Caption timing and caption track planning. |
-| Cinematic AI provider | `AI_VIDEO_HERO_PROVIDER` | `CORE_QUALITY_LAYER` | Premium AI hero/metaphor visual generation only. |
+| Google Vertex AI - Veo 3.1 Fast video-only 1080p | `AI_VIDEO_HERO_PROVIDER` | `CORE_QUALITY_LAYER` | Premium opening hook, key metaphor, and thumbnail still-frame source only. |
 | Creatomate Essential 2K | `CLOUD_TEMPLATE_RENDERER_LIGHT` | `CORE_LIGHT_RENDER` | Light template renderer for Shorts, cards, thumbnails, lower thirds, and hero composition. |
 | TBD cloud renderer | `CLOUD_FINAL_ASSEMBLY_RENDERER` | `REQUIRED_GAP` | Required gap for full long-form final MP4 assembly. |
 | VCOS storage/object storage | `MEDIA_STORAGE` | `CORE` | Object refs and durable media storage references. |
@@ -38,9 +38,9 @@ M10.2 is a routing and planning foundation only. It does not call ElevenLabs, Cr
 
 Creatomate Essential 2K may render thumbnails, thumbnail variants, Shorts final renders, title cards, intro/outro cards, section cards, workflow diagrams, statistic cards, lower thirds, caption burn-in, AI hero compositions, and 9:16/16:9/1:1 template exports.
 
-Creatomate Essential 2K must not generate cinematic AI footage, generate voice, buy/license stock, decide editorial content, run YouTube analytics, act as the long-form full render backbone, or act as permanent storage/archive.
+Creatomate Essential 2K must not generate AI hero footage, generate voice, buy/license stock, decide editorial content, run YouTube analytics, act as the long-form full render backbone, or act as permanent storage/archive.
 
-Cinematic AI may create opening hook visuals, premium metaphor scenes, high-impact background scenes, reusable Short hook visuals, and still frames for thumbnails. It does not render full edited video, create accurate diagrams, manage captions, guarantee brand consistency, or handle final publish packages.
+Google Vertex Veo may create opening hook visuals, key metaphor scenes, high-impact background clips, and still frames for thumbnails. It does not render full edited video, create accurate workflow/data/diagram cards, manage captions, guarantee final brand layout, handle final publish packages, or generate separate AI hero clips for every Short by default.
 
 ElevenLabs may create long narration voice, short narration voice, voice segments, and voice usage metadata. It does not write scripts, render video, manage captions, license stock/source material, or build publish packages.
 
@@ -57,7 +57,7 @@ Creatomate may route `LONG_FORM_FINAL_RENDER` only when a Growth 10K-or-higher p
 ## Job Routing
 
 - `THUMBNAIL_RENDER`, `SHORT_RENDER`, `TITLE_CARD_RENDER`, `DIAGRAM_CARD_RENDER`, `STAT_CARD_RENDER`, `LOWER_THIRD_RENDER`, `HERO_COMPOSITION_RENDER`, `PREVIEW_CLIP_RENDER` route to Creatomate Essential 2K.
-- `AI_HERO_GENERATION`, `AI_METAPHOR_GENERATION` route to the cinematic AI hero provider role.
+- `AI_HERO_GENERATION`, `AI_METAPHOR_GENERATION` route only to `GOOGLE_VERTEX_VEO`.
 - `VOICE_GENERATION`, `LONG_VOICE_GENERATION`, `SHORT_VOICE_GENERATION` route to ElevenLabs.
 - `LONG_FORM_FINAL_RENDER` routes only to a configured cloud final assembly renderer or explicit upgraded Creatomate final renderer.
 - Unknown jobs return `BLOCKED_UNKNOWN_PROVIDER`.
@@ -68,8 +68,9 @@ Configured assumptions for Quality-First $250 mode:
 
 - ElevenLabs Flash/Turbo PAYG: range $10-15/month.
 - Creatomate Essential 2K: $59/month assumption.
-- Cinematic AI Hero: $129/month assumption.
-- Extra AI Hero budget: range $45-50/month.
+- Google Vertex Veo: $0.10/second configured for Veo 3.1 Fast 1080p video-only.
+- Default 10s Veo clip estimate: $1.00.
+- Monthly AI hero cap: $175 by default.
 - Stock: $0 core.
 - Music/SFX subscription: $0 core.
 
@@ -93,6 +94,8 @@ AI Hero allocation:
 - Optional metaphor clips: 5-10/month.
 - Retry/variants: budget-dependent.
 - Shorts-specific hero: 0 default; reuse long-form hero.
+- Thumbnail background: still frame from the Veo clip.
+- Workflow/data/diagram sections: Creatomate/cards, not Veo.
 
 ## Gates
 
@@ -110,5 +113,6 @@ M10.2 adds `media_provider_role_profiles`, `provider_capability_matrix_entries`,
 
 ## Deferred
 
-- M10.3: YouTube Public + Owner Analytics Follow Patch.
+- M10.3: YouTube Public + Owner Analytics Follow Patch, now complete.
+- M10.4: Google Vertex Veo AI Hero Provider Binding and config externalization audit, now complete.
 - M11: dashboard/operator cockpit, approvals, upload task dashboard, derivative graph dashboard, learning promotion UX, and human-owned channel config editing.

@@ -32,6 +32,7 @@ from app.db.models import (
 from app.main import create_app
 from app.services import (
     AIHeroAssetPlanningService,
+    AIHeroGenerationService,
     CreatomateRenderAssetPlanningService,
     FinalMediaRefService,
     LicenseEvidenceGateService,
@@ -135,7 +136,11 @@ def test_provider_role_matrix_seeded_from_quality_first_matrix(db_session) -> No
     assert by_key["llm_router"].provider_type == "LLM_SCRIPT_ENGINE"
     assert by_key["elevenlabs_flash_turbo"].provider_type == "API_NATIVE_TTS"
     assert by_key["vcos_caption_timeline"].provider_type == "CAPTION_TIMELINE_ENGINE"
-    assert by_key["cinematic_ai_hero"].provider_type == "AI_VIDEO_HERO_PROVIDER"
+    assert by_key["GOOGLE_VERTEX_VEO"].provider_type == "AI_VIDEO_HERO_PROVIDER"
+    assert by_key["GOOGLE_VERTEX_VEO"].provider_name == "Google Vertex AI - Veo 3.1 Fast video-only 1080p"
+    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["model"] == "veo-3.1-fast"
+    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["cost_per_second_1080p"] == "0.10"
+    assert "cinematic_ai_hero" not in by_key
     assert by_key["creatomate_essential_2k"].provider_type == "CLOUD_TEMPLATE_RENDERER_LIGHT"
     assert by_key["cloud_final_assembly_renderer_tbd"].provider_type == "CLOUD_FINAL_ASSEMBLY_RENDERER"
     assert by_key["cloud_final_assembly_renderer_tbd"].recommendation == "REQUIRED_GAP"
@@ -150,7 +155,8 @@ def test_provider_role_matrix_seeded_from_quality_first_matrix(db_session) -> No
         for entry in db_session.scalars(select(ProviderCapabilityMatrixEntry)).all()
     }
     assert caps[("elevenlabs_flash_turbo", "VOICE_GENERATION")].capability == "SUPPORTED"
-    assert caps[("cinematic_ai_hero", "AI_HERO_GENERATION")].capability == "SUPPORTED"
+    assert caps[("GOOGLE_VERTEX_VEO", "AI_HERO_GENERATION")].capability == "SUPPORTED"
+    assert caps[("GOOGLE_VERTEX_VEO", "AI_HERO_GENERATION")].max_duration_seconds == Decimal("10.000000")
     assert caps[("creatomate_essential_2k", "SHORT_RENDER")].capability == "SUPPORTED"
     assert caps[("creatomate_essential_2k", "LONG_FORM_FINAL_RENDER")].capability == "BLOCKED_BY_PLAN"
 
@@ -164,9 +170,13 @@ def test_render_routing_enforces_creatomate_essential_boundary_and_cloud_gap(db_
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="STAT_CARD_RENDER")).selected_provider_key == "creatomate_essential_2k"
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="LOWER_THIRD_RENDER")).selected_provider_key == "creatomate_essential_2k"
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="HERO_COMPOSITION_RENDER")).selected_provider_key == "creatomate_essential_2k"
-    assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_HERO_GENERATION")).selected_provider_key == "cinematic_ai_hero"
-    assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_METAPHOR_GENERATION")).selected_provider_key == "cinematic_ai_hero"
+    assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_HERO_GENERATION")).selected_provider_key == "GOOGLE_VERTEX_VEO"
+    assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_METAPHOR_GENERATION")).selected_provider_key == "GOOGLE_VERTEX_VEO"
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="VOICE_GENERATION")).selected_provider_key == "elevenlabs_flash_turbo"
+    too_long_hero = router.decide(
+        data=MediaRenderRoutingDecisionRequest(job_type="AI_HERO_GENERATION", target_duration_seconds=Decimal("11"))
+    )
+    assert too_long_hero.routing_result == "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
 
     blocked = router.decide(data=MediaRenderRoutingDecisionRequest(job_type="LONG_FORM_FINAL_RENDER"))
     assert blocked.routing_result == "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
@@ -251,10 +261,19 @@ def test_capability_budget_license_and_reuse_gates(db_session, qualification_fac
     assert exceeded.decision == "BLOCK"
     assert exceeded.budget_state == "EXCEEDED"
     unknown = budget_service.check(
-        data=MediaProviderBudgetCheckRequest(provider_type="AI_VIDEO_HERO_PROVIDER", provider_key="cinematic_ai_hero")
+        data=MediaProviderBudgetCheckRequest(provider_type="AI_VIDEO_HERO_PROVIDER", provider_key="GOOGLE_VERTEX_VEO")
     )
     assert unknown.decision == "REVIEW_REQUIRED"
     assert unknown.budget_state == "UNKNOWN"
+    veo_default_clip = budget_service.check(
+        data=MediaProviderBudgetCheckRequest(
+            provider_type="AI_VIDEO_HERO_PROVIDER",
+            provider_key="GOOGLE_VERTEX_VEO",
+            estimated_usage_seconds=Decimal("10"),
+        )
+    )
+    assert veo_default_clip.decision == "PASS"
+    assert veo_default_clip.budget_state == "OK"
 
     scope = qualification_factory.channel_scope(name="M10.2 License")
     license_result = LicenseEvidenceGateService(db_session).check(
@@ -316,7 +335,13 @@ def test_packages_and_asset_planning_create_placeholders_without_provider_calls(
         data=AIHeroAssetPlanRequest(prompt="Premium metaphor scene.", intended_usage="OPENING_HOOK", duration_seconds=Decimal("8")),
     )
     assert hero.generation_state == "READY_FOR_PROVIDER"
+    assert hero.provider_key == "GOOGLE_VERTEX_VEO"
     assert hero.asset_ref is None
+    generated = AIHeroGenerationService(db_session).execute(asset_id=hero.id)
+    assert generated.generation_state == "READY_FOR_PROVIDER"
+    assert generated.real_execution_attempted is False
+    assert generated.estimated_cost_usd == Decimal("0.80")
+    assert "VEO_REAL_EXECUTION_DISABLED" in generated.reason_codes
 
     creatomate = CreatomateRenderAssetPlanningService(db_session).plan(
         video_project_id=flow.project.id,

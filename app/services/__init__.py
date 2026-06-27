@@ -92,6 +92,8 @@ from app.services.m10_1 import (
 )
 from app.services.m10_2 import (
     AIHeroAssetPlanningService,
+    AIHeroGenerationService,
+    GoogleVertexVeoConfigService,
     CreatomateRenderAssetPlanningService,
     FinalMediaRefService,
     HumanApprovalGateService,
@@ -197,6 +199,8 @@ __all__ = [
     "ShortCandidateRankingService",
     "UploadCardService",
     "AIHeroAssetPlanningService",
+    "AIHeroGenerationService",
+    "GoogleVertexVeoConfigService",
     "CreatomateRenderAssetPlanningService",
     "FinalMediaRefService",
     "HumanApprovalGateService",

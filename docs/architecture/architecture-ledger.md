@@ -25,6 +25,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M10.1 builds guarded real Ollama LLMRouter lanes plus derivative/reuse/shorts/cross-platform funnel backend contracts only.
 - M10.2 builds the Quality-First $250 media provider role matrix, provider capability matrix, render routing decisions, media provider gates, and render package planning only.
 - M10.3 builds YouTube PublicMonitorMode, OAuth-backed OwnerAnalyticsMode, safe credential references, YouTube sync runs/snapshots, M8 truth-layer integration, and dashboard-ready UploadedVideo follow read models only.
+- M10.4 binds Google Vertex Veo as the only AI hero provider and externalizes media/provider routing, capability, budget, and Veo defaults into config/env only.
 
 ## Scope Guardrails
 
@@ -78,7 +79,11 @@ M10.2 does not build dashboard/operator cockpit UI, approval/reject dashboard ac
 
 M10.3 adds YouTubeMonitoringCredential, YouTubeOAuthSession, YouTubePublicSyncRun, YouTubeOwnerAnalyticsSyncRun, UploadedVideoYouTubePublicMonitorSnapshot, and UploadedVideoYouTubeOwnerAnalyticsSnapshot. It follows existing YouTube `UploadedVideo` records, maps public stats as WEAK authority, maps OAuth owner analytics as STRONG authority, preserves zero/UNKNOWN/NOT_AVAILABLE, and feeds M8 analytics snapshots/summaries.
 
-M10.3 does not build dashboard/operator cockpit UI, OAuth connect/disconnect UI, YouTube upload/publish API, YouTube Studio scraping, browser automation, TikTok/Facebook analytics learning loops, M10.4 Google Vertex Veo binding, real ElevenLabs/Creatomate/Veo generation, automatic publish/upload/reupload, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
+M10.3 does not build dashboard/operator cockpit UI, OAuth connect/disconnect UI, YouTube upload/publish API, YouTube Studio scraping, browser automation, TikTok/Facebook analytics learning loops, real ElevenLabs/Creatomate/Veo generation, automatic publish/upload/reupload, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
+
+M10.4 binds `AI_HERO_GENERATION` and `AI_METAPHOR_GENERATION` to `GOOGLE_VERTEX_VEO`, externalizes media provider role/capability/routing/budget defaults into config catalogs, adds env support for Google Vertex/Veo real execution guards, and keeps real Veo smoke disabled by default.
+
+M10.4 does not build dashboard/operator cockpit UI, final long-form renderer, real Creatomate/ElevenLabs integration, YouTube sync/upload/publish APIs, channel config mutation, backup AI hero routing, Runway/Luma/generic cinematic fallback, automatic publish/upload/reupload, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
 ## Roadmap Mapping
 
@@ -100,7 +105,7 @@ M10.3 does not build dashboard/operator cockpit UI, OAuth connect/disconnect UI,
 - M10.1 complete means VCOS can real-smoke guarded local Ollama routing and prepare derivative/reuse/shorts/cross-platform funnel backend contracts without media provider routing or publishing.
 - M10.2 complete means VCOS can route media production jobs by provider role and safely block unsupported long-form final rendering when no final assembly renderer is configured.
 - M10.3 complete means VCOS can follow uploaded YouTube videos through public stats and owner analytics when OAuth is connected, then expose dashboard-ready UploadedVideo follow payloads.
-- M10.4 will bind Google Vertex Veo as the AI hero provider and audit hardcoded media/provider config later.
+- M10.4 complete means VCOS routes AI hero/metaphor jobs only to Google Vertex Veo, keeps real execution guarded, and has provider config externalized/audited.
 - M11 will display uploaded videos, learning approvals, playbook promotion UX, and human-owned channel config editing in an operator dashboard later.
 
 ## Pilot Notes

@@ -1,7 +1,11 @@
 from functools import lru_cache
+from decimal import Decimal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+OLLAMA_LOCAL_BASE_URL = "http://localhost:11434"
 
 
 class Settings(BaseSettings):
@@ -11,14 +15,6 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://vcos:vcos@localhost:55432/vcos"
     )
     log_level: str = "INFO"
-    ollama_base_url: str = Field(
-        default="http://localhost:11434",
-        validation_alias=AliasChoices("OLLAMA_BASE_URL", "VCOS_OLLAMA_BASE_URL"),
-    )
-    ollama_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OLLAMA_API_KEY", "VCOS_OLLAMA_API_KEY"),
-    )
     elevenlabs_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "VCOS_ELEVENLABS_API_KEY"),
@@ -26,10 +22,6 @@ class Settings(BaseSettings):
     creatomate_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("CREATOMATE_API_KEY", "VCOS_CREATOMATE_API_KEY"),
-    )
-    cinematic_ai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CINEMATIC_AI_API_KEY", "VCOS_CINEMATIC_AI_API_KEY"),
     )
     cloud_final_renderer_api_key: SecretStr | None = Field(
         default=None,
@@ -75,12 +67,72 @@ class Settings(BaseSettings):
         default="https://www.googleapis.com/auth/youtube.readonly,https://www.googleapis.com/auth/yt-analytics.readonly",
         validation_alias=AliasChoices("YOUTUBE_OAUTH_SCOPES", "VCOS_YOUTUBE_OAUTH_SCOPES"),
     )
+    ai_hero_provider: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_AI_HERO_PROVIDER", "AI_HERO_PROVIDER"),
+    )
+    google_cloud_project_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_CLOUD_PROJECT_ID", "VCOS_GOOGLE_CLOUD_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
+    )
+    google_cloud_location: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_CLOUD_LOCATION", "VCOS_GOOGLE_CLOUD_LOCATION"),
+    )
+    google_application_credentials: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS", "VCOS_GOOGLE_APPLICATION_CREDENTIALS"),
+    )
+    veo_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_MODEL", "VEO_MODEL"),
+    )
+    veo_mode: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_MODE", "VEO_MODE"),
+    )
+    veo_resolution: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_RESOLUTION", "VEO_RESOLUTION"),
+    )
+    veo_audio_enabled: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_AUDIO_ENABLED", "VEO_AUDIO_ENABLED"),
+    )
+    veo_default_duration_seconds: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_DEFAULT_DURATION_SECONDS", "VEO_DEFAULT_DURATION_SECONDS"),
+    )
+    veo_max_duration_seconds: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_MAX_DURATION_SECONDS", "VEO_MAX_DURATION_SECONDS"),
+    )
+    veo_cost_per_second_1080p: Decimal | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_COST_PER_SECOND_1080P", "VEO_COST_PER_SECOND_1080P"),
+    )
+    veo_monthly_budget_usd: Decimal | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_VEO_MONTHLY_BUDGET_USD", "VEO_MONTHLY_BUDGET_USD"),
+    )
+    veo_real_execution_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_VEO_REAL_EXECUTION_ENABLED", "VEO_REAL_EXECUTION_ENABLED"),
+    )
+    veo_real_smoke: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_VEO_REAL_SMOKE", "VEO_REAL_SMOKE"),
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="VCOS_",
         extra="ignore",
     )
+
+    @property
+    def ollama_base_url(self) -> str:
+        return OLLAMA_LOCAL_BASE_URL
 
     @field_validator("database_url")
     @classmethod
@@ -90,10 +142,8 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "ollama_api_key",
         "elevenlabs_api_key",
         "creatomate_api_key",
-        "cinematic_ai_api_key",
         "cloud_final_renderer_api_key",
         "pexels_api_key",
         "pixabay_api_key",
@@ -103,6 +153,22 @@ class Settings(BaseSettings):
     )
     @classmethod
     def empty_secret_must_be_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+    @field_validator(
+        "ai_hero_provider",
+        "google_cloud_project_id",
+        "google_cloud_location",
+        "google_application_credentials",
+        "veo_model",
+        "veo_mode",
+        "veo_resolution",
+        mode="before",
+    )
+    @classmethod
+    def empty_string_must_be_none(cls, value: object) -> object:
         if value == "":
             return None
         return value

@@ -165,6 +165,8 @@ from app.contracts.m10_1 import (
 from app.contracts.m10_2 import (
     AIHeroAssetPlanRequest,
     AIHeroAssetRead,
+    AIHeroGenerationExecuteRequest,
+    AIHeroGenerationJobRead,
     CreatomateRenderAssetPlanRequest,
     CreatomateRenderAssetRead,
     FinalMediaRefCreate,
@@ -415,6 +417,8 @@ __all__ = [
     "UploadCardRead",
     "AIHeroAssetPlanRequest",
     "AIHeroAssetRead",
+    "AIHeroGenerationExecuteRequest",
+    "AIHeroGenerationJobRead",
     "CreatomateRenderAssetPlanRequest",
     "CreatomateRenderAssetRead",
     "FinalMediaRefCreate",

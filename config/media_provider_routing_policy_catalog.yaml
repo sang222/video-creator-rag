@@ -1,0 +1,117 @@
+catalog_key: media_provider_routing_policy_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: TOPIC_DECISION
+    job_type: TOPIC_DECISION
+    provider_key: vcos_backend
+    reason_code: ROUTING_DECISION_CREATED
+  - key: LONG_SCRIPT_GENERATION
+    job_type: LONG_SCRIPT_GENERATION
+    provider_key: llm_router
+    reason_code: ROUTING_DECISION_CREATED
+  - key: SHORT_SCRIPT_GENERATION
+    job_type: SHORT_SCRIPT_GENERATION
+    provider_key: llm_router
+    reason_code: ROUTING_DECISION_CREATED
+  - key: LONG_VISUAL_PLAN
+    job_type: LONG_VISUAL_PLAN
+    provider_key: llm_router
+    reason_code: ROUTING_DECISION_CREATED
+  - key: LONG_CAPTION_TIMELINE
+    job_type: LONG_CAPTION_TIMELINE
+    provider_key: vcos_caption_timeline
+    reason_code: ROUTING_DECISION_CREATED
+  - key: SHORT_CAPTION_TIMELINE
+    job_type: SHORT_CAPTION_TIMELINE
+    provider_key: vcos_caption_timeline
+    reason_code: ROUTING_DECISION_CREATED
+  - key: LONG_MEDIA_QC
+    job_type: LONG_MEDIA_QC
+    provider_key: vcos_media_qc
+    reason_code: ROUTING_DECISION_CREATED
+  - key: SHORT_MEDIA_QC
+    job_type: SHORT_MEDIA_QC
+    provider_key: vcos_media_qc
+    reason_code: ROUTING_DECISION_CREATED
+  - key: LONG_PUBLISH_PACKAGE
+    job_type: LONG_PUBLISH_PACKAGE
+    provider_key: vcos_publish_handoff
+    reason_code: ROUTING_DECISION_CREATED
+  - key: SHORT_PUBLISH_PACKAGE
+    job_type: SHORT_PUBLISH_PACKAGE
+    provider_key: vcos_publish_handoff
+    reason_code: ROUTING_DECISION_CREATED
+  - key: LICENSE_EVIDENCE_CHECK
+    job_type: LICENSE_EVIDENCE_CHECK
+    provider_key: vcos_backend
+    reason_code: ROUTING_DECISION_CREATED
+  - key: BUDGET_CHECK
+    job_type: BUDGET_CHECK
+    provider_key: vcos_backend
+    reason_code: ROUTING_DECISION_CREATED
+  - key: PROVIDER_CAPABILITY_CHECK
+    job_type: PROVIDER_CAPABILITY_CHECK
+    provider_key: vcos_backend
+    reason_code: ROUTING_DECISION_CREATED
+  - key: SHORT_CANDIDATE_EXTRACTION
+    job_type: SHORT_CANDIDATE_EXTRACTION
+    provider_key: vcos_backend
+    reason_code: ROUTING_DECISION_CREATED
+  - key: SHORT_HERO_REUSE
+    job_type: SHORT_HERO_REUSE
+    provider_key: vcos_backend
+    reason_code: ROUTING_DECISION_CREATED
+  - key: THUMBNAIL_RENDER
+    job_type: THUMBNAIL_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: SHORT_RENDER
+    job_type: SHORT_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: TITLE_CARD_RENDER
+    job_type: TITLE_CARD_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: DIAGRAM_CARD_RENDER
+    job_type: DIAGRAM_CARD_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: STAT_CARD_RENDER
+    job_type: STAT_CARD_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: LOWER_THIRD_RENDER
+    job_type: LOWER_THIRD_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: HERO_COMPOSITION_RENDER
+    job_type: HERO_COMPOSITION_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: PREVIEW_CLIP_RENDER
+    job_type: PREVIEW_CLIP_RENDER
+    provider_key: creatomate_essential_2k
+    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+  - key: LONG_VOICE_GENERATION
+    job_type: LONG_VOICE_GENERATION
+    provider_key: elevenlabs_flash_turbo
+    reason_code: ELEVENLABS_VOICE_ROUTED
+  - key: SHORT_VOICE_GENERATION
+    job_type: SHORT_VOICE_GENERATION
+    provider_key: elevenlabs_flash_turbo
+    reason_code: ELEVENLABS_VOICE_ROUTED
+  - key: VOICE_GENERATION
+    job_type: VOICE_GENERATION
+    provider_key: elevenlabs_flash_turbo
+    reason_code: ELEVENLABS_VOICE_ROUTED
+  - key: AI_HERO_GENERATION
+    job_type: AI_HERO_GENERATION
+    provider_key: GOOGLE_VERTEX_VEO
+    reason_code: AI_HERO_PROVIDER_ROUTED
+  - key: AI_METAPHOR_GENERATION
+    job_type: AI_METAPHOR_GENERATION
+    provider_key: GOOGLE_VERTEX_VEO
+    reason_code: AI_HERO_PROVIDER_ROUTED

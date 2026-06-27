@@ -25,6 +25,7 @@ from app.contracts import (
     ShortCandidateRankRequest,
 )
 from app.core.errors import NotFoundError, ValidationFailureError
+from app.core.config import get_settings
 from app.core.time import utc_now
 from app.db.models import (
     AssetReuseIndexEntry,
@@ -177,7 +178,7 @@ class LLMRouterConfigLoader:
 
     def ensure_default_profile(self, *, profile_key: str | None = None) -> LLMRouterProfile:
         profile_key = profile_key or os.getenv("VCOS_LLM_ROUTER_PROFILE", "default")
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        base_url = get_settings().ollama_base_url
         real_enabled = _env_bool("VCOS_LLM_REAL_EXECUTION_ENABLED", False)
         provider = os.getenv("VCOS_LLM_PROVIDER", "ollama").lower()
         if provider != "ollama":

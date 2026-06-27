@@ -143,6 +143,7 @@ class MediaRenderRoutingDecisionRequest(BaseModel):
     target_duration_seconds: Decimal | None = None
     target_aspect_ratio: str | None = None
     estimated_usage_usd: Decimal | None = None
+    estimated_usage_seconds: Decimal | None = None
     technical_appendix: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -413,6 +414,34 @@ class AIHeroAssetRead(_ReadModel):
     generation_state: AIHeroAssetState
     created_at: AwareDatetime
     updated_at: AwareDatetime
+
+
+class AIHeroGenerationExecuteRequest(BaseModel):
+    output_gcs_uri: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AIHeroGenerationJobRead(BaseModel):
+    ai_hero_asset_id: uuid.UUID
+    provider_key: str | None
+    provider_type: MediaProviderType
+    generation_state: AIHeroAssetState
+    model: str | None = None
+    mode: str | None = None
+    resolution: str | None = None
+    audio_enabled: bool | None = None
+    requested_duration_seconds: Decimal | None = None
+    estimated_cost_usd: Decimal | None = None
+    budget_gate: MediaProviderBudgetGateRead | None = None
+    real_execution_attempted: bool = False
+    asset_ref: str | None = None
+    still_frame_ref: str | None = None
+    provider_operation_ref: str | None = None
+    reason_codes: list[str] = Field(min_length=1)
+    operator_summary: str
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class CreatomateRenderAssetPlanRequest(BaseModel):

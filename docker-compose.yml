@@ -16,10 +16,9 @@ services:
       - vcos-postgres-data:/var/lib/postgresql/data
 
   ollama:
-    image: ${VCOS_OLLAMA_IMAGE:-ollama/ollama:latest}
+    image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
-      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       VCOS_LLM_MODEL_CHEAP_STRUCTURED_PRIMARY: ${VCOS_LLM_MODEL_CHEAP_STRUCTURED_PRIMARY:-gpt-oss:20b-cloud}
       VCOS_LLM_MODEL_CHEAP_STRUCTURED_FALLBACK: ${VCOS_LLM_MODEL_CHEAP_STRUCTURED_FALLBACK:-qwen3.5:cloud}
       VCOS_LLM_MODEL_DEFAULT_MULTIMODAL_PRIMARY: ${VCOS_LLM_MODEL_DEFAULT_MULTIMODAL_PRIMARY:-qwen3.5:cloud}

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
+import yaml
 
 from app.contracts import (
     AIHeroAssetPlanRequest,
+    AIHeroGenerationExecuteRequest,
+    AIHeroGenerationJobRead,
     CreatomateRenderAssetPlanRequest,
     FinalMediaRefCreate,
     LicenseEvidenceGateCheckRequest,
@@ -28,6 +33,7 @@ from app.contracts import (
     ThumbnailVariantPlanRequest,
 )
 from app.core.errors import NotFoundError, ValidationFailureError
+from app.core.config import get_settings
 from app.core.time import utc_now
 from app.db.models import (
     AIHeroAsset,
@@ -46,6 +52,11 @@ from app.db.models import (
     ThumbnailVariant,
     VideoProject,
 )
+from app.providers.google_vertex_veo import (
+    GoogleVertexVeoExecutionConfig,
+    GoogleVertexVeoProvider,
+    GoogleVertexVeoRequest,
+)
 
 
 WORKFLOW_ORCHESTRATOR = "WORKFLOW_ORCHESTRATOR"
@@ -63,10 +74,8 @@ FREE_FALLBACK_PROVIDER = "FREE_FALLBACK_PROVIDER"
 MOCK_PROVIDER = "MOCK_PROVIDER"
 DEFERRED_MANUAL_LIBRARY = "DEFERRED_MANUAL_LIBRARY"
 
-CREATOMATE_PROVIDER_KEY = "creatomate_essential_2k"
-ELEVENLABS_PROVIDER_KEY = "elevenlabs_flash_turbo"
-CINEMATIC_AI_PROVIDER_KEY = "cinematic_ai_hero"
-CLOUD_FINAL_RENDERER_TBD_KEY = "cloud_final_assembly_renderer_tbd"
+CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+GOOGLE_VERTEX_VEO_PROVIDER_KEY = "GOOGLE_VERTEX_VEO"
 
 LONG_FORM_FINAL_RENDER = "LONG_FORM_FINAL_RENDER"
 VOICE_JOBS = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
@@ -81,24 +90,6 @@ CREATOMATE_LIGHT_JOBS = {
     "PREVIEW_CLIP_RENDER",
 }
 AI_HERO_JOBS = {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}
-VCOS_JOB_PROVIDER_KEYS = {
-    "TOPIC_DECISION": "vcos_backend",
-    "SHORT_CANDIDATE_EXTRACTION": "vcos_backend",
-    "SHORT_HERO_REUSE": "vcos_backend",
-    "BUDGET_CHECK": "vcos_backend",
-    "PROVIDER_CAPABILITY_CHECK": "vcos_backend",
-    "LONG_SCRIPT_GENERATION": "llm_router",
-    "SHORT_SCRIPT_GENERATION": "llm_router",
-    "LONG_VISUAL_PLAN": "llm_router",
-    "LONG_CAPTION_TIMELINE": "vcos_caption_timeline",
-    "SHORT_CAPTION_TIMELINE": "vcos_caption_timeline",
-    "LONG_MEDIA_QC": "vcos_media_qc",
-    "SHORT_MEDIA_QC": "vcos_media_qc",
-    "LONG_PUBLISH_PACKAGE": "vcos_publish_handoff",
-    "SHORT_PUBLISH_PACKAGE": "vcos_publish_handoff",
-    "LICENSE_EVIDENCE_CHECK": "vcos_backend",
-}
-
 MEDIA_JOB_TYPES = {
     "TOPIC_DECISION",
     "LONG_SCRIPT_GENERATION",
@@ -131,309 +122,163 @@ MEDIA_JOB_TYPES = {
     "VOICE_GENERATION",
 }
 
-PROVIDER_ROLE_SEEDS: list[dict[str, Any]] = [
-    {
-        "provider_key": "vcos_backend",
-        "provider_name": "VCOS Backend",
-        "provider_type": WORKFLOW_ORCHESTRATOR,
-        "role_description": "Orchestration, state, manifest, budget, QC, approval workflow, and publish handoff package.",
-        "recommendation": "CORE",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": True,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "cost_usd": 0},
-        "notes": "VCOS does not fake external provider outputs, bypass approval, or auto publish/upload/reupload.",
-    },
-    {
-        "provider_key": "llm_router",
-        "provider_name": "Existing LLM source / LLMRouter",
-        "provider_type": LLM_SCRIPT_ENGINE,
-        "role_description": "Script and planning language tasks through the guarded M10.1 router.",
-        "recommendation": "CORE",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "provider_cost_unknown": True},
-        "notes": "Business services route by lane; M10.2 does not add new real LLM execution.",
-    },
-    {
-        "provider_key": ELEVENLABS_PROVIDER_KEY,
-        "provider_name": "ElevenLabs Flash/Turbo",
-        "provider_type": API_NATIVE_TTS,
-        "role_description": "Voice generation only: long narration, short narration, segments, and usage metadata.",
-        "recommendation": "CORE_QUALITY_LAYER",
-        "is_enabled": True,
-        "is_real_provider": True,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "assumption_range_usd": [10, 15]},
-        "notes": "No script writing, video render, captions, stock licensing, or publish package behavior.",
-    },
-    {
-        "provider_key": "vcos_caption_timeline",
-        "provider_name": "VCOS caption timeline service",
-        "provider_type": CAPTION_TIMELINE_ENGINE,
-        "role_description": "Caption timing and caption track planning derived from voice timelines.",
-        "recommendation": "CORE",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": True,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "cost_usd": 0},
-        "notes": "Caption planning only; not a real media provider call.",
-    },
-    {
-        "provider_key": CINEMATIC_AI_PROVIDER_KEY,
-        "provider_name": "Cinematic AI Hero Provider",
-        "provider_type": AI_VIDEO_HERO_PROVIDER,
-        "role_description": "Premium AI hero/metaphor visual generation only.",
-        "recommendation": "CORE_QUALITY_LAYER",
-        "is_enabled": True,
-        "is_real_provider": True,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "base_assumption_usd": 129, "extra_budget_range_usd": [45, 50]},
-        "notes": "No full edited video render, accurate diagram generation, caption management, or final publish package.",
-    },
-    {
-        "provider_key": CREATOMATE_PROVIDER_KEY,
-        "provider_name": "Creatomate Essential 2K",
-        "provider_type": CLOUD_TEMPLATE_RENDERER_LIGHT,
-        "role_description": "Light template renderer for Shorts, cards, thumbnails, lower thirds, and hero composition.",
-        "recommendation": "CORE_LIGHT_RENDER",
-        "is_enabled": True,
-        "is_real_provider": True,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {
-            "mode": "QUALITY_FIRST_250",
-            "assumption_usd": 59,
-            "plan": "ESSENTIAL_2K",
-            "allow_long_form_final_renderer": False,
-        },
-        "notes": "Critical invariant: not the full long-form render backbone on Essential 2K.",
-    },
-    {
-        "provider_key": CLOUD_FINAL_RENDERER_TBD_KEY,
-        "provider_name": "TBD Cloud Final Assembly Renderer",
-        "provider_type": CLOUD_FINAL_ASSEMBLY_RENDERER,
-        "role_description": "Required gap for full long-form final MP4 assembly.",
-        "recommendation": "REQUIRED_GAP",
-        "is_enabled": False,
-        "is_real_provider": True,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "provider_required_gap": True},
-        "notes": "Must be configured before LONG_FORM_FINAL_RENDER can route.",
-    },
-    {
-        "provider_key": "vcos_storage",
-        "provider_name": "VCOS storage/object storage",
-        "provider_type": MEDIA_STORAGE,
-        "role_description": "Object refs and durable media storage references.",
-        "recommendation": "CORE",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": True,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "cost_usd": 0},
-        "notes": "Does not turn Creatomate into permanent storage/archive.",
-    },
-    {
-        "provider_key": "vcos_media_qc",
-        "provider_name": "VCOS MediaQC",
-        "provider_type": MEDIA_QC_ENGINE,
-        "role_description": "Media correctness checks and M6 MediaQC integration point.",
-        "recommendation": "CORE",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": True,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "cost_usd": 0},
-        "notes": "Delegates to existing M6 MediaQC where a report exists.",
-    },
-    {
-        "provider_key": "vcos_publish_handoff",
-        "provider_name": "VCOS publish handoff",
-        "provider_type": PUBLISH_PACKAGE_BUILDER,
-        "role_description": "Manual publish handoff package builder.",
-        "recommendation": "CORE",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": True,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "cost_usd": 0},
-        "notes": "No auto upload, publish, reupload, or dashboard approval UI.",
-    },
-    {
-        "provider_key": "paid_stock_provider_deferred",
-        "provider_name": "Paid stock providers",
-        "provider_type": API_NATIVE_STOCK_PROVIDER,
-        "role_description": "Paid stock API providers deferred from daily backbone.",
-        "recommendation": "DEFERRED",
-        "is_enabled": False,
-        "is_real_provider": True,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "core_budget_usd": 0},
-        "notes": "Deferred; stock remains $0 core in current mode.",
-    },
-    {
-        "provider_key": "pexels_pixabay_free_fallback",
-        "provider_name": "Pexels/Pixabay/free fallback",
-        "provider_type": FREE_FALLBACK_PROVIDER,
-        "role_description": "Free fallback assets only, gated by license evidence.",
-        "recommendation": "FALLBACK",
-        "is_enabled": True,
-        "is_real_provider": True,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "core_budget_usd": 0},
-        "notes": "Fallback only; license evidence is required.",
-    },
-    {
-        "provider_key": "envato_manual_library",
-        "provider_name": "Envato/manual stock library",
-        "provider_type": DEFERRED_MANUAL_LIBRARY,
-        "role_description": "Manual library, not daily automated production backbone.",
-        "recommendation": "DEFERRED",
-        "is_enabled": False,
-        "is_real_provider": False,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "QUALITY_FIRST_250", "daily_backbone": False},
-        "notes": "Manual library only; no automated Envato integration in M10.2.",
-    },
-    {
-        "provider_key": "mock_media_provider",
-        "provider_name": "Mock provider",
-        "provider_type": MOCK_PROVIDER,
-        "role_description": "Tests/dev only mock provider.",
-        "recommendation": "MOCK",
-        "is_enabled": True,
-        "is_real_provider": False,
-        "supports_real_execution": False,
-        "monthly_budget_assumption": {"mode": "TEST", "mock_cost_usd": 0},
-        "notes": "Mock-only and never production media execution.",
-    },
-]
+
+def _read_catalog(catalog_key: str) -> list[dict[str, Any]]:
+    path = CONFIG_DIR / f"{catalog_key}.yaml"
+    with path.open("r", encoding="utf-8") as handle:
+        content = yaml.safe_load(handle) or {}
+    if content.get("catalog_key") != catalog_key:
+        raise ValidationFailureError(f"invalid catalog_key in {path}")
+    items = content.get("items")
+    if not isinstance(items, list):
+        raise ValidationFailureError(f"catalog items must be a list: {path}")
+    return items
 
 
-def _capability(
-    provider_key: str,
-    provider_type: str,
-    job_type: str,
-    capability: str,
-    reason: str,
-    *,
-    max_duration_seconds: int | None = None,
-    ratios: list[str] | None = None,
-    outputs: list[str] | None = None,
-    plan_requirement: str | None = None,
-) -> dict[str, Any]:
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value))
+
+
+def _provider_role_seeds() -> list[dict[str, Any]]:
+    return [
+        {
+            "provider_key": item["provider_key"],
+            "provider_name": item["provider_name"],
+            "provider_type": item["provider_type"],
+            "role_description": item["role_description"],
+            "recommendation": item["recommendation"],
+            "is_enabled": bool(item.get("is_enabled", True)),
+            "is_real_provider": bool(item.get("is_real_provider", False)),
+            "supports_real_execution": bool(item.get("supports_real_execution", False)),
+            "monthly_budget_assumption": item.get("monthly_budget_assumption") or {},
+            "notes": item.get("notes"),
+        }
+        for item in _read_catalog("media_provider_role_profile_catalog")
+    ]
+
+
+def _provider_capability_seeds() -> list[dict[str, Any]]:
+    return [
+        {
+            "provider_key": item["provider_key"],
+            "provider_type": item["provider_type"],
+            "job_type": str(item["job_type"]).upper(),
+            "capability": item["capability"],
+            "max_duration_seconds": _decimal_or_none(item.get("max_duration_seconds")),
+            "supported_aspect_ratios": item.get("supported_aspect_ratios") or [],
+            "supported_outputs": item.get("supported_outputs") or [],
+            "plan_requirement": item.get("plan_requirement"),
+            "capability_reason": item["capability_reason"],
+        }
+        for item in _read_catalog("media_provider_capability_matrix_catalog")
+    ]
+
+
+def _default_budget_policy_seeds() -> list[dict[str, Any]]:
+    return [
+        {
+            "provider_type": item["provider_type"],
+            "provider_key": item.get("provider_key"),
+            "monthly_cap_units": _decimal_or_none(item.get("monthly_cap_units")),
+            "monthly_cap_usd": _decimal_or_none(item.get("monthly_cap_usd")),
+            "monthly_cap_seconds": _decimal_or_none(item.get("monthly_cap_seconds")),
+            "monthly_cap_renders": item.get("monthly_cap_renders"),
+            "current_mode": item["current_mode"],
+            "enforcement": item["enforcement"],
+        }
+        for item in _read_catalog("media_provider_budget_policy_catalog")
+    ]
+
+
+def _routing_policy() -> dict[str, dict[str, str]]:
     return {
-        "provider_key": provider_key,
-        "provider_type": provider_type,
-        "job_type": job_type,
-        "capability": capability,
-        "max_duration_seconds": Decimal(str(max_duration_seconds)) if max_duration_seconds is not None else None,
-        "supported_aspect_ratios": ratios or [],
-        "supported_outputs": outputs or [],
-        "plan_requirement": plan_requirement,
-        "capability_reason": reason,
+        str(item["job_type"]).upper(): {"provider_key": item["provider_key"], "reason_code": item["reason_code"]}
+        for item in _read_catalog("media_provider_routing_policy_catalog")
     }
 
 
-PROVIDER_CAPABILITY_SEEDS: list[dict[str, Any]] = [
-    *[
-        _capability(
-            CREATOMATE_PROVIDER_KEY,
-            CLOUD_TEMPLATE_RENDERER_LIGHT,
-            job,
-            "SUPPORTED",
-            "Creatomate Essential 2K is allowed for light template rendering in Quality-First $250 mode.",
-            max_duration_seconds=59 if job == "SHORT_RENDER" else 30 if job == "PREVIEW_CLIP_RENDER" else None,
-            ratios=["9:16", "16:9", "1:1"],
-            outputs=["mp4", "png", "jpg"],
-            plan_requirement="ESSENTIAL_2K",
-        )
-        for job in sorted(CREATOMATE_LIGHT_JOBS)
-    ],
-    _capability(
-        CREATOMATE_PROVIDER_KEY,
-        CLOUD_TEMPLATE_RENDERER_LIGHT,
-        LONG_FORM_FINAL_RENDER,
-        "BLOCKED_BY_PLAN",
-        "Creatomate Essential 2K is not the full long-form final render backbone.",
-        plan_requirement="GROWTH_10K_EXPLICIT_FINAL_RENDERER_OR_CLOUD_FINAL_ASSEMBLY_RENDERER",
-    ),
-    *[
-        _capability(
-            ELEVENLABS_PROVIDER_KEY,
-            API_NATIVE_TTS,
-            job,
-            "SUPPORTED",
-            "ElevenLabs is voice generation only.",
-            outputs=["audio", "voice_usage_metadata"],
-        )
-        for job in sorted(VOICE_JOBS)
-    ],
-    *[
-        _capability(
-            CINEMATIC_AI_PROVIDER_KEY,
-            AI_VIDEO_HERO_PROVIDER,
-            job,
-            "SUPPORTED",
-            "Cinematic AI provider is premium hero/metaphor visual generation only.",
-            outputs=["video_clip", "still_frame"],
-        )
-        for job in sorted(AI_HERO_JOBS)
-    ],
-    _capability(
-        CLOUD_FINAL_RENDERER_TBD_KEY,
-        CLOUD_FINAL_ASSEMBLY_RENDERER,
-        LONG_FORM_FINAL_RENDER,
-        "REQUIRES_EXTERNAL_PROVIDER",
-        "Full long-form final MP4 assembly requires a configured cloud final assembly renderer.",
-    ),
-    _capability("llm_router", LLM_SCRIPT_ENGINE, "LONG_SCRIPT_GENERATION", "SUPPORTED", "M10.1 LLMRouter handles script tasks."),
-    _capability("llm_router", LLM_SCRIPT_ENGINE, "SHORT_SCRIPT_GENERATION", "SUPPORTED", "M10.1 LLMRouter handles short script tasks."),
-    _capability("llm_router", LLM_SCRIPT_ENGINE, "LONG_VISUAL_PLAN", "SUPPORTED", "LLMRouter may plan visuals, not render media."),
-    _capability("vcos_caption_timeline", CAPTION_TIMELINE_ENGINE, "LONG_CAPTION_TIMELINE", "SUPPORTED", "VCOS builds caption timeline contracts."),
-    _capability("vcos_caption_timeline", CAPTION_TIMELINE_ENGINE, "SHORT_CAPTION_TIMELINE", "SUPPORTED", "VCOS builds short caption timeline contracts."),
-    _capability("vcos_media_qc", MEDIA_QC_ENGINE, "LONG_MEDIA_QC", "SUPPORTED", "M6 MediaQC remains the QC foundation."),
-    _capability("vcos_media_qc", MEDIA_QC_ENGINE, "SHORT_MEDIA_QC", "SUPPORTED", "M6 MediaQC remains the QC foundation."),
-    _capability("vcos_publish_handoff", PUBLISH_PACKAGE_BUILDER, "LONG_PUBLISH_PACKAGE", "SUPPORTED", "M7 publish handoff remains manual."),
-    _capability("vcos_publish_handoff", PUBLISH_PACKAGE_BUILDER, "SHORT_PUBLISH_PACKAGE", "SUPPORTED", "M10.1 upload cards remain manual."),
-    *[
-        _capability("vcos_backend", WORKFLOW_ORCHESTRATOR, job, "SUPPORTED", "VCOS orchestrates state, gates, and package planning.")
-        for job in ["TOPIC_DECISION", "SHORT_CANDIDATE_EXTRACTION", "SHORT_HERO_REUSE", "BUDGET_CHECK", "PROVIDER_CAPABILITY_CHECK", "LICENSE_EVIDENCE_CHECK"]
-    ],
-    _capability("mock_media_provider", MOCK_PROVIDER, "SHORT_RENDER", "MOCK_ONLY", "Mock provider is test/dev only."),
-]
+@dataclass(frozen=True)
+class GoogleVertexVeoResolvedConfig:
+    provider_key: str
+    model: str | None
+    mode: str | None
+    resolution: str | None
+    audio_enabled: bool | None
+    default_duration_seconds: Decimal | None
+    max_duration_seconds: Decimal | None
+    cost_per_second_1080p: Decimal | None
+    monthly_budget_usd: Decimal | None
+    project_id: str | None
+    location: str | None
+    service_account_path: str | None
+    real_execution_enabled: bool
+    real_smoke_enabled: bool
+
+    def estimate_cost(self, duration_seconds: Decimal | None) -> Decimal | None:
+        if duration_seconds is None or self.cost_per_second_1080p is None:
+            return None
+        return duration_seconds * self.cost_per_second_1080p
 
 
-DEFAULT_BUDGET_POLICIES: list[dict[str, Any]] = [
-    {
-        "provider_type": API_NATIVE_TTS,
-        "provider_key": ELEVENLABS_PROVIDER_KEY,
-        "monthly_cap_usd": Decimal("15"),
-        "current_mode": "QUALITY_FIRST_250",
-        "enforcement": "REVIEW_REQUIRED",
-    },
-    {
-        "provider_type": CLOUD_TEMPLATE_RENDERER_LIGHT,
-        "provider_key": CREATOMATE_PROVIDER_KEY,
-        "monthly_cap_usd": Decimal("59"),
-        "monthly_cap_renders": 160,
-        "current_mode": "QUALITY_FIRST_250",
-        "enforcement": "REVIEW_REQUIRED",
-    },
-    {
-        "provider_type": AI_VIDEO_HERO_PROVIDER,
-        "provider_key": CINEMATIC_AI_PROVIDER_KEY,
-        "monthly_cap_usd": Decimal("179"),
-        "monthly_cap_renders": 20,
-        "current_mode": "QUALITY_FIRST_250",
-        "enforcement": "REVIEW_REQUIRED",
-    },
-    {
-        "provider_type": CLOUD_FINAL_ASSEMBLY_RENDERER,
-        "provider_key": None,
-        "monthly_cap_renders": 10,
-        "current_mode": "QUALITY_FIRST_250",
-        "enforcement": "HARD_BLOCK",
-    },
-]
+class GoogleVertexVeoConfigService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def resolve(self) -> GoogleVertexVeoResolvedConfig:
+        settings = get_settings()
+        role = self.session.scalars(
+            select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY)
+        ).one_or_none()
+        seed = next((item for item in _provider_role_seeds() if item["provider_key"] == GOOGLE_VERTEX_VEO_PROVIDER_KEY), None)
+        defaults = (role.monthly_budget_assumption if role else seed.get("monthly_budget_assumption") if seed else {}) or {}
+        return GoogleVertexVeoResolvedConfig(
+            provider_key=role.provider_key if role else GOOGLE_VERTEX_VEO_PROVIDER_KEY,
+            model=settings.veo_model or defaults.get("model"),
+            mode=settings.veo_mode or defaults.get("video_mode"),
+            resolution=settings.veo_resolution or defaults.get("resolution"),
+            audio_enabled=settings.veo_audio_enabled if settings.veo_audio_enabled is not None else defaults.get("audio_enabled"),
+            default_duration_seconds=_decimal_or_none(
+                settings.veo_default_duration_seconds
+                if settings.veo_default_duration_seconds is not None
+                else defaults.get("default_duration_seconds")
+            ),
+            max_duration_seconds=_decimal_or_none(
+                settings.veo_max_duration_seconds if settings.veo_max_duration_seconds is not None else defaults.get("max_duration_seconds")
+            ),
+            cost_per_second_1080p=_decimal_or_none(
+                settings.veo_cost_per_second_1080p
+                if settings.veo_cost_per_second_1080p is not None
+                else defaults.get("cost_per_second_1080p")
+            ),
+            monthly_budget_usd=_decimal_or_none(
+                settings.veo_monthly_budget_usd if settings.veo_monthly_budget_usd is not None else defaults.get("monthly_budget_usd")
+            ),
+            project_id=settings.google_cloud_project_id,
+            location=settings.google_cloud_location,
+            service_account_path=settings.google_application_credentials,
+            real_execution_enabled=settings.veo_real_execution_enabled,
+            real_smoke_enabled=settings.veo_real_smoke,
+        )
+
+    def readiness_reason_codes(self, config: GoogleVertexVeoResolvedConfig | None = None) -> list[str]:
+        resolved = config or self.resolve()
+        reasons: list[str] = []
+        if _normalized_ai_hero_provider(get_settings().ai_hero_provider) not in {None, GOOGLE_VERTEX_VEO_PROVIDER_KEY}:
+            reasons.append("UNSUPPORTED_AI_HERO_PROVIDER")
+        if not resolved.model or not resolved.mode or not resolved.resolution:
+            reasons.append("VEO_CONFIG_MISSING")
+        if resolved.cost_per_second_1080p is None:
+            reasons.append("VEO_COST_CONFIG_MISSING")
+        if resolved.real_execution_enabled:
+            if not resolved.project_id:
+                reasons.append("GOOGLE_CLOUD_PROJECT_ID_MISSING")
+            if not resolved.location:
+                reasons.append("GOOGLE_CLOUD_LOCATION_MISSING")
+            if not resolved.service_account_path:
+                reasons.append("GOOGLE_APPLICATION_CREDENTIALS_MISSING")
+        return reasons or ["VEO_PROVIDER_CONFIG_READY"]
 
 
 class MediaProviderRoleService:
@@ -442,7 +287,9 @@ class MediaProviderRoleService:
 
     def ensure_matrix(self) -> list[MediaProviderRoleProfile]:
         records: list[MediaProviderRoleProfile] = []
-        for seed in PROVIDER_ROLE_SEEDS:
+        provider_role_seeds = _provider_role_seeds()
+        configured_provider_keys = {seed["provider_key"] for seed in provider_role_seeds}
+        for seed in provider_role_seeds:
             profile = self.session.scalars(
                 select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == seed["provider_key"])
             ).one_or_none()
@@ -454,9 +301,22 @@ class MediaProviderRoleService:
                     setattr(profile, key, value)
             records.append(profile)
         self.session.flush()
+        self._disable_removed_ai_hero_profiles(configured_provider_keys)
         ProviderCapabilityMatrixService(self.session).ensure_matrix()
         MediaProviderBudgetService(self.session).ensure_default_policies()
         return self.list_roles()
+
+    def _disable_removed_ai_hero_profiles(self, configured_provider_keys: set[str]) -> None:
+        removed = self.session.scalars(
+            select(MediaProviderRoleProfile)
+            .where(MediaProviderRoleProfile.provider_type == AI_VIDEO_HERO_PROVIDER)
+            .where(MediaProviderRoleProfile.provider_key.not_in(configured_provider_keys))
+        ).all()
+        for profile in removed:
+            profile.is_enabled = False
+            profile.supports_real_execution = False
+            profile.notes = "Disabled by M10.4 single AI hero provider binding; no fallback provider is allowed."
+        self.session.flush()
 
     def list_roles(self) -> list[MediaProviderRoleProfile]:
         if not self.session.scalars(select(MediaProviderRoleProfile).limit(1)).first():
@@ -482,7 +342,7 @@ class ProviderCapabilityMatrixService:
         self.session = session
 
     def ensure_matrix(self) -> list[ProviderCapabilityMatrixEntry]:
-        for seed in PROVIDER_CAPABILITY_SEEDS:
+        for seed in _provider_capability_seeds():
             entry = self.session.scalars(
                 select(ProviderCapabilityMatrixEntry)
                 .where(ProviderCapabilityMatrixEntry.provider_key == seed["provider_key"])
@@ -566,13 +426,28 @@ class MediaRenderJobRouterService:
                 capability_entry_id=entry.id if entry else None,
                 technical_appendix={"reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED", **data.technical_appendix},
             )
-        if data.estimated_usage_usd is not None:
+        duration_block = _duration_block(entry, data.target_duration_seconds)
+        aspect_block = _aspect_block(entry, data.target_aspect_ratio)
+        if duration_block or aspect_block:
+            return self._record_decision(
+                data=data,
+                job_type=job_type,
+                selected_provider_type=role.provider_type,
+                selected_provider_key=role.provider_key,
+                routing_result="BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
+                blocker_reason=duration_block or aspect_block,
+                capability_entry_id=entry.id,
+                technical_appendix={"reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED", **data.technical_appendix},
+            )
+        estimated_usage_seconds = data.estimated_usage_seconds or (data.target_duration_seconds if role.provider_type == AI_VIDEO_HERO_PROVIDER else None)
+        if data.estimated_usage_usd is not None or estimated_usage_seconds is not None:
             budget = MediaProviderBudgetService(self.session).check(
                 data=MediaProviderBudgetCheckRequest(
                     company_id=data.company_id,
                     provider_type=role.provider_type,
                     provider_key=role.provider_key,
                     estimated_usage_usd=data.estimated_usage_usd,
+                    estimated_usage_seconds=estimated_usage_seconds,
                 )
             )
             if budget.decision == "BLOCK":
@@ -594,8 +469,10 @@ class MediaRenderJobRouterService:
             selected_provider_key=role.provider_key,
             routing_result="ROUTED",
             capability_entry_id=entry.id,
+            budget_snapshot_id=budget.snapshot_id if "budget" in locals() else None,
             technical_appendix={
                 "reason_code": _route_reason_code(role.provider_type),
+                "budget_gate_decision": budget.decision if "budget" in locals() else None,
                 "real_provider_execution": False,
                 **data.technical_appendix,
             },
@@ -637,10 +514,7 @@ class MediaRenderJobRouterService:
                     **data.technical_appendix,
                 },
             )
-        essential_entry = ProviderCapabilityMatrixService(self.session).find_entry(
-            provider_key=CREATOMATE_PROVIDER_KEY,
-            job_type=LONG_FORM_FINAL_RENDER,
-        )
+        essential_entry = _blocked_light_renderer_entry(self.session, job_type=LONG_FORM_FINAL_RENDER)
         return self._record_decision(
             data=data,
             job_type=job_type,
@@ -738,7 +612,11 @@ class ProviderCapabilityGateService:
         duration_block = _duration_block(entry, data.target_duration_seconds)
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block or entry.capability != "SUPPORTED":
-            reason = "CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER" if role.provider_key == CREATOMATE_PROVIDER_KEY and job_type == LONG_FORM_FINAL_RENDER else "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
+            reason = (
+                "CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER"
+                if role.provider_type == CLOUD_TEMPLATE_RENDERER_LIGHT and job_type == LONG_FORM_FINAL_RENDER
+                else "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
+            )
             return ProviderCapabilityGateRead(
                 decision="BLOCK",
                 provider_key=role.provider_key,
@@ -780,7 +658,11 @@ class MediaProviderBudgetService:
 
     def ensure_default_policies(self) -> list[MediaProviderBudgetPolicy]:
         records: list[MediaProviderBudgetPolicy] = []
-        for seed in DEFAULT_BUDGET_POLICIES:
+        for seed in _default_budget_policy_seeds():
+            if seed["provider_key"] == GOOGLE_VERTEX_VEO_PROVIDER_KEY:
+                config = GoogleVertexVeoConfigService(self.session).resolve()
+                if config.monthly_budget_usd is not None:
+                    seed = {**seed, "monthly_cap_usd": config.monthly_budget_usd}
             policy = self.session.scalars(
                 select(MediaProviderBudgetPolicy)
                 .where(MediaProviderBudgetPolicy.company_id.is_(None))
@@ -811,6 +693,7 @@ class MediaProviderBudgetService:
 
     def check(self, *, data: MediaProviderBudgetCheckRequest) -> MediaProviderBudgetGateRead:
         self.ensure_default_policies()
+        data = self._with_configured_cost_estimate(data)
         policy = self._find_policy(data)
         if policy is None:
             snapshot = self._create_snapshot(data=data, budget_state="UNKNOWN")
@@ -872,6 +755,18 @@ class MediaProviderBudgetService:
             if policy is not None:
                 return policy
         return None
+
+    def _with_configured_cost_estimate(self, data: MediaProviderBudgetCheckRequest) -> MediaProviderBudgetCheckRequest:
+        if (
+            data.provider_type == AI_VIDEO_HERO_PROVIDER
+            and data.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY
+            and data.estimated_usage_usd is None
+            and data.estimated_usage_seconds is not None
+        ):
+            estimated_cost = GoogleVertexVeoConfigService(self.session).resolve().estimate_cost(data.estimated_usage_seconds)
+            if estimated_cost is not None:
+                return data.model_copy(update={"estimated_usage_usd": estimated_cost})
+        return data
 
     def _create_snapshot(self, *, data: MediaProviderBudgetCheckRequest, budget_state: str) -> MediaProviderBudgetSnapshot:
         now = utc_now()
@@ -1127,13 +1022,19 @@ class AIHeroAssetPlanningService:
 
     def plan(self, *, video_project_id: uuid.UUID, data: AIHeroAssetPlanRequest) -> AIHeroAsset:
         project = _require_project(self.session, video_project_id)
+        config = GoogleVertexVeoConfigService(self.session).resolve()
+        duration_seconds = data.duration_seconds or config.default_duration_seconds
+        estimated_cost = config.estimate_cost(duration_seconds)
         decision = MediaRenderJobRouterService(self.session).decide(
             data=MediaRenderRoutingDecisionRequest(
                 company_id=project.company_id,
                 channel_workspace_id=project.channel_workspace_id,
                 video_project_id=project.id,
                 job_type="AI_HERO_GENERATION",
-                target_duration_seconds=data.duration_seconds,
+                target_duration_seconds=duration_seconds,
+                target_aspect_ratio="16:9",
+                estimated_usage_seconds=duration_seconds,
+                estimated_usage_usd=estimated_cost,
             )
         )
         asset = AIHeroAsset(
@@ -1144,7 +1045,7 @@ class AIHeroAssetPlanningService:
             intended_usage=data.intended_usage,
             provider_type=AI_VIDEO_HERO_PROVIDER,
             provider_key=decision.selected_provider_key,
-            duration_seconds=data.duration_seconds,
+            duration_seconds=duration_seconds,
             asset_ref=None,
             still_frame_ref=None,
             rights_evidence_ref=None,
@@ -1159,6 +1060,158 @@ class AIHeroAssetPlanningService:
         if asset is None:
             raise NotFoundError(f"AI hero asset not found: {asset_id}")
         return asset
+
+
+class AIHeroGenerationService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def execute(self, *, asset_id: uuid.UUID, data: AIHeroGenerationExecuteRequest | None = None) -> AIHeroGenerationJobRead:
+        request_data = data or AIHeroGenerationExecuteRequest()
+        asset = AIHeroAssetPlanningService(self.session).require(asset_id)
+        config_service = GoogleVertexVeoConfigService(self.session)
+        config = config_service.resolve()
+        estimated_cost = config.estimate_cost(asset.duration_seconds)
+        budget_gate = MediaProviderBudgetService(self.session).check(
+            data=MediaProviderBudgetCheckRequest(
+                company_id=asset.company_id,
+                provider_type=asset.provider_type,
+                provider_key=asset.provider_key,
+                estimated_usage_seconds=asset.duration_seconds,
+                estimated_usage_usd=estimated_cost,
+            )
+        )
+        readiness = config_service.readiness_reason_codes(config)
+        if asset.provider_key != GOOGLE_VERTEX_VEO_PROVIDER_KEY:
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=["UNSUPPORTED_AI_HERO_PROVIDER"],
+                operator_summary="AI hero asset is not bound to Google Vertex Veo.",
+            )
+        if asset.generation_state not in {"READY_FOR_PROVIDER", "GENERATED"}:
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=["AI_HERO_ASSET_NOT_PROVIDER_READY"],
+                operator_summary="AI hero asset is not provider-ready.",
+            )
+        blocking_readiness = [reason for reason in readiness if reason not in {"VEO_PROVIDER_CONFIG_READY"}]
+        if blocking_readiness and config.real_execution_enabled:
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=blocking_readiness,
+                operator_summary="Veo real execution config is incomplete.",
+            )
+        if budget_gate.decision != "PASS":
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=budget_gate.reason_codes,
+                operator_summary=budget_gate.operator_summary,
+            )
+        if not config.real_execution_enabled or not config.real_smoke_enabled:
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=["VEO_REAL_EXECUTION_DISABLED"],
+                operator_summary="Veo provider binding is ready; real execution is disabled by env guard.",
+            )
+        if not config.model or not config.mode or not config.resolution or asset.duration_seconds is None:
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=["VEO_CONFIG_MISSING"],
+                operator_summary="Veo generation config is incomplete.",
+            )
+        response = GoogleVertexVeoProvider().generate_video(
+            request=GoogleVertexVeoRequest(
+                prompt=asset.prompt,
+                model=config.model,
+                mode=config.mode,
+                resolution=config.resolution,
+                duration_seconds=asset.duration_seconds,
+                audio_enabled=bool(config.audio_enabled),
+                output_gcs_uri=request_data.output_gcs_uri,
+            ),
+            config=GoogleVertexVeoExecutionConfig(
+                project_id=config.project_id,
+                location=config.location,
+                service_account_path=config.service_account_path,
+                real_execution_enabled=config.real_execution_enabled,
+                real_smoke_enabled=config.real_smoke_enabled,
+            ),
+        )
+        if not response.ok:
+            return self._result(
+                asset=asset,
+                config=config,
+                estimated_cost=estimated_cost,
+                budget_gate=budget_gate,
+                reason_codes=[response.error_code or "VEO_PROVIDER_ERROR"],
+                operator_summary=response.error_message or "Veo provider call failed.",
+                real_execution_attempted=True,
+            )
+        asset.asset_ref = response.output.get("asset_ref")
+        asset.still_frame_ref = response.output.get("still_frame_ref")
+        asset.rights_evidence_ref = f"provider://{GOOGLE_VERTEX_VEO_PROVIDER_KEY}/rights/provider-generated"
+        asset.generation_state = "GENERATED"
+        self.session.flush()
+        return self._result(
+            asset=asset,
+            config=config,
+            estimated_cost=estimated_cost,
+            budget_gate=budget_gate,
+            reason_codes=["VEO_REAL_SMOKE_COMPLETED"],
+            operator_summary="Veo real smoke request completed.",
+            real_execution_attempted=True,
+            provider_operation_ref=response.output.get("operation_ref"),
+        )
+
+    def _result(
+        self,
+        *,
+        asset: AIHeroAsset,
+        config: GoogleVertexVeoResolvedConfig,
+        estimated_cost: Decimal | None,
+        budget_gate: MediaProviderBudgetGateRead | None,
+        reason_codes: list[str],
+        operator_summary: str,
+        real_execution_attempted: bool = False,
+        provider_operation_ref: str | None = None,
+    ) -> AIHeroGenerationJobRead:
+        return AIHeroGenerationJobRead(
+            ai_hero_asset_id=asset.id,
+            provider_key=asset.provider_key,
+            provider_type=asset.provider_type,
+            generation_state=asset.generation_state,
+            model=config.model,
+            mode=config.mode,
+            resolution=config.resolution,
+            audio_enabled=config.audio_enabled,
+            requested_duration_seconds=asset.duration_seconds,
+            estimated_cost_usd=estimated_cost,
+            budget_gate=budget_gate,
+            real_execution_attempted=real_execution_attempted,
+            asset_ref=asset.asset_ref,
+            still_frame_ref=asset.still_frame_ref,
+            provider_operation_ref=provider_operation_ref,
+            reason_codes=reason_codes,
+            operator_summary=operator_summary,
+        )
 
 
 class CreatomateRenderAssetPlanningService:
@@ -1267,13 +1320,8 @@ class MediaProviderReadService:
 
 
 def _provider_key_for_job(job_type: str) -> str | None:
-    if job_type in CREATOMATE_LIGHT_JOBS:
-        return CREATOMATE_PROVIDER_KEY
-    if job_type in AI_HERO_JOBS:
-        return CINEMATIC_AI_PROVIDER_KEY
-    if job_type in VOICE_JOBS:
-        return ELEVENLABS_PROVIDER_KEY
-    return VCOS_JOB_PROVIDER_KEYS.get(job_type)
+    route = _routing_policy().get(job_type)
+    return route["provider_key"] if route else None
 
 
 def _route_reason_code(provider_type: str) -> str:
@@ -1295,6 +1343,15 @@ def _configured_final_renderer(session: Session) -> tuple[MediaProviderRoleProfi
         .where(ProviderCapabilityMatrixEntry.capability == "SUPPORTED")
     ).all()
     return rows[0] if rows else None
+
+
+def _blocked_light_renderer_entry(session: Session, *, job_type: str) -> ProviderCapabilityMatrixEntry | None:
+    return session.scalars(
+        select(ProviderCapabilityMatrixEntry)
+        .where(ProviderCapabilityMatrixEntry.provider_type == CLOUD_TEMPLATE_RENDERER_LIGHT)
+        .where(ProviderCapabilityMatrixEntry.job_type == job_type)
+        .where(ProviderCapabilityMatrixEntry.capability == "BLOCKED_BY_PLAN")
+    ).first()
 
 
 def _configured_creatomate_growth_final_renderer(session: Session) -> tuple[MediaProviderRoleProfile, ProviderCapabilityMatrixEntry] | None:
@@ -1341,6 +1398,14 @@ def _budget_state(policy: MediaProviderBudgetPolicy, data: MediaProviderBudgetCh
     )
     if not estimates_present:
         return "UNKNOWN"
+    if (
+        policy.provider_type == AI_VIDEO_HERO_PROVIDER
+        and policy.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY
+        and policy.monthly_cap_usd is not None
+        and data.estimated_usage_seconds is not None
+        and data.estimated_usage_usd is None
+    ):
+        return "UNKNOWN"
     exceeded = False
     warning = False
     if policy.monthly_cap_usd is not None and data.estimated_usage_usd is not None:
@@ -1360,6 +1425,15 @@ def _budget_state(policy: MediaProviderBudgetPolicy, data: MediaProviderBudgetCh
     if warning:
         return "WARNING"
     return "OK"
+
+
+def _normalized_ai_hero_provider(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower().replace("-", "_")
+    if normalized == "google_vertex_veo":
+        return GOOGLE_VERTEX_VEO_PROVIDER_KEY
+    return value
 
 
 def _require_project(session: Session, project_id: uuid.UUID) -> VideoProject:

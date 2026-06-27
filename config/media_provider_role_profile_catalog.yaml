@@ -1,0 +1,195 @@
+catalog_key: media_provider_role_profile_catalog
+catalog_version: "1.0.1"
+schema_version: catalog.v1
+status: active
+items:
+  - provider_key: vcos_backend
+    provider_name: VCOS Backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    role_description: Orchestration, state, manifest, budget, QC, approval workflow, and publish handoff package.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      cost_usd: 0
+    notes: VCOS does not fake external provider outputs, bypass approval, or auto publish/upload/reupload.
+  - provider_key: llm_router
+    provider_name: Existing LLM source / LLMRouter
+    provider_type: LLM_SCRIPT_ENGINE
+    role_description: Script and planning language tasks through the guarded M10.1 router.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      provider_cost_unknown: true
+    notes: Business services route by lane; M10.4 does not add new real LLM execution.
+  - provider_key: elevenlabs_flash_turbo
+    provider_name: ElevenLabs Flash/Turbo
+    provider_type: API_NATIVE_TTS
+    role_description: "Voice generation only: long narration, short narration, segments, and usage metadata."
+    recommendation: CORE_QUALITY_LAYER
+    is_enabled: true
+    is_real_provider: true
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      assumption_range_usd:
+        - 10
+        - 15
+    notes: No script writing, video render, captions, stock licensing, or publish package behavior.
+  - provider_key: vcos_caption_timeline
+    provider_name: VCOS caption timeline service
+    provider_type: CAPTION_TIMELINE_ENGINE
+    role_description: Caption timing and caption track planning derived from voice timelines.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      cost_usd: 0
+    notes: Caption planning only; not a real media provider call.
+  - provider_key: GOOGLE_VERTEX_VEO
+    provider_name: Google Vertex AI - Veo 3.1 Fast video-only 1080p
+    provider_type: AI_VIDEO_HERO_PROVIDER
+    role_description: Google Vertex Veo provider for opening hooks, key metaphors, and thumbnail still frames only.
+    recommendation: CORE_QUALITY_LAYER
+    is_enabled: true
+    is_real_provider: true
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      model: veo-3.1-fast
+      provider_key_alias: google_vertex_veo
+      provider_name: Google Vertex AI - Veo 3.1 Fast video-only 1080p
+      video_mode: video-only
+      resolution: 1080p
+      audio_enabled: false
+      default_duration_seconds: 8
+      max_duration_seconds: 10
+      cost_per_second_1080p: "0.10"
+      default_10s_clip_estimate_usd: "1.00"
+      monthly_budget_usd: "175"
+      backup_provider: null
+      usage:
+        opening_hook: veo
+        key_metaphor: veo
+        thumbnail_background: still_frame_from_veo_clip
+        shorts_default: reuse_or_crop_long_form_hero
+        workflow_data_diagram: creatomate_cards
+        per_short_ai_hero_default: false
+    notes: Single AI hero binding for M10.4; no Runway, Luma, generic cinematic AI fallback, web-app-only provider, or auto-route backup.
+  - provider_key: creatomate_essential_2k
+    provider_name: Creatomate Essential 2K
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    role_description: Light template renderer for Shorts, cards, thumbnails, lower thirds, and hero composition.
+    recommendation: CORE_LIGHT_RENDER
+    is_enabled: true
+    is_real_provider: true
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      assumption_usd: 59
+      plan: ESSENTIAL_2K
+      allow_long_form_final_renderer: false
+    notes: Critical invariant; not the full long-form render backbone on Essential 2K.
+  - provider_key: cloud_final_assembly_renderer_tbd
+    provider_name: TBD Cloud Final Assembly Renderer
+    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    role_description: Required gap for full long-form final MP4 assembly.
+    recommendation: REQUIRED_GAP
+    is_enabled: false
+    is_real_provider: true
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      provider_required_gap: true
+    notes: Must be configured before LONG_FORM_FINAL_RENDER can route.
+  - provider_key: vcos_storage
+    provider_name: VCOS storage/object storage
+    provider_type: MEDIA_STORAGE
+    role_description: Object refs and durable media storage references.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      cost_usd: 0
+    notes: Does not turn Creatomate into permanent storage/archive.
+  - provider_key: vcos_media_qc
+    provider_name: VCOS MediaQC
+    provider_type: MEDIA_QC_ENGINE
+    role_description: Media correctness checks and M6 MediaQC integration point.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      cost_usd: 0
+    notes: Delegates to existing M6 MediaQC where a report exists.
+  - provider_key: vcos_publish_handoff
+    provider_name: VCOS publish handoff
+    provider_type: PUBLISH_PACKAGE_BUILDER
+    role_description: Manual publish handoff package builder.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      cost_usd: 0
+    notes: No auto upload, publish, reupload, or dashboard approval UI.
+  - provider_key: paid_stock_provider_deferred
+    provider_name: Paid stock providers
+    provider_type: API_NATIVE_STOCK_PROVIDER
+    role_description: Paid stock API providers deferred from daily backbone.
+    recommendation: DEFERRED
+    is_enabled: false
+    is_real_provider: true
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      core_budget_usd: 0
+    notes: Deferred; stock remains $0 core in current mode.
+  - provider_key: pexels_pixabay_free_fallback
+    provider_name: Pexels/Pixabay/free fallback
+    provider_type: FREE_FALLBACK_PROVIDER
+    role_description: Free fallback assets only, gated by license evidence.
+    recommendation: FALLBACK
+    is_enabled: true
+    is_real_provider: true
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      core_budget_usd: 0
+    notes: Fallback only; license evidence is required.
+  - provider_key: envato_manual_library
+    provider_name: Envato/manual stock library
+    provider_type: DEFERRED_MANUAL_LIBRARY
+    role_description: Manual library, not daily automated production backbone.
+    recommendation: DEFERRED
+    is_enabled: false
+    is_real_provider: false
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: QUALITY_FIRST_250
+      daily_backbone: false
+    notes: Manual library only; no automated Envato integration in M10.4.
+  - provider_key: mock_media_provider
+    provider_name: Mock provider
+    provider_type: MOCK_PROVIDER
+    role_description: Tests/dev only mock provider.
+    recommendation: MOCK
+    is_enabled: true
+    is_real_provider: false
+    supports_real_execution: false
+    monthly_budget_assumption:
+      mode: TEST
+      mock_cost_usd: 0
+    notes: Mock-only and never production media execution.

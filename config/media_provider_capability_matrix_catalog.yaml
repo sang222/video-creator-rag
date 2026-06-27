@@ -1,0 +1,315 @@
+catalog_key: media_provider_capability_matrix_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: creatomate_essential_2k_DIAGRAM_CARD_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: DIAGRAM_CARD_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for light template rendering in Quality-First $250 mode.
+  - key: creatomate_essential_2k_HERO_COMPOSITION_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: HERO_COMPOSITION_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for light template rendering in Quality-First $250 mode.
+  - key: creatomate_essential_2k_LOWER_THIRD_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: LOWER_THIRD_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for light template rendering in Quality-First $250 mode.
+  - key: creatomate_essential_2k_PREVIEW_CLIP_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: PREVIEW_CLIP_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: 30
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for limited preview clip rendering in Quality-First $250 mode.
+  - key: creatomate_essential_2k_SHORT_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: SHORT_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: 59
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for Shorts template rendering under the 59s hard cap.
+  - key: creatomate_essential_2k_STAT_CARD_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: STAT_CARD_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for light template rendering in Quality-First $250 mode.
+  - key: creatomate_essential_2k_THUMBNAIL_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: THUMBNAIL_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K renders thumbnail layouts; Veo supplies only the optional still frame background.
+  - key: creatomate_essential_2k_TITLE_CARD_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: TITLE_CARD_RENDER
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["9:16", "16:9", "1:1"]
+    supported_outputs: ["mp4", "png", "jpg"]
+    plan_requirement: ESSENTIAL_2K
+    capability_reason: Creatomate Essential 2K is allowed for light template rendering in Quality-First $250 mode.
+  - key: creatomate_essential_2k_LONG_FORM_FINAL_RENDER
+    provider_key: creatomate_essential_2k
+    provider_type: CLOUD_TEMPLATE_RENDERER_LIGHT
+    job_type: LONG_FORM_FINAL_RENDER
+    capability: BLOCKED_BY_PLAN
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: GROWTH_10K_EXPLICIT_FINAL_RENDERER_OR_CLOUD_FINAL_ASSEMBLY_RENDERER
+    capability_reason: Creatomate Essential 2K is not the full long-form final render backbone.
+  - key: elevenlabs_flash_turbo_LONG_VOICE_GENERATION
+    provider_key: elevenlabs_flash_turbo
+    provider_type: API_NATIVE_TTS
+    job_type: LONG_VOICE_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: ["audio", "voice_usage_metadata"]
+    plan_requirement: null
+    capability_reason: ElevenLabs is voice generation only.
+  - key: elevenlabs_flash_turbo_SHORT_VOICE_GENERATION
+    provider_key: elevenlabs_flash_turbo
+    provider_type: API_NATIVE_TTS
+    job_type: SHORT_VOICE_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: ["audio", "voice_usage_metadata"]
+    plan_requirement: null
+    capability_reason: ElevenLabs is voice generation only.
+  - key: elevenlabs_flash_turbo_VOICE_GENERATION
+    provider_key: elevenlabs_flash_turbo
+    provider_type: API_NATIVE_TTS
+    job_type: VOICE_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: ["audio", "voice_usage_metadata"]
+    plan_requirement: null
+    capability_reason: ElevenLabs is voice generation only.
+  - key: GOOGLE_VERTEX_VEO_AI_HERO_GENERATION
+    provider_key: GOOGLE_VERTEX_VEO
+    provider_type: AI_VIDEO_HERO_PROVIDER
+    job_type: AI_HERO_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: 10
+    supported_aspect_ratios: ["16:9"]
+    supported_outputs: ["video_clip", "still_frame"]
+    plan_requirement: VERTEX_VEO_3_1_FAST_VIDEO_ONLY_1080P
+    capability_reason: Google Vertex Veo is the single configured AI hero provider for opening hooks and thumbnail stills.
+  - key: GOOGLE_VERTEX_VEO_AI_METAPHOR_GENERATION
+    provider_key: GOOGLE_VERTEX_VEO
+    provider_type: AI_VIDEO_HERO_PROVIDER
+    job_type: AI_METAPHOR_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: 10
+    supported_aspect_ratios: ["16:9"]
+    supported_outputs: ["video_clip", "still_frame"]
+    plan_requirement: VERTEX_VEO_3_1_FAST_VIDEO_ONLY_1080P
+    capability_reason: Google Vertex Veo is the single configured AI metaphor provider.
+  - key: cloud_final_assembly_renderer_tbd_LONG_FORM_FINAL_RENDER
+    provider_key: cloud_final_assembly_renderer_tbd
+    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    job_type: LONG_FORM_FINAL_RENDER
+    capability: REQUIRES_EXTERNAL_PROVIDER
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: Full long-form final MP4 assembly requires a configured cloud final assembly renderer.
+  - key: llm_router_LONG_SCRIPT_GENERATION
+    provider_key: llm_router
+    provider_type: LLM_SCRIPT_ENGINE
+    job_type: LONG_SCRIPT_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: M10.1 LLMRouter handles script tasks.
+  - key: llm_router_SHORT_SCRIPT_GENERATION
+    provider_key: llm_router
+    provider_type: LLM_SCRIPT_ENGINE
+    job_type: SHORT_SCRIPT_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: M10.1 LLMRouter handles short script tasks.
+  - key: llm_router_LONG_VISUAL_PLAN
+    provider_key: llm_router
+    provider_type: LLM_SCRIPT_ENGINE
+    job_type: LONG_VISUAL_PLAN
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: LLMRouter may plan visuals, not render media.
+  - key: vcos_caption_timeline_LONG_CAPTION_TIMELINE
+    provider_key: vcos_caption_timeline
+    provider_type: CAPTION_TIMELINE_ENGINE
+    job_type: LONG_CAPTION_TIMELINE
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS builds caption timeline contracts.
+  - key: vcos_caption_timeline_SHORT_CAPTION_TIMELINE
+    provider_key: vcos_caption_timeline
+    provider_type: CAPTION_TIMELINE_ENGINE
+    job_type: SHORT_CAPTION_TIMELINE
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS builds short caption timeline contracts.
+  - key: vcos_media_qc_LONG_MEDIA_QC
+    provider_key: vcos_media_qc
+    provider_type: MEDIA_QC_ENGINE
+    job_type: LONG_MEDIA_QC
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: M6 MediaQC remains the QC foundation.
+  - key: vcos_media_qc_SHORT_MEDIA_QC
+    provider_key: vcos_media_qc
+    provider_type: MEDIA_QC_ENGINE
+    job_type: SHORT_MEDIA_QC
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: M6 MediaQC remains the QC foundation.
+  - key: vcos_publish_handoff_LONG_PUBLISH_PACKAGE
+    provider_key: vcos_publish_handoff
+    provider_type: PUBLISH_PACKAGE_BUILDER
+    job_type: LONG_PUBLISH_PACKAGE
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: M7 publish handoff remains manual.
+  - key: vcos_publish_handoff_SHORT_PUBLISH_PACKAGE
+    provider_key: vcos_publish_handoff
+    provider_type: PUBLISH_PACKAGE_BUILDER
+    job_type: SHORT_PUBLISH_PACKAGE
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: M10.1 upload cards remain manual.
+  - key: vcos_backend_TOPIC_DECISION
+    provider_key: vcos_backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: TOPIC_DECISION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS orchestrates state, gates, and package planning.
+  - key: vcos_backend_SHORT_CANDIDATE_EXTRACTION
+    provider_key: vcos_backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: SHORT_CANDIDATE_EXTRACTION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS orchestrates state, gates, and package planning.
+  - key: vcos_backend_SHORT_HERO_REUSE
+    provider_key: vcos_backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: SHORT_HERO_REUSE
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS orchestrates state, gates, and package planning.
+  - key: vcos_backend_BUDGET_CHECK
+    provider_key: vcos_backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: BUDGET_CHECK
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS orchestrates state, gates, and package planning.
+  - key: vcos_backend_PROVIDER_CAPABILITY_CHECK
+    provider_key: vcos_backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: PROVIDER_CAPABILITY_CHECK
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS orchestrates state, gates, and package planning.
+  - key: vcos_backend_LICENSE_EVIDENCE_CHECK
+    provider_key: vcos_backend
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: LICENSE_EVIDENCE_CHECK
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: VCOS orchestrates state, gates, and package planning.
+  - key: mock_media_provider_SHORT_RENDER
+    provider_key: mock_media_provider
+    provider_type: MOCK_PROVIDER
+    job_type: SHORT_RENDER
+    capability: MOCK_ONLY
+    max_duration_seconds: null
+    supported_aspect_ratios: []
+    supported_outputs: []
+    plan_requirement: null
+    capability_reason: Mock provider is test/dev only.

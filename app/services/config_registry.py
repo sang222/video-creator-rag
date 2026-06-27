@@ -151,6 +151,55 @@ class LLMModelProfileCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+class MediaProviderRoleProfileCatalogItem(BaseModel):
+    provider_key: str
+    provider_name: str
+    provider_type: str
+    role_description: str
+    recommendation: str
+    is_enabled: bool = True
+    is_real_provider: bool = False
+    supports_real_execution: bool = False
+    monthly_budget_assumption: dict[str, Any] = Field(default_factory=dict)
+    notes: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+class MediaProviderCapabilityMatrixCatalogItem(BaseModel):
+    key: str
+    provider_key: str
+    provider_type: str
+    job_type: str
+    capability: str
+    max_duration_seconds: int | float | str | None = None
+    supported_aspect_ratios: list[str] = Field(default_factory=list)
+    supported_outputs: list[str] = Field(default_factory=list)
+    plan_requirement: str | None = None
+    capability_reason: str
+
+    model_config = ConfigDict(extra="forbid")
+
+class MediaProviderBudgetPolicyCatalogItem(BaseModel):
+    key: str
+    provider_type: str
+    provider_key: str | None = None
+    monthly_cap_units: int | float | str | None = None
+    monthly_cap_usd: int | float | str | None = None
+    monthly_cap_seconds: int | float | str | None = None
+    monthly_cap_renders: int | None = None
+    current_mode: str
+    enforcement: str
+
+    model_config = ConfigDict(extra="forbid")
+
+class MediaProviderRoutingPolicyCatalogItem(BaseModel):
+    key: str
+    job_type: str
+    provider_key: str
+    reason_code: str
+
+    model_config = ConfigDict(extra="forbid")
+
 class RetryPolicyCatalogItem(BaseModel):
     policy_key: str
     provider_key: str | None = None
@@ -388,6 +437,10 @@ class ConfigRegistryService:
             "media_provider_type_catalog": SimpleKeyCatalogItem,
             "media_provider_recommendation_catalog": SimpleKeyCatalogItem,
             "media_job_type_catalog": SimpleKeyCatalogItem,
+            "media_provider_role_profile_catalog": MediaProviderRoleProfileCatalogItem,
+            "media_provider_capability_matrix_catalog": MediaProviderCapabilityMatrixCatalogItem,
+            "media_provider_budget_policy_catalog": MediaProviderBudgetPolicyCatalogItem,
+            "media_provider_routing_policy_catalog": MediaProviderRoutingPolicyCatalogItem,
             "provider_capability_catalog": SimpleKeyCatalogItem,
             "media_routing_result_catalog": SimpleKeyCatalogItem,
             "media_budget_state_catalog": SimpleKeyCatalogItem,

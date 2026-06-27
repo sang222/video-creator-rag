@@ -329,7 +329,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 133
+    assert second["config"] == 137
     assert second["gates"] == 15
 
 

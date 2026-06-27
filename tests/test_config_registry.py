@@ -58,6 +58,10 @@ def test_config_yaml_validates(db_session) -> None:
         "media_provider_type_catalog",
         "media_provider_recommendation_catalog",
         "media_job_type_catalog",
+        "media_provider_role_profile_catalog",
+        "media_provider_capability_matrix_catalog",
+        "media_provider_budget_policy_catalog",
+        "media_provider_routing_policy_catalog",
         "provider_capability_catalog",
         "media_routing_result_catalog",
         "media_budget_state_catalog",
@@ -163,7 +167,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 133
+    assert catalog_count == 137
     assert role_count == 3
     assert metric_definition_count == 16
 

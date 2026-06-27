@@ -26,7 +26,7 @@ ollama-health:
 
 ollama-pull-cloud-models:
 	docker-compose up -d ollama
-	docker-compose exec -T ollama sh -lc 'set -u; test -n "$$OLLAMA_API_KEY"; models="$$(env | awk -F= '\''/^VCOS_LLM_MODEL_/ {print $$2}'\'' | sort -u)"; test -n "$$models"; failed=""; for model in $$models; do echo "Pulling $$model"; if OLLAMA_HOST=http://127.0.0.1:11434 ollama pull "$$model"; then echo "Pulled $$model"; else echo "Failed $$model"; failed="$$failed $$model"; fi; done; OLLAMA_HOST=http://127.0.0.1:11434 ollama list; if test -n "$$failed"; then echo "Failed models:$$failed"; exit 1; fi'
+	docker-compose exec -T ollama sh -lc 'set -u; models="$$(env | awk -F= '\''/^VCOS_LLM_MODEL_/ {print $$2}'\'' | sort -u)"; test -n "$$models"; failed=""; for model in $$models; do echo "Pulling $$model"; if OLLAMA_HOST=http://127.0.0.1:11434 ollama pull "$$model"; then echo "Pulled $$model"; else echo "Failed $$model"; failed="$$failed $$model"; fi; done; OLLAMA_HOST=http://127.0.0.1:11434 ollama list; if test -n "$$failed"; then echo "Failed models:$$failed"; exit 1; fi'
 
 migrate:
 	$(BIN)/alembic upgrade head
