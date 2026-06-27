@@ -25,13 +25,13 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
       <PageHeader
         title={workspace.channel.name}
         subtitle={String(workspace.health_summary.next_action ?? workspace.lifecycle.next_action)}
-        breadcrumbs={[{ label: "Không gian kênh", href: "/channels" }, { label: workspace.channel.name }]}
+        breadcrumbs={[{ label: "Kênh", href: "/channels" }, { label: workspace.channel.name }]}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricSummaryCard icon={Activity} label="Vòng đời kênh" value={<StatusValue value={workspace.lifecycle.lifecycle_state} />} hint="Vòng đời do người vận hành quyết định." />
         <MetricSummaryCard icon={Gauge} label="Sức khỏe" value={<StatusValue value={workspace.lifecycle.health_status} />} hint="Trạng thái sức khỏe chỉ cảnh báo, không tự đổi vòng đời." />
-        <MetricSummaryCard icon={ListChecks} label="Việc đang chờ" value={workspace.approvals.length} hint="Bao gồm bài học, publish, ops và phục hồi." />
-        <MetricSummaryCard icon={Database} label="Tệp Google Drive" value={String(workspace.media_storage.cloud_media_count ?? 0)} hint="Chỉ mở file qua CTA Google Drive." />
+        <MetricSummaryCard icon={ListChecks} label="Việc đang chờ" value={workspace.approvals.length} hint="Bao gồm bài học, gói publish, vận hành và phục hồi." />
+        <MetricSummaryCard icon={Database} label="Tệp Drive" value={String(workspace.media_storage.cloud_media_count ?? 0)} hint="Chỉ mở file qua CTA Google Drive." />
       </div>
       <Tabs.Root defaultValue="overview">
         <Tabs.List className="flex flex-wrap gap-2">
@@ -43,8 +43,8 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
             ["analytics", "Dữ liệu phân tích"],
             ["learning", "Bài học"],
             ["profile-policy", "Hồ sơ & chính sách kênh"],
-            ["media", "Tệp Google Drive"],
-            ["provider-health", "Trạng thái nhà cung cấp"]
+            ["media", "Tệp Drive"],
+            ["provider-health", "Vận hành"]
           ].map(([tab, label]) => (
             <Tabs.Trigger key={tab} value={tab} className="rounded-md border border-border px-3 py-2 text-sm data-[state=active]:border-primary data-[state=active]:text-primary">
               {label}
@@ -74,7 +74,7 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
               ))}
             </div>
           ) : (
-            <EmptyStateCard title="Chưa có dự án" description="Daily generation chỉ tạo việc mới khi vòng đời là Đang hoạt động. Kiểm tra policy snapshot và trạng thái kênh trước khi chạy." />
+            <EmptyStateCard title="Chưa có dự án" description="Luồng tạo hằng ngày chỉ tạo việc mới khi vòng đời là Đang hoạt động. Kiểm tra snapshot chính sách và trạng thái kênh trước khi chạy." />
           )}
         </Tabs.Content>
         <Tabs.Content value="approvals" className="mt-5">
@@ -88,27 +88,27 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
         </Tabs.Content>
         <Tabs.Content value="media" className="mt-5">
           <Panel>
-            <h2 className="text-base font-semibold">Tệp trên Google Drive</h2>
+            <h2 className="text-base font-semibold">Tệp Drive</h2>
             <p className="mt-2 text-sm text-muted-foreground">Google Drive chỉ là nơi lưu file. Dashboard chỉ dùng nút mở Drive đã xác minh và không bao giờ hiện đường dẫn local.</p>
             <div className="mt-4"><StatusBadge value={String(workspace.media_storage.storage_state ?? workspace.health_summary.storage_state)} /></div>
           </Panel>
         </Tabs.Content>
         <Tabs.Content value="publishing" className="mt-5">
-          <EmptyStateCard title="Gói publish" description="Mở hàng chờ gói publish để lấy CTA Google Drive, copy metadata và nhập paste-back sau khi upload thủ công." actions={[{ label: "Đi tới gói publish", href: "/publishing" }]} />
+          <EmptyStateCard title="Gói publish" description="Mở hàng chờ gói publish để lấy CTA Google Drive, sao chép thông tin mô tả và nhập paste-back sau khi upload thủ công." actions={[{ label: "Đi tới gói publish", href: "/publishing" }]} />
         </Tabs.Content>
         <Tabs.Content value="analytics" className="mt-5">
-          <EmptyStateCard title="Analytics" description="Chi tiết video đã upload sẽ hiển thị public YouTube stats và owner analytics; metric chưa có dữ liệu không phải bằng 0." actions={[{ label: "Xem video đã upload", href: "/uploaded-videos" }]} />
+          <EmptyStateCard title="Analytics" description="Chi tiết video đã upload sẽ hiển thị thống kê YouTube công khai và analytics chủ sở hữu; metric chưa có dữ liệu không phải bằng 0." actions={[{ label: "Xem video đã upload", href: "/uploaded-videos" }]} />
         </Tabs.Content>
         <Tabs.Content value="learning" className="mt-5">
-          <EmptyStateCard title="Bài học chờ duyệt" description="Learning candidate cần người duyệt bằng chứng trước khi trở thành playbook entry. VCOS không tự đổi cấu hình kênh." actions={[{ label: "Xem bài học", href: "/learning" }]} />
+          <EmptyStateCard title="Bài học chờ duyệt" description="Bài học cần người duyệt bằng chứng trước khi trở thành mục playbook. VCOS không tự đổi cấu hình kênh." actions={[{ label: "Xem bài học", href: "/learning" }]} />
         </Tabs.Content>
         <Tabs.Content value="profile-policy" className="mt-5">
           <EmptyStateCard title="Hồ sơ & chính sách kênh" description="Người vận hành chỉnh sửa sẽ tạo phiên bản hồ sơ và snapshot chính sách mới. Dự án cũ vẫn giữ snapshot đã gắn trước đó." />
         </Tabs.Content>
         <Tabs.Content value="provider-health" className="mt-5">
           <Panel>
-            <h2 className="text-base font-semibold">Trạng thái nhà cung cấp</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Trạng thái provider là dữ liệu đọc từ backend đã guard. Dashboard load không gọi provider thật.</p>
+            <h2 className="text-base font-semibold">Vận hành</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Trạng thái nhà cung cấp là dữ liệu đọc từ backend đã được bảo vệ. Khi mở trang, dashboard không gọi nhà cung cấp thật.</p>
           </Panel>
         </Tabs.Content>
       </Tabs.Root>

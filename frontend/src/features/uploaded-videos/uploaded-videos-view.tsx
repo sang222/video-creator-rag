@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { CirclePlay, MessageCircle, ThumbsUp, Video } from "lucide-react";
+import { AlertTriangle, CirclePlay, RefreshCw, Video } from "lucide-react";
 
 import { EmptyStateCard, MetricSummaryCard, PageHeader } from "@/components/cockpit";
 import { ErrorState, LoadingState } from "@/components/states";
@@ -18,35 +18,33 @@ export function UploadedVideosView() {
   if (query.isError) return <div className="p-4 md:p-8"><ErrorState message={query.error.message} /></div>;
   if (!query.data) return <div className="p-4 md:p-8"><LoadingState label="Đang tải video đã upload" /></div>;
 
-  const totals = query.data.reduce(
-    (acc, video) => ({
-      views: acc.views + Number(video.metrics.views ?? 0),
-      likes: acc.likes + Number(video.metrics.likes ?? 0),
-      comments: acc.comments + Number(video.metrics.comments ?? 0)
-    }),
-    { views: 0, likes: 0, comments: 0 }
-  );
+  const needsPublishConfirmation = query.data.filter((video) => !video.platform_video_id || !video.video_url).length;
+  const needsAnalyticsSync = query.data.filter((video) => needsSync(video.freshness) || needsSync(video.owner_analytics_status)).length;
+  const needsRecovery = query.data.filter((video) => {
+    const nextAction = String(video.next_action ?? "").toLowerCase();
+    return Boolean(video.latest_diagnostic) || nextAction.includes("recovery") || nextAction.includes("phục hồi");
+  }).length;
 
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
         title="Video đã upload"
         subtitle="Theo dõi video YouTube đã được publish thủ công. Metric chưa có dữ liệu không phải bằng 0."
-        breadcrumbs={[{ label: "Trung tâm điều hành", href: "/" }, { label: "Video đã upload" }]}
+        breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Video đã upload" }]}
         primaryAction={<Button asChild variant="primary"><Link href="/publishing">Đi tới gói publish</Link></Button>}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricSummaryCard icon={Video} label="Video đã nhập paste-back" value={query.data.length} hint="UploadedVideo chỉ được tạo sau khi human nhập URL/video_id." />
-        <MetricSummaryCard icon={CirclePlay} label="Views đã ghi nhận" value={query.data.length ? totals.views : "Chưa có dữ liệu"} hint="Không suy diễn performance theo quốc gia." />
-        <MetricSummaryCard icon={ThumbsUp} label="Likes đã ghi nhận" value={query.data.length ? totals.likes : "Chưa có dữ liệu"} hint="Dữ liệu lấy từ analytics/sync đã có." />
-        <MetricSummaryCard icon={MessageCircle} label="Comments đã ghi nhận" value={query.data.length ? totals.comments : "Chưa có dữ liệu"} hint="Chưa có dữ liệu không phải bằng 0." />
+        <MetricSummaryCard icon={Video} label="Tổng video đã upload" value={query.data.length} hint="Chỉ tính video đã được người vận hành nhập paste-back." />
+        <MetricSummaryCard icon={CirclePlay} label="Cần xác nhận publish" value={needsPublishConfirmation} hint="Gói chưa paste-back sẽ nằm ở trang Gói publish." />
+        <MetricSummaryCard icon={RefreshCw} label="Analytics cần sync" value={needsAnalyticsSync} hint="Dựa trên độ mới dữ liệu và trạng thái analytics chủ sở hữu." />
+        <MetricSummaryCard icon={AlertTriangle} label="Video cần recovery" value={needsRecovery} hint="Chỉ tính video có chẩn đoán hoặc việc tiếp theo là phục hồi." />
       </div>
       {query.data.length ? (
         <Panel className="overflow-x-auto p-0">
           <table className="w-full min-w-[980px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border text-left text-muted-foreground">
-                {["Tiêu đề", "Nền tảng", "Ngày publish", "Views", "Likes", "Comments", "CTR", "AVD", "Độ mới dữ liệu", "Owner analytics", ""].map((header) => (
+                {["Tiêu đề", "Nền tảng", "Ngày publish", "Views", "Likes", "Comments", "CTR", "AVD", "Độ mới dữ liệu", "Analytics chủ sở hữu", ""].map((header) => (
                   <th key={header} className="px-4 py-3 font-medium">{header}</th>
                 ))}
               </tr>
@@ -55,7 +53,7 @@ export function UploadedVideosView() {
               {query.data.map((video) => (
                 <tr key={video.id} className="border-b border-border/60">
                   <td className="px-4 py-3 font-medium">{video.title}</td>
-                  <td className="px-4 py-3">{video.platform}</td>
+                  <td className="px-4 py-3">{platformLabel(video.platform)}</td>
                   <td className="px-4 py-3">{new Date(video.published_at).toLocaleDateString("vi-VN")}</td>
                   <td className="px-4 py-3">{video.metrics.views ?? "Chưa có dữ liệu"}</td>
                   <td className="px-4 py-3">{video.metrics.likes ?? "Chưa có dữ liệu"}</td>
@@ -86,4 +84,15 @@ export function UploadedVideosView() {
       )}
     </div>
   );
+}
+
+function needsSync(value: string | null | undefined) {
+  return ["STALE", "UNKNOWN", "UNAVAILABLE", "NEEDS_AUTH", "FAILED", "NOT_CONFIGURED"].includes(String(value ?? "UNKNOWN").toUpperCase());
+}
+
+function platformLabel(value: string) {
+  return {
+    youtube: "YouTube",
+    YOUTUBE: "YouTube"
+  }[value] ?? "Nền tảng chưa xác định";
 }

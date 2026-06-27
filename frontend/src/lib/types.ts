@@ -160,6 +160,77 @@ export type ProviderOps = {
   safety_warnings: DashboardWarning[];
 };
 
+export type ProviderReadinessCheck = {
+  id?: string | null;
+  provider_key: string;
+  provider_type: string;
+  check_type: string;
+  check_state: string;
+  operator_summary: string;
+  next_action?: string | null;
+  reason_codes: string[];
+  technical_appendix: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type ProviderSummary = {
+  provider_key: string;
+  provider_name: string;
+  provider_type: string;
+  readiness_state: string;
+  status_label: string;
+  operator_summary: string;
+  next_action: string;
+  smoke_state?: string | null;
+  learning_authority?: string | null;
+  safe_config: Record<string, unknown>;
+  missing_env_keys: string[];
+  reason_codes: string[];
+  technical_appendix: Record<string, unknown>;
+};
+
+export type ProviderBudgetCard = {
+  key: string;
+  provider_name: string;
+  role: string;
+  configured_plan?: string | null;
+  configured_monthly_cap?: string | null;
+  budget_basis: string;
+  readiness_state: string;
+  missing_env_keys: string[];
+  note: string;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type IntegrationReadiness = {
+  generated_at: string;
+  snapshot_state: string;
+  latest_snapshot_id?: string | null;
+  provider_summaries: ProviderSummary[];
+  checks: ProviderReadinessCheck[];
+  blocking_items: Array<Record<string, unknown>>;
+  warning_items: Array<Record<string, unknown>>;
+  next_actions: Array<Record<string, unknown>>;
+  budget_cards: ProviderBudgetCard[];
+  security_summary: Record<string, unknown>;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type RealSmokeRun = {
+  id: string;
+  provider_key: string;
+  smoke_type: string;
+  run_state: string;
+  env_flags: Record<string, unknown>;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  result_summary?: string | null;
+  technical_appendix: Record<string, unknown>;
+  created_at: string;
+};
+
 export type LearningDecisionPayload = {
   action: "APPROVE" | "REJECT" | "REQUEST_MORE_EVIDENCE" | "SUPPRESS" | "EXPIRE";
   actor_role: string;

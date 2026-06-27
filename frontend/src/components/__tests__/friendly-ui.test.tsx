@@ -27,12 +27,15 @@ describe("friendly Vietnamese dashboard UI", () => {
   it("shows Vietnamese sidebar labels", () => {
     render(<AppShell><main>Trang thử</main></AppShell>);
 
-    expect(screen.getByText("Trung tâm điều hành")).toBeInTheDocument();
-    expect(screen.getByText("Không gian kênh")).toBeInTheDocument();
+    expect(screen.getByText("Trung tâm")).toBeInTheDocument();
+    expect(screen.getByText("Kênh")).toBeInTheDocument();
     expect(screen.getByText("Video đã upload")).toBeInTheDocument();
     expect(screen.getByText("Gói publish")).toBeInTheDocument();
+    expect(screen.getByText("Tệp Drive")).toBeInTheDocument();
+    expect(screen.getByText("Vận hành")).toBeInTheDocument();
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
     expect(screen.queryByText("Uploaded")).not.toBeInTheDocument();
+    expect(screen.queryByText("Không gian kênh")).not.toBeInTheDocument();
   });
 
   it("does not show raw enum labels as the primary badge text", () => {
@@ -40,5 +43,12 @@ describe("friendly Vietnamese dashboard UI", () => {
 
     expect(screen.getByText("Chờ người duyệt")).toBeInTheDocument();
     expect(screen.queryByText("READY_FOR_HUMAN_REVIEW")).not.toBeInTheDocument();
+  });
+
+  it("uses a safe Vietnamese fallback for unmapped backend enum labels", () => {
+    render(<StatusBadge value="SOME_NEW_BACKEND_ENUM" />);
+
+    expect(screen.getByText("Chưa có dữ liệu")).toBeInTheDocument();
+    expect(screen.queryByText("SOME_NEW_BACKEND_ENUM")).not.toBeInTheDocument();
   });
 });

@@ -3,8 +3,10 @@ import type {
   ChannelWorkspace,
   CommandCenter,
   DashboardQueues,
+  IntegrationReadiness,
   LearningDecisionPayload,
   ProviderOps,
+  RealSmokeRun,
   UploadedVideoDashboard,
   UploadedVideoListItem,
   AuthSession
@@ -35,7 +37,8 @@ export const queryKeys = {
   channelWorkspace: (channelId: string) => ["channel-workspace", channelId],
   uploadedVideos: ["uploaded-videos"],
   uploadedVideo: (uploadedVideoId: string) => ["uploaded-video", uploadedVideoId],
-  providerOps: ["provider-ops"]
+  providerOps: ["provider-ops"],
+  integrationsReadiness: ["integrations-readiness"]
 } as const;
 
 export function getCurrentUser() {
@@ -79,6 +82,18 @@ export function getUploadedVideoDashboard(uploadedVideoId: string) {
 
 export function getProviderOps() {
   return request<ProviderOps>("/providers/status");
+}
+
+export function getIntegrationsReadiness() {
+  return request<IntegrationReadiness>("/integrations/readiness");
+}
+
+export function runIntegrationsReadiness() {
+  return request<Record<string, unknown>>("/integrations/readiness/run", { method: "POST", body: JSON.stringify({}) });
+}
+
+export function runProviderSmoke(providerKey: string) {
+  return request<RealSmokeRun>(`/integrations/providers/${providerKey}/smoke`, { method: "POST", body: JSON.stringify({}) });
 }
 
 export function decideLearningCandidate(candidateId: string, payload: LearningDecisionPayload) {

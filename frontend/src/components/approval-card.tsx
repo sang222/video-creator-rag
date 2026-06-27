@@ -1,5 +1,6 @@
 import { Clock, FileText } from "lucide-react";
 
+import { FriendlyStatusBadge } from "@/components/friendly-status-badge";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -58,12 +59,17 @@ export function ApprovalCard({ item, onAction }: { item: ApprovalQueueItem; onAc
         <div className="flex flex-wrap gap-2">
           {item.allowed_actions.slice(0, 4).map((action) => (
             <Button key={action} type="button" variant="secondary" onClick={() => onAction?.(action)}>
-              {actionLabels[action] ?? action.toLowerCase().replaceAll("_", " ")}
+              {actionLabels[action] ?? "Xem chi tiết"}
             </Button>
           ))}
         </div>
       </div>
       <p className="mt-3 text-sm text-primary">{item.next_action}</p>
+      {item.freshness_label ? (
+        <div className="mt-3">
+          <FriendlyStatusBadge value={item.freshness_label} />
+        </div>
+      ) : null}
     </Panel>
   );
 }

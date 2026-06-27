@@ -11,16 +11,16 @@ import { useCurrentUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const nav = [
-  { href: "/", label: "Trung tâm điều hành", icon: Home },
-  { href: "/channels", label: "Không gian kênh", icon: Boxes },
+  { href: "/", label: "Trung tâm", icon: Home },
+  { href: "/channels", label: "Kênh", icon: Boxes },
   { href: "/queues", label: "Hàng chờ duyệt", icon: ListChecks },
   { href: "/projects", label: "Dự án", icon: GitBranch },
   { href: "/publishing", label: "Gói publish", icon: CirclePlay },
   { href: "/uploaded-videos", label: "Video đã upload", icon: Video },
-  { href: "/learning", label: "Bài học chờ duyệt", icon: Activity },
-  { href: "/media", label: "Tệp trên Google Drive", icon: Database },
-  { href: "/ops", label: "Trạng thái nhà cung cấp", icon: Gauge },
-  { href: "/settings", label: "Hồ sơ & chính sách", icon: Settings }
+  { href: "/learning", label: "Bài học", icon: Activity },
+  { href: "/media", label: "Tệp Drive", icon: Database },
+  { href: "/ops", label: "Vận hành", icon: Gauge },
+  { href: "/settings", label: "Cài đặt", icon: Settings }
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -50,15 +50,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const user = auth.session?.user;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-border bg-card/95 px-4 py-5 lg:block">
+    <div className="min-h-screen bg-background/95 text-foreground">
+      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-border bg-[#151821] px-4 py-5 lg:block">
         <div className="flex items-center gap-3 border-b border-border pb-5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm shadow-primary/20">
             <Siren size={20} aria-hidden="true" />
           </div>
           <div>
             <div className="text-xs font-semibold uppercase text-accent">VCOS</div>
-            <div className="text-lg font-semibold">Bảng điều hành</div>
+            <div className="text-lg font-semibold">Buồng lái vận hành</div>
           </div>
         </div>
         <nav className="mt-6 space-y-1">
@@ -69,8 +69,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex min-h-10 items-center gap-3 rounded-md px-3 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground",
-                  active && "bg-muted text-foreground"
+                  "flex min-h-10 items-center gap-3 rounded-md px-3 text-sm text-muted-foreground transition hover:bg-muted/80 hover:text-foreground",
+                  active && "border border-border bg-muted text-foreground shadow-sm shadow-black/10"
                 )}
               >
                 <item.icon size={17} aria-hidden="true" />
@@ -81,15 +81,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
       </aside>
       <main className="lg:pl-72">
-        <header className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
+        <header className="sticky top-0 z-20 border-b border-border bg-background/90 px-4 py-3 backdrop-blur md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xs uppercase text-muted-foreground">Trung tâm vận hành thủ công</div>
+              <div className="text-xs uppercase text-muted-foreground">Buồng lái vận hành thủ công</div>
               <div className="text-lg font-semibold">Bảng điều hành VCOS</div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <FriendlyStatusBadge value="NO_AUTO_PUBLISH" />
-              <span className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">Chỉ CTA Google Drive</span>
+              <span className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">Chỉ mở bằng Google Drive</span>
               <span className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
                 Vai trò hiện tại: {friendlyStatusLabel(user?.role ?? "READ_ONLY")}
               </span>

@@ -4,19 +4,19 @@
 
 :root {
   color-scheme: dark;
-  --background: 210 13% 7%;
-  --foreground: 42 18% 94%;
-  --muted: 205 12% 15%;
-  --muted-foreground: 215 9% 68%;
-  --border: 205 10% 24%;
-  --card: 210 12% 11%;
-  --card-foreground: 42 18% 94%;
-  --primary: 166 67% 46%;
-  --primary-foreground: 210 13% 7%;
-  --accent: 48 78% 61%;
-  --accent-foreground: 210 13% 7%;
-  --destructive: 354 71% 59%;
-  --warning: 38 88% 57%;
+  --background: 225 17% 7%;
+  --foreground: 220 14% 96%;
+  --muted: 222 22% 17%;
+  --muted-foreground: 216 10% 67%;
+  --border: 224 21% 21%;
+  --card: 224 22% 14%;
+  --card-foreground: 220 14% 96%;
+  --primary: 168 68% 47%;
+  --primary-foreground: 225 17% 7%;
+  --accent: 43 81% 63%;
+  --accent-foreground: 225 17% 7%;
+  --destructive: 354 67% 61%;
+  --warning: 39 79% 59%;
   --success: 151 55% 47%;
 }
 
@@ -26,11 +26,17 @@
 
 body {
   margin: 0;
-  background: hsl(var(--background));
+  background:
+    radial-gradient(circle at top left, rgba(45, 212, 191, 0.08), transparent 30rem),
+    hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0;
   text-rendering: geometricPrecision;
+}
+
+html {
+  background: hsl(var(--background));
 }
 
 a {
@@ -48,4 +54,18 @@ textarea {
 ::selection {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border: 3px solid hsl(var(--background));
+  border-radius: 999px;
 }

@@ -1,6 +1,6 @@
 import { ExternalLink, HardDrive } from "lucide-react";
 
-import { StatusBadge } from "@/components/status-badge";
+import { FriendlyStatusBadge } from "@/components/friendly-status-badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import type { GoogleDriveMedia } from "@/lib/types";
@@ -14,20 +14,20 @@ export function GoogleDriveMediaCard({ media }: { media: GoogleDriveMedia }) {
             <HardDrive size={18} />
           </div>
           <div>
-            <div className="text-sm font-semibold">{media.media_type.replaceAll("_", " ").toLowerCase()}</div>
+            <div className="text-sm font-semibold">{mediaTypeLabel(media.media_type)}</div>
             <div className="text-xs text-muted-foreground">Lưu trên Google Drive</div>
           </div>
         </div>
-        <StatusBadge value={media.status} />
+        <FriendlyStatusBadge value={media.status} />
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-muted-foreground">Xác minh</dt>
-          <dd><StatusBadge value={media.verification_status} /></dd>
+          <dd><FriendlyStatusBadge value={media.verification_status} /></dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Dọn local</dt>
-          <dd><StatusBadge value={media.cleanup_status} /></dd>
+          <dd><FriendlyStatusBadge value={media.cleanup_status} /></dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Dung lượng</dt>
@@ -42,9 +42,19 @@ export function GoogleDriveMediaCard({ media }: { media: GoogleDriveMedia }) {
       <Button asChild className="mt-4 w-full" variant="primary">
         <a href={media.web_view_link} target="_blank" rel="noreferrer">
           <ExternalLink size={16} />
-          {media.cta_label}
+          Mở trên Google Drive
         </a>
       </Button>
     </Panel>
   );
+}
+
+function mediaTypeLabel(value: string) {
+  return {
+    LONG_FORM_FINAL: "Video dài hoàn chỉnh",
+    SHORT_FINAL: "Video ngắn",
+    THUMBNAIL: "Thumbnail",
+    CAPTION_FILE: "Tệp phụ đề",
+    SOURCE_ASSET: "Tệp nguồn"
+  }[value.toUpperCase()] ?? "Tệp media";
 }

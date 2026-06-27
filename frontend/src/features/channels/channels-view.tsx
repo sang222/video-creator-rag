@@ -56,16 +56,16 @@ export function ChannelsView() {
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
-        title="Không gian kênh"
-        subtitle="Lifecycle do người vận hành quyết định; health chỉ quan sát và cảnh báo, không tự pause/deactivate kênh."
-        breadcrumbs={[{ label: "Trung tâm điều hành", href: "/" }, { label: "Không gian kênh" }]}
+        title="Kênh"
+        subtitle="Người vận hành quyết định vòng đời kênh; trạng thái sức khỏe chỉ dùng để quan sát và cảnh báo."
+        breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Kênh" }]}
         primaryAction={<Button asChild variant="primary"><Link href="/channels/new">Tạo kênh</Link></Button>}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricSummaryCard icon={Boxes} label="Tổng số kênh" value={query.data.length} hint="Mỗi kênh giữ policy snapshot riêng." />
-        <MetricSummaryCard icon={CheckCircle2} label="Kênh đang hoạt động" value={activeCount} hint="Daily generation chỉ chạy khi lifecycle ACTIVE." />
-        <MetricSummaryCard icon={PauseCircle} label="Kênh tạm dừng/ngừng" value={pausedCount} hint="Human có thể re-activate khi đủ điều kiện." />
-        <MetricSummaryCard icon={ShieldAlert} label="Kênh cần review" value={reviewCount} hint="Mở workspace để xem blocker và next action." />
+        <MetricSummaryCard icon={Boxes} label="Tổng số kênh" value={query.data.length} hint="Mỗi kênh giữ snapshot chính sách riêng." />
+        <MetricSummaryCard icon={CheckCircle2} label="Kênh đang hoạt động" value={activeCount} hint="Luồng tạo hằng ngày chỉ chạy khi vòng đời là Đang hoạt động." />
+        <MetricSummaryCard icon={PauseCircle} label="Kênh tạm dừng/ngừng" value={pausedCount} hint="Người vận hành có thể bật lại khi đủ điều kiện." />
+        <MetricSummaryCard icon={ShieldAlert} label="Kênh cần xem lại" value={reviewCount} hint="Mở kênh để xem blocker và việc tiếp theo." />
       </div>
       {query.data.length ? (
         <Panel className="overflow-x-auto p-0">
@@ -97,7 +97,7 @@ export function ChannelsView() {
       ) : (
         <EmptyStateCard
           title="Chưa có kênh"
-          description="Tạo kênh đầu tiên, compile policy snapshot, rồi human activate trước khi daily generation được phép chạy."
+          description="Tạo kênh đầu tiên, sinh snapshot chính sách, rồi người vận hành bật kênh trước khi daily generation được phép chạy."
           actions={[{ label: "Tạo kênh", href: "/channels/new", variant: "primary" }]}
         />
       )}

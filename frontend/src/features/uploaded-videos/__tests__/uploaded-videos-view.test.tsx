@@ -28,7 +28,10 @@ describe("UploadedVideosView", () => {
     expect(screen.getByText(/Sau khi bạn publish video thủ công lên YouTube/)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Đi tới gói publish" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Xem hướng dẫn paste-back" })).toBeInTheDocument();
-    expect(screen.getByText("Video đã nhập paste-back")).toBeInTheDocument();
+    expect(screen.getByText("Tổng video đã upload")).toBeInTheDocument();
+    expect(screen.getByText("Cần xác nhận publish")).toBeInTheDocument();
+    expect(screen.getByText("Analytics cần sync")).toBeInTheDocument();
+    expect(screen.getByText("Video cần recovery")).toBeInTheDocument();
     expect(screen.queryByText("No uploaded videos")).not.toBeInTheDocument();
     expect(screen.queryByText("Uploaded Videos")).not.toBeInTheDocument();
   });

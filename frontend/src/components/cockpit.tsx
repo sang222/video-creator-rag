@@ -90,7 +90,7 @@ export function ActionHintCard({
   icon?: LucideIcon;
 }) {
   const content = (
-    <Panel className="min-h-32 transition hover:border-primary/60">
+    <Panel className="min-h-32 transition hover:border-primary/60 hover:bg-muted/35">
       <div className="flex items-start gap-3">
         <Icon aria-hidden="true" className="mt-0.5 text-primary" size={20} />
         <div className="min-w-0">
@@ -107,6 +107,15 @@ export function ActionHintCard({
     </Panel>
   );
   return href ? <Link href={href}>{content}</Link> : content;
+}
+
+export function TechnicalAppendix({ children }: { children: ReactNode }) {
+  return (
+    <details className="rounded-md border border-border/80 bg-background/35 p-3 text-sm">
+      <summary className="cursor-pointer text-muted-foreground">Phụ lục kỹ thuật</summary>
+      <div className="mt-3 space-y-2 text-muted-foreground">{children}</div>
+    </details>
+  );
 }
 
 export function EmptyStateCard({

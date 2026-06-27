@@ -8,6 +8,18 @@ const labels: Record<string, string> = {
   REJECTED: "Đã từ chối",
   STALE: "Dữ liệu cũ",
   UNKNOWN: "Chưa có dữ liệu",
+  READY: "Đã sẵn sàng",
+  PARTIAL: "Cần cấu hình",
+  PASS: "Đã sẵn sàng",
+  WARNING: "Cần cấu hình",
+  PENDING: "Đang chờ",
+  QUEUED: "Đang chờ",
+  IN_PROGRESS: "Đang xử lý",
+  COMPLETED: "Hoàn tất",
+  DONE: "Hoàn tất",
+  SUCCESS: "Thành công",
+  ERROR: "Có lỗi",
+  SKIPPED: "Đã bỏ qua kiểm tra",
   UNAVAILABLE: "Không khả dụng",
   NOT_AVAILABLE: "Không khả dụng",
   FRESH: "Dữ liệu mới",
@@ -20,7 +32,6 @@ const labels: Record<string, string> = {
   CLEANED_LOCAL: "Đã dọn file local",
   CLEANED: "Đã dọn file local",
   ACTIVE: "Đang hoạt động",
-  READY: "Sẵn sàng",
   DRAFT: "Bản nháp",
   PAUSED: "Đang tạm dừng",
   DEACTIVATED: "Đã ngừng",
@@ -40,14 +51,21 @@ const labels: Record<string, string> = {
   HARD_RULE: "Quy tắc bắt buộc",
   HUMAN_REQUIRED: "Cần người vận hành",
   SEE_EVIDENCE: "Xem bằng chứng",
-  SEE_DIAGNOSTIC: "Xem diagnostic",
+  SEE_DIAGNOSTIC: "Xem chẩn đoán",
   SYSTEM_RECORDED: "Hệ thống đã ghi",
   CONFIGURED: "Đã cấu hình",
+  READY_FOR_SMOKE: "Sẵn sàng kiểm tra",
+  NEEDS_CREDENTIAL: "Thiếu thông tin kết nối",
+  NEEDS_CONFIG: "Cần cấu hình",
   MISSING_REQUIRED_GAP: "Thiếu cấu hình bắt buộc",
+  REQUIRED_GAP: "Thiếu renderer",
+  SMOKE_PASS: "Kiểm tra thành công",
+  SMOKE_FAILED: "Kiểm tra thất bại",
+  SMOKE_SKIPPED: "Đã bỏ qua kiểm tra",
   GOOGLE_DRIVE_READY: "Google Drive sẵn sàng",
   NO_CLOUD_MEDIA: "Chưa có file Drive",
-  NO_PROJECTS: "Chưa có project",
-  PROJECTS_ACTIVE: "Có project",
+  NO_PROJECTS: "Chưa có dự án",
+  PROJECTS_ACTIVE: "Có dự án",
   NO_HANDOFFS: "Chưa có gói publish",
   HANDOFFS_AVAILABLE: "Có gói publish",
   NO_LEARNING_REVIEW: "Chưa có bài học",
@@ -64,32 +82,48 @@ const labels: Record<string, string> = {
   DISABLED: "Đang tắt",
   CONFIGURED_BY_CATALOG: "Cấu hình bằng catalog",
   NO_AUTO_PUBLISH: "Không tự publish",
+  NO_RAW_LOG: "Không hiện log thô",
   DAILY_ALLOWED: "Được tạo daily",
-  DAILY_BLOCKED: "Daily đang bị chặn",
+  DAILY_BLOCKED: "Tạo hằng ngày đang bị chặn",
   READ_ONLY: "Chỉ đọc",
+  READ_ONLY_OBSERVER: "Chỉ đọc",
   OWNER_ADMIN: "Chủ sở hữu/admin",
   CHANNEL_MANAGER: "Quản lý kênh",
-  PRODUCER: "Producer",
-  REVIEWER: "Reviewer",
+  PRODUCER: "Nhà sản xuất",
+  REVIEWER: "Người duyệt",
   PUBLISHER: "Người xác nhận publish",
-  ANALYST: "Analyst",
-  PROCUREMENT_OPERATOR: "Ops mua sắm",
+  ANALYST: "Người phân tích",
+  PROCUREMENT_OPERATOR: "Vận hành mua sắm",
   COMPLIANCE_REVIEWER: "Duyệt compliance",
-  LEARNING_REVIEWER: "Duyệt bài học"
+  LEARNING_REVIEWER: "Duyệt bài học",
+  SIZE_VERIFIED: "Đã xác minh dung lượng",
+  SIZE_MISMATCH: "Dung lượng lệch",
+  NOT_VERIFIED: "Chưa xác minh",
+  UPLOADED: "Đã upload",
+  UPLOAD_PENDING: "Chờ upload thủ công",
+  PUBLISHED: "Đã publish",
+  MANUAL_CONFIRMATION_PENDING: "Chờ xác nhận thủ công",
+  PUBLIC: "Công khai",
+  PRIVATE: "Riêng tư",
+  UNLISTED: "Không công khai",
+  YOUTUBE: "YouTube"
 };
 
 function toneFor(value: string) {
   const normalized = value.toUpperCase();
-  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "INSIDE"].includes(normalized)) return "success";
-  if (["PAUSED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW"].includes(normalized)) return "warning";
-  if (["BLOCKED", "BLOCK", "FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE"].includes(normalized)) return "danger";
+  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED"].includes(normalized)) return "success";
+  if (["PAUSED", "PARTIAL", "WARNING", "SKIPPED", "SMOKE_SKIPPED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_CREDENTIAL", "NEEDS_CONFIG", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW", "PENDING", "QUEUED", "IN_PROGRESS", "UPLOAD_PENDING", "MANUAL_CONFIRMATION_PENDING"].includes(normalized)) return "warning";
+  if (["BLOCKED", "BLOCK", "FAILED", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH"].includes(normalized)) return "danger";
   if (["WEAK", "STRONG", "OBSERVING", "CONFIGURED"].includes(normalized)) return "info";
   return "neutral";
 }
 
 export function friendlyStatusLabel(value: string | number | null | undefined) {
   const raw = value === null || value === undefined || value === "" ? "UNKNOWN" : String(value);
-  return labels[raw.toUpperCase()] ?? raw.replaceAll("_", " ").toLowerCase();
+  const mapped = labels[raw.toUpperCase()];
+  if (mapped) return mapped;
+  if (/^[A-Z0-9_:-]+$/.test(raw) || raw.includes("_")) return labels.UNKNOWN;
+  return raw;
 }
 
 export function FriendlyStatusBadge({ value }: { value: string | number | null | undefined }) {

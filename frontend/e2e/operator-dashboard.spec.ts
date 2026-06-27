@@ -1,10 +1,27 @@
 import { expect, test } from "@playwright/test";
 
+const dashboardOrigin =
+  process.env.VCOS_DASHBOARD_E2E_BASE_URL ?? `http://127.0.0.1:${process.env.VCOS_DASHBOARD_E2E_PORT ?? "3000"}`;
+
+const corsHeaders = {
+  "access-control-allow-origin": dashboardOrigin,
+  "access-control-allow-credentials": "true",
+  "access-control-allow-headers": "content-type",
+  "access-control-allow-methods": "GET,POST,OPTIONS"
+};
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/auth/me", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: corsHeaders });
+      return;
+    }
     await route.fulfill({
+      headers: corsHeaders,
       json: {
         authenticated: true,
+        auth_enabled: true,
+        auth_mode: "local_password",
         user: {
           id: "operator-e2e",
           email: "operator@local.vcos",
@@ -16,7 +33,12 @@ test.beforeEach(async ({ page }) => {
   });
 
   await page.route("**/dashboard/command-center", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: corsHeaders });
+      return;
+    }
     await route.fulfill({
+      headers: corsHeaders,
       json: {
         generated_at: new Date().toISOString(),
         company_id: null,

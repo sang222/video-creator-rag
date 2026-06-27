@@ -56,8 +56,8 @@ export function ChannelInitWizard() {
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
         title="Tạo kênh"
-        subtitle="Chỉ dùng cấu hình do người vận hành nhập. Không có AI upgrade suggestion."
-        breadcrumbs={[{ label: "Không gian kênh", href: "/channels" }, { label: "Tạo kênh" }]}
+        subtitle="Chỉ dùng cấu hình do người vận hành nhập. Không tự gợi ý nâng cấp bằng AI."
+        breadcrumbs={[{ label: "Kênh", href: "/channels" }, { label: "Tạo kênh" }]}
       />
       <Panel>
         <form className="grid gap-5 md:grid-cols-2" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
@@ -101,9 +101,9 @@ export function ChannelInitWizard() {
           <div className="md:col-span-2 flex flex-wrap items-center gap-3">
             <Button type="submit" variant="primary" disabled={mutation.isPending}>
               <CheckCircle2 size={16} />
-              Tạo, compile, activate
+              Tạo và kích hoạt
             </Button>
-            <StatusBadge value="Cấu hình do human nhập" />
+            <StatusBadge value="Cấu hình do người vận hành nhập" />
           </div>
         </form>
       </Panel>
@@ -111,7 +111,7 @@ export function ChannelInitWizard() {
       {mutation.isSuccess ? (
         <Panel className="border-emerald-500/40">
           <h2 className="text-base font-semibold">Channel này đã sẵn sàng sản xuất video.</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Profile và policy snapshot đã được tạo từ thao tác của human operator.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Hồ sơ và snapshot chính sách đã được tạo từ thao tác của người vận hành.</p>
         </Panel>
       ) : null}
     </div>

@@ -33,16 +33,17 @@ export function UploadedVideoDetail({ uploadedVideoId }: { uploadedVideoId: stri
   if (!query.data) return <div className="p-4 md:p-8"><LoadingState label="Đang tải chi tiết video" /></div>;
 
   const data = query.data;
+  const videoTitle = String(data.uploaded_video.title ?? "Chi tiết video đã upload");
 
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
-        title={String(data.uploaded_video.platform_video_id)}
-        subtitle={String(data.uploaded_video.video_url)}
+        title={videoTitle}
+        subtitle="Theo dõi video đã được nhập paste-back sau khi người vận hành publish thủ công trên YouTube."
         breadcrumbs={[{ label: "Video đã upload", href: "/uploaded-videos" }, { label: "Chi tiết video" }]}
       />
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricSummaryCard label="Ngày publish thực tế" value={formatDate(data.uploaded_video.published_at)} hint="Thời điểm do human nhập sau khi upload thủ công." />
+        <MetricSummaryCard label="Ngày publish thực tế" value={formatDate(data.uploaded_video.published_at)} hint="Thời điểm do người vận hành nhập sau khi upload thủ công." />
         <MetricSummaryCard label="Khung giờ publish đã cấu hình" value={formatDate(data.publish_check.configured_publish_window)} hint="Không phải khuyến nghị algorithm." />
         <MetricSummaryCard label="Múi giờ kênh" value={String(data.publish_check.channel_timezone ?? "Chưa cấu hình")} hint="Dùng IANA timezone." />
         <MetricSummaryCard label="Giờ tương ứng của operator" value={formatDate(data.publish_check.operator_local_time)} hint="Human vẫn quyết định giờ publish thực tế." />
@@ -56,7 +57,7 @@ export function UploadedVideoDetail({ uploadedVideoId }: { uploadedVideoId: stri
           ["localization_packages", "configured_publish_window", "operator_local_time", "actual_published_at", "channel_timezone", "publish_timing_summary"].includes(key) ? null : (
           <Panel key={key}>
             <div className="text-sm text-muted-foreground">{publishCheckLabel(key)}</div>
-            <div className="mt-3"><StatusBadge value={String(value)} /></div>
+            <div className="mt-3"><StatusBadge value={publishCheckStatus(value)} /></div>
           </Panel>
           )
         ))}
@@ -70,7 +71,7 @@ export function UploadedVideoDetail({ uploadedVideoId }: { uploadedVideoId: stri
         </Panel>
       </section>
       <section>
-        <h2 className="mb-4 text-base font-semibold">Tệp trên Google Drive</h2>
+        <h2 className="mb-4 text-base font-semibold">Tệp Drive</h2>
         {data.media.length ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {data.media.map((media) => <GoogleDriveMediaCard key={media.id} media={media} />)}
@@ -85,7 +86,7 @@ export function UploadedVideoDetail({ uploadedVideoId }: { uploadedVideoId: stri
           {data.diagnostics.length || data.recovery_proposals.length ? (
             <div className="mt-4 space-y-3 text-sm text-muted-foreground">
               {[...data.diagnostics, ...data.recovery_proposals].map((item, index) => (
-                <div key={index} className="rounded-md border border-border p-3">{String(item.operator_summary ?? item.primary_status ?? item.proposal_type)}</div>
+                <div key={index} className="rounded-md border border-border p-3">{String(item.operator_summary ?? "Cần xem chẩn đoán")}</div>
               ))}
             </div>
           ) : (
@@ -134,7 +135,13 @@ function publishCheckLabel(key: string) {
     captions: "Caption",
     visibility: "Visibility",
     published_inside_configured_window: "Trong/ngoài khung giờ cấu hình"
-  }[key] ?? key.replaceAll("_", " ");
+  }[key] ?? "Mục kiểm tra";
+}
+
+function publishCheckStatus(value: unknown) {
+  if (value === true) return "VERIFIED";
+  if (value === false) return "NEEDS_HUMAN_REVIEW";
+  return String(value ?? "UNKNOWN");
 }
 
 function formatDate(value: unknown) {
@@ -146,5 +153,5 @@ function localizationSummary(value: unknown) {
   const data = value as { subtitle_languages?: string[]; metadata_languages?: string[] } | undefined;
   const subtitles = data?.subtitle_languages?.length ? data.subtitle_languages.join(", ") : "chưa có";
   const metadata = data?.metadata_languages?.length ? data.metadata_languages.join(", ") : "chưa có";
-  return `Phụ đề: ${subtitles}. Metadata theo ngôn ngữ: ${metadata}. Không re-upload video này.`;
+  return `Phụ đề: ${subtitles}. Metadata theo ngôn ngữ: ${metadata}. Không reupload video này.`;
 }

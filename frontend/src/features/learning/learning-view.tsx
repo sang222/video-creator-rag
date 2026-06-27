@@ -4,9 +4,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { BookOpenCheck, Clock, ShieldAlert } from "lucide-react";
 
 import { ApprovalCard } from "@/components/approval-card";
-import { EmptyStateCard, PageHeader } from "@/components/cockpit";
+import { EmptyStateCard, MetricSummaryCard, PageHeader } from "@/components/cockpit";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -47,14 +48,21 @@ export function LearningView() {
   if (!query.data) return <div className="p-4 md:p-8"><LoadingState label="Đang tải bài học chờ duyệt" /></div>;
 
   const learningItems = query.data.items.filter((item) => item.entity_type === "learning_candidate");
+  const highPriorityCount = learningItems.filter((item) => ["HIGH", "CRITICAL"].includes(item.priority)).length;
+  const needsEvidenceCount = learningItems.filter((item) => item.allowed_actions.includes("REQUEST_MORE_EVIDENCE") || item.confidence_label === "WEAK").length;
 
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
-        title="Bài học chờ duyệt"
-        subtitle="Duyệt bài học chỉ tạo playbook entry có audit. VCOS không tự đổi hồ sơ, policy snapshot hoặc cấu hình kênh."
-        breadcrumbs={[{ label: "Trung tâm điều hành", href: "/" }, { label: "Bài học chờ duyệt" }]}
+        title="Bài học"
+        subtitle="Duyệt bài học chỉ tạo mục playbook có audit. VCOS không tự đổi hồ sơ, snapshot chính sách hoặc cấu hình kênh."
+        breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Bài học" }]}
       />
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricSummaryCard icon={BookOpenCheck} label="Bài học chờ duyệt" value={learningItems.length} hint="Chỉ tính bài học đang nằm trong hàng chờ." />
+        <MetricSummaryCard icon={ShieldAlert} label="Cần thêm bằng chứng" value={needsEvidenceCount} hint="Ưu tiên xem gói bằng chứng trước khi ghi quyết định." />
+        <MetricSummaryCard icon={Clock} label="Ưu tiên cao" value={highPriorityCount} hint="Các bài học có độ ưu tiên cao hoặc khẩn cấp." />
+      </div>
       <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
         <div className="space-y-4">
           {learningItems.length ? (
@@ -71,11 +79,15 @@ export function LearningView() {
               />
             ))
           ) : (
-            <EmptyStateCard title="Chưa có bài học chờ duyệt" description="Bài học mới sẽ xuất hiện khi M10 tạo queue item có bằng chứng. Khi có dữ liệu, hãy xem evidence bundle trước khi duyệt." />
+            <EmptyStateCard
+              title="Chưa có bài học chờ duyệt"
+              description="Bài học mới sẽ xuất hiện khi backend tạo item có bằng chứng. Khi có dữ liệu, hãy xem gói bằng chứng trước khi duyệt."
+              actions={[{ label: "Về Trung tâm", href: "/" }]}
+            />
           )}
         </div>
         <Panel>
-          <h2 className="text-base font-semibold">Quyết định</h2>
+          <h2 className="text-base font-semibold">Ghi quyết định bài học</h2>
           <form className="mt-4 space-y-4" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
             <label className="block text-sm">
               <span className="mb-2 block text-muted-foreground">ID bài học</span>
