@@ -18,7 +18,6 @@ from app.contracts.ops import (
     DeadLetterJobCreate,
     ManualActionCreate,
     OpsIncidentCreate,
-    ProviderAttemptMockRequest,
     ProviderRegistryEntryCreate,
     QuotaAccountCreate,
     QuotaEventRequest,
@@ -45,85 +44,9 @@ from app.db.models import (
     RetryPolicy,
     SystemHealthSnapshot,
 )
-from app.providers.mock import run_mock_contract
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 
-
-MOCK_PROVIDER_SEEDS = [
-    ProviderRegistryEntryCreate(
-        provider_key="mock_llm",
-        provider_name="Mock LLM Provider",
-        provider_type="LLM",
-        status="ACTIVE",
-        capability_blob={"supports_streaming": False, "supports_json_mode": True},
-        policy_fit_blob={"mock_only": True, "production_enabled": False},
-        cost_model_blob={"unit": "TOKENS", "mock_cost_usd": 0},
-        quota_model_blob={"unit": "REQUESTS", "mock_limit": 1000},
-        retry_policy_blob={"max_attempts": 2, "retryable_error_codes": ["PROVIDER_TIMEOUT", "RETRYABLE_PROVIDER_ERROR"]},
-        metadata={"mock": True},
-    ),
-    ProviderRegistryEntryCreate(
-        provider_key="mock_tts",
-        provider_name="Mock TTS Provider",
-        provider_type="TTS",
-        status="ACTIVE",
-        capability_blob={"supports_tts": True, "audio_rights_risk_class": "mock"},
-        policy_fit_blob={"mock_only": True, "production_enabled": False},
-        cost_model_blob={"unit": "SECONDS", "mock_cost_usd": 0},
-        quota_model_blob={"unit": "REQUESTS", "mock_limit": 1000},
-        retry_policy_blob={"max_attempts": 2},
-        metadata={"mock": True},
-    ),
-    ProviderRegistryEntryCreate(
-        provider_key="mock_media",
-        provider_name="Mock Media Provider",
-        provider_type="MEDIA",
-        status="ACTIVE",
-        capability_blob={"preserves_metadata": True, "license_evidence_required": True},
-        policy_fit_blob={"mock_only": True, "production_enabled": False},
-        cost_model_blob={"unit": "REQUESTS", "mock_cost_usd": 0},
-        quota_model_blob={"unit": "REQUESTS", "mock_limit": 1000},
-        retry_policy_blob={"max_attempts": 2},
-        metadata={"mock": True},
-    ),
-    ProviderRegistryEntryCreate(
-        provider_key="mock_storage",
-        provider_name="Mock Storage Provider",
-        provider_type="STORAGE",
-        status="ACTIVE",
-        capability_blob={"preserves_metadata": True},
-        policy_fit_blob={"mock_only": True, "production_enabled": False},
-        cost_model_blob={"unit": "BYTES", "mock_cost_usd": 0},
-        quota_model_blob={"unit": "BYTES", "mock_limit": 1048576},
-        retry_policy_blob={"max_attempts": 2},
-        metadata={"mock": True},
-    ),
-    ProviderRegistryEntryCreate(
-        provider_key="mock_platform",
-        provider_name="Mock Platform Provider",
-        provider_type="PLATFORM",
-        status="ACTIVE",
-        capability_blob={"commercial_use_declared": True, "provenance_fidelity": "mock"},
-        policy_fit_blob={"mock_only": True, "production_enabled": False},
-        cost_model_blob={"unit": "REQUESTS", "mock_cost_usd": 0},
-        quota_model_blob={"unit": "REQUESTS", "mock_limit": 1000},
-        retry_policy_blob={"max_attempts": 2},
-        metadata={"mock": True},
-    ),
-    ProviderRegistryEntryCreate(
-        provider_key="mock_analytics",
-        provider_name="Mock Analytics Provider",
-        provider_type="ANALYTICS",
-        status="ACTIVE",
-        capability_blob={"metrics_fixture_only": True},
-        policy_fit_blob={"mock_only": True, "production_enabled": False},
-        cost_model_blob={"unit": "REQUESTS", "mock_cost_usd": 0},
-        quota_model_blob={"unit": "REQUESTS", "mock_limit": 1000},
-        retry_policy_blob={"max_attempts": 2},
-        metadata={"mock": True},
-    ),
-]
 
 SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
 RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_")
@@ -164,14 +87,7 @@ class ProviderRegistryService:
         return entry
 
     def seed_mock_providers(self) -> list[ProviderRegistryEntry]:
-        records: list[ProviderRegistryEntry] = []
-        for seed in MOCK_PROVIDER_SEEDS:
-            existing = self.get_entry(seed.provider_key)
-            if existing is None:
-                records.append(self.create_entry(data=seed, correlation_id="m4-provider-registry-seed"))
-            else:
-                records.append(existing)
-        return records
+        raise ValidationFailureError("Runtime mock providers were removed from production. Use tests/fakes only.")
 
     def get_entry(self, provider_key: str) -> ProviderRegistryEntry | None:
         return self.session.scalars(select(ProviderRegistryEntry).where(ProviderRegistryEntry.provider_key == provider_key)).one_or_none()
@@ -530,18 +446,21 @@ class ProviderHealthService:
 
     def check_provider(self, *, provider_key: str, mode: str = "success", next_action: str | None = None, metadata: dict[str, Any] | None = None) -> ProviderHealthSnapshot:
         entry = ProviderRegistryService(self.session).require_entry(provider_key)
-        response = run_mock_contract(provider_key, operation_key="health_check", mode=mode)
-        health_state, reasons, action = _provider_health_from_response(response, next_action)
+        if provider_key.startswith("mock_"):
+            raise ValidationFailureError("Runtime mock providers were removed from production. Use tests/fakes only.")
+        health_state = "UNKNOWN" if entry.status in {"ACTIVE", "EXPERIMENTAL"} else "UNAVAILABLE"
+        reasons = ["PROVIDER_HEALTH_NOT_CHECKED"] if health_state == "UNKNOWN" else ["PROVIDER_DISABLED"]
+        action = next_action or "Run provider-specific readiness checks before production execution."
         snapshot = ProviderHealthSnapshot(
             provider_key=provider_key,
             provider_type=entry.provider_type,
             health_state=health_state,
-            latency_ms=response.latency_ms,
-            error_rate=Decimal("0") if response.ok else Decimal("1"),
-            quota_state="EXHAUSTED" if health_state == "QUOTA_EXHAUSTED" else None,
+            latency_ms=None,
+            error_rate=None,
+            quota_state=None,
             reason_codes=reasons,
             next_action=action,
-            metadata_=metadata or {"mock": True},
+            metadata_=metadata or {"provider_call": False},
         )
         self.session.add(snapshot)
         self.session.flush()
@@ -703,70 +622,8 @@ class RetryOpsService:
         )
         return policy
 
-    def record_mock_attempt(self, *, data: ProviderAttemptMockRequest, correlation_id: str = "m4-provider-attempt") -> ProviderAttempt:
-        ProviderRegistryService(self.session).require_entry(data.provider_key)
-        started = utc_now()
-        response = run_mock_contract(data.provider_key, operation_key=data.operation_key, mode=data.mode)
-        classification = _classify_attempt(response, data.mode)
-        attempt = ProviderAttempt(
-            provider_key=data.provider_key,
-            operation_key=data.operation_key,
-            target_type=data.target_type,
-            target_id=data.target_id,
-            attempt_number=data.attempt_number,
-            status=classification.status,
-            error_code=classification.error_code,
-            error_message_redacted=classification.error_message_redacted,
-            started_at=started,
-            finished_at=utc_now(),
-            latency_ms=response.latency_ms,
-            metadata_={"mock": True, "output": response.output if response.ok else {}, **data.metadata},
-        )
-        self.session.add(attempt)
-        self.session.flush()
-        _record_ops_event(
-            self.session,
-            event_type="provider_attempt.created",
-            aggregate_type="provider_attempt",
-            aggregate_id=attempt.id,
-            target_type="provider_attempt",
-            target_id=attempt.id,
-            correlation_id=correlation_id,
-            payload={
-                "provider_key": attempt.provider_key,
-                "operation_key": attempt.operation_key,
-                "status": attempt.status,
-                "error_code": attempt.error_code,
-                "attempt_number": attempt.attempt_number,
-            },
-        )
-        if attempt.status == "CIRCUIT_OPEN":
-            OpsIncidentService(self.session).create_incident(
-                data=OpsIncidentCreate(
-                    incident_type="PROVIDER_OUTAGE",
-                    severity="ERROR",
-                    impacted_refs=[{"type": "provider", "provider_key": attempt.provider_key}],
-                    reason_codes=["CIRCUIT_BREAKER_OPEN"],
-                    next_action="Investigate provider circuit breaker state.",
-                ),
-                correlation_id="m4-provider-attempt-incident",
-            )
-        if attempt.status == "RETRYABLE_FAILURE" and data.attempt_number >= self._max_attempts(data.provider_key):
-            DeadLetterService(self.session).create_job(
-                data=DeadLetterJobCreate(
-                    queue_name="provider_attempts",
-                    job_type=data.operation_key,
-                    target_type=data.target_type or "provider",
-                    target_id=data.target_id,
-                    fail_count=data.attempt_number,
-                    replay_state="REPLAYABLE",
-                    reason_code="MAX_RETRY_EXCEEDED",
-                    next_action="Review provider attempt and replay when safe.",
-                    metadata={"provider_key": data.provider_key, "attempt_id": str(attempt.id)},
-                ),
-                correlation_id="m4-provider-attempt-dead-letter",
-            )
-        return attempt
+    def record_mock_attempt(self, *args: Any, **kwargs: Any) -> ProviderAttempt:
+        raise ValidationFailureError("Runtime mock provider attempts were removed from production. Use tests/fakes only.")
 
     def get_attempt(self, attempt_id: uuid.UUID) -> ProviderAttempt | None:
         return self.session.get(ProviderAttempt, attempt_id)

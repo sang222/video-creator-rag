@@ -17,5 +17,3 @@ items:
     description: Fallback-only provider role.
   - key: AVOIDED
     description: Avoided role in current mode.
-  - key: MOCK
-    description: Mock/test role only.

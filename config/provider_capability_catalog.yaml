@@ -13,5 +13,3 @@ items:
     description: Provider could support this job only after upgrade.
   - key: REQUIRES_EXTERNAL_PROVIDER
     description: Workflow requires a different external provider.
-  - key: MOCK_ONLY
-    description: Supported only in tests or development.

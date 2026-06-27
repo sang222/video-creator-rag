@@ -10,7 +10,7 @@ SlotType = Literal["DAILY", "WEEKLY", "CAMPAIGN", "EVERGREEN", "EXPERIMENT", "MA
 SlotStatus = Literal["OPEN", "ASSIGNED", "ADMITTED", "SKIPPED", "CANCELLED"]
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
 DailyRunStatus = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
-DailyRunMode = Literal["MOCK", "REAL_DISABLED"]
+DailyRunMode = Literal["REAL", "REAL_DISABLED", "NOT_CONFIGURED", "HUMAN_REVIEW_ONLY", "BLOCKED"]
 DailyRunTriggerType = Literal["MANUAL", "SCHEDULED", "TEST"]
 ContextPackPurpose = Literal["DAILY_IDEA", "PROJECT_ADMISSION", "AUTHORITY_REVIEW", "SEARCH_DEMAND", "TEST"]
 FreshnessState = Literal["FRESH", "STALE", "UNKNOWN", "NOT_REQUIRED"]
@@ -22,7 +22,6 @@ SearchDemandSourceType = Literal[
     "YOUTUBE_ANALYTICS",
     "TIKTOK_CREATOR_SEARCH_INSIGHTS_MANUAL",
     "INTERNAL_ANALYTICS",
-    "MOCK",
     "MANUAL_RESEARCH",
 ]
 SearchPlatform = Literal["YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GOOGLE", "GENERIC"]
@@ -30,16 +29,6 @@ PolicyFitState = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "UNKNOWN"]
 IdeaDecisionStatus = Literal["PROPOSED", "ADMITTED", "REVIEW_REQUIRED", "BLOCKED", "REJECTED", "SKIPPED"]
 IdeaMarketDecision = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "SKIPPED"]
 AdmissionDecision = Literal["ADMIT", "REVIEW_REQUIRED", "BLOCK", "SKIP"]
-MockLLMMode = Literal[
-    "success",
-    "timeout",
-    "quota_exceeded",
-    "malformed",
-    "unavailable",
-    "retryable_error",
-    "non_retryable_error",
-    "circuit_open",
-]
 TimecodeValue = int | float | str
 
 
@@ -75,7 +64,7 @@ class ChannelDailyRunCreate(BaseModel):
     editorial_calendar_slot_id: uuid.UUID | None = None
     run_date: date
     status: DailyRunStatus = "PENDING"
-    run_mode: DailyRunMode = "MOCK"
+    run_mode: DailyRunMode = "REAL_DISABLED"
     trigger_type: DailyRunTriggerType = "MANUAL"
     reason_codes: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -284,8 +273,7 @@ class DailyIdeaDecisionCreate(BaseModel):
     channel_daily_run_id: uuid.UUID
     context_pack_snapshot_id: uuid.UUID
     channel_state_pack_snapshot_id: uuid.UUID | None = None
-    provider_key: str = "mock_llm"
-    mock_mode: MockLLMMode = "success"
+    provider_key: str = "llm_router"
     quota_account_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
     estimated_cost: Decimal = Decimal("0")
@@ -318,8 +306,7 @@ class DailyIdeaDecisionRead(BaseModel):
 
 
 class DailyRunExecuteRequest(BaseModel):
-    mock_mode: MockLLMMode = "success"
-    provider_key: str = "mock_llm"
+    provider_key: str = "llm_router"
     quota_account_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
     estimated_cost: Decimal = Decimal("0")

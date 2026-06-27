@@ -784,65 +784,66 @@ class CreatomateReadinessCheck(_BaseReadinessCheck):
 
 class CloudFinalRendererReadinessCheck(_BaseReadinessCheck):
     provider_key = "cloud-final-renderer"
-    provider_name = "Cloud Final Renderer"
+    provider_name = "Cloud Final Renderer = Creatomate Growth 10K"
     provider_type = "CLOUD_FINAL_ASSEMBLY_RENDERER"
 
     def evaluate(self) -> list[ProviderCheckDraft]:
-        provider_env_present = self.env.string_configured(self.settings.cloud_final_renderer_provider)
-        key_configured = self.env.secret_configured(self.settings.cloud_final_renderer_api_key)
+        creatomate_key_configured = self.env.secret_configured(self.settings.creatomate_api_key)
+        plan_ok = str(self.settings.creatomate_plan or "").lower() == "growth_10k"
         return [
             self._check(
                 "CONFIG",
-                "BLOCKED",
-                "Thiếu renderer ráp video dài; M12 giữ Cloud Final Renderer là required gap.",
-                next_action="Chọn renderer ráp video dài sau.",
-                reason_codes=("CLOUD_FINAL_RENDERER_REQUIRED_GAP",),
+                "PASS" if plan_ok else "BLOCKED",
+                "Cloud Final Renderer đã trỏ tới Creatomate Growth 10K." if plan_ok else "Cloud Final Renderer cần Creatomate Growth 10K.",
+                next_action=None if plan_ok else "Cấu hình CREATOMATE_PLAN=growth_10k.",
+                reason_codes=("CLOUD_FINAL_RENDERER_CREATOMATE_GROWTH_10K",) if plan_ok else ("CREATOMATE_GROWTH_10K_REQUIRED",),
                 technical_appendix={
-                    "provider_status": "REQUIRED_GAP",
-                    "provider_env_present": provider_env_present,
-                    "provider_selection_out_of_scope": True,
-                    "missing_env_keys": [] if provider_env_present else ["CLOUD_FINAL_RENDERER_PROVIDER"],
+                    "provider": "creatomate",
+                    "required_plan": "growth_10k",
+                    "configured_plan": self.settings.creatomate_plan,
+                    "missing_env_keys": [] if plan_ok else ["CREATOMATE_PLAN"],
                 },
             ),
             self._check(
                 "CREDENTIAL",
-                "SKIPPED" if key_configured else "BLOCKED",
-                "Cloud Final Renderer API key có trong env nhưng chưa được dùng vì provider chưa được chọn trong M12."
-                if key_configured
-                else "Cloud Final Renderer chưa có credential riêng.",
-                next_action="Không thêm key final renderer cho đến khi milestone chọn provider." if not key_configured else "Giữ secret ngoài DB; chọn provider ở milestone sau.",
-                reason_codes=("CLOUD_FINAL_RENDERER_CREDENTIAL_UNUSED_IN_M12",) if key_configured else ("CLOUD_FINAL_RENDERER_API_KEY_MISSING",),
+                "PASS" if creatomate_key_configured else "BLOCKED",
+                "Creatomate API key đã có cho Cloud Final Renderer." if creatomate_key_configured else "Thiếu Creatomate API key cho Cloud Final Renderer.",
+                next_action=None if creatomate_key_configured else "Thêm CREATOMATE_API_KEY vào secret/env.",
+                reason_codes=("CREATOMATE_API_KEY_CONFIGURED",) if creatomate_key_configured else ("CREATOMATE_API_KEY_MISSING",),
                 technical_appendix={
-                    "provider_status": "REQUIRED_GAP",
-                    "CLOUD_FINAL_RENDERER_API_KEY": _redacted_presence(key_configured),
-                    "missing_env_keys": [] if key_configured else ["CLOUD_FINAL_RENDERER_API_KEY"],
+                    "provider": "creatomate",
+                    "CREATOMATE_API_KEY": _redacted_presence(creatomate_key_configured),
+                    "missing_env_keys": [] if creatomate_key_configured else ["CREATOMATE_API_KEY"],
                 },
             ),
             self._check(
                 "CAPABILITY",
-                "BLOCKED",
-                "Long-form final render vẫn bị chặn cho đến khi chọn và cấu hình renderer ráp video dài.",
-                next_action="Chọn renderer ráp video dài sau; không dùng Creatomate light renderer làm final renderer trong M12.",
-                reason_codes=("CLOUD_FINAL_RENDERER_REQUIRED_GAP", "LONG_FORM_FINAL_RENDER_BLOCKED"),
+                "PASS" if plan_ok and creatomate_key_configured else "BLOCKED",
+                "Creatomate Growth 10K là Cloud Final Renderer mục tiêu." if plan_ok and creatomate_key_configured else "Chưa đủ cấu hình để dùng Creatomate Growth 10K làm Cloud Final Renderer.",
+                next_action=None if plan_ok and creatomate_key_configured else "Hoàn tất plan/key Creatomate trước M12.2.",
+                reason_codes=("CLOUD_FINAL_RENDERER_READY",) if plan_ok and creatomate_key_configured else ("LONG_FORM_FINAL_RENDER_BLOCKED",),
                 technical_appendix={
-                    "provider_status": "REQUIRED_GAP",
+                    "provider": "creatomate",
+                    "required_plan": "growth_10k",
                     "real_final_render_added": False,
                 },
             ),
         ]
 
     def safe_config(self) -> dict[str, Any]:
-        api_key_configured = self.env.secret_configured(self.settings.cloud_final_renderer_api_key)
+        api_key_configured = self.env.secret_configured(self.settings.creatomate_api_key)
+        plan_ok = str(self.settings.creatomate_plan or "").lower() == "growth_10k"
         return {
-            "status": "REQUIRED_GAP",
-            "configuration_state": "REQUIRED_GAP",
-            "provider": "not_selected",
-            "provider_env_present": self.env.string_configured(self.settings.cloud_final_renderer_provider),
+            "status": "READY_FOR_CONFIGURED_PROVIDER" if plan_ok and api_key_configured else "NOT_CONFIGURED",
+            "configuration_state": "CONFIGURED" if plan_ok and api_key_configured else "NOT_CONFIGURED",
+            "provider": "creatomate",
+            "required_plan": "growth_10k",
+            "configured_plan": self.settings.creatomate_plan,
             "api_key_configured": api_key_configured,
             "ready_for_smoke": False,
-            "long_form_final_render_blocked": True,
+            "long_form_final_render_blocked": not (plan_ok and api_key_configured),
             "real_final_render_added": False,
-            "next_action": "Chọn renderer ráp video dài sau.",
+            "next_action": None if plan_ok and api_key_configured else "Cấu hình Creatomate Growth 10K trước M12.2.",
         }
 
 
@@ -1229,18 +1230,28 @@ class RealSmokeOrchestratorService:
         return _smoke_result("SKIPPED", "Chưa có adapter account/template-check an toàn; M12 không render thật.", env_flags=flags, reason="CREATOMATE_ADAPTER_NOT_AVAILABLE")
 
     def _cloud_final_renderer(self) -> dict[str, Any]:
-        key_configured = self.env.secret_configured(self.settings.cloud_final_renderer_api_key)
+        key_configured = self.env.secret_configured(self.settings.creatomate_api_key)
+        plan_ok = str(self.settings.creatomate_plan or "").lower() == "growth_10k"
         flags = {
-            "CLOUD_FINAL_RENDERER_PROVIDER_SELECTED": False,
-            "CLOUD_FINAL_RENDERER_API_KEY_CONFIGURED": key_configured,
-            "LONG_FORM_FINAL_RENDER_BLOCKED": True,
+            "CLOUD_FINAL_RENDERER_PROVIDER": "creatomate",
+            "CREATOMATE_PLAN_GROWTH_10K": plan_ok,
+            "CREATOMATE_API_KEY_CONFIGURED": key_configured,
+            "LONG_FORM_FINAL_RENDER_BLOCKED": not (plan_ok and key_configured),
         }
+        if not plan_ok or not key_configured:
+            return _smoke_result(
+                "BLOCKED",
+                "Cloud Final Renderer cần Creatomate Growth 10K và API key.",
+                env_flags=flags,
+                error_code="CREATOMATE_CLOUD_FINAL_RENDERER_NOT_CONFIGURED",
+                technical_appendix={"provider": "creatomate", "real_final_render_added": False},
+            )
         return _smoke_result(
-            "BLOCKED",
-            "Cloud Final Renderer là required gap trong M12; không có smoke/render thật.",
+            "SKIPPED",
+            "Cloud Final Renderer trỏ tới Creatomate Growth 10K; không render thật trong smoke mặc định.",
             env_flags=flags,
-            error_code="CLOUD_FINAL_RENDERER_REQUIRED_GAP",
-            technical_appendix={"provider_status": "REQUIRED_GAP", "real_final_render_added": False},
+            reason="CLOUD_FINAL_RENDERER_SMOKE_SKIPPED_NO_RENDER",
+            technical_appendix={"provider": "creatomate", "real_final_render_added": False},
         )
 
 

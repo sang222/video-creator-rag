@@ -1,123 +1,130 @@
 catalog_key: provider_registry_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
-  - provider_key: mock_llm
-    provider_name: Mock LLM Provider
+  - provider_key: ollama
+    provider_name: Ollama / LLMRouter
     provider_type: LLM
     status: ACTIVE
     capability_blob:
-      supports_streaming: false
-      supports_json_mode: true
+      llm_router_lane_bound: true
+      guarded_real_execution: true
     policy_fit_blob:
-      mock_only: true
-      production_enabled: false
+      production_enabled_when_configured: true
     cost_model_blob:
-      unit: TOKENS
-      mock_cost_usd: 0
-    quota_model_blob:
-      unit: REQUESTS
-      mock_limit: 1000
-    retry_policy_blob:
-      max_attempts: 2
+      provider_cost_unknown: true
+    quota_model_blob: {}
+    retry_policy_blob: {}
     metadata:
-      mock: true
-  - provider_key: mock_tts
-    provider_name: Mock TTS Provider
-    provider_type: TTS
-    status: ACTIVE
-    capability_blob:
-      supports_tts: true
-      audio_rights_risk_class: mock
-    policy_fit_blob:
-      mock_only: true
-      production_enabled: false
-    cost_model_blob:
-      unit: SECONDS
-      mock_cost_usd: 0
-    quota_model_blob:
-      unit: REQUESTS
-      mock_limit: 1000
-    retry_policy_blob:
-      max_attempts: 2
-    metadata:
-      mock: true
-  - provider_key: mock_media
-    provider_name: Mock Media Provider
-    provider_type: MEDIA
-    status: ACTIVE
-    capability_blob:
-      preserves_metadata: true
-      license_evidence_required: true
-    policy_fit_blob:
-      mock_only: true
-      production_enabled: false
-    cost_model_blob:
-      unit: REQUESTS
-      mock_cost_usd: 0
-    quota_model_blob:
-      unit: REQUESTS
-      mock_limit: 1000
-    retry_policy_blob:
-      max_attempts: 2
-    metadata:
-      mock: true
-  - provider_key: mock_storage
-    provider_name: Mock Storage Provider
-    provider_type: STORAGE
-    status: ACTIVE
-    capability_blob:
-      preserves_metadata: true
-    policy_fit_blob:
-      mock_only: true
-      production_enabled: false
-    cost_model_blob:
-      unit: BYTES
-      mock_cost_usd: 0
-    quota_model_blob:
-      unit: BYTES
-      mock_limit: 1048576
-    retry_policy_blob:
-      max_attempts: 2
-    metadata:
-      mock: true
-  - provider_key: mock_platform
-    provider_name: Mock Platform Provider
-    provider_type: PLATFORM
-    status: ACTIVE
-    capability_blob:
-      commercial_use_declared: true
-      provenance_fidelity: mock
-    policy_fit_blob:
-      mock_only: true
-      production_enabled: false
-    cost_model_blob:
-      unit: REQUESTS
-      mock_cost_usd: 0
-    quota_model_blob:
-      unit: REQUESTS
-      mock_limit: 1000
-    retry_policy_blob:
-      max_attempts: 2
-    metadata:
-      mock: true
-  - provider_key: mock_analytics
-    provider_name: Mock Analytics Provider
+      readiness_provider_key: ollama
+  - provider_key: youtube-public
+    provider_name: YouTube Public Monitor
     provider_type: ANALYTICS
     status: ACTIVE
     capability_blob:
-      metrics_fixture_only: true
+      public_video_metrics: true
+      api_key_required: true
     policy_fit_blob:
-      mock_only: true
-      production_enabled: false
-    cost_model_blob:
-      unit: REQUESTS
-      mock_cost_usd: 0
-    quota_model_blob:
-      unit: REQUESTS
-      mock_limit: 1000
-    retry_policy_blob:
-      max_attempts: 2
+      production_enabled_when_configured: true
+    cost_model_blob: {}
+    quota_model_blob: {}
+    retry_policy_blob: {}
     metadata:
-      mock: true
+      readiness_provider_key: youtube-public
+  - provider_key: youtube-owner
+    provider_name: YouTube Owner Analytics
+    provider_type: ANALYTICS
+    status: ACTIVE
+    capability_blob:
+      owner_analytics: true
+      oauth_required: true
+      readonly_scopes_only: true
+    policy_fit_blob:
+      production_enabled_when_configured: true
+    cost_model_blob: {}
+    quota_model_blob: {}
+    retry_policy_blob: {}
+    metadata:
+      readiness_provider_key: youtube-owner
+  - provider_key: google-drive
+    provider_name: Google Drive Offload
+    provider_type: STORAGE
+    status: ACTIVE
+    capability_blob:
+      media_offload: true
+      drive_file_scope_only: true
+    policy_fit_blob:
+      production_enabled_when_configured: true
+    cost_model_blob: {}
+    quota_model_blob: {}
+    retry_policy_blob: {}
+    metadata:
+      readiness_provider_key: google-drive
+  - provider_key: google-vertex-veo
+    provider_name: Google Vertex Veo
+    provider_type: VIDEO
+    status: ACTIVE
+    capability_blob:
+      model_id: veo-3.1-fast-generate-001
+      mode: video_only
+      allowed_duration_seconds: [4, 6, 8]
+      max_duration_seconds: 8
+      audio_enabled: false
+    policy_fit_blob:
+      production_enabled_when_configured: true
+    cost_model_blob:
+      cost_per_second_1080p_video_only: "0.10"
+    quota_model_blob: {}
+    retry_policy_blob: {}
+    metadata:
+      readiness_provider_key: google-vertex-veo
+  - provider_key: elevenlabs
+    provider_name: ElevenLabs
+    provider_type: TTS
+    status: ACTIVE
+    capability_blob:
+      voice_generation: true
+      api_key_required: true
+    policy_fit_blob:
+      production_enabled_when_configured: true
+    cost_model_blob:
+      budget_basis: credits_characters
+    quota_model_blob: {}
+    retry_policy_blob: {}
+    metadata:
+      readiness_provider_key: elevenlabs
+  - provider_key: creatomate
+    provider_name: Creatomate Growth 10K
+    provider_type: VIDEO
+    status: ACTIVE
+    capability_blob:
+      cloud_template_rendering: true
+      growth_10k_required: true
+      final_renderer_candidate: true
+    policy_fit_blob:
+      production_enabled_when_configured: true
+    cost_model_blob:
+      plan: growth_10k
+    quota_model_blob:
+      monthly_credits: 10000
+    retry_policy_blob: {}
+    metadata:
+      readiness_provider_key: creatomate
+  - provider_key: cloud-final-renderer
+    provider_name: Cloud Final Renderer = Creatomate Growth 10K
+    provider_type: VIDEO
+    status: ACTIVE
+    capability_blob:
+      long_form_final_render: true
+      configured_provider_required: creatomate
+      required_plan: growth_10k
+    policy_fit_blob:
+      production_enabled_when_configured: true
+    cost_model_blob:
+      provider: creatomate
+      plan: growth_10k
+    quota_model_blob: {}
+    retry_policy_blob: {}
+    metadata:
+      readiness_provider_key: cloud-final-renderer

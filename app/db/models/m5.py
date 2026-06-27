@@ -67,7 +67,7 @@ class ChannelDailyRun(Base):
     )
     run_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="PENDING")
-    run_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="MOCK")
+    run_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="REAL_DISABLED")
     trigger_type: Mapped[str] = mapped_column(String(40), nullable=False, default="MANUAL")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

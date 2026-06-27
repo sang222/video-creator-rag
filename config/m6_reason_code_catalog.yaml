@@ -45,8 +45,8 @@ items:
     description: Asset requirement was created.
   - code: APPROVED_ASSET_POOL_LOOKUP_PLACEHOLDER
     description: Approved asset pool lookup is placeholder-only.
-  - code: LOCAL_FIXTURE_ASSET_USED
-    description: Local fixture asset was used.
+  - code: PROVIDER_ASSET_NOT_CONFIGURED
+    description: Required media provider asset source is not configured.
   - code: MANUAL_ENVATO_PLACEHOLDER_CREATED
     description: Manual Envato placeholder was created.
   - code: BATCH_PROCUREMENT_REQUIRED
@@ -59,18 +59,14 @@ items:
     description: Source manifest was created.
   - code: INTERNAL_TEST_ONLY_ASSET
     description: Asset is internal test only.
-  - code: LOCAL_RENDER_STARTED
-    description: Local render started.
-  - code: LOCAL_RENDER_COMPLETED
-    description: Local render completed.
-  - code: LOCAL_RENDER_FAILED
-    description: Local render failed.
+  - code: FINAL_RENDERER_NOT_CONFIGURED
+    description: Cloud final renderer is not configured.
   - code: FFMPEG_UNAVAILABLE
     description: FFmpeg is unavailable.
   - code: FFPROBE_UNAVAILABLE
     description: FFprobe is unavailable.
-  - code: FINAL_VIDEO_CREATED
-    description: Final dummy video was created.
+  - code: CREATOMATE_GROWTH_10K_REQUIRED
+    description: Creatomate Growth 10K is required before final render can complete.
   - code: FINAL_VIDEO_NOT_PLAYABLE
     description: Final video is not playable.
   - code: MEDIA_QC_PASSED
@@ -89,8 +85,10 @@ items:
     description: Duration mismatch detected.
   - code: MANIFEST_CHECKSUM_MISSING
     description: Manifest or checksum is missing.
-  - code: MOCK_PROVIDER_ONLY
-    description: Mock providers only were used.
+  - code: ELEVENLABS_NOT_CONFIGURED
+    description: ElevenLabs is not configured.
+  - code: GOOGLE_VERTEX_VEO_NOT_CONFIGURED
+    description: Google Vertex Veo is not configured.
   - code: REAL_PROVIDER_BLOCKED
     description: Real provider execution was blocked.
   - code: EXTERNAL_NETWORK_BLOCKED

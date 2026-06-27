@@ -15,7 +15,5 @@ items:
     description: Manually captured TikTok Creator Search Insights evidence.
   - key: INTERNAL_ANALYTICS
     description: Internal analytics snapshot evidence.
-  - key: MOCK
-    description: Mock evidence for tests.
   - key: MANUAL_RESEARCH
     description: Manual research evidence reference.

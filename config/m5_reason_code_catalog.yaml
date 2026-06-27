@@ -19,10 +19,10 @@ items:
     description: Required numeric truth is missing.
   - code: METRIC_REF_UNKNOWN
     description: Metric reference is unknown or absent.
-  - code: MOCK_LLM_USED
-    description: Mock LLM provider was used.
+  - code: LLM_PROVIDER_NOT_CONFIGURED
+    description: Real LLM provider is not configured.
   - code: LLM_OUTPUT_MALFORMED
-    description: Mock LLM output was malformed.
+    description: LLM output was malformed.
   - code: LLM_SCHEMA_VALIDATION_FAILED
     description: LLM-derived structured output failed strict schema validation.
   - code: AUTHORITY_CONTEXT_INSUFFICIENT

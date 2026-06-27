@@ -3,8 +3,6 @@ catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
-  - key: MOCK
-    description: Deterministic local mock analytics sync.
   - key: MANUAL_IMPORT
     description: Human-entered local analytics import.
   - key: CSV_IMPORT

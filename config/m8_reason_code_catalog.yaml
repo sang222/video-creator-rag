@@ -11,8 +11,8 @@ items:
     description: Analytics sync run was blocked.
   - code: ANALYTICS_SYNC_FAILED
     description: Analytics sync run failed.
-  - code: ANALYTICS_PROVIDER_MOCK_USED
-    description: Mock analytics provider was used.
+  - code: ANALYTICS_PROVIDER_NOT_CONFIGURED
+    description: Analytics provider credentials or configuration are missing.
   - code: ANALYTICS_PROVIDER_REAL_DISABLED
     description: Real analytics provider placeholder is disabled.
   - code: MANUAL_ANALYTICS_IMPORTED

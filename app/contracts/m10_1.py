@@ -21,7 +21,7 @@ ShortVisualSource = Literal[
 ]
 TargetShortPlatform = Literal["YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK_REELS"]
 UploadPlatform = Literal["YOUTUBE_LONG", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK_REELS"]
-VoiceSource = Literal["REUSE_PARENT_AUDIO", "NEW_SHORT_VOICE_REQUIRED", "MOCK_ONLY"]
+VoiceSource = Literal["REUSE_PARENT_AUDIO", "NEW_SHORT_VOICE_REQUIRED"]
 ShortRenderState = Literal["PLANNED", "BLOCKED", "READY_FOR_M10_2_RENDER", "CANCELLED"]
 PromoteShortToLongState = Literal["GENERATED", "NEEDS_MORE_EVIDENCE", "READY_FOR_HUMAN_REVIEW", "REJECTED", "CANCELLED"]
 WatchHourPotential = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]

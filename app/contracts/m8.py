@@ -6,7 +6,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 
 AnalyticsPlatform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
-AnalyticsSyncMode = Literal["MOCK", "MANUAL_IMPORT", "CSV_IMPORT", "REAL_DISABLED", "YOUTUBE_PUBLIC_MONITOR", "YOUTUBE_OWNER_ANALYTICS"]
+AnalyticsSyncMode = Literal["MANUAL_IMPORT", "CSV_IMPORT", "REAL_DISABLED", "YOUTUBE_PUBLIC_MONITOR", "YOUTUBE_OWNER_ANALYTICS"]
 AnalyticsSyncState = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
 AnalyticsObservationWindow = Literal["T_PLUS_1H", "T_PLUS_6H", "T_PLUS_24H", "T_PLUS_48H", "T_PLUS_7D", "CUSTOM", "UNKNOWN"]
 MetricGroup = Literal["REACH", "ENGAGEMENT", "RETENTION", "TRAFFIC", "AUDIENCE", "REVENUE_DISABLED", "OTHER"]
@@ -70,7 +70,7 @@ class MetricDefinitionVersionRead(BaseModel):
 
 class AnalyticsSyncRunCreate(BaseModel):
     uploaded_video_id: uuid.UUID
-    sync_mode: AnalyticsSyncMode = "MOCK"
+    sync_mode: AnalyticsSyncMode = "YOUTUBE_OWNER_ANALYTICS"
     provider_key: str | None = None
     observed_from: AwareDatetime | None = None
     observed_to: AwareDatetime | None = None
@@ -80,8 +80,6 @@ class AnalyticsSyncRunCreate(BaseModel):
 
 
 class AnalyticsSyncRunExecuteRequest(BaseModel):
-    mock_mode: str = "success"
-
     model_config = ConfigDict(extra="forbid")
 
 

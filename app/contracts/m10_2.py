@@ -18,7 +18,6 @@ MediaProviderType = Literal[
     "PUBLISH_PACKAGE_BUILDER",
     "API_NATIVE_STOCK_PROVIDER",
     "FREE_FALLBACK_PROVIDER",
-    "MOCK_PROVIDER",
     "DEFERRED_MANUAL_LIBRARY",
 ]
 MediaProviderRecommendation = Literal[
@@ -29,7 +28,6 @@ MediaProviderRecommendation = Literal[
     "DEFERRED",
     "FALLBACK",
     "AVOIDED",
-    "MOCK",
 ]
 MediaJobType = Literal[
     "TOPIC_DECISION",
@@ -68,7 +66,6 @@ ProviderCapability = Literal[
     "BLOCKED_BY_PLAN",
     "REQUIRES_UPGRADE",
     "REQUIRES_EXTERNAL_PROVIDER",
-    "MOCK_ONLY",
 ]
 MediaRoutingResult = Literal[
     "ROUTED",

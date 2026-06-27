@@ -79,7 +79,6 @@ MEDIA_QC_ENGINE = "MEDIA_QC_ENGINE"
 PUBLISH_PACKAGE_BUILDER = "PUBLISH_PACKAGE_BUILDER"
 API_NATIVE_STOCK_PROVIDER = "API_NATIVE_STOCK_PROVIDER"
 FREE_FALLBACK_PROVIDER = "FREE_FALLBACK_PROVIDER"
-MOCK_PROVIDER = "MOCK_PROVIDER"
 DEFERRED_MANUAL_LIBRARY = "DEFERRED_MANUAL_LIBRARY"
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
@@ -485,7 +484,7 @@ class MediaRenderJobRouterService:
             )
         role = MediaProviderRoleService(self.session).require_role(provider_key)
         entry = ProviderCapabilityMatrixService(self.session).find_entry(provider_key=provider_key, job_type=job_type)
-        if entry is None or entry.capability not in {"SUPPORTED", "MOCK_ONLY"}:
+        if entry is None or entry.capability != "SUPPORTED":
             return self._record_decision(
                 data=data,
                 job_type=job_type,
@@ -1374,7 +1373,7 @@ class FinalMediaRefService:
         self.session = session
 
     def create(self, *, data: FinalMediaRefCreate) -> FinalMediaRef:
-        if not data.file_ref or data.file_ref.startswith("provider://fake") or data.file_ref.startswith("mock://provider-output"):
+        if not data.file_ref or data.file_ref.startswith("provider://fake"):
             raise ValidationFailureError("FinalMediaRef requires an actual known file ref or explicit test fixture ref.")
         ref = FinalMediaRef(**data.model_dump())
         self.session.add(ref)

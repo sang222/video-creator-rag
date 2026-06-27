@@ -169,6 +169,7 @@ from app.services.m12 import (
     YouTubeOwnerAnalyticsReadinessCheck,
     YouTubePublicReadinessCheck,
 )
+from app.services.m12_1r import MockRuntimePurgeService
 from app.services.m12_1 import (
     PromptRegistryRepository,
     PromptRegistryService,
@@ -310,6 +311,7 @@ __all__ = [
     "IntegrationDashboardReadService",
     "ProviderNextActionService",
     "SecurityRedactionService",
+    "MockRuntimePurgeService",
     "PromptRegistryRepository",
     "PromptRegistryService",
     "build_channel_contract_from_profile",

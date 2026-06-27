@@ -26,7 +26,7 @@ class ProductionArtifactRun(Base):
     source_project_admission_decision_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("project_admission_decisions.id")
     )
-    run_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="MOCK")
+    run_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="REAL_DISABLED")
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="PENDING")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

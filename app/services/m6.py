@@ -40,7 +40,6 @@ from app.contracts.m6 import (
     VisualPlanContract,
     VoiceTimelineContract,
 )
-from app.contracts.ops import CostEventCreate
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
@@ -50,7 +49,6 @@ from app.db.models import (
     ArtifactVersion,
     AssetManifestSnapshot,
     CaptionTrackSnapshot,
-    CostEvent,
     LLMRunSnapshot,
     MediaQCReport,
     MediaRenderJob,
@@ -66,11 +64,9 @@ from app.db.models import (
     VisualPlanSnapshot,
     VoiceTimelineSnapshot,
 )
-from app.providers.mock import MockLLMProvider
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
-from app.services.ops import CostService, ProviderRegistryService
 from app.services.workflow import ArtifactService
 
 
@@ -116,12 +112,12 @@ class ProductionArtifactRunService:
                 raise NotFoundError(f"project admission decision not found: {data.source_project_admission_decision_id}")
             if admission.admitted_video_project_id != project.id:
                 raise ValidationFailureError("admission decision does not reference this video project")
-        if data.run_mode == "REAL_DISABLED":
-            reason_codes = ["REAL_PROVIDER_BLOCKED"]
-            status = "BLOCKED"
-        else:
-            reason_codes = []
-            status = "PENDING"
+        reason_codes = [
+            "FINAL_RENDERER_NOT_CONFIGURED",
+            "CREATOMATE_GROWTH_10K_REQUIRED",
+            "HUMAN_ACTION_REQUIRED",
+        ]
+        status = "BLOCKED"
         run = ProductionArtifactRun(
             company_id=project.company_id,
             channel_workspace_id=project.channel_workspace_id,
@@ -145,7 +141,7 @@ class ProductionArtifactRunService:
             target_id=run.id,
             company_id=run.company_id,
             correlation_id=correlation_id,
-            reason_code="MOCK_PROVIDER_ONLY" if data.run_mode != "REAL_DISABLED" else "REAL_PROVIDER_BLOCKED",
+            reason_code=reason_codes[0],
             payload={
                 "video_project_id": str(project.id),
                 "policy_snapshot_id": str(project.policy_snapshot_id),
@@ -164,24 +160,30 @@ class ProductionArtifactRunService:
             raise NotFoundError(f"production artifact run not found: {run_id}")
         return run
 
-    def execute_local_mock_flow(
+    def execute_real_provider_flow(
         self,
         *,
         run_id: uuid.UUID,
         output_dir: Path | None = None,
-        mock_mode: str = "success",
         correlation_id: str = "m6-production-execute",
     ) -> ProductionArtifactRun:
         run = self.require_run(run_id)
-        if run.status == "BLOCKED" and run.run_mode == "REAL_DISABLED":
-            return run
-        run.status = "RUNNING"
-        run.started_at = utc_now()
-        run.reason_codes = ["MOCK_PROVIDER_ONLY"]
+        run.status = "BLOCKED"
+        run.completed_at = utc_now()
+        run.reason_codes = _dedupe(
+            [
+                *run.reason_codes,
+                "FINAL_RENDERER_NOT_CONFIGURED",
+                "ELEVENLABS_NOT_CONFIGURED",
+                "GOOGLE_VERTEX_VEO_NOT_CONFIGURED",
+                "CREATOMATE_GROWTH_10K_REQUIRED",
+                "HUMAN_ACTION_REQUIRED",
+            ]
+        )
         self.session.flush()
         _record_m6_event(
             self.session,
-            event_type="production_artifact_run.started",
+            event_type="production_artifact_run.blocked",
             aggregate_type="production_artifact_run",
             aggregate_id=run.id,
             actor_id=None,
@@ -189,135 +191,15 @@ class ProductionArtifactRunService:
             target_id=run.id,
             company_id=run.company_id,
             correlation_id=correlation_id,
-            reason_code="MOCK_PROVIDER_ONLY",
-            payload={"run_mode": run.run_mode, "video_project_id": str(run.video_project_id)},
+            reason_code=run.reason_codes[0],
+            payload={
+                "run_mode": run.run_mode,
+                "video_project_id": str(run.video_project_id),
+                "output_dir_ignored": output_dir is not None,
+                "no_local_fixture_render": True,
+            },
         )
-        try:
-            script_version = ScriptNarrationService(self.session).create_script_artifact(
-                run=run,
-                mock_mode=mock_mode,
-                correlation_id="m6-script-draft",
-            )
-            voice_snapshot = ScriptNarrationService(self.session).create_voice_timeline(
-                run=run,
-                script_version=script_version,
-                correlation_id="m6-voice-timeline",
-            )
-            caption_snapshot = CaptionCompilerService(self.session).build_from_voice_timeline(
-                run=run,
-                voice_timeline_snapshot=voice_snapshot,
-                correlation_id="m6-caption-track",
-            )
-            visual_snapshot = VisualPlanService(self.session).create_visual_plan(
-                run=run,
-                voice_timeline_snapshot=voice_snapshot,
-                caption_track_snapshot=caption_snapshot,
-                correlation_id="m6-visual-plan",
-            )
-            scene_snapshot = VisualPlanService(self.session).create_scene_manifest(
-                run=run,
-                visual_plan_snapshot=visual_snapshot,
-                correlation_id="m6-scene-manifest",
-            )
-            asset_snapshot, source_snapshot = AssetPlanningService(self.session).create_asset_and_source_manifests(
-                run=run,
-                scene_manifest_snapshot=scene_snapshot,
-                correlation_id="m6-asset-source-manifest",
-            )
-            render_spec_snapshot = RenderSpecCompilerService(self.session).compile_render_spec(
-                run=run,
-                voice_timeline_snapshot=voice_snapshot,
-                caption_track_snapshot=caption_snapshot,
-                visual_plan_snapshot=visual_snapshot,
-                scene_manifest_snapshot=scene_snapshot,
-                asset_manifest_snapshot=asset_snapshot,
-                correlation_id="m6-render-spec",
-            )
-            accessibility_report = AccessibilityQCService(self.session).run_qc(
-                caption_track_snapshot=caption_snapshot,
-                render_package_snapshot=None,
-                correlation_id="m6-accessibility-qc",
-            )
-            run.accessibility_qc_report_id = accessibility_report.id
-            render_result = LocalFixtureRendererService(self.session).render_local_smoke(
-                render_spec_snapshot_id=render_spec_snapshot.id,
-                output_dir=output_dir,
-                correlation_id="m6-local-video-smoke",
-            )
-            if render_result.package is None:
-                media_report = MediaQCService(self.session).run_blocked_qc(
-                    render_spec_snapshot=render_spec_snapshot,
-                    render_job=render_result.job,
-                    correlation_id="m6-media-qc",
-                )
-                run.media_qc_report_id = media_report.id
-                run.status = "BLOCKED"
-                run.completed_at = utc_now()
-                run.reason_codes = _dedupe([*run.reason_codes, *render_result.job.reason_codes, *media_report.reason_codes])
-                self.session.flush()
-                _record_m6_event(
-                    self.session,
-                    event_type="production_artifact_run.failed",
-                    aggregate_type="production_artifact_run",
-                    aggregate_id=run.id,
-                    actor_id=None,
-                    target_type="production_artifact_run",
-                    target_id=run.id,
-                    company_id=run.company_id,
-                    correlation_id=correlation_id,
-                    reason_code=run.reason_codes[0],
-                    payload={"status": run.status, "reason_codes": run.reason_codes},
-                )
-                return run
-            media_report = MediaQCService(self.session).run_qc(
-                render_package_snapshot=render_result.package,
-                correlation_id="m6-media-qc",
-            )
-            accessibility_report = AccessibilityQCService(self.session).run_qc(
-                caption_track_snapshot=caption_snapshot,
-                render_package_snapshot=render_result.package,
-                correlation_id="m6-accessibility-qc",
-            )
-            run.render_package_snapshot_id = render_result.package.id
-            run.media_qc_report_id = media_report.id
-            run.accessibility_qc_report_id = accessibility_report.id
-            run.status = "COMPLETED" if media_report.qc_state == "PASS" and accessibility_report.qc_state == "PASS" else "REVIEW_REQUIRED"
-            run.completed_at = utc_now()
-            run.reason_codes = _dedupe([*run.reason_codes, *media_report.reason_codes, *accessibility_report.reason_codes])
-            self.session.flush()
-            _record_m6_event(
-                self.session,
-                event_type="production_artifact_run.completed",
-                aggregate_type="production_artifact_run",
-                aggregate_id=run.id,
-                actor_id=None,
-                target_type="production_artifact_run",
-                target_id=run.id,
-                company_id=run.company_id,
-                correlation_id=correlation_id,
-                reason_code=run.reason_codes[0] if run.reason_codes else "LOCAL_RENDER_COMPLETED",
-                payload={"status": run.status, "reason_codes": run.reason_codes},
-            )
-            return run
-        except (ValidationError, ValidationFailureError) as exc:
-            run.status = "FAILED"
-            run.completed_at = utc_now()
-            run.reason_codes = _dedupe([*run.reason_codes, "BAD_ARTIFACT_REJECTED"])
-            self.session.flush()
-            _record_m6_event(
-                self.session,
-                event_type="production_artifact_run.failed",
-                aggregate_type="production_artifact_run",
-                aggregate_id=run.id,
-                actor_id=None,
-                target_type="production_artifact_run",
-                target_id=run.id,
-                company_id=run.company_id,
-                correlation_id=correlation_id,
-                reason_code="BAD_ARTIFACT_REJECTED",
-                payload={"status": run.status, "error": str(exc), "reason_codes": run.reason_codes},
-            )
-            raise
+        return run
 
 
 class ScriptNarrationService:
@@ -328,95 +210,23 @@ class ScriptNarrationService:
         self,
         *,
         run: ProductionArtifactRun,
-        mock_mode: str = "success",
         correlation_id: str = "m6-script-draft",
     ) -> ArtifactVersion:
         project = _require_project(self.session, run.video_project_id)
-        source_versions = _require_m5_project_inputs(self.session, project.id)
-        response = MockLLMProvider().generate(prompt=f"m6_script:{project.id}", mode=mock_mode)
-        cost_event = _record_mock_cost(self.session, project, provider_run_ref=f"production_artifact_run:{run.id}")
-        if not response.ok:
-            attempt = _record_provider_attempt(
-                self.session,
-                provider_key="mock_llm",
-                operation_key="m6_script_draft",
-                target_type="production_artifact_run",
-                target_id=run.id,
-                status=_provider_attempt_status(response),
-                error_code=response.error_code,
-                latency_ms=response.latency_ms,
-                cost_event_id=cost_event.id,
-                metadata={"mock": True, "mode": mock_mode},
-                correlation_id="m6-provider-attempt",
-                company_id=run.company_id,
-            )
-            _create_llm_run(
-                self.session,
-                run=run,
-                status="FAILED",
-                input_payload={"purpose": "SCRIPT_DRAFT", "video_project_id": str(project.id)},
-                output_payload={"error_code": response.error_code, "provider_attempt_id": str(attempt.id)},
-                cost_event_id=cost_event.id,
-                correlation_id=correlation_id,
-            )
-            raise ValidationFailureError("mock LLM script draft failed")
-        script_payload = self._build_script(project, source_versions)
-        script_payload["script_hash"] = _hash_payload({**script_payload, "script_hash": None})
-        script = ScriptDraftContract.model_validate(script_payload)
-        llm_run = _create_llm_run(
+        _require_m5_project_inputs(self.session, project.id)
+        _create_llm_run(
             self.session,
             run=run,
-            status="COMPLETED",
-            input_payload={
-                "purpose": "SCRIPT_DRAFT",
-                "video_project_id": str(project.id),
-                "source_artifact_version_ids": [str(item.id) for item in source_versions],
+            status="BLOCKED",
+            input_payload={"purpose": "SCRIPT_DRAFT", "video_project_id": str(project.id)},
+            output_payload={
+                "error_code": "LLM_PROVIDER_NOT_CONFIGURED",
+                "reason_codes": ["LLM_PROVIDER_NOT_CONFIGURED", "HUMAN_ACTION_REQUIRED"],
             },
-            output_payload=script.model_dump(mode="json"),
-            cost_event_id=cost_event.id,
+            cost_event_id=None,
             correlation_id=correlation_id,
         )
-        _record_provider_attempt(
-            self.session,
-            provider_key="mock_llm",
-            operation_key="m6_script_draft",
-            target_type="production_artifact_run",
-            target_id=run.id,
-            status="SUCCESS",
-            error_code=None,
-            latency_ms=response.latency_ms,
-            cost_event_id=cost_event.id,
-            metadata={"mock": True, "mode": mock_mode, "llm_run_snapshot_id": str(llm_run.id)},
-            correlation_id="m6-provider-attempt",
-            company_id=run.company_id,
-        )
-        content = script.model_copy(update={"llm_run_snapshot_id": llm_run.id}).model_dump(mode="json")
-        version = _create_artifact_version(
-            self.session,
-            project=project,
-            artifact_type="script",
-            content=content,
-            created_by_user_id=project.created_by_user_id,
-            evidence_refs=_collect_evidence_refs(source_versions),
-            context_refs=[{"type": "production_artifact_run", "id": str(run.id)}],
-            correlation_id="m6-script-artifact",
-        )
-        run.script_artifact_version_id = version.id
-        self.session.flush()
-        _record_m6_event(
-            self.session,
-            event_type="script_artifact.created",
-            aggregate_type="artifact_version",
-            aggregate_id=version.id,
-            actor_id=project.created_by_user_id,
-            target_type="artifact_version",
-            target_id=version.id,
-            company_id=project.company_id,
-            correlation_id=correlation_id,
-            reason_code="VOICE_TIMELINE_CREATED",
-            payload={"artifact_type": "script", "content_hash": version.content_hash},
-        )
-        return version
+        raise ValidationFailureError("M6 script drafting requires a configured real LLM provider.")
 
     def create_voice_timeline(
         self,
@@ -521,7 +331,7 @@ class ScriptNarrationService:
                     "source_artifact_version_id": source_versions[0].id if source_versions else None,
                     "pronunciation_hints": {},
                     "evidence_refs": evidence_refs,
-                    "safety_notes": ["mock draft; requires human review before production use"],
+                    "safety_notes": ["provider-generated draft required before production use"],
                 }
             )
             cursor = end
@@ -805,7 +615,7 @@ class SceneSourceDecisionService:
     ) -> SceneSourceDecisionContract:
         if factual_risk == "HIGH":
             preferred = "SCREENSHOT_PLACEHOLDER"
-            fallback = ["MANUAL_PREMIUM_PLACEHOLDER", "LOCAL_FIXTURE"]
+            fallback = ["MANUAL_PREMIUM_PLACEHOLDER"]
             source_class = "MANUAL_ASSET_LIBRARY"
             procurement = True
             rights_review = True
@@ -813,15 +623,15 @@ class SceneSourceDecisionService:
             reasons = ["SCENE_SOURCE_DECISION_CREATED", "LICENSE_EVIDENCE_REQUIRED"]
         elif scene_type in {"MECHANISM", "PROCESS", "DATA"}:
             preferred = "DIAGRAM_PLACEHOLDER"
-            fallback = ["LOCAL_FIXTURE", "MOCK_MEDIA"]
+            fallback = ["MANUAL_PREMIUM_PLACEHOLDER"]
             source_class = "LOCAL_RENDERER"
             procurement = False
             rights_review = False
             ai_check = False
-            reasons = ["SCENE_SOURCE_DECISION_CREATED", "LOCAL_FIXTURE_ASSET_USED"]
+            reasons = ["SCENE_SOURCE_DECISION_CREATED", "PROVIDER_ASSET_NOT_CONFIGURED"]
         elif importance in {"HIGH", "CRITICAL"} and specificity == "HIGH" and need_realism == "HIGH":
             preferred = "AI_PLACEHOLDER"
-            fallback = ["MANUAL_PREMIUM_PLACEHOLDER", "LOCAL_FIXTURE"]
+            fallback = ["MANUAL_PREMIUM_PLACEHOLDER"]
             source_class = "API_NATIVE_PROVIDER"
             procurement = True
             rights_review = True
@@ -829,20 +639,20 @@ class SceneSourceDecisionService:
             reasons = ["SCENE_SOURCE_DECISION_CREATED", "BATCH_PROCUREMENT_REQUIRED"]
         elif approved_asset_pool_match:
             preferred = "APPROVED_ASSET_POOL"
-            fallback = ["LOCAL_FIXTURE"]
+            fallback = ["MANUAL_PREMIUM_PLACEHOLDER"]
             source_class = "APPROVED_ASSET_POOL"
             procurement = False
             rights_review = False
             ai_check = False
             reasons = ["SCENE_SOURCE_DECISION_CREATED", "APPROVED_ASSET_POOL_LOOKUP_PLACEHOLDER"]
         else:
-            preferred = "LOCAL_FIXTURE"
-            fallback = ["MOCK_MEDIA"]
-            source_class = "LOCAL_RENDERER"
-            procurement = False
-            rights_review = False
+            preferred = "MANUAL_PREMIUM_PLACEHOLDER"
+            fallback = ["DIAGRAM_PLACEHOLDER"]
+            source_class = "MANUAL_ASSET_LIBRARY"
+            procurement = True
+            rights_review = True
             ai_check = False
-            reasons = ["SCENE_SOURCE_DECISION_CREATED", "LOCAL_FIXTURE_ASSET_USED", "INTERNAL_TEST_ONLY_ASSET"]
+            reasons = ["SCENE_SOURCE_DECISION_CREATED", "PROVIDER_ASSET_NOT_CONFIGURED", "LICENSE_EVIDENCE_REQUIRED"]
         return SceneSourceDecisionContract(
             scene_id="deterministic_scene_source_decision",
             source_class=source_class,
@@ -876,9 +686,9 @@ class AssetPlanningService:
         for scene in scene_manifest.scenes:
             requirement_id = f"req_{scene.scene_id}"
             source_class = scene.source_decision.source_class
-            source_type = "LOCAL_FIXTURE"
-            license_requirement = "INTERNAL_TEST_ONLY"
-            status = "SATISFIED"
+            source_type = "MANUAL_PLACEHOLDER"
+            license_requirement = "LICENSE_REQUIRED"
+            status = "WAITING_FOR_ASSET"
             if scene.preferred_source == "MANUAL_ENVATO_PLACEHOLDER":
                 source_class = "MANUAL_ASSET_LIBRARY"
                 source_type = "MANUAL_ENVATO_PLACEHOLDER"
@@ -903,11 +713,11 @@ class AssetPlanningService:
                 requirement_id=requirement_id,
                 source_type=source_type,
                 rights_envelope=RightsEnvelopeContract(
-                    license_state="INTERNAL_TEST_ONLY" if source_type == "LOCAL_FIXTURE" else "LICENSE_REQUIRED",
-                    commercial_use_allowed=False if source_type == "LOCAL_FIXTURE" else None,
-                    attribution_required=False if source_type == "LOCAL_FIXTURE" else None,
+                    license_state="LICENSE_REQUIRED",
+                    commercial_use_allowed=None,
+                    attribution_required=None,
                     evidence_refs=[],
-                    restrictions=["not for publish"] if source_type == "LOCAL_FIXTURE" else ["manual procurement required"],
+                    restrictions=["manual procurement required"],
                 ),
                 provenance_blob={
                     "created_by": "M6 AssetPlanningService",
@@ -1098,9 +908,9 @@ class RenderSpecCompilerService:
             "render_variants": [variant.model_dump(mode="json")],
             "audio_tracks": [
                 {
-                    "track_id": "mock_silent_audio",
+                    "track_id": "silent_audio_placeholder",
                     "track_type": "SILENT",
-                    "source_ref": "local_fixture://silent_audio",
+                    "source_ref": None,
                     "duration_seconds": voice_timeline.total_duration_seconds,
                     "metadata": {"explicit_silent_audio": True},
                 }
@@ -1686,24 +1496,6 @@ def _collect_evidence_refs(versions: list[ArtifactVersion]) -> list[dict[str, An
     return refs
 
 
-def _record_mock_cost(session: Session, project: VideoProject, *, provider_run_ref: str) -> CostEvent:
-    ProviderRegistryService(session).require_entry("mock_llm")
-    return CostService(session).record_event(
-        data=CostEventCreate(
-            provider_key="mock_llm",
-            cost_scope_type="PROJECT",
-            cost_scope_id=project.id,
-            amount=Decimal("0"),
-            cost_type="ESTIMATED",
-            unit_count=Decimal("1"),
-            unit_type="REQUESTS",
-            provider_run_ref=provider_run_ref,
-            metadata={"mock": True, "operation_key": "m6_script_draft"},
-        ),
-        correlation_id="m6-llm-cost-event",
-    )
-
-
 def _create_llm_run(
     session: Session,
     *,
@@ -1718,15 +1510,15 @@ def _create_llm_run(
         **input_payload,
         "production_artifact_run_id": str(run.id),
         "policy_snapshot_id": str(run.policy_snapshot_id),
-        "provider_key": "mock_llm",
+        "provider_key": "llm_router",
     }
     llm_run = LLMRunSnapshot(
         run_type="M6_SCRIPT_DRAFT",
-        provider="mock",
-        model_name="mock-llm",
-        provider_key="mock_llm",
-        model_key="mock-llm",
-        run_mode="MOCK",
+        provider="llm_router",
+        model_name=None,
+        provider_key="llm_router",
+        model_key=None,
+        run_mode="REAL_DISABLED",
         prompt_template_key="m6_script_draft",
         prompt_template_version="1.0.0",
         input_payload=_jsonable(payload),
@@ -1738,7 +1530,7 @@ def _create_llm_run(
         token_estimate=Decimal("0"),
         quota_event_id=None,
         cost_event_id=cost_event_id,
-        cost_payload={"estimated_cost": "0", "currency": "USD", "mock": True},
+        cost_payload={"estimated_cost": "0", "currency": "USD", "provider_configured": False},
         correlation_id=correlation_id,
         completed_at=utc_now(),
     )
@@ -1746,7 +1538,7 @@ def _create_llm_run(
     session.flush()
     _record_m6_event(
         session,
-        event_type="llm_run_snapshot.created_mock",
+        event_type="llm_run_snapshot.blocked",
         aggregate_type="llm_run_snapshot",
         aggregate_id=llm_run.id,
         actor_id=None,
@@ -1754,7 +1546,7 @@ def _create_llm_run(
         target_id=llm_run.id,
         company_id=run.company_id,
         correlation_id=correlation_id,
-        reason_code="LLM_RUN_SNAPSHOT_CREATED",
+        reason_code="LLM_PROVIDER_NOT_CONFIGURED",
         payload={"run_type": llm_run.run_type, "provider_key": llm_run.provider_key, "status": llm_run.status},
     )
     return llm_run
@@ -1803,7 +1595,7 @@ def _record_provider_attempt(
         target_id=attempt.id,
         company_id=company_id,
         correlation_id=correlation_id,
-        reason_code="MOCK_PROVIDER_ONLY" if status == "SUCCESS" else "BAD_ARTIFACT_REJECTED",
+        reason_code="PROVIDER_ATTEMPT_SUCCEEDED" if status == "SUCCESS" else "BAD_ARTIFACT_REJECTED",
         payload={
             "provider_key": attempt.provider_key,
             "operation_key": attempt.operation_key,
@@ -1885,14 +1677,14 @@ def _visual_intent(text: str) -> str:
         return "diagram of the production process"
     if any(word in lowered for word in ("data", "metric", "evidence")):
         return "simple data card placeholder"
-    return "generic local fixture b-roll placeholder"
+        return "generic manual asset placeholder"
 
 
 def _preferred_source_for_text(text: str) -> str:
     lowered = text.lower()
     if any(word in lowered for word in ("workflow", "system", "process", "timeline", "data")):
         return "DIAGRAM_PLACEHOLDER"
-    return "LOCAL_FIXTURE"
+    return "MANUAL_PREMIUM_PLACEHOLDER"
 
 
 def _scene_type_for_intent(intent: str) -> str:

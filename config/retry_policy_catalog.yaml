@@ -3,10 +3,10 @@ catalog_version: "1.0.0"
 schema_version: catalog.v1
 status: active
 items:
-  - policy_key: mock_provider_default
+  - policy_key: real_provider_metadata_default
     provider_key: null
-    target_type: provider_contract_test
-    status: ACTIVE
+    target_type: provider_metadata
+    status: DISABLED
     policy_blob:
       max_attempts: 2
       backoff_strategy: fixed

@@ -303,13 +303,3 @@ items:
     supported_outputs: []
     plan_requirement: null
     capability_reason: VCOS orchestrates state, gates, and package planning.
-  - key: mock_media_provider_SHORT_RENDER
-    provider_key: mock_media_provider
-    provider_type: MOCK_PROVIDER
-    job_type: SHORT_RENDER
-    capability: MOCK_ONLY
-    max_duration_seconds: null
-    supported_aspect_ratios: []
-    supported_outputs: []
-    plan_requirement: null
-    capability_reason: Mock provider is test/dev only.

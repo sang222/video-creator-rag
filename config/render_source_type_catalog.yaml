@@ -5,10 +5,6 @@ status: active
 items:
   - key: APPROVED_ASSET_POOL
     description: Approved local asset pool source.
-  - key: LOCAL_FIXTURE
-    description: Local fixture source.
-  - key: MOCK_MEDIA
-    description: Mock media source.
   - key: STOCK_PLACEHOLDER
     description: Stock placeholder source.
   - key: DIAGRAM_PLACEHOLDER

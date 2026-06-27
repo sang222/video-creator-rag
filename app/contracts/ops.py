@@ -46,7 +46,6 @@ ManualActionType = Literal[
 ]
 ManualActionPriority = Literal["LOW", "MEDIUM", "HIGH", "URGENT"]
 ManualActionState = Literal["OPEN", "IN_PROGRESS", "DONE", "CANCELLED"]
-MockProviderMode = Literal["success", "timeout", "quota_exceeded", "malformed", "unavailable", "retryable_error", "non_retryable_error", "circuit_open"]
 
 
 class ProviderRegistryEntryCreate(BaseModel):
@@ -234,7 +233,7 @@ class BudgetGateDecisionRead(BaseModel):
 
 
 class ProviderHealthCheckRequest(BaseModel):
-    mode: MockProviderMode = "success"
+    mode: str = "metadata_only"
     next_action: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -304,18 +303,6 @@ class RetryPolicyRead(RetryPolicyCreate):
     id: uuid.UUID
     created_at: AwareDatetime
     updated_at: AwareDatetime
-
-
-class ProviderAttemptMockRequest(BaseModel):
-    provider_key: str = Field(min_length=1)
-    operation_key: str = "contract_test"
-    mode: MockProviderMode = "success"
-    target_type: str | None = None
-    target_id: uuid.UUID | None = None
-    attempt_number: int = Field(default=1, gt=0)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="forbid")
 
 
 class ProviderAttemptRead(BaseModel):

@@ -182,15 +182,3 @@ items:
       mode: QUALITY_FIRST_250
       daily_backbone: false
     notes: Manual library only; no automated Envato integration in M10.4.
-  - provider_key: mock_media_provider
-    provider_name: Mock provider
-    provider_type: MOCK_PROVIDER
-    role_description: Tests/dev only mock provider.
-    recommendation: MOCK
-    is_enabled: true
-    is_real_provider: false
-    supports_real_execution: false
-    monthly_budget_assumption:
-      mode: TEST
-      mock_cost_usd: 0
-    notes: Mock-only and never production media execution.

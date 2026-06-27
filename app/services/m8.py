@@ -16,7 +16,6 @@ from app.contracts.m8 import (
     ManualAnalyticsImportContract,
     MetricAvailabilityItem,
 )
-from app.contracts.ops import ProviderAttemptMockRequest
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -25,17 +24,14 @@ from app.db.models import (
     EngagementSnapshot,
     MetricAvailabilitySnapshot,
     MetricDefinitionVersion,
-    ProviderAttempt,
     RenderPackageSnapshot,
     RetentionCurveSnapshot,
     TrafficSourceSnapshot,
     UploadedVideo,
     UploadedVideoMetricsSummary,
 )
-from app.providers.mock import MockAnalyticsProvider
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
-from app.services.ops import RetryOpsService
 
 
 SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
@@ -221,12 +217,19 @@ class AnalyticsSyncService:
         reason_codes = ["ANALYTICS_SYNC_CREATED", "NO_DIAGNOSIS_IN_M8", "NO_NETWORK_ANALYTICS_CALL"]
         next_action = "Run analytics sync again."
         provider_key = data.provider_key
-        if data.sync_mode == "MOCK":
-            provider_key = provider_key or "mock_analytics"
         if data.sync_mode == "REAL_DISABLED":
             state = "BLOCKED"
             reason_codes = ["ANALYTICS_SYNC_CREATED", "ANALYTICS_PROVIDER_REAL_DISABLED", "NO_NETWORK_ANALYTICS_CALL"]
             next_action = "Check provider credentials later."
+        elif data.sync_mode in {"YOUTUBE_PUBLIC_MONITOR", "YOUTUBE_OWNER_ANALYTICS"}:
+            state = "BLOCKED"
+            provider_key = provider_key or ("youtube-public" if data.sync_mode == "YOUTUBE_PUBLIC_MONITOR" else "youtube-owner")
+            reason_codes = [
+                "ANALYTICS_SYNC_CREATED",
+                "ANALYTICS_PROVIDER_NOT_CONFIGURED",
+                "NO_NETWORK_ANALYTICS_CALL",
+            ]
+            next_action = "Configure YouTube analytics credentials before running provider sync."
         elif uploaded.monitoring_state != "READY_FOR_ANALYTICS":
             state = "BLOCKED"
             reason_codes = ["ANALYTICS_SYNC_CREATED", "UPLOADED_VIDEO_NOT_READY_FOR_ANALYTICS"]
@@ -323,60 +326,13 @@ class AnalyticsSyncService:
                 correlation_id=correlation_id,
             )
             return run
-        run.sync_state = "RUNNING"
-        run.started_at = utc_now()
-        run.reason_codes = _dedupe([*run.reason_codes, "ANALYTICS_PROVIDER_MOCK_USED", "NO_NETWORK_ANALYTICS_CALL"])
-        self.session.flush()
-        request = data or AnalyticsSyncRunExecuteRequest()
-        attempt = RetryOpsService(self.session).record_mock_attempt(
-            data=ProviderAttemptMockRequest(
-                provider_key=run.provider_key or "mock_analytics",
-                operation_key="analytics_sync",
-                mode=request.mock_mode,  # type: ignore[arg-type]
-                target_type="uploaded_video",
-                target_id=uploaded.id,
-                metadata={"analytics_sync_run_id": str(run.id), "no_network_analytics_call": True},
-            ),
-            correlation_id="m8-analytics-provider-attempt",
-        )
-        run.provider_attempt_id = attempt.id
-        if attempt.status != "SUCCESS":
-            state = "BLOCKED" if attempt.status in {"RETRYABLE_FAILURE", "CIRCUIT_OPEN", "QUOTA_REJECTED"} else "FAILED"
-            self._finish_unsuccessful_run(
-                run,
-                sync_state=state,
-                reason_codes=["ANALYTICS_SYNC_BLOCKED" if state == "BLOCKED" else "ANALYTICS_SYNC_FAILED", attempt.error_code or "ANALYTICS_SYNC_FAILED"],
-                next_action="Run analytics sync again." if state == "BLOCKED" else "Inspect provider attempt before retry.",
-                correlation_id=correlation_id,
-            )
-            self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
-            return run
-        provider = MockAnalyticsProvider()
-        response = provider.fetch_video_metrics(
-            platform=uploaded.platform,
-            platform_video_id=uploaded.platform_video_id,
-            published_at=uploaded.published_at,
-            mode="success",
-        )
-        if not response.ok:
-            self._finish_unsuccessful_run(
-                run,
-                sync_state="FAILED",
-                reason_codes=["ANALYTICS_SYNC_FAILED", response.error_code or "ANALYTICS_SYNC_FAILED"],
-                next_action="Run analytics sync again.",
-                correlation_id=correlation_id,
-            )
-            self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
-            return run
-        output = AnalyticsProviderOutputContract.model_validate(response.output)
-        self._create_snapshot_set(
-            run=run,
-            uploaded=uploaded,
-            output=output,
-            source="MOCK_ANALYTICS",
-            source_note="Deterministic local mock analytics provider.",
+        self._block_run(
+            run,
+            reason_codes=["ANALYTICS_PROVIDER_NOT_CONFIGURED", "NO_NETWORK_ANALYTICS_CALL"],
+            next_action="Configure YouTube analytics credentials or import manual/CSV analytics.",
             correlation_id=correlation_id,
         )
+        self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
         return run
 
     def import_manual(

@@ -66,7 +66,6 @@ from app.contracts import (
     PolicyRevalidationBatchRead,
     PolicySourceRefCreate,
     PolicySourceRefRead,
-    ProviderAttemptMockRequest,
     ProviderAttemptRead,
     ProviderHealthCheckRequest,
     ProviderHealthSnapshotRead,
@@ -146,7 +145,6 @@ from app.contracts import (
     QuotaAccountRead,
     QuotaEventRead,
     QuotaEventRequest,
-    RenderLocalSmokeRequest,
     RetentionCurveSnapshotRead,
     RetrievalPlanSnapshotCreate,
     RetrievalPlanSnapshotRead,
@@ -952,15 +950,6 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
-    @application.post("/providers/seed-mocks")
-    def seed_mock_providers() -> dict[str, int]:
-        try:
-            with session_scope() as session:
-                records = ProviderRegistryService(session).seed_mock_providers()
-                return {"count": len(records)}
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
     @application.post("/providers", response_model=ProviderRegistryEntryRead)
     def create_provider(data: ProviderRegistryEntryCreate) -> ProviderRegistryEntryRead:
         try:
@@ -1164,15 +1153,6 @@ def create_app() -> FastAPI:
             with session_scope() as session:
                 policy = RetryOpsService(session).create_policy(data=data)
                 return RetryPolicyRead.model_validate(_retry_policy(policy))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @application.post("/provider-attempts/mock", response_model=ProviderAttemptRead)
-    def create_provider_attempt_mock(data: ProviderAttemptMockRequest) -> ProviderAttemptRead:
-        try:
-            with session_scope() as session:
-                attempt = RetryOpsService(session).record_mock_attempt(data=data)
-                return ProviderAttemptRead.model_validate(_provider_attempt(attempt))
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -1429,7 +1409,7 @@ def create_app() -> FastAPI:
     def execute_production_run(run_id: uuid.UUID) -> ProductionArtifactRunRead:
         try:
             with session_scope() as session:
-                run = ProductionArtifactRunService(session).execute_local_mock_flow(run_id=run_id)
+                run = ProductionArtifactRunService(session).execute_real_provider_flow(run_id=run_id)
                 return ProductionArtifactRunRead.model_validate(_production_run(run))
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -1442,20 +1422,6 @@ def create_app() -> FastAPI:
                 if run is None:
                     raise NotFoundError(f"production artifact run not found: {run_id}")
                 return ProductionArtifactRunRead.model_validate(_production_run(run))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @application.post("/render-jobs/local-smoke")
-    def create_local_smoke_render(data: RenderLocalSmokeRequest) -> dict[str, Any]:
-        try:
-            with session_scope() as session:
-                result = LocalFixtureRendererService(session).render_local_smoke(
-                    render_spec_snapshot_id=data.render_spec_snapshot_id,
-                )
-                return {
-                    "job": _render_job(result.job),
-                    "render_package": _render_package(result.package) if result.package else None,
-                }
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

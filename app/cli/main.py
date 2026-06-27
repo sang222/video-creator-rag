@@ -41,7 +41,6 @@ from app.contracts import (
     PolicyChangeRecordCreate,
     PolicyRevalidationBatchCreate,
     PolicySourceRefCreate,
-    ProviderAttemptMockRequest,
     ProviderRegistryEntryCreate,
     ProjectAdmissionDecisionCreate,
     ProductionArtifactRunCreate,
@@ -106,7 +105,6 @@ from app.services import (
     PublishHandoffService,
     QuotaService,
     ResourceResolverService,
-    RetryOpsService,
     ReviewService,
     SearchDemandEvidenceService,
     SystemHealthService,
@@ -118,6 +116,7 @@ from app.services import (
     LocalMediaCleanupService,
     MediaCloudReadService,
     MediaOffloadJobService,
+    MockRuntimePurgeService,
     YouTubeCredentialHealthService,
     YouTubeOwnerAnalyticsSyncService,
     YouTubePublicStatsSyncService,
@@ -128,6 +127,7 @@ from app.services import (
 
 app = typer.Typer(no_args_is_help=True)
 db_app = typer.Typer(no_args_is_help=True)
+data_app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(no_args_is_help=True)
 audit_app = typer.Typer(no_args_is_help=True)
 company_app = typer.Typer(no_args_is_help=True)
@@ -169,6 +169,7 @@ drive_app = typer.Typer(no_args_is_help=True)
 integrations_app = typer.Typer(no_args_is_help=True)
 post_publish_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
+app.add_typer(data_app, name="data")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
 app.add_typer(company_app, name="company")
@@ -223,6 +224,22 @@ def migrate() -> None:
     except Exception as exc:
         _fail(f"migration failed: {exc}")
     typer.echo("migration ok")
+
+
+@data_app.command("purge-mock-runtime")
+def data_purge_mock_runtime(
+    apply: bool = typer.Option(False, "--apply"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    if apply and dry_run:
+        _fail("choose either --dry-run or --apply")
+    try:
+        with session_scope() as session:
+            service = MockRuntimePurgeService(session)
+            result = service.apply() if apply else service.preview()
+            typer.echo(json.dumps(result))
+    except Exception as exc:
+        _fail(f"data purge-mock-runtime failed: {exc}")
 
 
 @config_app.command("seed")
@@ -726,15 +743,6 @@ def readiness_inspect(project_id: uuid.UUID = typer.Option(..., "--project-id"))
     except Exception as exc:
         _fail(f"readiness inspect failed: {exc}")
 
-@provider_app.command("seed-mocks")
-def provider_seed_mocks() -> None:
-    try:
-        with session_scope() as session:
-            records = ProviderRegistryService(session).seed_mock_providers()
-            typer.echo(json.dumps({"count": len(records)}))
-    except Exception as exc:
-        _fail(f"provider seed failed: {exc}")
-
 @provider_app.command("register")
 def provider_register(
     provider_key: str = typer.Option(..., "--provider-key"),
@@ -778,27 +786,6 @@ def provider_health_check(
             typer.echo(json.dumps(_provider_health_to_dict(snapshot)))
     except Exception as exc:
         _fail(f"provider health-check failed: {exc}")
-
-@provider_app.command("attempt-mock")
-def provider_attempt_mock(
-    provider_key: str = typer.Option(..., "--provider-key"),
-    operation_key: str = typer.Option("contract_test", "--operation-key"),
-    mode: str = typer.Option("success", "--mode"),
-    attempt_number: int = typer.Option(1, "--attempt-number"),
-) -> None:
-    try:
-        with session_scope() as session:
-            attempt = RetryOpsService(session).record_mock_attempt(
-                data=ProviderAttemptMockRequest(
-                    provider_key=provider_key,
-                    operation_key=operation_key,
-                    mode=mode,
-                    attempt_number=attempt_number,
-                )
-            )
-            typer.echo(json.dumps(_provider_attempt_to_dict(attempt)))
-    except Exception as exc:
-        _fail(f"provider attempt-mock failed: {exc}")
 
 @credential_app.command("ref-create")
 def credential_ref_create(
@@ -1158,7 +1145,7 @@ def search_evidence_create(
     company_id: uuid.UUID = typer.Option(..., "--company-id"),
     channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
     query: str = typer.Option(..., "--query"),
-    source_type: str = typer.Option("MOCK", "--source-type"),
+    source_type: str = typer.Option("MANUAL_RESEARCH", "--source-type"),
     platform: str = typer.Option("YOUTUBE", "--platform"),
     search_volume_30d: int | None = typer.Option(None, "--search-volume-30d"),
     relative_interest_index: str | None = typer.Option(None, "--relative-interest-index"),
@@ -1275,7 +1262,6 @@ def daily_run_create(
 @daily_app.command("execute")
 def daily_execute(
     daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
-    mock_mode: str = typer.Option("success", "--mock-mode"),
     quota_account_id: uuid.UUID | None = typer.Option(None, "--quota-account-id"),
     budget_policy_key: str | None = typer.Option(None, "--budget-policy-key"),
     estimated_cost: str = typer.Option("0", "--estimated-cost"),
@@ -1285,7 +1271,6 @@ def daily_execute(
             daily_run = ChannelDailyRunService(session).execute_run(
                 daily_run_id=daily_run_id,
                 data=DailyRunExecuteRequest(
-                    mock_mode=mock_mode,
                     quota_account_id=quota_account_id,
                     budget_policy_key=budget_policy_key,
                     estimated_cost=Decimal(estimated_cost),
@@ -1311,7 +1296,6 @@ def idea_decide(
     daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
     context_pack_snapshot_id: uuid.UUID = typer.Option(..., "--context-pack-snapshot-id"),
     channel_state_pack_snapshot_id: uuid.UUID | None = typer.Option(None, "--channel-state-pack-snapshot-id"),
-    mock_mode: str = typer.Option("success", "--mock-mode"),
 ) -> None:
     try:
         with session_scope() as session:
@@ -1320,7 +1304,6 @@ def idea_decide(
                     channel_daily_run_id=daily_run_id,
                     context_pack_snapshot_id=context_pack_snapshot_id,
                     channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
-                    mock_mode=mock_mode,
                 )
             )
             typer.echo(json.dumps(_daily_idea_to_dict(decision)))
@@ -1381,7 +1364,7 @@ def project_admit(
 def production_run_create(
     project_id: uuid.UUID = typer.Option(..., "--project-id"),
     source_project_admission_decision_id: uuid.UUID | None = typer.Option(None, "--source-project-admission-decision-id"),
-    run_mode: str = typer.Option("MOCK", "--run-mode"),
+    run_mode: str = typer.Option("REAL_DISABLED", "--run-mode"),
 ) -> None:
     try:
         with session_scope() as session:
@@ -1403,7 +1386,7 @@ def production_execute(
 ) -> None:
     try:
         with session_scope() as session:
-            run = ProductionArtifactRunService(session).execute_local_mock_flow(
+            run = ProductionArtifactRunService(session).execute_real_provider_flow(
                 run_id=production_run_id,
                 output_dir=output_dir,
             )
@@ -1423,28 +1406,6 @@ def production_inspect(
             typer.echo(json.dumps(_production_run_to_dict(run)))
     except Exception as exc:
         _fail(f"production inspect failed: {exc}")
-
-@media_app.command("render-local-smoke")
-def media_render_local_smoke(
-    render_spec_snapshot_id: uuid.UUID = typer.Option(..., "--render-spec-snapshot-id"),
-    output_dir: Path | None = typer.Option(None, "--output-dir"),
-) -> None:
-    try:
-        with session_scope() as session:
-            result = LocalFixtureRendererService(session).render_local_smoke(
-                render_spec_snapshot_id=render_spec_snapshot_id,
-                output_dir=output_dir,
-            )
-            typer.echo(
-                json.dumps(
-                    {
-                        "job": _render_job_to_dict(result.job),
-                        "render_package": _render_package_to_dict(result.package) if result.package else None,
-                    }
-                )
-            )
-    except Exception as exc:
-        _fail(f"media render-local-smoke failed: {exc}")
 
 @media_app.command("qc-run")
 def media_qc_run(
@@ -1642,7 +1603,7 @@ def uploaded_video_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--u
 @analytics_app.command("sync-create")
 def analytics_sync_create(
     uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
-    sync_mode: str = typer.Option("MOCK", "--sync-mode"),
+    sync_mode: str = typer.Option("YOUTUBE_OWNER_ANALYTICS", "--sync-mode"),
     provider_key: str | None = typer.Option(None, "--provider-key"),
     observed_from: str | None = typer.Option(None, "--observed-from"),
     observed_to: str | None = typer.Option(None, "--observed-to"),
@@ -1667,13 +1628,12 @@ def analytics_sync_create(
 @analytics_app.command("sync-execute")
 def analytics_sync_execute(
     sync_run_id: uuid.UUID = typer.Option(..., "--sync-run-id"),
-    mock_mode: str = typer.Option("success", "--mock-mode"),
 ) -> None:
     try:
         with session_scope() as session:
             run = AnalyticsSyncService(session).execute_sync_run(
                 sync_run_id=sync_run_id,
-                data=AnalyticsSyncRunExecuteRequest(mock_mode=mock_mode),
+                data=AnalyticsSyncRunExecuteRequest(),
             )
             typer.echo(json.dumps(_analytics_sync_run_to_dict(run)))
     except Exception as exc:

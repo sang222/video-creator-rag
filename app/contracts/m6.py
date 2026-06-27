@@ -4,15 +4,13 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
-ProductionRunMode = Literal["MOCK", "LOCAL_FIXTURE", "REAL_DISABLED"]
+ProductionRunMode = Literal["REAL", "REAL_DISABLED", "NOT_CONFIGURED", "HUMAN_REVIEW_ONLY", "BLOCKED"]
 ProductionRunStatus = Literal["PENDING", "RUNNING", "COMPLETED", "REVIEW_REQUIRED", "BLOCKED", "FAILED", "CANCELLED"]
-TimingSource = Literal["MOCK_TTS", "ESTIMATED", "LOCAL_AUDIO_ANALYSIS"]
+TimingSource = Literal["ESTIMATED", "LOCAL_AUDIO_ANALYSIS"]
 ConfidenceLevel = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 CaptionFormat = Literal["SRT", "VTT", "JSON"]
 PreferredSource = Literal[
     "APPROVED_ASSET_POOL",
-    "LOCAL_FIXTURE",
-    "MOCK_MEDIA",
     "STOCK_PLACEHOLDER",
     "DIAGRAM_PLACEHOLDER",
     "SCREENSHOT_PLACEHOLDER",
@@ -38,14 +36,13 @@ ProviderSourceClass = Literal[
     "MANUAL_ASSET_LIBRARY",
     "BATCH_PROCUREMENT_SOURCE",
     "LOCAL_RENDERER",
-    "MOCK_PROVIDER",
     "PREMIUM_FALLBACK_PROVIDER",
     "APPROVED_ASSET_POOL",
 ]
 RequiredMediaType = Literal["IMAGE", "VIDEO", "AUDIO", "DIAGRAM", "SCREENSHOT", "GENERATED_PLACEHOLDER"]
 LicenseRequirement = Literal["COMMERCIAL_SAFE", "INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "UNKNOWN"]
 RequirementStatus = Literal["SATISFIED", "FALLBACK_USED", "WAITING_FOR_ASSET", "BLOCKED", "NOT_REQUIRED"]
-AssetCandidateSourceType = Literal["LOCAL_FIXTURE", "MOCK", "MANUAL_PLACEHOLDER", "MANUAL_ENVATO_PLACEHOLDER", "EXTERNAL_DISABLED"]
+AssetCandidateSourceType = Literal["MANUAL_PLACEHOLDER", "MANUAL_ENVATO_PLACEHOLDER", "EXTERNAL_DISABLED"]
 LicenseState = Literal["INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "LICENSE_VERIFIED", "UNKNOWN"]
 Platform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
 Surface = Literal["LONG_FORM", "SHORT_FORM", "REELS", "FEED", "STORY", "GENERIC"]
@@ -54,7 +51,7 @@ CropStrategy = Literal["CENTER_CROP", "FIT_WITH_BLUR", "SMART_CROP_PLACEHOLDER",
 VariantStatus = Literal["PLANNED", "READY", "BLOCKED", "RENDERED", "QC_PASSED", "QC_REVIEW_REQUIRED"]
 RenderIntent = Literal["LOCAL_SMOKE", "DRAFT_PREVIEW", "PRODUCTION_DISABLED"]
 RenderSpecValidationState = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
-RendererKey = Literal["LOCAL_FFMPEG", "MOCK_RENDERER", "REAL_DISABLED"]
+RendererKey = Literal["REAL_DISABLED"]
 MediaRenderJobStatus = Literal["PENDING", "RUNNING", "COMPLETED", "REVIEW_REQUIRED", "BLOCKED", "FAILED"]
 RenderPackageState = Literal["CREATED", "QC_PASSED", "QC_REVIEW_REQUIRED", "QC_BLOCKED", "FAILED"]
 QCState = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "FAILED"]
@@ -415,7 +412,7 @@ class RenderSceneSpec(BaseModel):
 
 class AudioTrackSpec(BaseModel):
     track_id: str
-    track_type: Literal["MOCK_TTS", "SILENT", "TEST_TONE"]
+    track_type: Literal["SILENT", "TEST_TONE"]
     source_ref: str | None = None
     duration_seconds: float = Field(gt=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -493,7 +490,7 @@ class FileRefContract(BaseModel):
 class ProductionArtifactRunCreate(BaseModel):
     video_project_id: uuid.UUID
     source_project_admission_decision_id: uuid.UUID | None = None
-    run_mode: ProductionRunMode = "MOCK"
+    run_mode: ProductionRunMode = "REAL_DISABLED"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")

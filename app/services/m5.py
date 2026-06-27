@@ -26,7 +26,7 @@ from app.contracts.m5 import (
     SearchDemandEvidenceCreate,
     SearchIntentMapCreate,
 )
-from app.contracts.ops import BudgetGateCheckRequest, CostEventCreate, QuotaEventRequest
+from app.contracts.ops import BudgetGateCheckRequest
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate, VideoProjectCreate
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
@@ -49,7 +49,6 @@ from app.db.models import (
     ProjectAdmissionDecision,
     ProviderAttempt,
     ProviderHealthSnapshot,
-    ProviderRegistryEntry,
     QuotaAccount,
     RetrievalPlanSnapshot,
     ReviewTask,
@@ -58,11 +57,10 @@ from app.db.models import (
     User,
     VideoProject,
 )
-from app.providers.mock import MockLLMProvider
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
-from app.services.ops import BudgetGateService, CostService, QuotaService
+from app.services.ops import BudgetGateService
 from app.services.workflow import ArtifactService, VideoProjectService
 
 
@@ -111,7 +109,6 @@ SAFE_SEARCH_SOURCES = {
     "YOUTUBE_ANALYTICS",
     "TIKTOK_CREATOR_SEARCH_INSIGHTS_MANUAL",
     "INTERNAL_ANALYTICS",
-    "MOCK",
     "MANUAL_RESEARCH",
 }
 RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_")
@@ -538,7 +535,7 @@ class ChannelStatePackService:
             provider_health_summary=provider_health_summary,
             quota_summary=quota_summary,
             evidence_summary=evidence_summary,
-            freshness_state="UNKNOWN" if provider_health_summary["mock_llm"]["state"] == "UNKNOWN" else "FRESH",
+            freshness_state="UNKNOWN" if provider_health_summary["llm_router"]["state"] == "UNKNOWN" else "FRESH",
             confidence_level="UNKNOWN" if evidence_summary["search_demand_evidence_count"] == 0 else "MEDIUM",
             state_hash=state_hash,
         )
@@ -714,46 +711,33 @@ class LLMWorkflowService:
     def __init__(self, session: Session):
         self.session = session
 
-    def run_mock_authority(
+    def run_authority(
         self,
         *,
         daily_run: ChannelDailyRun,
         context_pack: ContextPackSnapshot,
-        channel_state_pack: ChannelStatePackSnapshot | None,
         provider_key: str,
-        mock_mode: str,
         quota_account_id: uuid.UUID | None,
         budget_policy_key: str | None,
         estimated_cost: Decimal,
         correlation_id: str,
     ) -> LLMWorkflowResult:
-        if provider_key != "mock_llm":
+        if provider_key.startswith("mock_"):
             return self._blocked_run(
                 daily_run=daily_run,
                 context_pack=context_pack,
-                reason_codes=["PROVIDER_HEALTH_BLOCKED"],
-                message="M5 supports MockLLMProvider only",
+                provider_key="llm_router",
+                reason_codes=["TEST_DOUBLE_RUNTIME_REMOVED", "HUMAN_ACTION_REQUIRED"],
+                message="Runtime mock providers were removed from production. Configure a real LLM provider.",
                 correlation_id=correlation_id,
             )
-        provider = self._require_mock_llm_provider(provider_key)
         if not _authority_source_refs(context_pack):
-            return LLMWorkflowResult(
-                terminal_status="BLOCKED",
-                reason_codes=["AUTHORITY_CONTEXT_INSUFFICIENT", "AUTHORITY_IDEA_SOURCE_MISSING"],
-                llm_run=None,
-                proposal=None,
-                provider_attempt=None,
-                quota_event_id=None,
-                cost_event_id=None,
-                budget_gate_result={},
-            )
-        health = _latest_provider_health(self.session, provider_key)
-        if health is not None and health.health_state not in {"HEALTHY", "DEGRADED"}:
             return self._blocked_run(
                 daily_run=daily_run,
                 context_pack=context_pack,
-                reason_codes=["PROVIDER_HEALTH_BLOCKED"],
-                message=f"provider health blocks M5 authority: {health.health_state}",
+                provider_key=provider_key,
+                reason_codes=["AUTHORITY_CONTEXT_INSUFFICIENT", "AUTHORITY_IDEA_SOURCE_MISSING"],
+                message="M5 cannot create a daily idea without real authority/context inputs.",
                 correlation_id=correlation_id,
             )
         budget_result: dict[str, Any] = {}
@@ -776,8 +760,9 @@ class LLMWorkflowService:
                 return self._blocked_run(
                     daily_run=daily_run,
                     context_pack=context_pack,
+                    provider_key=provider_key,
                     reason_codes=["COST_BUDGET_BLOCKED", *check.reason_codes],
-                    message="budget gate blocked mock LLM authority",
+                    message="Budget gate blocked M5 real-provider authority.",
                     correlation_id=correlation_id,
                     budget_gate_result=budget_result,
                 )
@@ -785,224 +770,28 @@ class LLMWorkflowService:
                 return self._blocked_run(
                     daily_run=daily_run,
                     context_pack=context_pack,
+                    provider_key=provider_key,
                     reason_codes=["BUDGET_REVIEW_REQUIRED", *check.reason_codes],
-                    message="budget gate requires review before mock LLM authority",
+                    message="Budget gate requires review before M5 real-provider authority.",
                     correlation_id=correlation_id,
                     budget_gate_result=budget_result,
                 )
-        reserved_quota_event_id: uuid.UUID | None = None
-        consumed_quota_event_id: uuid.UUID | None = None
-        if quota_account_id is not None:
-            reserved = QuotaService(self.session).reserve_quota(
-                data=QuotaEventRequest(
-                    quota_account_id=quota_account_id,
-                    amount=Decimal("1"),
-                    target_type="channel_daily_run",
-                    target_id=daily_run.id,
-                    metadata={"provider_key": provider_key},
-                )
-            )
-            reserved_quota_event_id = reserved.id
-            if reserved.event_type == "REJECT":
-                attempt = _record_provider_attempt(
-                    self.session,
-                    provider_key=provider_key,
-                    operation_key="m5_authority",
-                    target_type="channel_daily_run",
-                    target_id=daily_run.id,
-                    status="QUOTA_REJECTED",
-                    error_code="PROVIDER_QUOTA_EXCEEDED",
-                    latency_ms=0,
-                    quota_event_id=reserved.id,
-                    metadata={"mock": True, "blocked_before_provider": True},
-                    correlation_id="m5-provider-attempt",
-                )
-                llm_run = self._create_llm_run(
-                    daily_run=daily_run,
-                    context_pack=context_pack,
-                    provider_key=provider_key,
-                    status="BLOCKED",
-                    output_payload={"error": "quota rejected"},
-                    quota_event_id=reserved.id,
-                    cost_event_id=None,
-                    correlation_id=correlation_id,
-                )
-                return LLMWorkflowResult(
-                    terminal_status="BLOCKED",
-                    reason_codes=["PROVIDER_QUOTA_BLOCKED"],
-                    llm_run=llm_run,
-                    proposal=None,
-                    provider_attempt=attempt,
-                    quota_event_id=reserved.id,
-                    cost_event_id=None,
-                    budget_gate_result=budget_result,
-                )
-        response = MockLLMProvider().generate(prompt=_prompt_stub(context_pack), mode=mock_mode)
-        cost_event = CostService(self.session).record_event(
-            data=CostEventCreate(
-                provider_key=provider_key,
-                cost_scope_type="CHANNEL",
-                cost_scope_id=daily_run.channel_workspace_id,
-                amount=estimated_cost,
-                cost_type="ESTIMATED",
-                unit_count=Decimal("1"),
-                unit_type="REQUESTS",
-                provider_run_ref=f"channel_daily_run:{daily_run.id}",
-                metadata={"mock": True, "operation_key": "m5_authority"},
-            ),
-            correlation_id="m5-llm-cost-event",
-        )
-        if response.ok and quota_account_id is not None:
-            consumed = QuotaService(self.session).consume_quota(
-                data=QuotaEventRequest(
-                    quota_account_id=quota_account_id,
-                    amount=Decimal("1"),
-                    target_type="channel_daily_run",
-                    target_id=daily_run.id,
-                    reason_code="MOCK_LLM_USED",
-                    metadata={"provider_key": provider_key, "reserved_quota_event_id": str(reserved_quota_event_id)},
-                )
-            )
-            consumed_quota_event_id = consumed.id
-        elif quota_account_id is not None and reserved_quota_event_id is not None:
-            QuotaService(self.session).release_quota(
-                data=QuotaEventRequest(
-                    quota_account_id=quota_account_id,
-                    amount=Decimal("1"),
-                    target_type="channel_daily_run",
-                    target_id=daily_run.id,
-                    reason_code="PROVIDER_HEALTH_BLOCKED",
-                    metadata={"provider_key": provider_key, "reserved_quota_event_id": str(reserved_quota_event_id)},
-                )
-            )
-        if not response.ok:
-            attempt = _record_provider_attempt(
-                self.session,
-                provider_key=provider.provider_key,
-                operation_key="m5_authority",
-                target_type="channel_daily_run",
-                target_id=daily_run.id,
-                status=_provider_attempt_status(response),
-                error_code=response.error_code,
-                latency_ms=response.latency_ms,
-                quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-                cost_event_id=cost_event.id,
-                metadata={"mock": True, "mode": mock_mode, "output": response.output if response.ok else {}},
-                correlation_id="m5-provider-attempt",
-            )
-            reason_codes = (
-                ["LLM_OUTPUT_MALFORMED", "LLM_SCHEMA_VALIDATION_FAILED", "DAILY_RUN_FAILED"]
-                if mock_mode == "malformed" or response.error_code == "MALFORMED_OUTPUT"
-                else ["PROVIDER_HEALTH_BLOCKED", "DAILY_RUN_FAILED"]
-            )
-            llm_run = self._create_llm_run(
-                daily_run=daily_run,
-                context_pack=context_pack,
-                provider_key=provider_key,
-                status="FAILED",
-                output_payload={"error_code": response.error_code, "reason_codes": reason_codes},
-                quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-                cost_event_id=cost_event.id,
-                correlation_id=correlation_id,
-            )
-            return LLMWorkflowResult(
-                terminal_status="FAILED",
-                reason_codes=reason_codes,
-                llm_run=llm_run,
-                proposal=None,
-                provider_attempt=attempt,
-                quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-                cost_event_id=cost_event.id,
-                budget_gate_result=budget_result,
-            )
-        try:
-            proposal = _validated_authority_proposal(_proposal_from_context(context_pack, channel_state_pack))
-        except (ValidationError, ValidationFailureError) as exc:
-            validation_errors = _safe_validation_errors(exc)
-            attempt = _record_provider_attempt(
-                self.session,
-                provider_key=provider.provider_key,
-                operation_key="m5_authority",
-                target_type="channel_daily_run",
-                target_id=daily_run.id,
-                status="NON_RETRYABLE_FAILURE",
-                error_code="LLM_SCHEMA_VALIDATION_FAILED",
-                latency_ms=response.latency_ms,
-                quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-                cost_event_id=cost_event.id,
-                metadata={"mock": True, "mode": mock_mode, "validation_errors": validation_errors},
-                correlation_id="m5-provider-attempt",
-            )
-            llm_run = self._create_llm_run(
-                daily_run=daily_run,
-                context_pack=context_pack,
-                provider_key=provider_key,
-                status="FAILED",
-                output_payload={"error_code": "LLM_SCHEMA_VALIDATION_FAILED", "validation_errors": validation_errors},
-                quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-                cost_event_id=cost_event.id,
-                correlation_id=correlation_id,
-            )
-            return LLMWorkflowResult(
-                terminal_status="FAILED",
-                reason_codes=["LLM_SCHEMA_VALIDATION_FAILED", "DAILY_RUN_FAILED"],
-                llm_run=llm_run,
-                proposal=None,
-                provider_attempt=attempt,
-                quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-                cost_event_id=cost_event.id,
-                budget_gate_result=budget_result,
-            )
-        attempt = _record_provider_attempt(
-            self.session,
-            provider_key=provider.provider_key,
-            operation_key="m5_authority",
-            target_type="channel_daily_run",
-            target_id=daily_run.id,
-            status="SUCCESS",
-            error_code=None,
-            latency_ms=response.latency_ms,
-            quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-            cost_event_id=cost_event.id,
-            metadata={"mock": True, "mode": mock_mode, "output": response.output},
-            correlation_id="m5-provider-attempt",
-        )
-        llm_run = self._create_llm_run(
+        return self._blocked_run(
             daily_run=daily_run,
             context_pack=context_pack,
             provider_key=provider_key,
-            status="COMPLETED",
-            output_payload=proposal,
-            quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-            cost_event_id=cost_event.id,
+            reason_codes=["LLM_PROVIDER_NOT_CONFIGURED", "HUMAN_ACTION_REQUIRED"],
+            message="Real LLM authority is not configured for M5 daily execution.",
             correlation_id=correlation_id,
-        )
-        return LLMWorkflowResult(
-            terminal_status="COMPLETED",
-            reason_codes=["MOCK_LLM_USED", "LLM_RUN_SNAPSHOT_CREATED"],
-            llm_run=llm_run,
-            proposal=proposal,
-            provider_attempt=attempt,
-            quota_event_id=consumed_quota_event_id or reserved_quota_event_id,
-            cost_event_id=cost_event.id,
             budget_gate_result=budget_result,
         )
-
-    def _require_mock_llm_provider(self, provider_key: str) -> ProviderRegistryEntry:
-        entry = self.session.scalars(select(ProviderRegistryEntry).where(ProviderRegistryEntry.provider_key == provider_key)).one_or_none()
-        if entry is None:
-            raise NotFoundError(f"provider not found: {provider_key}")
-        if entry.provider_type != "LLM" or entry.provider_key != "mock_llm":
-            raise ValidationFailureError("M5 authority must use MockLLMProvider only")
-        if entry.status not in {"ACTIVE", "EXPERIMENTAL"}:
-            raise ValidationFailureError("mock LLM provider is not active")
-        return entry
 
     def _blocked_run(
         self,
         *,
         daily_run: ChannelDailyRun,
         context_pack: ContextPackSnapshot,
+        provider_key: str,
         reason_codes: list[str],
         message: str,
         correlation_id: str,
@@ -1011,7 +800,7 @@ class LLMWorkflowService:
         llm_run = self._create_llm_run(
             daily_run=daily_run,
             context_pack=context_pack,
-            provider_key="mock_llm",
+            provider_key=provider_key,
             status="BLOCKED",
             output_payload={"error": message, "reason_codes": reason_codes},
             quota_event_id=None,
@@ -1051,11 +840,11 @@ class LLMWorkflowService:
         }
         llm_run = LLMRunSnapshot(
             run_type="M5_CHANNEL_AUTHORITY_PROPOSAL",
-            provider="mock",
-            model_name="mock-llm",
+            provider="llm_router",
+            model_name=None,
             provider_key=provider_key,
-            model_key="mock-llm",
-            run_mode="MOCK",
+            model_key=None,
+            run_mode="REAL_DISABLED",
             prompt_template_key="m5_channel_authority",
             prompt_template_version="1.0.0",
             input_payload=input_payload,
@@ -1067,7 +856,7 @@ class LLMWorkflowService:
             token_estimate=Decimal("0"),
             quota_event_id=quota_event_id,
             cost_event_id=cost_event_id,
-            cost_payload={"estimated_cost": "0", "currency": "USD", "mock": True},
+            cost_payload={"estimated_cost": "0", "currency": "USD", "provider_configured": False},
             correlation_id=correlation_id,
             completed_at=utc_now(),
         )
@@ -1075,7 +864,7 @@ class LLMWorkflowService:
         self.session.flush()
         _record_m5_event(
             self.session,
-            event_type="llm_run_snapshot.created_mock",
+            event_type="llm_run_snapshot.blocked",
             aggregate_type="llm_run_snapshot",
             aggregate_id=llm_run.id,
             actor_id=None,
@@ -1114,12 +903,10 @@ class ChannelAuthorityService:
             else None
         )
         _validate_pack_scope(daily_run, context_pack, state_pack)
-        result = LLMWorkflowService(self.session).run_mock_authority(
+        result = LLMWorkflowService(self.session).run_authority(
             daily_run=daily_run,
             context_pack=context_pack,
-            channel_state_pack=state_pack,
             provider_key=data.provider_key,
-            mock_mode=data.mock_mode,
             quota_account_id=data.quota_account_id,
             budget_policy_key=data.budget_policy_key,
             estimated_cost=data.estimated_cost,
@@ -1127,7 +914,7 @@ class ChannelAuthorityService:
         )
         if result.terminal_status != "COMPLETED" or result.proposal is None or result.llm_run is None:
             raise M5AuthorityError(
-                "mock LLM authority did not produce a valid proposal",
+                "M5 real-provider authority is not configured",
                 terminal_status=result.terminal_status,
                 reason_codes=result.reason_codes,
                 llm_run_snapshot_id=result.llm_run.id if result.llm_run else None,
@@ -1164,7 +951,7 @@ class ChannelAuthorityService:
             target_id=decision.id,
             company_id=decision.company_id,
             correlation_id=correlation_id,
-            reason_code="MOCK_LLM_USED",
+            reason_code="LLM_RUN_SNAPSHOT_CREATED",
             payload={
                 "channel_daily_run_id": str(daily_run.id),
                 "context_pack_snapshot_id": str(context_pack.id),
@@ -1186,8 +973,12 @@ class ChannelDailyRunService:
         data: ChannelDailyRunCreate,
         correlation_id: str = "m5-daily-run-create",
     ) -> ChannelDailyRun:
-        if data.run_mode != "MOCK":
-            raise ValidationFailureError("M5 supports MOCK daily runs only; REAL_DISABLED cannot execute")
+        if data.run_mode == "REAL":
+            reason_codes: list[str] = []
+            status = data.status
+        else:
+            reason_codes = ["LLM_PROVIDER_NOT_CONFIGURED", "HUMAN_ACTION_REQUIRED"]
+            status = "BLOCKED"
         _validate_channel_policy_scope(
             self.session,
             company_id=data.company_id,
@@ -1204,6 +995,8 @@ class ChannelDailyRunService:
                 raise ValidationFailureError("slot policy snapshot does not match daily run")
         payload = data.model_dump()
         metadata = payload.pop("metadata")
+        payload["status"] = status
+        payload["reason_codes"] = reason_codes or payload.get("reason_codes", [])
         daily_run = ChannelDailyRun(**payload, metadata_=metadata)
         self.session.add(daily_run)
         self.session.flush()
@@ -1295,7 +1088,6 @@ class ChannelDailyRunService:
                     context_pack_snapshot_id=context_pack.id,
                     channel_state_pack_snapshot_id=state_pack.id,
                     provider_key=data.provider_key,
-                    mock_mode=data.mock_mode,
                     quota_account_id=data.quota_account_id,
                     budget_policy_key=data.budget_policy_key,
                     estimated_cost=data.estimated_cost,
@@ -1455,7 +1247,7 @@ class ProjectAdmissionService:
         result = BudgetGateService(self.session).check(
             data=BudgetGateCheckRequest(
                 policy_key=data.budget_policy_key,
-                provider_key="mock_llm",
+                provider_key="llm_router",
                 scope_type="CHANNEL",
                 scope_id=daily_run.channel_workspace_id,
                 estimated_cost=data.estimated_cost,
@@ -1681,11 +1473,11 @@ def _gate_summary(session: Session, company_id: uuid.UUID, channel_workspace_id:
 
 
 def _provider_health_summary(session: Session) -> dict[str, Any]:
-    health = _latest_provider_health(session, "mock_llm")
+    health = _latest_provider_health(session, "llm_router")
     return {
-        "mock_llm": {
+        "llm_router": {
             "state": health.health_state if health else "UNKNOWN",
-            "reason_codes": health.reason_codes if health else ["PROVIDER_HEALTH_BLOCKED"],
+            "reason_codes": health.reason_codes if health else ["LLM_PROVIDER_NOT_CONFIGURED"],
             "checked_at": health.checked_at.isoformat() if health else None,
         }
     }
@@ -1701,9 +1493,9 @@ def _latest_provider_health(session: Session, provider_key: str) -> ProviderHeal
 
 
 def _quota_summary(session: Session) -> dict[str, Any]:
-    accounts = session.scalars(select(QuotaAccount).where(QuotaAccount.provider_key == "mock_llm")).all()
+    accounts = session.scalars(select(QuotaAccount).where(QuotaAccount.provider_key == "llm_router")).all()
     return {
-        "mock_llm": [
+        "llm_router": [
             {
                 "quota_account_id": str(account.id),
                 "status": account.status,
@@ -1897,7 +1689,7 @@ def _record_provider_attempt(
 
 def _provider_attempt_reason_code(status: str, error_code: str | None) -> str:
     if status == "SUCCESS":
-        return "MOCK_LLM_USED"
+        return "PROVIDER_ATTEMPT_SUCCEEDED"
     if error_code == "LLM_SCHEMA_VALIDATION_FAILED":
         return "LLM_SCHEMA_VALIDATION_FAILED"
     if error_code == "MALFORMED_OUTPUT":
@@ -2025,14 +1817,14 @@ def _proposal_from_context(context_pack: ContextPackSnapshot, state_pack: Channe
         idea_source_refs.append({"type": "channel_state_pack_snapshot", "id": str(state_pack.id), "state_hash": state_pack.state_hash})
     return {
         "proposed_title": title,
-        "proposed_angle": f"Mock-first angle for {title}",
+        "proposed_angle": f"Real-provider draft angle for {title}",
         "proposed_format": seed["format"],
         "proposed_pillar": seed["pillar"],
         "proposed_series_key": seed["series_key"],
         "audience_problem": audience_problem,
         "search_intent_hypothesis": {"query": seed["query"], "source": seed["source"]["type"]},
         "rationale": {
-            "mode": "MOCK",
+            "mode": "NOT_CONFIGURED",
             "context_pack_snapshot_id": str(context_pack.id),
             "context_pack_hash": context_pack.pack_hash,
             "channel_state_pack_snapshot_id": str(state_pack.id) if state_pack else None,

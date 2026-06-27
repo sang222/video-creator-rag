@@ -27,7 +27,5 @@ items:
     description: API-native paid stock provider, deferred in this mode.
   - key: FREE_FALLBACK_PROVIDER
     description: Free fallback stock provider requiring license evidence.
-  - key: MOCK_PROVIDER
-    description: Mock provider for tests and development only.
   - key: DEFERRED_MANUAL_LIBRARY
     description: Deferred manual media library, not an automated daily backbone.

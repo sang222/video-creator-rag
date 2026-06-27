@@ -4,7 +4,7 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
-LearningRunMode = Literal["MOCK", "RULE_BASED", "MANUAL_TRIGGER", "REAL_DISABLED"]
+LearningRunMode = Literal["RULE_BASED", "MANUAL_TRIGGER", "REAL_DISABLED"]
 LearningRunState = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
 LearningCandidateType = Literal[
     "TOPIC_DEMAND_PATTERN",
