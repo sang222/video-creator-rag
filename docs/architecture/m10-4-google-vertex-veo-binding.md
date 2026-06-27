@@ -64,7 +64,8 @@ Env override support:
 - `VCOS_VEO_DEFAULT_DURATION_SECONDS`
 - `VCOS_VEO_MAX_DURATION_SECONDS`
 - `VCOS_VEO_COST_PER_SECOND_1080P_VIDEO_ONLY`
-- `VCOS_VEO_MONTHLY_BUDGET_USD`
+- `VCOS_VEO_MONTHLY_CAP_USD`
+- `VCOS_VEO_MONTHLY_BUDGET_USD` as a backward-compatible alias only.
 
 Service account JSON must never be committed, stored in DB, or printed. `GOOGLE_APPLICATION_CREDENTIALS` is a path/handle only.
 

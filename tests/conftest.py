@@ -95,6 +95,9 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    real_smoke_runs,
+                    provider_readiness_snapshots,
+                    provider_readiness_checks,
                     publish_timing_suggestions,
                     channel_publish_timing_policies,
                     localized_metadata_packages,

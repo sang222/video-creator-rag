@@ -142,13 +142,16 @@ REQUIRED_TABLES = {
     "localized_metadata_packages",
     "channel_publish_timing_policies",
     "publish_timing_suggestions",
+    "provider_readiness_checks",
+    "provider_readiness_snapshots",
+    "real_smoke_runs",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0017_m11_1_localization"
+    assert revision == "0018_m12_provider_readiness"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

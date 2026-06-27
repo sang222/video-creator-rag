@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, M11 Operator Dashboard foundation, and M11.1 Vietnamese dashboard/auth/localization/publish timing foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, M11 Operator Dashboard foundation, M11.1 Vietnamese dashboard/auth/localization/publish timing foundation, and M12 production credential readiness/guarded smoke foundation.
 
 ## Stack
 
@@ -39,7 +39,7 @@ make ollama-logs
 
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. The M10.1 router uses that local endpoint by default. `VCOS_LLM_MODEL_<LANE>_<ROLE>` values are env-driven. Ollama cloud auth is handled by your local/container Ollama sign-in state, not by a VCOS-tracked API key or image override. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
-Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `CLOUD_FINAL_RENDERER_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M10.4 removes the generic cinematic AI provider binding; AI hero jobs bind only to `GOOGLE_VERTEX_VEO`. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
+Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M12 Cloud Final Renderer readiness uses Creatomate Growth 10K when `CLOUD_FINAL_RENDERER_PROVIDER=creatomate`, `CREATOMATE_PLAN=growth_10k`, and `CREATOMATE_API_KEY` are configured; it does not run real long-form rendering by default. M10.4 removes the generic cinematic AI provider binding; AI hero jobs bind only to `GOOGLE_VERTEX_VEO`. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
 
 Google Vertex Veo config is split by type: `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `VCOS_VEO_REAL_EXECUTION_ENABLED`, and `VCOS_VEO_REAL_SMOKE` are env/secret-store concerns; Veo model, duration, resolution, cost, budget, route, and capability defaults live in config catalogs with env override support. Real Veo execution is disabled by default.
 
@@ -47,7 +47,28 @@ YouTube follow configuration is env-driven. `.env.example` declares `YOUTUBE_PUB
 
 Google Drive media offload is env-driven. `.env.example` declares `GOOGLE_DRIVE_OFFLOAD_ENABLED`, `GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE`, `GOOGLE_DRIVE_OAUTH_CLIENT_ID`, `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_OAUTH_SCOPES`, `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_DRIVE_UPLOAD_MODE`, `VCOS_DELETE_LOCAL_AFTER_DRIVE_UPLOAD`, `VCOS_LOCAL_MEDIA_MAX_AGE_HOURS`, `VCOS_LOCAL_MEDIA_MAX_STORAGE_GB`, and `VCOS_DRIVE_REAL_UPLOAD_SMOKE`. M10.5 uses `drive.file` scope, stores tokens only through `CredentialReference` pointing to ignored local dev token files, and keeps real upload smoke disabled by default.
 
-Dashboard auth is local/dev only in M11.1. `.env.example` declares `VCOS_DASHBOARD_AUTH_ENABLED`, `VCOS_AUTH_MODE`, `VCOS_BOOTSTRAP_ADMIN_EMAIL`, `VCOS_BOOTSTRAP_ADMIN_PASSWORD`, `VCOS_BOOTSTRAP_ADMIN_ROLE`, and `VCOS_AUTH_SESSION_TTL_HOURS`. Passwords and session tokens are stored hashed; frontend session state uses httpOnly cookies, not localStorage tokens.
+Dashboard auth is local/dev only in M11.1. `.env.example` declares `VCOS_DASHBOARD_AUTH_ENABLED`, `VCOS_AUTH_MODE`, `VCOS_BOOTSTRAP_ADMIN_EMAIL`, `VCOS_BOOTSTRAP_ADMIN_PASSWORD`, `VCOS_BOOTSTRAP_ADMIN_ROLE`, and `VCOS_AUTH_SESSION_TTL_HOURS` with a 24-hour local login session. Passwords and session tokens are stored hashed; frontend session state uses httpOnly cookies, not localStorage tokens.
+
+M12 readiness is env-driven and guard-first. `.env.example` declares hard budget display values such as `VCOS_BUDGET_MODE=hard_env`, `VCOS_MONTHLY_AI_BUDGET_USD=250`, ElevenLabs/Creatomate/Veo monthly caps, and disabled optional spend caps. These are configured monthly caps only; VCOS does not calculate actual spend or remaining budget in M12. Real smoke remains disabled by default and uses provider-specific flags before any external call.
+
+M12 dashboard routes are `/settings`, `/settings/integrations`, and `/providers/readiness`.
+
+## M12 Commands
+
+```bash
+vcos integrations readiness
+vcos integrations readiness --run-snapshot
+vcos integrations smoke --provider ollama
+vcos integrations smoke --provider youtube-public
+vcos integrations smoke --provider youtube-owner
+vcos integrations smoke --provider google-drive
+vcos integrations smoke --provider google-vertex-veo
+vcos integrations smoke --provider elevenlabs
+vcos integrations smoke --provider creatomate
+vcos integrations smoke --provider cloud-final-renderer
+```
+
+`vcos integrations smoke` records `SKIPPED` unless the matching real-smoke env guard is enabled. Cloud Final Renderer smoke reports Creatomate Growth 10K readiness only and does not run real rendering. M12 does not add YouTube upload/publish, unguarded Veo generation, paid voice generation by default, or real Creatomate render by default.
 
 ## M1 Commands
 

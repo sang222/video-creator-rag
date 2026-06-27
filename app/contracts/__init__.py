@@ -261,6 +261,16 @@ from app.contracts.m11_1 import (
     PublishTimingSuggestionRead,
     VideoProjectLocalizationRead,
 )
+from app.contracts.m12 import (
+    IntegrationReadinessRead,
+    ProviderBudgetCardRead,
+    ProviderReadinessCheckRead,
+    ProviderReadinessSnapshotRead,
+    ProviderSmokeRequest,
+    ProviderSummaryRead,
+    ReadinessRunRequest,
+    RealSmokeRunRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -539,6 +549,14 @@ __all__ = [
     "ProviderOpsDashboardRead",
     "UploadedVideoDashboardRead",
     "UploadedVideoListItem",
+    "IntegrationReadinessRead",
+    "ProviderBudgetCardRead",
+    "ProviderReadinessCheckRead",
+    "ProviderReadinessSnapshotRead",
+    "ProviderSmokeRequest",
+    "ProviderSummaryRead",
+    "ReadinessRunRequest",
+    "RealSmokeRunRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

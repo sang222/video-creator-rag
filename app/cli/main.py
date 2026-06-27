@@ -63,6 +63,7 @@ from app.contracts import (
     AIHeroGenerationExecuteRequest,
     MediaOffloadExecuteRequest,
     MediaOffloadJobCreate,
+    ProviderSmokeRequest,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -121,6 +122,8 @@ from app.services import (
     YouTubeOwnerAnalyticsSyncService,
     YouTubePublicStatsSyncService,
     AIHeroGenerationService,
+    ProviderReadinessService,
+    RealSmokeOrchestratorService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -163,6 +166,7 @@ uploaded_video_app = typer.Typer(no_args_is_help=True)
 analytics_app = typer.Typer(no_args_is_help=True)
 youtube_app = typer.Typer(no_args_is_help=True)
 drive_app = typer.Typer(no_args_is_help=True)
+integrations_app = typer.Typer(no_args_is_help=True)
 post_publish_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
@@ -203,6 +207,7 @@ app.add_typer(uploaded_video_app, name="uploaded-video")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(drive_app, name="drive")
+app.add_typer(integrations_app, name="integrations")
 app.add_typer(post_publish_app, name="post-publish")
 
 
@@ -1885,6 +1890,25 @@ def drive_cloud_ref(cloud_media_ref_id: uuid.UUID = typer.Option(..., "--id")) -
             typer.echo(json.dumps(payload.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"drive cloud-ref failed: {exc}")
+
+@integrations_app.command("readiness")
+def integrations_readiness(run_snapshot: bool = typer.Option(False, "--run-snapshot")) -> None:
+    try:
+        with session_scope() as session:
+            service = ProviderReadinessService(session)
+            payload = service.run() if run_snapshot else service.readiness()
+            typer.echo(json.dumps(payload.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"integrations readiness failed: {exc}")
+
+@integrations_app.command("smoke")
+def integrations_smoke(provider: str = typer.Option(..., "--provider")) -> None:
+    try:
+        with session_scope() as session:
+            run = RealSmokeOrchestratorService(session).run_provider(provider, ProviderSmokeRequest())
+            typer.echo(json.dumps(run.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"integrations smoke failed: {exc}")
 
 @media_app.command("cleanup-local")
 def media_cleanup_local(dry_run: bool = typer.Option(False, "--dry-run")) -> None:

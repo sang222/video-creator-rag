@@ -29,6 +29,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M10.5 builds Google Drive media offload/cloud archive, CloudMediaRef read contracts, MediaOffloadJob lifecycle, Drive OAuth credential references, and verified local cleanup only.
 - M11 builds the human-operated Operator Dashboard cockpit, dashboard read models, channel lifecycle decisions, learning review decisions, approved playbook entries, and Next.js frontend only.
 - M11.1 builds Vietnamese-only dashboard language, local/dev password auth shell, localization/subtitle/metadata package support, localization readiness gate, and configured publish timing by channel timezone only.
+- M12 builds production credential readiness, provider status aggregation, guarded real-smoke orchestration, hard-env AI budget display, and Settings / Integrations dashboard only.
 
 ## Scope Guardrails
 
@@ -100,6 +101,10 @@ M11.1 adds local password auth, Vietnamese dashboard copy, channel localization 
 
 M11.1 does not build production SSO/2FA/password reset, auto translation publish, AI dubbing, YouTube upload/publish APIs, reupload-by-country workflows, backend Drive download/preview proxy, TikTok/Facebook analytics loops, config upgrade suggestions, fake traffic, bot engagement, browser automation, or platform evasion.
 
+M12 adds `provider_readiness_checks`, `provider_readiness_snapshots`, `real_smoke_runs`, `/integrations/readiness`, provider-scoped readiness/smoke endpoints, `vcos integrations readiness`, `vcos integrations smoke`, and Vietnamese integrations dashboard routes `/settings`, `/settings/integrations`, and `/providers/readiness`.
+
+M12 records Cloud Final Renderer readiness for Creatomate Growth 10K when `CLOUD_FINAL_RENDERER_PROVIDER=creatomate`, `CREATOMATE_PLAN=growth_10k`, and `CREATOMATE_API_KEY` are configured. M12 does not build real final long-form rendering, YouTube upload/publish/reupload APIs, unguarded Veo generation, real paid ElevenLabs voice generation by default, real Creatomate rendering by default, dashboard scraping/browser automation, config upgrade suggestions, TikTok/Facebook analytics loops, fake traffic, bot engagement, or platform evasion.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -124,6 +129,7 @@ M11.1 does not build production SSO/2FA/password reset, auto translation publish
 - M10.5 complete means generated media can be offloaded to Google Drive, verified, referenced in DB, and cleaned locally under policy.
 - M11 complete means VCOS has an operator dashboard for channel setup, production tracking, approvals, publish handoff queues, uploaded video monitoring, recovery review, learning review, media Drive links, and provider/storage status.
 - M11.1 complete means dashboard has Vietnamese UI, login/local auth shell, localization/subtitle package support, localized metadata package support, localization readiness, and configured publish timing by channel location/timezone.
+- M12 complete means VCOS can validate credentials/provider readiness, display hard-env AI budget caps, show Creatomate Growth 10K Cloud Final Renderer readiness, and run guarded real smoke tests before production. Next milestones can focus on production dry-run or first real video package.
 
 ## Pilot Notes
 

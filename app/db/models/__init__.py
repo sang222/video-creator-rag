@@ -176,6 +176,11 @@ from app.db.models.m11_1 import (
     OperatorUser,
     PublishTimingSuggestion,
 )
+from app.db.models.m12 import (
+    ProviderReadinessCheck,
+    ProviderReadinessSnapshot,
+    RealSmokeRun,
+)
 
 __all__ = [
     "AuditEvent",
@@ -322,4 +327,7 @@ __all__ = [
     "LocalizedMetadataPackage",
     "ChannelPublishTimingPolicy",
     "PublishTimingSuggestion",
+    "ProviderReadinessCheck",
+    "ProviderReadinessSnapshot",
+    "RealSmokeRun",
 ]
