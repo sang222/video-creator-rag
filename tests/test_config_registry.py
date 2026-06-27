@@ -20,6 +20,10 @@ def test_config_yaml_validates(db_session) -> None:
         "analytics_sync_state_catalog",
         "accessibility_qc_state_catalog",
         "asset_source_type_catalog",
+        "cloud_media_storage_provider_catalog",
+        "cloud_media_type_catalog",
+        "cloud_media_upload_status_catalog",
+        "cloud_media_verification_status_catalog",
         "capability_matrix",
         "context_pack_purpose_catalog",
         "daily_run_status_catalog",
@@ -41,6 +45,8 @@ def test_config_yaml_validates(db_session) -> None:
         "cta_type_catalog",
         "derivative_type_catalog",
         "gate_definition_catalog",
+        "google_drive_connection_state_catalog",
+        "google_drive_oauth_session_status_catalog",
         "health_state_catalog",
         "human_upload_task_state_catalog",
         "idea_decision_status_catalog",
@@ -55,6 +61,7 @@ def test_config_yaml_validates(db_session) -> None:
         "m10_1_reason_code_catalog",
         "m10_2_reason_code_catalog",
         "m10_3_reason_code_catalog",
+        "m10_5_reason_code_catalog",
         "media_provider_type_catalog",
         "media_provider_recommendation_catalog",
         "media_job_type_catalog",
@@ -83,6 +90,7 @@ def test_config_yaml_validates(db_session) -> None:
         "llm_model_profile_catalog",
         "llm_route_status_catalog",
         "llm_router_lane_catalog",
+        "local_cleanup_status_catalog",
         "manual_action_type_catalog",
         "manual_publish_confirmation_state_catalog",
         "metadata_diff_severity_catalog",
@@ -93,6 +101,7 @@ def test_config_yaml_validates(db_session) -> None:
         "metric_unit_catalog",
         "media_qc_state_catalog",
         "media_render_job_status_catalog",
+        "media_offload_job_state_catalog",
         "music_policy_catalog",
         "niche_profile_templates",
         "ops_incident_type_catalog",
@@ -167,7 +176,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 137
+    assert catalog_count == 146
     assert role_count == 3
     assert metric_definition_count == 16
 

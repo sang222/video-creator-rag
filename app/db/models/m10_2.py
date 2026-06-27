@@ -146,6 +146,7 @@ class LongFormRenderPackage(Base):
     approved_asset_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     thumbnail_variant_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     music_sfx_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    cloud_media_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     render_manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     final_renderer_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     final_renderer_provider_key: Mapped[str | None] = mapped_column(String(160))
@@ -173,6 +174,7 @@ class ShortRenderPackage(Base):
     caption_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("caption_track_snapshots.id"))
     hero_reuse_ref: Mapped[str | None] = mapped_column(Text)
     template_asset_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    cloud_media_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     render_manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     target_duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     target_aspect_ratio: Mapped[str] = mapped_column(String(20), nullable=False, default="9:16")
@@ -282,12 +284,14 @@ class FinalMediaRef(Base):
     provider_key: Mapped[str | None] = mapped_column(String(160))
     provider_type: Mapped[str | None] = mapped_column(String(80))
     media_qc_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("media_qc_reports.id"))
+    cloud_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cloud_media_refs.id"))
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
         Index("ix_final_media_refs_company", "company_id"),
         Index("ix_final_media_refs_project", "video_project_id"),
         Index("ix_final_media_refs_type", "media_type"),
+        Index("ix_final_media_refs_cloud_media_ref", "cloud_media_ref_id"),
     )
 
 

@@ -26,6 +26,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M10.2 builds the Quality-First $250 media provider role matrix, provider capability matrix, render routing decisions, media provider gates, and render package planning only.
 - M10.3 builds YouTube PublicMonitorMode, OAuth-backed OwnerAnalyticsMode, safe credential references, YouTube sync runs/snapshots, M8 truth-layer integration, and dashboard-ready UploadedVideo follow read models only.
 - M10.4 binds Google Vertex Veo as the only AI hero provider and externalizes media/provider routing, capability, budget, and Veo defaults into config/env only.
+- M10.5 builds Google Drive media offload/cloud archive, CloudMediaRef read contracts, MediaOffloadJob lifecycle, Drive OAuth credential references, and verified local cleanup only.
 
 ## Scope Guardrails
 
@@ -85,6 +86,10 @@ M10.4 binds `AI_HERO_GENERATION` and `AI_METAPHOR_GENERATION` to `GOOGLE_VERTEX_
 
 M10.4 does not build dashboard/operator cockpit UI, final long-form renderer, real Creatomate/ElevenLabs integration, YouTube sync/upload/publish APIs, channel config mutation, backup AI hero routing, Runway/Luma/generic cinematic fallback, automatic publish/upload/reupload, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
+M10.5 uploads generated heavy media to Google Drive only after OAuth/root config is present, verifies Drive file id, web view link, size, and checksum where available, stores `CloudMediaRef` in VCOS DB, and cleans local files only after verified upload and cleanup safety checks.
+
+M10.5 does not build dashboard/operator cockpit UI, backend download proxy, backend preview proxy, Drive streaming through VCOS, Google Drive as DB/source of truth, YouTube upload/publish/reupload, YouTube Studio scraping/browser automation, TikTok/Facebook analytics loops, Veo provider changes, real Creatomate/ElevenLabs/final renderer calls, channel config mutation, config upgrade suggestions, approved playbook promotion, vector/RAG, OPA/Cedar, Algorithm/Growth/View agents, fake traffic, bot engagement, or platform evasion.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -106,7 +111,8 @@ M10.4 does not build dashboard/operator cockpit UI, final long-form renderer, re
 - M10.2 complete means VCOS can route media production jobs by provider role and safely block unsupported long-form final rendering when no final assembly renderer is configured.
 - M10.3 complete means VCOS can follow uploaded YouTube videos through public stats and owner analytics when OAuth is connected, then expose dashboard-ready UploadedVideo follow payloads.
 - M10.4 complete means VCOS routes AI hero/metaphor jobs only to Google Vertex Veo, keeps real execution guarded, and has provider config externalized/audited.
-- M11 will display uploaded videos, learning approvals, playbook promotion UX, and human-owned channel config editing in an operator dashboard later.
+- M10.5 complete means generated media can be offloaded to Google Drive, verified, referenced in DB, and cleaned locally under policy.
+- M11 will display uploaded videos, learning approvals, cloud media cards with Google Drive CTA links, playbook promotion UX, and human-owned channel config editing in an operator dashboard later.
 
 ## Pilot Notes
 

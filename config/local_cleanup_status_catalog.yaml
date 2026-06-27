@@ -1,0 +1,15 @@
+catalog_key: local_cleanup_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_ELIGIBLE
+    description: Local file is not eligible for cleanup.
+  - key: PENDING
+    description: Local cleanup is pending after verified upload.
+  - key: CLEANED
+    description: Local file was cleaned after verified upload.
+  - key: SKIPPED
+    description: Local cleanup was skipped by policy or safety guard.
+  - key: FAILED
+    description: Local cleanup failed.

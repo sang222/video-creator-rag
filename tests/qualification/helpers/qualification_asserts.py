@@ -19,7 +19,7 @@ REQUIRED_TAGS = {
     "m10-2-media-provider-routing",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0014_m10_3_youtube_follow"
+EXPECTED_ALEMBIC_HEAD = "0015_m10_5_drive_offload"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

@@ -1,0 +1,23 @@
+catalog_key: cloud_media_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LONG_FORM_FINAL
+    description: Final long-form video file.
+  - key: SHORT_FINAL
+    description: Final Shorts video file.
+  - key: THUMBNAIL
+    description: Generated thumbnail image.
+  - key: CAPTION
+    description: Caption file such as SRT or VTT.
+  - key: AI_HERO
+    description: AI hero video asset.
+  - key: CREATOMATE_ASSET
+    description: Creatomate rendered or planned asset output.
+  - key: PUBLISH_PACKAGE
+    description: Publish package file or archive.
+  - key: QC_EXPORT
+    description: QC export artifact.
+  - key: OTHER
+    description: Other generated heavy media artifact.

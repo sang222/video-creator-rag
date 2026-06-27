@@ -128,6 +128,7 @@ class PublishHandoffService:
             planned_metadata=planned_metadata.model_dump(mode="json"),
             planned_disclosures=planned_disclosures,
             planned_files=_jsonable(planned_files),
+            cloud_media_refs=data.cloud_media_refs,
             checklist_snapshot=checklist.model_dump(mode="json"),
             operator_instructions=instructions.model_dump(mode="json"),
             risk_summary={

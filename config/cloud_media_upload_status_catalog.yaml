@@ -1,0 +1,15 @@
+catalog_key: cloud_media_upload_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PENDING
+    description: Cloud upload is pending.
+  - key: UPLOADING
+    description: Cloud upload is in progress.
+  - key: VERIFIED
+    description: Cloud upload is verified.
+  - key: FAILED
+    description: Cloud upload failed.
+  - key: CANCELLED
+    description: Cloud upload was cancelled.

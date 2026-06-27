@@ -1,0 +1,15 @@
+catalog_key: cloud_media_verification_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_STARTED
+    description: Upload verification has not started.
+  - key: SIZE_VERIFIED
+    description: Drive file size matches local source size.
+  - key: CHECKSUM_VERIFIED
+    description: Provider checksum matches local checksum.
+  - key: CHECKSUM_UNAVAILABLE
+    description: Provider checksum is unavailable but size is verified.
+  - key: FAILED
+    description: Upload verification failed.

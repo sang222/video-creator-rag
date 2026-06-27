@@ -166,6 +166,15 @@ from app.contracts import (
     UploadedVideoMetricsSummaryRead,
     UploadedVideoRead,
     UploadedVideoYouTubeFollowSummaryRead,
+    CloudMediaReadPayload,
+    GoogleDriveConnectionStatusRead,
+    GoogleDriveOAuthSessionRead,
+    LocalCleanupRunRequest,
+    LocalCleanupRunResult,
+    LocalMediaRetentionPolicyRead,
+    MediaOffloadExecuteRequest,
+    MediaOffloadJobCreate,
+    MediaOffloadJobRead,
     VideoProjectCreate,
     VideoProjectRead,
     YouTubeConnectionStatusRead,
@@ -264,6 +273,12 @@ from app.services import (
     UploadCardService,
     WorkflowReadinessService,
     UploadedVideoYouTubeFollowReadService,
+    GoogleDriveCredentialHealthService,
+    GoogleDriveOAuthSessionService,
+    LocalMediaCleanupService,
+    LocalMediaRetentionPolicyService,
+    MediaCloudReadService,
+    MediaOffloadJobService,
     YouTubeCredentialHealthService,
     YouTubeOAuthSessionService,
     YouTubeOwnerAnalyticsSyncService,
@@ -1403,6 +1418,119 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return YouTubeCredentialHealthService(session).connection_status()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/auth/google-drive/start")
+    def start_google_drive_auth(
+        company_id: uuid.UUID | None = None,
+        channel_workspace_id: uuid.UUID | None = None,
+    ) -> RedirectResponse:
+        try:
+            with session_scope() as session:
+                result = GoogleDriveOAuthSessionService(session).start(
+                    company_id=company_id,
+                    channel_workspace_id=channel_workspace_id,
+                )
+                return RedirectResponse(result.authorization_url)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/auth/google-drive/callback", response_model=GoogleDriveOAuthSessionRead)
+    def google_drive_auth_callback(
+        state: str,
+        code: str | None = None,
+        error: str | None = None,
+    ) -> GoogleDriveOAuthSessionRead:
+        try:
+            with session_scope() as session:
+                oauth_session = GoogleDriveOAuthSessionService(session).handle_callback(state=state, code=code, error=error)
+                return GoogleDriveOAuthSessionRead.model_validate(_google_drive_oauth_session(oauth_session))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/google-drive/connection-status", response_model=GoogleDriveConnectionStatusRead)
+    def get_google_drive_connection_status() -> GoogleDriveConnectionStatusRead:
+        try:
+            with session_scope() as session:
+                return GoogleDriveCredentialHealthService(session).connection_status()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/media/offload-jobs", response_model=MediaOffloadJobRead)
+    def create_media_offload_job(data: MediaOffloadJobCreate) -> MediaOffloadJobRead:
+        try:
+            with session_scope() as session:
+                job = MediaOffloadJobService(session).create_job(data=data)
+                return MediaOffloadJobRead.model_validate(_media_offload_job(job))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/media/offload-jobs/{job_id}/execute", response_model=MediaOffloadJobRead)
+    def execute_media_offload_job(job_id: uuid.UUID, data: MediaOffloadExecuteRequest | None = None) -> MediaOffloadJobRead:
+        try:
+            with session_scope() as session:
+                job = MediaOffloadJobService(session).execute_job(job_id=job_id, data=data)
+                return MediaOffloadJobRead.model_validate(_media_offload_job(job))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/media/offload-jobs/{job_id}", response_model=MediaOffloadJobRead)
+    def get_media_offload_job(job_id: uuid.UUID) -> MediaOffloadJobRead:
+        try:
+            with session_scope() as session:
+                job = MediaOffloadJobService(session).require(job_id)
+                return MediaOffloadJobRead.model_validate(_media_offload_job(job))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/media/cloud-refs/{cloud_media_ref_id}", response_model=CloudMediaReadPayload)
+    def get_cloud_media_ref(cloud_media_ref_id: uuid.UUID) -> CloudMediaReadPayload:
+        try:
+            with session_scope() as session:
+                return MediaCloudReadService(session).dashboard_payload(cloud_media_ref_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-projects/{video_project_id}/media", response_model=list[CloudMediaReadPayload])
+    def list_video_project_media(video_project_id: uuid.UUID) -> list[CloudMediaReadPayload]:
+        try:
+            with session_scope() as session:
+                return MediaCloudReadService(session).list_by_video_project(video_project_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/render-packages/{render_package_id}/media", response_model=list[CloudMediaReadPayload])
+    def list_render_package_media(render_package_id: uuid.UUID) -> list[CloudMediaReadPayload]:
+        try:
+            with session_scope() as session:
+                return MediaCloudReadService(session).list_by_render_package(render_package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/media", response_model=list[CloudMediaReadPayload])
+    def list_uploaded_video_media(uploaded_video_id: uuid.UUID) -> list[CloudMediaReadPayload]:
+        try:
+            with session_scope() as session:
+                return MediaCloudReadService(session).list_by_uploaded_video(uploaded_video_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/media/local-cleanup/run", response_model=LocalCleanupRunResult)
+    def run_local_media_cleanup(data: LocalCleanupRunRequest | None = None) -> LocalCleanupRunResult:
+        try:
+            with session_scope() as session:
+                request = data or LocalCleanupRunRequest()
+                return LocalMediaCleanupService(session).run_pending_cleanup(dry_run=request.dry_run)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/media/local-retention-policy", response_model=LocalMediaRetentionPolicyRead)
+    def get_local_media_retention_policy() -> LocalMediaRetentionPolicyRead:
+        try:
+            with session_scope() as session:
+                policy = LocalMediaRetentionPolicyService(session).get_or_create_default()
+                return LocalMediaRetentionPolicyRead.model_validate(_local_media_retention_policy(policy))
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -2953,6 +3081,7 @@ def _publish_handoff(handoff: Any) -> dict[str, Any]:
         "planned_metadata": handoff.planned_metadata,
         "planned_disclosures": handoff.planned_disclosures,
         "planned_files": handoff.planned_files,
+        "cloud_media_refs": handoff.cloud_media_refs,
         "checklist_snapshot": handoff.checklist_snapshot,
         "operator_instructions": handoff.operator_instructions,
         "risk_summary": handoff.risk_summary,
@@ -3161,6 +3290,61 @@ def _youtube_oauth_session(session: Any) -> dict[str, Any]:
         "error_message": session.error_message,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
+    }
+
+def _google_drive_oauth_session(session: Any) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "company_id": session.company_id,
+        "channel_workspace_id": session.channel_workspace_id,
+        "redirect_uri": session.redirect_uri,
+        "scopes": session.scopes,
+        "status": session.status,
+        "credential_reference_id": session.credential_reference_id,
+        "error_code": session.error_code,
+        "error_message": session.error_message,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+    }
+
+def _media_offload_job(job: Any) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "company_id": job.company_id,
+        "channel_workspace_id": job.channel_workspace_id,
+        "video_project_id": job.video_project_id,
+        "uploaded_video_id": job.uploaded_video_id,
+        "source_media_ref_id": job.source_media_ref_id,
+        "render_package_id": job.render_package_id,
+        "local_source_path_hash": job.local_source_path_hash,
+        "target_provider": job.target_provider,
+        "target_folder_policy": job.target_folder_policy,
+        "target_media_type": job.target_media_type,
+        "job_state": job.job_state,
+        "cloud_media_ref_id": job.cloud_media_ref_id,
+        "retry_count": job.retry_count,
+        "error_code": job.error_code,
+        "error_message": job.error_message,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+    }
+
+def _local_media_retention_policy(policy: Any) -> dict[str, Any]:
+    return {
+        "id": policy.id,
+        "company_id": policy.company_id,
+        "channel_workspace_id": policy.channel_workspace_id,
+        "keep_local_after_upload": policy.keep_local_after_upload,
+        "cleanup_after_verified": policy.cleanup_after_verified,
+        "max_local_age_hours": policy.max_local_age_hours,
+        "max_local_storage_gb": policy.max_local_storage_gb,
+        "protected_paths": policy.protected_paths,
+        "allowed_cleanup_roots": policy.allowed_cleanup_roots,
+        "state": policy.state,
+        "created_at": policy.created_at,
+        "updated_at": policy.updated_at,
     }
 
 def _youtube_public_sync_run(run: Any) -> dict[str, Any]:

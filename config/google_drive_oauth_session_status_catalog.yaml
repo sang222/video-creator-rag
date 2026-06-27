@@ -1,0 +1,15 @@
+catalog_key: google_drive_oauth_session_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: STARTED
+    description: Google Drive OAuth session started.
+  - key: CALLBACK_RECEIVED
+    description: Google Drive OAuth callback was received.
+  - key: TOKEN_EXCHANGED
+    description: Google Drive OAuth code was exchanged for token storage.
+  - key: FAILED
+    description: Google Drive OAuth session failed.
+  - key: CANCELLED
+    description: Google Drive OAuth session was cancelled.

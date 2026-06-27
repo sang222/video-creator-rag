@@ -153,7 +153,7 @@ def test_m8_preflight_tags_migration_tables_defaults_and_metric_seed(engine, db_
     assert M8_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0014_m10_3_youtube_follow"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_m10_5_drive_offload"
         defaults = connection.execute(
             text(
                 """

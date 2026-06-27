@@ -67,6 +67,54 @@ class Settings(BaseSettings):
         default="https://www.googleapis.com/auth/youtube.readonly,https://www.googleapis.com/auth/yt-analytics.readonly",
         validation_alias=AliasChoices("YOUTUBE_OAUTH_SCOPES", "VCOS_YOUTUBE_OAUTH_SCOPES"),
     )
+    google_drive_offload_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_OFFLOAD_ENABLED", "VCOS_GOOGLE_DRIVE_OFFLOAD_ENABLED"),
+    )
+    google_drive_oauth_client_secrets_file: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE"),
+    )
+    google_drive_oauth_client_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_CLIENT_ID", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_ID"),
+    )
+    google_drive_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"),
+    )
+    google_drive_oauth_redirect_uri: str | None = Field(
+        default="http://localhost:8000/auth/google-drive/callback",
+        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_REDIRECT_URI", "VCOS_GOOGLE_DRIVE_OAUTH_REDIRECT_URI"),
+    )
+    google_drive_oauth_scopes: str = Field(
+        default="https://www.googleapis.com/auth/drive.file",
+        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_SCOPES", "VCOS_GOOGLE_DRIVE_OAUTH_SCOPES"),
+    )
+    google_drive_root_folder_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_ROOT_FOLDER_ID", "VCOS_GOOGLE_DRIVE_ROOT_FOLDER_ID"),
+    )
+    google_drive_upload_mode: str = Field(
+        default="resumable",
+        validation_alias=AliasChoices("GOOGLE_DRIVE_UPLOAD_MODE", "VCOS_GOOGLE_DRIVE_UPLOAD_MODE"),
+    )
+    delete_local_after_drive_upload: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VCOS_DELETE_LOCAL_AFTER_DRIVE_UPLOAD", "DELETE_LOCAL_AFTER_DRIVE_UPLOAD"),
+    )
+    local_media_max_age_hours: int = Field(
+        default=24,
+        validation_alias=AliasChoices("VCOS_LOCAL_MEDIA_MAX_AGE_HOURS", "LOCAL_MEDIA_MAX_AGE_HOURS"),
+    )
+    local_media_max_storage_gb: int = Field(
+        default=20,
+        validation_alias=AliasChoices("VCOS_LOCAL_MEDIA_MAX_STORAGE_GB", "LOCAL_MEDIA_MAX_STORAGE_GB"),
+    )
+    drive_real_upload_smoke: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_DRIVE_REAL_UPLOAD_SMOKE", "DRIVE_REAL_UPLOAD_SMOKE"),
+    )
     ai_hero_provider: str | None = Field(
         default=None,
         validation_alias=AliasChoices("VCOS_AI_HERO_PROVIDER", "AI_HERO_PROVIDER"),
@@ -149,6 +197,7 @@ class Settings(BaseSettings):
         "pixabay_api_key",
         "youtube_data_api_key",
         "youtube_oauth_client_secret",
+        "google_drive_oauth_client_secret",
         mode="before",
     )
     @classmethod
@@ -162,6 +211,11 @@ class Settings(BaseSettings):
         "google_cloud_project_id",
         "google_cloud_location",
         "google_application_credentials",
+        "google_drive_oauth_client_secrets_file",
+        "google_drive_oauth_client_id",
+        "google_drive_oauth_redirect_uri",
+        "google_drive_root_folder_id",
+        "google_drive_upload_mode",
         "veo_model",
         "veo_mode",
         "veo_resolution",

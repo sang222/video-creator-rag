@@ -156,6 +156,13 @@ from app.db.models.m10_3 import (
     YouTubeOwnerAnalyticsSyncRun,
     YouTubePublicSyncRun,
 )
+from app.db.models.m10_5 import (
+    CloudMediaRef,
+    GoogleDriveMediaCredential,
+    GoogleDriveOAuthSession,
+    LocalMediaRetentionPolicy,
+    MediaOffloadJob,
+)
 
 __all__ = [
     "AuditEvent",
@@ -288,4 +295,9 @@ __all__ = [
     "YouTubeOAuthSession",
     "YouTubeOwnerAnalyticsSyncRun",
     "YouTubePublicSyncRun",
+    "CloudMediaRef",
+    "GoogleDriveMediaCredential",
+    "GoogleDriveOAuthSession",
+    "LocalMediaRetentionPolicy",
+    "MediaOffloadJob",
 ]

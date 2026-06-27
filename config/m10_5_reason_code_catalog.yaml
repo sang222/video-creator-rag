@@ -1,0 +1,43 @@
+catalog_key: m10_5_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: GOOGLE_DRIVE_OFFLOAD_CONFIGURED
+    description: Google Drive media offload is configured.
+  - code: GOOGLE_DRIVE_OAUTH_SESSION_STARTED
+    description: Google Drive OAuth session started.
+  - code: GOOGLE_DRIVE_OAUTH_CALLBACK_RECEIVED
+    description: Google Drive OAuth callback received.
+  - code: GOOGLE_DRIVE_TOKEN_EXCHANGED
+    description: Google Drive OAuth token exchanged and stored by credential reference.
+  - code: GOOGLE_DRIVE_NEEDS_REAUTH
+    description: Google Drive OAuth credential needs reauthorization.
+  - code: MEDIA_OFFLOAD_JOB_CREATED
+    description: Media offload job was created.
+  - code: MEDIA_OFFLOAD_UPLOAD_STARTED
+    description: Media offload upload started.
+  - code: MEDIA_OFFLOAD_UPLOAD_VERIFIED
+    description: Media offload upload was verified.
+  - code: MEDIA_OFFLOAD_UPLOAD_FAILED
+    description: Media offload upload failed.
+  - code: CLOUD_MEDIA_REF_CREATED
+    description: Cloud media reference was created.
+  - code: CLOUD_MEDIA_REF_VERIFIED
+    description: Cloud media reference points to a verified Drive file.
+  - code: LOCAL_MEDIA_CLEANUP_SKIPPED
+    description: Local media cleanup was skipped.
+  - code: LOCAL_MEDIA_CLEANUP_COMPLETED
+    description: Local media cleanup completed.
+  - code: LOCAL_MEDIA_CLEANUP_FAILED
+    description: Local media cleanup failed.
+  - code: LOCAL_MEDIA_NOT_DELETED_UPLOAD_UNVERIFIED
+    description: Local file was not deleted because upload was not verified.
+  - code: LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH
+    description: Local file was not deleted because path is outside allowed cleanup roots or protected.
+  - code: DASHBOARD_DRIVE_CTA_ONLY
+    description: Dashboard contract exposes Google Drive CTA only.
+  - code: BACKEND_DOWNLOAD_PROXY_FORBIDDEN
+    description: Backend media download proxy is forbidden.
+  - code: DASHBOARD_UI_DEFERRED_TO_M11
+    description: Dashboard UI remains deferred to M11.

@@ -95,6 +95,11 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    google_drive_oauth_sessions,
+                    google_drive_media_credentials,
+                    media_offload_jobs,
+                    cloud_media_refs,
+                    local_media_retention_policies,
                     youtube_owner_analytics_sync_runs,
                     youtube_public_sync_runs,
                     uploaded_video_youtube_owner_analytics_snapshots,

@@ -270,7 +270,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0010_m9_post_publish_diagnostics",
         "0012_m10_1_router_derivatives",
         "0013_m10_2_provider_routing",
-        "0014_m10_3_youtube_follow",
+        "0015_m10_5_drive_offload",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -329,7 +329,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 137
+    assert second["config"] == 146
     assert second["gates"] == 15
 
 

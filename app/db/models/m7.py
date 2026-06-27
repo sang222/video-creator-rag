@@ -45,6 +45,7 @@ class PublishHandoffPackage(Base):
     planned_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     planned_disclosures: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     planned_files: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    cloud_media_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     checklist_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     operator_instructions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     risk_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

@@ -149,6 +149,7 @@ class PublishHandoffCreate(BaseModel):
     render_variant_id: str | None = None
     created_by_user_id: uuid.UUID | None = None
     planned_metadata_overrides: dict[str, Any] = Field(default_factory=dict)
+    cloud_media_refs: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -174,6 +175,7 @@ class PublishHandoffRead(BaseModel):
     planned_metadata: dict[str, Any]
     planned_disclosures: dict[str, Any]
     planned_files: dict[str, Any]
+    cloud_media_refs: list[dict[str, Any]]
     checklist_snapshot: dict[str, Any]
     operator_instructions: dict[str, Any]
     risk_summary: dict[str, Any]

@@ -61,6 +61,8 @@ from app.contracts import (
     ContextPackSnapshotCreate,
     YouTubeOwnerAnalyticsSyncRequest,
     AIHeroGenerationExecuteRequest,
+    MediaOffloadExecuteRequest,
+    MediaOffloadJobCreate,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -111,6 +113,10 @@ from app.services import (
     WorkflowReadinessService,
     RenderSpecCompilerService,
     UploadedVideoYouTubeFollowReadService,
+    GoogleDriveCredentialHealthService,
+    LocalMediaCleanupService,
+    MediaCloudReadService,
+    MediaOffloadJobService,
     YouTubeCredentialHealthService,
     YouTubeOwnerAnalyticsSyncService,
     YouTubePublicStatsSyncService,
@@ -156,6 +162,7 @@ publish_app = typer.Typer(no_args_is_help=True)
 uploaded_video_app = typer.Typer(no_args_is_help=True)
 analytics_app = typer.Typer(no_args_is_help=True)
 youtube_app = typer.Typer(no_args_is_help=True)
+drive_app = typer.Typer(no_args_is_help=True)
 post_publish_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(config_app, name="config")
@@ -195,6 +202,7 @@ app.add_typer(publish_app, name="publish")
 app.add_typer(uploaded_video_app, name="uploaded-video")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(youtube_app, name="youtube")
+app.add_typer(drive_app, name="drive")
 app.add_typer(post_publish_app, name="post-publish")
 
 
@@ -1815,6 +1823,78 @@ def youtube_follow_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--u
     except Exception as exc:
         _fail(f"youtube follow-summary failed: {exc}")
 
+@drive_app.command("connection-status")
+def drive_connection_status() -> None:
+    try:
+        with session_scope() as session:
+            status_read = GoogleDriveCredentialHealthService(session).connection_status()
+            typer.echo(json.dumps(status_read.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"drive connection-status failed: {exc}")
+
+@drive_app.command("offload")
+def drive_offload(
+    path: Path = typer.Option(..., "--path"),
+    media_type: str = typer.Option(..., "--media-type"),
+    company_id: uuid.UUID | None = typer.Option(None, "--company-id"),
+    channel_workspace_id: uuid.UUID | None = typer.Option(None, "--channel-id"),
+    video_project_id: uuid.UUID | None = typer.Option(None, "--video-project-id"),
+    uploaded_video_id: uuid.UUID | None = typer.Option(None, "--uploaded-video-id"),
+    source_media_ref_id: uuid.UUID | None = typer.Option(None, "--source-media-ref-id"),
+    render_package_id: uuid.UUID | None = typer.Option(None, "--render-package-id"),
+    keep_local: bool = typer.Option(False, "--keep-local"),
+) -> None:
+    try:
+        with session_scope() as session:
+            service = MediaOffloadJobService(session)
+            job = service.create_job(
+                data=MediaOffloadJobCreate(
+                    company_id=company_id,
+                    channel_workspace_id=channel_workspace_id,
+                    video_project_id=video_project_id,
+                    uploaded_video_id=uploaded_video_id,
+                    source_media_ref_id=source_media_ref_id,
+                    render_package_id=render_package_id,
+                    local_source_path=str(path),
+                    target_media_type=media_type,  # type: ignore[arg-type]
+                    keep_local=keep_local,
+                )
+            )
+            executed = service.execute_job(
+                job_id=job.id,
+                data=MediaOffloadExecuteRequest(local_source_path=str(path), keep_local=keep_local),
+            )
+            typer.echo(json.dumps(_media_offload_job_to_dict(executed)))
+    except Exception as exc:
+        _fail(f"drive offload failed: {exc}")
+
+@drive_app.command("offload-job")
+def drive_offload_job(job_id: uuid.UUID = typer.Option(..., "--job-id")) -> None:
+    try:
+        with session_scope() as session:
+            job = MediaOffloadJobService(session).require(job_id)
+            typer.echo(json.dumps(_media_offload_job_to_dict(job)))
+    except Exception as exc:
+        _fail(f"drive offload-job failed: {exc}")
+
+@drive_app.command("cloud-ref")
+def drive_cloud_ref(cloud_media_ref_id: uuid.UUID = typer.Option(..., "--id")) -> None:
+    try:
+        with session_scope() as session:
+            payload = MediaCloudReadService(session).dashboard_payload(cloud_media_ref_id)
+            typer.echo(json.dumps(payload.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"drive cloud-ref failed: {exc}")
+
+@media_app.command("cleanup-local")
+def media_cleanup_local(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+    try:
+        with session_scope() as session:
+            result = LocalMediaCleanupService(session).run_pending_cleanup(dry_run=dry_run)
+            typer.echo(json.dumps(result.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"media cleanup-local failed: {exc}")
+
 @post_publish_app.command("health-create")
 def post_publish_health_create(
     uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
@@ -2242,6 +2322,7 @@ def _publish_handoff_to_dict(handoff: Any) -> dict[str, Any]:
         "planned_metadata": handoff.planned_metadata,
         "planned_disclosures": handoff.planned_disclosures,
         "planned_files": handoff.planned_files,
+        "cloud_media_refs": handoff.cloud_media_refs,
         "checklist_snapshot": handoff.checklist_snapshot,
         "operator_instructions": handoff.operator_instructions,
         "risk_summary": handoff.risk_summary,
@@ -2461,6 +2542,30 @@ def _youtube_owner_sync_run_to_dict(run: Any) -> dict[str, Any]:
         "created_snapshot_id": str(run.created_snapshot_id) if run.created_snapshot_id else None,
         "created_at": run.created_at.isoformat(),
         "updated_at": run.updated_at.isoformat(),
+    }
+
+def _media_offload_job_to_dict(job: Any) -> dict[str, Any]:
+    return {
+        "id": str(job.id),
+        "company_id": str(job.company_id) if job.company_id else None,
+        "channel_workspace_id": str(job.channel_workspace_id) if job.channel_workspace_id else None,
+        "video_project_id": str(job.video_project_id) if job.video_project_id else None,
+        "uploaded_video_id": str(job.uploaded_video_id) if job.uploaded_video_id else None,
+        "source_media_ref_id": str(job.source_media_ref_id) if job.source_media_ref_id else None,
+        "render_package_id": str(job.render_package_id) if job.render_package_id else None,
+        "local_source_path_hash": job.local_source_path_hash,
+        "target_provider": job.target_provider,
+        "target_folder_policy": job.target_folder_policy,
+        "target_media_type": job.target_media_type,
+        "job_state": job.job_state,
+        "cloud_media_ref_id": str(job.cloud_media_ref_id) if job.cloud_media_ref_id else None,
+        "retry_count": job.retry_count,
+        "error_code": job.error_code,
+        "error_message": job.error_message,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
     }
 
 def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:

@@ -330,6 +330,7 @@ class LongFormRenderPackageCreate(BaseModel):
     approved_asset_refs: list[dict[str, Any]] = Field(default_factory=list)
     thumbnail_variant_refs: list[dict[str, Any]] = Field(default_factory=list)
     music_sfx_refs: list[dict[str, Any]] = Field(default_factory=list)
+    cloud_media_refs: list[dict[str, Any]] = Field(default_factory=list)
     render_manifest: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -348,6 +349,7 @@ class LongFormRenderPackageRead(_ReadModel):
     approved_asset_refs: list[dict[str, Any]]
     thumbnail_variant_refs: list[dict[str, Any]]
     music_sfx_refs: list[dict[str, Any]]
+    cloud_media_refs: list[dict[str, Any]]
     render_manifest: dict[str, Any]
     final_renderer_required: bool
     final_renderer_provider_key: str | None
@@ -362,6 +364,7 @@ class ShortRenderPackageCreate(BaseModel):
     caption_track_id: uuid.UUID | None = None
     hero_reuse_ref: str | None = None
     template_asset_refs: list[dict[str, Any]] = Field(default_factory=list)
+    cloud_media_refs: list[dict[str, Any]] = Field(default_factory=list)
     render_manifest: dict[str, Any] = Field(default_factory=dict)
     target_duration_seconds: Decimal | None = None
     target_aspect_ratio: str = "9:16"
@@ -380,6 +383,7 @@ class ShortRenderPackageRead(_ReadModel):
     caption_track_id: uuid.UUID | None
     hero_reuse_ref: str | None
     template_asset_refs: list[dict[str, Any]]
+    cloud_media_refs: list[dict[str, Any]]
     render_manifest: dict[str, Any]
     target_duration_seconds: Decimal | None
     target_aspect_ratio: str
@@ -515,6 +519,7 @@ class FinalMediaRefCreate(BaseModel):
     provider_key: str | None = None
     provider_type: MediaProviderType | None = None
     media_qc_report_id: uuid.UUID | None = None
+    cloud_media_ref_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -533,6 +538,7 @@ class FinalMediaRefRead(_ReadModel):
     provider_key: str | None
     provider_type: MediaProviderType | None
     media_qc_report_id: uuid.UUID | None
+    cloud_media_ref_id: uuid.UUID | None
     created_at: AwareDatetime
 
 

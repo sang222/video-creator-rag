@@ -1,0 +1,17 @@
+catalog_key: google_drive_connection_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_CONFIGURED
+    description: Google Drive offload credential is not configured.
+  - key: CONFIGURED
+    description: Google Drive offload configuration exists.
+  - key: CONNECTED
+    description: Google Drive OAuth credential is connected.
+  - key: NEEDS_REAUTH
+    description: Google Drive OAuth credential needs reauthorization.
+  - key: REVOKED
+    description: Google Drive OAuth credential was revoked.
+  - key: ERROR
+    description: Google Drive offload credential has an error.

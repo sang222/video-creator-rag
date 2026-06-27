@@ -1,0 +1,7 @@
+catalog_key: cloud_media_storage_provider_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: GOOGLE_DRIVE
+    description: Google Drive stores generated media blobs while VCOS DB remains source of truth.
