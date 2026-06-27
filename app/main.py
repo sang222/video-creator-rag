@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -327,6 +328,13 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
     application = FastAPI(title=settings.app_name)
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origin_list,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     @application.get("/health")
     def health() -> dict[str, str]:

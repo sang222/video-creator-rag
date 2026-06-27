@@ -26,6 +26,10 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://vcos:vcos@localhost:55432/vcos"
     )
     log_level: str = "INFO"
+    cors_allowed_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        validation_alias=AliasChoices("VCOS_CORS_ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS"),
+    )
     elevenlabs_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "VCOS_ELEVENLABS_API_KEY"),
@@ -197,6 +201,10 @@ class Settings(BaseSettings):
     @property
     def ollama_base_url(self) -> str:
         return OLLAMA_LOCAL_BASE_URL
+
+    @property
+    def cors_allowed_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
     @field_validator("database_url")
     @classmethod

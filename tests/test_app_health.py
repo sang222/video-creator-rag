@@ -18,6 +18,21 @@ def test_health_returns_ok_when_db_available() -> None:
     assert response.json()["database"] == "ok"
 
 
+def test_local_frontend_cors_preflight_allows_dashboard_api() -> None:
+    client = TestClient(create_app())
+    response = client.options(
+        "/uploaded-videos",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "content-type" in response.headers["access-control-allow-headers"].lower()
+
+
 def test_provider_api_keys_load_from_env(monkeypatch) -> None:
     get_settings.cache_clear()
     monkeypatch.setenv("ELEVENLABS_API_KEY", "eleven-test")
