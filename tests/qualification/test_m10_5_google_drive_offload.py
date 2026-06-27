@@ -159,7 +159,7 @@ def test_m10_5_preflight_schema_defaults_config_catalogs_and_scope(engine, db_se
     assert M10_5_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_m10_5_drive_offload"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_m11_operator_dashboard"
         defaults = connection.execute(
             text(
                 """

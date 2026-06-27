@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, and M10.5 Google Drive media offload/cloud archive foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, and M11 Operator Dashboard foundation.
 
 ## Stack
 
@@ -339,6 +339,35 @@ vcos media cleanup-local
 
 M10.5 uploads generated heavy media to Google Drive, verifies Drive file id/web view link/size/checksum where available, stores `CloudMediaRef` in VCOS DB, and cleans local files only after verified upload and retention policy checks. M11 dashboard will use the Drive `web_view_link` as the only human access CTA. VCOS does not expose backend media download or preview proxy routes.
 
+## M11 Dashboard
+
+```bash
+GET /dashboard/command-center
+GET /dashboard/queues
+GET /dashboard/queues/{queue_type}
+GET /channels
+GET /channels/{channel_id}/workspace
+GET /channels/{channel_id}/lifecycle
+POST /channels/{channel_id}/lifecycle-decision
+GET /uploaded-videos
+GET /uploaded-videos/{uploaded_video_id}/dashboard
+POST /learning-candidates/{candidate_id}/approve
+POST /learning-candidates/{candidate_id}/reject
+POST /learning-candidates/{candidate_id}/request-more-evidence
+POST /learning-candidates/{candidate_id}/suppress
+POST /learning-candidates/{candidate_id}/expire
+GET /providers/status
+GET /ops/health
+```
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+M11 adds an action-first operator cockpit for Command Center, channel setup/workspaces, approvals, uploaded video monitoring, Google Drive media CTAs, learning review/playbook promotion, and provider/ops health. Media cards use Google Drive `web_view_link` only and never expose local paths, backend download URLs, or preview proxy URLs.
+
 ## Boundaries
 
-M0-M10.5 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/cloud final renderer execution, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. Real Veo execution and real Drive upload smoke are guarded and off by default. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, scrape YouTube Studio, or build dashboard UI. M10.5 adds Drive archive/offload only; it does not add backend download/preview proxy. CapCut pilot notes do not make CapCut a production dependency.
+M0-M11 do not implement auto upload, platform publish APIs, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/cloud final renderer execution, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. Real Veo execution and real Drive upload smoke are guarded and off by default. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, or scrape YouTube Studio. M10.5 adds Drive archive/offload only; it does not add backend download/preview proxy. M11 adds dashboard UI/read models and human review decisions only; it does not auto mutate channel profiles or suggest config upgrades. CapCut pilot notes do not make CapCut a production dependency.

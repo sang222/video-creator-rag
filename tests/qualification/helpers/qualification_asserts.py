@@ -17,9 +17,12 @@ REQUIRED_TAGS = {
     "m10-learning-review-queue",
     "m10-1-router-derivative-funnel",
     "m10-2-media-provider-routing",
+    "m10-3-youtube-follow",
+    "m10-4-google-vertex-veo-binding",
+    "m10-5-google-drive-media-offload",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0015_m10_5_drive_offload"
+EXPECTED_ALEMBIC_HEAD = "0016_m11_operator_dashboard"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -39,6 +42,9 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m10-1-llm-router-derivative-funnel.md",
     "docs/architecture/m10-2-media-provider-role-matrix.md",
     "docs/architecture/m10-3-youtube-follow.md",
+    "docs/architecture/m10-4-google-vertex-veo-binding.md",
+    "docs/architecture/m10-5-google-drive-media-offload.md",
+    "docs/architecture/m11-operator-dashboard.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -53,6 +59,9 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m10_1-final-report.md",
     "reports/m10_2-final-report.md",
     "reports/m10_3-final-report.md",
+    "reports/m10_4-final-report.md",
+    "reports/m10_5-final-report.md",
+    "reports/m11-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }

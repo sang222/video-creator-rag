@@ -135,7 +135,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0015_m10_5_drive_offload"
+    assert revision == "0016_m11_operator_dashboard"
 
 
 def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:
@@ -448,4 +448,10 @@ def test_m4_scope_guard_no_m5_plus_tables_or_services(engine) -> None:
     for term in forbidden_terms:
         assert term not in app_text
     routes = {route.path for route in create_app().routes}
-    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "dashboard"])}
+    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs"])}
+    assert {route for route in routes if "dashboard" in route} <= {
+        "/dashboard/command-center",
+        "/dashboard/queues",
+        "/dashboard/queues/{queue_type}",
+        "/uploaded-videos/{uploaded_video_id}/dashboard",
+    }

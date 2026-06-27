@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
-ChannelStatus = Literal["draft", "active", "paused", "archived"]
+ChannelStatus = Literal["draft", "ready", "active", "paused", "deactivated", "archived"]
 MembershipStatus = Literal["active", "paused", "removed"]
 
 

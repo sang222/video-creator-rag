@@ -163,6 +163,11 @@ from app.db.models.m10_5 import (
     LocalMediaRetentionPolicy,
     MediaOffloadJob,
 )
+from app.db.models.m11 import (
+    ApprovedPlaybookEntry,
+    ChannelLifecycleDecision,
+    LearningReviewDecision,
+)
 
 __all__ = [
     "AuditEvent",
@@ -300,4 +305,7 @@ __all__ = [
     "GoogleDriveOAuthSession",
     "LocalMediaRetentionPolicy",
     "MediaOffloadJob",
+    "ApprovedPlaybookEntry",
+    "ChannelLifecycleDecision",
+    "LearningReviewDecision",
 ]

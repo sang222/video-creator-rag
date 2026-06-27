@@ -13,9 +13,17 @@ build/
 *.egg-info/
 var/generated/
 var/credentials/
+var/logs/
 test-render-output/
 client_secret*.json
 *_client_secret.json
 *.mp4
 *.mov
 *.wav
+
+# Frontend build/test artifacts
+frontend/.next/
+frontend/node_modules/*
+frontend/test-results/
+frontend/playwright-report/
+frontend/*.tsbuildinfo

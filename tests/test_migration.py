@@ -133,13 +133,16 @@ REQUIRED_TABLES = {
     "local_media_retention_policies",
     "google_drive_media_credentials",
     "google_drive_oauth_sessions",
+    "channel_lifecycle_decisions",
+    "learning_review_decisions",
+    "approved_playbook_entries",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0015_m10_5_drive_offload"
+    assert revision == "0016_m11_operator_dashboard"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

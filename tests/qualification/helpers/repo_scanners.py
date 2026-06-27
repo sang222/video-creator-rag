@@ -119,11 +119,21 @@ FORBIDDEN_BEHAVIOR_PATTERNS = {
 ALLOWED_CODE_SUBSTRINGS = {
     "publish_risk_gate",
     "published_at",
+    '"PUBLISHER"',
     "MockAnalyticsProvider",
     "mock_analytics",
+    "no_fake_traffic",
     "MANUAL_ENVATO_PLACEHOLDER",
     "envato_api_calls",
     "APPROVED_ASSET_POOL_LOOKUP_PLACEHOLDER",
+}
+
+ALLOWED_ROUTE_PREFIXES = {
+    "/dashboard",
+}
+
+ALLOWED_ROUTE_PATHS = {
+    "/uploaded-videos/{uploaded_video_id}/dashboard",
 }
 
 
@@ -144,6 +154,8 @@ def route_scope_violations() -> list[ScopeViolation]:
     violations: list[ScopeViolation] = []
     for route in create_app().routes:
         path = getattr(route, "path", "")
+        if path in ALLOWED_ROUTE_PATHS or any(path.startswith(prefix) for prefix in ALLOWED_ROUTE_PREFIXES):
+            continue
         lowered = path.lower()
         if any(fragment in lowered for fragment in FORBIDDEN_ROUTE_FRAGMENTS):
             violations.append(ScopeViolation("app.routes", "forbidden route", None, path))

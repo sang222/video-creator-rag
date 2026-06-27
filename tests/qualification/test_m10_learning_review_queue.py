@@ -10,11 +10,13 @@ from app.contracts import LearningCandidateGenerationRunCreate, ManualAnalyticsI
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.db.models import (
     DomainEvent,
+    ApprovedPlaybookEntry,
     LearningCandidate,
     LearningCandidateGenerationRun,
     LearningEvidenceBundle,
     LearningPromotionEligibilityRun,
     LearningReviewQueueItem,
+    LearningReviewDecision,
     PlaybookCandidateDraft,
     UploadedVideo,
 )
@@ -49,7 +51,6 @@ FORBIDDEN_M10_2_M11_TABLES = {
     "provider_capability_matrices",
     "dashboard_widgets",
     "config_review_ctas",
-    "approved_playbook_entries",
 }
 
 FORBIDDEN_LEARNING_PAYLOAD_FIELDS = {
@@ -185,7 +186,7 @@ def test_m10_preflight_schema_catalogs_defaults_and_scope(engine, db_session, qu
     assert M10_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_2_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_m10_5_drive_offload"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_m11_operator_dashboard"
         defaults = connection.execute(
             text(
                 """
@@ -205,8 +206,8 @@ def test_m10_preflight_schema_catalogs_defaults_and_scope(engine, db_session, qu
     qualification_factory.seed_all()
     assert all_scope_violations(engine) == []
     route_text = " ".join(route.path for route in create_app().routes).lower()
-    assert "/learning-candidates/{candidate_id}/approve" not in route_text
-    assert "/learning-candidates/{candidate_id}/reject" not in route_text
+    assert "/learning-candidates/{candidate_id}/approve" in route_text
+    assert "/learning-candidates/{candidate_id}/reject" in route_text
     assert "config-review" not in route_text
 
 
@@ -385,13 +386,22 @@ def test_m10_api_read_paths_events_and_no_action_mutations(db_session, qualifica
     assert draft_id is not None
     assert client.get(f"/playbook-candidate-drafts/{draft_id}").status_code == 200
 
-    for path in [
+    blocked = client.post(
         f"/learning-candidates/{candidate_id}/approve",
-        f"/learning-candidates/{candidate_id}/reject",
-        f"/learning-review-queue/{queue_id}/approve",
-        f"/learning-review-queue/{queue_id}/suppress",
-    ]:
-        assert client.post(path).status_code == 404
+        json={"action": "APPROVE", "actor_role": "READ_ONLY_OBSERVER"},
+    )
+    assert blocked.status_code == 403
+
+    approved = client.post(
+        f"/learning-candidates/{candidate_id}/approve",
+        json={"action": "APPROVE", "actor_role": "LEARNING_REVIEWER", "rationale": "Evidence reviewed in M11."},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["approved_playbook_entry_id"] is not None
+    assert approved.json()["technical_appendix"]["no_channel_profile_mutation"] is True
+    db_session.expire_all()
+    assert db_session.query(LearningReviewDecision).count() == 1
+    assert db_session.query(ApprovedPlaybookEntry).count() == 1
 
     event_types = set(db_session.scalars(select(DomainEvent.event_type)).all())
     assert {
@@ -402,6 +412,8 @@ def test_m10_api_read_paths_events_and_no_action_mutations(db_session, qualifica
         "learning_promotion_eligibility_run.created",
         "learning_review_queue_item.created",
         "playbook_candidate_draft.created",
+        "learning.review_decision_recorded",
+        "approved_playbook_entry.created",
     } <= event_types
 
 

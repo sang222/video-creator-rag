@@ -1,5 +1,5 @@
 catalog_key: role_catalog
-catalog_version: "1.1.0"
+catalog_version: "1.2.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -33,3 +33,72 @@ items:
     permissions:
       - audit:read
       - workflow:read
+  - key: owner_admin
+    name: Owner/Admin
+    description: Full M11 operator dashboard control.
+    permissions:
+      - dashboard:read
+      - dashboard:mutate
+      - channel:lifecycle:decide
+      - profile_policy:activate
+      - provider:manage
+      - learning:approve
+  - key: channel_manager
+    name: Channel Manager
+    description: Manages channel workspace, daily runs, lifecycle review, and recovery.
+    permissions:
+      - dashboard:read
+      - channel:lifecycle:decide
+      - recovery:review
+  - key: producer
+    name: Producer
+    description: Works project and artifact production state.
+    permissions:
+      - dashboard:read
+      - project:produce
+  - key: reviewer
+    name: Reviewer
+    description: Reviews artifacts, MediaQC, and AccessibilityQC.
+    permissions:
+      - dashboard:read
+      - artifact:review
+      - media_qc:review
+  - key: publisher
+    name: Publisher
+    description: Performs manual publish handoff and paste-back confirmation.
+    permissions:
+      - dashboard:read
+      - publish:confirm_manual
+      - media:open_drive_cta
+  - key: analyst
+    name: Analyst
+    description: Reviews analytics, diagnostics, and evidence notes.
+    permissions:
+      - dashboard:read
+      - analytics:read
+      - diagnostics:read
+  - key: procurement_operator
+    name: Procurement Operator
+    description: Reviews asset, reuse, and license records.
+    permissions:
+      - dashboard:read
+      - asset:review
+      - license:review
+  - key: compliance_reviewer
+    name: Compliance Reviewer
+    description: Resolves policy, rights, and disclosure gates.
+    permissions:
+      - dashboard:read
+      - gate:review
+      - rights:review
+  - key: learning_reviewer
+    name: Learning Reviewer
+    description: Reviews learning candidates and approves playbook entries.
+    permissions:
+      - dashboard:read
+      - learning:approve
+  - key: read_only_observer
+    name: Read-only Observer
+    description: Views M11 summaries without mutation permissions.
+    permissions:
+      - dashboard:read

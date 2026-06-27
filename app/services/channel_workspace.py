@@ -9,7 +9,7 @@ from app.db.models import ChannelMembership, ChannelWorkspace, Company, Role, Us
 from app.services.audit import AuditService
 
 
-CHANNEL_STATUSES = {"draft", "active", "paused", "archived"}
+CHANNEL_STATUSES = {"draft", "ready", "active", "paused", "deactivated", "archived"}
 
 
 class ChannelWorkspaceService:

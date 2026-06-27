@@ -177,7 +177,7 @@ def test_config_seed_idempotent(db_session) -> None:
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
     assert catalog_count == 146
-    assert role_count == 3
+    assert role_count == 13
     assert metric_definition_count == 16
 
 

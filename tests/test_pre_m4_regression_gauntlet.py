@@ -271,6 +271,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0012_m10_1_router_derivatives",
         "0013_m10_2_provider_routing",
         "0015_m10_5_drive_offload",
+        "0016_m11_operator_dashboard",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -286,6 +287,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         {"learning_candidate_generation_runs", "learning_candidates", "learning_review_queue_items"},
         {"media_provider_role_profiles", "provider_capability_matrix_entries", "media_render_routing_decisions"},
         {"youtube_public_sync_runs", "youtube_owner_analytics_sync_runs", "uploaded_video_youtube_public_monitor_snapshots"},
+        {"channel_lifecycle_decisions", "learning_review_decisions", "approved_playbook_entries"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:
@@ -662,4 +664,10 @@ def test_scope_guard_scans_schema_routes_cli_services_and_imports(engine) -> Non
         assert f"import {forbidden}" not in app_text
         assert f"from {forbidden}" not in app_text
     routes = {route.path for route in create_app().routes}
-    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs", "dashboard"])}
+    assert not {route for route in routes if any(fragment in route for fragment in ["rag", "vector", "upload-jobs"])}
+    assert {route for route in routes if "dashboard" in route} <= {
+        "/dashboard/command-center",
+        "/dashboard/queues",
+        "/dashboard/queues/{queue_type}",
+        "/uploaded-videos/{uploaded_video_id}/dashboard",
+    }

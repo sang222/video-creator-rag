@@ -95,6 +95,9 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    approved_playbook_entries,
+                    learning_review_decisions,
+                    channel_lifecycle_decisions,
                     google_drive_oauth_sessions,
                     google_drive_media_credentials,
                     media_offload_jobs,

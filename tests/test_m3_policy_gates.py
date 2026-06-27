@@ -364,7 +364,8 @@ def test_m3_scope_guards_and_docs() -> None:
     assert "SemanticLayer" not in app_text
     assert "PublishUpload" not in app_text
     assert "PublishUpload" not in app_text
-    assert "Dashboard" not in app_text
+    assert "DashboardWidget" not in app_text
+    assert "OperatorCockpit" not in app_text
     doc = (ROOT / "docs/architecture/m3-policy-gate-readiness.md").read_text(encoding="utf-8")
     assert "No LLM policy decisions" in doc
     assert "M5 will build ResourceResolver" in doc

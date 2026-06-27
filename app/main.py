@@ -194,6 +194,19 @@ from app.contracts import (
     ContextPackSnapshotRead,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
+from app.contracts.m11 import (
+    ChannelLifecycleDecisionCreate,
+    ChannelLifecycleDecisionRead,
+    ChannelLifecycleRead,
+    ChannelWorkspaceDashboardRead,
+    CommandCenterRead,
+    DashboardQueuesRead,
+    LearningReviewDecisionCreate,
+    LearningReviewDecisionRead,
+    ProviderOpsDashboardRead,
+    UploadedVideoDashboardRead,
+    UploadedVideoListItem,
+)
 from app.core.config import get_settings
 from app.core.db import check_database
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailureError
@@ -284,6 +297,13 @@ from app.services import (
     YouTubeOwnerAnalyticsSyncService,
     YouTubePublicStatsSyncService,
 )
+from app.services.m11 import (
+    M11ChannelLifecycleService,
+    M11DashboardService,
+    M11LearningReviewService,
+    channel_lifecycle_decision_read,
+    learning_review_decision_read,
+)
 
 
 class CompanyCreate(BaseModel):
@@ -318,6 +338,46 @@ def create_app() -> FastAPI:
                 detail="database unavailable",
             ) from exc
         return {"status": "ok", "app": settings.app_name, "database": "ok"}
+
+    @application.get("/dashboard/command-center", response_model=CommandCenterRead)
+    def get_dashboard_command_center(company_id: uuid.UUID | None = None) -> CommandCenterRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).command_center(company_id=company_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/dashboard/queues", response_model=DashboardQueuesRead)
+    def get_dashboard_queues(queue_type: str | None = None) -> DashboardQueuesRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).queues(queue_type=queue_type)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/dashboard/queues/{queue_type}", response_model=DashboardQueuesRead)
+    def get_dashboard_queue_by_type(queue_type: str) -> DashboardQueuesRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).queues(queue_type=queue_type)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/providers/status", response_model=ProviderOpsDashboardRead)
+    def get_provider_status_dashboard() -> ProviderOpsDashboardRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).provider_ops()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/ops/health", response_model=ProviderOpsDashboardRead)
+    def get_ops_health_dashboard() -> ProviderOpsDashboardRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).provider_ops()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @application.post("/companies", response_model=CompanyRead)
     def create_company(data: CompanyCreate) -> CompanyRead:
@@ -358,6 +418,14 @@ def create_app() -> FastAPI:
             channels = ChannelWorkspaceService(session).list_channels(company_id)
             return [ChannelWorkspaceRead.model_validate(_channel(channel)) for channel in channels]
 
+    @application.get("/channels")
+    def list_dashboard_channels(company_id: uuid.UUID | None = None) -> list[dict[str, Any]]:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).list_channels(company_id=company_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.get("/channels/{channel_id}", response_model=ChannelWorkspaceRead)
     def get_channel(channel_id: uuid.UUID) -> ChannelWorkspaceRead:
         with session_scope() as session:
@@ -365,6 +433,34 @@ def create_app() -> FastAPI:
             if channel is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="channel not found")
             return ChannelWorkspaceRead.model_validate(_channel(channel))
+
+    @application.get("/channels/{channel_id}/workspace", response_model=ChannelWorkspaceDashboardRead)
+    def get_channel_workspace_dashboard(channel_id: uuid.UUID) -> ChannelWorkspaceDashboardRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).workspace(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channels/{channel_id}/lifecycle", response_model=ChannelLifecycleRead)
+    def get_channel_lifecycle(channel_id: uuid.UUID) -> ChannelLifecycleRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).lifecycle(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channels/{channel_id}/lifecycle-decision", response_model=ChannelLifecycleDecisionRead)
+    def create_channel_lifecycle_decision(
+        channel_id: uuid.UUID,
+        data: ChannelLifecycleDecisionCreate,
+    ) -> ChannelLifecycleDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = M11ChannelLifecycleService(session).decide(channel_id=channel_id, data=data)
+                return channel_lifecycle_decision_read(decision)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @application.post("/channels/{channel_id}/memberships", response_model=ChannelMembershipRead)
     def assign_membership(channel_id: uuid.UUID, data: ChannelMembershipCreate) -> ChannelMembershipRead:
@@ -1264,6 +1360,25 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.get("/uploaded-videos", response_model=list[UploadedVideoListItem])
+    def list_uploaded_videos_dashboard(
+        channel_id: uuid.UUID | None = None,
+        company_id: uuid.UUID | None = None,
+    ) -> list[UploadedVideoListItem]:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).list_uploaded_videos(channel_id=channel_id, company_id=company_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/uploaded-videos/{uploaded_video_id}/dashboard", response_model=UploadedVideoDashboardRead)
+    def get_uploaded_video_dashboard(uploaded_video_id: uuid.UUID) -> UploadedVideoDashboardRead:
+        try:
+            with session_scope() as session:
+                return M11DashboardService(session).uploaded_video_dashboard(uploaded_video_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.get("/uploaded-videos/{uploaded_video_id}", response_model=UploadedVideoRead)
     def get_uploaded_video(uploaded_video_id: uuid.UUID) -> UploadedVideoRead:
         try:
@@ -1743,6 +1858,41 @@ def create_app() -> FastAPI:
                 return LearningEvidenceBundleRead.model_validate(_learning_evidence_bundle(bundle))
         except Exception as exc:
             raise _as_http_error(exc) from exc
+
+    @application.post("/learning-candidates/{candidate_id}/approve", response_model=LearningReviewDecisionRead)
+    def approve_learning_candidate(
+        candidate_id: uuid.UUID,
+        data: LearningReviewDecisionCreate | None = None,
+    ) -> LearningReviewDecisionRead:
+        return _learning_review_action(candidate_id, "APPROVE", data)
+
+    @application.post("/learning-candidates/{candidate_id}/reject", response_model=LearningReviewDecisionRead)
+    def reject_learning_candidate(
+        candidate_id: uuid.UUID,
+        data: LearningReviewDecisionCreate | None = None,
+    ) -> LearningReviewDecisionRead:
+        return _learning_review_action(candidate_id, "REJECT", data)
+
+    @application.post("/learning-candidates/{candidate_id}/request-more-evidence", response_model=LearningReviewDecisionRead)
+    def request_more_learning_evidence(
+        candidate_id: uuid.UUID,
+        data: LearningReviewDecisionCreate | None = None,
+    ) -> LearningReviewDecisionRead:
+        return _learning_review_action(candidate_id, "REQUEST_MORE_EVIDENCE", data)
+
+    @application.post("/learning-candidates/{candidate_id}/suppress", response_model=LearningReviewDecisionRead)
+    def suppress_learning_candidate(
+        candidate_id: uuid.UUID,
+        data: LearningReviewDecisionCreate | None = None,
+    ) -> LearningReviewDecisionRead:
+        return _learning_review_action(candidate_id, "SUPPRESS", data)
+
+    @application.post("/learning-candidates/{candidate_id}/expire", response_model=LearningReviewDecisionRead)
+    def expire_learning_candidate(
+        candidate_id: uuid.UUID,
+        data: LearningReviewDecisionCreate | None = None,
+    ) -> LearningReviewDecisionRead:
+        return _learning_review_action(candidate_id, "EXPIRE", data)
 
     @application.get("/learning-review-queue", response_model=list[LearningReviewQueueItemRead])
     def list_learning_review_queue(
@@ -3647,6 +3797,21 @@ def _playbook_candidate_draft(draft: Any) -> dict[str, Any]:
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
     }
+
+
+def _learning_review_action(
+    candidate_id: uuid.UUID,
+    action: str,
+    data: LearningReviewDecisionCreate | None,
+) -> LearningReviewDecisionRead:
+    try:
+        request = data.model_copy(update={"action": action}) if data is not None else LearningReviewDecisionCreate(action=action)
+        with session_scope() as session:
+            decision = M11LearningReviewService(session).decide(candidate_id=candidate_id, data=request)
+            return learning_review_decision_read(session, decision)
+    except Exception as exc:
+        raise _as_http_error(exc) from exc
+
 
 def _as_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (NotFoundError, KeyError)):

@@ -159,7 +159,7 @@ def test_m9_preflight_schema_catalogs_and_scope(engine, db_session, qualificatio
     assert M9_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_m10_5_drive_offload"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_m11_operator_dashboard"
         defaults = connection.execute(
             text(
                 """
@@ -179,8 +179,14 @@ def test_m9_preflight_schema_catalogs_and_scope(engine, db_session, qualificatio
     taxonomy = db_session.scalars(select(DiagnosticTaxonomyVersion)).all()
     assert {item.taxonomy_key for item in taxonomy} >= {"PACKAGING_FAILURE", "HOOK_FAILURE", "INSUFFICIENT_DATA"}
     assert all_scope_violations(engine) == []
-    route_text = " ".join(route.path for route in create_app().routes).lower()
-    assert "dashboard" not in route_text
+    routes = {route.path for route in create_app().routes}
+    assert {route for route in routes if "dashboard" in route} <= {
+        "/dashboard/command-center",
+        "/dashboard/queues",
+        "/dashboard/queues/{queue_type}",
+        "/uploaded-videos/{uploaded_video_id}/dashboard",
+    }
+    route_text = " ".join(routes).lower()
     assert "growth" not in route_text
 
 

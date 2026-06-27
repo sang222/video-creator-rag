@@ -238,7 +238,7 @@ def test_m10_3_preflight_migration_defaults_config_catalogs_and_scope(engine, db
     assert M10_3_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_4_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_m10_5_drive_offload"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_m11_operator_dashboard"
         defaults = connection.execute(
             text(
                 """
@@ -269,8 +269,14 @@ def test_m10_3_preflight_migration_defaults_config_catalogs_and_scope(engine, db
     assert ("uploaded_video_youtube_owner_analytics_snapshots", "metric_availability", "'{}'::jsonb") in default_map
 
     qualification_factory.seed_all()
-    route_text = " ".join(route.path for route in create_app().routes).lower()
-    assert "dashboard" not in route_text
+    routes = {route.path for route in create_app().routes}
+    assert {route for route in routes if "dashboard" in route} <= {
+        "/dashboard/command-center",
+        "/dashboard/queues",
+        "/dashboard/queues/{queue_type}",
+        "/uploaded-videos/{uploaded_video_id}/dashboard",
+    }
+    route_text = " ".join(routes).lower()
     assert "youtube-upload" not in route_text
     assert "youtube-studio" not in route_text
     assert "veo" not in route_text

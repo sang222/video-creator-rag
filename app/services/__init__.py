@@ -138,6 +138,11 @@ from app.services.m10_5 import (
     MediaOffloadJobService,
     MediaOffloadReadService,
 )
+from app.services.m11 import (
+    M11ChannelLifecycleService,
+    M11DashboardService,
+    M11LearningReviewService,
+)
 
 __all__ = [
     "AuditService",
@@ -255,6 +260,9 @@ __all__ = [
     "MediaCloudReadService",
     "MediaOffloadJobService",
     "MediaOffloadReadService",
+    "M11ChannelLifecycleService",
+    "M11DashboardService",
+    "M11LearningReviewService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

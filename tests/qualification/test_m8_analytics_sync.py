@@ -153,7 +153,7 @@ def test_m8_preflight_tags_migration_tables_defaults_and_metric_seed(engine, db_
     assert M8_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_m10_5_drive_offload"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_m11_operator_dashboard"
         defaults = connection.execute(
             text(
                 """
@@ -318,8 +318,14 @@ def test_m8_api_cli_smoke_and_scope_guard(db_session, qualification_factory, tmp
         assert json.loads(result.output)
 
     assert all_scope_violations() == []
-    forbidden_text = " ".join(route.path for route in create_app().routes).lower()
-    assert "dashboard" not in forbidden_text
+    routes = {route.path for route in create_app().routes}
+    assert {route for route in routes if "dashboard" in route} <= {
+        "/dashboard/command-center",
+        "/dashboard/queues",
+        "/dashboard/queues/{queue_type}",
+        "/uploaded-videos/{uploaded_video_id}/dashboard",
+    }
+    forbidden_text = " ".join(routes).lower()
     assert "growth" not in forbidden_text
     assert "no-view" not in forbidden_text
 
