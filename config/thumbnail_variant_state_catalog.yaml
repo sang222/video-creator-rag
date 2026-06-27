@@ -1,0 +1,17 @@
+catalog_key: thumbnail_variant_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Thumbnail variant is drafted.
+  - key: READY_FOR_PROVIDER
+    description: Thumbnail variant is ready for template provider handoff.
+  - key: RENDERED
+    description: Thumbnail variant is rendered.
+  - key: SELECTED
+    description: Thumbnail variant is selected.
+  - key: REJECTED
+    description: Thumbnail variant is rejected.
+  - key: CANCELLED
+    description: Thumbnail variant is cancelled.

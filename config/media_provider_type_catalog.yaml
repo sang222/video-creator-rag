@@ -1,0 +1,33 @@
+catalog_key: media_provider_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: WORKFLOW_ORCHESTRATOR
+    description: VCOS orchestration, state, manifest, budget, QC, approval, and handoff.
+  - key: LLM_SCRIPT_ENGINE
+    description: LLM-backed script and planning engine.
+  - key: API_NATIVE_TTS
+    description: API-native text-to-speech provider.
+  - key: CAPTION_TIMELINE_ENGINE
+    description: Caption timeline planner.
+  - key: AI_VIDEO_HERO_PROVIDER
+    description: Premium AI hero and metaphor visual provider.
+  - key: CLOUD_TEMPLATE_RENDERER_LIGHT
+    description: Light cloud template renderer for Shorts, cards, thumbnails, and compositions.
+  - key: CLOUD_FINAL_ASSEMBLY_RENDERER
+    description: Cloud final assembly renderer for full long-form final MP4 output.
+  - key: MEDIA_STORAGE
+    description: Media/object storage role.
+  - key: MEDIA_QC_ENGINE
+    description: Media QC engine role.
+  - key: PUBLISH_PACKAGE_BUILDER
+    description: Manual publish package builder.
+  - key: API_NATIVE_STOCK_PROVIDER
+    description: API-native paid stock provider, deferred in this mode.
+  - key: FREE_FALLBACK_PROVIDER
+    description: Free fallback stock provider requiring license evidence.
+  - key: MOCK_PROVIDER
+    description: Mock provider for tests and development only.
+  - key: DEFERRED_MANUAL_LIBRARY
+    description: Deferred manual media library, not an automated daily backbone.

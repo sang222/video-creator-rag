@@ -61,7 +61,7 @@ def test_m4_mock_providers_modes_credentials_quota_cost_and_health(db_session, q
             provider_key="mock_llm",
             credential_key="primary",
             credential_type="API_KEY",
-            secret_ref="vault://vcos/mock_llm/primary",
+            secret_ref="env://MOCK_LLM_API_KEY",
             status="EXPIRED",
         )
     )

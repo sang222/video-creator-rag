@@ -17,7 +17,7 @@ REQUIRED_TAGS = {
     "m10-learning-review-queue",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0012_m10_1_router_derivatives"
+EXPECTED_ALEMBIC_HEAD = "0013_m10_2_provider_routing"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -35,6 +35,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m9-post-publish-diagnostics.md",
     "docs/architecture/m10-learning-review-queue.md",
     "docs/architecture/m10-1-llm-router-derivative-funnel.md",
+    "docs/architecture/m10-2-media-provider-role-matrix.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
     "reports/m2-final-report.md",
@@ -47,6 +48,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m9-final-report.md",
     "reports/m10-final-report.md",
     "reports/m10_1-final-report.md",
+    "reports/m10_2-final-report.md",
     "reports/pre_m4_qualification_report.md",
     "scripts/pre_m4_qualification.py",
 }

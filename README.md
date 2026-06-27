@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, and M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, and M10.2 media provider role/routing foundation.
 
 ## Stack
 
@@ -38,6 +38,8 @@ make ollama-logs
 ```
 
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. `OLLAMA_API_KEY` and `VCOS_LLM_MODEL_<LANE>_<ROLE>` are env-driven; put the real key in local `.env` only, never in tracked files. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
+
+Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `CINEMATIC_AI_API_KEY`, `CLOUD_FINAL_RENDERER_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M10.2 still does not call these real providers; credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
 
 ## M1 Commands
 
@@ -95,7 +97,7 @@ M3 converts M2 allowance JSONB into deterministic gate/evidence contracts. `Gate
 vcos provider seed-mocks
 vcos provider list
 vcos provider health-check --provider-key mock_llm
-vcos credential ref-create --provider-key mock_llm --credential-key primary --credential-type API_KEY --secret-ref vault://vcos/mock_llm/primary
+vcos credential ref-create --provider-key mock_llm --credential-key primary --credential-type API_KEY --secret-ref env://MOCK_LLM_API_KEY
 vcos credential health-check --credential-reference-id <credential-reference-id>
 vcos quota account-create --provider-key mock_llm --quota-limit 100 --unit REQUESTS
 vcos quota reserve --quota-account-id <quota-account-id> --amount 1
@@ -242,6 +244,36 @@ GET /promote-short-to-long-candidates/{candidate_id}
 
 M10.1 adds guarded Ollama LLMRouter lanes, route attempts, ProviderAttempt/LLMRunSnapshot logging, long-form to selected Shorts candidates, deterministic ShortValueScore, derivative originality checks, reusable artifact rights/reuse governance, cross-platform funnel packages, upload cards, and manual human upload tasks. Real Ollama execution is disabled by default and real smoke is skipped unless explicitly enabled. `UploadedVideo` remains canonical published video truth. YouTube analytics remains the learning authority; TikTok/Facebook are export/support surfaces only in M10.1.
 
+## M10.2 API
+
+```bash
+GET /media-provider-roles
+GET /media-provider-roles/{provider_key}
+GET /media-provider-capabilities
+GET /media-provider-capabilities/{provider_key}
+POST /media-render-routing/decide
+GET /media-render-routing/decisions/{decision_id}
+POST /video-projects/{video_project_id}/long-form-render-package
+GET /long-form-render-packages/{package_id}
+POST /short-candidates/{short_candidate_id}/short-render-package
+GET /short-render-packages/{package_id}
+POST /video-projects/{video_project_id}/ai-hero-assets/plan
+GET /ai-hero-assets/{asset_id}
+POST /video-projects/{video_project_id}/creatomate-assets/plan
+GET /creatomate-render-assets/{asset_id}
+POST /video-projects/{video_project_id}/thumbnail-variants/plan
+GET /thumbnail-variants/{variant_id}
+GET /media-provider-budgets
+GET /media-provider-budgets/snapshot
+POST /media-provider-gates/capability/check
+POST /media-provider-gates/license/check
+POST /media-provider-gates/budget/check
+POST /media-provider-gates/reused-content/check
+POST /media-provider-gates/media-qc/check
+```
+
+M10.2 adds the Quality-First $250 media provider role matrix, provider capability entries, deterministic render routing, provider/budget/license/reuse/QC gates, long-form and Short render package planning, AI hero planning, Creatomate template asset planning, thumbnail variant planning, final media refs, and license evidence records. Creatomate Essential 2K routes only light template work and Shorts; it cannot route `LONG_FORM_FINAL_RENDER` by default. Full long-form final MP4 assembly requires a configured `CLOUD_FINAL_ASSEMBLY_RENDERER`. M10.2 does not call real ElevenLabs, Creatomate, AI Hero, or cloud final renderer APIs.
+
 ## Boundaries
 
-M0-M10.1 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, media provider routing, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. CapCut pilot notes do not make CapCut a production dependency.
+M0-M10.2 do not implement auto upload, platform publish APIs, dashboard UI, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/AI Hero/cloud renderer execution, Envato API/download/generation, YouTube follow sync, auto-reupload, fake traffic, bot engagement, or platform evasion systems. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. CapCut pilot notes do not make CapCut a production dependency.

@@ -95,6 +95,18 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    license_evidence_records,
+                    final_media_refs,
+                    thumbnail_variants,
+                    creatomate_render_assets,
+                    ai_hero_assets,
+                    short_render_packages,
+                    long_form_render_packages,
+                    media_render_routing_decisions,
+                    media_provider_budget_snapshots,
+                    media_provider_budget_policies,
+                    provider_capability_matrix_entries,
+                    media_provider_role_profiles,
                     usage_savings_ledger_entries,
                     human_upload_tasks,
                     upload_cards,

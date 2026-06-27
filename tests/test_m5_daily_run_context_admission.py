@@ -174,7 +174,7 @@ def test_m5_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert daily_run.metadata_ == {}
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0012_m10_1_router_derivatives"
+    assert revision == "0013_m10_2_provider_routing"
 
 
 def test_resource_resolver_enforces_scope_sources_and_deterministic_pack(db_session) -> None:

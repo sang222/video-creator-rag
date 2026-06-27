@@ -110,13 +110,25 @@ REQUIRED_TABLES = {
     "upload_cards",
     "human_upload_tasks",
     "usage_savings_ledger_entries",
+    "media_provider_role_profiles",
+    "provider_capability_matrix_entries",
+    "media_render_routing_decisions",
+    "media_provider_budget_policies",
+    "media_provider_budget_snapshots",
+    "long_form_render_packages",
+    "short_render_packages",
+    "ai_hero_assets",
+    "creatomate_render_assets",
+    "thumbnail_variants",
+    "final_media_refs",
+    "license_evidence_records",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0012_m10_1_router_derivatives"
+    assert revision == "0013_m10_2_provider_routing"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

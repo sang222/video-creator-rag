@@ -23,6 +23,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M9 builds deterministic post-publish observation windows, no-view/packaging/retention/engagement/policy diagnostics, failure trace reports, recovery proposals, and manual review actions only.
 - M10 builds evidence-backed learning candidates, evidence bundles, deterministic promotion eligibility runs, M11-ready learning review queue items, and playbook candidate drafts only.
 - M10.1 builds guarded real Ollama LLMRouter lanes plus derivative/reuse/shorts/cross-platform funnel backend contracts only.
+- M10.2 builds the Quality-First $250 media provider role matrix, provider capability matrix, render routing decisions, media provider gates, and render package planning only.
 
 ## Scope Guardrails
 
@@ -70,6 +71,10 @@ M10.1 adds LLMRouterProfile, LLMRouterLane, LLMModelProfile, LLMRouteAttempt, Co
 
 M10.1 does not build dashboard/operator cockpit UI, M10.2 media provider routing, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, automatic publish/upload/reupload, external platform APIs, TikTok/Facebook analytics learning loops, Envato automated integration, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, or platform evasion.
 
+M10.2 adds MediaProviderRoleProfile, ProviderCapabilityMatrixEntry, MediaRenderRoutingDecision, MediaProviderBudgetPolicy, MediaProviderBudgetSnapshot, LongFormRenderPackage, ShortRenderPackage, AIHeroAsset, CreatomateRenderAsset, ThumbnailVariant, FinalMediaRef, and LicenseEvidenceRecord.
+
+M10.2 does not build dashboard/operator cockpit UI, approval/reject dashboard actions, real ElevenLabs/Creatomate/AI Hero/cloud final renderer calls, YouTube public/owner analytics sync, M10.3 YouTube follow implementation, automatic publish/upload/reupload, TikTok/Facebook analytics learning loops, Envato automated integration, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -88,7 +93,8 @@ M10.1 does not build dashboard/operator cockpit UI, M10.2 media provider routing
 - M9 complete means VCOS can diagnose uploaded video health and propose human-approved actions without automatic recovery.
 - M10 complete means VCOS can create evidence-backed learning candidates and queue them for M11 review without approval or promotion.
 - M10.1 complete means VCOS can real-smoke guarded local Ollama routing and prepare derivative/reuse/shorts/cross-platform funnel backend contracts without media provider routing or publishing.
-- M10.2 will handle Media Provider Role Matrix and provider routing later.
+- M10.2 complete means VCOS can route media production jobs by provider role and safely block unsupported long-form final rendering when no final assembly renderer is configured.
+- M10.3 will handle YouTube Public + Owner Analytics Follow Patch later.
 - M11 will display uploaded videos, learning approvals, playbook promotion UX, and human-owned channel config editing in an operator dashboard later.
 
 ## Pilot Notes

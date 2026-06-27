@@ -1,0 +1,21 @@
+catalog_key: media_provider_recommendation_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CORE
+    description: Core VCOS production role.
+  - key: CORE_QUALITY_LAYER
+    description: Core paid quality layer for this mode.
+  - key: CORE_LIGHT_RENDER
+    description: Core light render layer for cards, Shorts, thumbnails, and compositions.
+  - key: REQUIRED_GAP
+    description: Required missing provider gap before a workflow can complete.
+  - key: DEFERRED
+    description: Deferred from daily production backbone.
+  - key: FALLBACK
+    description: Fallback-only provider role.
+  - key: AVOIDED
+    description: Avoided role in current mode.
+  - key: MOCK
+    description: Mock/test role only.

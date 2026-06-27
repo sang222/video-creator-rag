@@ -1,0 +1,17 @@
+catalog_key: media_routing_result_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ROUTED
+    description: Job was routed to a provider role.
+  - key: BLOCKED_PROVIDER_CAPABILITY_REQUIRED
+    description: Job is blocked because a required provider capability is missing.
+  - key: BLOCKED_BUDGET
+    description: Job is blocked by budget policy.
+  - key: BLOCKED_LICENSE
+    description: Job is blocked by license evidence policy.
+  - key: BLOCKED_UNKNOWN_PROVIDER
+    description: Job is blocked because no known provider route exists.
+  - key: BLOCKED_SCOPE
+    description: Job is blocked because it is out of M10.2 scope.

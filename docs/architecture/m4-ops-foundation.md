@@ -40,7 +40,7 @@ Seeded providers are mock-only:
 
 ## Credentials
 
-`credential_references` stores references only. `secret_ref` is a handle such as `vault://...` or `env://...`, not a secret value.
+`credential_references` stores references only. `secret_ref` is an env handle such as `env://ELEVENLABS_API_KEY`, not a secret value.
 
 `credential_health_snapshots` preserves credential health history. Missing, expired, revoked, or misconfigured credentials create reason codes and manual actions.
 

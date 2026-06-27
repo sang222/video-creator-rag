@@ -1,0 +1,41 @@
+catalog_key: m10_2_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: MEDIA_PROVIDER_ROLE_CREATED
+    description: Media provider role profile was created.
+  - code: PROVIDER_CAPABILITY_ENTRY_CREATED
+    description: Provider capability entry was created.
+  - code: ROUTING_DECISION_CREATED
+    description: Media routing decision was created.
+  - code: LONG_FORM_FINAL_RENDER_BLOCKED_PROVIDER_REQUIRED
+    description: Long-form final render is blocked because a capable final renderer is required.
+  - code: CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER
+    description: Creatomate Essential 2K is blocked from full long-form final render.
+  - code: CREATOMATE_LIGHT_RENDER_ROUTED
+    description: Light render job routed to Creatomate.
+  - code: ELEVENLABS_VOICE_ROUTED
+    description: Voice job routed to ElevenLabs.
+  - code: AI_HERO_PROVIDER_ROUTED
+    description: AI hero job routed to cinematic AI provider.
+  - code: CLOUD_FINAL_RENDERER_REQUIRED
+    description: Cloud final assembly renderer is required.
+  - code: BUDGET_GATE_PASSED
+    description: Media provider budget gate passed.
+  - code: BUDGET_GATE_WARNING
+    description: Media provider budget gate returned warning or review requirement.
+  - code: BUDGET_GATE_BLOCKED
+    description: Media provider budget gate blocked the job.
+  - code: LICENSE_EVIDENCE_REQUIRED
+    description: License evidence is required before using this asset.
+  - code: REUSED_CONTENT_REVIEW_REQUIRED
+    description: Reused or template-only content requires review.
+  - code: YOUTUBE_ONLY_ANALYTICS_AUTHORITY
+    description: YouTube analytics is the only learning authority in this mode.
+  - code: REAL_MEDIA_PROVIDER_DEFERRED
+    description: Real media provider execution is deferred.
+  - code: DASHBOARD_UI_DEFERRED_TO_M11
+    description: Dashboard UI is deferred to M11.
+  - code: YOUTUBE_FOLLOW_DEFERRED_TO_M10_3
+    description: YouTube public and owner analytics follow patch is deferred to M10.3.

@@ -134,6 +134,20 @@ from app.db.models.m10_1 import (
     UploadCard,
     UsageSavingsLedgerEntry,
 )
+from app.db.models.m10_2 import (
+    AIHeroAsset,
+    CreatomateRenderAsset,
+    FinalMediaRef,
+    LicenseEvidenceRecord,
+    LongFormRenderPackage,
+    MediaProviderBudgetPolicy,
+    MediaProviderBudgetSnapshot,
+    MediaProviderRoleProfile,
+    MediaRenderRoutingDecision,
+    ProviderCapabilityMatrixEntry,
+    ShortRenderPackage,
+    ThumbnailVariant,
+)
 
 __all__ = [
     "AuditEvent",
@@ -248,4 +262,16 @@ __all__ = [
     "ShortRenderPlan",
     "UploadCard",
     "UsageSavingsLedgerEntry",
+    "AIHeroAsset",
+    "CreatomateRenderAsset",
+    "FinalMediaRef",
+    "LicenseEvidenceRecord",
+    "LongFormRenderPackage",
+    "MediaProviderBudgetPolicy",
+    "MediaProviderBudgetSnapshot",
+    "MediaProviderRoleProfile",
+    "MediaRenderRoutingDecision",
+    "ProviderCapabilityMatrixEntry",
+    "ShortRenderPackage",
+    "ThumbnailVariant",
 ]

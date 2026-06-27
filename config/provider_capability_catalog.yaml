@@ -1,0 +1,17 @@
+catalog_key: provider_capability_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: SUPPORTED
+    description: Provider supports this job under current configuration.
+  - key: UNSUPPORTED
+    description: Provider does not support this job.
+  - key: BLOCKED_BY_PLAN
+    description: Provider plan blocks this job.
+  - key: REQUIRES_UPGRADE
+    description: Provider could support this job only after upgrade.
+  - key: REQUIRES_EXTERNAL_PROVIDER
+    description: Workflow requires a different external provider.
+  - key: MOCK_ONLY
+    description: Supported only in tests or development.

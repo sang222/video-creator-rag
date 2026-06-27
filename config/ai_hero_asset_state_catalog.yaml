@@ -1,0 +1,15 @@
+catalog_key: ai_hero_asset_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PLANNED
+    description: AI hero asset is planned.
+  - key: READY_FOR_PROVIDER
+    description: AI hero asset is ready for provider handoff.
+  - key: GENERATED
+    description: AI hero asset has been generated.
+  - key: BLOCKED
+    description: AI hero asset planning is blocked.
+  - key: CANCELLED
+    description: AI hero asset was cancelled.

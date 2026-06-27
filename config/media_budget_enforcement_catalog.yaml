@@ -1,0 +1,11 @@
+catalog_key: media_budget_enforcement_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HARD_BLOCK
+    description: Exceeded budget blocks execution.
+  - key: REVIEW_REQUIRED
+    description: Exceeded or unknown budget requires review.
+  - key: OBSERVE_ONLY
+    description: Budget state is observed but does not block.

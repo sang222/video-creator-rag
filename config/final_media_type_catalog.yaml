@@ -1,0 +1,17 @@
+catalog_key: final_media_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: LONG_FORM_FINAL
+    description: Final long-form video file.
+  - key: SHORT_FINAL
+    description: Final Short video file.
+  - key: THUMBNAIL
+    description: Thumbnail image file.
+  - key: CARD
+    description: Card image or video file.
+  - key: AI_HERO
+    description: AI hero asset file.
+  - key: PREVIEW
+    description: Preview clip file.

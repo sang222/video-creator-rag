@@ -135,7 +135,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0012_m10_1_router_derivatives"
+    assert revision == "0013_m10_2_provider_routing"
 
 
 def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:
@@ -171,12 +171,12 @@ def test_credential_references_redact_and_health_is_history(db_session) -> None:
             provider_key="mock_llm",
             credential_key="primary",
             credential_type="API_KEY",
-            secret_ref="vault://vcos/mock_llm/primary",
+            secret_ref="env://MOCK_LLM_API_KEY",
             status="EXPIRED",
             scope_blob={"scopes": ["contract_test"]},
         )
     )
-    assert reference.secret_ref == "vault://vcos/mock_llm/primary"
+    assert reference.secret_ref == "env://MOCK_LLM_API_KEY"
     with pytest.raises(ValidationFailureError):
         service.create_reference(
             data=CredentialReferenceCreate(
@@ -197,7 +197,7 @@ def test_credential_references_redact_and_health_is_history(db_session) -> None:
         + [event.payload for event in db_session.scalars(select(DomainEvent)).all()]
     )
     assert "sk-this-is-raw" not in event_text
-    assert "vault://vcos/mock_llm/primary" not in event_text
+    assert "env://MOCK_LLM_API_KEY" not in event_text
 
 
 def test_quota_ledger_deterministic_and_budget_gate(db_session) -> None:
@@ -381,7 +381,7 @@ def test_m4_api_and_cli_smoke(db_session) -> None:
             "provider_key": "mock_llm",
             "credential_key": "api",
             "credential_type": "API_KEY",
-            "secret_ref": "vault://vcos/mock",
+            "secret_ref": "env://MOCK_LLM_API_KEY",
             "status": "MISSING",
         },
     )

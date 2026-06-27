@@ -1,0 +1,15 @@
+catalog_key: creatomate_render_asset_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PLANNED
+    description: Template render asset is planned.
+  - key: READY_FOR_PROVIDER
+    description: Template render asset is ready for provider handoff.
+  - key: RENDERED
+    description: Template render asset has rendered.
+  - key: BLOCKED
+    description: Template render asset is blocked.
+  - key: CANCELLED
+    description: Template render asset was cancelled.

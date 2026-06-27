@@ -1,0 +1,13 @@
+catalog_key: media_budget_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: OK
+    description: Budget estimate is within configured cap.
+  - key: WARNING
+    description: Budget estimate is near configured cap.
+  - key: EXCEEDED
+    description: Budget estimate exceeds configured cap.
+  - key: UNKNOWN
+    description: Budget estimate is unavailable or insufficient.

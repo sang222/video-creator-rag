@@ -53,6 +53,21 @@ def test_config_yaml_validates(db_session) -> None:
         "m9_reason_code_catalog",
         "m10_reason_code_catalog",
         "m10_1_reason_code_catalog",
+        "m10_2_reason_code_catalog",
+        "media_provider_type_catalog",
+        "media_provider_recommendation_catalog",
+        "media_job_type_catalog",
+        "provider_capability_catalog",
+        "media_routing_result_catalog",
+        "media_budget_state_catalog",
+        "media_budget_enforcement_catalog",
+        "long_form_render_package_state_catalog",
+        "short_render_package_state_catalog",
+        "ai_hero_asset_state_catalog",
+        "creatomate_render_asset_state_catalog",
+        "thumbnail_variant_state_catalog",
+        "final_media_type_catalog",
+        "license_status_catalog",
         "learning_candidate_state_catalog",
         "learning_candidate_type_catalog",
         "learning_confidence_label_catalog",
@@ -139,7 +154,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 109
+    assert catalog_count == 124
     assert role_count == 3
     assert metric_definition_count == 16
 

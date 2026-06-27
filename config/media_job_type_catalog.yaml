@@ -1,0 +1,63 @@
+catalog_key: media_job_type_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: TOPIC_DECISION
+    description: Long-form topic decision orchestration.
+  - key: LONG_SCRIPT_GENERATION
+    description: Long-form script generation.
+  - key: LONG_VOICE_GENERATION
+    description: Long-form narration voice generation.
+  - key: LONG_CAPTION_TIMELINE
+    description: Long-form caption timeline generation.
+  - key: LONG_VISUAL_PLAN
+    description: Long-form visual plan generation.
+  - key: AI_HERO_GENERATION
+    description: Premium AI hero visual generation.
+  - key: AI_METAPHOR_GENERATION
+    description: Premium AI metaphor visual generation.
+  - key: TITLE_CARD_RENDER
+    description: Title card template render.
+  - key: DIAGRAM_CARD_RENDER
+    description: Diagram card template render.
+  - key: STAT_CARD_RENDER
+    description: Statistic card template render.
+  - key: LOWER_THIRD_RENDER
+    description: Lower-third template render.
+  - key: HERO_COMPOSITION_RENDER
+    description: AI hero composition template render.
+  - key: THUMBNAIL_RENDER
+    description: Thumbnail template render.
+  - key: LONG_FORM_FINAL_RENDER
+    description: Full long-form final MP4 assembly render.
+  - key: LONG_MEDIA_QC
+    description: Long-form media QC.
+  - key: LONG_PUBLISH_PACKAGE
+    description: Long-form manual publish package.
+  - key: SHORT_CANDIDATE_EXTRACTION
+    description: Short candidate extraction from a long-form source.
+  - key: SHORT_SCRIPT_GENERATION
+    description: Short script generation.
+  - key: SHORT_VOICE_GENERATION
+    description: Short voice generation.
+  - key: SHORT_CAPTION_TIMELINE
+    description: Short caption timeline generation.
+  - key: SHORT_HERO_REUSE
+    description: Short hero asset reuse planning.
+  - key: SHORT_RENDER
+    description: Short final template render.
+  - key: SHORT_MEDIA_QC
+    description: Short media QC.
+  - key: SHORT_PUBLISH_PACKAGE
+    description: Short manual publish package.
+  - key: PREVIEW_CLIP_RENDER
+    description: Limited preview clip render.
+  - key: LICENSE_EVIDENCE_CHECK
+    description: License evidence gate check.
+  - key: BUDGET_CHECK
+    description: Provider budget gate check.
+  - key: PROVIDER_CAPABILITY_CHECK
+    description: Provider capability gate check.
+  - key: VOICE_GENERATION
+    description: Generic voice generation routing alias.

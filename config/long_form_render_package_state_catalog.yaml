@@ -1,0 +1,17 @@
+catalog_key: long_form_render_package_state_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: DRAFT
+    description: Package is being drafted.
+  - key: READY_FOR_FINAL_RENDER
+    description: Package is ready for a configured final renderer.
+  - key: BLOCKED_PROVIDER_CAPABILITY_REQUIRED
+    description: Package is blocked because final render capability is missing.
+  - key: FINAL_RENDERED
+    description: Final render is complete.
+  - key: QC_READY
+    description: Package is ready for QC.
+  - key: CANCELLED
+    description: Package was cancelled.
