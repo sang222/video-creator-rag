@@ -53,29 +53,38 @@ def test_m12_readiness_classifies_missing_config_and_cloud_final_needs_config(db
     assert by_provider["elevenlabs"].readiness_state == "BLOCKED"
     assert by_provider["creatomate"].readiness_state == "BLOCKED"
     assert by_provider["cloud-final-renderer"].readiness_state == "BLOCKED"
-    assert "CLOUD_FINAL_RENDERER_NEEDS_CONFIG" in by_provider["cloud-final-renderer"].reason_codes
-    assert by_provider["cloud-final-renderer"].safe_config["status"] == "NEEDS_CONFIG"
+    assert "CLOUD_FINAL_RENDERER_REQUIRED_GAP" in by_provider["cloud-final-renderer"].reason_codes
+    assert by_provider["cloud-final-renderer"].safe_config["status"] == "REQUIRED_GAP"
     assert any(item["provider_key"] == "cloud-final-renderer" for item in payload.blocking_items)
 
 
-def test_m12_cloud_final_renderer_creatomate_growth_ready_for_smoke(db_session) -> None:
+def test_m12_cloud_final_renderer_remains_required_gap_even_if_creatomate_env_present(db_session) -> None:
     payload = ProviderReadinessService(
         db_session,
         _settings(
             cloud_final_renderer_provider="creatomate",
             creatomate_plan="growth_10k",
             creatomate_api_key="creatomate-secret",
+            cloud_final_renderer_api_key="cloud-final-secret",
         ),
     ).readiness()
 
-    summary = {item.provider_key: item for item in payload.provider_summaries}["cloud-final-renderer"]
-    assert summary.readiness_state == "PASS"
-    assert summary.safe_config["configuration_state"] == "CONFIGURED"
-    assert summary.safe_config["status"] == "READY_FOR_SMOKE"
-    assert summary.safe_config["provider"] == "Creatomate Growth 10K"
-    assert "CLOUD_FINAL_RENDERER_READY_FOR_SMOKE" in summary.reason_codes
-    assert not any(item["provider_key"] == "cloud-final-renderer" for item in payload.blocking_items)
-    assert "creatomate-secret" not in summary.model_dump_json()
+    by_provider = {item.provider_key: item for item in payload.provider_summaries}
+    cloud = by_provider["cloud-final-renderer"]
+    creatomate = by_provider["creatomate"]
+    assert cloud.readiness_state == "BLOCKED"
+    assert cloud.safe_config["configuration_state"] == "REQUIRED_GAP"
+    assert cloud.safe_config["status"] == "REQUIRED_GAP"
+    assert cloud.safe_config["provider"] == "not_selected"
+    assert cloud.safe_config["long_form_final_render_blocked"] is True
+    assert "CLOUD_FINAL_RENDERER_REQUIRED_GAP" in cloud.reason_codes
+    assert any(item["provider_key"] == "cloud-final-renderer" for item in payload.blocking_items)
+    assert creatomate.safe_config["role"] == "Shorts/cards/thumbnails"
+    assert creatomate.safe_config["not_final_long_form_renderer"] is True
+    raw = payload.model_dump_json()
+    assert "READY_FOR_SMOKE" not in raw
+    assert "creatomate-secret" not in raw
+    assert "cloud-final-secret" not in raw
 
 
 def test_m12_budget_cards_are_hard_env_display_only(db_session) -> None:
@@ -140,6 +149,25 @@ def test_m12_smoke_guards_skip_without_external_calls(db_session, monkeypatch) -
     assert veo.run_state == "SKIPPED"
     assert db_session.query(RealSmokeRun).count() == 3
     assert all("secret" not in json.dumps(run.env_flags).lower() for run in db_session.query(RealSmokeRun).all())
+
+
+def test_m12_cloud_final_renderer_smoke_is_blocked_required_gap(db_session, monkeypatch) -> None:
+    install_network_sentinel(monkeypatch)
+    settings = _settings(
+        cloud_final_renderer_provider="creatomate",
+        creatomate_plan="growth_10k",
+        creatomate_api_key="creatomate-secret",
+        cloud_final_renderer_api_key="cloud-final-secret",
+    )
+
+    run = RealSmokeOrchestratorService(db_session, settings).run_provider("cloud-final-renderer")
+
+    assert run.run_state == "BLOCKED"
+    assert run.error_code == "CLOUD_FINAL_RENDERER_REQUIRED_GAP"
+    raw = run.model_dump_json()
+    assert "READY_FOR_SMOKE" not in raw
+    assert "creatomate-secret" not in raw
+    assert "cloud-final-secret" not in raw
 
 
 def test_m12_enabled_smoke_blocks_when_credentials_missing(db_session, monkeypatch) -> None:

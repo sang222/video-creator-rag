@@ -15,11 +15,11 @@ const readinessPayload = {
     summary("google-drive", "Google Drive", "BLOCKED", { connected: false, root_folder_configured: false }, ["GOOGLE_DRIVE_ROOT_FOLDER_ID"]),
     summary("google-vertex-veo", "Google Vertex Veo", "WARNING", { model_id: "veo-3.1-fast-generate-001", duration_rules: "4,6,8; max 8s" }),
     summary("elevenlabs", "ElevenLabs", "BLOCKED", { api_key_configured: false, budget_basis: "credits/characters" }, ["ELEVENLABS_API_KEY"]),
-    summary("creatomate", "Creatomate", "PASS", { api_key_configured: true, final_renderer_status: "READY_FOR_SMOKE" }),
-    summary("cloud-final-renderer", "Cloud Final Renderer", "PASS", { status: "READY_FOR_SMOKE", configuration_state: "CONFIGURED", provider: "Creatomate Growth 10K", plan: "growth_10k", api_key_configured: true })
+    summary("creatomate", "Creatomate", "PASS", { api_key_configured: true, role: "Shorts/cards/thumbnails", not_final_long_form_renderer: true }),
+    summary("cloud-final-renderer", "Cloud Final Renderer", "BLOCKED", { status: "REQUIRED_GAP", configuration_state: "REQUIRED_GAP", provider: "not_selected", long_form_final_render_blocked: true, next_action: "Chọn renderer ráp video dài sau." })
   ],
   checks: [
-    check("cloud-final-renderer", "CAPABILITY", "PASS", "Cloud Final Renderer Creatomate Growth 10K đã ready for smoke."),
+    check("cloud-final-renderer", "CAPABILITY", "BLOCKED", "Long-form final render vẫn bị chặn cho đến khi chọn và cấu hình renderer ráp video dài."),
     check("youtube-owner", "CREDENTIAL", "BLOCKED", "YouTube owner analytics cần OAuth token")
   ],
   blocking_items: [{ provider_key: "youtube-owner" }],
@@ -78,15 +78,16 @@ describe("IntegrationsReadinessView", () => {
   it("renders Vietnamese provider readiness, CTAs, budget display, and no secrets", async () => {
     renderWithQuery();
 
-    expect(await screen.findByRole("heading", { name: "Cài đặt" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Cấu hình tích hợp" })).toBeInTheDocument();
     expect(screen.getByText("Kiểm tra trạng thái kết nối, token và nhà cung cấp trước khi chạy môi trường production.")).toBeInTheDocument();
     expect(screen.getByText("YouTube Owner Analytics")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Kết nối YouTube/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Kết nối Google Drive/ })).toBeInTheDocument();
     expect(screen.getByText("Cloud Final Renderer")).toBeInTheDocument();
-    expect(screen.getByText("Renderer cuối cho video dài")).toBeInTheDocument();
-    expect(screen.getAllByText("Đã cấu hình").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Sẵn sàng kiểm tra").length).toBeGreaterThan(0);
+    expect(screen.getByText("Thiếu renderer ráp video dài")).toBeInTheDocument();
+    expect(screen.getByText("Chưa chọn")).toBeInTheDocument();
+    expect(screen.getAllByText("Đang bị chặn").length).toBeGreaterThan(0);
+    expect(screen.getByText("Không dùng")).toBeInTheDocument();
     expect(screen.getByText("Ngân sách AI tháng này")).toBeInTheDocument();
     expect(screen.getAllByText("Đây là ngân sách cấu hình cứng từ biến môi trường, chưa phải chi phí thực tế đã tiêu.").length).toBeGreaterThan(0);
     expect(screen.getByText("$250 USD")).toBeInTheDocument();

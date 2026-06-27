@@ -47,9 +47,9 @@ export function IntegrationsReadinessView() {
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
-        title="Cài đặt"
+        title="Cấu hình tích hợp"
         subtitle="Kiểm tra trạng thái kết nối, token và nhà cung cấp trước khi chạy môi trường production."
-        breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Cài đặt" }]}
+        breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Cài đặt", href: "/settings" }, { label: "Tích hợp" }]}
         primaryAction={
           <Button onClick={() => readinessMutation.mutate()} disabled={readinessMutation.isPending}>
             <RefreshCw size={16} aria-hidden="true" />
@@ -277,8 +277,8 @@ function roleCopy(summary: ProviderSummary) {
     "google-drive": "Offload media qua quyền drive.file",
     "google-vertex-veo": "Video AI hero, thời lượng 4/6/8 giây, không âm thanh",
     elevenlabs: "Nhà cung cấp giọng đọc theo gói Creator",
-    creatomate: "Shorts, card và thumbnail; có kiểm tra renderer",
-    "cloud-final-renderer": "Renderer cuối cho video dài"
+    creatomate: "Shorts, card và thumbnail; không ráp video dài",
+    "cloud-final-renderer": "Thiếu renderer ráp video dài"
   };
   return role[summary.provider_key] ?? "Nhà cung cấp đã cấu hình";
 }
@@ -314,14 +314,13 @@ function safeFields(summary: ProviderSummary) {
     creatomate: [
       { label: "Khóa API", value: yesNo(config.api_key_configured) },
       { label: "Vai trò", value: creatomateRoleLabel(config.role) },
-      { label: "Renderer cuối", value: providerStateLabel(config.final_renderer_status) }
+      { label: "Renderer video dài", value: config.not_final_long_form_renderer ? "Không dùng" : "Chưa có dữ liệu" }
     ],
     "cloud-final-renderer": [
       { label: "Nhà cung cấp", value: providerNameLabel(config.provider) },
-      { label: "Gói", value: String(config.plan ?? "Chưa cấu hình") },
-      { label: "Khóa API", value: yesNo(config.api_key_configured) },
-      { label: "Trạng thái cấu hình", value: providerStateLabel(config.configuration_state) },
-      { label: "Trạng thái", value: providerStateLabel(config.status) }
+      { label: "Trạng thái", value: providerStateLabel(config.status) },
+      { label: "Video dài", value: config.long_form_final_render_blocked ? "Đang bị chặn" : "Chưa có dữ liệu" },
+      { label: "Việc tiếp theo", value: String(config.next_action ?? "Chọn renderer ráp video dài sau") }
     ]
   };
   return fields[summary.provider_key] ?? [{ label: "Loại nhà cung cấp", value: "Chưa có dữ liệu" }];
@@ -339,7 +338,8 @@ function creatomateRoleLabel(value: unknown) {
 function providerNameLabel(value: unknown) {
   const raw = String(value ?? "");
   return {
-    creatomate: "Creatomate"
+    creatomate: "Creatomate",
+    not_selected: "Chưa chọn"
   }[raw] ?? (raw ? "Nhà cung cấp đã cấu hình" : "Chưa cấu hình");
 }
 

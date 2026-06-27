@@ -39,7 +39,7 @@ make ollama-logs
 
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. The M10.1 router uses that local endpoint by default. `VCOS_LLM_MODEL_<LANE>_<ROLE>` values are env-driven. Ollama cloud auth is handled by your local/container Ollama sign-in state, not by a VCOS-tracked API key or image override. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
-Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M12 Cloud Final Renderer readiness uses Creatomate Growth 10K when `CLOUD_FINAL_RENDERER_PROVIDER=creatomate`, `CREATOMATE_PLAN=growth_10k`, and `CREATOMATE_API_KEY` are configured; it does not run real long-form rendering by default. M10.4 removes the generic cinematic AI provider binding; AI hero jobs bind only to `GOOGLE_VERTEX_VEO`. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
+Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `CLOUD_FINAL_RENDERER_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M12 keeps Cloud Final Renderer as a required gap; Creatomate stays light-template only for shorts/cards/thumbnails and is not selected as the long-form final renderer. M10.4 removes the generic cinematic AI provider binding; AI hero jobs bind only to `GOOGLE_VERTEX_VEO`. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
 
 Google Vertex Veo config is split by type: `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `VCOS_VEO_REAL_EXECUTION_ENABLED`, and `VCOS_VEO_REAL_SMOKE` are env/secret-store concerns; Veo model, duration, resolution, cost, budget, route, and capability defaults live in config catalogs with env override support. Real Veo execution is disabled by default.
 
@@ -65,10 +65,9 @@ vcos integrations smoke --provider google-drive
 vcos integrations smoke --provider google-vertex-veo
 vcos integrations smoke --provider elevenlabs
 vcos integrations smoke --provider creatomate
-vcos integrations smoke --provider cloud-final-renderer
 ```
 
-`vcos integrations smoke` records `SKIPPED` unless the matching real-smoke env guard is enabled. Cloud Final Renderer smoke reports Creatomate Growth 10K readiness only and does not run real rendering. M12 does not add YouTube upload/publish, unguarded Veo generation, paid voice generation by default, or real Creatomate render by default.
+`vcos integrations smoke` records `SKIPPED` unless the matching real-smoke env guard is enabled. Cloud Final Renderer remains `REQUIRED_GAP`; M12 does not pick a long-form renderer or run real rendering. M12 does not add YouTube upload/publish, unguarded Veo generation, paid voice generation by default, or real Creatomate render by default.
 
 ## M1 Commands
 

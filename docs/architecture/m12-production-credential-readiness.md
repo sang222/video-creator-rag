@@ -50,7 +50,6 @@ vcos integrations smoke --provider google-drive
 vcos integrations smoke --provider google-vertex-veo
 vcos integrations smoke --provider elevenlabs
 vcos integrations smoke --provider creatomate
-vcos integrations smoke --provider cloud-final-renderer
 ```
 
 ## Real Smoke Guard Policy
@@ -117,6 +116,15 @@ CREATOMATE_MONTHLY_BUDGET_USD=149
 CREATOMATE_API_KEY=
 ```
 
+Cloud Final Renderer gap:
+
+```bash
+CLOUD_FINAL_RENDERER_PROVIDER=
+CLOUD_FINAL_RENDERER_API_KEY=
+```
+
+These values remain empty until a later milestone selects/configures a capable long-form final renderer.
+
 Disabled optional spend:
 
 ```bash
@@ -164,17 +172,14 @@ Real upload smoke uploads a tiny test file only when `VCOS_DRIVE_REAL_UPLOAD_SMO
 
 ## Cloud Final Renderer Readiness
 
-Cloud Final Renderer is `READY_FOR_SMOKE` when:
+Cloud Final Renderer is `REQUIRED_GAP` in M12.
 
 ```bash
-CLOUD_FINAL_RENDERER_PROVIDER=creatomate
-CREATOMATE_PLAN=growth_10k
-CREATOMATE_API_KEY=<secret-manager-or-local-env>
+CLOUD_FINAL_RENDERER_PROVIDER=
+CLOUD_FINAL_RENDERER_API_KEY=
 ```
 
-If provider or plan is missing, status is `NEEDS_CONFIG`. If `CREATOMATE_API_KEY` is missing, status is `NEEDS_CREDENTIAL`.
-
-M12 still does not run real long-form rendering by default. The dashboard and API only validate readiness/configuration and guarded smoke state.
+Creatomate budget/config can still be displayed for shorts/cards/thumbnails, but M12 does not promote Creatomate into the long-form final renderer. Long-form final render remains blocked until a later milestone selects/configures a capable `CLOUD_FINAL_ASSEMBLY_RENDERER`. M12 does not run Cloud Final Renderer smoke or real long-form rendering.
 
 ## Security
 
