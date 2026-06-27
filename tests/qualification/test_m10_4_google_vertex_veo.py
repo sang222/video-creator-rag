@@ -4,9 +4,21 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.contracts import AIHeroAssetPlanRequest, MediaProviderBudgetCheckRequest, MediaRenderRoutingDecisionRequest
+from app.contracts import (
+    AIHeroAssetPlanRequest,
+    MediaProviderBudgetCheckRequest,
+    MediaRenderRoutingDecisionRequest,
+    ProviderCapabilityGateCheckRequest,
+)
+from app.core.config import VEO_ALLOWED_DURATION_SECONDS, VEO_GA_MODEL_ID, VEO_VIDEO_ONLY_MODE
 from app.db.models import MediaProviderRoleProfile, ProviderCapabilityMatrixEntry
-from app.services import AIHeroAssetPlanningService, MediaProviderBudgetService, MediaProviderRoleService, MediaRenderJobRouterService
+from app.services import (
+    AIHeroAssetPlanningService,
+    MediaProviderBudgetService,
+    MediaProviderRoleService,
+    MediaRenderJobRouterService,
+    ProviderCapabilityGateService,
+)
 from app.services.m10_2 import GoogleVertexVeoConfigService, GoogleVertexVeoResolvedConfig
 
 
@@ -59,6 +71,67 @@ def test_m10_4_binds_ai_hero_to_google_vertex_veo_without_alternative_fallbacks(
     assert planned.generation_state == "READY_FOR_PROVIDER"
 
 
+def test_m10_4_veo_config_uses_ga_model_exact_durations_and_no_preview_or_backup(db_session) -> None:
+    MediaProviderRoleService(db_session).ensure_matrix()
+    config = GoogleVertexVeoConfigService(db_session).resolve()
+    role = db_session.scalars(
+        select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == "GOOGLE_VERTEX_VEO")
+    ).one()
+    defaults = role.monthly_budget_assumption
+    capability_entries = {
+        entry.job_type: entry
+        for entry in db_session.scalars(
+            select(ProviderCapabilityMatrixEntry).where(ProviderCapabilityMatrixEntry.provider_key == "GOOGLE_VERTEX_VEO")
+        )
+    }
+
+    assert config.model_id == VEO_GA_MODEL_ID
+    assert defaults["model_id"] == VEO_GA_MODEL_ID
+    assert "model" not in defaults
+    assert config.model_id != "veo-3.1-fast-generate-preview"
+    assert config.model_id != "veo-3.1-fast"
+    assert config.mode == VEO_VIDEO_ONLY_MODE
+    assert defaults["video_mode"] == VEO_VIDEO_ONLY_MODE
+    assert tuple(int(value) for value in config.allowed_duration_seconds) == VEO_ALLOWED_DURATION_SECONDS
+    assert defaults["allowed_duration_seconds"] == [4, 6, 8]
+    assert config.default_duration_seconds == Decimal("8")
+    assert config.max_duration_seconds == Decimal("8")
+    assert capability_entries["AI_HERO_GENERATION"].max_duration_seconds == Decimal("8.000000")
+    assert capability_entries["AI_METAPHOR_GENERATION"].max_duration_seconds == Decimal("8.000000")
+    assert config.estimate_cost(Decimal("8")) == Decimal("0.80")
+    assert defaults["cost_per_second_1080p_video_only"] == "0.10"
+    assert defaults["default_8s_attempt_estimate_usd"] == "0.80"
+    assert defaults["backup_provider"] is None
+
+    ai_hero_roles = db_session.scalars(
+        select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_type == "AI_VIDEO_HERO_PROVIDER")
+    ).all()
+    assert {role.provider_key for role in ai_hero_roles if role.is_enabled} == {"GOOGLE_VERTEX_VEO"}
+    assert all("runway" not in role.provider_key.lower() for role in ai_hero_roles)
+    assert all("luma" not in role.provider_key.lower() for role in ai_hero_roles)
+
+    gate = ProviderCapabilityGateService(db_session)
+    for duration in (4, 6, 8):
+        result = gate.check(
+            data=ProviderCapabilityGateCheckRequest(
+                job_type="AI_HERO_GENERATION",
+                provider_key="GOOGLE_VERTEX_VEO",
+                target_duration_seconds=Decimal(duration),
+                target_aspect_ratio="16:9",
+            )
+        )
+        assert result.decision == "PASS"
+    blocked = gate.check(
+        data=ProviderCapabilityGateCheckRequest(
+            job_type="AI_HERO_GENERATION",
+            provider_key="GOOGLE_VERTEX_VEO",
+            target_duration_seconds=Decimal("10"),
+            target_aspect_ratio="16:9",
+        )
+    )
+    assert blocked.decision == "BLOCK"
+
+
 def test_m10_4_veo_budget_uses_configured_cost_and_unknown_when_missing(db_session, monkeypatch) -> None:
     MediaProviderRoleService(db_session).ensure_matrix()
     service = MediaProviderBudgetService(db_session)
@@ -66,22 +139,23 @@ def test_m10_4_veo_budget_uses_configured_cost_and_unknown_when_missing(db_sessi
         data=MediaProviderBudgetCheckRequest(
             provider_type="AI_VIDEO_HERO_PROVIDER",
             provider_key="GOOGLE_VERTEX_VEO",
-            estimated_usage_seconds=Decimal("10"),
+            estimated_usage_seconds=Decimal("8"),
         )
     )
     assert default_clip.decision == "PASS"
     snapshot = service.latest_snapshots()[0]
-    assert snapshot.estimated_usage_usd == Decimal("1.000000")
+    assert snapshot.estimated_usage_usd == Decimal("0.800000")
 
     def no_price_config(self):
         return GoogleVertexVeoResolvedConfig(
             provider_key="GOOGLE_VERTEX_VEO",
-            model="veo-3.1-fast",
-            mode="video-only",
+            model_id=VEO_GA_MODEL_ID,
+            mode=VEO_VIDEO_ONLY_MODE,
             resolution="1080p",
             audio_enabled=False,
+            allowed_duration_seconds=tuple(Decimal(str(value)) for value in VEO_ALLOWED_DURATION_SECONDS),
             default_duration_seconds=Decimal("8"),
-            max_duration_seconds=Decimal("10"),
+            max_duration_seconds=Decimal("8"),
             cost_per_second_1080p=None,
             monthly_budget_usd=Decimal("175"),
             project_id=None,
@@ -96,7 +170,7 @@ def test_m10_4_veo_budget_uses_configured_cost_and_unknown_when_missing(db_sessi
         data=MediaProviderBudgetCheckRequest(
             provider_type="AI_VIDEO_HERO_PROVIDER",
             provider_key="GOOGLE_VERTEX_VEO",
-            estimated_usage_seconds=Decimal("10"),
+            estimated_usage_seconds=Decimal("8"),
         )
     )
     assert missing_cost.decision == "REVIEW_REQUIRED"

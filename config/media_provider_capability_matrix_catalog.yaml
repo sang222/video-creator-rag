@@ -1,5 +1,5 @@
 catalog_key: media_provider_capability_matrix_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.0.1"
 schema_version: catalog.v1
 status: active
 items:
@@ -128,7 +128,7 @@ items:
     provider_type: AI_VIDEO_HERO_PROVIDER
     job_type: AI_HERO_GENERATION
     capability: SUPPORTED
-    max_duration_seconds: 10
+    max_duration_seconds: 8
     supported_aspect_ratios: ["16:9"]
     supported_outputs: ["video_clip", "still_frame"]
     plan_requirement: VERTEX_VEO_3_1_FAST_VIDEO_ONLY_1080P
@@ -138,7 +138,7 @@ items:
     provider_type: AI_VIDEO_HERO_PROVIDER
     job_type: AI_METAPHOR_GENERATION
     capability: SUPPORTED
-    max_duration_seconds: 10
+    max_duration_seconds: 8
     supported_aspect_ratios: ["16:9"]
     supported_outputs: ["video_clip", "still_frame"]
     plan_requirement: VERTEX_VEO_3_1_FAST_VIDEO_ONLY_1080P

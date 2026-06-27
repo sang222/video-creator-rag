@@ -6,6 +6,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 OLLAMA_LOCAL_BASE_URL = "http://localhost:11434"
+VEO_GA_MODEL_ID = "veo-3.1-fast-generate-001"
+VEO_FORBIDDEN_MODEL_IDS = frozenset(
+    {
+        "veo-3.1-fast",
+        "veo-3.1-fast-generate-preview",
+    }
+)
+VEO_VIDEO_ONLY_MODE = "video_only"
+VEO_ALLOWED_DURATION_SECONDS = (4, 6, 8)
+VEO_DEFAULT_DURATION_SECONDS = 8
+VEO_MAX_DURATION_SECONDS = 8
 
 
 class Settings(BaseSettings):
@@ -131,9 +142,9 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS", "VCOS_GOOGLE_APPLICATION_CREDENTIALS"),
     )
-    veo_model: str | None = Field(
+    veo_model_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_VEO_MODEL", "VEO_MODEL"),
+        validation_alias=AliasChoices("VCOS_VEO_MODEL_ID", "VEO_MODEL_ID", "VCOS_VEO_MODEL", "VEO_MODEL"),
     )
     veo_mode: str | None = Field(
         default=None,
@@ -155,9 +166,14 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("VCOS_VEO_MAX_DURATION_SECONDS", "VEO_MAX_DURATION_SECONDS"),
     )
-    veo_cost_per_second_1080p: Decimal | None = Field(
+    veo_cost_per_second_1080p_video_only: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_VEO_COST_PER_SECOND_1080P", "VEO_COST_PER_SECOND_1080P"),
+        validation_alias=AliasChoices(
+            "VCOS_VEO_COST_PER_SECOND_1080P_VIDEO_ONLY",
+            "VEO_COST_PER_SECOND_1080P_VIDEO_ONLY",
+            "VCOS_VEO_COST_PER_SECOND_1080P",
+            "VEO_COST_PER_SECOND_1080P",
+        ),
     )
     veo_monthly_budget_usd: Decimal | None = Field(
         default=None,
@@ -216,7 +232,7 @@ class Settings(BaseSettings):
         "google_drive_oauth_redirect_uri",
         "google_drive_root_folder_id",
         "google_drive_upload_mode",
-        "veo_model",
+        "veo_model_id",
         "veo_mode",
         "veo_resolution",
         mode="before",
@@ -226,6 +242,21 @@ class Settings(BaseSettings):
         if value == "":
             return None
         return value
+
+    @field_validator("veo_model_id")
+    @classmethod
+    def veo_model_id_must_be_ga(cls, value: str | None) -> str | None:
+        if value in VEO_FORBIDDEN_MODEL_IDS:
+            raise ValueError("VCOS_VEO_MODEL_ID must use the GA model id veo-3.1-fast-generate-001")
+        return value
+
+    @property
+    def veo_model(self) -> str | None:
+        return self.veo_model_id
+
+    @property
+    def veo_cost_per_second_1080p(self) -> Decimal | None:
+        return self.veo_cost_per_second_1080p_video_only
 
 
 @lru_cache(maxsize=1)

@@ -66,11 +66,12 @@ Creatomate may route `LONG_FORM_FINAL_RENDER` only when a Growth 10K-or-higher p
 
 Configured assumptions for Quality-First $250 mode:
 
-- ElevenLabs Flash/Turbo PAYG: range $10-15/month.
+- ElevenLabs Creator is the baseline starting plan; track voice budget by credits/characters where possible.
 - Creatomate Essential 2K: $59/month assumption.
 - Google Vertex Veo: $0.10/second configured for Veo 3.1 Fast 1080p video-only.
-- Default 10s Veo clip estimate: $1.00.
+- Default 8s Veo attempt estimate: $0.80.
 - Monthly AI hero cap: $175 by default.
+- ElevenLabs Pro is an upgrade path if Creator credits become tight.
 - Stock: $0 core.
 - Music/SFX subscription: $0 core.
 

@@ -1,5 +1,5 @@
 catalog_key: media_provider_role_profile_catalog
-catalog_version: "1.0.1"
+catalog_version: "1.0.2"
 schema_version: catalog.v1
 status: active
 items:
@@ -37,10 +37,10 @@ items:
     supports_real_execution: false
     monthly_budget_assumption:
       mode: QUALITY_FIRST_250
-      assumption_range_usd:
-        - 10
-        - 15
-    notes: No script writing, video render, captions, stock licensing, or publish package behavior.
+      baseline_plan: CREATOR
+      budget_basis: credits_or_characters
+      upgrade_path: PRO_IF_CREATOR_CREDITS_TIGHT
+    notes: No script writing, video render, captions, stock licensing, or publish package behavior; budget tracking should prefer credits/characters over dollar assumptions.
   - provider_key: vcos_caption_timeline
     provider_name: VCOS caption timeline service
     provider_type: CAPTION_TIMELINE_ENGINE
@@ -63,16 +63,17 @@ items:
     supports_real_execution: true
     monthly_budget_assumption:
       mode: QUALITY_FIRST_250
-      model: veo-3.1-fast
+      model_id: veo-3.1-fast-generate-001
       provider_key_alias: google_vertex_veo
       provider_name: Google Vertex AI - Veo 3.1 Fast video-only 1080p
-      video_mode: video-only
+      video_mode: video_only
       resolution: 1080p
       audio_enabled: false
+      allowed_duration_seconds: [4, 6, 8]
       default_duration_seconds: 8
-      max_duration_seconds: 10
-      cost_per_second_1080p: "0.10"
-      default_10s_clip_estimate_usd: "1.00"
+      max_duration_seconds: 8
+      cost_per_second_1080p_video_only: "0.10"
+      default_8s_attempt_estimate_usd: "0.80"
       monthly_budget_usd: "175"
       backup_provider: null
       usage:

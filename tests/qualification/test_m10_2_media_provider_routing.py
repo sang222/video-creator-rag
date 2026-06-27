@@ -135,11 +135,15 @@ def test_provider_role_matrix_seeded_from_quality_first_matrix(db_session) -> No
     assert by_key["vcos_backend"].provider_type == "WORKFLOW_ORCHESTRATOR"
     assert by_key["llm_router"].provider_type == "LLM_SCRIPT_ENGINE"
     assert by_key["elevenlabs_flash_turbo"].provider_type == "API_NATIVE_TTS"
+    assert by_key["elevenlabs_flash_turbo"].monthly_budget_assumption["baseline_plan"] == "CREATOR"
+    assert by_key["elevenlabs_flash_turbo"].monthly_budget_assumption["budget_basis"] == "credits_or_characters"
     assert by_key["vcos_caption_timeline"].provider_type == "CAPTION_TIMELINE_ENGINE"
     assert by_key["GOOGLE_VERTEX_VEO"].provider_type == "AI_VIDEO_HERO_PROVIDER"
     assert by_key["GOOGLE_VERTEX_VEO"].provider_name == "Google Vertex AI - Veo 3.1 Fast video-only 1080p"
-    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["model"] == "veo-3.1-fast"
-    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["cost_per_second_1080p"] == "0.10"
+    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["model_id"] == "veo-3.1-fast-generate-001"
+    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["video_mode"] == "video_only"
+    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["allowed_duration_seconds"] == [4, 6, 8]
+    assert by_key["GOOGLE_VERTEX_VEO"].monthly_budget_assumption["cost_per_second_1080p_video_only"] == "0.10"
     assert "cinematic_ai_hero" not in by_key
     assert by_key["creatomate_essential_2k"].provider_type == "CLOUD_TEMPLATE_RENDERER_LIGHT"
     assert by_key["cloud_final_assembly_renderer_tbd"].provider_type == "CLOUD_FINAL_ASSEMBLY_RENDERER"
@@ -156,7 +160,7 @@ def test_provider_role_matrix_seeded_from_quality_first_matrix(db_session) -> No
     }
     assert caps[("elevenlabs_flash_turbo", "VOICE_GENERATION")].capability == "SUPPORTED"
     assert caps[("GOOGLE_VERTEX_VEO", "AI_HERO_GENERATION")].capability == "SUPPORTED"
-    assert caps[("GOOGLE_VERTEX_VEO", "AI_HERO_GENERATION")].max_duration_seconds == Decimal("10.000000")
+    assert caps[("GOOGLE_VERTEX_VEO", "AI_HERO_GENERATION")].max_duration_seconds == Decimal("8.000000")
     assert caps[("creatomate_essential_2k", "SHORT_RENDER")].capability == "SUPPORTED"
     assert caps[("creatomate_essential_2k", "LONG_FORM_FINAL_RENDER")].capability == "BLOCKED_BY_PLAN"
 
@@ -173,9 +177,7 @@ def test_render_routing_enforces_creatomate_essential_boundary_and_cloud_gap(db_
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_HERO_GENERATION")).selected_provider_key == "GOOGLE_VERTEX_VEO"
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_METAPHOR_GENERATION")).selected_provider_key == "GOOGLE_VERTEX_VEO"
     assert router.decide(data=MediaRenderRoutingDecisionRequest(job_type="VOICE_GENERATION")).selected_provider_key == "elevenlabs_flash_turbo"
-    too_long_hero = router.decide(
-        data=MediaRenderRoutingDecisionRequest(job_type="AI_HERO_GENERATION", target_duration_seconds=Decimal("11"))
-    )
+    too_long_hero = router.decide(data=MediaRenderRoutingDecisionRequest(job_type="AI_HERO_GENERATION", target_duration_seconds=Decimal("10")))
     assert too_long_hero.routing_result == "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
 
     blocked = router.decide(data=MediaRenderRoutingDecisionRequest(job_type="LONG_FORM_FINAL_RENDER"))
@@ -269,7 +271,7 @@ def test_capability_budget_license_and_reuse_gates(db_session, qualification_fac
         data=MediaProviderBudgetCheckRequest(
             provider_type="AI_VIDEO_HERO_PROVIDER",
             provider_key="GOOGLE_VERTEX_VEO",
-            estimated_usage_seconds=Decimal("10"),
+            estimated_usage_seconds=Decimal("8"),
         )
     )
     assert veo_default_clip.decision == "PASS"

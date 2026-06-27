@@ -47,14 +47,15 @@ PASS.
 
 - Provider type: `AI_VIDEO_HERO_PROVIDER`.
 - Provider key duy nhất: `GOOGLE_VERTEX_VEO`.
-- Model: `veo-3.1-fast`.
-- Mode: `video-only`.
+- Model id: `veo-3.1-fast-generate-001`.
+- Mode: `video_only`.
 - Resolution: `1080p`.
 - Default duration: 8s.
-- Max duration: 10s.
+- Allowed durations: `[4, 6, 8]`.
+- Max duration: 8s.
 - Audio: false.
 - Cost: `$0.10`/second.
-- Default 10s estimate: `$1.00`.
+- Default 8s attempt estimate: `$0.80`.
 - Monthly cap: `$175`.
 - Không cấu hình Runway, Luma, generic cinematic fallback, web-app-only provider, hoặc backup/alternative auto-route.
 
@@ -75,7 +76,7 @@ PASS.
 PASS.
 
 - Env/secret-store only: `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `VCOS_VEO_REAL_EXECUTION_ENABLED`, `VCOS_VEO_REAL_SMOKE`.
-- Env overrides: `VCOS_AI_HERO_PROVIDER`, `VCOS_VEO_MODEL`, `VCOS_VEO_MODE`, `VCOS_VEO_RESOLUTION`, `VCOS_VEO_AUDIO_ENABLED`, `VCOS_VEO_DEFAULT_DURATION_SECONDS`, `VCOS_VEO_MAX_DURATION_SECONDS`, `VCOS_VEO_COST_PER_SECOND_1080P`, `VCOS_VEO_MONTHLY_BUDGET_USD`.
+- Env overrides: `VCOS_AI_HERO_PROVIDER`, `VCOS_VEO_MODEL_ID`, optional legacy alias `VCOS_VEO_MODEL`, `VCOS_VEO_MODE`, `VCOS_VEO_RESOLUTION`, `VCOS_VEO_AUDIO_ENABLED`, `VCOS_VEO_DEFAULT_DURATION_SECONDS`, `VCOS_VEO_MAX_DURATION_SECONDS`, `VCOS_VEO_COST_PER_SECOND_1080P_VIDEO_ONLY`, `VCOS_VEO_MONTHLY_BUDGET_USD`.
 - Config registry/catalog: provider role profile, capability matrix, routing policy, budget policy, model/mode/resolution/duration/audio/cost/monthly budget/usage policy defaults.
 - Service account JSON không commit, không DB, không log; `GOOGLE_APPLICATION_CREDENTIALS` chỉ là path/handle.
 

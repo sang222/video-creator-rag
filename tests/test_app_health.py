@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.core.config import VEO_GA_MODEL_ID
 from app.core.config import get_settings
 from app.main import create_app
 
@@ -28,8 +29,8 @@ def test_provider_api_keys_load_from_env(monkeypatch) -> None:
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT_ID", "vcos-test-project")
     monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/absolute/path/to/service_account.json")
-    monkeypatch.setenv("VCOS_VEO_MODEL", "veo-3.1-fast")
-    monkeypatch.setenv("VCOS_VEO_COST_PER_SECOND_1080P", "0.10")
+    monkeypatch.setenv("VCOS_VEO_MODEL_ID", VEO_GA_MODEL_ID)
+    monkeypatch.setenv("VCOS_VEO_COST_PER_SECOND_1080P_VIDEO_ONLY", "0.10")
     monkeypatch.setenv("VCOS_VEO_MONTHLY_BUDGET_USD", "175")
     settings = get_settings()
     try:
@@ -47,8 +48,20 @@ def test_provider_api_keys_load_from_env(monkeypatch) -> None:
         assert settings.google_cloud_project_id == "vcos-test-project"
         assert settings.google_cloud_location == "us-central1"
         assert settings.google_application_credentials == "/absolute/path/to/service_account.json"
-        assert settings.veo_model == "veo-3.1-fast"
+        assert settings.veo_model_id == VEO_GA_MODEL_ID
+        assert settings.veo_model == VEO_GA_MODEL_ID
+        assert str(settings.veo_cost_per_second_1080p_video_only) == "0.10"
         assert str(settings.veo_cost_per_second_1080p) == "0.10"
         assert str(settings.veo_monthly_budget_usd) == "175"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_legacy_veo_model_env_alias_loads_ga_model_id(monkeypatch) -> None:
+    get_settings.cache_clear()
+    monkeypatch.delenv("VCOS_VEO_MODEL_ID", raising=False)
+    monkeypatch.setenv("VCOS_VEO_MODEL", VEO_GA_MODEL_ID)
+    try:
+        assert get_settings().veo_model_id == VEO_GA_MODEL_ID
     finally:
         get_settings.cache_clear()

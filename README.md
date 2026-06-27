@@ -310,7 +310,7 @@ POST /ai-hero-assets/{asset_id}/generate
 vcos media ai-hero-generate --asset-id <asset-id>
 ```
 
-M10.4 binds AI hero/metaphor generation to Google Vertex Veo (`GOOGLE_VERTEX_VEO`) with model `veo-3.1-fast`, video-only mode, 1080p, audio disabled, default 8 seconds, max 10 seconds, configured cost $0.10/second, and default monthly AI hero cap $175. Opening hooks and key metaphors route to Veo. Thumbnail backgrounds use still frames from Veo clips. Shorts reuse/crop long-form hero assets by default. Workflow/data/diagram visuals route to Creatomate/cards, not Veo. Runway, Luma, generic cinematic AI fallback, web-app-only providers, and backup AI hero auto-route are not configured.
+M10.4 binds AI hero/metaphor generation to Google Vertex Veo (`GOOGLE_VERTEX_VEO`) with model id `veo-3.1-fast-generate-001`, `video_only` mode, 1080p, audio disabled, allowed durations `[4, 6, 8]`, default 8 seconds, max 8 seconds, configured video-only cost $0.10/second, and default monthly AI hero cap $175. Opening hooks and key metaphors route to Veo. Thumbnail backgrounds use still frames from Veo clips. Shorts reuse/crop long-form hero assets by default. Workflow/data/diagram visuals route to Creatomate/cards, not Veo. Runway, Luma, generic cinematic AI fallback, web-app-only providers, and backup AI hero auto-route are not configured.
 
 ## M10.5 API/CLI
 

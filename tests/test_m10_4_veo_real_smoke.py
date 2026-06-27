@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.core.config import VEO_GA_MODEL_ID, VEO_VIDEO_ONLY_MODE
 from app.providers.google_vertex_veo import GoogleVertexVeoExecutionConfig, GoogleVertexVeoProvider, GoogleVertexVeoRequest
 
 
@@ -15,7 +16,7 @@ def test_real_veo_smoke_skipped_unless_enabled() -> None:
         "GOOGLE_CLOUD_PROJECT_ID": os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
         "GOOGLE_CLOUD_LOCATION": os.getenv("GOOGLE_CLOUD_LOCATION"),
         "GOOGLE_APPLICATION_CREDENTIALS": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-        "VCOS_VEO_MODEL": os.getenv("VCOS_VEO_MODEL"),
+        "VCOS_VEO_MODEL_ID": os.getenv("VCOS_VEO_MODEL_ID") or os.getenv("VCOS_VEO_MODEL"),
     }
     missing = [key for key, value in required.items() if not value]
     if missing:
@@ -23,8 +24,8 @@ def test_real_veo_smoke_skipped_unless_enabled() -> None:
     result = GoogleVertexVeoProvider().generate_video(
         request=GoogleVertexVeoRequest(
             prompt="A quiet abstract opening hook for a software workflow explainer, no text.",
-            model=required["VCOS_VEO_MODEL"] or "veo-3.1-fast",
-            mode=os.getenv("VCOS_VEO_MODE", "video-only"),
+            model=required["VCOS_VEO_MODEL_ID"] or VEO_GA_MODEL_ID,
+            mode=os.getenv("VCOS_VEO_MODE", VEO_VIDEO_ONLY_MODE),
             resolution=os.getenv("VCOS_VEO_RESOLUTION", "1080p"),
             duration_seconds=Decimal(os.getenv("VCOS_VEO_DEFAULT_DURATION_SECONDS", "8")),
             audio_enabled=os.getenv("VCOS_VEO_AUDIO_ENABLED", "false").lower() == "true",

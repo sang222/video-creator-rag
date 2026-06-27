@@ -33,7 +33,15 @@ from app.contracts import (
     ThumbnailVariantPlanRequest,
 )
 from app.core.errors import NotFoundError, ValidationFailureError
-from app.core.config import get_settings
+from app.core.config import (
+    VEO_ALLOWED_DURATION_SECONDS,
+    VEO_DEFAULT_DURATION_SECONDS,
+    VEO_FORBIDDEN_MODEL_IDS,
+    VEO_GA_MODEL_ID,
+    VEO_MAX_DURATION_SECONDS,
+    VEO_VIDEO_ONLY_MODE,
+    get_settings,
+)
 from app.core.time import utc_now
 from app.db.models import (
     AIHeroAsset,
@@ -141,6 +149,48 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     return Decimal(str(value))
 
 
+def _resolve_veo_model_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    model_id = str(value).strip()
+    if not model_id:
+        return None
+    if model_id in VEO_FORBIDDEN_MODEL_IDS:
+        raise ValidationFailureError(f"Veo model id is not allowed: {model_id}")
+    if model_id != VEO_GA_MODEL_ID:
+        raise ValidationFailureError(f"Veo model id must be {VEO_GA_MODEL_ID}")
+    return model_id
+
+
+def _resolve_veo_allowed_duration_seconds(value: Any) -> tuple[Decimal, ...]:
+    if value is None:
+        return tuple(Decimal(str(item)) for item in VEO_ALLOWED_DURATION_SECONDS)
+    if not isinstance(value, list):
+        raise ValidationFailureError("Veo allowed_duration_seconds must be a list")
+    return tuple(Decimal(str(item)) for item in value)
+
+
+def _validate_veo_resolved_defaults(
+    *,
+    model_id: str | None,
+    mode: str | None,
+    allowed_duration_seconds: tuple[Decimal, ...],
+    default_duration_seconds: Decimal | None,
+    max_duration_seconds: Decimal | None,
+) -> None:
+    expected_allowed = tuple(Decimal(str(item)) for item in VEO_ALLOWED_DURATION_SECONDS)
+    if model_id is None:
+        return
+    if mode != VEO_VIDEO_ONLY_MODE:
+        raise ValidationFailureError(f"Veo mode must be {VEO_VIDEO_ONLY_MODE}")
+    if allowed_duration_seconds != expected_allowed:
+        raise ValidationFailureError("Veo allowed durations must be exactly [4, 6, 8]")
+    if default_duration_seconds != Decimal(str(VEO_DEFAULT_DURATION_SECONDS)):
+        raise ValidationFailureError("Veo default duration must be 8 seconds")
+    if max_duration_seconds != Decimal(str(VEO_MAX_DURATION_SECONDS)):
+        raise ValidationFailureError("Veo max duration must be 8 seconds")
+
+
 def _provider_role_seeds() -> list[dict[str, Any]]:
     return [
         {
@@ -202,10 +252,11 @@ def _routing_policy() -> dict[str, dict[str, str]]:
 @dataclass(frozen=True)
 class GoogleVertexVeoResolvedConfig:
     provider_key: str
-    model: str | None
+    model_id: str | None
     mode: str | None
     resolution: str | None
     audio_enabled: bool | None
+    allowed_duration_seconds: tuple[Decimal, ...]
     default_duration_seconds: Decimal | None
     max_duration_seconds: Decimal | None
     cost_per_second_1080p: Decimal | None
@@ -221,6 +272,10 @@ class GoogleVertexVeoResolvedConfig:
             return None
         return duration_seconds * self.cost_per_second_1080p
 
+    @property
+    def model(self) -> str | None:
+        return self.model_id
+
 
 class GoogleVertexVeoConfigService:
     def __init__(self, session: Session):
@@ -233,24 +288,37 @@ class GoogleVertexVeoConfigService:
         ).one_or_none()
         seed = next((item for item in _provider_role_seeds() if item["provider_key"] == GOOGLE_VERTEX_VEO_PROVIDER_KEY), None)
         defaults = (role.monthly_budget_assumption if role else seed.get("monthly_budget_assumption") if seed else {}) or {}
+        allowed_duration_seconds = _resolve_veo_allowed_duration_seconds(defaults.get("allowed_duration_seconds"))
+        default_duration_seconds = _decimal_or_none(
+            settings.veo_default_duration_seconds
+            if settings.veo_default_duration_seconds is not None
+            else defaults.get("default_duration_seconds")
+        )
+        max_duration_seconds = _decimal_or_none(
+            settings.veo_max_duration_seconds if settings.veo_max_duration_seconds is not None else defaults.get("max_duration_seconds")
+        )
+        model_id = _resolve_veo_model_id(settings.veo_model_id or defaults.get("model_id") or defaults.get("model"))
+        mode = settings.veo_mode or defaults.get("video_mode")
+        _validate_veo_resolved_defaults(
+            model_id=model_id,
+            mode=mode,
+            allowed_duration_seconds=allowed_duration_seconds,
+            default_duration_seconds=default_duration_seconds,
+            max_duration_seconds=max_duration_seconds,
+        )
         return GoogleVertexVeoResolvedConfig(
             provider_key=role.provider_key if role else GOOGLE_VERTEX_VEO_PROVIDER_KEY,
-            model=settings.veo_model or defaults.get("model"),
-            mode=settings.veo_mode or defaults.get("video_mode"),
+            model_id=model_id,
+            mode=mode,
             resolution=settings.veo_resolution or defaults.get("resolution"),
             audio_enabled=settings.veo_audio_enabled if settings.veo_audio_enabled is not None else defaults.get("audio_enabled"),
-            default_duration_seconds=_decimal_or_none(
-                settings.veo_default_duration_seconds
-                if settings.veo_default_duration_seconds is not None
-                else defaults.get("default_duration_seconds")
-            ),
-            max_duration_seconds=_decimal_or_none(
-                settings.veo_max_duration_seconds if settings.veo_max_duration_seconds is not None else defaults.get("max_duration_seconds")
-            ),
+            allowed_duration_seconds=allowed_duration_seconds,
+            default_duration_seconds=default_duration_seconds,
+            max_duration_seconds=max_duration_seconds,
             cost_per_second_1080p=_decimal_or_none(
-                settings.veo_cost_per_second_1080p
-                if settings.veo_cost_per_second_1080p is not None
-                else defaults.get("cost_per_second_1080p")
+                settings.veo_cost_per_second_1080p_video_only
+                if settings.veo_cost_per_second_1080p_video_only is not None
+                else defaults.get("cost_per_second_1080p_video_only", defaults.get("cost_per_second_1080p"))
             ),
             monthly_budget_usd=_decimal_or_none(
                 settings.veo_monthly_budget_usd if settings.veo_monthly_budget_usd is not None else defaults.get("monthly_budget_usd")
@@ -267,8 +335,10 @@ class GoogleVertexVeoConfigService:
         reasons: list[str] = []
         if _normalized_ai_hero_provider(get_settings().ai_hero_provider) not in {None, GOOGLE_VERTEX_VEO_PROVIDER_KEY}:
             reasons.append("UNSUPPORTED_AI_HERO_PROVIDER")
-        if not resolved.model or not resolved.mode or not resolved.resolution:
+        if not resolved.model_id or not resolved.mode or not resolved.resolution:
             reasons.append("VEO_CONFIG_MISSING")
+        if _veo_duration_block(resolved, resolved.default_duration_seconds) is not None:
+            reasons.append("VEO_DURATION_CONFIG_INVALID")
         if resolved.cost_per_second_1080p is None:
             reasons.append("VEO_COST_CONFIG_MISSING")
         if resolved.real_execution_enabled:
@@ -427,6 +497,8 @@ class MediaRenderJobRouterService:
                 technical_appendix={"reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED", **data.technical_appendix},
             )
         duration_block = _duration_block(entry, data.target_duration_seconds)
+        if duration_block is None and role.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY and job_type in AI_HERO_JOBS:
+            duration_block = _veo_duration_block(GoogleVertexVeoConfigService(self.session).resolve(), data.target_duration_seconds)
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block:
             return self._record_decision(
@@ -610,6 +682,8 @@ class ProviderCapabilityGateService:
                 operator_summary=f"{role.provider_key} has no declared support for {job_type}.",
             )
         duration_block = _duration_block(entry, data.target_duration_seconds)
+        if duration_block is None and role.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY and job_type in AI_HERO_JOBS:
+            duration_block = _veo_duration_block(GoogleVertexVeoConfigService(self.session).resolve(), data.target_duration_seconds)
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block or entry.capability != "SUPPORTED":
             reason = (
@@ -1128,7 +1202,7 @@ class AIHeroGenerationService:
                 reason_codes=["VEO_REAL_EXECUTION_DISABLED"],
                 operator_summary="Veo provider binding is ready; real execution is disabled by env guard.",
             )
-        if not config.model or not config.mode or not config.resolution or asset.duration_seconds is None:
+        if not config.model_id or not config.mode or not config.resolution or asset.duration_seconds is None:
             return self._result(
                 asset=asset,
                 config=config,
@@ -1140,7 +1214,7 @@ class AIHeroGenerationService:
         response = GoogleVertexVeoProvider().generate_video(
             request=GoogleVertexVeoRequest(
                 prompt=asset.prompt,
-                model=config.model,
+                model=config.model_id,
                 mode=config.mode,
                 resolution=config.resolution,
                 duration_seconds=asset.duration_seconds,
@@ -1198,7 +1272,7 @@ class AIHeroGenerationService:
             provider_key=asset.provider_key,
             provider_type=asset.provider_type,
             generation_state=asset.generation_state,
-            model=config.model,
+            model=config.model_id,
             mode=config.mode,
             resolution=config.resolution,
             audio_enabled=config.audio_enabled,
@@ -1375,6 +1449,16 @@ def _duration_block(entry: ProviderCapabilityMatrixEntry, target_duration_second
         return None
     if target_duration_seconds > entry.max_duration_seconds:
         return f"{entry.provider_key} supports {entry.job_type} only up to {entry.max_duration_seconds} seconds."
+    return None
+
+
+def _veo_duration_block(config: GoogleVertexVeoResolvedConfig, target_duration_seconds: Decimal | None) -> str | None:
+    if target_duration_seconds is None:
+        return None
+    allowed = set(config.allowed_duration_seconds)
+    if target_duration_seconds not in allowed:
+        formatted = ", ".join(str(int(item)) for item in config.allowed_duration_seconds)
+        return f"{config.provider_key} supports Veo durations exactly [{formatted}] seconds."
     return None
 
 

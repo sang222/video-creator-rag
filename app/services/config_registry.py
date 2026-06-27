@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.config_catalog import CatalogDocument
 from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
+from app.core.config import VEO_ALLOWED_DURATION_SECONDS, VEO_DEFAULT_DURATION_SECONDS, VEO_GA_MODEL_ID, VEO_MAX_DURATION_SECONDS, VEO_VIDEO_ONLY_MODE
 from app.core.errors import ConfigVersionConflictError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import ConfigCatalogVersion, Role
@@ -481,6 +482,7 @@ class ConfigRegistryService:
         seen: set[str] = set()
         for item in document.items:
             parsed = item_model.model_validate(item)
+            self._validate_media_provider_catalog_item(document.catalog_key, parsed)
             key = (
                 getattr(parsed, "code", None)
                 or getattr(parsed, "event_type", None)
@@ -499,6 +501,38 @@ class ConfigRegistryService:
             if key in seen:
                 raise ValidationFailureError(f"duplicate catalog item: {key}")
             seen.add(key)
+
+    def _validate_media_provider_catalog_item(self, catalog_key: str, parsed: BaseModel) -> None:
+        if catalog_key == "media_provider_role_profile_catalog":
+            provider_key = getattr(parsed, "provider_key", None)
+            if provider_key != "GOOGLE_VERTEX_VEO":
+                return
+            assumption = getattr(parsed, "monthly_budget_assumption", {})
+            if assumption.get("model_id") != VEO_GA_MODEL_ID:
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO model_id must use the GA Veo model id")
+            if "model" in assumption:
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO catalog must use model_id, not model")
+            if assumption.get("video_mode") != VEO_VIDEO_ONLY_MODE:
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO video_mode must be video_only")
+            if assumption.get("allowed_duration_seconds") != list(VEO_ALLOWED_DURATION_SECONDS):
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO allowed durations must be exactly [4, 6, 8]")
+            if assumption.get("default_duration_seconds") != VEO_DEFAULT_DURATION_SECONDS:
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO default duration must be 8")
+            if assumption.get("max_duration_seconds") != VEO_MAX_DURATION_SECONDS:
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO max duration must be 8")
+            if assumption.get("cost_per_second_1080p_video_only") != "0.10":
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO video-only cost must be 0.10")
+            if "cost_per_second_1080p" in assumption:
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO catalog must use cost_per_second_1080p_video_only")
+            if assumption.get("default_8s_attempt_estimate_usd") != "0.80":
+                raise ValidationFailureError("GOOGLE_VERTEX_VEO 8s attempt estimate must be 0.80")
+            return
+        if catalog_key == "media_provider_capability_matrix_catalog":
+            provider_key = getattr(parsed, "provider_key", None)
+            job_type = getattr(parsed, "job_type", None)
+            if provider_key == "GOOGLE_VERTEX_VEO" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
+                if getattr(parsed, "max_duration_seconds", None) != VEO_MAX_DURATION_SECONDS:
+                    raise ValidationFailureError("GOOGLE_VERTEX_VEO capability max duration must be 8")
 
     def _seed_metric_definitions(self, content: dict[str, Any]) -> None:
         from app.db.models import MetricDefinitionVersion

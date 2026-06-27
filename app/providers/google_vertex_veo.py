@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from app.core.config import VEO_ALLOWED_DURATION_SECONDS, VEO_FORBIDDEN_MODEL_IDS, VEO_GA_MODEL_ID, VEO_MAX_DURATION_SECONDS, VEO_VIDEO_ONLY_MODE
 from app.providers.base import ProviderResponse
 
 
@@ -40,6 +41,9 @@ class GoogleVertexVeoProvider:
         config: GoogleVertexVeoExecutionConfig,
     ) -> ProviderResponse:
         started = time.monotonic()
+        validation_error = _validate_request(request)
+        if validation_error is not None:
+            return _error_response(validation_error, "Veo request config is not allowed for M10.4.", started, retryable=False)
         if not config.real_execution_enabled or not config.real_smoke_enabled:
             return _error_response(
                 "VEO_REAL_EXECUTION_DISABLED",
@@ -115,6 +119,19 @@ def _missing_real_execution_config(config: GoogleVertexVeoExecutionConfig) -> li
     if not config.service_account_path:
         missing.append("GOOGLE_APPLICATION_CREDENTIALS")
     return missing
+
+
+def _validate_request(request: GoogleVertexVeoRequest) -> str | None:
+    if request.model in VEO_FORBIDDEN_MODEL_IDS or request.model != VEO_GA_MODEL_ID:
+        return "VEO_MODEL_NOT_ALLOWED"
+    if request.mode != VEO_VIDEO_ONLY_MODE:
+        return "VEO_MODE_NOT_ALLOWED"
+    allowed = {Decimal(str(item)) for item in VEO_ALLOWED_DURATION_SECONDS}
+    if request.duration_seconds not in allowed:
+        return "VEO_DURATION_NOT_ALLOWED"
+    if request.duration_seconds > Decimal(str(VEO_MAX_DURATION_SECONDS)):
+        return "VEO_DURATION_NOT_ALLOWED"
+    return None
 
 
 def _ensure_google_application_credentials(service_account_path: str | None) -> None:
