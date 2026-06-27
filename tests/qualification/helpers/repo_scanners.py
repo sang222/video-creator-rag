@@ -120,6 +120,7 @@ ALLOWED_CODE_SUBSTRINGS = {
     "publish_risk_gate",
     "published_at",
     '"PUBLISHER"',
+    "'PUBLISHER'",
     "MockAnalyticsProvider",
     "mock_analytics",
     "no_fake_traffic",

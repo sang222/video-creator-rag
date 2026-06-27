@@ -1,23 +1,22 @@
 import { Database } from "lucide-react";
 
-import { Panel } from "@/components/ui/panel";
+import { ActionHintCard, PageHeader } from "@/components/cockpit";
 
 export default function Page() {
   return (
     <div className="space-y-6 p-4 md:p-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Media Storage / Google Drive Offload</h1>
-        <p className="mt-1 text-sm text-muted-foreground">File access stays on Google Drive web_view_link only.</p>
-      </div>
-      <Panel>
-        <div className="flex items-start gap-3">
-          <Database className="text-primary" size={22} />
-          <div>
-            <h2 className="text-base font-semibold">Open in Google Drive</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Dashboard media cards appear on publish and uploaded video screens after CloudMediaRef verification.</p>
-          </div>
-        </div>
-      </Panel>
+      <PageHeader
+        title="Tệp trên Google Drive"
+        subtitle="File đã offload chỉ mở bằng nút Google Drive đã xác minh. VCOS không tạo link tải hoặc preview trung gian."
+        breadcrumbs={[{ label: "Trung tâm điều hành", href: "/" }, { label: "Tệp trên Google Drive" }]}
+      />
+      <ActionHintCard
+        icon={Database}
+        title="Mở trên Google Drive"
+        body="Media card sẽ xuất hiện trong gói publish và chi tiết video sau khi file Drive được xác minh. Nếu chưa có file, hãy hoàn tất offload hoặc mở gói publish liên quan."
+        href="/publishing"
+        actionLabel="Đi tới gói publish"
+      />
     </div>
   );
 }

@@ -136,13 +136,19 @@ REQUIRED_TABLES = {
     "channel_lifecycle_decisions",
     "learning_review_decisions",
     "approved_playbook_entries",
+    "operator_users",
+    "operator_auth_sessions",
+    "localized_subtitle_packages",
+    "localized_metadata_packages",
+    "channel_publish_timing_policies",
+    "publish_timing_suggestions",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0016_m11_operator_dashboard"
+    assert revision == "0017_m11_1_localization"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

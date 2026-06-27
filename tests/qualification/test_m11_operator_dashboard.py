@@ -102,7 +102,7 @@ def test_m11_uploaded_video_dashboard_uses_drive_cta_only(db_session, qualificat
     response = client.get(f"/uploaded-videos/{uploaded.id}/dashboard")
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["media"][0]["cta_label"] == "Open in Google Drive"
+    assert payload["media"][0]["cta_label"] == "Mở trên Google Drive"
     assert payload["media"][0]["web_view_link"].startswith("https://drive.google.com/")
     serialized = response.text
     assert "local_source_path" not in serialized

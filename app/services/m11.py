@@ -45,6 +45,8 @@ from app.db.models import (
     LearningEvidenceBundle,
     LearningReviewDecision,
     LearningReviewQueueItem,
+    LocalizedMetadataPackage,
+    LocalizedSubtitlePackage,
     ManualAction,
     MediaOffloadJob,
     OpsIncident,
@@ -53,6 +55,7 @@ from app.db.models import (
     ProviderHealthSnapshot,
     ProviderRegistryEntry,
     PublishHandoffPackage,
+    PublishTimingSuggestion,
     QuotaAccount,
     RecoveryProposal,
     UploadedVideo,
@@ -117,30 +120,30 @@ class M11DashboardService:
         drive_auth_needed = self._drive_auth_needed()
         youtube_auth_needed = self._youtube_auth_needed()
         cards = [
-            _action_card("critical_queue", "Critical Queue Count", learning_count + recovery_count + manual_action_count + incident_count, "HIGH", "Review approval, recovery, and ops queues.", "/queues"),
-            _action_card("due_today", "Due Today", manual_action_count, "NORMAL", "Open manual action queue.", "/queues/ops"),
-            _action_card("blocked_human", "Blocked by Human", ready_to_publish + learning_count, "HIGH", "Approve, reject, or complete handoff tasks.", "/approvals"),
-            _action_card("blocked_policy", "Blocked by Policy/Rights", self._count_blocked_gates(), "HIGH", "Open gate and rights review.", "/queues/gates"),
-            _action_card("blocked_provider", "Blocked by Provider/Quota", incident_count, "HIGH", "Review provider and ops health.", "/ops"),
-            _action_card("needs_youtube_auth", "Needs YouTube Auth", 1 if youtube_auth_needed else 0, "NORMAL", "Connect or re-auth YouTube owner analytics.", "/ops"),
-            _action_card("needs_drive_auth", "Needs Google Drive Auth", 1 if drive_auth_needed else 0, "NORMAL", "Connect Google Drive media offload.", "/media"),
-            _action_card("channels_at_risk", "Channels at Risk", channels_at_risk, "HIGH", "Review channel lifecycle and diagnostics.", "/channels"),
-            _action_card("learning_review", "Learning Review Count", learning_count, "NORMAL", "Review evidence before promotion.", "/learning"),
+            _action_card("critical_queue", "Việc cần xử lý", learning_count + recovery_count + manual_action_count + incident_count, "HIGH", "Mở hàng chờ duyệt, phục hồi và ops.", "/queues"),
+            _action_card("due_today", "Việc ops đang mở", manual_action_count, "NORMAL", "Mở hàng chờ thao tác thủ công.", "/queues/ops"),
+            _action_card("blocked_human", "Đang chờ người vận hành", ready_to_publish + learning_count, "HIGH", "Duyệt bài học hoặc hoàn tất gói publish.", "/queues"),
+            _action_card("blocked_policy", "Bị chặn bởi policy/rights", self._count_blocked_gates(), "HIGH", "Mở hàng chờ kiểm tra bằng chứng và quyền.", "/queues"),
+            _action_card("blocked_provider", "Nhà cung cấp/quota cần xem", incident_count, "HIGH", "Kiểm tra trạng thái nhà cung cấp và ops.", "/ops"),
+            _action_card("needs_youtube_auth", "Cần kết nối YouTube", 1 if youtube_auth_needed else 0, "NORMAL", "Kết nối lại owner analytics khi cần.", "/ops"),
+            _action_card("needs_drive_auth", "Cần kết nối Google Drive", 1 if drive_auth_needed else 0, "NORMAL", "Kết nối Google Drive media offload.", "/media"),
+            _action_card("channels_at_risk", "Kênh cần theo dõi", channels_at_risk, "HIGH", "Mở lifecycle và diagnostic của kênh.", "/channels"),
+            _action_card("learning_review", "Bài học chờ duyệt", learning_count, "NORMAL", "Xem bằng chứng trước khi đưa vào playbook.", "/learning"),
         ]
         required_actions = [
-            {"type": "PUBLISH_HANDOFF", "count": ready_to_publish, "next_action": "Manual upload on YouTube, then paste back video_id/url."},
-            {"type": "LEARNING_REVIEW", "count": learning_count, "next_action": "Review evidence bundle; no automatic profile mutation."},
-            {"type": "RECOVERY_REVIEW", "count": recovery_count, "next_action": "Accept, reject, wait, or mark unsafe. No reupload spam."},
-            {"type": "ANALYTICS_FRESHNESS", "count": stale_metrics_count, "next_action": "Sync/import analytics before deciding."},
+            {"type": "PUBLISH_HANDOFF", "count": ready_to_publish, "next_action": "Upload thủ công trên YouTube, rồi paste back video_id/url."},
+            {"type": "LEARNING_REVIEW", "count": learning_count, "next_action": "Duyệt evidence bundle; không tự mutate profile/config."},
+            {"type": "RECOVERY_REVIEW", "count": recovery_count, "next_action": "Duyệt/chờ/từ chối đề xuất phục hồi. Không re-upload spam."},
+            {"type": "ANALYTICS_FRESHNESS", "count": stale_metrics_count, "next_action": "Sync/import analytics trước khi kết luận."},
         ]
         return CommandCenterRead(
             generated_at=utc_now(),
             company_id=company_id,
             cards=cards,
             metrics=[
-                DashboardMetricCard(key="ready_to_publish", label="Ready to Publish", value=ready_to_publish, state="ACTION_REQUIRED"),
-                DashboardMetricCard(key="stale_metrics", label="YouTube Metrics Stale/Unknown", value=stale_metrics_count, state="CHECK_FRESHNESS"),
-                DashboardMetricCard(key="ops_incidents", label="Ops/Provider Incidents", value=incident_count, state="WATCH"),
+                DashboardMetricCard(key="ready_to_publish", label="Gói publish sẵn sàng", value=ready_to_publish, state="ACTION_REQUIRED"),
+                DashboardMetricCard(key="stale_metrics", label="Metric YouTube cũ/chưa có", value=stale_metrics_count, state="CHECK_FRESHNESS"),
+                DashboardMetricCard(key="ops_incidents", label="Sự cố ops/nhà cung cấp", value=incident_count, state="WATCH"),
             ],
             required_actions=required_actions,
             safety_warnings=_safety_warnings(),
@@ -287,7 +290,7 @@ class M11DashboardService:
                     freshness=summary.freshness_state if summary is not None else "UNKNOWN",
                     owner_analytics_status="CONNECTED" if owner is not None else "UNKNOWN",
                     latest_diagnostic=self._latest_failure_status(uploaded.id),
-                    next_action=summary.next_action if summary is not None else "Dữ liệu analytics đang stale, cần sync/import lại trước khi quyết định.",
+                    next_action=summary.next_action if summary is not None else "Metric này chưa có dữ liệu, không phải bằng 0. Cần sync/import trước khi quyết định.",
                 )
             )
         return items
@@ -302,7 +305,11 @@ class M11DashboardService:
             uploaded_video=_uploaded_video_dict(uploaded),
             public_stats=_public_stats_card(public),
             owner_analytics=_owner_analytics_card(owner),
-            publish_check=_publish_check(public),
+            publish_check={
+                **_publish_check(public),
+                **self._publish_timing_check(uploaded),
+                "localization_packages": self._localization_packages(uploaded.video_project_id),
+            },
             diagnostics=[_failure_report_card(report) for report in self._failure_reports(uploaded.id)],
             recovery_proposals=[_recovery_card(proposal) for proposal in self._recovery_proposals(uploaded.id)],
             learning_candidates=[_learning_candidate_card(candidate) for candidate in self._learning_candidates(uploaded.id)],
@@ -318,7 +325,7 @@ class M11DashboardService:
                 "provider_name": provider.provider_name,
                 "provider_type": provider.provider_type,
                 "status": provider.status,
-                "next_action": "Review capability/budget state." if provider.status != "ACTIVE" else None,
+                "next_action": "Kiểm tra capability/budget của nhà cung cấp." if provider.status != "ACTIVE" else None,
             }
             for provider in self.session.scalars(select(ProviderRegistryEntry).order_by(ProviderRegistryEntry.provider_key.asc()).limit(100)).all()
         ]
@@ -446,8 +453,8 @@ class M11DashboardService:
                     risk_level=str(handoff.risk_summary.get("risk_level", "UNKNOWN")),
                     confidence_label="HUMAN_REQUIRED",
                     freshness_label="CURRENT",
-                    evidence_summary="Media phải mở qua Google Drive CTA; không dùng local path.",
-                    next_action=handoff.next_action or "Open Drive files, upload manually, then confirm actual publish details.",
+                    evidence_summary="Media phải mở qua Google Drive CTA; không dùng đường dẫn local.",
+                    next_action=handoff.next_action or "Mở file trên Google Drive, upload thủ công, rồi nhập lại thông tin publish thực tế.",
                     allowed_actions=["OPEN_DRIVE", "CONFIRM_MANUAL_PUBLISH"],
                     source_refs=handoff.cloud_media_refs,
                     audit_refs=[{"type": "publish_handoff_package", "id": str(handoff.id)}],
@@ -470,13 +477,13 @@ class M11DashboardService:
                 entity_type="recovery_proposal",
                 entity_id=proposal.id,
                 operator_summary=proposal.operator_summary,
-                friendly_status="Recovery proposal waiting for human review.",
+                friendly_status="Đề xuất phục hồi đang chờ người duyệt.",
                 priority="NORMAL",
                 risk_level=proposal.risk_level,
                 confidence_label="EVIDENCE_BOUND",
                 freshness_label="SEE_DIAGNOSTIC",
-                evidence_summary=", ".join(proposal.recommended_actions) or "No action text.",
-                next_action="Accept, reject, wait, request review, or mark unsafe.",
+                evidence_summary=", ".join(proposal.recommended_actions) or "Chưa có mô tả thao tác.",
+                next_action="Duyệt, từ chối, chờ thêm dữ liệu, yêu cầu review, hoặc đánh dấu không an toàn.",
                 allowed_actions=["ACCEPT", "REJECT", "WAIT", "REQUEST_REVIEW", "MARK_UNSAFE"],
                 source_refs=proposal.evidence_refs,
                 audit_refs=[{"type": "recovery_proposal", "id": str(proposal.id)}],
@@ -494,12 +501,12 @@ class M11DashboardService:
                 entity_type=action.target_type,
                 entity_id=action.target_id,
                 operator_summary=action.next_action,
-                friendly_status=action.reason_code or "Manual action required.",
+                friendly_status=action.reason_code or "Cần thao tác thủ công.",
                 priority=action.priority,
                 risk_level="UNKNOWN",
                 confidence_label="SYSTEM_RECORDED",
                 freshness_label="CURRENT",
-                evidence_summary=action.reason_code or "Ops manual action.",
+                evidence_summary=action.reason_code or "Thao tác ops thủ công.",
                 next_action=action.next_action,
                 allowed_actions=["COMPLETE", "ADD_NOTE"],
                 audit_refs=[{"type": "manual_action", "id": str(action.id)}],
@@ -574,6 +581,44 @@ class M11DashboardService:
                 .limit(25)
             ).all()
         )
+
+    def _publish_timing_check(self, uploaded: UploadedVideo) -> dict[str, Any]:
+        suggestion = self.session.scalars(
+            select(PublishTimingSuggestion)
+            .where(PublishTimingSuggestion.publish_handoff_package_id == uploaded.publish_handoff_package_id)
+            .order_by(PublishTimingSuggestion.created_at.desc())
+            .limit(1)
+        ).one_or_none()
+        if suggestion is None:
+            return {
+                "actual_published_at": uploaded.published_at,
+                "configured_publish_window": None,
+                "published_inside_configured_window": "UNKNOWN",
+                "publish_timing_summary": "Chưa có khung giờ publish đã cấu hình cho video này.",
+            }
+        inside_window = abs((uploaded.published_at - suggestion.suggested_publish_at_utc).total_seconds()) <= 7200
+        return {
+            "actual_published_at": uploaded.published_at,
+            "configured_publish_window": suggestion.suggested_publish_at_local,
+            "channel_timezone": suggestion.target_timezone,
+            "operator_local_time": suggestion.operator_local_time,
+            "published_inside_configured_window": "INSIDE" if inside_window else "OUTSIDE",
+            "publish_timing_summary": "Khung giờ publish đã cấu hình; human vẫn quyết định giờ publish thực tế.",
+        }
+
+    def _localization_packages(self, video_project_id: uuid.UUID) -> dict[str, Any]:
+        subtitles = self.session.scalars(
+            select(LocalizedSubtitlePackage).where(LocalizedSubtitlePackage.video_project_id == video_project_id)
+        ).all()
+        metadata = self.session.scalars(
+            select(LocalizedMetadataPackage).where(LocalizedMetadataPackage.video_project_id == video_project_id)
+        ).all()
+        return {
+            "subtitle_languages": [item.target_language for item in subtitles],
+            "metadata_languages": [item.language for item in metadata],
+            "subtitle_review_status": {item.target_language: item.human_review_status for item in subtitles},
+            "metadata_review_status": {item.language: item.human_review_status for item in metadata},
+        }
 
     def _channel_analytics_freshness(self, channel_id: uuid.UUID) -> str:
         states = set(
@@ -851,18 +896,18 @@ def _action_card(key: str, title: str, count: int, severity: str, next_action: s
 
 def _safety_warnings() -> list[DashboardWarning]:
     return [
-        DashboardWarning(key="no_auto_publish", label="No Auto Publish", severity="HARD_RULE", text="Dashboard không upload/publish/reupload tự động."),
-        DashboardWarning(key="no_fake_traffic", label="No Fake Traffic", severity="HARD_RULE", text="Không bot engagement, fake views, IP/VPS tricks, hoặc platform evasion."),
-        DashboardWarning(key="drive_cta_only", label="Drive CTA Only", severity="HARD_RULE", text="Media chỉ mở qua Google Drive web_view_link; không proxy download/preview."),
+        DashboardWarning(key="no_auto_publish", label="Không tự publish", severity="HARD_RULE", text="Bảng điều hành không upload/publish/reupload tự động."),
+        DashboardWarning(key="no_fake_traffic", label="Không fake traffic", severity="HARD_RULE", text="Không bot engagement, fake views, IP/VPS tricks, hoặc platform evasion."),
+        DashboardWarning(key="drive_cta_only", label="Chỉ dùng CTA Google Drive", severity="HARD_RULE", text="Media chỉ mở qua nút Google Drive đã xác minh; không tạo link tải hoặc preview trung gian."),
     ]
 
 
 def _queue_label(queue_type: str) -> str:
     return {
-        "learning": "Learning Promotion Queue",
-        "publish_confirmation": "Publish Confirmation Queue",
-        "recovery": "Recovery Proposal Queue",
-        "ops_manual_action": "Ops Manual Action Queue",
+        "learning": "Bài học chờ duyệt",
+        "publish_confirmation": "Gói publish",
+        "recovery": "Đề xuất phục hồi",
+        "ops_manual_action": "Thao tác ops",
     }.get(queue_type, queue_type)
 
 
@@ -874,8 +919,16 @@ def _channel_dict(channel: ChannelWorkspace) -> dict[str, Any]:
         "name": channel.name,
         "status": channel.status,
         "primary_language": channel.primary_language,
+        "primary_region": channel.primary_region,
+        "primary_timezone": channel.primary_timezone,
         "target_market": channel.target_market,
         "default_timezone": channel.default_timezone,
+        "target_subtitle_languages": channel.target_subtitle_languages,
+        "target_metadata_languages": channel.target_metadata_languages,
+        "target_regions": channel.target_regions,
+        "translation_mode": channel.translation_mode,
+        "localization_required_for_publish": channel.localization_required_for_publish,
+        "localized_metadata_required": channel.localized_metadata_required,
         "active_policy_snapshot_id": channel.active_policy_snapshot_id,
         "metadata": channel.metadata_,
         "created_at": channel.created_at,
@@ -910,7 +963,7 @@ def _project_card(project: VideoProject) -> dict[str, Any]:
         "id": project.id,
         "title": project.title,
         "current_stage": project.status,
-        "next_action": "Continue project workflow in approval/production queues.",
+        "next_action": "Tiếp tục workflow trong hàng chờ duyệt/sản xuất.",
         "policy_snapshot_id": project.policy_snapshot_id,
         "due_at": None,
     }
@@ -956,14 +1009,14 @@ def _channel_next_action(lifecycle_state: str, health_status: str) -> str:
     if lifecycle_state == "READY":
         return "Channel này đã sẵn sàng sản xuất video."
     if lifecycle_state == "ACTIVE" and health_status in {"LOW_VIEW", "NO_VIEW", "WATCHLIST"}:
-        return "Continue observing or open diagnostics; lifecycle không tự đổi."
+        return "Tiếp tục quan sát hoặc mở diagnostic; lifecycle không tự đổi."
     if lifecycle_state == "ACTIVE":
-        return "Continue daily generation and monitor evidence."
+        return "Tiếp tục daily generation và theo dõi bằng chứng."
     if lifecycle_state == "PAUSED":
         return "Channel đang PAUSED nên daily job sẽ không tạo video mới."
     if lifecycle_state == "DEACTIVATED":
         return "Channel đã DEACTIVATED nên VCOS không generate idea/project mới."
-    return "Archived channel is read-only unless reactivated."
+    return "Channel đã archive là read-only trừ khi được kích hoạt lại."
 
 
 def _allowed_lifecycle_actions(lifecycle_state: str) -> list[str]:
@@ -1050,7 +1103,7 @@ def _public_stats_card(snapshot: UploadedVideoYouTubePublicMonitorSnapshot | Non
             "likes": None,
             "comments": None,
             "freshness": "UNKNOWN",
-            "next_action": "Public stats unknown; sync/import before deciding.",
+            "next_action": "Public stats chưa có dữ liệu; sync/import trước khi quyết định.",
         }
     return {
         "source": "YouTube Data API",
@@ -1077,7 +1130,7 @@ def _owner_analytics_card(snapshot: UploadedVideoYouTubeOwnerAnalyticsSnapshot |
             "estimated_minutes_watched": None,
             "subscribers_gained": None,
             "subscribers_lost": None,
-            "next_action": "Owner analytics not connected or not synced. Unknown is not zero.",
+            "next_action": "Owner analytics chưa kết nối hoặc chưa sync. Chưa có dữ liệu không phải bằng 0.",
         }
     return {
         "connection": "CONNECTED",
@@ -1141,7 +1194,7 @@ def _learning_candidate_card(candidate: LearningCandidate) -> dict[str, Any]:
         "recommended_scope": candidate.recommended_scope,
         "limitations": candidate.limitations,
         "counter_evidence": candidate.counter_evidence,
-        "next_action": "Review evidence bundle before promotion.",
+        "next_action": "Xem evidence bundle trước khi đưa vào playbook.",
     }
 
 
@@ -1151,7 +1204,7 @@ def _cloud_media_card(ref: CloudMediaRef) -> dict[str, Any]:
         "storage": "Google Drive",
         "media_type": ref.media_type,
         "status": ref.upload_status,
-        "cta_label": "Open in Google Drive",
+        "cta_label": "Mở trên Google Drive",
         "web_view_link": ref.web_view_link,
         "file_size": ref.size_bytes,
         "uploaded_at": ref.uploaded_at,

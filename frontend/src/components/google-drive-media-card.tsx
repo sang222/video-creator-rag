@@ -14,28 +14,28 @@ export function GoogleDriveMediaCard({ media }: { media: GoogleDriveMedia }) {
             <HardDrive size={18} />
           </div>
           <div>
-            <div className="text-sm font-semibold">{media.media_type.replaceAll("_", " ")}</div>
-            <div className="text-xs text-muted-foreground">Storage: Google Drive</div>
+            <div className="text-sm font-semibold">{media.media_type.replaceAll("_", " ").toLowerCase()}</div>
+            <div className="text-xs text-muted-foreground">Lưu trên Google Drive</div>
           </div>
         </div>
         <StatusBadge value={media.status} />
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <dt className="text-muted-foreground">Verification</dt>
-          <dd>{media.verification_status.replaceAll("_", " ")}</dd>
+          <dt className="text-muted-foreground">Xác minh</dt>
+          <dd><StatusBadge value={media.verification_status} /></dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Cleanup</dt>
-          <dd>{media.cleanup_status.replaceAll("_", " ")}</dd>
+          <dt className="text-muted-foreground">Dọn local</dt>
+          <dd><StatusBadge value={media.cleanup_status} /></dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Size</dt>
-          <dd>{media.file_size ? `${Math.round(media.file_size / 1024)} KB` : "Unknown"}</dd>
+          <dt className="text-muted-foreground">Dung lượng</dt>
+          <dd>{media.file_size ? `${Math.round(media.file_size / 1024)} KB` : "Chưa có dữ liệu"}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Uploaded</dt>
-          <dd>{media.uploaded_at ? new Date(media.uploaded_at).toLocaleString() : "Unknown"}</dd>
+          <dt className="text-muted-foreground">Đã upload</dt>
+          <dd>{media.uploaded_at ? new Date(media.uploaded_at).toLocaleString("vi-VN") : "Chưa có dữ liệu"}</dd>
         </div>
       </dl>
       {media.friendly_error ? <p className="mt-3 text-sm text-amber-100">{media.friendly_error}</p> : null}

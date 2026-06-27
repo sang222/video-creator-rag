@@ -1,0 +1,7 @@
+catalog_key: dashboard_language_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: vi
+    description: Tiếng Việt

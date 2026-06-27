@@ -6,6 +6,7 @@ import { CheckCircle2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { PageHeader } from "@/components/cockpit";
 import { ErrorState } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -53,55 +54,56 @@ export function ChannelInitWizard() {
 
   return (
     <div className="space-y-6 p-4 md:p-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Channel Init</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Human-entered config only. No AI upgrade suggestion.</p>
-      </div>
+      <PageHeader
+        title="Tạo kênh"
+        subtitle="Chỉ dùng cấu hình do người vận hành nhập. Không có AI upgrade suggestion."
+        breadcrumbs={[{ label: "Không gian kênh", href: "/channels" }, { label: "Tạo kênh" }]}
+      />
       <Panel>
         <form className="grid gap-5 md:grid-cols-2" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
-          <Field label="Company ID" error={form.formState.errors.company_id?.message}>
+          <Field label="ID công ty" error={form.formState.errors.company_id?.message}>
             <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("company_id")} />
           </Field>
-          <Field label="Template" error={form.formState.errors.template_key?.message}>
+          <Field label="Template hồ sơ" error={form.formState.errors.template_key?.message}>
             <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("template_key")} />
           </Field>
-          <Field label="Channel Key" error={form.formState.errors.key?.message}>
+          <Field label="Khóa kênh" error={form.formState.errors.key?.message}>
             <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("key")} />
           </Field>
-          <Field label="Channel Name" error={form.formState.errors.name?.message}>
+          <Field label="Tên kênh" error={form.formState.errors.name?.message}>
             <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("name")} />
           </Field>
-          <Field label="Language" error={form.formState.errors.primary_language?.message}>
+          <Field label="Ngôn ngữ chính" error={form.formState.errors.primary_language?.message}>
             <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("primary_language")} />
           </Field>
-          <Field label="Region / Market" error={form.formState.errors.target_market?.message}>
+          <Field label="Vùng / thị trường" error={form.formState.errors.target_market?.message}>
             <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("target_market")} />
           </Field>
-          <Field label="Long-form target minutes" error={form.formState.errors.long_form_target_minutes?.message}>
+          <Field label="Số phút video dài mục tiêu" error={form.formState.errors.long_form_target_minutes?.message}>
             <input type="number" className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("long_form_target_minutes")} />
           </Field>
-          <Field label="Short length seconds" error={form.formState.errors.short_form_length_seconds?.message}>
+          <Field label="Số giây video ngắn" error={form.formState.errors.short_form_length_seconds?.message}>
             <input type="number" className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("short_form_length_seconds")} />
           </Field>
-          <Field label="TTS character budget" error={form.formState.errors.tts_character_budget?.message}>
+          <Field label="Ngân sách ký tự TTS" error={form.formState.errors.tts_character_budget?.message}>
             <input type="number" className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("tts_character_budget")} />
           </Field>
-          <Field label="AI hero budget USD" error={form.formState.errors.ai_hero_budget_usd?.message}>
+          <Field label="Ngân sách AI hero USD" error={form.formState.errors.ai_hero_budget_usd?.message}>
             <input type="number" className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("ai_hero_budget_usd")} />
           </Field>
-          <Field label="Derivative shorts per long-form" error={form.formState.errors.derivative_shorts_per_long_form?.message}>
+          <Field label="Số Shorts phái sinh mỗi video dài" error={form.formState.errors.derivative_shorts_per_long_form?.message}>
             <input type="number" className="w-full rounded-md border border-border bg-background px-3 py-2" {...form.register("derivative_shorts_per_long_form")} />
           </Field>
           <label className="flex min-h-10 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
             <input type="checkbox" {...form.register("drive_offload_enabled")} />
-            Drive offload enabled
+            Bật offload lên Google Drive
           </label>
           <div className="md:col-span-2 flex flex-wrap items-center gap-3">
             <Button type="submit" variant="primary" disabled={mutation.isPending}>
               <CheckCircle2 size={16} />
-              Create, Compile, Activate
+              Tạo, compile, activate
             </Button>
-            <StatusBadge value="Human config only" />
+            <StatusBadge value="Cấu hình do human nhập" />
           </div>
         </form>
       </Panel>

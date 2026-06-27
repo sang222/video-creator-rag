@@ -1,0 +1,13 @@
+catalog_key: localization_readiness_result_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: PASS
+    description: Đạt
+  - key: REVIEW_REQUIRED
+    description: Cần review
+  - key: BLOCK
+    description: Đang bị chặn
+  - key: NOT_REQUIRED
+    description: Không bắt buộc

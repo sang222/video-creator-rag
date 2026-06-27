@@ -1,0 +1,49 @@
+catalog_key: m11_1_reason_code_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - code: DASHBOARD_LANGUAGE_VIETNAMESE_ONLY
+    description: Dashboard operator UI is Vietnamese-only.
+  - code: LOGIN_REQUIRED
+    description: Login is required for protected dashboard routes.
+  - code: LOGIN_SUCCESS
+    description: Local password login succeeded.
+  - code: LOGIN_FAILED
+    description: Local password login failed.
+  - code: LOGOUT_SUCCESS
+    description: Local dashboard logout succeeded.
+  - code: BOOTSTRAP_ADMIN_CREATED
+    description: Bootstrap admin user was created from env.
+  - code: BOOTSTRAP_ADMIN_SKIPPED
+    description: Bootstrap admin was skipped because an operator user already exists.
+  - code: PASSWORD_HASHED
+    description: Password was stored as a hash only.
+  - code: SESSION_CREATED
+    description: HttpOnly cookie session was created.
+  - code: SESSION_REVOKED
+    description: Dashboard auth session was revoked.
+  - code: LOCALIZATION_CONFIG_UPDATED
+    description: Human-owned channel localization config was updated.
+  - code: LOCALIZED_SUBTITLE_PACKAGE_CREATED
+    description: Localized subtitle package was created.
+  - code: LOCALIZED_METADATA_PACKAGE_CREATED
+    description: Localized metadata package was created.
+  - code: LOCALIZATION_READY
+    description: Localization readiness passed.
+  - code: LOCALIZATION_REVIEW_REQUIRED
+    description: Localization needs human review.
+  - code: LOCALIZATION_BLOCKED
+    description: Localization blocks publish because channel policy requires it.
+  - code: PUBLISH_TIMING_POLICY_UPDATED
+    description: Channel publish timing policy was updated.
+  - code: PUBLISH_TIMING_SUGGESTION_CREATED
+    description: Publish timing suggestion was created from channel config.
+  - code: PUBLISH_WINDOW_CONFIGURED
+    description: Configured publish window is available.
+  - code: NO_AUTO_PUBLISH
+    description: VCOS must not auto publish.
+  - code: DRIVE_CTA_ONLY_FOR_SUBTITLES
+    description: Subtitle files use Google Drive CTA only.
+  - code: DASHBOARD_UI_VIETNAMESE_VALIDATED
+    description: Vietnamese dashboard UI validation passed.

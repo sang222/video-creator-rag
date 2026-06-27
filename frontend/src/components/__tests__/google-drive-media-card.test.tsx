@@ -12,7 +12,7 @@ describe("GoogleDriveMediaCard", () => {
           storage: "Google Drive",
           media_type: "LONG_FORM_FINAL",
           status: "VERIFIED",
-          cta_label: "Open in Google Drive",
+          cta_label: "Mở trên Google Drive",
           web_view_link: "https://drive.google.com/file/d/cloud-1/view",
           file_size: 2048,
           uploaded_at: "2026-06-27T00:00:00Z",
@@ -23,7 +23,7 @@ describe("GoogleDriveMediaCard", () => {
       />
     );
 
-    const link = screen.getByRole("link", { name: /open in google drive/i });
+    const link = screen.getByRole("link", { name: /mở trên google drive/i });
     expect(link).toHaveAttribute("href", "https://drive.google.com/file/d/cloud-1/view");
     expect(container.textContent).not.toContain("/Users/");
     expect(container.innerHTML).not.toContain("web_content_link");

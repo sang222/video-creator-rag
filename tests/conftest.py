@@ -95,6 +95,12 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    publish_timing_suggestions,
+                    channel_publish_timing_policies,
+                    localized_metadata_packages,
+                    localized_subtitle_packages,
+                    operator_auth_sessions,
+                    operator_users,
                     approved_playbook_entries,
                     learning_review_decisions,
                     channel_lifecycle_decisions,

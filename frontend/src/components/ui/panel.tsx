@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 export function Panel({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <section className={cn("rounded-md border border-border bg-card p-4 text-card-foreground", className)} {...props} />;
+  return <section className={cn("rounded-md border border-border/90 bg-card p-5 text-card-foreground shadow-sm shadow-black/10", className)} {...props} />;
 }
 
 export function PanelHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

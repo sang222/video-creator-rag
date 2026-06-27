@@ -272,6 +272,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0013_m10_2_provider_routing",
         "0015_m10_5_drive_offload",
         "0016_m11_operator_dashboard",
+        "0017_m11_1_localization",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},
@@ -288,6 +289,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         {"media_provider_role_profiles", "provider_capability_matrix_entries", "media_render_routing_decisions"},
         {"youtube_public_sync_runs", "youtube_owner_analytics_sync_runs", "uploaded_video_youtube_public_monitor_snapshots"},
         {"channel_lifecycle_decisions", "learning_review_decisions", "approved_playbook_entries"},
+        {"operator_users", "localized_subtitle_packages", "channel_publish_timing_policies"},
     ]
     engine = create_engine(migrated_temp_database, future=True)
     try:
@@ -331,7 +333,7 @@ def test_config_and_gate_seeds_are_idempotent_with_expected_counts(db_session) -
         "domain": db_session.query(DomainEvent).count(),
     }
     assert first == second
-    assert second["config"] == 146
+    assert second["config"] == 157
     assert second["gates"] == 15
 
 

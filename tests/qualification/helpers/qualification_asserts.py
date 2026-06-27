@@ -22,7 +22,7 @@ REQUIRED_TAGS = {
     "m10-5-google-drive-media-offload",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0016_m11_operator_dashboard"
+EXPECTED_ALEMBIC_HEAD = "0017_m11_1_localization"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

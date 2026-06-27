@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,8 +22,16 @@ class ChannelWorkspace(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     primary_language: Mapped[str] = mapped_column(Text, nullable=False, default="en")
+    primary_region: Mapped[str | None] = mapped_column(String(16))
+    primary_timezone: Mapped[str] = mapped_column(Text, nullable=False, default="UTC")
     target_market: Mapped[str | None] = mapped_column(Text)
     default_timezone: Mapped[str] = mapped_column(Text, nullable=False, default="UTC")
+    target_subtitle_languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    target_metadata_languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    target_regions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    translation_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="DISABLED")
+    localization_required_for_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    localized_metadata_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     active_policy_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = utc_created_at()

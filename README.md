@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, and M11 Operator Dashboard foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, M11 Operator Dashboard foundation, and M11.1 Vietnamese dashboard/auth/localization/publish timing foundation.
 
 ## Stack
 
@@ -46,6 +46,8 @@ Google Vertex Veo config is split by type: `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CL
 YouTube follow configuration is env-driven. `.env.example` declares `YOUTUBE_PUBLIC_MONITOR_ENABLED`, `YOUTUBE_DATA_API_KEY`, `YOUTUBE_OWNER_ANALYTICS_ENABLED`, `YOUTUBE_OAUTH_CLIENT_SECRETS_FILE`, `YOUTUBE_OAUTH_CLIENT_ID`, `YOUTUBE_OAUTH_CLIENT_SECRET`, `YOUTUBE_OAUTH_REDIRECT_URI`, and `YOUTUBE_OAUTH_SCOPES`. M10.3 stores API keys and OAuth tokens only through safe references/local ignored dev token files, never as raw DB fields.
 
 Google Drive media offload is env-driven. `.env.example` declares `GOOGLE_DRIVE_OFFLOAD_ENABLED`, `GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE`, `GOOGLE_DRIVE_OAUTH_CLIENT_ID`, `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_OAUTH_REDIRECT_URI`, `GOOGLE_DRIVE_OAUTH_SCOPES`, `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_DRIVE_UPLOAD_MODE`, `VCOS_DELETE_LOCAL_AFTER_DRIVE_UPLOAD`, `VCOS_LOCAL_MEDIA_MAX_AGE_HOURS`, `VCOS_LOCAL_MEDIA_MAX_STORAGE_GB`, and `VCOS_DRIVE_REAL_UPLOAD_SMOKE`. M10.5 uses `drive.file` scope, stores tokens only through `CredentialReference` pointing to ignored local dev token files, and keeps real upload smoke disabled by default.
+
+Dashboard auth is local/dev only in M11.1. `.env.example` declares `VCOS_DASHBOARD_AUTH_ENABLED`, `VCOS_AUTH_MODE`, `VCOS_BOOTSTRAP_ADMIN_EMAIL`, `VCOS_BOOTSTRAP_ADMIN_PASSWORD`, `VCOS_BOOTSTRAP_ADMIN_ROLE`, and `VCOS_AUTH_SESSION_TTL_HOURS`. Passwords and session tokens are stored hashed; frontend session state uses httpOnly cookies, not localStorage tokens.
 
 ## M1 Commands
 

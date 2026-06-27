@@ -18,7 +18,7 @@ export function MetricCard({
         <div className="text-sm text-muted-foreground">{label}</div>
         <StatusBadge value={state} />
       </div>
-      <div className="mt-4 text-3xl font-semibold">{value ?? "Unknown"}</div>
+      <div className="mt-4 text-3xl font-semibold">{value ?? "Chưa có dữ liệu"}</div>
       {nextAction ? <div className="mt-3 text-sm text-muted-foreground">{nextAction}</div> : null}
     </Panel>
   );

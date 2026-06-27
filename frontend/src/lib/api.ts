@@ -6,7 +6,8 @@ import type {
   LearningDecisionPayload,
   ProviderOps,
   UploadedVideoDashboard,
-  UploadedVideoListItem
+  UploadedVideoListItem,
+  AuthSession
 } from "./types";
 
 export const apiBaseUrl = process.env.NEXT_PUBLIC_VCOS_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -14,6 +15,7 @@ export const apiBaseUrl = process.env.NEXT_PUBLIC_VCOS_API_BASE_URL ?? "http://1
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "content-type": "application/json",
       ...(init?.headers ?? {})
@@ -35,6 +37,21 @@ export const queryKeys = {
   uploadedVideo: (uploadedVideoId: string) => ["uploaded-video", uploadedVideoId],
   providerOps: ["provider-ops"]
 } as const;
+
+export function getCurrentUser() {
+  return request<AuthSession>("/auth/me");
+}
+
+export function login(email: string, password: string) {
+  return request<AuthSession>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password })
+  });
+}
+
+export function logout() {
+  return request<{ status: string; message: string }>("/auth/logout", { method: "POST" });
+}
 
 export function getCommandCenter() {
   return request<CommandCenter>("/dashboard/command-center");

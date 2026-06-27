@@ -1,0 +1,11 @@
+catalog_key: publish_timing_confidence_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CONFIGURED
+    description: Đã cấu hình
+  - key: OBSERVED
+    description: Đã quan sát
+  - key: UNKNOWN
+    description: Chưa có dữ liệu

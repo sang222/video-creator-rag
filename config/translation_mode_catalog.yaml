@@ -1,0 +1,11 @@
+catalog_key: translation_mode_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: HUMAN_REVIEW_REQUIRED
+    description: Bắt buộc người duyệt
+  - key: MACHINE_DRAFT_ONLY
+    description: Chỉ draft máy, cần review
+  - key: DISABLED
+    description: Tắt localization

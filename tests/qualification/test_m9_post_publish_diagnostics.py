@@ -159,7 +159,7 @@ def test_m9_preflight_schema_catalogs_and_scope(engine, db_session, qualificatio
     assert M9_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_m11_operator_dashboard"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_m11_1_localization"
         defaults = connection.execute(
             text(
                 """

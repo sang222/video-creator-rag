@@ -245,6 +245,22 @@ from app.contracts.m11 import (
     UploadedVideoDashboardRead,
     UploadedVideoListItem,
 )
+from app.contracts.m11_1 import (
+    AuthLoginRequest,
+    AuthSessionRead,
+    ChannelLocalizationConfig,
+    ChannelLocalizationConfigUpdate,
+    ChannelPublishTimingPolicyCreate,
+    ChannelPublishTimingPolicyRead,
+    CurrentOperatorUserRead,
+    LocalizationReadinessGateRead,
+    LocalizedMetadataPackageCreate,
+    LocalizedMetadataPackageRead,
+    LocalizedSubtitlePackageCreate,
+    LocalizedSubtitlePackageRead,
+    PublishTimingSuggestionRead,
+    VideoProjectLocalizationRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,

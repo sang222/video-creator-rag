@@ -1,0 +1,19 @@
+catalog_key: localization_human_review_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: NOT_REQUIRED
+    description: Không bắt buộc
+  - key: DRAFT
+    description: Bản nháp
+  - key: NEEDS_REVIEW
+    description: Cần review
+  - key: NEEDS_HUMAN_REVIEW
+    description: Cần người duyệt
+  - key: APPROVED
+    description: Đã duyệt
+  - key: REJECTED
+    description: Đã từ chối
+  - key: BLOCKED
+    description: Đang bị chặn

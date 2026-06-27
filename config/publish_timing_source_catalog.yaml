@@ -1,0 +1,11 @@
+catalog_key: publish_timing_source_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: CHANNEL_CONFIG
+    description: Cấu hình kênh
+  - key: HUMAN_OVERRIDE
+    description: Human override
+  - key: ANALYTICS_OBSERVED_LATER
+    description: Analytics quan sát sau

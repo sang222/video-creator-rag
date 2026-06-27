@@ -143,6 +143,15 @@ from app.services.m11 import (
     M11DashboardService,
     M11LearningReviewService,
 )
+from app.services.m11_1 import (
+    AuthService,
+    LocalizationConfigService,
+    LocalizationReadinessGateService,
+    LocalizedMetadataPackageService,
+    LocalizedSubtitlePackageService,
+    PublishTimingPolicyService,
+    PublishTimingSuggestionService,
+)
 
 __all__ = [
     "AuditService",
@@ -263,6 +272,13 @@ __all__ = [
     "M11ChannelLifecycleService",
     "M11DashboardService",
     "M11LearningReviewService",
+    "AuthService",
+    "LocalizationConfigService",
+    "LocalizedSubtitlePackageService",
+    "LocalizedMetadataPackageService",
+    "LocalizationReadinessGateService",
+    "PublishTimingPolicyService",
+    "PublishTimingSuggestionService",
     "PolicyCatalogService",
     "PolicyChangeService",
     "PolicyRevalidationService",

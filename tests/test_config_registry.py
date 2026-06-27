@@ -45,9 +45,19 @@ def test_config_yaml_validates(db_session) -> None:
         "cta_type_catalog",
         "derivative_type_catalog",
         "gate_definition_catalog",
-        "google_drive_connection_state_catalog",
-        "google_drive_oauth_session_status_catalog",
-        "health_state_catalog",
+            "google_drive_connection_state_catalog",
+            "google_drive_oauth_session_status_catalog",
+            "dashboard_language_catalog",
+            "operator_user_role_catalog",
+            "operator_user_status_catalog",
+            "auth_session_status_catalog",
+            "translation_mode_catalog",
+            "localization_translation_status_catalog",
+            "localization_human_review_status_catalog",
+            "localization_readiness_result_catalog",
+            "publish_timing_source_catalog",
+            "publish_timing_confidence_catalog",
+            "health_state_catalog",
         "human_upload_task_state_catalog",
         "idea_decision_status_catalog",
         "license_state_catalog",
@@ -60,8 +70,9 @@ def test_config_yaml_validates(db_session) -> None:
         "m10_reason_code_catalog",
         "m10_1_reason_code_catalog",
         "m10_2_reason_code_catalog",
-        "m10_3_reason_code_catalog",
-        "m10_5_reason_code_catalog",
+            "m10_3_reason_code_catalog",
+            "m10_5_reason_code_catalog",
+            "m11_1_reason_code_catalog",
         "media_provider_type_catalog",
         "media_provider_recommendation_catalog",
         "media_job_type_catalog",
@@ -176,7 +187,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 146
+    assert catalog_count == 157
     assert role_count == 13
     assert metric_definition_count == 16
 

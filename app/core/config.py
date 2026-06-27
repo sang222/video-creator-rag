@@ -130,6 +130,30 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("VCOS_DRIVE_REAL_UPLOAD_SMOKE", "DRIVE_REAL_UPLOAD_SMOKE"),
     )
+    dashboard_auth_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_DASHBOARD_AUTH_ENABLED", "DASHBOARD_AUTH_ENABLED"),
+    )
+    auth_mode: str = Field(
+        default="local_password",
+        validation_alias=AliasChoices("VCOS_AUTH_MODE", "AUTH_MODE"),
+    )
+    bootstrap_admin_email: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_BOOTSTRAP_ADMIN_EMAIL", "BOOTSTRAP_ADMIN_EMAIL"),
+    )
+    bootstrap_admin_password: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("VCOS_BOOTSTRAP_ADMIN_PASSWORD", "BOOTSTRAP_ADMIN_PASSWORD"),
+    )
+    bootstrap_admin_role: str = Field(
+        default="OWNER_ADMIN",
+        validation_alias=AliasChoices("VCOS_BOOTSTRAP_ADMIN_ROLE", "BOOTSTRAP_ADMIN_ROLE"),
+    )
+    auth_session_ttl_hours: int = Field(
+        default=12,
+        validation_alias=AliasChoices("VCOS_AUTH_SESSION_TTL_HOURS", "AUTH_SESSION_TTL_HOURS"),
+    )
     ai_hero_provider: str | None = Field(
         default=None,
         validation_alias=AliasChoices("VCOS_AI_HERO_PROVIDER", "AI_HERO_PROVIDER"),
@@ -222,6 +246,7 @@ class Settings(BaseSettings):
         "youtube_data_api_key",
         "youtube_oauth_client_secret",
         "google_drive_oauth_client_secret",
+        "bootstrap_admin_password",
         mode="before",
     )
     @classmethod
@@ -240,6 +265,9 @@ class Settings(BaseSettings):
         "google_drive_oauth_redirect_uri",
         "google_drive_root_folder_id",
         "google_drive_upload_mode",
+        "auth_mode",
+        "bootstrap_admin_email",
+        "bootstrap_admin_role",
         "veo_model_id",
         "veo_mode",
         "veo_resolution",

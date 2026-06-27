@@ -165,3 +165,19 @@ export type LearningDecisionPayload = {
   actor_role: string;
   rationale?: string;
 };
+
+export type CurrentOperatorUser = {
+  id: string;
+  email: string;
+  display_name?: string | null;
+  role: string;
+  status: string;
+};
+
+export type AuthSession = {
+  authenticated: boolean;
+  auth_enabled: boolean;
+  auth_mode: string;
+  local_dev_note: string;
+  user?: CurrentOperatorUser | null;
+};

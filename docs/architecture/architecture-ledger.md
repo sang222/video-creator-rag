@@ -28,6 +28,7 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M10.4 binds Google Vertex Veo as the only AI hero provider and externalizes media/provider routing, capability, budget, and Veo defaults into config/env only.
 - M10.5 builds Google Drive media offload/cloud archive, CloudMediaRef read contracts, MediaOffloadJob lifecycle, Drive OAuth credential references, and verified local cleanup only.
 - M11 builds the human-operated Operator Dashboard cockpit, dashboard read models, channel lifecycle decisions, learning review decisions, approved playbook entries, and Next.js frontend only.
+- M11.1 builds Vietnamese-only dashboard language, local/dev password auth shell, localization/subtitle/metadata package support, localization readiness gate, and configured publish timing by channel timezone only.
 
 ## Scope Guardrails
 
@@ -95,6 +96,10 @@ M11 adds dashboard aggregation endpoints, channel lifecycle decision endpoints, 
 
 M11 does not build auto publish/upload/reupload, YouTube upload API, backend Drive download/preview proxy, Google Drive as source of truth, YouTube Studio scraping/browser automation, TikTok/Facebook analytics learning loops, config upgrade suggestions, automatic ChannelProfileVersion mutation from learning, unguarded provider calls, new provider decisions, vector/RAG, OPA/Cedar, Algorithm/Growth/View agents, fake traffic, bot engagement, or platform evasion.
 
+M11.1 adds local password auth, Vietnamese dashboard copy, channel localization config, subtitle/metadata language packages, localization readiness, publish timing policy/suggestion, and friendly cockpit UI polish.
+
+M11.1 does not build production SSO/2FA/password reset, auto translation publish, AI dubbing, YouTube upload/publish APIs, reupload-by-country workflows, backend Drive download/preview proxy, TikTok/Facebook analytics loops, config upgrade suggestions, fake traffic, bot engagement, browser automation, or platform evasion.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -118,6 +123,7 @@ M11 does not build auto publish/upload/reupload, YouTube upload API, backend Dri
 - M10.4 complete means VCOS routes AI hero/metaphor jobs only to Google Vertex Veo, keeps real execution guarded, and has provider config externalized/audited.
 - M10.5 complete means generated media can be offloaded to Google Drive, verified, referenced in DB, and cleaned locally under policy.
 - M11 complete means VCOS has an operator dashboard for channel setup, production tracking, approvals, publish handoff queues, uploaded video monitoring, recovery review, learning review, media Drive links, and provider/storage status.
+- M11.1 complete means dashboard has Vietnamese UI, login/local auth shell, localization/subtitle package support, localized metadata package support, localization readiness, and configured publish timing by channel location/timezone.
 
 ## Pilot Notes
 

@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
@@ -193,6 +193,19 @@ from app.contracts import (
     ChannelStatePackSnapshotRead,
     ContextPackSnapshotCreate,
     ContextPackSnapshotRead,
+    AuthLoginRequest,
+    AuthSessionRead,
+    ChannelLocalizationConfig,
+    ChannelLocalizationConfigUpdate,
+    ChannelPublishTimingPolicyCreate,
+    ChannelPublishTimingPolicyRead,
+    LocalizationReadinessGateRead,
+    LocalizedMetadataPackageCreate,
+    LocalizedMetadataPackageRead,
+    LocalizedSubtitlePackageCreate,
+    LocalizedSubtitlePackageRead,
+    PublishTimingSuggestionRead,
+    VideoProjectLocalizationRead,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
 from app.contracts.m11 import (
@@ -297,6 +310,13 @@ from app.services import (
     YouTubeOAuthSessionService,
     YouTubeOwnerAnalyticsSyncService,
     YouTubePublicStatsSyncService,
+    AuthService,
+    LocalizationConfigService,
+    LocalizationReadinessGateService,
+    LocalizedMetadataPackageService,
+    LocalizedSubtitlePackageService,
+    PublishTimingPolicyService,
+    PublishTimingSuggestionService,
 )
 from app.services.m11 import (
     M11ChannelLifecycleService,
@@ -305,6 +325,7 @@ from app.services.m11 import (
     channel_lifecycle_decision_read,
     learning_review_decision_read,
 )
+from app.services.m11_1 import AUTH_COOKIE_NAME
 
 
 class CompanyCreate(BaseModel):
@@ -331,7 +352,7 @@ def create_app() -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origin_list,
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
@@ -346,6 +367,46 @@ def create_app() -> FastAPI:
                 detail="database unavailable",
             ) from exc
         return {"status": "ok", "app": settings.app_name, "database": "ok"}
+
+    @application.post("/auth/login", response_model=AuthSessionRead)
+    def auth_login(data: AuthLoginRequest, response: Response) -> AuthSessionRead:
+        try:
+            with session_scope() as session:
+                auth_payload, token, expires_at = AuthService(session, settings).login(email=data.email, password=data.password)
+                response.set_cookie(
+                    AUTH_COOKIE_NAME,
+                    token,
+                    httponly=True,
+                    secure=False,
+                    samesite="lax",
+                    expires=expires_at,
+                    path="/",
+                )
+                return auth_payload
+        except ForbiddenError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email hoặc mật khẩu không đúng.") from exc
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/auth/logout")
+    def auth_logout(request: Request, response: Response) -> dict[str, str]:
+        try:
+            with session_scope() as session:
+                AuthService(session, settings).logout(request.cookies.get(AUTH_COOKIE_NAME))
+                response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+                return {"status": "ok", "message": "Đăng xuất thành công."}
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/auth/me", response_model=AuthSessionRead)
+    def auth_me(request: Request) -> AuthSessionRead:
+        try:
+            with session_scope() as session:
+                return AuthService(session, settings).current_user(request.cookies.get(AUTH_COOKIE_NAME))
+        except ForbiddenError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Phiên đăng nhập đã hết hạn.") from exc
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @application.get("/dashboard/command-center", response_model=CommandCenterRead)
     def get_dashboard_command_center(company_id: uuid.UUID | None = None) -> CommandCenterRead:
@@ -470,6 +531,44 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.get("/channels/{channel_id}/localization-config", response_model=ChannelLocalizationConfig)
+    def get_channel_localization_config(channel_id: uuid.UUID) -> ChannelLocalizationConfig:
+        try:
+            with session_scope() as session:
+                return LocalizationConfigService(session).get(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channels/{channel_id}/localization-config", response_model=ChannelLocalizationConfig)
+    def update_channel_localization_config(
+        channel_id: uuid.UUID,
+        data: ChannelLocalizationConfigUpdate,
+    ) -> ChannelLocalizationConfig:
+        try:
+            with session_scope() as session:
+                return LocalizationConfigService(session).update(channel_id, data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channels/{channel_id}/publish-timing-policy", response_model=ChannelPublishTimingPolicyRead)
+    def get_channel_publish_timing_policy(channel_id: uuid.UUID) -> ChannelPublishTimingPolicyRead:
+        try:
+            with session_scope() as session:
+                return PublishTimingPolicyService(session).get(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channels/{channel_id}/publish-timing-policy", response_model=ChannelPublishTimingPolicyRead)
+    def update_channel_publish_timing_policy(
+        channel_id: uuid.UUID,
+        data: ChannelPublishTimingPolicyCreate,
+    ) -> ChannelPublishTimingPolicyRead:
+        try:
+            with session_scope() as session:
+                return PublishTimingPolicyService(session).update(channel_id, data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.post("/channels/{channel_id}/memberships", response_model=ChannelMembershipRead)
     def assign_membership(channel_id: uuid.UUID, data: ChannelMembershipCreate) -> ChannelMembershipRead:
         try:
@@ -562,6 +661,44 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return VideoProjectService(session).inspect_workflow_state(project_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-projects/{video_project_id}/localization", response_model=VideoProjectLocalizationRead)
+    def get_video_project_localization(video_project_id: uuid.UUID) -> VideoProjectLocalizationRead:
+        try:
+            with session_scope() as session:
+                return LocalizationReadinessGateService(session).video_localization(video_project_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-projects/{video_project_id}/localized-subtitles", response_model=LocalizedSubtitlePackageRead)
+    def create_localized_subtitle_package(
+        video_project_id: uuid.UUID,
+        data: LocalizedSubtitlePackageCreate,
+    ) -> LocalizedSubtitlePackageRead:
+        try:
+            with session_scope() as session:
+                return LocalizedSubtitlePackageService(session).create(video_project_id, data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-projects/{video_project_id}/localized-metadata", response_model=LocalizedMetadataPackageRead)
+    def create_localized_metadata_package(
+        video_project_id: uuid.UUID,
+        data: LocalizedMetadataPackageCreate,
+    ) -> LocalizedMetadataPackageRead:
+        try:
+            with session_scope() as session:
+                return LocalizedMetadataPackageService(session).create(video_project_id, data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-projects/{video_project_id}/localization-readiness/check", response_model=LocalizationReadinessGateRead)
+    def check_video_project_localization_readiness(video_project_id: uuid.UUID) -> LocalizationReadinessGateRead:
+        try:
+            with session_scope() as session:
+                return LocalizationReadinessGateService(session).check(video_project_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -1332,12 +1469,44 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/publish-handoffs/{handoff_id}/publish-timing-suggestion", response_model=PublishTimingSuggestionRead)
+    def create_publish_timing_suggestion(handoff_id: uuid.UUID) -> PublishTimingSuggestionRead:
+        try:
+            with session_scope() as session:
+                return PublishTimingSuggestionService(session).create_for_handoff(handoff_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.post("/publish-handoffs/{handoff_id}/mark-ready", response_model=PublishHandoffRead)
     def mark_publish_handoff_ready(handoff_id: uuid.UUID) -> PublishHandoffRead:
         try:
             with session_scope() as session:
                 handoff = PublishHandoffService(session).mark_ready(handoff_id=handoff_id)
                 return PublishHandoffRead.model_validate(_publish_handoff(handoff))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/localized-subtitle-packages/{package_id}", response_model=LocalizedSubtitlePackageRead)
+    def get_localized_subtitle_package(package_id: uuid.UUID) -> LocalizedSubtitlePackageRead:
+        try:
+            with session_scope() as session:
+                return LocalizedSubtitlePackageService(session).get(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/localized-metadata-packages/{package_id}", response_model=LocalizedMetadataPackageRead)
+    def get_localized_metadata_package(package_id: uuid.UUID) -> LocalizedMetadataPackageRead:
+        try:
+            with session_scope() as session:
+                return LocalizedMetadataPackageService(session).get(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/publish-timing-suggestions/{suggestion_id}", response_model=PublishTimingSuggestionRead)
+    def get_publish_timing_suggestion(suggestion_id: uuid.UUID) -> PublishTimingSuggestionRead:
+        try:
+            with session_scope() as session:
+                return PublishTimingSuggestionService(session).get(suggestion_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

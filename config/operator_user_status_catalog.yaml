@@ -1,0 +1,9 @@
+catalog_key: operator_user_status_catalog
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: ACTIVE
+    description: Đang hoạt động
+  - key: DISABLED
+    description: Đã vô hiệu hóa

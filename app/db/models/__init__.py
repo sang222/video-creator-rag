@@ -168,6 +168,14 @@ from app.db.models.m11 import (
     ChannelLifecycleDecision,
     LearningReviewDecision,
 )
+from app.db.models.m11_1 import (
+    ChannelPublishTimingPolicy,
+    LocalizedMetadataPackage,
+    LocalizedSubtitlePackage,
+    OperatorAuthSession,
+    OperatorUser,
+    PublishTimingSuggestion,
+)
 
 __all__ = [
     "AuditEvent",
@@ -308,4 +316,10 @@ __all__ = [
     "ApprovedPlaybookEntry",
     "ChannelLifecycleDecision",
     "LearningReviewDecision",
+    "OperatorUser",
+    "OperatorAuthSession",
+    "LocalizedSubtitlePackage",
+    "LocalizedMetadataPackage",
+    "ChannelPublishTimingPolicy",
+    "PublishTimingSuggestion",
 ]
