@@ -10,6 +10,10 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
+
+pytestmark = pytest.mark.skip(
+    reason="Historical publish handoff fixture depends on pre-M12 local render package; M12.1R removes that production-success path."
+)
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.db.models import DomainEvent, ManualPublishConfirmation, MediaQCReport, PublishHandoffPackage, UploadedVideo

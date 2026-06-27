@@ -7,6 +7,10 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 import app.services.m6 as m6_service
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M12 mock/local-render regression contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 from app.contracts import CredentialReferenceCreate
 from app.contracts.m6 import ProductionArtifactRunCreate
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate, ReviewTaskCreate

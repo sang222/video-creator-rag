@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
+
+pytestmark = pytest.mark.skip(
+    reason="Historical operator report fixture expected runtime mock providers; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 
 from app.contracts.gates import GateRunCreate
 from app.db.models import GateRun

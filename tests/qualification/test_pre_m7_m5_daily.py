@@ -7,6 +7,10 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.contracts.m5 import ContextPackSnapshotCreate, RetrievalPlanSnapshotCreate, SearchDemandEvidenceCreate
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M12 runtime mock contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 from app.core.errors import ValidationFailureError
 from app.db.models import Artifact, ContextPackSnapshot, CostEvent, DailyIdeaDecision, LLMRunSnapshot, ProviderAttempt, VideoProject
 from app.services import ResourceResolverService

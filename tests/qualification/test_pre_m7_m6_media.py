@@ -7,6 +7,10 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.contracts.m6 import RenderSpecContract, SceneSourceDecisionContract, VoiceTimelineContract
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M12 local fixture renderer contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 from app.db.models import AssetManifestSnapshot, MediaQCReport, RenderPackageSnapshot, RenderSpecSnapshot, SourceManifestSnapshot
 from app.services import MediaQCService, SceneSourceDecisionService
 

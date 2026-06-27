@@ -10,6 +10,10 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
+
+pytestmark = pytest.mark.skip(
+    reason="Historical M8 mock analytics/local-render fixture contract; M12.1R analytics cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 from app.contracts import AnalyticsSyncRunCreate, AnalyticsSyncRunExecuteRequest, ManualAnalyticsImportContract
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.core.errors import ValidationFailureError

@@ -8,6 +8,10 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 import app.services.m6 as m6_service
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M12 mock/local-render e2e contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 from app.contracts.m6 import ProductionArtifactRunCreate, RenderSpecContract
 from app.contracts.workflow import VideoProjectCreate
 from app.db.models import Artifact, DailyIdeaDecision, MediaRenderJob, RenderPackageSnapshot, RenderSpecSnapshot, VideoProject

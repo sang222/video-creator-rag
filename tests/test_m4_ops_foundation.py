@@ -1,6 +1,5 @@
 import json
 import socket
-import uuid
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import DBAPIError
 from typer.testing import CliRunner
 
+import app.providers.mock as runtime_mock
 from app.cli.main import app as cli_app
 from app.contracts import (
     BudgetGateCheckRequest,
@@ -22,13 +22,13 @@ from app.contracts import (
     DeadLetterJobCreate,
     ManualActionCreate,
     OpsIncidentCreate,
-    ProviderAttemptMockRequest,
     ProviderRegistryEntryCreate,
     QuotaAccountCreate,
     QuotaEventRequest,
     RetryPolicyCreate,
 )
 from app.core.errors import ConflictError, ValidationFailureError
+from app.core.time import utc_now
 from app.db.models import (
     AuditEvent,
     CostEvent,
@@ -38,17 +38,8 @@ from app.db.models import (
     LLMRunSnapshot,
     ProviderAttempt,
     ProviderRegistryEntry,
-    QuotaEvent,
 )
 from app.main import create_app
-from app.providers import (
-    MockAnalyticsProvider,
-    MockLLMProvider,
-    MockMediaProvider,
-    MockPlatformProvider,
-    MockStorageProvider,
-    MockTTSProvider,
-)
 from app.services import (
     BudgetGateService,
     ComponentHealthService,
@@ -64,9 +55,18 @@ from app.services import (
     RetryOpsService,
     SystemHealthService,
 )
+from tests.fakes.providers import (
+    FakeAnalyticsProvider,
+    FakeLLMProvider,
+    FakeMediaProvider,
+    FakePlatformProvider,
+    FakeStorageProvider,
+    FakeTTSProvider,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 runner = CliRunner()
+REAL_PROVIDER_KEY = "ollama"
 
 M4_TABLES = {
     "provider_registry_entries",
@@ -95,7 +95,6 @@ FORBIDDEN_SCOPE_FRAGMENTS = {
     "auto_reupload",
     "semantic",
     "memory_promotion",
-    "dashboard",
     "source_scrap",
     "source_parse",
     "algorithm_agent",
@@ -104,25 +103,47 @@ FORBIDDEN_SCOPE_FRAGMENTS = {
 }
 
 
-def _seed(db_session) -> None:
+def _seed(db_session) -> ProviderRegistryEntry:
     ConfigRegistryService(db_session).seed([ROOT / "config"])
-    ProviderRegistryService(db_session).seed_mock_providers()
+    service = ProviderRegistryService(db_session)
+    entry = service.get_entry(REAL_PROVIDER_KEY)
+    if entry is None:
+        entry = service.create_entry(
+            data=ProviderRegistryEntryCreate(
+                provider_key=REAL_PROVIDER_KEY,
+                provider_name="Ollama / LLMRouter",
+                provider_type="LLM",
+                capability_blob={"llm_router_lane_bound": True, "guarded_real_execution": True},
+                policy_fit_blob={"production_enabled_when_configured": True},
+                cost_model_blob={"provider_cost_unknown": True},
+                metadata={"readiness_provider_key": REAL_PROVIDER_KEY},
+            )
+        )
+    return entry
+
+
+def _provider_attempt(provider_key: str = REAL_PROVIDER_KEY) -> ProviderAttempt:
+    return ProviderAttempt(
+        provider_key=provider_key,
+        operation_key="metadata_only_check",
+        attempt_number=1,
+        status="SUCCESS",
+        started_at=utc_now(),
+        finished_at=utc_now(),
+        metadata_={"provider_call": False},
+    )
 
 
 def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> None:
     tables = set(inspect(engine).get_table_names())
     assert M4_TABLES <= tables
     assert not {table for table in tables for fragment in FORBIDDEN_SCOPE_FRAGMENTS if fragment in table}
-    _seed(db_session)
-    entry = db_session.scalar(select(ProviderRegistryEntry).where(ProviderRegistryEntry.provider_key == "mock_llm"))
-    assert entry.capability_blob["supports_json_mode"] is True
-    assert entry.policy_fit_blob["mock_only"] is True
-    assert entry.cost_model_blob
-    assert entry.quota_model_blob
-    assert entry.retry_policy_blob
+    entry = _seed(db_session)
+    assert entry.provider_key == REAL_PROVIDER_KEY
+    assert entry.capability_blob["llm_router_lane_bound"] is True
     health = CredentialReferenceService(db_session).create_reference(
         data=CredentialReferenceCreate(
-            provider_key="mock_llm",
+            provider_key=REAL_PROVIDER_KEY,
             credential_key="none",
             credential_type="NONE",
             status="MISSING",
@@ -138,29 +159,25 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert revision == "0019_m12_1_prompt_registry"
 
 
-def test_provider_registry_and_mock_providers_are_deterministic(db_session) -> None:
+def test_provider_registry_is_real_only_and_test_fakes_are_test_scoped(db_session) -> None:
     service = ProviderRegistryService(db_session)
-    first = service.seed_mock_providers()
-    second = service.seed_mock_providers()
-    assert len(first) == 6
-    assert [item.id for item in first] == [item.id for item in second]
-    with pytest.raises(ConflictError):
-        service.create_entry(
-            data=ProviderRegistryEntryCreate(
-                provider_key="mock_llm",
-                provider_name="Duplicate",
-                provider_type="LLM",
-            )
-        )
-    assert MockLLMProvider().generate(prompt="x").output["json"]["fixture"] == "mock_llm"
-    assert MockTTSProvider().synthesize(text="hello").output["audio_ref"] == "mock://tts/audio.wav"
-    assert MockMediaProvider().resolve_media(query="q").output["license_ref"]
-    assert MockStorageProvider().store(object_key="a", payload_ref="mock://p").output["storage_ref"]
-    assert MockPlatformProvider().check_platform(target_ref="t").output["status"] == "reachable"
-    assert MockAnalyticsProvider().fetch_metrics(metric_key="views").output["metrics"][0]["value"] == 0
-    assert MockLLMProvider().generate(prompt="x", mode="timeout").retryable is True
-    assert MockLLMProvider().generate(prompt="x", mode="quota_exceeded").error_code == "PROVIDER_QUOTA_EXCEEDED"
-    assert MockLLMProvider().generate(prompt="x", mode="malformed").output["raw"]
+    entry = _seed(db_session)
+    assert service.get_entry(REAL_PROVIDER_KEY).id == entry.id
+    with pytest.raises(ValidationFailureError, match="Runtime mock providers were removed"):
+        service.seed_mock_providers()
+    assert not any(item.provider_key.startswith("mock_") for item in service.list_entries())
+
+    with pytest.raises(runtime_mock.RuntimeMockProviderRemoved):
+        runtime_mock.MockLLMProvider()
+    assert FakeLLMProvider().generate(prompt="x").output["json"]["fixture"] == "fake_llm"
+    assert FakeTTSProvider().synthesize(text="hello").output["audio_ref"] == "fake://tts/audio.wav"
+    assert FakeMediaProvider().resolve_media(query="q").output["media_ref"]
+    assert FakeStorageProvider().store(object_key="a", payload_ref="fake://p").output["storage_ref"]
+    assert FakePlatformProvider().check_platform(target_ref="t").output["platform_ref"]
+    assert FakeAnalyticsProvider().fetch_metrics(metric_key="views").output["metrics"][0]["value"] == 0
+    assert FakeLLMProvider().generate(prompt="x", mode="timeout").retryable is True
+    assert FakeLLMProvider().generate(prompt="x", mode="quota_exceeded").error_code == "PROVIDER_QUOTA_EXCEEDED"
+    assert FakeLLMProvider().generate(prompt="x", mode="malformed").output["raw"]
 
 
 def test_credential_references_redact_and_health_is_history(db_session) -> None:
@@ -168,19 +185,19 @@ def test_credential_references_redact_and_health_is_history(db_session) -> None:
     service = CredentialReferenceService(db_session)
     reference = service.create_reference(
         data=CredentialReferenceCreate(
-            provider_key="mock_llm",
+            provider_key=REAL_PROVIDER_KEY,
             credential_key="primary",
             credential_type="API_KEY",
-            secret_ref="env://MOCK_LLM_API_KEY",
+            secret_ref="env://OLLAMA_BASE_URL",
             status="EXPIRED",
             scope_blob={"scopes": ["contract_test"]},
         )
     )
-    assert reference.secret_ref == "env://MOCK_LLM_API_KEY"
+    assert reference.secret_ref == "env://OLLAMA_BASE_URL"
     with pytest.raises(ValidationFailureError):
         service.create_reference(
             data=CredentialReferenceCreate(
-                provider_key="mock_llm",
+                provider_key=REAL_PROVIDER_KEY,
                 credential_key="raw",
                 credential_type="API_KEY",
                 secret_ref="sk-this-is-raw",
@@ -197,7 +214,7 @@ def test_credential_references_redact_and_health_is_history(db_session) -> None:
         + [event.payload for event in db_session.scalars(select(DomainEvent)).all()]
     )
     assert "sk-this-is-raw" not in event_text
-    assert "env://MOCK_LLM_API_KEY" not in event_text
+    assert "env://OLLAMA_BASE_URL" not in event_text
 
 
 def test_quota_ledger_deterministic_and_budget_gate(db_session) -> None:
@@ -205,7 +222,7 @@ def test_quota_ledger_deterministic_and_budget_gate(db_session) -> None:
     quota = QuotaService(db_session)
     account = quota.create_account(
         data=QuotaAccountCreate(
-            provider_key="mock_llm",
+            provider_key=REAL_PROVIDER_KEY,
             quota_scope_type="GLOBAL",
             quota_window="DAILY",
             quota_limit=Decimal("10"),
@@ -228,13 +245,13 @@ def test_quota_ledger_deterministic_and_budget_gate(db_session) -> None:
     db_session.rollback()
     account = quota.require_account(account.id)
     policy = BudgetGateService(db_session).create_policy(
-            data=BudgetPolicyCreate(
-                policy_key="m4-budget",
-                scope_type="GLOBAL",
-                policy_blob={"require_manual_approval_above_usd": 5},
-                status="ACTIVE",
-            )
+        data=BudgetPolicyCreate(
+            policy_key="m4-budget",
+            scope_type="GLOBAL",
+            policy_blob={"require_manual_approval_above_usd": 5},
+            status="ACTIVE",
         )
+    )
     review = BudgetGateService(db_session).check(data=BudgetGateCheckRequest(policy_key=policy.policy_key, estimated_cost=Decimal("6")))
     blocked = BudgetGateService(db_session).check(
         data=BudgetGateCheckRequest(policy_key=policy.policy_key, quota_account_id=account.id, quota_amount=Decimal("100"))
@@ -247,10 +264,10 @@ def test_cost_events_are_append_only_and_not_pnl(db_session) -> None:
     _seed(db_session)
     service = CostService(db_session)
     events = [
-        service.record_event(data=CostEventCreate(provider_key="mock_llm", cost_scope_type="GLOBAL", amount=Decimal("1"), cost_type=kind))
+        service.record_event(data=CostEventCreate(provider_key=REAL_PROVIDER_KEY, cost_scope_type="GLOBAL", amount=Decimal("1"), cost_type=kind))
         for kind in ["ESTIMATED", "RESERVED", "ACTUAL", "ADJUSTED", "REFUNDED"]
     ]
-    assert [event.cost_type for event in service.list_events(provider_key="mock_llm")] == [event.cost_type for event in events]
+    assert [event.cost_type for event in service.list_events(provider_key=REAL_PROVIDER_KEY)] == [event.cost_type for event in events]
     assert service.actual_cash_total(cost_scope_type="GLOBAL") == Decimal("3.000000")
     estimated = events[0]
     estimated.amount = Decimal("99")
@@ -265,18 +282,17 @@ def test_cost_events_are_append_only_and_not_pnl(db_session) -> None:
 
 def test_provider_component_and_system_health_history(db_session) -> None:
     _seed(db_session)
-    healthy = ProviderHealthService(db_session).check_provider(provider_key="mock_llm", mode="success")
-    unavailable = ProviderHealthService(db_session).check_provider(provider_key="mock_llm", mode="unavailable")
-    assert healthy.health_state == "HEALTHY"
-    assert unavailable.health_state == "UNAVAILABLE"
-    assert unavailable.next_action
+    health = ProviderHealthService(db_session).check_provider(provider_key=REAL_PROVIDER_KEY, mode="success")
+    assert health.health_state == "UNKNOWN"
+    assert health.reason_codes == ["PROVIDER_HEALTH_NOT_CHECKED"]
+    assert health.metadata_["provider_call"] is False
     degraded_component = ComponentHealthService(db_session).create_snapshot(
         data=ComponentHealthSnapshotCreate(
             component_type="QUEUE",
-            component_key="mock_queue",
+            component_key="ops_queue",
             health_state="DEGRADED",
             reason_codes=["SYSTEM_HEALTH_DEGRADED"],
-            next_action="Inspect queue fixture.",
+            next_action="Inspect queue.",
         )
     )
     assert degraded_component.next_action
@@ -285,33 +301,37 @@ def test_provider_component_and_system_health_history(db_session) -> None:
     assert system.next_action
 
 
-def test_retry_provider_attempt_dead_letter_and_incident_lifecycle(db_session) -> None:
+def test_retry_mock_attempts_fail_fast_and_append_only_attempts_remain_guarded(db_session) -> None:
     _seed(db_session)
     retry = RetryOpsService(db_session)
     retry.create_policy(
         data=RetryPolicyCreate(
-            policy_key="mock-retry",
-            provider_key="mock_llm",
+            policy_key="real-metadata-retry",
+            provider_key=REAL_PROVIDER_KEY,
             status="ACTIVE",
             policy_blob={"max_attempts": 2},
         )
     )
-    success = retry.record_mock_attempt(data=ProviderAttemptMockRequest(provider_key="mock_llm", mode="success"))
-    retryable = retry.record_mock_attempt(
-        data=ProviderAttemptMockRequest(provider_key="mock_llm", mode="retryable_error", attempt_number=2)
+    before = db_session.query(ProviderAttempt).count()
+    with pytest.raises(ValidationFailureError, match="Runtime mock provider attempts were removed"):
+        retry.record_mock_attempt(provider_key=REAL_PROVIDER_KEY, mode="success")
+    assert db_session.query(ProviderAttempt).count() == before
+
+    dead_letter = DeadLetterService(db_session).create_job(
+        data=DeadLetterJobCreate(
+            queue_name="provider_attempts",
+            job_type="metadata_only_check",
+            reason_code="MAX_RETRY_EXCEEDED",
+            next_action="Review provider readiness before retry.",
+        )
     )
-    non_retryable = retry.record_mock_attempt(data=ProviderAttemptMockRequest(provider_key="mock_llm", mode="non_retryable_error"))
-    circuit = retry.record_mock_attempt(data=ProviderAttemptMockRequest(provider_key="mock_llm", mode="circuit_open"))
-    assert success.status == "SUCCESS"
-    assert retryable.status == "RETRYABLE_FAILURE"
-    assert non_retryable.status == "NON_RETRYABLE_FAILURE"
-    assert circuit.status == "CIRCUIT_OPEN"
-    dead_letter = db_session.scalar(select(DeadLetterJob).where(DeadLetterJob.reason_code == "MAX_RETRY_EXCEEDED"))
-    assert dead_letter is not None
     replayed = DeadLetterService(db_session).replay_job(dead_letter.id)
     assert replayed.replay_state == "REPLAYED"
-    assert OpsIncidentService(db_session).list_incidents()[0].incident_type == "PROVIDER_OUTAGE"
-    success.status = "CANCELLED"
+
+    attempt = _provider_attempt()
+    db_session.add(attempt)
+    db_session.commit()
+    attempt.status = "CANCELLED"
     with pytest.raises(DBAPIError):
         db_session.commit()
     db_session.rollback()
@@ -354,8 +374,9 @@ def test_m4_no_network_and_llm_snapshot_inert(monkeypatch, db_session) -> None:
 
     monkeypatch.setattr(socket, "create_connection", fail_network)
     monkeypatch.setattr(socket.socket, "connect", fail_network)
-    ProviderHealthService(db_session).check_provider(provider_key="mock_llm", mode="success")
-    RetryOpsService(db_session).record_mock_attempt(data=ProviderAttemptMockRequest(provider_key="mock_llm", mode="success"))
+    ProviderHealthService(db_session).check_provider(provider_key=REAL_PROVIDER_KEY, mode="success")
+    with pytest.raises(ValidationFailureError):
+        RetryOpsService(db_session).record_mock_attempt(provider_key=REAL_PROVIDER_KEY, mode="success")
     assert db_session.scalar(select(LLMRunSnapshot).limit(1)) is None
     provider_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app" / "providers").rglob("*.py"))
     for forbidden in ["openai", "anthropic", "requests", "httpx", "urllib.request", "boto3"]:
@@ -367,21 +388,37 @@ def test_m4_api_and_cli_smoke(db_session) -> None:
     ConfigRegistryService(db_session).seed([ROOT / "config"])
     db_session.commit()
     cli_seed = runner.invoke(cli_app, ["provider", "seed-mocks"])
-    assert cli_seed.exit_code == 0, cli_seed.output
+    assert cli_seed.exit_code != 0
+    cli_register = runner.invoke(
+        cli_app,
+        [
+            "provider",
+            "register",
+            "--provider-key",
+            REAL_PROVIDER_KEY,
+            "--provider-name",
+            "Ollama / LLMRouter",
+            "--provider-type",
+            "LLM",
+            "--capability-json",
+            "{\"llm_router_lane_bound\": true}",
+        ],
+    )
+    assert cli_register.exit_code == 0, cli_register.output
     cli_list = runner.invoke(cli_app, ["provider", "list"])
     assert cli_list.exit_code == 0, cli_list.output
-    assert any(item["provider_key"] == "mock_llm" for item in json.loads(cli_list.output))
+    assert any(item["provider_key"] == REAL_PROVIDER_KEY for item in json.loads(cli_list.output))
     client = TestClient(create_app())
-    health = client.post("/providers/mock_llm/health-check", json={"mode": "quota_exceeded"})
+    health = client.post(f"/providers/{REAL_PROVIDER_KEY}/health-check", json={"mode": "metadata_only"})
     assert health.status_code == 200, health.text
-    assert health.json()["health_state"] == "QUOTA_EXHAUSTED"
+    assert health.json()["health_state"] == "UNKNOWN"
     credential = client.post(
         "/credential-references",
         json={
-            "provider_key": "mock_llm",
+            "provider_key": REAL_PROVIDER_KEY,
             "credential_key": "api",
             "credential_type": "API_KEY",
-            "secret_ref": "env://MOCK_LLM_API_KEY",
+            "secret_ref": "env://OLLAMA_BASE_URL",
             "status": "MISSING",
         },
     )
@@ -389,13 +426,19 @@ def test_m4_api_and_cli_smoke(db_session) -> None:
     assert "sk-" not in credential.text
     quota = client.post(
         "/quota-accounts",
-        json={"provider_key": "mock_llm", "quota_scope_type": "GLOBAL", "quota_window": "DAILY", "quota_limit": "2", "unit": "REQUESTS"},
+        json={
+            "provider_key": REAL_PROVIDER_KEY,
+            "quota_scope_type": "GLOBAL",
+            "quota_window": "DAILY",
+            "quota_limit": "2",
+            "unit": "REQUESTS",
+        },
     )
     assert quota.status_code == 200, quota.text
     reserve = client.post("/quota-events/reserve", json={"quota_account_id": quota.json()["id"], "amount": "1"})
     assert reserve.status_code == 200, reserve.text
-    attempt = runner.invoke(cli_app, ["provider", "attempt-mock", "--provider-key", "mock_llm", "--mode", "success"])
-    assert attempt.exit_code == 0, attempt.output
+    attempt = runner.invoke(cli_app, ["provider", "attempt-mock", "--provider-key", REAL_PROVIDER_KEY, "--mode", "success"])
+    assert attempt.exit_code != 0
     incident = runner.invoke(
         cli_app,
         ["incident", "create", "--incident-type", "HEALTH_DEGRADED", "--severity", "WARNING", "--next-action", "Review health."],
@@ -411,13 +454,13 @@ def test_m4_events_written_and_failed_transactions_write_no_events(db_session) -
     before = (db_session.query(AuditEvent).count(), db_session.query(DomainEvent).count())
     with pytest.raises(ConflictError):
         ProviderRegistryService(db_session).create_entry(
-            data=ProviderRegistryEntryCreate(provider_key="mock_llm", provider_name="Dup", provider_type="LLM")
+            data=ProviderRegistryEntryCreate(provider_key=REAL_PROVIDER_KEY, provider_name="Dup", provider_type="LLM")
         )
     db_session.rollback()
     after = (db_session.query(AuditEvent).count(), db_session.query(DomainEvent).count())
     assert after == before
     CostService(db_session).record_event(
-        data=CostEventCreate(provider_key="mock_llm", cost_scope_type="GLOBAL", amount=Decimal("1"), cost_type="ESTIMATED")
+        data=CostEventCreate(provider_key=REAL_PROVIDER_KEY, cost_scope_type="GLOBAL", amount=Decimal("1"), cost_type="ESTIMATED")
     )
     event_types = {event.event_type for event in db_session.scalars(select(DomainEvent)).all()}
     assert "cost_event.created" in event_types

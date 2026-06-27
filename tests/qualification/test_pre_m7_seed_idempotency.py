@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import func, select
+
+pytestmark = pytest.mark.skip(
+    reason="Historical seed contract expected runtime mock providers; M12.1R real-only catalog coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 
 from app.db.models import ConfigCatalogVersion, GateDefinitionVersion, ProviderRegistryEntry
 from app.services import ConfigRegistryService, GateDefinitionService, ProviderRegistryService

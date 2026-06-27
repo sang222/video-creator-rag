@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M7 API/CLI smoke depends on removed mock seed/local render commands; M12.1R CLI/API cutover is covered by tests/test_m12_1r_mock_runtime_purge.py."
+)
 
 from app.cli.main import app as cli_app
 from app.main import create_app

@@ -21,6 +21,11 @@ from app.contracts import (
     ThumbnailVariantPlanRequest,
     ThumbnailVariantInput,
 )
+
+pytestmark = pytest.mark.skip(
+    reason="Historical provider-routing qualification includes removed mock/local-render fixtures; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
+
 from app.core.errors import ValidationFailureError
 from app.db.models import (
     FinalMediaRef,

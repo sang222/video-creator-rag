@@ -35,7 +35,7 @@ def test_fk_unique_constraints_and_failed_transaction_rollback(db_session, quali
     )
     try:
         ProviderRegistryService(db_session).create_entry(
-            data=ProviderRegistryEntryCreate(provider_key="mock_llm", provider_name="Duplicate", provider_type="LLM")
+            data=ProviderRegistryEntryCreate(provider_key="ollama", provider_name="Duplicate", provider_type="LLM")
         )
     except Exception:
         db_session.rollback()

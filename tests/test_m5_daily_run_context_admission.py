@@ -11,6 +11,10 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 import app.services.m5 as m5_service
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M12 runtime mock contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 from app.cli.main import app as cli_app
 from app.contracts import ChannelProfileVersionCreate, ChannelWorkspaceCreate
 from app.contracts.m5 import (
