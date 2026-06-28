@@ -184,7 +184,7 @@ class QualificationFactory:
                 data=SearchDemandEvidenceCreate(
                     company_id=scope.company.id,
                     channel_workspace_id=scope.channel.id,
-                    evidence_source_type="MOCK",
+                    evidence_source_type="MANUAL_RESEARCH",
                     query="budgeted video workflow",
                     platform="YOUTUBE",
                     search_volume_30d=evidence_volume,

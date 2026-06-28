@@ -242,7 +242,7 @@ def test_m10_3_preflight_migration_defaults_config_catalogs_and_scope(engine, db
     assert M10_3_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_4_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0019_m12_1_prompt_registry"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_m12_2r_handoff_ledger"
         defaults = connection.execute(
             text(
                 """

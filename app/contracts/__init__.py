@@ -292,6 +292,17 @@ from app.contracts.m12_2 import (
     FirstScriptedVideoPackageRequest,
     FirstScriptedVideoPackageReviewRead,
 )
+from app.contracts.m12_2r import (
+    BackfillUploadedVideoRequest,
+    BackfillUploadedVideoResult,
+    HumanUploadTaskLedgerRead,
+    HumanUploadTaskListRead,
+    PublishLedgerRead,
+    UploadedVideoBackfillEventRead,
+    UploadedVideoLedgerRead,
+    UploadedVideoListRead,
+    UploadedVideoVerificationResult,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -396,6 +407,15 @@ __all__ = [
     "FirstScriptedVideoPackageRead",
     "FirstScriptedVideoPackageRequest",
     "FirstScriptedVideoPackageReviewRead",
+    "BackfillUploadedVideoRequest",
+    "BackfillUploadedVideoResult",
+    "HumanUploadTaskLedgerRead",
+    "HumanUploadTaskListRead",
+    "PublishLedgerRead",
+    "UploadedVideoBackfillEventRead",
+    "UploadedVideoLedgerRead",
+    "UploadedVideoListRead",
+    "UploadedVideoVerificationResult",
     "ProviderAttemptRead",
     "ProviderHealthCheckRequest",
     "ProviderHealthSnapshotRead",

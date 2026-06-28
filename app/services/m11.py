@@ -41,6 +41,7 @@ from app.db.models import (
     CredentialReference,
     FailureTraceReport,
     GoogleDriveMediaCredential,
+    HumanUploadTask,
     LearningCandidate,
     LearningEvidenceBundle,
     LearningReviewDecision,
@@ -103,6 +104,16 @@ class M11DashboardService:
 
     def command_center(self, *, company_id: uuid.UUID | None = None) -> CommandCenterRead:
         ready_to_publish = self._count(PublishHandoffPackage, PublishHandoffPackage.package_state == "READY_FOR_OPERATOR", company_id=company_id)
+        need_manual_upload = self._count(
+            HumanUploadTask,
+            HumanUploadTask.task_state == "READY_FOR_HUMAN_UPLOAD",
+            company_id=company_id,
+        )
+        waiting_backfill = self._count(
+            HumanUploadTask,
+            HumanUploadTask.task_state.in_(["HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"]),
+            company_id=company_id,
+        )
         learning_count = self._count(
             LearningReviewQueueItem,
             LearningReviewQueueItem.queue_state.in_(["READY_FOR_HUMAN_REVIEW", "NEEDS_MORE_EVIDENCE", "BLOCKED"]),
@@ -123,6 +134,8 @@ class M11DashboardService:
             _action_card("critical_queue", "Việc cần xử lý", learning_count + recovery_count + manual_action_count + incident_count, "HIGH", "Mở hàng chờ duyệt, phục hồi và ops.", "/queues"),
             _action_card("due_today", "Việc ops đang mở", manual_action_count, "NORMAL", "Mở hàng chờ thao tác thủ công.", "/queues/ops"),
             _action_card("blocked_human", "Đang chờ người vận hành", ready_to_publish + learning_count, "HIGH", "Duyệt bài học hoặc hoàn tất gói publish.", "/queues"),
+            _action_card("manual_upload_needed", "Cần upload thủ công", need_manual_upload, "HIGH", "Mở gói upload, upload thủ công trên YouTube rồi nhập lại video_id.", "/channels"),
+            _action_card("waiting_video_id_backfill", "Chờ nhập video_id", waiting_backfill, "HIGH", "Nhập URL hoặc video_id sau khi upload thủ công.", "/channels"),
             _action_card("blocked_policy", "Bị chặn bởi policy/rights", self._count_blocked_gates(), "HIGH", "Mở hàng chờ kiểm tra bằng chứng và quyền.", "/queues"),
             _action_card("blocked_provider", "Nhà cung cấp/quota cần xem", incident_count, "HIGH", "Kiểm tra trạng thái nhà cung cấp và ops.", "/ops"),
             _action_card("needs_youtube_auth", "Cần kết nối YouTube", 1 if youtube_auth_needed else 0, "NORMAL", "Kết nối lại owner analytics khi cần.", "/ops"),
@@ -132,6 +145,8 @@ class M11DashboardService:
         ]
         required_actions = [
             {"type": "PUBLISH_HANDOFF", "count": ready_to_publish, "next_action": "Upload thủ công trên YouTube, rồi paste back video_id/url."},
+            {"type": "HUMAN_UPLOAD_TASK", "count": need_manual_upload, "next_action": "Upload thủ công; VCOS chỉ ghi nhận và xác minh."},
+            {"type": "UPLOAD_BACKFILL", "count": waiting_backfill, "next_action": "Nhập URL hoặc video_id YouTube vào VCOS."},
             {"type": "LEARNING_REVIEW", "count": learning_count, "next_action": "Duyệt evidence bundle; không tự mutate profile/config."},
             {"type": "RECOVERY_REVIEW", "count": recovery_count, "next_action": "Duyệt/chờ/từ chối đề xuất phục hồi. Không re-upload spam."},
             {"type": "ANALYTICS_FRESHNESS", "count": stale_metrics_count, "next_action": "Sync/import analytics trước khi kết luận."},
@@ -142,6 +157,8 @@ class M11DashboardService:
             cards=cards,
             metrics=[
                 DashboardMetricCard(key="ready_to_publish", label="Gói publish sẵn sàng", value=ready_to_publish, state="ACTION_REQUIRED"),
+                DashboardMetricCard(key="need_manual_upload", label="Cần upload thủ công", value=need_manual_upload, state="ACTION_REQUIRED"),
+                DashboardMetricCard(key="waiting_backfill", label="Chờ nhập video_id", value=waiting_backfill, state="ACTION_REQUIRED"),
                 DashboardMetricCard(key="stale_metrics", label="Metric YouTube cũ/chưa có", value=stale_metrics_count, state="CHECK_FRESHNESS"),
                 DashboardMetricCard(key="ops_incidents", label="Sự cố ops/nhà cung cấp", value=incident_count, state="WATCH"),
             ],
@@ -185,7 +202,12 @@ class M11DashboardService:
         statement = select(ChannelWorkspace).order_by(ChannelWorkspace.created_at.desc(), ChannelWorkspace.id.desc())
         if company_id is not None:
             statement = statement.where(ChannelWorkspace.company_id == company_id)
-        return [_channel_summary(channel, self.lifecycle(channel.id)) for channel in self.session.scalars(statement).all()]
+        channels = []
+        for channel in self.session.scalars(statement).all():
+            item = _channel_summary(channel, self.lifecycle(channel.id))
+            item["upload_counts"] = self._upload_counts(channel.id)
+            channels.append(item)
+        return channels
 
     def lifecycle(self, channel_id: uuid.UUID) -> ChannelLifecycleRead:
         channel = self.session.get(ChannelWorkspace, channel_id)
@@ -234,6 +256,7 @@ class M11DashboardService:
         ]
         approvals = [item for item in self._learning_queue_items(channel_id=channel_id)[:10]]
         uploaded_videos = [item.model_dump(mode="json") for item in self.list_uploaded_videos(channel_id=channel_id)[:10]]
+        upload_counts = self._upload_counts(channel_id)
         media_count = self._count(CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id)
         failed_media_count = self._count(CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id, CloudMediaRef.upload_status == "FAILED")
         return ChannelWorkspaceDashboardRead(
@@ -246,6 +269,7 @@ class M11DashboardService:
                 "analytics_freshness": self._channel_analytics_freshness(channel_id),
                 "production_state": _state_from_count(len(projects), "NO_PROJECTS", "PROJECTS_ACTIVE"),
                 "publish_state": _state_from_count(self._count(PublishHandoffPackage, PublishHandoffPackage.channel_workspace_id == channel_id), "NO_HANDOFFS", "HANDOFFS_AVAILABLE"),
+                "upload_counts": upload_counts,
                 "learning_state": _state_from_count(len(approvals), "NO_LEARNING_REVIEW", "LEARNING_REVIEW_READY"),
                 "storage_state": "FAILED" if failed_media_count else _state_from_count(media_count, "NO_CLOUD_MEDIA", "GOOGLE_DRIVE_READY"),
             },
@@ -254,6 +278,10 @@ class M11DashboardService:
             daily_runs=daily_runs,
             approvals=approvals,
             uploaded_videos=uploaded_videos,
+            publish_ledger={
+                **upload_counts,
+                "operator_summary_vi": "Upload là thao tác thủ công. VCOS chỉ ghi nhận URL/video_id và xác minh YouTube nếu đã kết nối.",
+            },
             media_storage={"provider": "Google Drive", "cloud_media_count": media_count, "failed_count": failed_media_count, "cta_only": True},
             provider_health=self.provider_ops().integrations,
             technical_appendix={"no_latest_profile_lookup_for_projects": True},
@@ -276,7 +304,7 @@ class M11DashboardService:
             public = self._latest_public_snapshot(uploaded.id)
             owner = self._latest_owner_snapshot(uploaded.id)
             metrics = _metrics_from_summary(summary, public, owner)
-            title = str(uploaded.actual_metadata.get("actual_title") or uploaded.operator_summary.get("title") or uploaded.platform_video_id)
+            title = str(uploaded.actual_title or uploaded.actual_metadata.get("actual_title") or uploaded.operator_summary.get("title") or uploaded.platform_video_id)
             items.append(
                 UploadedVideoListItem(
                     id=uploaded.id,
@@ -285,12 +313,20 @@ class M11DashboardService:
                     platform=uploaded.platform,
                     platform_video_id=uploaded.platform_video_id,
                     video_url=uploaded.video_url,
+                    external_video_id=uploaded.platform_video_id,
+                    external_url=uploaded.video_url,
+                    actual_visibility=uploaded.actual_visibility,
+                    verification_status=uploaded.verification_status,
+                    analytics_sync_status=uploaded.analytics_sync_status,
                     published_at=uploaded.published_at,
                     metrics=metrics,
-                    freshness=summary.freshness_state if summary is not None else "UNKNOWN",
-                    owner_analytics_status="CONNECTED" if owner is not None else "UNKNOWN",
+                    freshness=summary.freshness_state if summary is not None else uploaded.analytics_sync_status,
+                    owner_analytics_status="CONNECTED" if owner is not None else uploaded.analytics_sync_status,
                     latest_diagnostic=self._latest_failure_status(uploaded.id),
-                    next_action=summary.next_action if summary is not None else "Metric này chưa có dữ liệu, không phải bằng 0. Cần sync/import trước khi quyết định.",
+                    next_action=summary.next_action
+                    if summary is not None
+                    else uploaded.operator_summary.get("next_action")
+                    or "Metric này chưa có dữ liệu, không phải bằng 0. Cần sync/import trước khi quyết định.",
                 )
             )
         return items
@@ -386,6 +422,38 @@ class M11DashboardService:
         if company_id is not None and hasattr(model, "company_id"):
             statement = statement.where(model.company_id == company_id)
         return int(self.session.scalar(statement) or 0)
+
+    def _upload_counts(self, channel_id: uuid.UUID) -> dict[str, int]:
+        need_upload = self._count(
+            HumanUploadTask,
+            HumanUploadTask.channel_workspace_id == channel_id,
+            HumanUploadTask.task_state == "READY_FOR_HUMAN_UPLOAD",
+            HumanUploadTask.actual_uploaded_video_id.is_(None),
+        )
+        waiting_backfill = self._count(
+            HumanUploadTask,
+            HumanUploadTask.channel_workspace_id == channel_id,
+            HumanUploadTask.task_state.in_(["HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"]),
+            HumanUploadTask.actual_uploaded_video_id.is_(None),
+        )
+        uploaded = self._count(UploadedVideo, UploadedVideo.channel_workspace_id == channel_id)
+        waiting_verification = self._count(
+            UploadedVideo,
+            UploadedVideo.channel_workspace_id == channel_id,
+            UploadedVideo.verification_status.in_(["NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "VERIFICATION_FAILED"]),
+        )
+        verified = self._count(
+            UploadedVideo,
+            UploadedVideo.channel_workspace_id == channel_id,
+            UploadedVideo.verification_status.in_(["VERIFIED_PUBLIC", "VERIFIED_OWNER"]),
+        )
+        return {
+            "need_upload_count": need_upload,
+            "waiting_backfill_count": waiting_backfill,
+            "uploaded_count": uploaded,
+            "waiting_verification_count": waiting_verification,
+            "verified_count": verified,
+        }
 
     def _latest_lifecycle_decision(self, channel_id: uuid.UUID) -> ChannelLifecycleDecision | None:
         return self.session.scalars(
@@ -583,6 +651,13 @@ class M11DashboardService:
         )
 
     def _publish_timing_check(self, uploaded: UploadedVideo) -> dict[str, Any]:
+        if uploaded.publish_handoff_package_id is None:
+            return {
+                "actual_published_at": uploaded.published_at,
+                "configured_publish_window": None,
+                "published_inside_configured_window": "UNKNOWN",
+                "publish_timing_summary": "Video này được ghi nhận từ upload thủ công; chưa có publish handoff timing cũ.",
+            }
         suggestion = self.session.scalars(
             select(PublishTimingSuggestion)
             .where(PublishTimingSuggestion.publish_handoff_package_id == uploaded.publish_handoff_package_id)
@@ -606,7 +681,14 @@ class M11DashboardService:
             "publish_timing_summary": "Khung giờ publish đã cấu hình; human vẫn quyết định giờ publish thực tế.",
         }
 
-    def _localization_packages(self, video_project_id: uuid.UUID) -> dict[str, Any]:
+    def _localization_packages(self, video_project_id: uuid.UUID | None) -> dict[str, Any]:
+        if video_project_id is None:
+            return {
+                "subtitle_languages": [],
+                "metadata_languages": [],
+                "subtitle_review_status": {},
+                "metadata_review_status": {},
+            }
         subtitles = self.session.scalars(
             select(LocalizedSubtitlePackage).where(LocalizedSubtitlePackage.video_project_id == video_project_id)
         ).all()

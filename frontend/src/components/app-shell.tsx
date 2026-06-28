@@ -107,6 +107,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Button>
             </div>
           </div>
+          <nav aria-label="Điều hướng chính" className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 lg:hidden">
+            {nav.map((item) => {
+              const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-transparent px-3 text-sm text-muted-foreground transition hover:bg-muted/80 hover:text-foreground",
+                    active && "border-border bg-muted text-foreground"
+                  )}
+                >
+                  <item.icon size={16} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
         </header>
         {children}
       </main>

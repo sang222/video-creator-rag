@@ -153,13 +153,15 @@ REQUIRED_TABLES = {
     "prompt_audit_snapshots",
     "prompt_evaluation_cases",
     "prompt_evaluation_runs",
+    "first_scripted_video_packages",
+    "uploaded_video_backfill_events",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0019_m12_1_prompt_registry"
+    assert revision == "0021_m12_2r_handoff_ledger"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

@@ -247,16 +247,21 @@ class UploadedVideoRead(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
-    video_project_id: uuid.UUID
-    policy_snapshot_id: uuid.UUID
-    publish_handoff_package_id: uuid.UUID
-    manual_publish_confirmation_id: uuid.UUID
-    render_package_snapshot_id: uuid.UUID
+    video_project_id: uuid.UUID | None
+    policy_snapshot_id: uuid.UUID | None
+    publish_handoff_package_id: uuid.UUID | None
+    manual_publish_confirmation_id: uuid.UUID | None
+    render_package_snapshot_id: uuid.UUID | None
+    first_scripted_video_package_id: uuid.UUID | None = None
+    human_upload_task_id: uuid.UUID | None = None
+    destination: str = "YOUTUBE"
     source_manifest_snapshot_id: uuid.UUID | None
     rights_envelope_ref: str | None
     platform: PublishTargetPlatform
     platform_video_id: str
     video_url: str
+    external_video_id: str | None = None
+    external_url: str | None = None
     published_at: AwareDatetime
     publish_status: UploadedVideoPublishStatus
     actual_metadata: dict[str, Any]
@@ -264,6 +269,20 @@ class UploadedVideoRead(BaseModel):
     lineage_refs: dict[str, Any]
     monitoring_state: UploadedVideoMonitoringState
     operator_summary: dict[str, Any]
+    actual_title: str | None = None
+    actual_visibility: PrivacyStatus = "UNKNOWN"
+    actual_publish_time: AwareDatetime | None = None
+    actual_upload_time: AwareDatetime | None = None
+    playlist_id: str | None = None
+    thumbnail_uploaded: bool | None = None
+    subtitles_uploaded: bool | None = None
+    description_modified_from_package: bool | None = None
+    package_metadata_diff: dict[str, Any] | None = None
+    verification_status: str = "NOT_VERIFIED"
+    analytics_sync_status: str = "NOT_STARTED"
+    last_verified_at: AwareDatetime | None = None
+    last_analytics_sync_at: AwareDatetime | None = None
+    operator_note: str | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 

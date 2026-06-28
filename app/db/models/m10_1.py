@@ -454,12 +454,28 @@ class HumanUploadTask(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     channel_workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False)
-    upload_card_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("upload_cards.id"), nullable=False)
+    upload_card_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("upload_cards.id"))
+    video_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"))
+    first_scripted_video_package_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id")
+    )
+    publish_package_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("publish_handoff_packages.id"))
+    destination: Mapped[str] = mapped_column(String(40), nullable=False, default="YOUTUBE")
     target_platform: Mapped[str] = mapped_column(String(40), nullable=False)
     task_state: Mapped[str] = mapped_column(String(40), nullable=False)
+    upload_card_ref: Mapped[str | None] = mapped_column(Text)
+    title_snapshot: Mapped[str | None] = mapped_column(Text)
+    description_snapshot: Mapped[str | None] = mapped_column(Text)
+    thumbnail_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    subtitle_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    required_assets: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    checklist: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     required_checklist: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     scheduled_time_suggestion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_uploaded_video_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("uploaded_videos.id"))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    blocked_reason: Mapped[str | None] = mapped_column(Text)
+    operator_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -467,6 +483,10 @@ class HumanUploadTask(Base):
         Index("ix_human_upload_tasks_company_id", "company_id"),
         Index("ix_human_upload_tasks_channel_id", "channel_workspace_id"),
         Index("ix_human_upload_tasks_card_id", "upload_card_id"),
+        Index("ix_human_upload_tasks_video_project_id", "video_project_id"),
+        Index("ix_human_upload_tasks_first_package_id", "first_scripted_video_package_id"),
+        Index("ix_human_upload_tasks_publish_package_id", "publish_package_id"),
+        Index("ix_human_upload_tasks_destination", "destination"),
         Index("ix_human_upload_tasks_state", "task_state"),
     )
 

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -117,19 +117,16 @@ class UploadedVideo(Base):
     channel_workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
     )
-    video_project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False)
-    policy_snapshot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id"), nullable=False
+    video_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"))
+    policy_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id"))
+    publish_handoff_package_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("publish_handoff_packages.id"))
+    manual_publish_confirmation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("manual_publish_confirmations.id"))
+    render_package_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("render_package_snapshots.id"))
+    first_scripted_video_package_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id")
     )
-    publish_handoff_package_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("publish_handoff_packages.id"), nullable=False
-    )
-    manual_publish_confirmation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("manual_publish_confirmations.id"), nullable=False
-    )
-    render_package_snapshot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("render_package_snapshots.id"), nullable=False
-    )
+    human_upload_task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("human_upload_tasks.id"))
+    destination: Mapped[str] = mapped_column(String(40), nullable=False, default="YOUTUBE")
     source_manifest_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("source_manifest_snapshots.id")
     )
@@ -144,6 +141,20 @@ class UploadedVideo(Base):
     lineage_refs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     monitoring_state: Mapped[str] = mapped_column(String(40), nullable=False, default="NOT_STARTED")
     operator_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    actual_title: Mapped[str | None] = mapped_column(Text)
+    actual_visibility: Mapped[str] = mapped_column(String(40), nullable=False, default="UNKNOWN")
+    actual_publish_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    actual_upload_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    playlist_id: Mapped[str | None] = mapped_column(Text)
+    thumbnail_uploaded: Mapped[bool | None] = mapped_column(Boolean)
+    subtitles_uploaded: Mapped[bool | None] = mapped_column(Boolean)
+    description_modified_from_package: Mapped[bool | None] = mapped_column(Boolean)
+    package_metadata_diff: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False, default="NOT_VERIFIED")
+    analytics_sync_status: Mapped[str] = mapped_column(String(40), nullable=False, default="NOT_STARTED")
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_analytics_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    operator_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -152,9 +163,14 @@ class UploadedVideo(Base):
         Index("ix_uploaded_videos_company_id", "company_id"),
         Index("ix_uploaded_videos_channel_workspace_id", "channel_workspace_id"),
         Index("ix_uploaded_videos_video_project_id", "video_project_id"),
+        Index("ix_uploaded_videos_first_package_id", "first_scripted_video_package_id"),
+        Index("ix_uploaded_videos_human_upload_task_id", "human_upload_task_id"),
+        Index("ix_uploaded_videos_destination", "destination"),
         Index("ix_uploaded_videos_platform", "platform"),
         Index("ix_uploaded_videos_published_at", "published_at"),
         Index("ix_uploaded_videos_monitoring_state", "monitoring_state"),
+        Index("ix_uploaded_videos_verification_status", "verification_status"),
+        Index("ix_uploaded_videos_analytics_sync_status", "analytics_sync_status"),
     )
 
 

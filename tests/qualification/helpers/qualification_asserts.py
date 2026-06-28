@@ -24,7 +24,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0019_m12_1_prompt_registry"
+EXPECTED_ALEMBIC_HEAD = "0021_m12_2r_handoff_ledger"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

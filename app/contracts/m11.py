@@ -174,6 +174,7 @@ class ChannelWorkspaceDashboardRead(BaseModel):
     daily_runs: list[dict[str, Any]]
     approvals: list[ApprovalQueueItem]
     uploaded_videos: list[dict[str, Any]]
+    publish_ledger: dict[str, Any] = Field(default_factory=dict)
     media_storage: dict[str, Any]
     provider_health: dict[str, Any]
     technical_appendix: dict[str, Any] = Field(default_factory=dict)
@@ -188,6 +189,11 @@ class UploadedVideoListItem(BaseModel):
     platform: str
     platform_video_id: str
     video_url: str
+    external_video_id: str | None = None
+    external_url: str | None = None
+    actual_visibility: str | None = None
+    verification_status: str = "NOT_VERIFIED"
+    analytics_sync_status: str = "NOT_STARTED"
     published_at: AwareDatetime
     metrics: dict[str, Any]
     freshness: str

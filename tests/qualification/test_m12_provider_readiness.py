@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
-from app.db.models import ProviderReadinessSnapshot, RealSmokeRun
+from app.db.models import CredentialReference, GoogleDriveMediaCredential, ProviderReadinessSnapshot, RealSmokeRun
 from app.main import create_app
+from app.services.m10_5 import GOOGLE_DRIVE_SCOPE
+from app.services import m12 as m12_module
 from app.services.m12 import ProviderReadinessService, RealSmokeOrchestratorService
 from tests.qualification.helpers.network_sentinel import install_network_sentinel
 
@@ -115,6 +118,56 @@ def test_m12_budget_cards_are_hard_env_display_only(db_session) -> None:
     assert cards["elevenlabs"].budget_basis == "credits_characters"
     assert "remaining" not in json.dumps(payload.model_dump(mode="json")).lower()
     assert "chi phí thực tế" in cards["total-ai"].note
+
+
+def test_m12_google_drive_readiness_ignores_manual_smoke_failure(db_session, monkeypatch) -> None:
+    settings = _settings(
+        google_drive_root_folder_id="drive-root",
+        google_drive_oauth_client_id="client-id",
+        google_drive_oauth_client_secret="client-secret",
+    )
+    reference = CredentialReference(
+        provider_key="google_drive",
+        credential_key="media_offload_default",
+        credential_type="OAUTH_TOKEN",
+        secret_ref="local_file://var/credentials/google-drive/oauth/test.json",
+        scope_blob={"scopes": [GOOGLE_DRIVE_SCOPE]},
+        status="CONFIGURED",
+        metadata_={"storage": "LOCAL_DEV_FILE", "raw_values_in_db": False},
+    )
+    db_session.add(reference)
+    db_session.flush()
+    db_session.add(
+        GoogleDriveMediaCredential(
+            credential_reference_id=reference.id,
+            connection_state="CONNECTED",
+            scopes=[GOOGLE_DRIVE_SCOPE],
+            root_folder_id="drive-root",
+        )
+    )
+    db_session.flush()
+
+    original_evaluate = m12_module.GoogleDriveReadinessCheck.evaluate
+
+    def evaluate_with_failed_smoke(self):
+        checks = original_evaluate(self)
+        return [
+            replace(check, check_state="FAILED", operator_summary="Drive real smoke failed in a guarded test folder.")
+            if check.check_type == "REAL_SMOKE"
+            else check
+            for check in checks
+        ]
+
+    monkeypatch.setattr(m12_module.GoogleDriveReadinessCheck, "evaluate", evaluate_with_failed_smoke)
+
+    payload = ProviderReadinessService(db_session, settings).provider_readiness("google-drive")
+    drive = payload.provider_summaries[0]
+
+    assert payload.snapshot_state == "READY"
+    assert payload.blocking_items == []
+    assert payload.warning_items == []
+    assert drive.readiness_state == "PASS"
+    assert drive.smoke_state == "FAILED"
 
 
 def test_m12_veo_monthly_cap_env_alias(monkeypatch) -> None:

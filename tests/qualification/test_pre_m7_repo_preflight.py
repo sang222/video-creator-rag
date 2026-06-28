@@ -75,6 +75,8 @@ ALLOWED_QUALIFICATION_DIRTY_PREFIXES = (
     "alembic/versions/0017_m11_1_localization_auth_timing.py",
     "alembic/versions/0018_m12_provider_readiness.py",
     "alembic/versions/0019_m12_1_prompt_registry.py",
+    "alembic/versions/0020_m12_2_first_scripted_video_package.py",
+    "alembic/versions/0021_m12_2r_publish_handoff_ledger.py",
     "app/prompts/registry/agents.yaml",
     "app/prompts/schemas/base_envelope.schema.json",
     "config/cloud_media_storage_provider_catalog.yaml",

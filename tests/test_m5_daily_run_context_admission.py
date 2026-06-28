@@ -147,7 +147,7 @@ def _evidence(db_session, company, channel, *, volume: int | None = 800):
         data=SearchDemandEvidenceCreate(
             company_id=company.id,
             channel_workspace_id=channel.id,
-            evidence_source_type="MOCK",
+            evidence_source_type="MANUAL_RESEARCH",
             query="budgeted video workflow",
             platform="YOUTUBE",
             search_volume_30d=volume,
@@ -178,7 +178,7 @@ def test_m5_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert daily_run.metadata_ == {}
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0019_m12_1_prompt_registry"
+    assert revision == "0021_m12_2r_handoff_ledger"
 
 
 def test_resource_resolver_enforces_scope_sources_and_deterministic_pack(db_session) -> None:
@@ -600,7 +600,7 @@ def test_m5_api_and_cli_smoke(db_session) -> None:
         json={
             "company_id": str(company.id),
             "channel_workspace_id": str(channel.id),
-            "evidence_source_type": "MOCK",
+            "evidence_source_type": "MANUAL_RESEARCH",
             "query": "api m5 smoke",
             "platform": "YOUTUBE",
             "search_volume_30d": 500,

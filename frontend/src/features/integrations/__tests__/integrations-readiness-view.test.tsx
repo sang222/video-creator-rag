@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IntegrationsReadinessView } from "@/features/integrations/integrations-readiness-view";
 
@@ -19,6 +19,7 @@ const readinessPayload = {
     summary("cloud-final-renderer", "Cloud Final Renderer", "BLOCKED", { status: "REQUIRED_GAP", configuration_state: "REQUIRED_GAP", provider: "not_selected", long_form_final_render_blocked: true, next_action: "Chọn renderer ráp video dài sau." })
   ],
   checks: [
+    check("google-drive", "CREDENTIAL", "BLOCKED", "Google Drive cần OAuth client/token.", { oauth_client_configured: false, token_connected: false }),
     check("cloud-final-renderer", "CAPABILITY", "BLOCKED", "Long-form final render vẫn bị chặn cho đến khi chọn và cấu hình renderer ráp video dài."),
     check("youtube-owner", "CREDENTIAL", "BLOCKED", "YouTube owner analytics cần OAuth token")
   ],
@@ -55,9 +56,11 @@ const readinessPayload = {
   technical_appendix: { no_provider_calls_on_get: true }
 };
 
+let readinessResponse: unknown = readinessPayload;
+
 vi.mock("@/lib/api", () => ({
   apiBaseUrl: "http://127.0.0.1:8000",
-  getIntegrationsReadiness: vi.fn(async () => readinessPayload),
+  getIntegrationsReadiness: vi.fn(async () => readinessResponse),
   runIntegrationsReadiness: vi.fn(async () => ({})),
   runProviderSmoke: vi.fn(async () => ({ run_state: "SKIPPED" })),
   queryKeys: {
@@ -75,6 +78,10 @@ function renderWithQuery() {
 }
 
 describe("IntegrationsReadinessView", () => {
+  beforeEach(() => {
+    readinessResponse = readinessPayload;
+  });
+
   it("renders Vietnamese provider readiness, CTAs, budget display, and no secrets", async () => {
     renderWithQuery();
 
@@ -82,10 +89,14 @@ describe("IntegrationsReadinessView", () => {
     expect(screen.getByText("Kiểm tra trạng thái kết nối, token và nhà cung cấp trước khi chạy môi trường production.")).toBeInTheDocument();
     expect(screen.getByText("YouTube Owner Analytics")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Kết nối YouTube/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Kết nối Google Drive/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cần cấu hình OAuth/ })).toBeDisabled();
+    expect(screen.queryByRole("link", { name: /Kết nối Google Drive/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Google Drive chưa thể mở luồng cấp quyền. Hãy cấu hình client, secret, redirect URI và scope drive.file trước.")).toBeInTheDocument();
     expect(screen.getByText("Cloud Final Renderer")).toBeInTheDocument();
     expect(screen.getByText("Thiếu renderer ráp video dài")).toBeInTheDocument();
     expect(screen.getByText("Chưa chọn")).toBeInTheDocument();
+    expect(screen.getAllByText("Loại kiểm tra: Thông tin kết nối").length).toBeGreaterThan(0);
+    expect(screen.getByText("Loại kiểm tra: Năng lực")).toBeInTheDocument();
     expect(screen.getAllByText("Đang bị chặn").length).toBeGreaterThan(0);
     expect(screen.getByText("Không dùng")).toBeInTheDocument();
     expect(screen.getByText("Ngân sách AI tháng này")).toBeInTheDocument();
@@ -96,6 +107,38 @@ describe("IntegrationsReadinessView", () => {
     expect(screen.queryByText("READY_FOR_SMOKE")).not.toBeInTheDocument();
     expect(screen.queryByText(/sk-/)).not.toBeInTheDocument();
     expect(screen.queryByText(/remaining/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps Google Drive ready when only the manual real smoke failed", async () => {
+    readinessResponse = {
+      ...readinessPayload,
+      snapshot_state: "BLOCKED",
+      provider_summaries: [
+        {
+          ...summary("google-drive", "Google Drive", "BLOCKED", { connected: true, root_folder_configured: true }),
+          smoke_state: "FAILED"
+        }
+      ],
+      checks: [
+        check("google-drive", "CONFIG", "PASS", "Google Drive offload và root folder đã cấu hình."),
+        check("google-drive", "CREDENTIAL", "PASS", "Google Drive OAuth token đã kết nối.", { oauth_client_configured: true, token_connected: true }),
+        check("google-drive", "SECURITY", "PASS", "Google Drive chỉ dùng scope drive.file."),
+        check("google-drive", "REAL_SMOKE", "FAILED", "Drive real smoke failed in a guarded test folder.")
+      ],
+      blocking_items: [{ provider_key: "google-drive", check_type: "REAL_SMOKE" }],
+      warning_items: [],
+      budget_cards: []
+    };
+
+    renderWithQuery();
+
+    expect(await screen.findByRole("heading", { name: "Cấu hình tích hợp" })).toBeInTheDocument();
+    const blockedTile = screen.getByText("Nhà cung cấp bị chặn").closest("section");
+    expect(blockedTile).not.toBeNull();
+    expect(within(blockedTile as HTMLElement).getByText("0")).toBeInTheDocument();
+    expect(screen.getAllByText("Thất bại").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Đã sẵn sàng").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: /Kết nối Google Drive/ })).not.toBeInTheDocument();
   });
 });
 
@@ -117,7 +160,7 @@ function summary(provider_key: string, provider_name: string, readiness_state: s
   };
 }
 
-function check(provider_key: string, check_type: string, check_state: string, operator_summary: string) {
+function check(provider_key: string, check_type: string, check_state: string, operator_summary: string, technical_appendix: Record<string, unknown> = {}) {
   return {
     provider_key,
     provider_type: "TYPE",
@@ -126,6 +169,6 @@ function check(provider_key: string, check_type: string, check_state: string, op
     operator_summary,
     next_action: "Cấu hình tiếp theo",
     reason_codes: [],
-    technical_appendix: {}
+    technical_appendix
   };
 }

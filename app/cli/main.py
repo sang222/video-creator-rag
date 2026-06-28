@@ -64,6 +64,7 @@ from app.contracts import (
     MediaOffloadJobCreate,
     ProviderSmokeRequest,
     FirstScriptedVideoPackageRequest,
+    BackfillUploadedVideoRequest,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -125,6 +126,7 @@ from app.services import (
     ProviderReadinessService,
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
+    PublishHandoffLedgerService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -165,6 +167,8 @@ captions_app = typer.Typer(no_args_is_help=True)
 render_spec_app = typer.Typer(no_args_is_help=True)
 publish_app = typer.Typer(no_args_is_help=True)
 uploaded_video_app = typer.Typer(no_args_is_help=True)
+upload_tasks_app = typer.Typer(no_args_is_help=True)
+uploaded_videos_app = typer.Typer(no_args_is_help=True)
 analytics_app = typer.Typer(no_args_is_help=True)
 youtube_app = typer.Typer(no_args_is_help=True)
 drive_app = typer.Typer(no_args_is_help=True)
@@ -208,6 +212,8 @@ app.add_typer(captions_app, name="captions")
 app.add_typer(render_spec_app, name="render-spec")
 app.add_typer(publish_app, name="publish")
 app.add_typer(uploaded_video_app, name="uploaded-video")
+app.add_typer(upload_tasks_app, name="upload-tasks")
+app.add_typer(uploaded_videos_app, name="uploaded-videos")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(drive_app, name="drive")
@@ -1901,6 +1907,82 @@ def package_first_video(
             typer.echo(json.dumps(package.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"package first-video failed: {exc}")
+
+
+@upload_tasks_app.command("list")
+def upload_tasks_list(channel_id: uuid.UUID = typer.Option(..., "--channel-id")) -> None:
+    try:
+        with session_scope() as session:
+            payload = PublishHandoffLedgerService(session).list_upload_tasks(channel_id=channel_id)
+            typer.echo(json.dumps(payload.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"upload-tasks list failed: {exc}")
+
+
+@upload_tasks_app.command("create")
+def upload_tasks_create(package_id: uuid.UUID = typer.Option(..., "--package-id")) -> None:
+    try:
+        with session_scope() as session:
+            task = PublishHandoffLedgerService(session).create_upload_task_from_package(package_id)
+            typer.echo(json.dumps(task.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"upload-tasks create failed: {exc}")
+
+
+@upload_tasks_app.command("start")
+def upload_tasks_start(task_id: uuid.UUID = typer.Option(..., "--task-id")) -> None:
+    try:
+        with session_scope() as session:
+            task = PublishHandoffLedgerService(session).start_upload_task(task_id)
+            typer.echo(json.dumps(task.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"upload-tasks start failed: {exc}")
+
+
+@upload_tasks_app.command("backfill")
+def upload_tasks_backfill(
+    task_id: uuid.UUID = typer.Option(..., "--task-id"),
+    youtube_url_or_id: str = typer.Option(..., "--youtube-url-or-id"),
+    visibility: str | None = typer.Option(None, "--visibility"),
+    actual_title: str | None = typer.Option(None, "--actual-title"),
+    operator_note: str | None = typer.Option(None, "--operator-note"),
+) -> None:
+    try:
+        normalized_visibility = visibility.upper() if visibility else None
+        with session_scope() as session:
+            result = PublishHandoffLedgerService(session).backfill_uploaded_video(
+                task_id=task_id,
+                data=BackfillUploadedVideoRequest(
+                    youtube_url_or_video_id=youtube_url_or_id,
+                    actual_title=actual_title,
+                    actual_visibility=normalized_visibility,  # type: ignore[arg-type]
+                    operator_note=operator_note,
+                ),
+            )
+            typer.echo(json.dumps(result.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"upload-tasks backfill failed: {exc}")
+
+
+@uploaded_videos_app.command("list")
+def uploaded_videos_list(channel_id: uuid.UUID = typer.Option(..., "--channel-id")) -> None:
+    try:
+        with session_scope() as session:
+            payload = PublishHandoffLedgerService(session).list_uploaded_videos(channel_id=channel_id)
+            typer.echo(json.dumps(payload.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"uploaded-videos list failed: {exc}")
+
+
+@uploaded_videos_app.command("verify")
+def uploaded_videos_verify(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+    try:
+        with session_scope() as session:
+            payload = PublishHandoffLedgerService(session).verify_uploaded_video(uploaded_video_id)
+            typer.echo(json.dumps(payload.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"uploaded-videos verify failed: {exc}")
+
 
 @media_app.command("cleanup-local")
 def media_cleanup_local(dry_run: bool = typer.Option(False, "--dry-run")) -> None:

@@ -178,6 +178,7 @@ from app.services.m12_1 import (
     prompt_template_hash,
 )
 from app.services.m12_2 import FirstScriptedVideoPackageService, verify_m12_2_required_tags
+from app.services.m12_2r import PublishHandoffLedgerService, parse_youtube_video_id
 
 __all__ = [
     "AuditService",
@@ -316,7 +317,9 @@ __all__ = [
     "PromptRegistryRepository",
     "PromptRegistryService",
     "FirstScriptedVideoPackageService",
+    "PublishHandoffLedgerService",
     "verify_m12_2_required_tags",
+    "parse_youtube_video_id",
     "build_channel_contract_from_profile",
     "prompt_context_hash",
     "prompt_template_hash",

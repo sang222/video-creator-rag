@@ -49,7 +49,20 @@ FunnelPackageState = Literal["DRAFT", "READY_FOR_HUMAN_REVIEW", "READY_FOR_UPLOA
 CTAType = Literal["NONE", "SEARCH_YOUTUBE", "BRAND_CTA", "LINK_IN_BIO", "PINNED_COMMENT"]
 MusicPolicy = Literal["SAFE_MODE", "PLATFORM_NATIVE_MODE", "NO_MUSIC_MODE"]
 UploadCardState = Literal["DRAFT", "READY", "BLOCKED", "USED", "CANCELLED"]
-HumanUploadTaskState = Literal["READY", "UPLOADED", "NEEDS_FIX", "SKIPPED", "CANCELLED"]
+HumanUploadTaskState = Literal[
+    "READY",
+    "UPLOADED",
+    "NEEDS_FIX",
+    "SKIPPED",
+    "CANCELLED",
+    "READY_FOR_HUMAN_UPLOAD",
+    "HUMAN_UPLOAD_IN_PROGRESS",
+    "UPLOADED_WAITING_BACKFILL",
+    "BACKFILLED_WAITING_VERIFICATION",
+    "UPLOADED_VERIFIED",
+    "UPLOADED_UNVERIFIED",
+    "BLOCKED",
+]
 
 
 class _ReadModel(BaseModel):

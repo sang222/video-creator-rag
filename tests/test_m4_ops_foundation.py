@@ -156,7 +156,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0019_m12_1_prompt_registry"
+    assert revision == "0021_m12_2r_handoff_ledger"
 
 
 def test_provider_registry_is_real_only_and_test_fakes_are_test_scoped(db_session) -> None:

@@ -9,7 +9,13 @@ import type {
   RealSmokeRun,
   UploadedVideoDashboard,
   UploadedVideoListItem,
-  AuthSession
+  AuthSession,
+  BackfillUploadedVideoInput,
+  BackfillUploadedVideoResult,
+  HumanUploadTask,
+  HumanUploadTaskList,
+  PublishLedger,
+  UploadedVideoLedgerList
 } from "./types";
 
 export const apiBaseUrl = process.env.NEXT_PUBLIC_VCOS_API_BASE_URL ?? "http://localhost:8000";
@@ -35,6 +41,9 @@ export const queryKeys = {
   queues: (queueType?: string) => ["queues", queueType ?? "all"],
   channels: ["channels"],
   channelWorkspace: (channelId: string) => ["channel-workspace", channelId],
+  channelPublishLedger: (channelId: string) => ["channel-publish-ledger", channelId],
+  channelUploadTasks: (channelId: string) => ["channel-upload-tasks", channelId],
+  channelUploadedVideos: (channelId: string) => ["channel-uploaded-videos", channelId],
   uploadedVideos: ["uploaded-videos"],
   uploadedVideo: (uploadedVideoId: string) => ["uploaded-video", uploadedVideoId],
   providerOps: ["provider-ops"],
@@ -70,6 +79,33 @@ export function getChannels() {
 
 export function getChannelWorkspace(channelId: string) {
   return request<ChannelWorkspace>(`/channels/${channelId}/workspace`);
+}
+
+export function getChannelPublishLedger(channelId: string) {
+  return request<PublishLedger>(`/channels/${channelId}/publish-ledger`);
+}
+
+export function getChannelUploadTasks(channelId: string) {
+  return request<HumanUploadTaskList>(`/channels/${channelId}/upload-tasks`);
+}
+
+export function getChannelUploadedVideos(channelId: string) {
+  return request<UploadedVideoLedgerList>(`/channels/${channelId}/uploaded-videos`);
+}
+
+export function startUploadTask(taskId: string) {
+  return request<HumanUploadTask>(`/upload-tasks/${taskId}/start`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export function backfillUploadedVideo(taskId: string, input: BackfillUploadedVideoInput) {
+  return request<BackfillUploadedVideoResult>(`/upload-tasks/${taskId}/backfill-uploaded-video`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function verifyUploadedVideo(uploadedVideoId: string) {
+  return request<Record<string, unknown>>(`/uploaded-videos/${uploadedVideoId}/verify`, { method: "POST", body: JSON.stringify({}) });
 }
 
 export function getUploadedVideos() {

@@ -103,28 +103,42 @@ def _uploaded_video(
     published_offset: timedelta = timedelta(days=3),
     disclosures: dict | None = None,
 ) -> UploadedVideo:
-    flow = qualification_factory.m6_full_flow(output_dir=tmp_path)
-    handoff = PublishHandoffService(db_session).create_from_render_package(
-        data=PublishHandoffCreate(
-            render_package_snapshot_id=flow.production_run.render_package_snapshot_id,
-            created_by_user_id=flow.operator.id,
-        )
+    flow = qualification_factory.m2_project()
+    published_at = datetime.now(UTC) - published_offset
+    metadata = _actual_metadata()
+    uploaded = UploadedVideo(
+        company_id=flow.company.id,
+        channel_workspace_id=flow.channel.id,
+        video_project_id=flow.project.id,
+        policy_snapshot_id=flow.snapshot.id,
+        platform="YOUTUBE",
+        platform_video_id=video_id,
+        video_url=f"https://www.youtube.com/watch?v={video_id}",
+        published_at=published_at,
+        publish_status="CONFIRMED",
+        actual_metadata=metadata,
+        actual_disclosures=disclosures or _actual_disclosures(),
+        lineage_refs={
+            "source": "manual_qualification_fixture",
+            "human_handoff_only": True,
+            "no_upload_api_by_policy": True,
+        },
+        monitoring_state="NOT_STARTED",
+        operator_summary={
+            "title": metadata["actual_title"],
+            "operator_summary_vi": "Video đã được ghi nhận thủ công cho fixture dashboard.",
+        },
+        actual_title=metadata["actual_title"],
+        actual_visibility="PUBLIC",
+        actual_publish_time=published_at,
+        actual_upload_time=published_at,
+        thumbnail_uploaded=True,
+        subtitles_uploaded=True,
+        verification_status="VERIFICATION_UNAVAILABLE",
+        analytics_sync_status="NOT_CONFIGURED",
     )
-    PublishHandoffService(db_session).mark_ready(handoff_id=handoff.id)
-    confirmation = ManualPublishConfirmationService(db_session).create_confirmation(
-        data=ManualPublishConfirmationCreate(
-            publish_handoff_package_id=handoff.id,
-            confirmed_by_user_id=flow.operator.id,
-            actual_video_id=video_id,
-            actual_video_url=f"https://www.youtube.com/watch?v={video_id}",
-            actual_published_at=datetime.now(UTC) - published_offset,
-            actual_metadata=_actual_metadata(),
-            actual_disclosures=disclosures or _actual_disclosures(),
-            actual_files={"caption_uploaded": True},
-        )
-    )
-    uploaded = ManualPublishConfirmationService(db_session).accept_confirmation(confirmation_id=confirmation.id)
-    uploaded.published_at = datetime.now(UTC) - published_offset
+    db_session.add(uploaded)
+    db_session.flush()
     return uploaded
 
 
@@ -191,7 +205,7 @@ def test_m10_preflight_schema_catalogs_defaults_and_scope(engine, db_session, qu
     assert M10_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_2_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0019_m12_1_prompt_registry"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_m12_2r_handoff_ledger"
         defaults = connection.execute(
             text(
                 """

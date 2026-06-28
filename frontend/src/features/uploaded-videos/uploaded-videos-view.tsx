@@ -20,6 +20,7 @@ export function UploadedVideosView() {
 
   const needsPublishConfirmation = query.data.filter((video) => !video.platform_video_id || !video.video_url).length;
   const needsAnalyticsSync = query.data.filter((video) => needsSync(video.freshness) || needsSync(video.owner_analytics_status)).length;
+  const waitingVerification = query.data.filter((video) => ["NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "VERIFICATION_FAILED"].includes(video.verification_status)).length;
   const needsRecovery = query.data.filter((video) => {
     const nextAction = String(video.next_action ?? "").toLowerCase();
     return Boolean(video.latest_diagnostic) || nextAction.includes("recovery") || nextAction.includes("phục hồi");
@@ -36,15 +37,18 @@ export function UploadedVideosView() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricSummaryCard icon={Video} label="Tổng video đã upload" value={query.data.length} hint="Chỉ tính video đã được người vận hành nhập paste-back." />
         <MetricSummaryCard icon={CirclePlay} label="Cần xác nhận publish" value={needsPublishConfirmation} hint="Gói chưa paste-back sẽ nằm ở trang Gói publish." />
-        <MetricSummaryCard icon={RefreshCw} label="Analytics cần sync" value={needsAnalyticsSync} hint="Dựa trên độ mới dữ liệu và trạng thái analytics chủ sở hữu." />
+        <MetricSummaryCard icon={RefreshCw} label="Chờ xác minh YouTube" value={waitingVerification} hint="VCOS chỉ xác minh read-only khi YouTube đã kết nối." />
         <MetricSummaryCard icon={AlertTriangle} label="Video cần recovery" value={needsRecovery} hint="Chỉ tính video có chẩn đoán hoặc việc tiếp theo là phục hồi." />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricSummaryCard icon={RefreshCw} label="Analytics cần sync" value={needsAnalyticsSync} hint="Không có dữ liệu không được tính là 0." />
       </div>
       {query.data.length ? (
         <Panel className="overflow-x-auto p-0">
-          <table className="w-full min-w-[980px] border-collapse text-sm">
+          <table className="w-full min-w-[1220px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border text-left text-muted-foreground">
-                {["Tiêu đề", "Nền tảng", "Ngày publish", "Views", "Likes", "Comments", "CTR", "AVD", "Độ mới dữ liệu", "Analytics chủ sở hữu", ""].map((header) => (
+                {["Tiêu đề", "YouTube video_id", "Visibility", "Ngày publish", "Views", "Likes", "Comments", "Xác minh", "Analytics", "Độ mới dữ liệu", ""].map((header) => (
                   <th key={header} className="px-4 py-3 font-medium">{header}</th>
                 ))}
               </tr>
@@ -53,19 +57,24 @@ export function UploadedVideosView() {
               {query.data.map((video) => (
                 <tr key={video.id} className="border-b border-border/60">
                   <td className="px-4 py-3 font-medium">{video.title}</td>
-                  <td className="px-4 py-3">{platformLabel(video.platform)}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{video.external_video_id ?? video.platform_video_id}</td>
+                  <td className="px-4 py-3"><StatusBadge value={video.actual_visibility ?? "UNKNOWN"} /></td>
                   <td className="px-4 py-3">{new Date(video.published_at).toLocaleDateString("vi-VN")}</td>
                   <td className="px-4 py-3">{video.metrics.views ?? "Chưa có dữ liệu"}</td>
                   <td className="px-4 py-3">{video.metrics.likes ?? "Chưa có dữ liệu"}</td>
                   <td className="px-4 py-3">{video.metrics.comments ?? "Chưa có dữ liệu"}</td>
-                  <td className="px-4 py-3">{video.metrics.ctr ?? "Chưa có dữ liệu"}</td>
-                  <td className="px-4 py-3">{video.metrics.average_view_duration_seconds ?? "Chưa có dữ liệu"}</td>
+                  <td className="px-4 py-3"><StatusBadge value={video.verification_status} /></td>
+                  <td className="px-4 py-3"><StatusBadge value={video.analytics_sync_status} /></td>
                   <td className="px-4 py-3"><StatusBadge value={video.freshness} /></td>
-                  <td className="px-4 py-3"><StatusBadge value={video.owner_analytics_status} /></td>
                   <td className="px-4 py-3">
-                    <Button asChild>
-                      <Link href={`/uploaded-videos/${video.id}`}>Mở</Link>
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild>
+                        <Link href={`/uploaded-videos/${video.id}`}>Mở</Link>
+                      </Button>
+                      <Button asChild>
+                        <a href={video.external_url ?? video.video_url} target="_blank" rel="noreferrer">Mở YouTube</a>
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -88,11 +97,4 @@ export function UploadedVideosView() {
 
 function needsSync(value: string | null | undefined) {
   return ["STALE", "UNKNOWN", "UNAVAILABLE", "NEEDS_AUTH", "FAILED", "NOT_CONFIGURED"].includes(String(value ?? "UNKNOWN").toUpperCase());
-}
-
-function platformLabel(value: string) {
-  return {
-    youtube: "YouTube",
-    YOUTUBE: "YouTube"
-  }[value] ?? "Nền tảng chưa xác định";
 }

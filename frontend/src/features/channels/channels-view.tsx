@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { Boxes, CheckCircle2, PauseCircle, ShieldAlert } from "lucide-react";
+import { Boxes, CheckCircle2, ClipboardEdit, PauseCircle, ShieldAlert, UploadCloud, Video } from "lucide-react";
 
 import { EmptyStateCard, MetricSummaryCard, PageHeader } from "@/components/cockpit";
 import { ErrorState, LoadingState } from "@/components/states";
@@ -26,6 +26,26 @@ const columns = [
   columnHelper.accessor("health_status", {
     header: "Sức khỏe",
     cell: (info) => <StatusBadge value={info.getValue()} />
+  }),
+  columnHelper.display({
+    id: "need_upload",
+    header: "Cần upload",
+    cell: ({ row }) => row.original.upload_counts?.need_upload_count ?? 0
+  }),
+  columnHelper.display({
+    id: "waiting_backfill",
+    header: "Chờ nhập video_id",
+    cell: ({ row }) => row.original.upload_counts?.waiting_backfill_count ?? 0
+  }),
+  columnHelper.display({
+    id: "uploaded",
+    header: "Đã upload",
+    cell: ({ row }) => row.original.upload_counts?.uploaded_count ?? 0
+  }),
+  columnHelper.display({
+    id: "waiting_verification",
+    header: "Chờ xác minh YouTube",
+    cell: ({ row }) => row.original.upload_counts?.waiting_verification_count ?? 0
   }),
   columnHelper.accessor("next_action", {
     header: "Việc tiếp theo"
@@ -52,6 +72,9 @@ export function ChannelsView() {
   const activeCount = query.data.filter((channel) => channel.lifecycle_state === "ACTIVE").length;
   const pausedCount = query.data.filter((channel) => ["PAUSED", "DEACTIVATED", "ARCHIVED"].includes(channel.lifecycle_state)).length;
   const reviewCount = query.data.filter((channel) => ["WATCHLIST", "NEEDS_HUMAN_REVIEW", "NO_VIEW", "LOW_VIEW"].includes(channel.health_status)).length;
+  const needUploadCount = query.data.reduce((sum, channel) => sum + (channel.upload_counts?.need_upload_count ?? 0), 0);
+  const waitingBackfillCount = query.data.reduce((sum, channel) => sum + (channel.upload_counts?.waiting_backfill_count ?? 0), 0);
+  const uploadedCount = query.data.reduce((sum, channel) => sum + (channel.upload_counts?.uploaded_count ?? 0), 0);
 
   return (
     <div className="space-y-6 p-4 md:p-8">
@@ -66,10 +89,13 @@ export function ChannelsView() {
         <MetricSummaryCard icon={CheckCircle2} label="Kênh đang hoạt động" value={activeCount} hint="Luồng tạo hằng ngày chỉ chạy khi vòng đời là Đang hoạt động." />
         <MetricSummaryCard icon={PauseCircle} label="Kênh tạm dừng/ngừng" value={pausedCount} hint="Người vận hành có thể bật lại khi đủ điều kiện." />
         <MetricSummaryCard icon={ShieldAlert} label="Kênh cần xem lại" value={reviewCount} hint="Mở kênh để xem blocker và việc tiếp theo." />
+        <MetricSummaryCard icon={UploadCloud} label="Cần upload thủ công" value={needUploadCount} hint="Gói đã duyệt, chưa có UploadedVideo." />
+        <MetricSummaryCard icon={ClipboardEdit} label="Chờ nhập video_id" value={waitingBackfillCount} hint="Đã bắt đầu upload thủ công, cần paste-back URL/video_id." />
+        <MetricSummaryCard icon={Video} label="Đã upload" value={uploadedCount} hint="Đã có record UploadedVideo trong VCOS." />
       </div>
       {query.data.length ? (
         <Panel className="overflow-x-auto p-0">
-          <table className="w-full min-w-[760px] border-collapse text-sm">
+          <table className="w-full min-w-[1120px] border-collapse text-sm">
             <thead>
                 {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b border-border">

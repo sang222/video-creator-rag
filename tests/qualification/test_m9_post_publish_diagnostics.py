@@ -164,7 +164,7 @@ def test_m9_preflight_schema_catalogs_and_scope(engine, db_session, qualificatio
     assert M9_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0019_m12_1_prompt_registry"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_m12_2r_handoff_ledger"
         defaults = connection.execute(
             text(
                 """

@@ -273,7 +273,7 @@ def test_migration_chain_idempotency_and_downgrade_reupgrade(migrated_temp_datab
         "0015_m10_5_drive_offload",
         "0016_m11_operator_dashboard",
         "0018_m12_provider_readiness",
-        "0019_m12_1_prompt_registry",
+        "0021_m12_2r_handoff_ledger",
     ]
     expected_by_revision = [
         {"companies", "config_catalog_versions"},

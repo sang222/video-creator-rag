@@ -31,6 +31,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./var:/app/var
     healthcheck:
       test:
         [

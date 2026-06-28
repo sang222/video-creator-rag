@@ -96,7 +96,7 @@ def test_m7_migration_tables_defaults_unique_and_scope(engine, db_session, quali
     assert M7_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0019_m12_1_prompt_registry"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_m12_2r_handoff_ledger"
 
     flow = qualification_factory.m6_full_flow(output_dir=tmp_path)
     handoff = PublishHandoffService(db_session).create_from_render_package(

@@ -40,6 +40,9 @@ export function IntegrationsReadinessView() {
 
   const data = query.data;
   const checksByProvider = groupChecks(data.checks);
+  const blockingItems = readinessItems(data.blocking_items);
+  const warningItems = readinessItems(data.warning_items);
+  const snapshotState = snapshotStateFromReadinessItems(data.snapshot_state, blockingItems, warningItems);
   const summaries = providerOrder
     .map((key) => data.provider_summaries.find((summary) => summary.provider_key === key))
     .filter(Boolean) as ProviderSummary[];
@@ -58,15 +61,15 @@ export function IntegrationsReadinessView() {
         }
         meta={
           <div className="flex flex-wrap items-center gap-2">
-            <FriendlyStatusBadge value={data.snapshot_state} />
+            <FriendlyStatusBadge value={snapshotState} />
             <span className="text-xs text-muted-foreground">Không tự tạo video, upload, publish hoặc reupload.</span>
           </div>
         }
       />
 
       <section className="grid gap-4 md:grid-cols-3">
-        <SummaryTile label="Nhà cung cấp bị chặn" value={data.blocking_items.length} status={data.blocking_items.length ? "BLOCKED" : "PASS"} />
-        <SummaryTile label="Cần xem thêm" value={data.warning_items.length} status={data.warning_items.length ? "WARNING" : "PASS"} />
+        <SummaryTile label="Nhà cung cấp bị chặn" value={blockingItems.length} status={blockingItems.length ? "BLOCKED" : "PASS"} />
+        <SummaryTile label="Cần xem thêm" value={warningItems.length} status={warningItems.length ? "WARNING" : "PASS"} />
         <SummaryTile label="Lộ secret" value="Không có" status="PASS" />
       </section>
 
@@ -121,6 +124,16 @@ function ProviderCard({
   const isYouTubeOwner = summary.provider_key === "youtube-owner";
   const isDrive = summary.provider_key === "google-drive";
   const connected = Boolean(summary.safe_config.connected);
+  const driveCredentialCheck = isDrive ? checks.find((check) => check.check_type === "CREDENTIAL") : undefined;
+  const driveOauthClientConfigured = !isDrive || driveCredentialCheck?.technical_appendix.oauth_client_configured !== false;
+  const driveNeedsOAuthClient = isDrive && !driveOauthClientConfigured;
+  const smokeCheck = checks.find((check) => check.check_type === "REAL_SMOKE");
+  const readinessState = readinessStateFromChecks(summary.provider_key, checks, summary.readiness_state);
+  const smokeState = smokeCheck?.check_state ?? summary.smoke_state ?? "UNKNOWN";
+  const smokeAction = smokeCheck?.next_action ?? summary.next_action ?? "Kiểm tra thủ công là diagnostic riêng, không tự upload/publish/reupload.";
+  const nextAction = driveNeedsOAuthClient
+    ? "Cấu hình OAuth client Google Drive trước, rồi quay lại kết nối tài khoản với quyền drive.file."
+    : smokeAction;
 
   return (
     <Panel className="flex min-h-[320px] flex-col gap-4">
@@ -129,7 +142,7 @@ function ProviderCard({
           <PanelTitle>{summary.provider_name}</PanelTitle>
           <p className="mt-1 text-sm text-muted-foreground">{roleCopy(summary)}</p>
         </div>
-        <FriendlyStatusBadge value={summary.readiness_state} />
+        <FriendlyStatusBadge value={readinessState} />
       </PanelHeader>
 
       <div className="grid gap-3 text-sm md:grid-cols-2">
@@ -148,12 +161,19 @@ function ProviderCard({
         </div>
       ) : null}
 
+      {driveNeedsOAuthClient ? (
+        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+          <div className="font-medium">Cần cấu hình OAuth client</div>
+          <div className="mt-1 text-muted-foreground">Google Drive chưa thể mở luồng cấp quyền. Hãy cấu hình client, secret, redirect URI và scope drive.file trước.</div>
+        </div>
+      ) : null}
+
       <div className="rounded-md border border-border/80 p-3 text-sm">
         <div className="flex items-center justify-between gap-3">
           <span className="text-muted-foreground">Trạng thái kiểm tra thủ công</span>
-          <FriendlyStatusBadge value={summary.smoke_state ?? "UNKNOWN"} />
+          <FriendlyStatusBadge value={smokeState} />
         </div>
-        <p className="mt-2 leading-5">{summary.next_action}</p>
+        <p className="mt-2 leading-5">{nextAction}</p>
       </div>
 
       <div className="mt-auto flex flex-wrap gap-2">
@@ -166,12 +186,19 @@ function ProviderCard({
           </Button>
         ) : null}
         {isDrive && !connected ? (
-          <Button asChild variant="primary">
-            <a href={`${apiBaseUrl}/auth/google-drive/start`}>
-              <ExternalLink size={16} aria-hidden="true" />
-              Kết nối Google Drive
-            </a>
-          </Button>
+          driveNeedsOAuthClient ? (
+            <Button className="border-warning/45 bg-warning/10 text-warning hover:bg-warning/10" disabled>
+              <ShieldCheck size={16} aria-hidden="true" />
+              Cần cấu hình OAuth
+            </Button>
+          ) : (
+            <Button asChild variant="primary">
+              <a href={`${apiBaseUrl}/auth/google-drive/start`}>
+                <ExternalLink size={16} aria-hidden="true" />
+                Kết nối Google Drive
+              </a>
+            </Button>
+          )
         ) : null}
         <Button onClick={onSmoke} disabled={smokePending}>
           <PlayCircle size={16} aria-hidden="true" />
@@ -190,7 +217,7 @@ function ProviderCard({
           {checks.map((check) => (
             <div key={`${check.provider_key}-${check.check_type}-${check.operator_summary}`} className="rounded-md bg-muted/30 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span>Loại kiểm tra: {check.check_type}</span>
+                <span>Loại kiểm tra: {checkTypeLabel(check.check_type)}</span>
                 <FriendlyStatusBadge value={check.check_state} />
               </div>
               <p className="mt-2 text-muted-foreground">{check.operator_summary}</p>
@@ -267,6 +294,42 @@ function groupChecks(checks: ProviderReadinessCheck[]) {
     acc[check.provider_key] = [...(acc[check.provider_key] ?? []), check];
     return acc;
   }, {});
+}
+
+function readinessItems(items: Array<Record<string, unknown>>) {
+  return items.filter((item) => !isDriveSmokeItem(String(item.provider_key ?? ""), String(item.check_type ?? "")));
+}
+
+function snapshotStateFromReadinessItems(snapshotState: string, blockingItems: Array<Record<string, unknown>>, warningItems: Array<Record<string, unknown>>) {
+  if (blockingItems.length) return "BLOCKED";
+  if (warningItems.length) return "PARTIAL";
+  if (["BLOCKED", "PARTIAL"].includes(snapshotState)) return "READY";
+  return snapshotState;
+}
+
+function readinessStateFromChecks(providerKey: string, checks: ProviderReadinessCheck[], fallback: string) {
+  const readinessChecks = checks.filter((check) => !isDriveSmokeItem(providerKey, check.check_type));
+  if (!readinessChecks.length) return fallback;
+  const states = readinessChecks.map((check) => check.check_state);
+  if (states.some((state) => ["BLOCKED", "FAILED"].includes(state))) return "BLOCKED";
+  if (states.some((state) => ["WARNING", "UNKNOWN", "SKIPPED"].includes(state))) return "WARNING";
+  return "PASS";
+}
+
+function isDriveSmokeItem(providerKey: string, checkType: string) {
+  return providerKey === "google-drive" && checkType.toUpperCase() === "REAL_SMOKE";
+}
+
+function checkTypeLabel(value: string) {
+  return {
+    CONFIG: "Cấu hình",
+    CREDENTIAL: "Thông tin kết nối",
+    CONNECTION: "Kết nối",
+    REAL_SMOKE: "Smoke thật",
+    CAPABILITY: "Năng lực",
+    BUDGET: "Ngân sách",
+    SECURITY: "Bảo mật scope"
+  }[value.toUpperCase()] ?? "Kiểm tra kỹ thuật";
 }
 
 function roleCopy(summary: ProviderSummary) {

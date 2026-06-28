@@ -266,8 +266,9 @@ class EnvConfigAuditService:
 
 class ProviderNextActionService:
     def for_checks(self, provider_key: str, checks: list[ProviderCheckDraft]) -> str:
+        readiness_checks = [check for check in checks if _counts_for_readiness(check)] or checks
         for state in ("BLOCKED", "FAILED", "WARNING", "UNKNOWN", "SKIPPED"):
-            for check in checks:
+            for check in readiness_checks:
                 if check.check_state == state and check.next_action:
                     return check.next_action
         return "Không cần thao tác thêm trước khi chạy bước readiness tiếp theo."
@@ -1146,7 +1147,7 @@ class RealSmokeOrchestratorService:
         try:
             cloud_ref, verification = GoogleDriveUploadService(self.session).upload_verified(
                 local_path=local_path,
-                media_type="READINESS_SMOKE",
+                media_type="OTHER",
                 company_id=None,
                 channel_workspace_id=None,
                 video_project_id=None,
@@ -1320,7 +1321,8 @@ def _ollama_models_from_lanes(lanes: list[Any]) -> list[str]:
 
 
 def _provider_state(checks: list[ProviderCheckDraft]) -> str:
-    states = [check.check_state for check in checks]
+    readiness_checks = [check for check in checks if _counts_for_readiness(check)] or checks
+    states = [check.check_state for check in readiness_checks]
     if any(state in {"BLOCKED", "FAILED"} for state in states):
         return "BLOCKED"
     if any(state in {"WARNING", "UNKNOWN"} for state in states):
@@ -1328,6 +1330,10 @@ def _provider_state(checks: list[ProviderCheckDraft]) -> str:
     if any(state == "SKIPPED" for state in states):
         return "WARNING"
     return "PASS"
+
+
+def _counts_for_readiness(check: ProviderCheckDraft) -> bool:
+    return not (check.provider_key == "google-drive" and check.check_type == "REAL_SMOKE")
 
 
 def _smoke_state(checks: list[ProviderCheckDraft]) -> str | None:
@@ -1383,6 +1389,7 @@ def _snapshot_parts(
     summaries: list[ProviderSummaryRead],
     checks: list[ProviderCheckDraft],
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    readiness_checks = [check for check in checks if _counts_for_readiness(check)]
     blocking = [
         {
             "provider_key": check.provider_key,
@@ -1391,7 +1398,7 @@ def _snapshot_parts(
             "next_action": check.next_action,
             "reason_codes": list(check.reason_codes),
         }
-        for check in checks
+        for check in readiness_checks
         if check.check_state in {"BLOCKED", "FAILED"}
     ]
     warning = [
@@ -1402,7 +1409,7 @@ def _snapshot_parts(
             "next_action": check.next_action,
             "reason_codes": list(check.reason_codes),
         }
-        for check in checks
+        for check in readiness_checks
         if check.check_state in {"WARNING", "UNKNOWN", "SKIPPED"}
     ]
     actions = [

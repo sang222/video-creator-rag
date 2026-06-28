@@ -90,6 +90,7 @@ export type ChannelSummary = {
   health_status: string;
   next_action: string;
   daily_generation_allowed: boolean;
+  upload_counts?: PublishLedgerCounts;
 };
 
 export type ChannelWorkspace = {
@@ -100,6 +101,7 @@ export type ChannelWorkspace = {
   daily_runs: Array<Record<string, unknown>>;
   approvals: ApprovalQueueItem[];
   uploaded_videos: Array<Record<string, unknown>>;
+  publish_ledger?: PublishLedgerCounts & { operator_summary_vi?: string };
   media_storage: Record<string, unknown>;
   provider_health: Record<string, unknown>;
   technical_appendix: Record<string, unknown>;
@@ -112,6 +114,11 @@ export type UploadedVideoListItem = {
   platform: string;
   platform_video_id: string;
   video_url: string;
+  external_video_id?: string | null;
+  external_url?: string | null;
+  actual_visibility?: string | null;
+  verification_status: string;
+  analytics_sync_status: string;
   published_at: string;
   metrics: Record<string, number | string | null>;
   freshness: string;
@@ -251,4 +258,105 @@ export type AuthSession = {
   auth_mode: string;
   local_dev_note: string;
   user?: CurrentOperatorUser | null;
+};
+
+export type PublishLedgerCounts = {
+  need_upload_count: number;
+  waiting_backfill_count: number;
+  uploaded_count: number;
+  waiting_verification_count: number;
+  verified_count: number;
+  analytics_not_configured_count?: number;
+  blocked_count?: number;
+};
+
+export type HumanUploadTask = {
+  id: string;
+  channel_id: string;
+  video_project_id?: string | null;
+  first_scripted_video_package_id?: string | null;
+  publish_package_id?: string | null;
+  destination: "YOUTUBE";
+  status: string;
+  upload_card_ref?: string | null;
+  title_snapshot: string;
+  description_snapshot?: string | null;
+  thumbnail_ref?: unknown;
+  subtitle_refs: Array<Record<string, unknown>>;
+  required_assets: Array<Record<string, unknown>>;
+  checklist: Array<Record<string, unknown>>;
+  actual_uploaded_video_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  blocked_reason?: string | null;
+  operator_note?: string | null;
+  next_action: string;
+};
+
+export type HumanUploadTaskList = PublishLedgerCounts & {
+  channel_id: string;
+  tasks: HumanUploadTask[];
+  unverified_count: number;
+};
+
+export type UploadedVideoLedger = {
+  id: string;
+  channel_id: string;
+  video_project_id?: string | null;
+  first_scripted_video_package_id?: string | null;
+  publish_package_id?: string | null;
+  human_upload_task_id?: string | null;
+  destination: "YOUTUBE";
+  external_video_id: string;
+  external_url: string;
+  actual_title?: string | null;
+  actual_visibility: string;
+  actual_publish_time?: string | null;
+  actual_upload_time?: string | null;
+  playlist_id?: string | null;
+  thumbnail_uploaded?: boolean | null;
+  subtitles_uploaded?: boolean | null;
+  description_modified_from_package?: boolean | null;
+  package_metadata_diff?: Record<string, unknown> | null;
+  verification_status: string;
+  analytics_sync_status: string;
+  last_verified_at?: string | null;
+  last_analytics_sync_at?: string | null;
+  operator_note?: string | null;
+  next_action: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UploadedVideoLedgerList = {
+  channel_id: string;
+  uploaded_videos: UploadedVideoLedger[];
+};
+
+export type PublishLedger = PublishLedgerCounts & {
+  channel_id: string;
+  latest_tasks: HumanUploadTask[];
+  latest_uploaded_videos: UploadedVideoLedger[];
+  operator_summary_vi: string;
+};
+
+export type BackfillUploadedVideoInput = {
+  youtube_url_or_video_id: string;
+  actual_title?: string | null;
+  actual_visibility?: string | null;
+  actual_publish_time?: string | null;
+  actual_upload_time?: string | null;
+  playlist_id?: string | null;
+  thumbnail_uploaded?: boolean | null;
+  subtitles_uploaded?: boolean | null;
+  description_modified_from_package?: boolean | null;
+  operator_note?: string | null;
+};
+
+export type BackfillUploadedVideoResult = {
+  task: HumanUploadTask;
+  uploaded_video: UploadedVideoLedger;
+  parsed_video_id: string;
+  next_action: string;
 };

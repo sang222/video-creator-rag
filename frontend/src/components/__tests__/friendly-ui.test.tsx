@@ -27,12 +27,12 @@ describe("friendly Vietnamese dashboard UI", () => {
   it("shows Vietnamese sidebar labels", () => {
     render(<AppShell><main>Trang thử</main></AppShell>);
 
-    expect(screen.getByText("Trung tâm")).toBeInTheDocument();
-    expect(screen.getByText("Kênh")).toBeInTheDocument();
-    expect(screen.getByText("Video đã upload")).toBeInTheDocument();
-    expect(screen.getByText("Gói publish")).toBeInTheDocument();
-    expect(screen.getByText("Tệp Drive")).toBeInTheDocument();
-    expect(screen.getByText("Vận hành")).toBeInTheDocument();
+    expect(screen.getAllByText("Trung tâm").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Kênh").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Video đã upload").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Gói publish").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Tệp Drive").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Vận hành").length).toBeGreaterThan(0);
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
     expect(screen.queryByText("Uploaded")).not.toBeInTheDocument();
     expect(screen.queryByText("Không gian kênh")).not.toBeInTheDocument();

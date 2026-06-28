@@ -218,6 +218,14 @@ from app.contracts import (
     FirstScriptedVideoPackageRead,
     FirstScriptedVideoPackageRequest,
     FirstScriptedVideoPackageReviewRead,
+    BackfillUploadedVideoRequest,
+    BackfillUploadedVideoResult,
+    HumanUploadTaskLedgerRead,
+    HumanUploadTaskListRead,
+    PublishLedgerRead,
+    UploadedVideoLedgerRead,
+    UploadedVideoListRead,
+    UploadedVideoVerificationResult,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
 from app.contracts.m11 import (
@@ -333,6 +341,7 @@ from app.services import (
     PromptRegistryService,
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
+    PublishHandoffLedgerService,
 )
 from app.services.m11 import (
     M11ChannelLifecycleService,
@@ -574,6 +583,52 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return M11DashboardService(session).workspace(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channels/{channel_id}/upload-tasks", response_model=HumanUploadTaskListRead)
+    def list_channel_upload_tasks(
+        channel_id: uuid.UUID,
+        status: str | None = None,
+        destination: str | None = None,
+        video_project_id: uuid.UUID | None = None,
+        package_id: uuid.UUID | None = None,
+    ) -> HumanUploadTaskListRead:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).list_upload_tasks(
+                    channel_id=channel_id,
+                    status=status,
+                    destination=destination,
+                    video_project_id=video_project_id,
+                    package_id=package_id,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channels/{channel_id}/uploaded-videos", response_model=UploadedVideoListRead)
+    def list_channel_uploaded_videos(
+        channel_id: uuid.UUID,
+        verification_status: str | None = None,
+        analytics_sync_status: str | None = None,
+        actual_visibility: str | None = None,
+    ) -> UploadedVideoListRead:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).list_uploaded_videos(
+                    channel_id=channel_id,
+                    verification_status=verification_status,
+                    analytics_sync_status=analytics_sync_status,
+                    actual_visibility=actual_visibility,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channels/{channel_id}/publish-ledger", response_model=PublishLedgerRead)
+    def get_channel_publish_ledger(channel_id: uuid.UUID) -> PublishLedgerRead:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).publish_ledger(channel_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -1590,6 +1645,14 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/uploaded-videos/{uploaded_video_id}/verify", response_model=UploadedVideoVerificationResult)
+    def verify_uploaded_video(uploaded_video_id: uuid.UUID) -> UploadedVideoVerificationResult:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).verify_uploaded_video(uploaded_video_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.get("/uploaded-videos/{uploaded_video_id}", response_model=UploadedVideoRead)
     def get_uploaded_video(uploaded_video_id: uuid.UUID) -> UploadedVideoRead:
         try:
@@ -2240,6 +2303,33 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return FirstScriptedVideoPackageService(session).review(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-packages/{package_id}/upload-task", response_model=HumanUploadTaskLedgerRead)
+    def create_upload_task_from_video_package(package_id: uuid.UUID) -> HumanUploadTaskLedgerRead:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).create_upload_task_from_package(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/upload-tasks/{task_id}/start", response_model=HumanUploadTaskLedgerRead)
+    def start_human_upload_task(task_id: uuid.UUID) -> HumanUploadTaskLedgerRead:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).start_upload_task(task_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/upload-tasks/{task_id}/backfill-uploaded-video", response_model=BackfillUploadedVideoResult)
+    def backfill_human_uploaded_video(
+        task_id: uuid.UUID,
+        data: BackfillUploadedVideoRequest,
+    ) -> BackfillUploadedVideoResult:
+        try:
+            with session_scope() as session:
+                return PublishHandoffLedgerService(session).backfill_uploaded_video(task_id=task_id, data=data)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -3548,11 +3638,16 @@ def _uploaded_video(uploaded: Any) -> dict[str, Any]:
         "publish_handoff_package_id": uploaded.publish_handoff_package_id,
         "manual_publish_confirmation_id": uploaded.manual_publish_confirmation_id,
         "render_package_snapshot_id": uploaded.render_package_snapshot_id,
+        "first_scripted_video_package_id": uploaded.first_scripted_video_package_id,
+        "human_upload_task_id": uploaded.human_upload_task_id,
+        "destination": uploaded.destination,
         "source_manifest_snapshot_id": uploaded.source_manifest_snapshot_id,
         "rights_envelope_ref": uploaded.rights_envelope_ref,
         "platform": uploaded.platform,
         "platform_video_id": uploaded.platform_video_id,
         "video_url": uploaded.video_url,
+        "external_video_id": uploaded.platform_video_id,
+        "external_url": uploaded.video_url,
         "published_at": uploaded.published_at,
         "publish_status": uploaded.publish_status,
         "actual_metadata": uploaded.actual_metadata,
@@ -3560,6 +3655,20 @@ def _uploaded_video(uploaded: Any) -> dict[str, Any]:
         "lineage_refs": uploaded.lineage_refs,
         "monitoring_state": uploaded.monitoring_state,
         "operator_summary": uploaded.operator_summary,
+        "actual_title": uploaded.actual_title,
+        "actual_visibility": uploaded.actual_visibility,
+        "actual_publish_time": uploaded.actual_publish_time,
+        "actual_upload_time": uploaded.actual_upload_time,
+        "playlist_id": uploaded.playlist_id,
+        "thumbnail_uploaded": uploaded.thumbnail_uploaded,
+        "subtitles_uploaded": uploaded.subtitles_uploaded,
+        "description_modified_from_package": uploaded.description_modified_from_package,
+        "package_metadata_diff": uploaded.package_metadata_diff,
+        "verification_status": uploaded.verification_status,
+        "analytics_sync_status": uploaded.analytics_sync_status,
+        "last_verified_at": uploaded.last_verified_at,
+        "last_analytics_sync_at": uploaded.last_analytics_sync_at,
+        "operator_note": uploaded.operator_note,
         "created_at": uploaded.created_at,
         "updated_at": uploaded.updated_at,
     }

@@ -101,19 +101,31 @@ const labels: Record<string, string> = {
   NOT_VERIFIED: "Chưa xác minh",
   UPLOADED: "Đã upload",
   UPLOAD_PENDING: "Chờ upload thủ công",
+  READY_FOR_HUMAN_UPLOAD: "Cần upload thủ công",
+  HUMAN_UPLOAD_IN_PROGRESS: "Đang upload thủ công",
+  UPLOADED_WAITING_BACKFILL: "Chờ nhập video_id",
+  BACKFILLED_WAITING_VERIFICATION: "Chờ xác minh YouTube",
+  UPLOADED_VERIFIED: "Đã upload và xác minh",
+  UPLOADED_UNVERIFIED: "Đã upload, chưa xác minh",
   PUBLISHED: "Đã publish",
   MANUAL_CONFIRMATION_PENDING: "Chờ xác nhận thủ công",
+  VERIFIED_PUBLIC: "Đã xác minh public",
+  VERIFIED_OWNER: "Đã xác minh owner",
+  VERIFICATION_UNAVAILABLE: "Chưa kết nối YouTube",
+  VERIFICATION_FAILED: "Xác minh thất bại",
+  SYNCED: "Đã sync",
   PUBLIC: "Công khai",
   PRIVATE: "Riêng tư",
   UNLISTED: "Không công khai",
+  SCHEDULED: "Đã lên lịch",
   YOUTUBE: "YouTube"
 };
 
 function toneFor(value: string) {
   const normalized = value.toUpperCase();
-  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED"].includes(normalized)) return "success";
-  if (["PAUSED", "PARTIAL", "WARNING", "SKIPPED", "SMOKE_SKIPPED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_CREDENTIAL", "NEEDS_CONFIG", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW", "PENDING", "QUEUED", "IN_PROGRESS", "UPLOAD_PENDING", "MANUAL_CONFIRMATION_PENDING"].includes(normalized)) return "warning";
-  if (["BLOCKED", "BLOCK", "FAILED", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH"].includes(normalized)) return "danger";
+  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "VERIFIED_PUBLIC", "VERIFIED_OWNER", "UPLOADED_VERIFIED", "SYNCED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED"].includes(normalized)) return "success";
+  if (["PAUSED", "PARTIAL", "WARNING", "SKIPPED", "SMOKE_SKIPPED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_CREDENTIAL", "NEEDS_CONFIG", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW", "PENDING", "QUEUED", "IN_PROGRESS", "UPLOAD_PENDING", "READY_FOR_HUMAN_UPLOAD", "HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL", "BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED", "MANUAL_CONFIRMATION_PENDING", "NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "NOT_CONFIGURED"].includes(normalized)) return "warning";
+  if (["BLOCKED", "BLOCK", "FAILED", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH", "VERIFICATION_FAILED"].includes(normalized)) return "danger";
   if (["WEAK", "STRONG", "OBSERVING", "CONFIGURED"].includes(normalized)) return "info";
   return "neutral";
 }
