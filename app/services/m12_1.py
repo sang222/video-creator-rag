@@ -142,9 +142,11 @@ class PromptRegistryRepository:
                 system_delta,
                 "# Output Contract",
                 (
-                    "Return JSON only. The JSON must match the BaseEnvelope schema and include "
-                    "limitations, confidence_label, risk_level, next_action, operator_summary_vi, "
-                    "technical_appendix, and artifact."
+                    "Return JSON only as one top-level BaseEnvelope object. Do not return an artifact-only object. "
+                    "The top-level keys must be exactly contract_version, agent_key, status, confidence_label, "
+                    "risk_level, evidence_refs, limitations, next_action, operator_summary_vi, technical_appendix, "
+                    "and artifact. Use contract_version \"m12.1.0\" and the exact requested agent_key. "
+                    "Use uppercase enum values only."
                 ),
             ]
         )
@@ -335,6 +337,8 @@ class PromptRegistryService:
         if parsed is None:
             result = {"valid": False, "errors": ["Output is not parseable JSON."], "schema_ref": data.schema_ref}
             return PromptOutputValidationResult(status="ERROR", validation_result=result, repair_attempts=repair_attempts, reason_codes=["JSON_PARSE_FAILED"])
+        parsed, shape_attempts = repair_envelope_shape(parsed, expected_agent_key=data.agent_key, max_attempts=max(0, 2 - len(repair_attempts)))
+        repair_attempts = (repair_attempts + shape_attempts)[:2]
         validation = validate_base_envelope(parsed, schema=schema, expected_agent_key=data.agent_key)
         status = "OK" if validation["valid"] else "REVIEW_REQUIRED"
         if parsed.get("status") in {"BLOCK", "REFUSAL", "ERROR"}:
@@ -775,6 +779,81 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
             return parsed, attempts[: max(0, index)]
         return {"value": parsed}, attempts[: max(0, index)]
     return None, attempts[:2]
+
+
+def repair_envelope_shape(
+    parsed: dict[str, Any],
+    *,
+    expected_agent_key: str,
+    max_attempts: int = 2,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if max_attempts <= 0:
+        return parsed, []
+    repaired = dict(parsed)
+    attempts: list[dict[str, Any]] = []
+
+    metadata_changed = False
+    for key, value in {
+        "contract_version": PROMPT_CONTRACT_VERSION,
+        "evidence_refs": [],
+        "limitations": [],
+        "next_action": None,
+        "technical_appendix": {},
+    }.items():
+        if key not in repaired:
+            repaired[key] = value
+            metadata_changed = True
+    if metadata_changed:
+        attempts.append(
+            {
+                "repair_type": "fill_missing_envelope_metadata",
+                "semantic_change_allowed": False,
+                "fields": [
+                    key
+                    for key in [
+                        "contract_version",
+                        "agent_key",
+                        "evidence_refs",
+                        "limitations",
+                        "next_action",
+                        "technical_appendix",
+                    ]
+                    if key not in parsed
+                ],
+            }
+        )
+
+    if len(attempts) >= max_attempts:
+        return repaired, attempts[:max_attempts]
+
+    if repaired.get("agent_key") != expected_agent_key:
+        repaired["agent_key"] = expected_agent_key
+        attempts.append({"repair_type": "normalize_envelope_agent_key", "semantic_change_allowed": False})
+
+    if len(attempts) >= max_attempts:
+        return repaired, attempts[:max_attempts]
+
+    enum_changed = False
+    enum_fields = {
+        "status": ENVELOPE_ALLOWED_STATUS,
+        "confidence_label": ENVELOPE_ALLOWED_CONFIDENCE,
+        "risk_level": {item for item in ENVELOPE_ALLOWED_RISK if isinstance(item, str)},
+    }
+    for key, allowed in enum_fields.items():
+        value = repaired.get(key)
+        if isinstance(value, str):
+            upper_value = value.upper()
+            if key == "risk_level" and value.lower() in {"null", "none"}:
+                repaired[key] = None
+                enum_changed = True
+                continue
+            if upper_value in allowed and upper_value != value:
+                repaired[key] = upper_value
+                enum_changed = True
+    if enum_changed:
+        attempts.append({"repair_type": "normalize_envelope_enum_casing", "semantic_change_allowed": False})
+
+    return repaired, attempts[:max_attempts]
 
 
 def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], expected_agent_key: str) -> dict[str, Any]:

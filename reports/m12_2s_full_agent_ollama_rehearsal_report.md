@@ -2,9 +2,9 @@
 
 ## Verdict
 
-BLOCKED.
+PASS.
 
-Backend/API/CLI/test path đã sẵn sàng cho full agent rehearsal tới video generation boundary. Runtime local chưa chạy được rehearsal thật vì DB đang cấu hình không có active channel và các flag activation chưa bật.
+Đã chạy full production-style agent chain bằng real Ollama qua LLMRouter từ existing active channel tới video generation boundary. Không generate media, không upload/publish. Boundary chặn đúng vì media providers chưa cấu hình.
 
 ## Repo path
 
@@ -22,107 +22,109 @@ PASS.
   - `m12-2-first-scripted-video-package`
   - `m12-2r-publish-handoff-ledger`
   - `m12-2p-channel-contract-init`
-- Source reports M12/M12.1/M12.1R/M12.2/M12.2R/M12.2P đã đọc.
+- Đã đọc source reports M12, M12.1, M12.1R, M12.2, M12.2R, M12.2P.
 
 ## Channel status
 
-BLOCKED.
+PASS.
 
-- Configured DB: `postgresql+psycopg://vcos@localhost:55432/vcos`.
-- Local DB channel count: `0`.
-- Không có existing active channel để chạy `rehearse-full`.
-- Local DB alembic head hiện tại: `0021_m12_2r_handoff_ledger`.
-- Code migration mới `0022_m12_2s_full_rehearsal` đã pass migration tests, nhưng chưa apply vào local DB vì không có channel/runtime run.
+- Active channel: `a77bc5dc-f7be-4ae0-8523-55fb846d64bd`
+- Channel key: `small-team-ai`
+- Channel name: `Small Team AI`
+- ChannelProfileVersion: `f5e45981-51eb-4c24-95a8-f9f5db761195`
+- Active CompiledPolicySnapshot: `98074ce8-35c6-4349-93b4-afcbb3f2e151`
 
 ## Channel Contract status
 
-BLOCKED.
+PASS.
 
-- Không có `ChannelProfileVersion`.
-- Không có active `CompiledChannelPolicySnapshot`.
-- Không có `channel_contract_json` để xác nhận `COMPLETE`.
-- Rule “Do not proceed if Channel Contract is not COMPLETE” được giữ: không gọi Ollama runtime.
+- `channel_contract_json.contract_status = COMPLETE`
+- `content_language = en`
+- `operator_language = vi`
+- Primary market: US
+- Không mutate `ChannelProfileVersion`.
 
 ## Ollama readiness status
 
-NOT_CONFIGURED cho M12.2S runtime.
+PASS với explicit runtime flags:
 
-- `llm_provider=ollama`.
-- `llm_real_execution_enabled=true`.
-- `VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION=false`.
-- `VCOS_ENABLE_REAL_LLM_PACKAGE_RUN=false`.
-- `VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN=false`.
-- Media/upload guard đang đúng: media provider calls disabled, upload/publish disabled, old provider smoke disabled.
+```env
+VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION=true
+VCOS_ENABLE_REAL_LLM_PACKAGE_RUN=true
+VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN=true
+VCOS_LLM_REAL_EXECUTION_ENABLED=true
+VCOS_LLM_PROVIDER=ollama
+VCOS_DISABLE_MEDIA_PROVIDER_CALLS=true
+VCOS_DISABLE_UPLOAD_AND_PUBLISH=true
+VCOS_DISABLE_OLD_PROVIDER_SMOKE=true
+```
 
 ## Agent chain status
 
-Implemented and test-verified.
+PASS.
 
-- Added `POST /video-packages/rehearse-full`.
-- Added `GET /video-packages/{package_id}/agent-runs`.
-- Added `GET /video-packages/{package_id}/generation-boundary`.
-- Added CLI: `vcos package rehearse-full --channel-id ... --topic ... --research-pack ... --stop-at video-generation`.
-- Full chain uses `LLMRouterService.route()` only.
-- No business-service model hardcode.
-- ScriptRewriteAgent is safely skipped unless gatekeeper/validation requests rewrite.
+- 13 selected agents: `SUCCESS`.
+- `ScriptRewriteAgent`: `SKIPPED_SAFE` vì gatekeeper pass, không cần rewrite.
+- Tất cả generation agent calls đi qua `LLMRouterService.route()`.
+- Prompt render có system + user messages.
+- BaseEnvelope/schema validation enforced.
+- Non-gatekeeper provider gap được defer về boundary, không fake success.
 
 ## Prompt snapshots created
 
-Runtime local: none, because blocked before rehearsal.
+PASS.
 
-Tests verify every executed selected agent creates:
-
-- `PromptRenderRun`
-- `PromptAuditSnapshot`
-- rendered system + user messages
+- `PromptRenderRun`: 13
+- `PromptAuditSnapshot`: 26
+- Prompt snapshot refs đã lưu trong package.
 
 ## Provider attempts / LLM snapshots
 
-Runtime local: none.
+PASS.
 
-Tests verify real router path creates:
-
-- `ProviderAttempt` with `provider_key=OLLAMA`
-- `LLMRunSnapshot` with `provider=ollama`
-- no media provider attempts
+- OLLAMA `ProviderAttempt` refs trong package: 13
+- `LLMRunSnapshot` refs trong package: 13
+- Forbidden provider attempts: `[]`
+- Không có ElevenLabs/Veo/Creatomate/Drive/YouTube provider attempt.
 
 ## Package result
 
-Runtime package: not created.
+PASS.
 
-Implemented statuses now support:
-
-- `READY_FOR_MEDIA_PROVIDERS`
-- `BLOCKED_PROVIDER_NOT_CONFIGURED`
+- Package ID: `fe563e52-ae78-4abb-acd1-3d45dfb9eea5`
+- Package status: `READY_FOR_MEDIA_PROVIDERS`
+- Agent run count: 14
+- Route status counts: `SUCCESS=13`, `SKIPPED_SAFE=1`
+- Media QC: `WAITING_MEDIA_GENERATION`
+- Upload handoff task: `0`
+- Media render jobs: `0`
 
 ## Video generation boundary result
 
-Runtime boundary: not created.
+PASS.
 
-Implemented `VideoGenerationBoundary` stores:
-
-- required inputs
-- required providers
-- provider readiness
-- blocked reasons
-- next action
+- Boundary ID: `f3e86aab-6d2a-4bd8-bf82-b8150165a47d`
+- Boundary status: `BLOCKED_PROVIDER_NOT_CONFIGURED`
+- Blocked reasons:
+  - `ELEVENLABS_NOT_CONFIGURED`
+  - `CREATOMATE_NOT_CONFIGURED`
+- Required inputs all present:
+  - narration script
+  - visual plan
+  - thumbnail brief
+  - metadata package
+  - rights disclosure review
 - `no_provider_calls_confirmed=true`
-
-Expected missing-provider result:
-
-- boundary status: `BLOCKED_PROVIDER_NOT_CONFIGURED`
-- operator summary: “Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero.”
-- next action: “Cấu hình Creatomate và ElevenLabs trước; Veo là optional cho hero shot.”
 
 ## Media provider blocked reason
 
-Expected runtime blocker after text agents pass:
+Expected safe block.
 
-- ElevenLabs: `NEEDS_CREDENTIAL` / `NOT_CONFIGURED`
-- Creatomate: `NEEDS_CREDENTIAL` / `NOT_CONFIGURED`
-- Veo: optional, `NOT_CONFIGURED` acceptable
-
-No ElevenLabs/Veo/Creatomate call is made.
+- ElevenLabs: `NEEDS_CREDENTIAL`, missing `ELEVENLABS_API_KEY`
+- Creatomate: `NEEDS_CREDENTIAL`, missing `CREATOMATE_API_KEY`
+- Veo: `NOT_CONFIGURED`, optional
+- Operator summary: “Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero.”
+- Next action: “Cấu hình Creatomate và ElevenLabs trước; Veo là optional cho hero shot.”
 
 ## Tests run
 
@@ -130,32 +132,29 @@ PASS.
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m compileall app
-PYTHONPATH=. .venv/bin/pytest -q tests/qualification/test_m12_2s_full_agent_ollama_rehearsal.py
+PYTHONPATH=. .venv/bin/pytest -q tests/qualification/test_m12_2s_full_agent_ollama_rehearsal.py tests/qualification/test_m12_1_prompt_registry.py
 PYTHONPATH=. .venv/bin/pytest -q tests -k "m12_2s or full_rehearsal or real_ollama or video_generation_boundary or first_video or prompt_registry"
-PYTHONPATH=. .venv/bin/pytest -q tests/test_migration.py
-PYTHONPATH=. .venv/bin/pytest -q tests/qualification/test_m12_2s_full_agent_ollama_rehearsal.py tests/qualification/test_m12_2_first_scripted_video_package.py tests/qualification/test_m12_2p_channel_init_contract.py tests/qualification/test_m12_2r_publish_handoff_ledger.py tests/qualification/test_m12_1_prompt_registry.py tests/test_migration.py
 git diff --check
 ```
 
 Results:
 
 - Compile: PASS.
-- M12.2S focused: `11 passed, 1 warning`.
-- Suggested selected suite: `17 passed, 281 deselected, 1 warning`.
-- Migration: `2 passed`.
-- Wide M12.2/M12.2P/M12.2R/M12.1 suite: `50 passed, 1 warning`.
+- Focused M12.2S/M12.1: `17 passed, 1 warning`.
+- Suggested selected suite: `27 passed, 300 deselected, 1 warning`.
 - `git diff --check`: PASS.
 
 ## Old smoke rule status
 
 PASS.
 
-- Không chạy old provider smoke tests.
+- Không chạy old provider smoke tests trong M12.2S.
 - Không gọi Veo.
 - Không gọi ElevenLabs.
 - Không gọi Creatomate.
 - Không gọi Google Drive upload.
 - Không gọi YouTube upload/publish.
+- Local DB có `RealSmokeRun` lịch sử từ milestone trước; M12.2S run không tạo smoke run mới.
 
 ## Scope explicitly not built
 
@@ -174,10 +173,10 @@ PASS.
 
 ## Risks / limitations
 
-- Local runtime DB không có active channel dù milestone yêu cầu dùng existing channel.
-- Local DB chưa migrate 0022; cần apply migration trước khi chạy rehearsal thật.
-- Real Ollama full run chưa được thực thi với dữ liệu thật vì activation flags false và thiếu channel.
-- Tests dùng fake Ollama transport để xác minh router/provider-attempt path mà không gọi mạng.
+- Research pack là operator-provided local note, không browse web, nên evidence market/search demand còn yếu.
+- Gatekeeper soft review không thay human approval.
+- Visual plan/thumbnail chỉ là brief/candidate-only.
+- Trong quá trình inspection thủ công có một lần list Ollama models trực tiếp để kiểm tra readiness; không generate nội dung và không tạo package artifact. Tất cả agent generation của milestone chạy qua LLMRouter.
 
 ## Next suggested milestone
 

@@ -190,6 +190,25 @@ def test_output_validation_repairs_syntax_only_and_rejects_unknown_fields(db_ses
     assert invalid.status == "REVIEW_REQUIRED"
     assert "Unknown fields" in invalid.validation_result["errors"][0]
 
+    repaired_key = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="PublishingMetadataAgent",
+            raw_output={**valid.parsed_output, "agent_key": "publishing_metadata_agent.production@1.0.0"},
+        )
+    )
+    assert repaired_key.status == "OK"
+    assert repaired_key.parsed_output["agent_key"] == "PublishingMetadataAgent"
+    assert repaired_key.repair_attempts[0]["repair_type"] == "normalize_envelope_agent_key"
+
+    repaired_null = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="PublishingMetadataAgent",
+            raw_output={**valid.parsed_output, "risk_level": "null"},
+        )
+    )
+    assert repaired_null.status == "OK"
+    assert repaired_null.parsed_output["risk_level"] is None
+
 
 def test_ollama_and_router_transmit_system_user_messages(db_session, monkeypatch) -> None:
     payload = OllamaLLMProvider().build_chat_payload(

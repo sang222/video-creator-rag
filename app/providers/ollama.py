@@ -56,6 +56,8 @@ class OllamaLLMProvider:
             return _error_response("PROVIDER_HTTP_ERROR", f"Ollama returned HTTP {status}", started, retryable=status >= 500)
         message = response_payload.get("message") or {}
         content = str(message.get("content") or "")
+        if request.response_format == "json" and not content:
+            return _error_response("PROVIDER_EMPTY_JSON_CONTENT", "Ollama returned empty JSON content.", started, retryable=True)
         output = {
             "provider_key": self.provider_key,
             "model": response_payload.get("model") or request.model,
@@ -76,6 +78,7 @@ class OllamaLLMProvider:
         }
         if request.response_format == "json":
             payload["format"] = "json"
+            payload["think"] = False
         return payload
 
     def extract_usage(self, payload: dict[str, Any]) -> dict[str, int | None]:

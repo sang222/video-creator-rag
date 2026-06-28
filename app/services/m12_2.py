@@ -921,6 +921,7 @@ class FirstScriptedVideoPackageService:
             prompt_audit_snapshot_refs.append(str(audit_id))
         agent_run_refs.append(self._agent_ref(step, render, route=route, validation=validation.model_dump(mode="json")))
 
+        validation_is_structurally_valid = bool(validation.validation_result.get("valid")) if isinstance(validation.validation_result, dict) else False
         if validation.parsed_output is None or validation.status not in {"OK", "REVIEW_REQUIRED", "BLOCK"}:
             artifacts[step.artifact_key] = validation.validation_result
             return {
@@ -928,7 +929,7 @@ class FirstScriptedVideoPackageService:
                 "next_action": "Sửa output schema/LLM response trước khi tiếp tục full rehearsal.",
                 "parsed_output": validation.parsed_output,
             }
-        if validation.status == "REVIEW_REQUIRED":
+        if validation.status == "REVIEW_REQUIRED" and not validation_is_structurally_valid:
             artifacts[step.artifact_key] = {
                 "validation_result": validation.validation_result,
                 "parsed_output": validation.parsed_output,
@@ -941,7 +942,10 @@ class FirstScriptedVideoPackageService:
             }
 
         output = validation.parsed_output
-        artifacts[step.artifact_key] = output.get("artifact") or {}
+        artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        if step.agent_key == "ProviderReadinessSummaryAgent" and not artifact:
+            artifact = self._provider_readiness_summary_artifact(provider_readiness_snapshot, output)
+        artifacts[step.artifact_key] = artifact
         agent_block = self._full_rehearsal_artifact_block(step.agent_key, artifacts[step.artifact_key])
         if agent_block is not None:
             artifacts[f"{step.artifact_key}_review"] = agent_block
@@ -965,18 +969,59 @@ class FirstScriptedVideoPackageService:
 
         envelope_status = output.get("status")
         if envelope_status == "BLOCK":
+            if step.agent_key == "ProviderReadinessSummaryAgent":
+                artifacts[f"{step.artifact_key}_review"] = {
+                    "status": "BLOCK",
+                    "source": "agent_envelope",
+                    "agent_key": step.agent_key,
+                    "expected_boundary_block": True,
+                    "reason_codes": ["PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"],
+                    "next_action": output.get("next_action"),
+                }
+                return {"stop_status": None, "next_action": None, "parsed_output": output}
             return {
                 "stop_status": "BLOCKED",
                 "next_action": output.get("next_action") or "Agent upstream trả BLOCK; không tiếp tục downstream.",
                 "parsed_output": output,
             }
         if envelope_status == "REVIEW_REQUIRED":
+            artifacts[f"{step.artifact_key}_review"] = {
+                "status": "REVIEW_REQUIRED",
+                "source": "agent_envelope",
+                "agent_key": step.agent_key,
+                "next_action": output.get("next_action"),
+            }
             return {
-                "stop_status": "REVIEW_REQUIRED",
-                "next_action": output.get("next_action") or "Agent upstream cần human review; không tiếp tục downstream.",
+                "stop_status": None,
+                "next_action": None,
                 "parsed_output": output,
             }
         return {"stop_status": None, "next_action": None, "parsed_output": output}
+
+    def _provider_readiness_summary_artifact(
+        self,
+        provider_readiness_snapshot: dict[str, Any],
+        output: dict[str, Any],
+    ) -> dict[str, Any]:
+        providers: dict[str, dict[str, Any]] = {}
+        for summary in provider_readiness_snapshot.get("provider_summaries", []):
+            if not isinstance(summary, dict) or not summary.get("provider_key"):
+                continue
+            provider_key = str(summary["provider_key"]).lower()
+            if provider_key not in {"elevenlabs", "creatomate", "google-vertex-veo", "cloud-final-renderer"}:
+                continue
+            providers[provider_key] = {
+                "readiness_state": summary.get("readiness_state"),
+                "missing_env_keys": summary.get("missing_env_keys") or [],
+                "reason_codes": summary.get("reason_codes") or [],
+                "next_action": summary.get("next_action"),
+            }
+        return {
+            "providers": providers,
+            "summary_status": output.get("status"),
+            "next_action": output.get("next_action"),
+            "operator_summary_vi": output.get("operator_summary_vi"),
+        }
 
     def _maybe_run_script_rewrite(
         self,
@@ -1198,6 +1243,38 @@ class FirstScriptedVideoPackageService:
                 "no_prompt_self_mutation": True,
                 "no_channel_config_mutation": True,
                 "script_rewrite_rule": "Run ScriptRewriteAgent only when gatekeeper/validation explicitly requires rewrite; do not add new claims.",
+                "missing_media_provider_rule": (
+                    "Do not return REVIEW_REQUIRED or BLOCK only because ElevenLabs, Creatomate, or Veo are not configured. "
+                    "For valid text/review artifacts, record provider gaps in limitations; VideoGenerationBoundary will block provider execution."
+                ),
+                "script_writer_artifact_contract": {
+                    "required": "artifact.sentences",
+                    "sentence_item_fields": ["sentence_id", "text", "approx_seconds"],
+                    "sentence_id_format": "S1, S2, S3...",
+                },
+                "visual_plan_artifact_contract": {
+                    "required": "artifact.scenes",
+                    "scene_source_field": "intended_visual_source",
+                    "allowed_values": sorted(VISUAL_SOURCE_ALLOWLIST),
+                    "provider_backed_assets": "candidate-only; do not request or imply generation",
+                },
+                "media_qc_artifact_contract": {
+                    "no_media_file_exists": True,
+                    "allowed_artifact_status": ["NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"],
+                    "forbidden_status": ["PASS", "QC_PASS"],
+                    "provider_gap_handling": "limitations plus VideoGenerationBoundary, not BLOCK",
+                },
+                "rights_disclosure_artifact_contract": {
+                    "required_non_empty_artifact": True,
+                    "minimum_fields": ["result", "source_manifest_status", "ai_disclosure_needed", "rights_risk", "disclosure_notes"],
+                    "text_only_rehearsal_note": "future generated media still needs source/provider manifest review",
+                },
+                "provider_readiness_artifact_contract": {
+                    "missing_media_providers_expected_at_boundary": True,
+                    "top_level_status_for_valid_summary": "OK",
+                    "forbidden_top_level_status_for_missing_provider_only": ["BLOCK", "REVIEW_REQUIRED"],
+                    "minimum_artifact_fields": ["providers", "next_action"],
+                },
                 "visual_source_allowlist": sorted(VISUAL_SOURCE_ALLOWLIST),
                 "media_qc_expected_without_media": ["NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"],
             },
@@ -1255,12 +1332,14 @@ class FirstScriptedVideoPackageService:
     def _visual_plan_block(self, artifact: Any) -> dict[str, Any] | None:
         values = _find_visual_source_values(artifact)
         invalid = sorted(value for value in values if value not in VISUAL_SOURCE_ALLOWLIST)
-        if not invalid:
+        missing_scene_sources = _find_scenes_missing_visual_source(artifact)
+        if not invalid and not missing_scene_sources:
             return None
         return {
             "status": "REVIEW_REQUIRED",
             "reason_codes": ["VISUAL_SOURCE_NOT_ALLOWED"],
             "invalid_visual_sources": invalid,
+            "scenes_missing_intended_visual_source": missing_scene_sources,
             "allowed_visual_sources": sorted(VISUAL_SOURCE_ALLOWLIST),
         }
 
@@ -1281,6 +1360,18 @@ class FirstScriptedVideoPackageService:
                     **visual_block,
                     "next_action": "Sửa visual plan để chỉ dùng nguồn DIAGRAM/CARD/SCREENSHOT/EXISTING_ASSET/VEO hoặc Creatomate candidate-only.",
                 }
+        if agent_key == "ScriptWriterAgent" and not _has_sentence_ids(artifact):
+            return {
+                "status": "REVIEW_REQUIRED",
+                "reason_codes": ["SCRIPT_SENTENCE_IDS_REQUIRED"],
+                "next_action": "ScriptWriterAgent phải trả artifact.sentences với sentence_id/text/approx_seconds.",
+            }
+        if agent_key == "RightsDisclosureReviewer" and not _has_required_rights_review(artifact):
+            return {
+                "status": "REVIEW_REQUIRED",
+                "reason_codes": ["RIGHTS_DISCLOSURE_ARTIFACT_REQUIRED"],
+                "next_action": "RightsDisclosureReviewer phải trả artifact có result/source_manifest_status/ai_disclosure_needed/rights_risk/disclosure_notes.",
+            }
         if agent_key == "ThumbnailBriefAgent":
             rendered_keys = sorted(_find_forbidden_thumbnail_render_keys(artifact))
             if rendered_keys:
@@ -1520,6 +1611,47 @@ def _find_visual_source_values(value: Any) -> set[str]:
     return found
 
 
+def _find_scenes_missing_visual_source(value: Any) -> list[int | str]:
+    if not isinstance(value, dict):
+        return []
+    scenes = value.get("scenes")
+    if not isinstance(scenes, list):
+        return []
+    missing: list[int | str] = []
+    for index, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            missing.append(index)
+            continue
+        source = scene.get("intended_visual_source") or scene.get("visual_source") or scene.get("source_type")
+        if not isinstance(source, str) or not source:
+            missing.append(scene.get("section") or scene.get("sentence_id") or index)
+    return missing
+
+
+def _has_sentence_ids(value: Any) -> bool:
+    if isinstance(value, dict):
+        sentences = value.get("sentences")
+        if isinstance(sentences, list) and sentences:
+            return all(
+                isinstance(item, dict)
+                and isinstance(item.get("sentence_id"), str)
+                and isinstance(item.get("text"), str)
+                and item.get("approx_seconds") is not None
+                for item in sentences
+            )
+        return any(_has_sentence_ids(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_sentence_ids(item) for item in value)
+    return False
+
+
+def _has_required_rights_review(value: Any) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    required = {"result", "source_manifest_status", "ai_disclosure_needed", "rights_risk", "disclosure_notes"}
+    return required <= set(value)
+
+
 def _find_forbidden_thumbnail_render_keys(value: Any) -> set[str]:
     forbidden = {
         "render_url",
@@ -1545,7 +1677,7 @@ def _find_forbidden_thumbnail_render_keys(value: Any) -> set[str]:
 def _media_qc_status(value: Any) -> str | None:
     if not isinstance(value, dict):
         return None
-    for key in ("status", "qc_status", "result", "media_qc_status"):
+    for key in ("status", "artifact_status", "qc_status", "result", "media_qc_status"):
         if value.get(key):
             return str(value[key]).upper()
     return None

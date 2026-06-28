@@ -163,6 +163,7 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "source_manifest_status": "OPERATOR_NOTES_ONLY",
             "ai_disclosure_needed": True,
             "rights_risk": "MEDIUM",
+            "disclosure_notes": "Future generated media still needs source/provider manifest review.",
         },
         "GatekeeperSoftReviewAgent": {"result": gatekeeper_result, "findings": []},
         "UploadCardCopyAgent": {"title": "VCOS M12.2S", "description": "Paste-ready only.", "not_uploaded": True},
@@ -333,6 +334,32 @@ def test_m12_2s_gatekeeper_stops_or_marks_review_required(db_session, qualificat
     assert package.package_status == expected_status
     assert "upload_card_copy" not in package.artifacts
     assert db_session.query(HumanUploadTask).count() == 0
+
+
+def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    outputs = _outputs()
+    for output in outputs:
+        if output["agent_key"] == "ProviderReadinessSummaryAgent":
+            output["status"] = "BLOCK"
+            output["artifact"] = {}
+            output["next_action"] = "Configure ElevenLabs and Creatomate before media generation."
+
+    package = FirstScriptedVideoPackageService(
+        db_session,
+        settings=_settings(),
+        llm_router=FakeRouter(outputs),
+    ).rehearse_full(_request(scope.channel.id))
+
+    assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
+    assert package.artifacts["provider_readiness_summary_review"]["reason_codes"] == [
+        "PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"
+    ]
+    assert package.artifacts["provider_readiness_summary"]["providers"]
+    assert package.artifacts["media_qc_explanation"]["status"] == "WAITING_MEDIA_GENERATION"
+    boundary = db_session.query(VideoGenerationBoundary).one()
+    assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
+    assert "GATEKEEPER_BLOCK" not in boundary.blocked_reasons
 
 
 def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_factory) -> None:
