@@ -1,6 +1,9 @@
 import type {
   ChannelSummary,
   ChannelWorkspace,
+  ChannelContractDraft,
+  ChannelInitCompileResult,
+  ChannelInitDraft,
   Company,
   CommandCenter,
   DashboardQueues,
@@ -88,6 +91,49 @@ export function createCompany(input: { name: string; slug: string }) {
   return request<Company>("/companies", {
     method: "POST",
     body: JSON.stringify({ name: input.name, slug: input.slug })
+  });
+}
+
+export type MinimalChannelInitInput = {
+  company_id: string;
+  channel_name: string;
+  public_presence_mode: "EXISTING_PUBLIC_CHANNEL" | "NEW_CHANNEL_NO_PUBLIC_FOOTPRINT";
+  youtube_url_or_handle?: string | null;
+  website_url?: string | null;
+  social_profile_links?: string[];
+  operator_note_purpose: string;
+  intended_content_language?: string | null;
+  intended_primary_market?: string | null;
+  owner_operator_language: string;
+  initial_topic_pillar_hints?: string[];
+  source_usage_attestation: boolean;
+};
+
+export function createChannelInitDraft(input: MinimalChannelInitInput) {
+  return request<ChannelInitDraft>("/channel-init-drafts", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function researchChannelInitDraft(draftId: string) {
+  return request<ChannelContractDraft>(`/channel-init-drafts/${draftId}/research`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function reviewChannelInitDraft(draftId: string, decisions: Array<Record<string, unknown>>, humanNotes?: string) {
+  return request<ChannelContractDraft>(`/channel-init-drafts/${draftId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ decisions, human_notes: humanNotes ?? null })
+  });
+}
+
+export function compileChannelInitDraft(draftId: string) {
+  return request<ChannelInitCompileResult>(`/channel-init-drafts/${draftId}/compile`, {
+    method: "POST",
+    body: JSON.stringify({})
   });
 }
 

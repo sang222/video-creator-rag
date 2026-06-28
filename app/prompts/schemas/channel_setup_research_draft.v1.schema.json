@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vcos://schemas/channel_setup_research_draft/1.0.0",
+  "title": "VCOS Channel Setup Research Draft Envelope",
+  "type": "object",
+  "x-vcos-schema-version": "1.0.0",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "agent_key",
+    "status",
+    "confidence_label",
+    "risk_level",
+    "evidence_refs",
+    "limitations",
+    "next_action",
+    "operator_summary_vi",
+    "technical_appendix",
+    "artifact"
+  ],
+  "properties": {
+    "contract_version": {"type": "string"},
+    "agent_key": {"const": "ChannelSetupResearchAgent"},
+    "status": {"enum": ["OK", "REVIEW_REQUIRED", "BLOCK", "REFUSAL", "ERROR"]},
+    "confidence_label": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+    "risk_level": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", null]},
+    "evidence_refs": {"type": "array", "items": {"type": "object"}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "next_action": {"type": ["string", "null"]},
+    "operator_summary_vi": {"type": "string"},
+    "technical_appendix": {"type": "object"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_refs",
+        "field_suggestions",
+        "confidence",
+        "cannot_determine_fields",
+        "human_questions",
+        "safety_flags",
+        "no_runtime_mutation_guarantee"
+      ],
+      "properties": {
+        "evidence_refs": {"type": "array", "items": {"type": "object"}},
+        "field_suggestions": {"type": "object"},
+        "confidence": {"type": "object"},
+        "cannot_determine_fields": {"type": "array", "items": {"type": "string"}},
+        "human_questions": {"type": "array", "items": {"type": "object"}},
+        "safety_flags": {"type": "array", "items": {"type": "string"}},
+        "no_runtime_mutation_guarantee": {"const": true}
+      }
+    }
+  }
+}

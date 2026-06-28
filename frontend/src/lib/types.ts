@@ -43,6 +43,85 @@ export type Company = {
   default_currency: string;
 };
 
+export type FieldMeta = {
+  value: unknown;
+  source_type: string;
+  confidence_label: "LOW" | "MEDIUM" | "HIGH" | string;
+  evidence_refs: string[];
+  review_required: boolean;
+  editable_by_human: boolean;
+  locked_reason?: string | null;
+};
+
+export type EvidenceRef = {
+  ref_id: string;
+  source_type: string;
+  url?: string | null;
+  title?: string | null;
+  snippet?: string | null;
+  captured_at: string;
+  reliability: "LOW" | "MEDIUM" | "HIGH" | string;
+};
+
+export type ChannelContractDraft = {
+  id: string;
+  init_draft_id: string;
+  company_id: string;
+  channel_name: string;
+  source_urls: Array<Record<string, unknown>>;
+  admin_minimal_input: Record<string, unknown>;
+  suggested_channel_contract: Record<string, unknown>;
+  field_source_map_json: Record<string, FieldMeta>;
+  confidence_summary: Record<string, string>;
+  missing_fields: string[];
+  human_questions: Array<Record<string, unknown>>;
+  risks: Array<Record<string, unknown>>;
+  evidence_refs: EvidenceRef[];
+  workflow_status: string;
+  contract_status?: string | null;
+  review_decision_log_json: Array<Record<string, unknown>>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChannelInitDraft = {
+  id: string;
+  company_id: string;
+  channel_name: string;
+  public_presence_mode: "EXISTING_PUBLIC_CHANNEL" | "NEW_CHANNEL_NO_PUBLIC_FOOTPRINT";
+  youtube_url_or_handle?: string | null;
+  website_url?: string | null;
+  social_profile_links: string[];
+  operator_note_purpose: string;
+  intended_content_language?: string | null;
+  intended_primary_market?: string | null;
+  owner_operator_language: string;
+  initial_topic_pillar_hints: string[];
+  source_usage_attestation: boolean;
+  workflow_status: string;
+  contract_status?: string | null;
+  channel_id?: string | null;
+  channel_profile_version_id?: string | null;
+  compiled_policy_snapshot_id?: string | null;
+  latest_contract_draft?: ChannelContractDraft | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChannelInitCompileResult = {
+  init_draft_id: string;
+  channel_id: string;
+  channel_profile_version_id: string;
+  compiled_policy_snapshot_id: string;
+  workflow_status: string;
+  contract_status: string;
+  missing_fields: string[];
+  contradiction_reasons: string[];
+  activation_eligibility: boolean;
+  channel_contract_json: Record<string, unknown>;
+  field_source_map_json: Record<string, FieldMeta>;
+};
+
 export type ApprovalQueueItem = {
   queue_item_id?: string | null;
   queue_type: string;

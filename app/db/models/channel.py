@@ -155,3 +155,75 @@ class CompiledChannelPolicySnapshot(Base):
         Index("ix_compiled_channel_policy_snapshots_channel_profile_version_id", "channel_profile_version_id"),
         Index("ix_compiled_channel_policy_snapshots_created_at", "created_at"),
     )
+
+
+class ChannelInitDraft(Base):
+    __tablename__ = "channel_init_drafts"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    channel_name: Mapped[str] = mapped_column(Text, nullable=False)
+    public_presence_mode: Mapped[str] = mapped_column(String(80), nullable=False)
+    youtube_url_or_handle: Mapped[str | None] = mapped_column(Text)
+    website_url: Mapped[str | None] = mapped_column(Text)
+    social_profile_links: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    operator_note_purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    intended_content_language: Mapped[str | None] = mapped_column(Text)
+    intended_primary_market: Mapped[str | None] = mapped_column(Text)
+    owner_operator_language: Mapped[str] = mapped_column(Text, nullable=False, default="vi-VN")
+    initial_topic_pillar_hints: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    source_usage_attestation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    workflow_status: Mapped[str] = mapped_column(String(80), nullable=False, default="RESEARCH_PENDING")
+    contract_status: Mapped[str | None] = mapped_column(String(40))
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"))
+    channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_profile_versions.id")
+    )
+    compiled_policy_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id")
+    )
+    created_at: Mapped[datetime] = utc_created_at()
+    updated_at: Mapped[datetime] = utc_updated_at()
+
+    __table_args__ = (
+        Index("ix_channel_init_drafts_company_id", "company_id"),
+        Index("ix_channel_init_drafts_workflow_status", "workflow_status"),
+        Index("ix_channel_init_drafts_channel_id", "channel_id"),
+        Index("ix_channel_init_drafts_created_at", "created_at"),
+    )
+
+
+class ChannelContractDraft(Base):
+    __tablename__ = "channel_contract_drafts"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    init_draft_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_init_drafts.id"), nullable=False
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    channel_name: Mapped[str] = mapped_column(Text, nullable=False)
+    source_urls: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    admin_minimal_input: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    suggested_channel_contract: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    field_source_map_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    confidence_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    missing_fields: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    human_questions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    risks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    workflow_status: Mapped[str] = mapped_column(String(80), nullable=False, default="NEEDS_HUMAN_REVIEW")
+    contract_status: Mapped[str | None] = mapped_column(String(40))
+    review_decision_log_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = utc_created_at()
+    updated_at: Mapped[datetime] = utc_updated_at()
+
+    __table_args__ = (
+        Index("ix_channel_contract_drafts_init_draft_id", "init_draft_id"),
+        Index("ix_channel_contract_drafts_company_id", "company_id"),
+        Index("ix_channel_contract_drafts_workflow_status", "workflow_status"),
+        Index("ix_channel_contract_drafts_created_at", "created_at"),
+    )

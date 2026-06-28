@@ -179,6 +179,17 @@ from app.services.m12_1 import (
 )
 from app.services.m12_2 import FirstScriptedVideoPackageService, verify_m12_2_required_tags, verify_m12_2s_required_tags
 from app.services.m12_2r import PublishHandoffLedgerService, parse_youtube_video_id
+from app.services.m12_2p3 import (
+    ChannelContractCompiler,
+    ChannelContractDraftBuilder,
+    ChannelContractReviewService,
+    ChannelInitDraftService,
+    ChannelResearchEvidenceCollector,
+    ChannelSetupResearchAgentService,
+    ensure_field_source_coverage,
+    evaluate_contract,
+    leaf_values,
+)
 
 __all__ = [
     "AuditService",
@@ -318,6 +329,15 @@ __all__ = [
     "PromptRegistryService",
     "FirstScriptedVideoPackageService",
     "PublishHandoffLedgerService",
+    "ChannelContractCompiler",
+    "ChannelContractDraftBuilder",
+    "ChannelContractReviewService",
+    "ChannelInitDraftService",
+    "ChannelResearchEvidenceCollector",
+    "ChannelSetupResearchAgentService",
+    "ensure_field_source_coverage",
+    "evaluate_contract",
+    "leaf_values",
     "verify_m12_2_required_tags",
     "verify_m12_2s_required_tags",
     "parse_youtube_video_id",

@@ -474,3 +474,62 @@ agents:
     common_skill_refs: *common_skill_refs
     channel_contract_required: true
     market_locale_context_required: true
+  - agent_key: ChannelSetupResearchAgent
+    template_key: channel_setup_research_agent.production
+    template_version: "1.0.0"
+    status: *active
+    system_delta_ref: app/prompts/agents/system_deltas/channel_setup_research_agent.md
+    user_template_ref: *default_user_template_ref
+    output_schema_ref: app/prompts/schemas/channel_setup_research_draft.v1.schema.json
+    schema_ref: channel_setup_research_draft.v1
+    schema_version: "1.0.0"
+    allowed_router_lanes: [cheap_structured, long_context_text]
+    default_router_lane: cheap_structured
+    input_contract:
+      required:
+        - task_payload
+        - minimal_admin_input
+      optional:
+        - evidence_refs
+        - allowed_public_sources
+        - connector_flags
+    output_contract:
+      schema_ref: channel_setup_research_draft.v1
+      required_envelope_fields:
+        - contract_version
+        - agent_key
+        - status
+        - confidence_label
+        - risk_level
+        - evidence_refs
+        - limitations
+        - next_action
+        - operator_summary_vi
+        - technical_appendix
+        - artifact
+      required_artifact_fields:
+        - evidence_refs
+        - field_suggestions
+        - confidence
+        - cannot_determine_fields
+        - human_questions
+        - safety_flags
+        - no_runtime_mutation_guarantee
+    safety_policy_refs:
+      - common_vcos_constitution
+      - common_channel_contract
+      - common_policy_safety
+      - common_evidence_handling
+      - common_rights_disclosure
+    common_skill_refs:
+      - app/prompts/common/common_vcos_constitution.md
+      - app/prompts/common/common_channel_contract.md
+      - app/prompts/common/common_output_contract.md
+      - app/prompts/common/common_evidence_handling.md
+      - app/prompts/common/common_policy_safety.md
+      - app/prompts/common/common_operator_language.md
+      - app/prompts/common/common_market_locale_context.md
+      - app/prompts/common/common_rights_disclosure.md
+      - app/prompts/common/common_json_repair.md
+    channel_contract_required: false
+    market_locale_context_required: false

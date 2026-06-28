@@ -9,6 +9,8 @@ from app.db.models.foundation import (
     UserRole,
 )
 from app.db.models.channel import (
+    ChannelContractDraft,
+    ChannelInitDraft,
     ChannelMembership,
     ChannelProfileCompileRun,
     ChannelProfileVersion,
@@ -203,6 +205,8 @@ __all__ = [
     "Role",
     "User",
     "UserRole",
+    "ChannelContractDraft",
+    "ChannelInitDraft",
     "ChannelMembership",
     "ChannelProfileCompileRun",
     "ChannelProfileVersion",

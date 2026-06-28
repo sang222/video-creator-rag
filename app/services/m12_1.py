@@ -68,6 +68,7 @@ REQUIRED_AGENT_KEYS = [
     "MediaQCExplanationAgent",
     "RightsDisclosureReviewer",
     "UploadCardCopyAgent",
+    "ChannelSetupResearchAgent",
 ]
 
 ENVELOPE_REQUIRED_FIELDS = {

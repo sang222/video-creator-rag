@@ -229,6 +229,14 @@ from app.contracts import (
     UploadedVideoLedgerRead,
     UploadedVideoListRead,
     UploadedVideoVerificationResult,
+    ChannelContractDraftRead,
+    ChannelContractPreviewRead,
+    ChannelContractReviewRequest,
+    ChannelInitCompileRequest,
+    ChannelInitCompileResult,
+    ChannelInitDraftCreate,
+    ChannelInitDraftRead,
+    ChannelInitResearchRequest,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
 from app.contracts.m11 import (
@@ -345,6 +353,12 @@ from app.services import (
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
     PublishHandoffLedgerService,
+    ChannelContractCompiler,
+    ChannelContractReviewService,
+    ChannelInitDraftService,
+    ChannelSetupResearchAgentService,
+    evaluate_contract,
+    leaf_values,
 )
 from app.services.m11 import (
     M11ChannelLifecycleService,
@@ -570,6 +584,100 @@ def create_app() -> FastAPI:
             if company is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="company not found")
             return CompanyRead.model_validate(_company(company))
+
+    @application.post("/channel-init-drafts", response_model=ChannelInitDraftRead)
+    def create_channel_init_draft(data: ChannelInitDraftCreate) -> ChannelInitDraftRead:
+        try:
+            with session_scope() as session:
+                draft = ChannelInitDraftService(session).create(data)
+                return ChannelInitDraftRead.model_validate(_channel_init_draft(draft, None))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channel-init-drafts/{draft_id}", response_model=ChannelInitDraftRead)
+    def get_channel_init_draft(draft_id: uuid.UUID) -> ChannelInitDraftRead:
+        try:
+            with session_scope() as session:
+                service = ChannelInitDraftService(session)
+                draft = service.get(draft_id)
+                latest = service.latest_contract_draft(draft_id)
+                return ChannelInitDraftRead.model_validate(_channel_init_draft(draft, latest))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channel-init-drafts/{draft_id}/research", response_model=ChannelContractDraftRead)
+    def research_channel_init_draft(
+        draft_id: uuid.UUID,
+        data: ChannelInitResearchRequest | None = None,
+    ) -> ChannelContractDraftRead:
+        try:
+            with session_scope() as session:
+                request = data or ChannelInitResearchRequest()
+                contract_draft = ChannelSetupResearchAgentService(session).run(
+                    draft_id,
+                    enable_optional_web_snippets=request.enable_optional_web_snippets,
+                )
+                return ChannelContractDraftRead.model_validate(_channel_contract_draft(contract_draft))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channel-init-drafts/{draft_id}/review", response_model=ChannelContractDraftRead)
+    def review_channel_init_draft(
+        draft_id: uuid.UUID,
+        data: ChannelContractReviewRequest,
+    ) -> ChannelContractDraftRead:
+        try:
+            with session_scope() as session:
+                contract_draft = ChannelContractReviewService(session).apply_review(draft_id, data)
+                return ChannelContractDraftRead.model_validate(_channel_contract_draft(contract_draft))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channel-init-drafts/{draft_id}/compile", response_model=ChannelInitCompileResult)
+    def compile_channel_init_draft(
+        draft_id: uuid.UUID,
+        data: ChannelInitCompileRequest | None = None,
+    ) -> ChannelInitCompileResult:
+        try:
+            with session_scope() as session:
+                request = data or ChannelInitCompileRequest()
+                result = ChannelContractCompiler(session).compile(draft_id, correlation_id=request.correlation_id)
+                return ChannelInitCompileResult.model_validate(result)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channel-init-drafts/{draft_id}/contract-preview", response_model=ChannelContractPreviewRead)
+    def preview_channel_init_contract(draft_id: uuid.UUID) -> ChannelContractPreviewRead:
+        try:
+            with session_scope() as session:
+                service = ChannelInitDraftService(session)
+                draft = service.get(draft_id)
+                contract_draft = service.latest_contract_draft(draft_id)
+                if contract_draft is None:
+                    raise NotFoundError(f"channel contract draft not found for init draft: {draft_id}")
+                contract = contract_draft.suggested_channel_contract
+                field_map = contract_draft.field_source_map_json
+                status, missing_fields, contradiction_reasons = evaluate_contract(contract, field_map)
+                leaf_paths = set(leaf_values(contract))
+                coverage = {
+                    "leaf_count": len(leaf_paths),
+                    "covered_count": len(leaf_paths & set(field_map)),
+                    "missing_paths": sorted(leaf_paths - set(field_map)),
+                }
+                return ChannelContractPreviewRead.model_validate(
+                    {
+                        "init_draft_id": draft.id,
+                        "contract_status": status,
+                        "workflow_status": draft.workflow_status,
+                        "channel_contract_json": contract,
+                        "field_source_map_json": field_map,
+                        "missing_fields": missing_fields,
+                        "contradiction_reasons": contradiction_reasons,
+                        "field_source_coverage": coverage,
+                    }
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @application.post("/companies/{company_id}/channels", response_model=ChannelWorkspaceRead)
     def create_channel(company_id: uuid.UUID, data: ChannelWorkspaceCreate) -> ChannelWorkspaceRead:
@@ -849,6 +957,18 @@ def create_app() -> FastAPI:
                 if snapshot is None:
                     raise NotFoundError(f"policy snapshot not found for channel: {channel_id}")
                 activated = ChannelProfileService(session).activate_snapshot(snapshot_id=snapshot.id)
+                from sqlalchemy import select
+                from app.db.models import ChannelInitDraft
+
+                init_draft = session.scalars(
+                    select(ChannelInitDraft).where(
+                        ChannelInitDraft.channel_id == channel_id,
+                        ChannelInitDraft.compiled_policy_snapshot_id == activated.id,
+                    )
+                ).first()
+                if init_draft is not None:
+                    init_draft.workflow_status = "ACTIVATED"
+                    session.flush()
                 return _snapshot_with_contract_state(activated)
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -2916,6 +3036,55 @@ def _channel(channel: Any) -> dict[str, Any]:
         "metadata": channel.metadata_,
         "created_at": channel.created_at,
         "updated_at": channel.updated_at,
+    }
+
+
+def _channel_init_draft(draft: Any, latest_contract_draft: Any | None) -> dict[str, Any]:
+    return {
+        "id": draft.id,
+        "company_id": draft.company_id,
+        "channel_name": draft.channel_name,
+        "public_presence_mode": draft.public_presence_mode,
+        "youtube_url_or_handle": draft.youtube_url_or_handle,
+        "website_url": draft.website_url,
+        "social_profile_links": draft.social_profile_links,
+        "operator_note_purpose": draft.operator_note_purpose,
+        "intended_content_language": draft.intended_content_language,
+        "intended_primary_market": draft.intended_primary_market,
+        "owner_operator_language": draft.owner_operator_language,
+        "initial_topic_pillar_hints": draft.initial_topic_pillar_hints,
+        "source_usage_attestation": draft.source_usage_attestation,
+        "workflow_status": draft.workflow_status,
+        "contract_status": draft.contract_status,
+        "channel_id": draft.channel_id,
+        "channel_profile_version_id": draft.channel_profile_version_id,
+        "compiled_policy_snapshot_id": draft.compiled_policy_snapshot_id,
+        "latest_contract_draft": _channel_contract_draft(latest_contract_draft) if latest_contract_draft else None,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
+    }
+
+
+def _channel_contract_draft(draft: Any) -> dict[str, Any]:
+    return {
+        "id": draft.id,
+        "init_draft_id": draft.init_draft_id,
+        "company_id": draft.company_id,
+        "channel_name": draft.channel_name,
+        "source_urls": draft.source_urls,
+        "admin_minimal_input": draft.admin_minimal_input,
+        "suggested_channel_contract": draft.suggested_channel_contract,
+        "field_source_map_json": draft.field_source_map_json,
+        "confidence_summary": draft.confidence_summary,
+        "missing_fields": draft.missing_fields,
+        "human_questions": draft.human_questions,
+        "risks": draft.risks,
+        "evidence_refs": draft.evidence_refs,
+        "workflow_status": draft.workflow_status,
+        "contract_status": draft.contract_status,
+        "review_decision_log_json": draft.review_decision_log_json,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
     }
 
 

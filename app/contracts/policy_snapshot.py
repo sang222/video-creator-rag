@@ -58,6 +58,7 @@ class CompiledChannelPolicyPayload(BaseModel):
     format_bible: dict[str, Any]
     capability_status: CapabilityStatus
     channel_contract_json: dict[str, Any] | None = None
+    field_source_map_json: dict[str, Any] | None = None
     compiled_policy_snapshot_json: dict[str, Any] | None = None
     contract_status: str | None = None
     missing_fields: list[str] = Field(default_factory=list)
