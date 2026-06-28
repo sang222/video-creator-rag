@@ -7,6 +7,7 @@ from app.contracts import AuditEnvelope, ChannelMembershipCreate, ChannelWorkspa
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.db.models import ChannelMembership, ChannelWorkspace, Company, Role, User
 from app.services.audit import AuditService
+from app.services.channel_contract import reject_legacy_provider_budget_fields
 
 
 CHANNEL_STATUSES = {"draft", "ready", "active", "paused", "deactivated", "archived"}
@@ -25,6 +26,7 @@ class ChannelWorkspaceService:
     ) -> ChannelWorkspace:
         if self.session.get(Company, company_id) is None:
             raise NotFoundError(f"company not found: {company_id}")
+        reject_legacy_provider_budget_fields(data.model_dump(mode="json"))
         duplicate = self.session.scalars(
             select(ChannelWorkspace).where(
                 ChannelWorkspace.company_id == company_id,
@@ -39,8 +41,16 @@ class ChannelWorkspaceService:
             name=data.name,
             status=data.status,
             primary_language=data.primary_language,
+            primary_region=data.primary_region,
+            primary_timezone=data.primary_timezone or data.default_timezone,
             target_market=data.target_market,
             default_timezone=data.default_timezone,
+            target_subtitle_languages=data.target_subtitle_languages,
+            target_metadata_languages=data.target_metadata_languages,
+            target_regions=data.target_regions,
+            translation_mode=data.translation_mode,
+            localization_required_for_publish=data.localization_required_for_publish,
+            localized_metadata_required=data.localized_metadata_required,
             metadata_=data.metadata,
         )
         self.session.add(channel)

@@ -35,27 +35,13 @@ from app.db.models import (
     PromptTemplateRecord,
     StructuredOutputSchema,
 )
+from app.services.channel_contract import build_channel_contract
 
 
 PROMPT_CONTRACT_VERSION = "m12.1.0"
 DEFAULT_TEMPLATE_VERSION = "1.0.0"
 BASE_SCHEMA_REF = "base_agent_envelope"
 MISSING_CHANNEL_NEXT_ACTION = "Bổ sung hoặc compile lại ChannelProfileVersion trước khi render prompt."
-FORBIDDEN_BEHAVIOR_CODES = [
-    "fake" + "_traffic",
-    "bot" + "_engagement",
-    "spam_reupload",
-    "algorithm_manipulation",
-    "platform" + "_evasion",
-    "ip_vps_tricks",
-    "youtube_studio_scraping",
-    "dashboard_scraping",
-    "invented_metrics",
-    "invented_sources",
-    "invented_rights",
-    "unsupported_local_claims",
-]
-
 REQUIRED_AGENT_KEYS = [
     "ChannelAuthorityAgent",
     "TopicIdeaScoringAgent",
@@ -439,6 +425,10 @@ class PromptRegistryService:
                 raise ValidationFailureError("compiled policy snapshot does not match channel profile version")
             if compiled_policy is None:
                 compiled_policy = snapshot.compiled_payload
+            if data.channel_contract_json is None and isinstance(snapshot.compiled_payload, dict):
+                frozen_contract = snapshot.compiled_payload.get("channel_contract_json")
+                if isinstance(frozen_contract, dict):
+                    channel_contract = frozen_contract
         if market_locale is None and channel_contract is not None:
             market_locale = channel_contract.get("market_locale") if isinstance(channel_contract, dict) else None
         return {
@@ -704,84 +694,7 @@ class PromptRegistryService:
 
 def build_channel_contract_from_profile(session: Session, profile_version: ChannelProfileVersion) -> dict[str, Any]:
     channel = session.get(ChannelWorkspace, profile_version.channel_workspace_id)
-    profile_input = profile_version.profile_input
-    market_locale = {
-        "primary_market": profile_input.get("target_market") or (channel.target_market if channel else None),
-        "secondary_markets": channel.target_regions if channel else [],
-        "audience_locale": channel.primary_region if channel else None,
-        "content_language": channel.primary_language if channel else None,
-        "operator_language": (channel.metadata_ or {}).get("operator_language") if channel else None,
-        "timezone": channel.primary_timezone if channel else None,
-        "currency": None,
-        "measurement_units": None,
-        "date_format": None,
-        "cultural_style": None,
-        "market_examples_preference": None,
-        "regulatory_sensitivity": None,
-        "market_locale_context_status": "KNOWN" if (profile_input.get("target_market") and channel and channel.primary_language) else "PARTIAL",
-    }
-    contract_status = "COMPLETE" if market_locale["market_locale_context_status"] == "KNOWN" and market_locale["operator_language"] else "PARTIAL"
-    return {
-        "channel_identity": {
-            "channel_name": profile_input.get("display_name") or (channel.name if channel else None),
-            "channel_type": "YOUTUBE_CHANNEL",
-            "niche": profile_input.get("template_key"),
-            "positioning": profile_input.get("audience_segment"),
-            "brand_promise": None,
-            "platform_targets": profile_input.get("platform_strategy"),
-            "series_plan": profile_input.get("series_plan", []),
-        },
-        "target_audience": {
-            "primary_persona": profile_input.get("audience_segment"),
-            "audience_level": None,
-            "pain_points": [],
-            "desired_outcome": None,
-        },
-        "market_locale": market_locale,
-        "editorial_strategy": {
-            "content_pillars": profile_input.get("content_pillars", []),
-            "allowed_angles": [],
-            "forbidden_angles": [],
-            "claim_style": profile_input.get("evidence_requirement"),
-            "allowed_topics": [],
-            "forbidden_topics": [],
-        },
-        "format_policy": profile_input.get("format_strategy", {}),
-        "voice_style": profile_input.get("voice_style", {}),
-        "platform_strategy": {
-            **(profile_input.get("platform_strategy") or {}),
-            "youtube_is_learning_authority": True,
-            "auto_publish_allowed": False,
-            "studio_scraping_allowed": False,
-        },
-        "media_policy": {
-            "voice_provider": "ELEVENLABS",
-            "ai_hero_provider": "GOOGLE_VERTEX_VEO",
-            "ai_hero_model_id": "veo-3.1-fast-generate-001",
-            "ai_hero_allowed_durations_seconds": [4, 6, 8],
-            "ai_hero_default_duration_seconds": 8,
-            "ai_hero_audio": False,
-            "renderer": "CREATOMATE_GROWTH_10K_LIGHT_ONLY",
-            "storage_archive": "GOOGLE_DRIVE",
-        },
-        "rights_policy": profile_input.get("policies", {}),
-        "budget_policy": {
-            "monthly_budget_usd": None,
-            "cost_sensitivity": None,
-            "avoid_unnecessary_ai_hero": True,
-            "prefer_reuse_safe_assets": True,
-            "exact_cost_claim_requires_provider_snapshot": True,
-        },
-        "learning_policy": {
-            "authority": "YOUTUBE",
-            "min_evidence_required": profile_input.get("evidence_requirement"),
-            "auto_promote_learning": False,
-            "config_mutation_by_agent_allowed": False,
-            "weak_evidence_action": "REVIEW_REQUIRED",
-        },
-        "forbidden_behavior": list(FORBIDDEN_BEHAVIOR_CODES),
-        "contract_status": contract_status,
-    }
+    return build_channel_contract(profile_input=profile_version.profile_input, channel=channel)
 
 
 def prompt_template_hash(

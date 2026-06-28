@@ -90,6 +90,19 @@ export type ChannelSummary = {
   health_status: string;
   next_action: string;
   daily_generation_allowed: boolean;
+  contract_status?: string;
+  contract_review_label?: string;
+  contract_review?: {
+    contract_status: string;
+    label: string;
+    latest_snapshot_id?: string | null;
+    active_snapshot_id?: string | null;
+    snapshot_version?: number;
+    missing_fields?: string[];
+    contradiction_reasons?: string[];
+    market_locale?: Record<string, unknown>;
+    next_action?: string;
+  };
   upload_counts?: PublishLedgerCounts;
 };
 

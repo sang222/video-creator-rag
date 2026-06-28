@@ -71,6 +71,17 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
 
   const workspace = query.data;
   const ledger = ledgerQuery.data ?? workspace.publish_ledger;
+  const contractReview = workspace.health_summary.contract_review as {
+    contract_status?: string;
+    label?: string;
+    latest_snapshot_id?: string | null;
+    active_snapshot_id?: string | null;
+    snapshot_version?: number;
+    missing_fields?: string[];
+    contradiction_reasons?: string[];
+    market_locale?: Record<string, unknown>;
+    next_action?: string;
+  } | undefined;
   const uploadTasks = tasksQuery.data?.tasks ?? [];
   const tasksNeedingUpload = uploadTasks.filter((task) => !task.actual_uploaded_video_id && task.status !== "CANCELLED");
   const uploadedVideos = uploadedQuery.data?.uploaded_videos ?? [];
@@ -86,6 +97,7 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricSummaryCard icon={Activity} label="Vòng đời kênh" value={<StatusValue value={workspace.lifecycle.lifecycle_state} />} hint="Vòng đời do người vận hành quyết định." />
         <MetricSummaryCard icon={Gauge} label="Sức khỏe" value={<StatusValue value={workspace.lifecycle.health_status} />} hint="Trạng thái sức khỏe chỉ cảnh báo, không tự đổi vòng đời." />
+        <MetricSummaryCard icon={CheckCircle2} label="Hồ sơ kênh" value={contractReview?.label ?? "Cần bổ sung hồ sơ"} hint="Channel Contract quyết định khả năng kích hoạt." />
         <MetricSummaryCard icon={ListChecks} label="Việc đang chờ" value={workspace.approvals.length} hint="Bao gồm bài học, gói publish, vận hành và phục hồi." />
         <MetricSummaryCard icon={Database} label="Tệp Drive" value={String(workspace.media_storage.cloud_media_count ?? 0)} hint="Chỉ mở file qua CTA Google Drive." />
         <MetricSummaryCard icon={UploadCloud} label="Cần upload thủ công" value={ledger?.need_upload_count ?? 0} hint="Gói đã duyệt, chưa có UploadedVideo." />
@@ -318,7 +330,34 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
           <EmptyStateCard title="Bài học chờ duyệt" description="Bài học cần người duyệt bằng chứng trước khi trở thành mục playbook. VCOS không tự đổi cấu hình kênh." actions={[{ label: "Xem bài học", href: "/learning" }]} />
         </Tabs.Content>
         <Tabs.Content value="profile-policy" className="mt-5">
-          <EmptyStateCard title="Hồ sơ & chính sách kênh" description="Người vận hành chỉnh sửa sẽ tạo phiên bản hồ sơ và snapshot chính sách mới. Dự án cũ vẫn giữ snapshot đã gắn trước đó." />
+          <Panel>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold">Hồ sơ & chính sách kênh</h2>
+                <p className="mt-2 text-sm text-muted-foreground">Người vận hành chỉnh sửa sẽ tạo phiên bản hồ sơ và snapshot chính sách mới. Dự án cũ vẫn giữ snapshot đã gắn trước đó.</p>
+              </div>
+              <StatusBadge value={contractReview?.contract_status ?? "MISSING"} />
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <InfoTile label="Policy snapshot" value={contractReview?.latest_snapshot_id ?? "Chưa có snapshot"} />
+              <InfoTile label="Phiên bản snapshot" value={contractReview?.snapshot_version ? String(contractReview.snapshot_version) : "Chưa có"} />
+              <InfoTile label="Publish policy" value="Không tự publish / Human handoff only" />
+              <InfoTile label="Market" value={String(contractReview?.market_locale?.primary_market ?? "Chưa nhập")} />
+              <InfoTile label="Locale" value={String(contractReview?.market_locale?.audience_locale ?? "Chưa nhập")} />
+              <InfoTile label="Timezone" value={String(contractReview?.market_locale?.timezone ?? "Chưa nhập")} />
+            </div>
+            {contractReview?.missing_fields?.length ? (
+              <div className="mt-5 rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+                Thiếu: {contractReview.missing_fields.join(", ")}
+              </div>
+            ) : null}
+            {contractReview?.contradiction_reasons?.length ? (
+              <div className="mt-5 rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">
+                Mâu thuẫn: {contractReview.contradiction_reasons.join(", ")}
+              </div>
+            ) : null}
+            <p className="mt-5 text-sm text-muted-foreground">{contractReview?.next_action ?? "Bổ sung hồ sơ kênh và compile policy snapshot."}</p>
+          </Panel>
         </Tabs.Content>
         <Tabs.Content value="provider-health" className="mt-5">
           <Panel>
@@ -333,6 +372,15 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
 
 function StatusValue({ value }: { value: string }) {
   return <span className="inline-flex"><StatusBadge value={value} /></span>;
+}
+
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+      <div className="text-muted-foreground">{label}</div>
+      <div className="mt-1 break-words font-medium">{value}</div>
+    </div>
+  );
 }
 
 function UploadTasksTable({

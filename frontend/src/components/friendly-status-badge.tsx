@@ -8,6 +8,9 @@ const labels: Record<string, string> = {
   REJECTED: "Đã từ chối",
   STALE: "Dữ liệu cũ",
   UNKNOWN: "Chưa có dữ liệu",
+  COMPLETE: "Hồ sơ đủ để kích hoạt",
+  MISSING: "Thiếu thông tin cấu hình",
+  CONTRADICTORY: "Có cấu hình mâu thuẫn",
   READY: "Đã sẵn sàng",
   PARTIAL: "Cần cấu hình",
   PASS: "Đã sẵn sàng",
@@ -123,9 +126,9 @@ const labels: Record<string, string> = {
 
 function toneFor(value: string) {
   const normalized = value.toUpperCase();
-  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "VERIFIED_PUBLIC", "VERIFIED_OWNER", "UPLOADED_VERIFIED", "SYNCED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED"].includes(normalized)) return "success";
+  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "VERIFIED_PUBLIC", "VERIFIED_OWNER", "UPLOADED_VERIFIED", "SYNCED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED", "COMPLETE"].includes(normalized)) return "success";
   if (["PAUSED", "PARTIAL", "WARNING", "SKIPPED", "SMOKE_SKIPPED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_CREDENTIAL", "NEEDS_CONFIG", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW", "PENDING", "QUEUED", "IN_PROGRESS", "UPLOAD_PENDING", "READY_FOR_HUMAN_UPLOAD", "HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL", "BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED", "MANUAL_CONFIRMATION_PENDING", "NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "NOT_CONFIGURED"].includes(normalized)) return "warning";
-  if (["BLOCKED", "BLOCK", "FAILED", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH", "VERIFICATION_FAILED"].includes(normalized)) return "danger";
+  if (["BLOCKED", "BLOCK", "FAILED", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH", "VERIFICATION_FAILED", "MISSING", "CONTRADICTORY"].includes(normalized)) return "danger";
   if (["WEAK", "STRONG", "OBSERVING", "CONFIGURED"].includes(normalized)) return "info";
   return "neutral";
 }

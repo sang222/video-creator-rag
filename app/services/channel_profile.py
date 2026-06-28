@@ -14,6 +14,7 @@ from app.db.models import (
 )
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
+from app.services.channel_contract import ensure_snapshot_contract_activatable, reject_legacy_provider_budget_fields
 from app.services.profile_compiler import ChannelProfileCompiler
 
 
@@ -33,6 +34,7 @@ class ChannelProfileService:
             raise NotFoundError(f"channel not found: {channel_id}")
         if data.created_by is not None and self.session.get(User, data.created_by) is None:
             raise NotFoundError(f"user not found: {data.created_by}")
+        reject_legacy_provider_budget_fields(data.model_dump(mode="json"))
         if data.profile_input is not None:
             profile_input = data.profile_input
             source_template_key = profile_input.template_key
@@ -129,6 +131,7 @@ class ChannelProfileService:
         snapshot = self.session.get(CompiledChannelPolicySnapshot, snapshot_id)
         if snapshot is None:
             raise NotFoundError(f"snapshot not found: {snapshot_id}")
+        ensure_snapshot_contract_activatable(snapshot.compiled_payload)
         channel = self.session.get(ChannelWorkspace, snapshot.channel_workspace_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {snapshot.channel_workspace_id}")

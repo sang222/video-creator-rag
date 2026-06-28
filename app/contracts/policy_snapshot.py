@@ -57,6 +57,12 @@ class CompiledChannelPolicyPayload(BaseModel):
     distinctiveness_profile: dict[str, Any]
     format_bible: dict[str, Any]
     capability_status: CapabilityStatus
+    channel_contract_json: dict[str, Any] | None = None
+    compiled_policy_snapshot_json: dict[str, Any] | None = None
+    contract_status: str | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    contradiction_reasons: list[str] = Field(default_factory=list)
+    activation_required: bool = False
 
     model_config = ConfigDict(extra="forbid")
 

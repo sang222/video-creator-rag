@@ -294,8 +294,8 @@ class YouTubeOwnerAnalyticsProvider:
         end_date: date,
     ) -> ProviderFetchResult:
         metrics = (
-            "views,likes,comments,impressions,impressionClickThroughRate,averageViewDuration,"
-            "averageViewPercentage,estimatedMinutesWatched,subscribersGained,subscribersLost"
+            "views,likes,comments,averageViewDuration,averageViewPercentage,"
+            "estimatedMinutesWatched,subscribersGained,subscribersLost"
         )
         query = urllib.parse.urlencode(
             {

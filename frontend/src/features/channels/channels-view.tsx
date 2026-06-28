@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { Boxes, CheckCircle2, ClipboardEdit, PauseCircle, ShieldAlert, UploadCloud, Video } from "lucide-react";
+import { Boxes, CheckCircle2, ClipboardEdit, FileWarning, PauseCircle, ShieldAlert, UploadCloud, Video } from "lucide-react";
 
 import { EmptyStateCard, MetricSummaryCard, PageHeader } from "@/components/cockpit";
 import { ErrorState, LoadingState } from "@/components/states";
@@ -26,6 +26,10 @@ const columns = [
   columnHelper.accessor("health_status", {
     header: "Sức khỏe",
     cell: (info) => <StatusBadge value={info.getValue()} />
+  }),
+  columnHelper.accessor("contract_review_label", {
+    header: "Hồ sơ kênh",
+    cell: (info) => <span>{info.getValue() ?? "Cần bổ sung hồ sơ"}</span>
   }),
   columnHelper.display({
     id: "need_upload",
@@ -72,6 +76,9 @@ export function ChannelsView() {
   const activeCount = query.data.filter((channel) => channel.lifecycle_state === "ACTIVE").length;
   const pausedCount = query.data.filter((channel) => ["PAUSED", "DEACTIVATED", "ARCHIVED"].includes(channel.lifecycle_state)).length;
   const reviewCount = query.data.filter((channel) => ["WATCHLIST", "NEEDS_HUMAN_REVIEW", "NO_VIEW", "LOW_VIEW"].includes(channel.health_status)).length;
+  const contractMissingCount = query.data.filter((channel) => channel.contract_status === "PARTIAL" || channel.contract_status === "MISSING").length;
+  const contractReviewCount = query.data.filter((channel) => channel.contract_status === "STALE" || channel.contract_status === "CONTRADICTORY").length;
+  const contractReadyCount = query.data.filter((channel) => channel.contract_status === "COMPLETE").length;
   const needUploadCount = query.data.reduce((sum, channel) => sum + (channel.upload_counts?.need_upload_count ?? 0), 0);
   const waitingBackfillCount = query.data.reduce((sum, channel) => sum + (channel.upload_counts?.waiting_backfill_count ?? 0), 0);
   const uploadedCount = query.data.reduce((sum, channel) => sum + (channel.upload_counts?.uploaded_count ?? 0), 0);
@@ -89,6 +96,9 @@ export function ChannelsView() {
         <MetricSummaryCard icon={CheckCircle2} label="Kênh đang hoạt động" value={activeCount} hint="Luồng tạo hằng ngày chỉ chạy khi vòng đời là Đang hoạt động." />
         <MetricSummaryCard icon={PauseCircle} label="Kênh tạm dừng/ngừng" value={pausedCount} hint="Người vận hành có thể bật lại khi đủ điều kiện." />
         <MetricSummaryCard icon={ShieldAlert} label="Kênh cần xem lại" value={reviewCount} hint="Mở kênh để xem blocker và việc tiếp theo." />
+        <MetricSummaryCard icon={FileWarning} label="Cần bổ sung hồ sơ" value={contractMissingCount} hint="Channel Contract chưa đủ để kích hoạt." />
+        <MetricSummaryCard icon={ShieldAlert} label="Cần review policy snapshot" value={contractReviewCount} hint="Snapshot stale hoặc có cấu hình mâu thuẫn." />
+        <MetricSummaryCard icon={CheckCircle2} label="Đủ điều kiện kích hoạt" value={contractReadyCount} hint="Contract COMPLETE, có thể kích hoạt thủ công." />
         <MetricSummaryCard icon={UploadCloud} label="Cần upload thủ công" value={needUploadCount} hint="Gói đã duyệt, chưa có UploadedVideo." />
         <MetricSummaryCard icon={ClipboardEdit} label="Chờ nhập video_id" value={waitingBackfillCount} hint="Đã bắt đầu upload thủ công, cần paste-back URL/video_id." />
         <MetricSummaryCard icon={Video} label="Đã upload" value={uploadedCount} hint="Đã có record UploadedVideo trong VCOS." />

@@ -160,11 +160,13 @@ def test_m12_2_missing_channel_returns_needs_channel_init(db_session) -> None:
 
 def test_m12_2_missing_channel_contract_blocks_before_llm(db_session, qualification_factory) -> None:
     scope = qualification_factory.channel_scope(name="M12.2 Contract Missing")
+    scope.channel.active_policy_snapshot_id = None
+    db_session.flush()
     router = FakeRouter([])
 
     package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).create(_request(scope.channel.id))
 
-    assert package.package_status == "REVIEW_REQUIRED"
+    assert package.package_status == "BLOCKED"
     assert package.next_action == "Bổ sung hoặc compile lại ChannelProfileVersion trước khi chạy video package production."
     assert package.prompt_render_run_refs == []
     assert router.calls == []

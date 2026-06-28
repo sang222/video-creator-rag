@@ -19,10 +19,12 @@ from app.core.time import utc_now
 from app.db.models import (
     ChannelProfileCompileRun,
     ChannelProfileVersion,
+    ChannelWorkspace,
     CompiledChannelPolicySnapshot,
 )
 from app.services.config_registry import LoadedCatalog, canonical_json, content_hash
 from app.services.config_registry import ConfigRegistryService
+from app.services.channel_contract import build_channel_contract, reject_legacy_provider_budget_fields
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class ChannelProfileCompiler:
         if profile_version is None:
             raise KeyError(f"profile version not found: {profile_version_id}")
         profile_input = ChannelProfileInput.model_validate(profile_version.profile_input)
+        reject_legacy_provider_budget_fields(profile_input.model_dump(mode="json"))
         catalogs = self.load_catalogs(profile_input.template_key)
         run = ChannelProfileCompileRun(
             channel_profile_version_id=profile_version.id,
@@ -87,11 +90,13 @@ class ChannelProfileCompiler:
         self.session.add(run)
         self.session.flush()
         try:
+            channel = self.session.get(ChannelWorkspace, profile_version.channel_workspace_id)
             payload, output_hash = self.compile_from_input(
                 profile_input=profile_input,
                 template=catalogs.template,
                 capability_matrix=catalogs.capability_matrix,
                 compiler_policy=catalogs.compiler_policy,
+                channel=channel,
             )
             snapshot = self._get_or_create_snapshot(
                 profile_version=profile_version,
@@ -133,7 +138,9 @@ class ChannelProfileCompiler:
         template: NicheProfileTemplate,
         capability_matrix: CapabilityMatrix,
         compiler_policy: ProfileCompilerPolicy,
+        channel: ChannelWorkspace | None = None,
     ) -> tuple[dict[str, Any], str]:
+        reject_legacy_provider_budget_fields(profile_input.model_dump(mode="json"))
         if not capability_matrix.profile_compiler_available:
             raise ValidationFailureError("profile compiler capability is unavailable")
         if not capability_matrix.policy_snapshot_available:
@@ -146,7 +153,7 @@ class ChannelProfileCompiler:
             raise ValidationFailureError(f"unsupported audience segment: {profile_input.audience_segment}")
         if profile_input.risk_tolerance not in compiler_policy.allowed_risk_tolerance:
             raise ValidationFailureError(f"unsupported risk tolerance: {profile_input.risk_tolerance}")
-        payload = {
+        legacy_payload = {
             "channel_constitution": {
                 "promise": f"Practical, evidence-aware {profile_input.display_name} content.",
                 "audience": profile_input.audience_segment,
@@ -198,6 +205,25 @@ class ChannelProfileCompiler:
                 "voice": profile_input.voice_style,
             },
             "capability_status": self._capability_status(capability_matrix),
+        }
+        channel_contract = build_channel_contract(profile_input=profile_input.model_dump(mode="json"), channel=channel)
+        compiled_policy_snapshot_json = {
+            "schema_version": "m12.2p.channel_policy_snapshot.v1",
+            "snapshot_source": "ChannelProfileCompiler",
+            "channel_contract_status": channel_contract["contract_status"],
+            "missing_fields": channel_contract["missing_fields"],
+            "contradiction_reasons": channel_contract["contradiction_reasons"],
+            "market_locale": channel_contract["market_locale"],
+            "legacy_policy_sections": legacy_payload,
+        }
+        payload = {
+            **legacy_payload,
+            "channel_contract_json": channel_contract,
+            "compiled_policy_snapshot_json": compiled_policy_snapshot_json,
+            "contract_status": channel_contract["contract_status"],
+            "missing_fields": channel_contract["missing_fields"],
+            "contradiction_reasons": channel_contract["contradiction_reasons"],
+            "activation_required": channel_contract["contract_status"] != "COMPLETE",
         }
         missing = sorted(set(compiler_policy.required_output_sections) - set(payload))
         if missing:

@@ -66,6 +66,7 @@ from app.db.models import (
     VideoProject,
     YouTubeMonitoringCredential,
 )
+from app.services.policy_snapshot import PolicySnapshotService
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 
@@ -205,6 +206,9 @@ class M11DashboardService:
         channels = []
         for channel in self.session.scalars(statement).all():
             item = _channel_summary(channel, self.lifecycle(channel.id))
+            item["contract_review"] = self._contract_review(channel.id)
+            item["contract_status"] = item["contract_review"]["contract_status"]
+            item["contract_review_label"] = item["contract_review"]["label"]
             item["upload_counts"] = self._upload_counts(channel.id)
             channels.append(item)
         return channels
@@ -259,6 +263,7 @@ class M11DashboardService:
         upload_counts = self._upload_counts(channel_id)
         media_count = self._count(CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id)
         failed_media_count = self._count(CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id, CloudMediaRef.upload_status == "FAILED")
+        contract_review = self._contract_review(channel_id)
         return ChannelWorkspaceDashboardRead(
             channel=_channel_dict(channel),
             health_summary={
@@ -270,6 +275,8 @@ class M11DashboardService:
                 "production_state": _state_from_count(len(projects), "NO_PROJECTS", "PROJECTS_ACTIVE"),
                 "publish_state": _state_from_count(self._count(PublishHandoffPackage, PublishHandoffPackage.channel_workspace_id == channel_id), "NO_HANDOFFS", "HANDOFFS_AVAILABLE"),
                 "upload_counts": upload_counts,
+                "contract_review": contract_review,
+                "contract_status": contract_review["contract_status"],
                 "learning_state": _state_from_count(len(approvals), "NO_LEARNING_REVIEW", "LEARNING_REVIEW_READY"),
                 "storage_state": "FAILED" if failed_media_count else _state_from_count(media_count, "NO_CLOUD_MEDIA", "GOOGLE_DRIVE_READY"),
             },
@@ -284,8 +291,44 @@ class M11DashboardService:
             },
             media_storage={"provider": "Google Drive", "cloud_media_count": media_count, "failed_count": failed_media_count, "cta_only": True},
             provider_health=self.provider_ops().integrations,
-            technical_appendix={"no_latest_profile_lookup_for_projects": True},
+            technical_appendix={"no_latest_profile_lookup_for_projects": True, "contract_review": contract_review},
         )
+
+    def _contract_review(self, channel_id: uuid.UUID) -> dict[str, Any]:
+        snapshots = PolicySnapshotService(self.session).list_snapshots(channel_id)
+        active = PolicySnapshotService(self.session).get_active_snapshot_for_channel(channel_id)
+        snapshot = active or (snapshots[0] if snapshots else None)
+        if snapshot is None:
+            return {
+                "contract_status": "MISSING",
+                "label": "Cần bổ sung hồ sơ",
+                "latest_snapshot_id": None,
+                "active_snapshot_id": None,
+                "missing_fields": ["compiled_policy_snapshot"],
+                "next_action": "Tạo hồ sơ kênh và compile policy snapshot.",
+            }
+        payload = snapshot.compiled_payload if isinstance(snapshot.compiled_payload, dict) else {}
+        contract = payload.get("channel_contract_json") if isinstance(payload.get("channel_contract_json"), dict) else {}
+        contract_status = str(contract.get("contract_status") or payload.get("contract_status") or "MISSING")
+        missing_fields = contract.get("missing_fields") or payload.get("missing_fields") or []
+        labels = {
+            "COMPLETE": "Đủ điều kiện kích hoạt",
+            "PARTIAL": "Cần bổ sung hồ sơ",
+            "CONTRADICTORY": "Có cấu hình mâu thuẫn",
+            "STALE": "Cần review policy snapshot",
+            "MISSING": "Cần bổ sung hồ sơ",
+        }
+        return {
+            "contract_status": contract_status,
+            "label": labels.get(contract_status, "Cần review policy snapshot"),
+            "latest_snapshot_id": str(snapshot.id),
+            "active_snapshot_id": str(active.id) if active is not None else None,
+            "snapshot_version": snapshot.snapshot_version,
+            "missing_fields": missing_fields,
+            "contradiction_reasons": contract.get("contradiction_reasons") or payload.get("contradiction_reasons") or [],
+            "market_locale": contract.get("market_locale") or {},
+            "next_action": contract.get("next_action") or ("Kích hoạt kênh." if contract_status == "COMPLETE" else "Bổ sung hồ sơ kênh và compile lại policy snapshot."),
+        }
 
     def list_uploaded_videos(
         self,

@@ -27,7 +27,7 @@ from app.db.models import (
 )
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
 from app.services.m12 import ProviderReadinessService
-from app.services.m12_1 import PromptRegistryService, build_channel_contract_from_profile
+from app.services.m12_1 import PromptRegistryService
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -163,7 +163,11 @@ class FirstScriptedVideoPackageService:
                 next_action=flag_block["next_action"],
             ))
 
-        channel_contract = build_channel_contract_from_profile(self.session, profile_version)
+        channel_contract = (
+            snapshot.compiled_payload.get("channel_contract_json")
+            if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
+            else {}
+        )
         contract_block = self._channel_contract_block(channel_contract, snapshot)
         if contract_block is not None:
             return self._read(self._create_package(

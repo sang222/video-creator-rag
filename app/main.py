@@ -370,6 +370,18 @@ class CompanyRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ChannelCreateRequest(ChannelWorkspaceCreate):
+    company_id: uuid.UUID
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChannelActivateRequest(BaseModel):
+    snapshot_id: uuid.UUID | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -551,6 +563,20 @@ def create_app() -> FastAPI:
                 channel = ChannelWorkspaceService(session).create_channel(
                     company_id=company_id,
                     data=data,
+                )
+                return ChannelWorkspaceRead.model_validate(_channel(channel))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channels", response_model=ChannelWorkspaceRead)
+    def create_channel_direct(data: ChannelCreateRequest) -> ChannelWorkspaceRead:
+        try:
+            with session_scope() as session:
+                payload = data.model_dump()
+                company_id = payload.pop("company_id")
+                channel = ChannelWorkspaceService(session).create_channel(
+                    company_id=company_id,
+                    data=ChannelWorkspaceCreate.model_validate(payload),
                 )
                 return ChannelWorkspaceRead.model_validate(_channel(channel))
         except Exception as exc:
@@ -738,6 +764,26 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/channels/{channel_id}/compile-policy-snapshot")
+    def compile_channel_policy_snapshot(
+        channel_id: uuid.UUID,
+        data: ChannelProfileCompileRequest | None = None,
+    ) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                profiles = ChannelProfileService(session).list_profile_versions(channel_id)
+                if not profiles:
+                    raise NotFoundError(f"profile version not found for channel: {channel_id}")
+                request = data or ChannelProfileCompileRequest()
+                compiled = ChannelProfileCompiler(session).compile(
+                    profile_version_id=profiles[0].id,
+                    correlation_id=request.correlation_id or f"api-channel-compile-{channel_id}",
+                )
+                snapshot = PolicySnapshotService(session).get_snapshot(compiled.snapshot_id)
+                return _snapshot_with_contract_state(snapshot)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.post("/profile-versions/{profile_version_id}/approve", response_model=ChannelProfileVersionRead)
     def approve_profile_version(
         profile_version_id: uuid.UUID,
@@ -759,6 +805,36 @@ def create_app() -> FastAPI:
             with session_scope() as session:
                 snapshot = ChannelProfileService(session).activate_snapshot(snapshot_id=snapshot_id)
                 return SnapshotRead.model_validate(_snapshot(snapshot))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/channels/{channel_id}/policy-snapshot")
+    def get_channel_policy_snapshot(channel_id: uuid.UUID) -> dict[str, Any] | None:
+        try:
+            with session_scope() as session:
+                snapshots = PolicySnapshotService(session).list_snapshots(channel_id)
+                snapshot = PolicySnapshotService(session).get_active_snapshot_for_channel(channel_id) or (snapshots[0] if snapshots else None)
+                return _snapshot_with_contract_state(snapshot) if snapshot is not None else None
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/channels/{channel_id}/activate")
+    def activate_channel(channel_id: uuid.UUID, data: ChannelActivateRequest | None = None) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                request = data or ChannelActivateRequest()
+                snapshot = None
+                if request.snapshot_id is not None:
+                    snapshot = PolicySnapshotService(session).get_snapshot(request.snapshot_id)
+                    if snapshot is not None and snapshot.channel_workspace_id != channel_id:
+                        raise ValidationFailureError("policy snapshot does not belong to selected channel")
+                else:
+                    snapshots = PolicySnapshotService(session).list_snapshots(channel_id)
+                    snapshot = snapshots[0] if snapshots else None
+                if snapshot is None:
+                    raise NotFoundError(f"policy snapshot not found for channel: {channel_id}")
+                activated = ChannelProfileService(session).activate_snapshot(snapshot_id=snapshot.id)
+                return _snapshot_with_contract_state(activated)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -2777,8 +2853,16 @@ def _channel(channel: Any) -> dict[str, Any]:
         "name": channel.name,
         "status": channel.status,
         "primary_language": channel.primary_language,
+        "primary_region": channel.primary_region,
+        "primary_timezone": channel.primary_timezone,
         "target_market": channel.target_market,
         "default_timezone": channel.default_timezone,
+        "target_subtitle_languages": channel.target_subtitle_languages,
+        "target_metadata_languages": channel.target_metadata_languages,
+        "target_regions": channel.target_regions,
+        "translation_mode": channel.translation_mode,
+        "localization_required_for_publish": channel.localization_required_for_publish,
+        "localized_metadata_required": channel.localized_metadata_required,
         "active_policy_snapshot_id": channel.active_policy_snapshot_id,
         "metadata": channel.metadata_,
         "created_at": channel.created_at,
@@ -2830,6 +2914,26 @@ def _snapshot(snapshot: Any) -> dict[str, Any]:
         "profile_input_hash": snapshot.profile_input_hash,
         "activated_at": snapshot.activated_at,
         "created_at": snapshot.created_at,
+    }
+
+
+def _snapshot_with_contract_state(snapshot: Any) -> dict[str, Any]:
+    payload = snapshot.compiled_payload if snapshot is not None else {}
+    contract = payload.get("channel_contract_json") if isinstance(payload, dict) and isinstance(payload.get("channel_contract_json"), dict) else {}
+    status_value = contract.get("contract_status") or payload.get("contract_status") if isinstance(payload, dict) else "MISSING"
+    missing_fields = contract.get("missing_fields") or payload.get("missing_fields") if isinstance(payload, dict) else []
+    contradiction_reasons = contract.get("contradiction_reasons") or payload.get("contradiction_reasons") if isinstance(payload, dict) else []
+    return {
+        **_snapshot(snapshot),
+        "channel_contract_json": contract or None,
+        "compiled_policy_snapshot_json": payload.get("compiled_policy_snapshot_json") if isinstance(payload, dict) else None,
+        "contract_status": status_value or "MISSING",
+        "missing_fields": missing_fields or [],
+        "contradiction_reasons": contradiction_reasons or [],
+        "next_action": contract.get("next_action")
+        or (
+            "Kích hoạt kênh." if status_value == "COMPLETE" else "Bổ sung hồ sơ kênh và compile lại policy snapshot."
+        ),
     }
 
 

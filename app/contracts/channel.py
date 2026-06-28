@@ -14,8 +14,16 @@ class ChannelWorkspaceCreate(BaseModel):
     name: str = Field(min_length=1)
     status: ChannelStatus = "draft"
     primary_language: str = "en"
+    primary_region: str | None = None
+    primary_timezone: str | None = None
     target_market: str | None = None
     default_timezone: str = "UTC"
+    target_subtitle_languages: list[str] = Field(default_factory=list)
+    target_metadata_languages: list[str] = Field(default_factory=list)
+    target_regions: list[str] = Field(default_factory=list)
+    translation_mode: str = "DISABLED"
+    localization_required_for_publish: bool = False
+    localized_metadata_required: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -28,8 +36,16 @@ class ChannelWorkspaceRead(BaseModel):
     name: str
     status: ChannelStatus
     primary_language: str
+    primary_region: str | None = None
+    primary_timezone: str | None = None
     target_market: str | None
     default_timezone: str
+    target_subtitle_languages: list[str] = Field(default_factory=list)
+    target_metadata_languages: list[str] = Field(default_factory=list)
+    target_regions: list[str] = Field(default_factory=list)
+    translation_mode: str = "DISABLED"
+    localization_required_for_publish: bool = False
+    localized_metadata_required: bool = False
     active_policy_snapshot_id: uuid.UUID | None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: AwareDatetime
