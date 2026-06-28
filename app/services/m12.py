@@ -1109,7 +1109,7 @@ class RealSmokeOrchestratorService:
         if not self.settings.youtube_real_owner_smoke:
             return _smoke_result("SKIPPED", "YouTube owner smoke bị bỏ qua vì flag thật đang tắt.", env_flags=flags, reason="YOUTUBE_OWNER_SMOKE_SKIPPED")
         credential_service = YouTubeOAuthCredentialService(self.session, config_service=YouTubeMonitoringConfigService(self.settings))
-        reference = credential_service.get_connected_reference()
+        reference = credential_service.get_connected_owner_reference()
         if reference is None:
             return _smoke_result("BLOCKED", "YouTube owner smoke cần OAuth token.", env_flags={**flags, "token_connected": False}, error_code="NEEDS_AUTH")
         access_token = credential_service.get_valid_access_token(reference)

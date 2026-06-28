@@ -233,6 +233,17 @@ def test_m12_enabled_smoke_blocks_when_credentials_missing(db_session, monkeypat
     assert run.error_code == "YOUTUBE_PUBLIC_SMOKE_CONFIG_MISSING"
 
 
+def test_m12_enabled_youtube_owner_smoke_blocks_without_connected_token(db_session, monkeypatch) -> None:
+    install_network_sentinel(monkeypatch)
+    settings = _settings(youtube_real_owner_smoke=True, youtube_test_video_id="dQw4w9WgXcQ")
+
+    run = RealSmokeOrchestratorService(db_session, settings).run_provider("youtube-owner")
+
+    assert run.run_state == "BLOCKED"
+    assert run.error_code == "NEEDS_AUTH"
+    assert run.env_flags["token_connected"] == {"configured": False, "redacted": True}
+
+
 def test_m12_api_exposes_readiness_without_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ELEVENLABS_API_KEY", "sk-raw-secret")
     monkeypatch.setenv("CREATOMATE_API_KEY", "creatomate-raw-secret")
