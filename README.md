@@ -37,6 +37,17 @@ make ollama-pull-cloud-models
 make ollama-logs
 ```
 
+Dockerized dashboard/API:
+
+```bash
+make docker-build
+make docker-migrate
+make docker-seed
+make frontend-up
+```
+
+The dashboard runs at `http://localhost:3000` and calls the API at `http://localhost:8000` by default. Keep both URLs on the same hostname so the local httpOnly auth cookie survives refresh. Override `VCOS_FRONTEND_PORT`, `VCOS_API_PORT`, or `NEXT_PUBLIC_VCOS_API_BASE_URL` in `.env` before building the frontend image when needed.
+
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. The M10.1 router uses that local endpoint by default. `VCOS_LLM_MODEL_<LANE>_<ROLE>` values are env-driven. Ollama cloud auth is handled by your local/container Ollama sign-in state, not by a VCOS-tracked API key or image override. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
 Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `CLOUD_FINAL_RENDERER_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M12 keeps Cloud Final Renderer as a required gap; Creatomate stays light-template only for shorts/cards/thumbnails and is not selected as the long-form final renderer. M10.4 removes the generic cinematic AI provider binding; AI hero jobs bind only to `GOOGLE_VERTEX_VEO`. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.

@@ -287,6 +287,11 @@ from app.contracts.m12_1 import (
     PromptTemplateRecordRead,
     StructuredOutputSchemaRead,
 )
+from app.contracts.m12_2 import (
+    FirstScriptedVideoPackageRead,
+    FirstScriptedVideoPackageRequest,
+    FirstScriptedVideoPackageReviewRead,
+)
 from app.contracts.policy_snapshot import (
     CompiledChannelPolicyPayload,
     CompiledChannelPolicySnapshot,
@@ -388,6 +393,9 @@ __all__ = [
     "PromptRenderResult",
     "PromptRenderRunRead",
     "PromptTemplateRecordRead",
+    "FirstScriptedVideoPackageRead",
+    "FirstScriptedVideoPackageRequest",
+    "FirstScriptedVideoPackageReviewRead",
     "ProviderAttemptRead",
     "ProviderHealthCheckRequest",
     "ProviderHealthSnapshotRead",

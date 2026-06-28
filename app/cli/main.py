@@ -63,6 +63,7 @@ from app.contracts import (
     MediaOffloadExecuteRequest,
     MediaOffloadJobCreate,
     ProviderSmokeRequest,
+    FirstScriptedVideoPackageRequest,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -123,6 +124,7 @@ from app.services import (
     AIHeroGenerationService,
     ProviderReadinessService,
     RealSmokeOrchestratorService,
+    FirstScriptedVideoPackageService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -168,6 +170,7 @@ youtube_app = typer.Typer(no_args_is_help=True)
 drive_app = typer.Typer(no_args_is_help=True)
 integrations_app = typer.Typer(no_args_is_help=True)
 post_publish_app = typer.Typer(no_args_is_help=True)
+package_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(data_app, name="data")
 app.add_typer(config_app, name="config")
@@ -210,6 +213,7 @@ app.add_typer(youtube_app, name="youtube")
 app.add_typer(drive_app, name="drive")
 app.add_typer(integrations_app, name="integrations")
 app.add_typer(post_publish_app, name="post-publish")
+app.add_typer(package_app, name="package")
 
 
 def _fail(message: str) -> None:
@@ -1869,6 +1873,34 @@ def integrations_smoke(provider: str = typer.Option(..., "--provider")) -> None:
             typer.echo(json.dumps(run.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"integrations smoke failed: {exc}")
+
+@package_app.command("first-video")
+def package_first_video(
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    topic: str | None = typer.Option(None, "--topic"),
+    research_pack: Path | None = typer.Option(None, "--research-pack"),
+    video_project_id: uuid.UUID | None = typer.Option(None, "--video-project-id"),
+    no_media: bool = typer.Option(True, "--no-media/--allow-media"),
+    human_review_only: bool = typer.Option(True, "--human-review-only/--allow-non-review"),
+) -> None:
+    try:
+        research_pack_text = research_pack.read_text(encoding="utf-8") if research_pack else None
+        research_pack_ref = "operator_provided_research_pack" if research_pack else None
+        with session_scope() as session:
+            package = FirstScriptedVideoPackageService(session).create(
+                FirstScriptedVideoPackageRequest(
+                    channel_id=channel_id,
+                    topic=topic,
+                    research_pack_text=research_pack_text,
+                    research_pack_ref=research_pack_ref,
+                    video_project_id=video_project_id,
+                    no_media=no_media,
+                    human_review_only=human_review_only,
+                )
+            )
+            typer.echo(json.dumps(package.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"package first-video failed: {exc}")
 
 @media_app.command("cleanup-local")
 def media_cleanup_local(dry_run: bool = typer.Option(False, "--dry-run")) -> None:

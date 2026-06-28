@@ -15,6 +15,54 @@ services:
     volumes:
       - vcos-postgres-data:/var/lib/postgresql/data
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VCOS_DATABASE_URL: ${VCOS_DOCKER_DATABASE_URL:-postgresql+psycopg://vcos:vcos@postgres:5432/vcos}
+      OLLAMA_BASE_URL: ${VCOS_DOCKER_OLLAMA_BASE_URL:-http://ollama:11434}
+      VCOS_CORS_ALLOWED_ORIGINS: ${VCOS_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    ports:
+      - "${VCOS_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_VCOS_API_BASE_URL: ${NEXT_PUBLIC_VCOS_API_BASE_URL:-http://localhost:8000}
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${VCOS_FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   ollama:
     image: ollama/ollama:latest
     environment:

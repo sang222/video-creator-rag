@@ -46,6 +46,26 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("VCOS_LLM_ROUTER_REAL_SMOKE", "LLM_ROUTER_REAL_SMOKE"),
     )
+    production_prompt_activation_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION", "ENABLE_PRODUCTION_PROMPT_ACTIVATION"),
+    )
+    real_llm_package_run_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_ENABLE_REAL_LLM_PACKAGE_RUN", "ENABLE_REAL_LLM_PACKAGE_RUN"),
+    )
+    media_provider_calls_disabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VCOS_DISABLE_MEDIA_PROVIDER_CALLS", "DISABLE_MEDIA_PROVIDER_CALLS"),
+    )
+    upload_and_publish_disabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VCOS_DISABLE_UPLOAD_AND_PUBLISH", "DISABLE_UPLOAD_AND_PUBLISH"),
+    )
+    old_provider_smoke_disabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VCOS_DISABLE_OLD_PROVIDER_SMOKE", "DISABLE_OLD_PROVIDER_SMOKE"),
+    )
     elevenlabs_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "VCOS_ELEVENLABS_API_KEY"),

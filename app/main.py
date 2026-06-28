@@ -215,6 +215,9 @@ from app.contracts import (
     PromptRenderResult,
     ReadinessRunRequest,
     RealSmokeRunRead,
+    FirstScriptedVideoPackageRead,
+    FirstScriptedVideoPackageRequest,
+    FirstScriptedVideoPackageReviewRead,
 )
 from app.contracts.policy_snapshot import CompiledChannelPolicySnapshot as SnapshotRead
 from app.contracts.m11 import (
@@ -329,6 +332,7 @@ from app.services import (
     ProviderReadinessService,
     PromptRegistryService,
     RealSmokeOrchestratorService,
+    FirstScriptedVideoPackageService,
 )
 from app.services.m11 import (
     M11ChannelLifecycleService,
@@ -2212,6 +2216,30 @@ def create_app() -> FastAPI:
             with session_scope() as session:
                 runs = PromptRegistryService(session).run_evaluation_cases()
                 return [PromptEvaluationRunRead.model_validate(run) for run in runs]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-packages/first-scripted", response_model=FirstScriptedVideoPackageRead)
+    def create_first_scripted_video_package(data: FirstScriptedVideoPackageRequest) -> FirstScriptedVideoPackageRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).create(data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/{package_id}", response_model=FirstScriptedVideoPackageRead)
+    def get_first_scripted_video_package(package_id: uuid.UUID) -> FirstScriptedVideoPackageRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).get(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/{package_id}/review", response_model=FirstScriptedVideoPackageReviewRead)
+    def get_first_scripted_video_package_review(package_id: uuid.UUID) -> FirstScriptedVideoPackageReviewRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).review(package_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

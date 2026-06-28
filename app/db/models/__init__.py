@@ -191,6 +191,7 @@ from app.db.models.m12_1 import (
     PromptTemplateRecord,
     StructuredOutputSchema,
 )
+from app.db.models.m12_2 import FirstScriptedVideoPackage
 
 __all__ = [
     "AuditEvent",
@@ -348,4 +349,5 @@ __all__ = [
     "PromptRenderRun",
     "PromptTemplateRecord",
     "StructuredOutputSchema",
+    "FirstScriptedVideoPackage",
 ]
