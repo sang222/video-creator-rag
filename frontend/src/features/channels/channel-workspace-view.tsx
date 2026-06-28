@@ -66,14 +66,17 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
     onSuccess: invalidateLedger
   });
   const [activateError, setActivateError] = useState<string | null>(null);
+  const [activateSuccess, setActivateSuccess] = useState<string | null>(null);
   const activateMutation = useMutation({
     mutationFn: () => activateChannel(channelId),
     onSuccess: async () => {
       setActivateError(null);
+      setActivateSuccess("Kênh đã được kích hoạt. Các project mới sẽ dùng snapshot hiện tại.");
       await queryClient.invalidateQueries({ queryKey: queryKeys.channelWorkspace(channelId) });
     },
     onError: (error: Error) => {
-      setActivateError(error.message || "Kích hoạt kênh thất bại.");
+      setActivateSuccess(null);
+      setActivateError(activationErrorMessage(error));
     }
   });
 
@@ -369,7 +372,7 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
               </div>
             ) : null}
             {(() => {
-              const isDraft = ["DRAFT", "READY"].includes(workspace.lifecycle.lifecycle_state);
+              const isDraft = workspace.lifecycle.lifecycle_state === "DRAFT";
               const isComplete = contractReview?.contract_status === "COMPLETE";
               const hasSnap = Boolean(contractReview?.latest_snapshot_id);
               const canActivate = isDraft && isComplete && hasSnap;
@@ -410,9 +413,9 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
                 {activateError}
               </div>
             ) : null}
-            {activateMutation.isSuccess && workspace.lifecycle.lifecycle_state === "ACTIVE" ? (
+            {activateSuccess ? (
               <div className="mt-3 rounded-md border border-green-400/30 bg-green-400/10 p-3 text-sm text-green-100">
-                Kênh đã được kích hoạt. Các project mới sẽ dùng snapshot hiện tại.
+                {activateSuccess}
               </div>
             ) : null}
           </Panel>
@@ -505,6 +508,17 @@ function shortId(value: string | null | undefined) {
 function formatDate(value: string | null | undefined) {
   if (!value) return "Chưa có dữ liệu";
   return new Date(value).toLocaleString("vi-VN");
+}
+
+function activationErrorMessage(error: Error) {
+  const message = error.message || "Backend từ chối kích hoạt.";
+  if (message.includes("not COMPLETE")) {
+    return "Không thể kích hoạt kênh: Channel Contract chưa COMPLETE. Bổ sung hồ sơ kênh rồi thử lại.";
+  }
+  if (message.includes("policy snapshot not found")) {
+    return "Không thể kích hoạt kênh: chưa có policy snapshot. Compile snapshot trước.";
+  }
+  return `Không thể kích hoạt kênh: ${message}`;
 }
 
 function visibilityLabel(value: string) {

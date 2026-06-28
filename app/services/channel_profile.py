@@ -135,6 +135,26 @@ class ChannelProfileService:
             raise NotFoundError(f"snapshot not found: {snapshot_id}")
         contract_status, missing_fields, contradiction_reasons = contract_status_from_snapshot_payload(snapshot.compiled_payload)
         if contract_status != CONTRACT_COMPLETE:
+            channel = self.session.get(ChannelWorkspace, snapshot.channel_workspace_id)
+            blocked_payload = {
+                "snapshot_id": str(snapshot.id),
+                "reason_code": "CHANNEL_ACTIVATION_BLOCKED",
+                "contract_status": contract_status,
+                "missing_fields": missing_fields,
+                "contradiction_reasons": contradiction_reasons,
+            }
+            AuditService(self.session).append(
+                AuditEnvelope(
+                    actor_type="system",
+                    action="channel.activation_blocked",
+                    target_type="channel_workspace",
+                    target_id=snapshot.channel_workspace_id,
+                    reason_code="CHANNEL_ACTIVATION_BLOCKED",
+                    correlation_id=correlation_id,
+                    payload=blocked_payload,
+                ),
+                company_id=channel.company_id if channel else None,
+            )
             DomainEventBus(self.session).append(
                 EventEnvelope(
                     event_type="channel.activation_blocked",
@@ -142,14 +162,9 @@ class ChannelProfileService:
                     aggregate_type="channel_workspace",
                     aggregate_id=snapshot.channel_workspace_id,
                     correlation_id=correlation_id,
-                    payload={
-                        "snapshot_id": str(snapshot.id),
-                        "contract_status": contract_status,
-                        "missing_fields": missing_fields,
-                        "contradiction_reasons": contradiction_reasons,
-                    },
+                    payload=blocked_payload,
                 ),
-                company_id=None,
+                company_id=channel.company_id if channel else None,
             )
             raise ValidationFailureError(
                 f"channel contract is not COMPLETE (got {contract_status}); activation blocked. "
@@ -197,7 +212,12 @@ class ChannelProfileService:
                 aggregate_type="channel_workspace",
                 aggregate_id=channel.id,
                 correlation_id=correlation_id,
-                payload={"snapshot_id": str(snapshot.id), "previous_status": previous_status, "new_status": "active"},
+                payload={
+                    "snapshot_id": str(snapshot.id),
+                    "reason_code": "CHANNEL_ACTIVATED",
+                    "previous_status": previous_status,
+                    "new_status": "active",
+                },
             ),
             company_id=channel.company_id,
         )

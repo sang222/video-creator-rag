@@ -200,6 +200,62 @@ describe("ChannelWorkspaceView - Activation CTA", () => {
     });
   });
 
+  it("refreshes status to active after activation success", async () => {
+    const activeWorkspace = makeWorkspace({
+      channel: { status: "active" },
+      health_summary: {
+        channel_status: "ACTIVE",
+        health: "HEALTHY",
+        next_action: "Kênh đang hoạt động.",
+        contract_review: {
+          contract_status: "COMPLETE",
+          label: "Hồ sơ đủ để kích hoạt",
+          latest_snapshot_id: "snap-1",
+          active_snapshot_id: "snap-1",
+          snapshot_version: 1,
+          missing_fields: [],
+          contradiction_reasons: [],
+          next_action: "Kênh đang hoạt động.",
+        },
+      },
+      lifecycle: {
+        lifecycle_state: "ACTIVE",
+        health_status: "HEALTHY",
+        daily_generation_allowed: true,
+        next_action: "Kênh đang hoạt động.",
+        main_blocker: null,
+        allowed_actions: ["KEEP_ACTIVE", "ADD_MANUAL_NOTE"],
+      },
+    });
+    const workspaceSpy = vi
+      .spyOn(api, "getChannelWorkspace")
+      .mockResolvedValueOnce(makeWorkspace())
+      .mockResolvedValue(activeWorkspace);
+    vi.spyOn(api, "getChannelPublishLedger").mockResolvedValue(emptyLedger);
+    vi.spyOn(api, "getChannelUploadTasks").mockResolvedValue(emptyTaskList);
+    vi.spyOn(api, "getChannelUploadedVideos").mockResolvedValue(emptyUploadedVideos);
+    const activateSpy = vi.spyOn(api, "activateChannel").mockResolvedValue({ status: "active" });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ChannelWorkspaceView channelId="ch-1" />
+      </QueryClientProvider>
+    );
+    await openProfileTab();
+    await userEvent.click(await screen.findByRole("button", { name: /Kích hoạt kênh/ }));
+
+    await waitFor(() => {
+      expect(activateSpy).toHaveBeenCalledWith("ch-1");
+      expect(workspaceSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(screen.getByText("Kênh đã được kích hoạt. Các project mới sẽ dùng snapshot hiện tại.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("Đang hoạt động").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Bản nháp")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cần review policy snapshot trước khi activate channel.")).not.toBeInTheDocument();
+  });
+
   it("shows Vietnamese error on activation failure", async () => {
     vi.spyOn(api, "activateChannel").mockRejectedValue(new Error("channel contract is not COMPLETE (got PARTIAL)"));
     renderView(makeWorkspace());
@@ -208,9 +264,8 @@ describe("ChannelWorkspaceView - Activation CTA", () => {
       const btn = screen.getByRole("button", { name: /Kích hoạt kênh/ });
       fireEvent.click(btn);
     });
-    // Error message should be displayed
     await waitFor(() => {
-      expect(screen.getByText(/channel contract is not COMPLETE/)).toBeInTheDocument();
+      expect(screen.getByText("Không thể kích hoạt kênh: Channel Contract chưa COMPLETE. Bổ sung hồ sơ kênh rồi thử lại.")).toBeInTheDocument();
     });
   });
 

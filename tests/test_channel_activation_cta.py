@@ -16,23 +16,30 @@ Frontend:
 - no publish/upload button appears
 """
 
+import copy
 import uuid
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts import ChannelProfileVersionCreate
 from app.core.errors import ValidationFailureError
 from app.db.models import (
+    AuditEvent,
     ChannelProfileVersion,
     ChannelWorkspace,
     Company,
     CompiledChannelPolicySnapshot,
+    DomainEvent,
+    User,
+    VideoProject,
 )
-from app.services.channel_contract import CONTRACT_COMPLETE, CONTRACT_PARTIAL, CONTRACT_MISSING
+from app.main import create_app
 from app.services.channel_profile import ChannelProfileService
 from app.services.company import CompanyService
+from app.services.profile_compiler import ChannelProfileCompiler
 
 
 def _make_company(session: Session) -> Company:
@@ -55,6 +62,55 @@ def _make_channel(session: Session, company_id: uuid.UUID, *, status: str = "dra
     session.add(channel)
     session.flush()
     return channel
+
+
+def _make_user(session: Session) -> User:
+    user = User(
+        email=f"activation-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Activation Test",
+        status="active",
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+def _profile_input(session: Session, contract: dict):
+    compiler = ChannelProfileCompiler(session)
+    profile_input, _ = compiler.profile_input_from_template("saas_digital_leverage")
+    return profile_input.model_copy(
+        update={
+            "display_name": contract["channel_identity"].get("channel_name") or "Test Channel",
+            "target_market": contract.get("market_locale", {}).get("primary_market") or "",
+            "format_strategy": contract["format_policy"],
+            "voice_style": contract["voice_style"],
+            "platform_strategy": contract["platform_strategy"],
+            "content_pillars": contract["editorial_strategy"]["content_pillars"],
+            "policies": {
+                "review": "human_review",
+                "safety": "avoid unsupported claims",
+                "channel_contract": contract,
+            },
+        }
+    )
+
+
+def _compile_snapshot(
+    session: Session,
+    channel: ChannelWorkspace,
+    *,
+    contract: dict | None = None,
+    correlation_id: str = "m12-2p-r-activation-test",
+) -> tuple[ChannelProfileVersion, CompiledChannelPolicySnapshot]:
+    compiler = ChannelProfileCompiler(session)
+    profile = ChannelProfileService(session).create_profile_version(
+        channel_id=channel.id,
+        data=ChannelProfileVersionCreate(profile_input=_profile_input(session, contract or _complete_contract_payload())),
+    )
+    compiled = compiler.compile(profile_version_id=profile.id, correlation_id=correlation_id)
+    snapshot = session.get(CompiledChannelPolicySnapshot, compiled.snapshot_id)
+    assert snapshot is not None
+    return profile, snapshot
 
 
 def _complete_contract_payload() -> dict:
@@ -177,6 +233,16 @@ def _partial_contract_payload() -> dict:
     return payload
 
 
+def _second_complete_contract_payload() -> dict:
+    payload = _complete_contract_payload()
+    payload["channel_identity"]["channel_name"] = "Test Channel UK"
+    payload["market_locale"]["primary_market"] = "UK"
+    payload["market_locale"]["audience_locale"] = "en-GB"
+    payload["market_locale"]["timezone"] = "Europe/London"
+    payload["market_locale"]["currency"] = "GBP"
+    return payload
+
+
 class TestActivationSucceedsWhenContractComplete:
     """Activation succeeds when contract is COMPLETE and snapshot exists."""
 
@@ -184,62 +250,27 @@ class TestActivationSucceedsWhenContractComplete:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
         assert channel.status == "draft"
+        profile, snapshot = _compile_snapshot(db_session, channel)
+        before_profile_input = copy.deepcopy(profile.profile_input)
+        before_profile_hash = profile.profile_input_hash
 
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_complete_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
-        )
+        result = ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
         db_session.commit()
 
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiled = compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
-        )
-        assert snapshot is not None
-
-        result = svc.activate_snapshot(snapshot_id=snapshot.id)
-        db_session.commit()
-
+        db_session.refresh(profile)
         db_session.refresh(channel)
         assert channel.status == "active"
         assert channel.active_policy_snapshot_id == snapshot.id
+        assert result.status == "active"
+        assert profile.profile_input == before_profile_input
+        assert profile.profile_input_hash == before_profile_hash
 
     def test_activation_sets_metadata_active(self, db_session: Session) -> None:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
+        _, snapshot = _compile_snapshot(db_session, channel)
 
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_complete_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
-        )
-        db_session.commit()
-
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiled = compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
-        )
-
-        svc.activate_snapshot(snapshot_id=snapshot.id)
+        ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
         db_session.commit()
 
         db_session.refresh(channel)
@@ -248,72 +279,35 @@ class TestActivationSucceedsWhenContractComplete:
     def test_activation_records_audit(self, db_session: Session) -> None:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
+        _, snapshot = _compile_snapshot(db_session, channel)
 
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_complete_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
-        )
+        ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
         db_session.commit()
 
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
-        )
-
-        svc.activate_snapshot(snapshot_id=snapshot.id)
-        db_session.commit()
-
-        from app.db.models import AuditEvent
         audits = db_session.scalars(
-            select(AuditEvent).where(AuditEvent.target_id == channel.id)
+            select(AuditEvent).where(
+                AuditEvent.target_id == channel.id,
+                AuditEvent.reason_code == "CHANNEL_ACTIVATED",
+            )
         ).all()
-        actions = [a.action for a in audits]
-        assert "channel.activated" in actions
+        assert [audit.event_type for audit in audits] == ["channel.activated"]
 
     def test_activation_records_domain_event(self, db_session: Session) -> None:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
+        _, snapshot = _compile_snapshot(db_session, channel)
 
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_complete_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
-        )
+        ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
         db_session.commit()
 
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
-        )
-
-        svc.activate_snapshot(snapshot_id=snapshot.id)
-        db_session.commit()
-
-        from app.db.models import DomainEvent
         events = db_session.scalars(
-            select(DomainEvent).where(DomainEvent.aggregate_id == channel.id)
+            select(DomainEvent).where(
+                DomainEvent.aggregate_id == channel.id,
+                DomainEvent.event_type == "channel.activated",
+            )
         ).all()
-        event_types = [e.event_type for e in events]
-        assert "channel.activated" in event_types
+        assert events
+        assert events[-1].payload["reason_code"] == "CHANNEL_ACTIVATED"
 
 
 class TestActivationBlockedWhenContractPartial:
@@ -322,31 +316,10 @@ class TestActivationBlockedWhenContractPartial:
     def test_activation_raises_on_partial_contract(self, db_session: Session) -> None:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
-
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_partial_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
-        )
-        db_session.commit()
-
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiled = compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
-        )
-        assert snapshot is not None
+        _, snapshot = _compile_snapshot(db_session, channel, contract=_partial_contract_payload())
 
         with pytest.raises(ValidationFailureError, match=r"not COMPLETE"):
-            svc.activate_snapshot(snapshot_id=snapshot.id)
+            ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
 
         db_session.refresh(channel)
         assert channel.status == "draft"
@@ -361,6 +334,16 @@ class TestActivationBlockedWhenNoSnapshot:
         with pytest.raises(Exception, match=r"snapshot not found"):
             svc.activate_snapshot(snapshot_id=fake_id)
 
+    def test_activation_endpoint_blocks_channel_without_snapshot(self, db_session: Session) -> None:
+        company = _make_company(db_session)
+        channel = _make_channel(db_session, company.id, status="draft")
+        db_session.commit()
+
+        response = TestClient(create_app()).post(f"/channels/{channel.id}/activate", json={})
+
+        assert response.status_code == 404
+        assert "policy snapshot not found" in response.text
+
 
 class TestActivationDoesNotMutateVideoProjectSnapshots:
     """Activation does not mutate existing VideoProject snapshots."""
@@ -368,73 +351,65 @@ class TestActivationDoesNotMutateVideoProjectSnapshots:
     def test_activation_preserves_project_snapshots(self, db_session: Session) -> None:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
-
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_complete_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
+        user = _make_user(db_session)
+        _, first_snapshot = _compile_snapshot(
+            db_session,
+            channel,
+            correlation_id="m12-2p-r-first-snapshot",
         )
-        db_session.commit()
-
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
+        project = VideoProject(
+            company_id=company.id,
+            channel_workspace_id=channel.id,
+            policy_snapshot_id=first_snapshot.id,
+            title="Frozen project",
+            description="Project keeps its original policy snapshot.",
+            created_by_user_id=user.id,
+        )
+        db_session.add(project)
+        db_session.flush()
+        _, second_snapshot = _compile_snapshot(
+            db_session,
+            channel,
+            contract=_second_complete_contract_payload(),
+            correlation_id="m12-2p-r-second-snapshot",
         )
 
-        # No VideoProject rows to mutate — verify activation succeeds and channel goes active
-        svc.activate_snapshot(snapshot_id=snapshot.id)
+        ChannelProfileService(db_session).activate_snapshot(snapshot_id=second_snapshot.id)
         db_session.commit()
 
         db_session.refresh(channel)
+        db_session.refresh(project)
         assert channel.status == "active"
-        assert channel.active_policy_snapshot_id == snapshot.id
+        assert channel.active_policy_snapshot_id == second_snapshot.id
+        assert project.policy_snapshot_id == first_snapshot.id
 
 
 class TestActivationBlockedRecordsEvent:
     """Blocked activation records activation_blocked event."""
 
-    def test_blocked_records_event(self, db_session: Session) -> None:
+    def test_blocked_records_event_and_audit(self, db_session: Session) -> None:
         company = _make_company(db_session)
         channel = _make_channel(db_session, company.id, status="draft")
-
-        svc = ChannelProfileService(db_session)
-        profile = svc.create_profile_version(
-            channel_id=channel.id,
-            data=ChannelProfileVersionCreate(
-                profile_input=_partial_contract_payload(),
-                template_key="saas_digital_leverage",
-            ),
-        )
-        db_session.commit()
-
-        from app.services.profile_compiler import ChannelProfileCompiler
-        compiler = ChannelProfileCompiler(db_session)
-        compiler.compile(channel_id=channel.id, profile_version_id=profile.id)
-        db_session.commit()
-
-        snapshot = db_session.scalar(
-            select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_workspace_id == channel.id
-            )
-        )
+        _, snapshot = _compile_snapshot(db_session, channel, contract=_partial_contract_payload())
 
         with pytest.raises(ValidationFailureError):
-            svc.activate_snapshot(snapshot_id=snapshot.id)
+            ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
 
         db_session.commit()
 
-        from app.db.models import DomainEvent
         events = db_session.scalars(
-            select(DomainEvent).where(DomainEvent.aggregate_id == channel.id)
+            select(DomainEvent).where(
+                DomainEvent.aggregate_id == channel.id,
+                DomainEvent.event_type == "channel.activation_blocked",
+            )
         ).all()
-        event_types = [e.event_type for e in events]
-        assert "channel.activation_blocked" in event_types
+        audits = db_session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.target_id == channel.id,
+                AuditEvent.reason_code == "CHANNEL_ACTIVATION_BLOCKED",
+            )
+        ).all()
+        assert events
+        assert events[-1].payload["reason_code"] == "CHANNEL_ACTIVATION_BLOCKED"
+        assert audits
+        assert audits[-1].event_type == "channel.activation_blocked"
