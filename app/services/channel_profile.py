@@ -14,8 +14,10 @@ from app.db.models import (
 )
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
-from app.services.channel_contract import ensure_snapshot_contract_activatable, reject_legacy_provider_budget_fields
+from app.services.channel_contract import CONTRACT_COMPLETE, contract_status_from_snapshot_payload, ensure_snapshot_contract_activatable, reject_legacy_provider_budget_fields
 from app.services.profile_compiler import ChannelProfileCompiler
+from app.services.domain_events import DomainEventBus
+from app.contracts import EventEnvelope
 
 
 class ChannelProfileService:
@@ -131,23 +133,73 @@ class ChannelProfileService:
         snapshot = self.session.get(CompiledChannelPolicySnapshot, snapshot_id)
         if snapshot is None:
             raise NotFoundError(f"snapshot not found: {snapshot_id}")
-        ensure_snapshot_contract_activatable(snapshot.compiled_payload)
+        contract_status, missing_fields, contradiction_reasons = contract_status_from_snapshot_payload(snapshot.compiled_payload)
+        if contract_status != CONTRACT_COMPLETE:
+            DomainEventBus(self.session).append(
+                EventEnvelope(
+                    event_type="channel.activation_blocked",
+                    event_version=1,
+                    aggregate_type="channel_workspace",
+                    aggregate_id=snapshot.channel_workspace_id,
+                    correlation_id=correlation_id,
+                    payload={
+                        "snapshot_id": str(snapshot.id),
+                        "contract_status": contract_status,
+                        "missing_fields": missing_fields,
+                        "contradiction_reasons": contradiction_reasons,
+                    },
+                ),
+                company_id=None,
+            )
+            raise ValidationFailureError(
+                f"channel contract is not COMPLETE (got {contract_status}); activation blocked. "
+                f"missing_fields={missing_fields}, contradiction_reasons={contradiction_reasons}"
+            )
         channel = self.session.get(ChannelWorkspace, snapshot.channel_workspace_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {snapshot.channel_workspace_id}")
         profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        previous_status = channel.status
         channel.active_policy_snapshot_id = snapshot.id
+        channel.status = "active"
         snapshot.status = "active"
         snapshot.activated_at = utc_now()
         if profile_version is not None:
             profile_version.status = "active"
+        metadata = dict(channel.metadata_ or {})
+        metadata["m11_lifecycle_state"] = "ACTIVE"
+        metadata["m11_health_status"] = metadata.get("m11_health_status", "NEW")
+        channel.metadata_ = metadata
         self.session.flush()
         self._audit(
             action="policy_snapshot.activated",
             target_id=snapshot.id,
             company_id=channel.company_id,
             correlation_id=correlation_id,
-            payload={"channel_id": str(channel.id), "profile_version_id": str(snapshot.channel_profile_version_id)},
+            payload={"channel_id": str(channel.id), "profile_version_id": str(snapshot.channel_profile_version_id), "previous_status": previous_status, "new_status": "active"},
+        )
+        AuditService(self.session).append(
+            AuditEnvelope(
+                actor_type="system",
+                action="channel.activated",
+                target_type="channel_workspace",
+                target_id=channel.id,
+                reason_code="CHANNEL_ACTIVATED",
+                correlation_id=correlation_id,
+                payload={"snapshot_id": str(snapshot.id), "previous_status": previous_status},
+            ),
+            company_id=channel.company_id,
+        )
+        DomainEventBus(self.session).append(
+            EventEnvelope(
+                event_type="channel.activated",
+                event_version=1,
+                aggregate_type="channel_workspace",
+                aggregate_id=channel.id,
+                correlation_id=correlation_id,
+                payload={"snapshot_id": str(snapshot.id), "previous_status": previous_status, "new_status": "active"},
+            ),
+            company_id=channel.company_id,
         )
         return snapshot
 

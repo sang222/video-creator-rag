@@ -10,9 +10,12 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.contracts.m12_2 import (
+    FirstScriptedVideoPackageAgentRunsRead,
     FirstScriptedVideoPackageRead,
     FirstScriptedVideoPackageRequest,
     FirstScriptedVideoPackageReviewRead,
+    M122SPreflightRead,
+    VideoGenerationBoundaryRead,
 )
 from app.contracts.m12_1 import PromptOutputValidationRequest, PromptRenderRequest
 from app.core.config import Settings, get_settings
@@ -21,8 +24,10 @@ from app.db.models import (
     ChannelProfileVersion,
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
+    Company,
     FirstScriptedVideoPackage,
     PromptAuditSnapshot,
+    VideoGenerationBoundary,
     VideoProject,
 )
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
@@ -32,10 +37,25 @@ from app.services.m12_1 import PromptRegistryService
 
 ROOT = Path(__file__).resolve().parents[2]
 M12_2_REQUIRED_TAGS = ("m12-1-prompt-registry-contracts", "m12-1r-mock-dryrun-purge")
+M12_2S_REQUIRED_TAGS = (
+    "m12-1-prompt-registry-contracts",
+    "m12-1r-mock-dryrun-purge",
+    "m12-2-first-scripted-video-package",
+    "m12-2r-publish-handoff-ledger",
+    "m12-2p-channel-contract-init",
+)
 CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION = "Bổ sung hoặc compile lại ChannelProfileVersion trước khi chạy video package production."
 NEEDS_CHANNEL_NEXT_ACTION = "Tạo channel và compile ChannelProfileVersion trước khi chạy M12.2."
+M12_2S_NEEDS_COMPANY_NEXT_ACTION = "Tạo company trước, sau đó tạo channel."
+M12_2S_NEEDS_CHANNEL_NEXT_ACTION = "Tạo channel bằng Channel Init và compile snapshot."
+M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION = "Bổ sung field còn thiếu và compile lại ChannelProfileVersion."
 NEEDS_RESEARCH_PACK_NEXT_ACTION = "Bổ sung research pack/source notes trước khi chạy video package production."
 HUMAN_APPROVAL_REQUIRED = "Human final approval required before any media generation, upload, publish, or reupload."
+MEDIA_PROVIDER_BOUNDARY_SUMMARY = (
+    "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
+)
+MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = "Cấu hình Creatomate và ElevenLabs trước; Veo là optional cho hero shot."
+FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + Real Ollama Rehearsal"
 
 VISUAL_SOURCE_ALLOWLIST = {
     "DIAGRAM",
@@ -67,8 +87,48 @@ PACKAGE_AGENT_CHAIN: tuple[PackageAgentStep, ...] = (
     PackageAgentStep("GatekeeperSoftReviewAgent", "gatekeeper_soft_review", "gatekeeper_review", "policy_soft_review"),
 )
 
+FULL_REHEARSAL_AGENT_CHAIN: tuple[PackageAgentStep, ...] = (
+    PackageAgentStep("ChannelAuthorityAgent", "cheap_structured", "admission_decision", "json_schema_output"),
+    PackageAgentStep("TopicIdeaScoringAgent", "cheap_structured", "topic_scores", "json_schema_output"),
+    PackageAgentStep("ResearchPackSummarizer", "long_context_text", "research_notes", "long_context_synthesis"),
+    PackageAgentStep("ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"),
+    PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
+    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
+    PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
+    PackageAgentStep("ThumbnailBriefAgent", "visual_creative_review", "thumbnail_brief", "thumbnail_direction_review"),
+    PackageAgentStep("RightsDisclosureReviewer", "gatekeeper_soft_review", "rights_disclosure_review", "policy_soft_review"),
+    PackageAgentStep("GatekeeperSoftReviewAgent", "gatekeeper_soft_review", "gatekeeper_review", "policy_soft_review"),
+    PackageAgentStep("UploadCardCopyAgent", "cheap_structured", "upload_card_copy", "metadata_generation"),
+    PackageAgentStep("ProviderReadinessSummaryAgent", "cheap_structured", "provider_readiness_summary", "json_schema_output"),
+    PackageAgentStep("MediaQCExplanationAgent", "cheap_structured", "media_qc_explanation", "small_classification"),
+)
+
+FULL_REHEARSAL_REQUIRED_AGENT_KEYS = {
+    "ChannelAuthorityAgent",
+    "TopicIdeaScoringAgent",
+    "ResearchPackSummarizer",
+    "ScriptPlanningAgent",
+    "ScriptWriterAgent",
+    "PublishingMetadataAgent",
+    "VisualPlanningAgent",
+    "ThumbnailBriefAgent",
+    "RightsDisclosureReviewer",
+    "GatekeeperSoftReviewAgent",
+    "UploadCardCopyAgent",
+    "ProviderReadinessSummaryAgent",
+    "MediaQCExplanationAgent",
+}
+
 
 def verify_m12_2_required_tags(repo_root: Path = ROOT) -> dict[str, Any]:
+    return _verify_required_tags(M12_2_REQUIRED_TAGS, repo_root=repo_root)
+
+
+def verify_m12_2s_required_tags(repo_root: Path = ROOT) -> dict[str, Any]:
+    return _verify_required_tags(M12_2S_REQUIRED_TAGS, repo_root=repo_root)
+
+
+def _verify_required_tags(required_tags: tuple[str, ...], *, repo_root: Path = ROOT) -> dict[str, Any]:
     try:
         completed = subprocess.run(
             ["git", "tag", "--list"],
@@ -80,15 +140,15 @@ def verify_m12_2_required_tags(repo_root: Path = ROOT) -> dict[str, Any]:
     except OSError as exc:
         return {
             "status": "BLOCKED",
-            "required_tags": list(M12_2_REQUIRED_TAGS),
-            "missing_tags": list(M12_2_REQUIRED_TAGS),
+            "required_tags": list(required_tags),
+            "missing_tags": list(required_tags),
             "error": str(exc),
         }
     tags = {line.strip() for line in completed.stdout.splitlines() if line.strip()}
-    missing = [tag for tag in M12_2_REQUIRED_TAGS if tag not in tags]
+    missing = [tag for tag in required_tags if tag not in tags]
     return {
         "status": "PASS" if not missing else "BLOCKED",
-        "required_tags": list(M12_2_REQUIRED_TAGS),
+        "required_tags": list(required_tags),
         "missing_tags": missing,
     }
 
@@ -234,11 +294,268 @@ class FirstScriptedVideoPackageService:
         package = self._create_package(**package_state)
         return self._read(package)
 
+    def rehearse_full(self, data: FirstScriptedVideoPackageRequest) -> FirstScriptedVideoPackageRead:
+        preflight = self.preflight_full_rehearsal(data)
+        channel = self.session.get(ChannelWorkspace, data.channel_id)
+        if channel is None:
+            raise ValidationFailureError(f"{preflight.status}: {preflight.next_action}")
+        if preflight.status != "READY":
+            artifacts: dict[str, Any] = {"preflight": preflight.model_dump(mode="json")}
+            if preflight.status == "BLOCKED_NEEDS_CHANNEL_CONTRACT":
+                artifacts["channel_contract_review"] = preflight.details.get("channel_contract_review", {})
+            if preflight.status == "BLOCKED_ACTIVATION_FLAGS":
+                artifacts["runtime_mode"] = preflight.details.get("runtime_mode", {})
+            if preflight.status == "NOT_CONFIGURED":
+                artifacts["llm_readiness"] = preflight.details.get("llm_readiness", {})
+            return self._read(self._create_package(
+                channel_id=channel.id,
+                status="NOT_CONFIGURED" if preflight.status == "NOT_CONFIGURED" else "BLOCKED",
+                channel_profile_version_id=preflight.channel_profile_version_id,
+                compiled_policy_snapshot_id=preflight.compiled_policy_snapshot_id,
+                artifacts=artifacts,
+                limitations=["M12.2S preflight blocked full agent rehearsal before provider/readiness or LLM work."],
+                next_action=preflight.next_action,
+            ))
+
+        readiness_snapshot = ProviderReadinessService(self.session, self.settings).run()
+        snapshot = self._active_snapshot(channel)
+        if snapshot is None:
+            raise ValidationFailureError(f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}")
+
+        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        if profile_version is None:
+            raise ValidationFailureError(f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}")
+
+        video_project_id = self._validate_optional_project(data.video_project_id, channel_id=channel.id, snapshot_id=snapshot.id)
+
+        channel_contract = (
+            snapshot.compiled_payload.get("channel_contract_json")
+            if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
+            else {}
+        )
+
+        if not data.topic:
+            return self._read(self._create_package(
+                channel_id=channel.id,
+                video_project_id=video_project_id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                provider_readiness_snapshot_id=readiness_snapshot.id,
+                status="BLOCKED",
+                artifacts={"topic": {"status": "NEEDS_TOPIC"}},
+                limitations=["Thiếu topic; VCOS không tự bịa đề tài để chạy agent production."],
+                next_action="Bổ sung topic trước khi chạy full Ollama rehearsal.",
+            ))
+
+        if not (data.research_pack_text or data.research_pack_ref):
+            return self._read(self._create_package(
+                channel_id=channel.id,
+                video_project_id=video_project_id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                provider_readiness_snapshot_id=readiness_snapshot.id,
+                status="REVIEW_REQUIRED",
+                artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
+                limitations=["Thiếu research pack/source notes; VCOS không browse web hoặc bịa nguồn."],
+                next_action=NEEDS_RESEARCH_PACK_NEXT_ACTION,
+            ))
+
+        package_state = self._run_full_rehearsal_agent_chain(
+            channel=channel,
+            profile_version=profile_version,
+            snapshot=snapshot,
+            channel_contract=channel_contract,
+            provider_readiness_snapshot=readiness_snapshot.model_dump(mode="json"),
+            data=data,
+            video_project_id=video_project_id,
+        )
+        package = self._create_package(**package_state)
+        if self._should_create_boundary(package.artifacts):
+            boundary = self._create_generation_boundary(package=package, readiness_snapshot=readiness_snapshot.model_dump(mode="json"))
+            package.artifacts = {
+                **package.artifacts,
+                "video_generation_boundary_ref": str(boundary.id),
+                "video_generation_boundary_status": boundary.boundary_status,
+            }
+            self.session.flush()
+        return self._read(package)
+
+    def preflight_full_rehearsal(
+        self,
+        data: FirstScriptedVideoPackageRequest | None = None,
+        *,
+        channel_id: uuid.UUID | None = None,
+    ) -> M122SPreflightRead:
+        requested_channel_id = data.channel_id if data is not None else channel_id
+        companies = list(self.session.scalars(select(Company).order_by(desc(Company.created_at))).all())
+        if not companies:
+            return M122SPreflightRead(
+                status="BLOCKED_NEEDS_COMPANY",
+                next_action=M12_2S_NEEDS_COMPANY_NEXT_ACTION,
+                reason_codes=["COMPANY_MISSING"],
+            )
+
+        channel = self._select_preflight_channel(requested_channel_id)
+        if channel is None:
+            return M122SPreflightRead(
+                status="BLOCKED_NEEDS_CHANNEL",
+                next_action=M12_2S_NEEDS_CHANNEL_NEXT_ACTION,
+                company_id=companies[0].id,
+                reason_codes=["CHANNEL_MISSING"],
+                details={"requested_channel_id": str(requested_channel_id) if requested_channel_id else None},
+            )
+
+        snapshot = self._active_snapshot(channel)
+        if snapshot is None:
+            return M122SPreflightRead(
+                status="BLOCKED_NEEDS_CHANNEL_CONTRACT",
+                next_action=M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
+                company_id=channel.company_id,
+                channel_id=channel.id,
+                contract_status="MISSING",
+                reason_codes=["ACTIVE_COMPILED_POLICY_SNAPSHOT_MISSING"],
+                details={
+                    "channel_contract_review": {
+                        "status": "BLOCKED_NEEDS_CHANNEL_CONTRACT",
+                        "reason_codes": ["ACTIVE_COMPILED_POLICY_SNAPSHOT_MISSING"],
+                        "missing_or_invalid_fields": ["active_compiled_policy_snapshot"],
+                        "next_action": M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
+                    }
+                },
+            )
+
+        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        if profile_version is None:
+            return M122SPreflightRead(
+                status="BLOCKED_NEEDS_CHANNEL_CONTRACT",
+                next_action=M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
+                company_id=channel.company_id,
+                channel_id=channel.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                contract_status="MISSING",
+                reason_codes=["CHANNEL_PROFILE_VERSION_MISSING"],
+                details={
+                    "channel_contract_review": {
+                        "status": "BLOCKED_NEEDS_CHANNEL_CONTRACT",
+                        "reason_codes": ["CHANNEL_PROFILE_VERSION_MISSING"],
+                        "missing_or_invalid_fields": ["channel_profile_version"],
+                        "next_action": M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
+                    }
+                },
+            )
+
+        channel_contract = (
+            snapshot.compiled_payload.get("channel_contract_json")
+            if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
+            else {}
+        )
+        contract_block = self._channel_contract_block(channel_contract, snapshot)
+        if contract_block is not None:
+            return M122SPreflightRead(
+                status="BLOCKED_NEEDS_CHANNEL_CONTRACT",
+                next_action=M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
+                company_id=channel.company_id,
+                channel_id=channel.id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                contract_status=str(channel_contract.get("contract_status") or "MISSING"),
+                reason_codes=["CHANNEL_CONTRACT_INCOMPLETE"],
+                details={"channel_contract_review": {**contract_block, "status": "BLOCKED_NEEDS_CHANNEL_CONTRACT", "next_action": M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}},
+            )
+
+        tag_preflight = verify_m12_2s_required_tags(self.repo_root)
+        if tag_preflight["status"] != "PASS":
+            missing_tags = tag_preflight.get("missing_tags", [])
+            return M122SPreflightRead(
+                status="BLOCKED_REQUIRED_TAGS",
+                next_action=f"Khôi phục hoặc tạo tag còn thiếu: {', '.join(missing_tags)}.",
+                company_id=channel.company_id,
+                channel_id=channel.id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+                reason_codes=["M12_2S_REQUIRED_TAGS_MISSING"],
+                details={"required_tags": tag_preflight},
+            )
+
+        flag_block = self._flag_block(data or FirstScriptedVideoPackageRequest(channel_id=channel.id))
+        if flag_block is not None:
+            return M122SPreflightRead(
+                status="BLOCKED_ACTIVATION_FLAGS",
+                next_action=flag_block["next_action"],
+                company_id=channel.company_id,
+                channel_id=channel.id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+                reason_codes=["M12_2S_ACTIVATION_FLAGS_INVALID"],
+                details={"runtime_mode": flag_block},
+            )
+
+        llm_block = self._llm_readiness_block(full_rehearsal=True)
+        if llm_block is not None:
+            return M122SPreflightRead(
+                status="NOT_CONFIGURED",
+                next_action=llm_block["next_action"],
+                company_id=channel.company_id,
+                channel_id=channel.id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+                reason_codes=["OLLAMA_OR_LLM_ROUTER_NOT_READY"],
+                details={"llm_readiness": llm_block},
+            )
+
+        return M122SPreflightRead(
+            status="READY",
+            next_action="Có thể chạy M12.2S full agent rehearsal bằng Ollama.",
+            company_id=channel.company_id,
+            channel_id=channel.id,
+            channel_profile_version_id=profile_version.id,
+            compiled_policy_snapshot_id=snapshot.id,
+            contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+        )
+
     def get(self, package_id: uuid.UUID) -> FirstScriptedVideoPackageRead:
         package = self.session.get(FirstScriptedVideoPackage, package_id)
         if package is None:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
         return self._read(package)
+
+    def agent_runs(self, package_id: uuid.UUID) -> FirstScriptedVideoPackageAgentRunsRead:
+        package = self.session.get(FirstScriptedVideoPackage, package_id)
+        if package is None:
+            raise NotFoundError(f"first scripted video package not found: {package_id}")
+        provider_attempt_refs = [
+            str(ref["provider_attempt_id"])
+            for ref in package.agent_run_refs
+            if isinstance(ref, dict) and ref.get("provider_attempt_id")
+        ]
+        llm_run_refs = [
+            str(ref["llm_run_snapshot_id"])
+            for ref in package.agent_run_refs
+            if isinstance(ref, dict) and ref.get("llm_run_snapshot_id")
+        ]
+        return FirstScriptedVideoPackageAgentRunsRead(
+            package_id=package.id,
+            package_status=package.package_status,  # type: ignore[arg-type]
+            agent_runs=package.agent_run_refs,
+            prompt_render_run_refs=[uuid.UUID(str(item)) for item in package.prompt_render_run_refs],
+            prompt_audit_snapshot_refs=[uuid.UUID(str(item)) for item in package.prompt_audit_snapshot_refs],
+            provider_attempt_refs=provider_attempt_refs,
+            llm_run_snapshot_refs=llm_run_refs,
+        )
+
+    def generation_boundary(self, package_id: uuid.UUID) -> VideoGenerationBoundaryRead:
+        boundary = self.session.scalars(
+            select(VideoGenerationBoundary)
+            .where(VideoGenerationBoundary.package_id == package_id)
+            .order_by(desc(VideoGenerationBoundary.created_at))
+            .limit(1)
+        ).one_or_none()
+        if boundary is None:
+            raise NotFoundError(f"video generation boundary not found for package: {package_id}")
+        return VideoGenerationBoundaryRead.model_validate(boundary)
 
     def review(self, package_id: uuid.UUID) -> FirstScriptedVideoPackageReviewRead:
         package = self.session.get(FirstScriptedVideoPackage, package_id)
@@ -425,6 +742,286 @@ class FirstScriptedVideoPackageService:
             "next_action": next_action,
         }
 
+    def _run_full_rehearsal_agent_chain(
+        self,
+        *,
+        channel: ChannelWorkspace,
+        profile_version: ChannelProfileVersion,
+        snapshot: CompiledChannelPolicySnapshot,
+        channel_contract: dict[str, Any],
+        provider_readiness_snapshot: dict[str, Any],
+        data: FirstScriptedVideoPackageRequest,
+        video_project_id: uuid.UUID | None,
+    ) -> dict[str, Any]:
+        artifacts: dict[str, Any] = {
+            "channel_contract_snapshot_ref": {
+                "channel_id": str(channel.id),
+                "channel_profile_version_id": str(profile_version.id),
+                "compiled_policy_snapshot_id": str(snapshot.id),
+                "channel_contract_status": channel_contract.get("contract_status"),
+                "compiled_policy_content_hash": snapshot.content_hash,
+            },
+            "runtime_guard": {
+                "real_ollama_agent_run": True,
+                "llm_router_only": True,
+                "no_media_provider_calls": True,
+                "no_upload_or_publish": True,
+                "old_provider_smoke_disabled": True,
+            },
+        }
+        agent_run_refs: list[dict[str, Any]] = []
+        prompt_render_run_refs: list[str] = []
+        prompt_audit_snapshot_refs: list[str] = []
+        status = "READY_FOR_MEDIA_PROVIDERS"
+        next_action = HUMAN_APPROVAL_REQUIRED
+        limitations: list[str] = [
+            "M12.2S chỉ chạy agent text/review bằng Ollama; không generate media, không TTS, không upload/publish.",
+            "Veo/ElevenLabs/Creatomate chỉ xuất hiện trong readiness/boundary, không được gọi runtime.",
+        ]
+
+        for step in FULL_REHEARSAL_AGENT_CHAIN:
+            result = self._execute_rehearsal_agent_step(
+                step=step,
+                data=data,
+                artifacts=artifacts,
+                channel=channel,
+                profile_version=profile_version,
+                snapshot=snapshot,
+                channel_contract=channel_contract,
+                provider_readiness_snapshot=provider_readiness_snapshot,
+                agent_run_refs=agent_run_refs,
+                prompt_render_run_refs=prompt_render_run_refs,
+                prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+            )
+            if result["stop_status"] is not None:
+                status = result["stop_status"]
+                next_action = result["next_action"] or next_action
+                if step.agent_key == "GatekeeperSoftReviewAgent":
+                    rewrite = self._maybe_run_script_rewrite(
+                        gatekeeper_output=result.get("parsed_output"),
+                        data=data,
+                        artifacts=artifacts,
+                        channel=channel,
+                        profile_version=profile_version,
+                        snapshot=snapshot,
+                        channel_contract=channel_contract,
+                        provider_readiness_snapshot=provider_readiness_snapshot,
+                        agent_run_refs=agent_run_refs,
+                        prompt_render_run_refs=prompt_render_run_refs,
+                        prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+                    )
+                    if rewrite["ran"]:
+                        status = rewrite["stop_status"] or "REVIEW_REQUIRED"
+                        next_action = rewrite["next_action"] or "Review script rewrite trước khi chạy lại gatekeeper."
+                break
+            if step.agent_key == "GatekeeperSoftReviewAgent":
+                agent_run_refs.append(self._safe_skip_ref("ScriptRewriteAgent", "Gatekeeper PASS; validation không yêu cầu rewrite."))
+
+        artifacts["human_review_checklist"] = self._human_review_checklist(artifacts, provider_readiness_snapshot_id=uuid.UUID(provider_readiness_snapshot["id"]))
+        risk_summary = self._risk_summary(artifacts, status)
+        return {
+            "channel_id": channel.id,
+            "video_project_id": video_project_id,
+            "channel_profile_version_id": profile_version.id,
+            "compiled_policy_snapshot_id": snapshot.id,
+            "provider_readiness_snapshot_id": uuid.UUID(provider_readiness_snapshot["id"]),
+            "status": status,
+            "agent_run_refs": agent_run_refs,
+            "prompt_render_run_refs": prompt_render_run_refs,
+            "prompt_audit_snapshot_refs": sorted(set(prompt_audit_snapshot_refs)),
+            "artifacts": artifacts,
+            "limitations": limitations + risk_summary.get("limitations", []),
+            "risk_limitations_summary": risk_summary,
+            "next_action": next_action,
+        }
+
+    def _execute_rehearsal_agent_step(
+        self,
+        *,
+        step: PackageAgentStep,
+        data: FirstScriptedVideoPackageRequest,
+        artifacts: dict[str, Any],
+        channel: ChannelWorkspace,
+        profile_version: ChannelProfileVersion,
+        snapshot: CompiledChannelPolicySnapshot,
+        channel_contract: dict[str, Any],
+        provider_readiness_snapshot: dict[str, Any],
+        agent_run_refs: list[dict[str, Any]],
+        prompt_render_run_refs: list[str],
+        prompt_audit_snapshot_refs: list[str],
+    ) -> dict[str, Any]:
+        task_payload = self._full_rehearsal_task_payload(
+            step=step,
+            data=data,
+            artifacts=artifacts,
+            channel=channel,
+            snapshot=snapshot,
+            provider_readiness_snapshot=provider_readiness_snapshot,
+        )
+        render = self.prompt_registry.render_prompt(
+            PromptRenderRequest(
+                agent_key=step.agent_key,
+                router_lane=step.router_lane,
+                task_payload=task_payload,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                channel_contract_json=channel_contract,
+                compiled_policy_snapshot_json=snapshot.compiled_payload,
+                market_locale_context_json=channel_contract.get("market_locale"),
+                evidence_refs=self._evidence_refs(data),
+                artifact_refs=self._artifact_refs(artifacts),
+                input_payload_ref=f"full-agent-rehearsal:{channel.id}:{step.agent_key}",
+            )
+        )
+        prompt_render_run_refs.append(str(render.prompt_render_run_id))
+        prompt_audit_snapshot_refs.append(str(render.prompt_audit_snapshot_id))
+        if render.status != "OK":
+            artifacts[step.artifact_key] = render.blocking_output.model_dump(mode="json") if render.blocking_output else None
+            return {
+                "stop_status": "REVIEW_REQUIRED" if render.status == "REVIEW_REQUIRED" else "BLOCKED",
+                "next_action": CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
+                "parsed_output": None,
+            }
+
+        route = self.llm_router.route(
+            lane_name=render.router_lane,
+            messages=[message.model_dump() for message in render.rendered_messages],
+            requested_task_type=step.requested_task_type,
+            response_format="json",
+            correlation_id=f"m12-2s-full-agent-rehearsal-{step.agent_key}",
+        )
+        if route.status != "SUCCESS":
+            agent_run_refs.append(self._agent_ref(step, render, route=route, validation=None))
+            artifacts[step.artifact_key] = {"status": route.status, "reason_codes": route.reason_codes}
+            return {
+                "stop_status": "NOT_CONFIGURED" if route.status == "SKIPPED" else "ERROR",
+                "next_action": "Cấu hình real Ollama/LLMRouter trước khi chạy full agent rehearsal.",
+                "parsed_output": None,
+            }
+
+        raw_output: str | dict[str, Any] | None = route.structured_output or route.content
+        validation = self.prompt_registry.validate_output(
+            PromptOutputValidationRequest(
+                agent_key=step.agent_key,
+                raw_output=raw_output or "",
+                prompt_render_run_id=render.prompt_render_run_id,
+            )
+        )
+        audit_id = self._latest_audit_id(
+            render.prompt_render_run_id,
+            provider_refs=[
+                {
+                    "route_attempt_id": str(route.route_attempt_id),
+                    "provider_attempt_id": str(route.provider_attempt_id) if route.provider_attempt_id else None,
+                    "llm_run_snapshot_id": str(route.llm_run_snapshot_id) if route.llm_run_snapshot_id else None,
+                }
+            ],
+        )
+        if audit_id is not None:
+            prompt_audit_snapshot_refs.append(str(audit_id))
+        agent_run_refs.append(self._agent_ref(step, render, route=route, validation=validation.model_dump(mode="json")))
+
+        if validation.parsed_output is None or validation.status not in {"OK", "REVIEW_REQUIRED", "BLOCK"}:
+            artifacts[step.artifact_key] = validation.validation_result
+            return {
+                "stop_status": "ERROR",
+                "next_action": "Sửa output schema/LLM response trước khi tiếp tục full rehearsal.",
+                "parsed_output": validation.parsed_output,
+            }
+        if validation.status == "REVIEW_REQUIRED":
+            artifacts[step.artifact_key] = {
+                "validation_result": validation.validation_result,
+                "parsed_output": validation.parsed_output,
+                "repair_attempts": validation.repair_attempts,
+            }
+            return {
+                "stop_status": "REVIEW_REQUIRED",
+                "next_action": "Sửa output schema/LLM response trước khi tiếp tục full rehearsal.",
+                "parsed_output": validation.parsed_output,
+            }
+
+        output = validation.parsed_output
+        artifacts[step.artifact_key] = output.get("artifact") or {}
+        agent_block = self._full_rehearsal_artifact_block(step.agent_key, artifacts[step.artifact_key])
+        if agent_block is not None:
+            artifacts[f"{step.artifact_key}_review"] = agent_block
+            return {"stop_status": "REVIEW_REQUIRED", "next_action": agent_block["next_action"], "parsed_output": output}
+
+        if step.agent_key == "GatekeeperSoftReviewAgent":
+            gatekeeper_result = self._gatekeeper_result(output)
+            if gatekeeper_result == "BLOCK":
+                return {
+                    "stop_status": "BLOCKED",
+                    "next_action": output.get("next_action") or "Sửa rủi ro gatekeeper trước khi tới media boundary.",
+                    "parsed_output": output,
+                }
+            if gatekeeper_result == "REVIEW_REQUIRED":
+                return {
+                    "stop_status": "REVIEW_REQUIRED",
+                    "next_action": output.get("next_action") or HUMAN_APPROVAL_REQUIRED,
+                    "parsed_output": output,
+                }
+            return {"stop_status": None, "next_action": None, "parsed_output": output}
+
+        envelope_status = output.get("status")
+        if envelope_status == "BLOCK":
+            return {
+                "stop_status": "BLOCKED",
+                "next_action": output.get("next_action") or "Agent upstream trả BLOCK; không tiếp tục downstream.",
+                "parsed_output": output,
+            }
+        if envelope_status == "REVIEW_REQUIRED":
+            return {
+                "stop_status": "REVIEW_REQUIRED",
+                "next_action": output.get("next_action") or "Agent upstream cần human review; không tiếp tục downstream.",
+                "parsed_output": output,
+            }
+        return {"stop_status": None, "next_action": None, "parsed_output": output}
+
+    def _maybe_run_script_rewrite(
+        self,
+        *,
+        gatekeeper_output: dict[str, Any] | None,
+        data: FirstScriptedVideoPackageRequest,
+        artifacts: dict[str, Any],
+        channel: ChannelWorkspace,
+        profile_version: ChannelProfileVersion,
+        snapshot: CompiledChannelPolicySnapshot,
+        channel_contract: dict[str, Any],
+        provider_readiness_snapshot: dict[str, Any],
+        agent_run_refs: list[dict[str, Any]],
+        prompt_render_run_refs: list[str],
+        prompt_audit_snapshot_refs: list[str],
+    ) -> dict[str, Any]:
+        if not _needs_script_rewrite(gatekeeper_output):
+            agent_run_refs.append(self._safe_skip_ref("ScriptRewriteAgent", "Gatekeeper REVIEW_REQUIRED nhưng không yêu cầu rewrite."))
+            return {"ran": False, "stop_status": None, "next_action": None}
+        rewrite_step = PackageAgentStep("ScriptRewriteAgent", "long_context_text", "script_rewrite", "deep_rewrite")
+        result = self._execute_rehearsal_agent_step(
+            step=rewrite_step,
+            data=data,
+            artifacts=artifacts,
+            channel=channel,
+            profile_version=profile_version,
+            snapshot=snapshot,
+            channel_contract=channel_contract,
+            provider_readiness_snapshot=provider_readiness_snapshot,
+            agent_run_refs=agent_run_refs,
+            prompt_render_run_refs=prompt_render_run_refs,
+            prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+        )
+        return {"ran": True, "stop_status": result["stop_status"], "next_action": result["next_action"]}
+
+    def _safe_skip_ref(self, agent_key: str, reason: str) -> dict[str, Any]:
+        return {
+            "agent_key": agent_key,
+            "route_status": "SKIPPED_SAFE",
+            "skip_reason": reason,
+            "llm_router_only": True,
+            "provider_attempt_id": None,
+            "llm_run_snapshot_id": None,
+        }
+
     def _active_snapshot(self, channel: ChannelWorkspace) -> CompiledChannelPolicySnapshot | None:
         if channel.active_policy_snapshot_id is None:
             return None
@@ -432,6 +1029,17 @@ class FirstScriptedVideoPackageService:
         if snapshot is None or snapshot.channel_workspace_id != channel.id:
             return None
         return snapshot if snapshot.status == "active" else None
+
+    def _select_preflight_channel(self, channel_id: uuid.UUID | None) -> ChannelWorkspace | None:
+        if channel_id is not None:
+            return self.session.get(ChannelWorkspace, channel_id)
+        channels = list(
+            self.session.scalars(
+                select(ChannelWorkspace).order_by(desc(ChannelWorkspace.created_at))
+            ).all()
+        )
+        active_channels = [channel for channel in channels if channel.status == "active"]
+        return active_channels[0] if active_channels else (channels[0] if channels else None)
 
     def _validate_optional_project(
         self,
@@ -495,17 +1103,20 @@ class FirstScriptedVideoPackageService:
             "next_action": "Bật đúng M12.2 activation flags và giữ media/upload/publish disabled.",
         }
 
-    def _llm_readiness_block(self) -> dict[str, Any] | None:
+    def _llm_readiness_block(self, *, full_rehearsal: bool = False) -> dict[str, Any] | None:
         failures: list[str] = []
         if not self.settings.real_llm_package_run_enabled:
             failures.append("VCOS_ENABLE_REAL_LLM_PACKAGE_RUN")
+        if full_rehearsal and not self.settings.real_ollama_agent_run_enabled:
+            failures.append("VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN")
         if not self.settings.llm_real_execution_enabled:
             failures.append("VCOS_LLM_REAL_EXECUTION_ENABLED")
         if self.settings.llm_provider.lower() != "ollama":
             failures.append("VCOS_LLM_PROVIDER")
         lanes = LLMRouterConfigLoader(self.session).list_lanes(profile_key="default")
         lane_names = {lane.lane_name for lane in lanes}
-        required_lanes = {step.router_lane for step in PACKAGE_AGENT_CHAIN}
+        required_chain = FULL_REHEARSAL_AGENT_CHAIN if full_rehearsal else PACKAGE_AGENT_CHAIN
+        required_lanes = {step.router_lane for step in required_chain}
         missing_lanes = sorted(required_lanes - lane_names)
         if missing_lanes:
             failures.extend(f"LLM_ROUTER_LANE:{lane}" for lane in missing_lanes)
@@ -545,6 +1156,50 @@ class FirstScriptedVideoPackageService:
                 "no_mock_fallback": True,
                 "no_prompt_self_mutation": True,
                 "no_channel_config_mutation": True,
+            },
+        }
+
+    def _full_rehearsal_task_payload(
+        self,
+        *,
+        step: PackageAgentStep,
+        data: FirstScriptedVideoPackageRequest,
+        artifacts: dict[str, Any],
+        channel: ChannelWorkspace,
+        snapshot: CompiledChannelPolicySnapshot,
+        provider_readiness_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "milestone": FULL_REHEARSAL_MILESTONE,
+            "agent_task": step.artifact_key,
+            "channel_id": str(channel.id),
+            "compiled_policy_snapshot_id": str(snapshot.id),
+            "seed_topic": data.topic,
+            "target_video_type": data.target_video_type,
+            "package_title_seed": data.package_title_seed,
+            "research_pack_text": data.research_pack_text,
+            "research_pack_ref": data.research_pack_ref,
+            "provider_readiness_snapshot": provider_readiness_snapshot,
+            "previous_artifacts": artifacts,
+            "required_stop_at": "video_generation",
+            "runtime_constraints": {
+                "real_ollama_via_llm_router_only": True,
+                "human_review_only": True,
+                "no_media_provider_calls": True,
+                "no_elevenlabs_call": True,
+                "no_google_vertex_veo_call": True,
+                "no_creatomate_call": True,
+                "no_google_drive_upload": True,
+                "no_youtube_upload": True,
+                "no_publish": True,
+                "no_reupload": True,
+                "no_mock_fallback": True,
+                "no_dry_run_success": True,
+                "no_prompt_self_mutation": True,
+                "no_channel_config_mutation": True,
+                "script_rewrite_rule": "Run ScriptRewriteAgent only when gatekeeper/validation explicitly requires rewrite; do not add new claims.",
+                "visual_source_allowlist": sorted(VISUAL_SOURCE_ALLOWLIST),
+                "media_qc_expected_without_media": ["NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"],
             },
         }
 
@@ -618,6 +1273,142 @@ class FirstScriptedVideoPackageService:
             return "BLOCK"
         return "REVIEW_REQUIRED" if result == "REVIEW_REQUIRED" else "PASS"
 
+    def _full_rehearsal_artifact_block(self, agent_key: str, artifact: Any) -> dict[str, Any] | None:
+        if agent_key == "VisualPlanningAgent":
+            visual_block = self._visual_plan_block(artifact)
+            if visual_block is not None:
+                return {
+                    **visual_block,
+                    "next_action": "Sửa visual plan để chỉ dùng nguồn DIAGRAM/CARD/SCREENSHOT/EXISTING_ASSET/VEO hoặc Creatomate candidate-only.",
+                }
+        if agent_key == "ThumbnailBriefAgent":
+            rendered_keys = sorted(_find_forbidden_thumbnail_render_keys(artifact))
+            if rendered_keys:
+                return {
+                    "status": "REVIEW_REQUIRED",
+                    "reason_codes": ["THUMBNAIL_RENDER_NOT_ALLOWED"],
+                    "forbidden_render_keys": rendered_keys,
+                    "next_action": "ThumbnailBriefAgent chỉ được tạo brief/variant, không render thumbnail.",
+                }
+        if agent_key == "MediaQCExplanationAgent":
+            qc_status = _media_qc_status(artifact)
+            if qc_status not in {"NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"}:
+                return {
+                    "status": "REVIEW_REQUIRED",
+                    "reason_codes": ["MEDIA_QC_CANNOT_PASS_WITHOUT_MEDIA"],
+                    "observed_status": qc_status,
+                    "next_action": "MediaQCExplanationAgent phải trả NOT_AVAILABLE hoặc WAITING_MEDIA_GENERATION khi chưa có media file.",
+                }
+        return None
+
+    def _should_create_boundary(self, artifacts: dict[str, Any]) -> bool:
+        return bool(artifacts.get("narration_script") and artifacts.get("visual_plan") and artifacts.get("thumbnail_brief"))
+
+    def _create_generation_boundary(
+        self,
+        *,
+        package: FirstScriptedVideoPackage,
+        readiness_snapshot: dict[str, Any],
+    ) -> VideoGenerationBoundary:
+        provider_readiness = self._boundary_provider_readiness(readiness_snapshot)
+        missing_required = [
+            provider
+            for provider in ("elevenlabs", "creatomate")
+            if provider_readiness.get(provider, {}).get("status") != "CONFIGURED"
+        ]
+        required_inputs = {
+            "narration_script": {"present": bool(package.artifacts.get("narration_script"))},
+            "visual_plan": {"present": bool(package.artifacts.get("visual_plan"))},
+            "thumbnail_brief": {"present": bool(package.artifacts.get("thumbnail_brief"))},
+            "metadata_package": {"present": bool(package.artifacts.get("metadata_package"))},
+            "rights_disclosure_review": {"present": bool(package.artifacts.get("rights_disclosure_review"))},
+        }
+        blocked_reasons: list[str] = []
+        if any(not item["present"] for item in required_inputs.values()):
+            blocked_reasons.append("REQUIRED_INPUT_MISSING")
+            boundary_status = "REVIEW_REQUIRED"
+            operator_summary = "Gói nội dung chưa đủ artifact để chuyển tới media boundary."
+            next_action = "Bổ sung đủ script, visual plan, thumbnail brief, metadata và rights review."
+        elif package.package_status == "BLOCKED":
+            blocked_reasons.append("GATEKEEPER_BLOCK")
+            boundary_status = "BLOCKED_GATEKEEPER"
+            operator_summary = "Gatekeeper đang BLOCK nên chưa thể chuyển tới bước tạo media."
+            next_action = "Sửa các blocker gatekeeper trước khi tạo media."
+        elif package.package_status == "REVIEW_REQUIRED":
+            blocked_reasons.append("PACKAGE_REVIEW_REQUIRED")
+            boundary_status = "REVIEW_REQUIRED"
+            operator_summary = "Package cần human review trước khi chuyển tới provider media."
+            next_action = HUMAN_APPROVAL_REQUIRED
+        elif missing_required:
+            blocked_reasons.extend(f"{provider.upper()}_NOT_CONFIGURED" for provider in missing_required)
+            boundary_status = "BLOCKED_PROVIDER_NOT_CONFIGURED"
+            operator_summary = MEDIA_PROVIDER_BOUNDARY_SUMMARY
+            next_action = MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
+        else:
+            boundary_status = "READY_FOR_MEDIA_PROVIDERS"
+            operator_summary = "Gói nội dung đã sẵn sàng chuyển tới media providers khi operator phê duyệt."
+            next_action = HUMAN_APPROVAL_REQUIRED
+
+        boundary = VideoGenerationBoundary(
+            package_id=package.id,
+            channel_id=package.channel_id,
+            video_project_id=package.video_project_id,
+            required_inputs=required_inputs,
+            required_providers=[
+                {"provider_key": "elevenlabs", "role": "ElevenLabs voice", "required": True},
+                {"provider_key": "creatomate", "role": "Creatomate render", "required": True},
+                {"provider_key": "google-vertex-veo", "role": "optional Google Vertex Veo hero", "required": False},
+            ],
+            provider_readiness=provider_readiness,
+            boundary_status=boundary_status,
+            blocked_reasons=blocked_reasons,
+            next_action=next_action,
+            operator_summary_vi=operator_summary,
+            no_provider_calls_confirmed=True,
+        )
+        self.session.add(boundary)
+        self.session.flush()
+        return boundary
+
+    def _boundary_provider_readiness(self, readiness_snapshot: dict[str, Any]) -> dict[str, Any]:
+        summaries = {
+            str(summary.get("provider_key")): summary
+            for summary in readiness_snapshot.get("provider_summaries", [])
+            if isinstance(summary, dict) and summary.get("provider_key")
+        }
+        return {
+            "elevenlabs": self._provider_boundary_state(summaries.get("elevenlabs")),
+            "creatomate": self._provider_boundary_state(summaries.get("creatomate")),
+            "veo": self._provider_boundary_state(summaries.get("google-vertex-veo"), optional=True),
+        }
+
+    def _provider_boundary_state(self, summary: dict[str, Any] | None, *, optional: bool = False) -> dict[str, Any]:
+        if summary is None:
+            return {
+                "status": "NOT_CONFIGURED",
+                "required": not optional,
+                "readiness_state": "UNKNOWN",
+                "reason_codes": ["PROVIDER_READINESS_MISSING"],
+            }
+        readiness_state = str(summary.get("readiness_state") or "UNKNOWN")
+        reason_codes = list(summary.get("reason_codes") or [])
+        missing_env_keys = list(summary.get("missing_env_keys") or [])
+        credential_missing = any("KEY_MISSING" in code or "NEEDS_AUTH" in code or "CREDENTIAL" in code for code in reason_codes)
+        if readiness_state == "PASS":
+            status = "CONFIGURED"
+        elif credential_missing or missing_env_keys:
+            status = "NEEDS_CREDENTIAL"
+        else:
+            status = "NOT_CONFIGURED"
+        return {
+            "status": status,
+            "required": not optional,
+            "readiness_state": readiness_state,
+            "missing_env_keys": missing_env_keys,
+            "reason_codes": reason_codes,
+            "next_action": summary.get("next_action"),
+        }
+
     def _human_review_checklist(self, artifacts: dict[str, Any], provider_readiness_snapshot_id: uuid.UUID) -> dict[str, Any]:
         narration = artifacts.get("narration_script") or {}
         research = artifacts.get("research_notes") or {}
@@ -645,6 +1436,7 @@ class FirstScriptedVideoPackageService:
             "package_status": status,
             "media_provider_calls_made": False,
             "upload_or_publish_calls_made": False,
+            "no_provider_calls_confirmed": True,
             "old_provider_smoke_run": False,
             "mock_fallback_used": False,
             "dry_run_success_used": False,
@@ -726,3 +1518,48 @@ def _find_visual_source_values(value: Any) -> set[str]:
         for item in value:
             found.update(_find_visual_source_values(item))
     return found
+
+
+def _find_forbidden_thumbnail_render_keys(value: Any) -> set[str]:
+    forbidden = {
+        "render_url",
+        "rendered_url",
+        "rendered_thumbnail_url",
+        "thumbnail_file_path",
+        "image_url",
+        "generated_image_ref",
+        "actual_thumbnail_asset",
+    }
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in forbidden:
+                found.add(key)
+            found.update(_find_forbidden_thumbnail_render_keys(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_find_forbidden_thumbnail_render_keys(item))
+    return found
+
+
+def _media_qc_status(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    for key in ("status", "qc_status", "result", "media_qc_status"):
+        if value.get(key):
+            return str(value[key]).upper()
+    return None
+
+
+def _needs_script_rewrite(output: dict[str, Any] | None) -> bool:
+    if not isinstance(output, dict):
+        return False
+    artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+    appendix = output.get("technical_appendix") if isinstance(output.get("technical_appendix"), dict) else {}
+    markers = (
+        artifact.get("needs_script_rewrite"),
+        artifact.get("rewrite_required"),
+        appendix.get("needs_script_rewrite"),
+        appendix.get("rewrite_required"),
+    )
+    return any(bool(marker) for marker in markers)

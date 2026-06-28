@@ -154,6 +154,7 @@ REQUIRED_TABLES = {
     "prompt_evaluation_cases",
     "prompt_evaluation_runs",
     "first_scripted_video_packages",
+    "video_generation_boundaries",
     "uploaded_video_backfill_events",
 }
 
@@ -161,7 +162,7 @@ REQUIRED_TABLES = {
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0021_m12_2r_handoff_ledger"
+    assert revision == "0022_m12_2s_full_rehearsal"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

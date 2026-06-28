@@ -215,9 +215,12 @@ from app.contracts import (
     PromptRenderResult,
     ReadinessRunRequest,
     RealSmokeRunRead,
+    FirstScriptedVideoPackageAgentRunsRead,
     FirstScriptedVideoPackageRead,
     FirstScriptedVideoPackageRequest,
     FirstScriptedVideoPackageReviewRead,
+    M122SPreflightRead,
+    VideoGenerationBoundaryRead,
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
     HumanUploadTaskLedgerRead,
@@ -355,6 +358,8 @@ from app.services.m11_1 import AUTH_COOKIE_NAME
 
 class CompanyCreate(BaseModel):
     name: str
+    slug: str
+    description: str = ""
     status: str = "active"
     default_currency: str = "USD"
 
@@ -364,6 +369,8 @@ class CompanyCreate(BaseModel):
 class CompanyRead(BaseModel):
     id: uuid.UUID
     name: str
+    slug: str
+    description: str
     status: str
     default_currency: str
 
@@ -541,12 +548,20 @@ def create_app() -> FastAPI:
             with session_scope() as session:
                 company = CompanyService(session).create_company(
                     name=data.name,
+                    slug=data.slug,
+                    description=data.description,
                     status=data.status,
                     default_currency=data.default_currency,
                 )
                 return CompanyRead.model_validate(_company(company))
         except Exception as exc:
             raise _as_http_error(exc) from exc
+
+    @application.get("/companies", response_model=list[CompanyRead])
+    def list_companies(limit: int = 100) -> list[CompanyRead]:
+        with session_scope() as session:
+            companies = CompanyService(session).list_companies(limit=limit)
+            return [CompanyRead.model_validate(_company(c)) for c in companies]
 
     @application.get("/companies/{company_id}", response_model=CompanyRead)
     def get_company(company_id: uuid.UUID) -> CompanyRead:
@@ -2366,6 +2381,22 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @application.post("/video-packages/rehearse-full", response_model=FirstScriptedVideoPackageRead)
+    def rehearse_full_video_package(data: FirstScriptedVideoPackageRequest) -> FirstScriptedVideoPackageRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).rehearse_full(data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/rehearse-full/preflight", response_model=M122SPreflightRead)
+    def preflight_rehearse_full_video_package(channel_id: uuid.UUID | None = None) -> M122SPreflightRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).preflight_full_rehearsal(channel_id=channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @application.get("/video-packages/{package_id}", response_model=FirstScriptedVideoPackageRead)
     def get_first_scripted_video_package(package_id: uuid.UUID) -> FirstScriptedVideoPackageRead:
         try:
@@ -2379,6 +2410,22 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return FirstScriptedVideoPackageService(session).review(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/{package_id}/agent-runs", response_model=FirstScriptedVideoPackageAgentRunsRead)
+    def get_first_scripted_video_package_agent_runs(package_id: uuid.UUID) -> FirstScriptedVideoPackageAgentRunsRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).agent_runs(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/{package_id}/generation-boundary", response_model=VideoGenerationBoundaryRead)
+    def get_video_generation_boundary(package_id: uuid.UUID) -> VideoGenerationBoundaryRead:
+        try:
+            with session_scope() as session:
+                return FirstScriptedVideoPackageService(session).generation_boundary(package_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -2840,6 +2887,8 @@ def _company(company: Any) -> dict[str, Any]:
     return {
         "id": company.id,
         "name": company.name,
+        "slug": company.slug,
+        "description": company.description,
         "status": company.status,
         "default_currency": company.default_currency,
     }

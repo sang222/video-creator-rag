@@ -34,6 +34,15 @@ export type CommandCenter = {
   technical_appendix: Record<string, unknown>;
 };
 
+export type Company = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  status: string;
+  default_currency: string;
+};
+
 export type ApprovalQueueItem = {
   queue_item_id?: string | null;
   queue_type: string;

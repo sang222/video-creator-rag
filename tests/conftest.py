@@ -95,6 +95,7 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    video_generation_boundaries,
                     uploaded_video_backfill_events,
                     first_scripted_video_packages,
                     prompt_evaluation_runs,

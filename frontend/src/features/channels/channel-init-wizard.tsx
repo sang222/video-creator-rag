@@ -1,9 +1,9 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
 import { z } from "zod";
 
@@ -12,12 +12,13 @@ import { ErrorState } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
-import { activateChannel, initChannel, queryKeys } from "@/lib/api";
+import { activateChannel, createCompany, getCompanies, initChannel, queryKeys } from "@/lib/api";
+import type { Company } from "@/lib/types";
 
 const requiredText = z.string().trim().min(1, "Bắt buộc nhập.");
 
 const schema = z.object({
-  company_id: z.string().uuid("ID công ty phải là UUID."),
+  company_id: z.string().uuid("Chọn công ty."),
   key: requiredText,
   name: requiredText,
   template_key: requiredText.default("saas_digital_leverage"),
@@ -89,9 +90,11 @@ type FormValues = z.infer<typeof schema>;
 
 export function ChannelInitWizard() {
   const queryClient = useQueryClient();
+  const [companyDraft, setCompanyDraft] = useState({ name: "VCOS Company", slug: "vcos-company" });
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
+      company_id: "",
       template_key: "saas_digital_leverage",
       channel_type: "YOUTUBE_CHANNEL",
       secondary_platforms: "Shorts",
@@ -121,7 +124,18 @@ export function ChannelInitWizard() {
       drive_offload_enabled: true
     }
   });
+  const companiesQuery = useQuery({ queryKey: queryKeys.companies, queryFn: getCompanies });
+  const companyMutation = useMutation({
+    mutationFn: createCompany,
+    onSuccess: async (company) => {
+      form.setValue("company_id", company.id, { shouldDirty: true, shouldValidate: true });
+      setCompanyDraft({ name: "", slug: "" });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.companies });
+    }
+  });
+  const companies = companiesQuery.data?.length ? companiesQuery.data : companyMutation.data ? [companyMutation.data] : [];
   const values = form.watch();
+  const selectedCompanyId = values.company_id;
   const preview = contractPreview(values);
   const mutation = useMutation({
     mutationFn: initChannel,
@@ -139,6 +153,14 @@ export function ChannelInitWizard() {
     }
   });
   const canActivate = mutation.isSuccess && compiledStatus === "COMPLETE";
+  const channelSubmitDisabled = mutation.isPending || companiesQuery.isLoading || !selectedCompanyId;
+
+  useEffect(() => {
+    const fetchedCompanies = companiesQuery.data ?? [];
+    if (fetchedCompanies.length === 1 && !selectedCompanyId) {
+      form.setValue("company_id", fetchedCompanies[0].id, { shouldValidate: true });
+    }
+  }, [companiesQuery.data, form, selectedCompanyId]);
 
   return (
     <div className="space-y-6 p-4 md:p-8">
@@ -166,7 +188,22 @@ export function ChannelInitWizard() {
 
       <form className="space-y-5" onSubmit={form.handleSubmit((submitted) => mutation.mutate(submitted))}>
         <Section title="Thông tin kênh">
-          <TextInput label="ID công ty *" error={form.formState.errors.company_id?.message} registration={form.register("company_id")} />
+          <CompanySelect
+            companies={companies}
+            loading={companiesQuery.isLoading}
+            error={form.formState.errors.company_id?.message}
+            registration={form.register("company_id")}
+          />
+          {!companiesQuery.isLoading && companies.length === 0 ? (
+            <CompanyBootstrapInline
+              draft={companyDraft}
+              onDraftChange={setCompanyDraft}
+              onCreate={() => companyMutation.mutate(companyDraft)}
+              pending={companyMutation.isPending}
+              error={companyMutation.isError ? companyMutation.error.message : null}
+            />
+          ) : null}
+          {companiesQuery.isError ? <div className="text-sm text-rose-100">Không tải được danh sách công ty: {companiesQuery.error.message}</div> : null}
           <TextInput label="Khóa kênh *" error={form.formState.errors.key?.message} registration={form.register("key")} />
           <TextInput label="Tên kênh *" error={form.formState.errors.name?.message} registration={form.register("name")} />
           <TextInput label="Template hồ sơ *" error={form.formState.errors.template_key?.message} registration={form.register("template_key")} />
@@ -290,7 +327,7 @@ export function ChannelInitWizard() {
         </Section>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="primary" disabled={mutation.isPending}>
+          <Button type="submit" variant="primary" disabled={channelSubmitDisabled}>
             <CheckCircle2 size={16} />
             Tạo và compile snapshot
           </Button>
@@ -323,6 +360,7 @@ const dateFormatOptions = [["MM/DD/YYYY", "MM/DD/YYYY"], ["DD/MM/YYYY", "DD/MM/Y
 function contractPreview(values: Partial<FormValues>) {
   const missing: string[] = [];
   for (const [key, label] of [
+    ["company_id", "Công ty"],
     ["name", "Tên kênh"],
     ["niche", "Niche"],
     ["primary_persona", "Persona"],
@@ -336,6 +374,77 @@ function contractPreview(values: Partial<FormValues>) {
     if (!values[key]) missing.push(label);
   }
   return { status: missing.length ? "PARTIAL" : "COMPLETE", missing };
+}
+
+function CompanySelect({
+  companies,
+  loading,
+  error,
+  registration
+}: {
+  companies: Company[];
+  loading: boolean;
+  error?: string;
+  registration: UseFormRegisterReturn;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-2 block text-muted-foreground">Công ty *</span>
+      <select className="w-full rounded-md border border-border bg-background px-3 py-2" disabled={loading || companies.length === 0} {...registration}>
+        <option value="">{loading ? "Đang tải công ty" : "Chọn công ty"}</option>
+        {companies.map((company) => (
+          <option key={company.id} value={company.id}>{company.name} ({company.slug})</option>
+        ))}
+      </select>
+      {error ? <span className="mt-1 block text-xs text-rose-100">{error}</span> : null}
+    </label>
+  );
+}
+
+function CompanyBootstrapInline({
+  draft,
+  onDraftChange,
+  onCreate,
+  pending,
+  error
+}: {
+  draft: { name: string; slug: string };
+  onDraftChange: (draft: { name: string; slug: string }) => void;
+  onCreate: () => void;
+  pending: boolean;
+  error: string | null;
+}) {
+  const canCreate = draft.name.trim() && draft.slug.trim();
+  return (
+    <div className="rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm xl:col-span-2">
+      <h3 className="font-semibold text-amber-100">Tạo công ty trước</h3>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <label className="block">
+          <span className="mb-2 block text-muted-foreground">Tên công ty</span>
+          <input
+            className="w-full rounded-md border border-border bg-background px-3 py-2"
+            value={draft.name}
+            onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-muted-foreground">Slug công ty</span>
+          <input
+            className="w-full rounded-md border border-border bg-background px-3 py-2"
+            value={draft.slug}
+            onChange={(event) => onDraftChange({ ...draft, slug: event.target.value })}
+          />
+        </label>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button type="button" onClick={onCreate} disabled={pending || !canCreate}>
+          {pending ? "Đang tạo..." : "Tạo công ty"}
+        </Button>
+        <span className="text-xs text-muted-foreground">Company là dữ liệu setup do operator nhập, không phải nội dung do AI tạo.</span>
+      </div>
+      {error ? <div className="mt-2 text-xs text-rose-100">{error}</div> : null}
+    </div>
+  );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

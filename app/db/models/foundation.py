@@ -30,6 +30,8 @@ class Company(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     default_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     created_at: Mapped[datetime] = utc_created_at()

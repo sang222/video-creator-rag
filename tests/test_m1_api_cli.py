@@ -18,7 +18,7 @@ def test_api_health_still_works() -> None:
 
 def test_company_channel_profile_compile_api_smoke() -> None:
     client = TestClient(create_app())
-    company = client.post("/companies", json={"name": "API Co"})
+    company = client.post("/companies", json={"name": "API Co", "slug": "api-co"})
     assert company.status_code == 200, company.text
     company_id = company.json()["id"]
     channel = client.post(
@@ -41,7 +41,7 @@ def test_company_channel_profile_compile_api_smoke() -> None:
 
 
 def test_cli_company_channel_profile_compile_smoke() -> None:
-    company = runner.invoke(cli_app, ["company", "create", "--name", "CLI Co"])
+    company = runner.invoke(cli_app, ["company", "create", "--name", "CLI Co", "--slug", "cli-co"])
     assert company.exit_code == 0, company.output
     company_id = json.loads(company.output)["id"]
     channel = runner.invoke(

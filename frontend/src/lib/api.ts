@@ -1,6 +1,7 @@
 import type {
   ChannelSummary,
   ChannelWorkspace,
+  Company,
   CommandCenter,
   DashboardQueues,
   IntegrationReadiness,
@@ -46,6 +47,8 @@ export const queryKeys = {
   channelUploadedVideos: (channelId: string) => ["channel-uploaded-videos", channelId],
   uploadedVideos: ["uploaded-videos"],
   uploadedVideo: (uploadedVideoId: string) => ["uploaded-video", uploadedVideoId],
+  channelLifecycle: (channelId: string) => ["channel-lifecycle", channelId],
+  companies: ["companies"],
   providerOps: ["provider-ops"],
   integrationsReadiness: ["integrations-readiness"]
 } as const;
@@ -75,6 +78,17 @@ export function getQueues(queueType?: string) {
 
 export function getChannels() {
   return request<ChannelSummary[]>("/channels");
+}
+
+export function getCompanies() {
+  return request<Company[]>("/companies");
+}
+
+export function createCompany(input: { name: string; slug: string }) {
+  return request<Company>("/companies", {
+    method: "POST",
+    body: JSON.stringify({ name: input.name, slug: input.slug })
+  });
 }
 
 export function getChannelWorkspace(channelId: string) {
@@ -400,6 +414,13 @@ export function activateChannel(channelId: string, snapshotId?: string) {
   return request<Record<string, unknown>>(`/channels/${channelId}/activate`, {
     method: "POST",
     body: JSON.stringify({ snapshot_id: snapshotId ?? null })
+  });
+}
+
+export function postLifecycleDecision(channelId: string, action: string, reason?: string) {
+  return request<Record<string, unknown>>(`/channels/${channelId}/lifecycle-decision`, {
+    method: "POST",
+    body: JSON.stringify({ action, reason: reason ?? `Operator activated channel via CTA`, actor_role: "OWNER_ADMIN" })
   });
 }
 

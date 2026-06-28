@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import {
+  activateChannel,
   backfillUploadedVideo,
   getChannelPublishLedger,
   getChannelUploadedVideos,
@@ -63,6 +64,17 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
   const verifyMutation = useMutation({
     mutationFn: verifyUploadedVideo,
     onSuccess: invalidateLedger
+  });
+  const [activateError, setActivateError] = useState<string | null>(null);
+  const activateMutation = useMutation({
+    mutationFn: () => activateChannel(channelId),
+    onSuccess: async () => {
+      setActivateError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.channelWorkspace(channelId) });
+    },
+    onError: (error: Error) => {
+      setActivateError(error.message || "Kích hoạt kênh thất bại.");
+    }
   });
 
   if (query.isLoading) return <div className="p-4 md:p-8"><LoadingState label="Đang tải không gian kênh" /></div>;
@@ -356,7 +368,53 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
                 Mâu thuẫn: {contractReview.contradiction_reasons.join(", ")}
               </div>
             ) : null}
-            <p className="mt-5 text-sm text-muted-foreground">{contractReview?.next_action ?? "Bổ sung hồ sơ kênh và compile policy snapshot."}</p>
+            {(() => {
+              const isDraft = ["DRAFT", "READY"].includes(workspace.lifecycle.lifecycle_state);
+              const isComplete = contractReview?.contract_status === "COMPLETE";
+              const hasSnap = Boolean(contractReview?.latest_snapshot_id);
+              const canActivate = isDraft && isComplete && hasSnap;
+              if (canActivate) {
+                return (
+                  <div className="mt-5 flex flex-col gap-3">
+                    <Button
+                      variant="primary"
+                      onClick={() => activateMutation.mutate()}
+                      disabled={activateMutation.isPending}
+                    >
+                      {activateMutation.isPending ? "Đang kích hoạt..." : "Kích hoạt kênh"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">Người vận hành quyết định kích hoạt. VCOS không tự publish/upload/reupload.</p>
+                  </div>
+                );
+              }
+              if (isDraft && !isComplete) {
+                return (
+                  <div className="mt-5 flex flex-col gap-3">
+                    <Button variant="primary" disabled>Bổ sung hồ sơ kênh</Button>
+                    <p className="text-xs text-muted-foreground">{`Hợp đồng kênh chưa hoàn chỉnh (${contractReview?.contract_status ?? "MISSING"}). Cần bổ sung trước khi kích hoạt.`}</p>
+                  </div>
+                );
+              }
+              if (isDraft && !hasSnap) {
+                return (
+                  <div className="mt-5 flex flex-col gap-3">
+                    <Button variant="primary" disabled>Kích hoạt kênh</Button>
+                    <p className="text-xs text-muted-foreground">Chưa có policy snapshot. Cần compile snapshot trước khi kích hoạt.</p>
+                  </div>
+                );
+              }
+              return <p className="mt-5 text-sm text-muted-foreground">{contractReview?.next_action ?? "Bổ sung hồ sơ kênh và compile policy snapshot."}</p>;
+            })()}
+            {activateError ? (
+              <div className="mt-3 rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">
+                {activateError}
+              </div>
+            ) : null}
+            {activateMutation.isSuccess && workspace.lifecycle.lifecycle_state === "ACTIVE" ? (
+              <div className="mt-3 rounded-md border border-green-400/30 bg-green-400/10 p-3 text-sm text-green-100">
+                Kênh đã được kích hoạt. Các project mới sẽ dùng snapshot hiện tại.
+              </div>
+            ) : null}
           </Panel>
         </Tabs.Content>
         <Tabs.Content value="provider-health" className="mt-5">

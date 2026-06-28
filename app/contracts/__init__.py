@@ -288,9 +288,12 @@ from app.contracts.m12_1 import (
     StructuredOutputSchemaRead,
 )
 from app.contracts.m12_2 import (
+    FirstScriptedVideoPackageAgentRunsRead,
     FirstScriptedVideoPackageRead,
     FirstScriptedVideoPackageRequest,
     FirstScriptedVideoPackageReviewRead,
+    M122SPreflightRead,
+    VideoGenerationBoundaryRead,
 )
 from app.contracts.m12_2r import (
     BackfillUploadedVideoRequest,
@@ -407,6 +410,9 @@ __all__ = [
     "FirstScriptedVideoPackageRead",
     "FirstScriptedVideoPackageRequest",
     "FirstScriptedVideoPackageReviewRead",
+    "FirstScriptedVideoPackageAgentRunsRead",
+    "M122SPreflightRead",
+    "VideoGenerationBoundaryRead",
     "BackfillUploadedVideoRequest",
     "BackfillUploadedVideoResult",
     "HumanUploadTaskLedgerRead",

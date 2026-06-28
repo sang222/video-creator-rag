@@ -54,6 +54,10 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("VCOS_ENABLE_REAL_LLM_PACKAGE_RUN", "ENABLE_REAL_LLM_PACKAGE_RUN"),
     )
+    real_ollama_agent_run_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN", "ENABLE_REAL_OLLAMA_AGENT_RUN"),
+    )
     media_provider_calls_disabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("VCOS_DISABLE_MEDIA_PROVIDER_CALLS", "DISABLE_MEDIA_PROVIDER_CALLS"),

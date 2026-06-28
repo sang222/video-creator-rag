@@ -135,6 +135,7 @@ data_app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(no_args_is_help=True)
 audit_app = typer.Typer(no_args_is_help=True)
 company_app = typer.Typer(no_args_is_help=True)
+bootstrap_app = typer.Typer(no_args_is_help=True)
 channel_app = typer.Typer(no_args_is_help=True)
 profile_app = typer.Typer(no_args_is_help=True)
 project_app = typer.Typer(no_args_is_help=True)
@@ -180,6 +181,8 @@ app.add_typer(data_app, name="data")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
 app.add_typer(company_app, name="company")
+app.add_typer(company_app, name="companies")
+app.add_typer(bootstrap_app, name="bootstrap")
 app.add_typer(channel_app, name="channel")
 app.add_typer(profile_app, name="profile")
 app.add_typer(project_app, name="project")
@@ -280,21 +283,89 @@ def health() -> None:
     typer.echo("health ok")
 
 
+@company_app.command("list")
+def company_list(limit: int = typer.Option(100, "--limit", min=1, max=1000)) -> None:
+    try:
+        with session_scope() as session:
+            companies = CompanyService(session).list_companies(limit=limit)
+            typer.echo(json.dumps([
+                {"id": str(c.id), "name": c.name, "slug": c.slug, "description": c.description, "status": c.status, "default_currency": c.default_currency, "created_at": c.created_at.isoformat()}
+                for c in companies
+            ]))
+    except Exception as exc:
+        _fail(f"company list failed: {exc}")
+
 @company_app.command("create")
 def company_create(
     name: str = typer.Option(..., "--name"),
+    slug: str = typer.Option(..., "--slug"),
+    description: str = typer.Option("", "--description"),
     default_currency: str = typer.Option("USD", "--default-currency"),
 ) -> None:
     try:
         with session_scope() as session:
             company = CompanyService(session).create_company(
                 name=name,
+                slug=slug,
+                description=description,
                 default_currency=default_currency,
             )
-            typer.echo(json.dumps({"id": str(company.id), "name": company.name}))
+            typer.echo(json.dumps({"id": str(company.id), "name": company.name, "slug": company.slug}))
     except Exception as exc:
         _fail(f"company create failed: {exc}")
 
+
+
+@company_app.command("bootstrap")
+def company_bootstrap(
+    name: str = typer.Option(..., "--name"),
+    slug: str = typer.Option(..., "--slug"),
+    description: str = typer.Option("", "--description"),
+    default_currency: str = typer.Option("USD", "--default-currency"),
+) -> None:
+    _bootstrap_company(
+        name=name,
+        slug=slug,
+        description=description,
+        default_currency=default_currency,
+    )
+
+
+@bootstrap_app.command("company")
+def bootstrap_company(
+    name: str = typer.Option(..., "--name"),
+    slug: str = typer.Option(..., "--slug"),
+    description: str = typer.Option("", "--description"),
+    default_currency: str = typer.Option("USD", "--default-currency"),
+) -> None:
+    _bootstrap_company(
+        name=name,
+        slug=slug,
+        description=description,
+        default_currency=default_currency,
+    )
+
+
+def _bootstrap_company(
+    *,
+    name: str,
+    slug: str,
+    description: str,
+    default_currency: str,
+) -> None:
+    try:
+        with session_scope() as session:
+            company = CompanyService(session).create_company(
+                name=name,
+                slug=slug,
+                description=description,
+                default_currency=default_currency,
+            )
+            session.commit()
+            typer.echo(f"Company ready: {company.name} ({company.slug}) id={company.id}")
+            typer.echo(f"COMPANY_ID={company.id}")
+    except Exception as exc:
+        _fail(f"company bootstrap failed: {exc}")
 
 @channel_app.command("create")
 def channel_create(
@@ -1907,6 +1978,54 @@ def package_first_video(
             typer.echo(json.dumps(package.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"package first-video failed: {exc}")
+
+
+@package_app.command("rehearse-full")
+def package_rehearse_full(
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+    topic: str | None = typer.Option(None, "--topic"),
+    research_pack: Path | None = typer.Option(None, "--research-pack"),
+    video_project_id: uuid.UUID | None = typer.Option(None, "--video-project-id"),
+    target_video_type: str = typer.Option("long_form", "--target-video-type"),
+    package_title_seed: str | None = typer.Option(None, "--package-title-seed"),
+    stop_at: str = typer.Option("video-generation", "--stop-at"),
+) -> None:
+    if stop_at != "video-generation":
+        _fail("package rehearse-full chỉ hỗ trợ --stop-at video-generation trong M12.2S")
+    try:
+        research_pack_text = research_pack.read_text(encoding="utf-8") if research_pack else None
+        research_pack_ref = str(research_pack) if research_pack else None
+        with session_scope() as session:
+            package = FirstScriptedVideoPackageService(session).rehearse_full(
+                FirstScriptedVideoPackageRequest(
+                    channel_id=channel_id,
+                    topic=topic,
+                    research_pack_text=research_pack_text,
+                    research_pack_ref=research_pack_ref,
+                    video_project_id=video_project_id,
+                    target_video_type=target_video_type,  # type: ignore[arg-type]
+                    package_title_seed=package_title_seed,
+                    no_media=True,
+                    human_review_only=True,
+                )
+            )
+            typer.echo(json.dumps(package.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"package rehearse-full failed: {exc}")
+
+
+@package_app.command("rehearse-full-preflight")
+def package_rehearse_full_preflight(
+    channel_id: uuid.UUID | None = typer.Option(None, "--channel-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            preflight = FirstScriptedVideoPackageService(session).preflight_full_rehearsal(
+                channel_id=channel_id,
+            )
+            typer.echo(json.dumps(preflight.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"package rehearse-full-preflight failed: {exc}")
 
 
 @upload_tasks_app.command("list")

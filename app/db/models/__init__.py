@@ -191,7 +191,7 @@ from app.db.models.m12_1 import (
     PromptTemplateRecord,
     StructuredOutputSchema,
 )
-from app.db.models.m12_2 import FirstScriptedVideoPackage
+from app.db.models.m12_2 import FirstScriptedVideoPackage, VideoGenerationBoundary
 from app.db.models.m12_2r import UploadedVideoBackfillEvent
 
 __all__ = [
@@ -351,5 +351,6 @@ __all__ = [
     "PromptTemplateRecord",
     "StructuredOutputSchema",
     "FirstScriptedVideoPackage",
+    "VideoGenerationBoundary",
     "UploadedVideoBackfillEvent",
 ]
