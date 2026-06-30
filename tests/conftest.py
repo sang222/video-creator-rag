@@ -109,6 +109,7 @@ def clean_database(engine: Engine) -> None:
                     video_generation_boundaries,
                     uploaded_video_backfill_events,
                     first_scripted_video_packages,
+                    effective_channel_runtime_context_snapshots,
                     prompt_evaluation_runs,
                     prompt_evaluation_cases,
                     prompt_audit_snapshots,

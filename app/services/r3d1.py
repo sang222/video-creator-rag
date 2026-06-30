@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -48,6 +49,18 @@ REQUIRED_CHARACTER = CharacterPolicyMode.REQUIRED_CHARACTER.value
 
 def _code(code: RuntimeScopeErrorCode) -> str:
     return code.value
+
+
+def _db_payload(data: Any) -> dict[str, Any]:
+    payload = data.model_dump()
+    for key, value in list(payload.items()):
+        if isinstance(value, Enum):
+            payload[key] = value.value
+    return payload
+
+
+def _hash_payload(data: Any) -> dict[str, Any]:
+    return data.model_dump(mode="json")
 
 
 @dataclass(frozen=True)
@@ -493,8 +506,8 @@ class R3D1AdminService:
 
     def create_content_category(self, data: ContentCategoryCreate) -> ContentCategory:
         self._require_channel_for_company(data.company_id, data.channel_workspace_id)
-        payload = data.model_dump(mode="json")
-        category = ContentCategory(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        category = ContentCategory(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(category)
         self.session.flush()
         return category
@@ -517,32 +530,32 @@ class R3D1AdminService:
 
     def create_category_creative_digest(self, data: CategoryCreativeDigestCreate) -> CategoryCreativeDigest:
         self._require(ContentCategory, data.content_category_id, "content category")
-        payload = data.model_dump(mode="json")
-        digest = CategoryCreativeDigest(**payload, digest_hash=content_hash(payload))
+        payload = _db_payload(data)
+        digest = CategoryCreativeDigest(**payload, digest_hash=content_hash(_hash_payload(data)))
         self.session.add(digest)
         self.session.flush()
         return digest
 
     def create_character_profile(self, data: CharacterProfileCreate) -> CharacterProfile:
         self._require_channel_for_company(data.company_id, data.channel_workspace_id)
-        payload = data.model_dump(mode="json")
-        profile = CharacterProfile(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        profile = CharacterProfile(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(profile)
         self.session.flush()
         return profile
 
     def create_character_version(self, data: CharacterVersionCreate) -> CharacterVersion:
         self._require(CharacterProfile, data.character_profile_id, "character profile")
-        payload = data.model_dump(mode="json")
-        version = CharacterVersion(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        version = CharacterVersion(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(version)
         self.session.flush()
         return version
 
     def create_character_image_branch(self, data: CharacterImageBranchCreate) -> CharacterImageBranch:
         self._require(CharacterVersion, data.character_version_id, "character version")
-        payload = data.model_dump(mode="json")
-        branch = CharacterImageBranch(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        branch = CharacterImageBranch(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(branch)
         self.session.flush()
         return branch
@@ -552,8 +565,8 @@ class R3D1AdminService:
         data: CharacterReferenceAssetPackCreate,
     ) -> CharacterReferenceAssetPack:
         self._require(CharacterImageBranch, data.character_image_branch_id, "character image branch")
-        payload = data.model_dump(mode="json")
-        pack = CharacterReferenceAssetPack(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        pack = CharacterReferenceAssetPack(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(pack)
         self.session.flush()
         return pack
@@ -562,7 +575,7 @@ class R3D1AdminService:
         self._require(CharacterReferenceAssetPack, data.reference_asset_pack_id, "reference asset pack")
         if data.cloud_media_ref_id is not None:
             self._require(CloudMediaRef, data.cloud_media_ref_id, "cloud media ref")
-        asset = CharacterReferenceAsset(**data.model_dump(mode="json"))
+        asset = CharacterReferenceAsset(**_db_payload(data))
         self.session.add(asset)
         self.session.flush()
         return asset
@@ -573,8 +586,8 @@ class R3D1AdminService:
             profile = self._require(CharacterProfile, data.character_profile_id, "character profile")
             if profile.company_id != data.company_id or profile.channel_workspace_id != data.channel_workspace_id:
                 raise ValidationFailureError("voice profile character does not belong to channel scope")
-        payload = data.model_dump(mode="json")
-        voice = VoiceProfile(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        voice = VoiceProfile(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(voice)
         self.session.flush()
         return voice
@@ -609,8 +622,8 @@ class R3D1AdminService:
                 or (voice.character_profile_id is not None and voice.character_profile_id != profile.id)
             ):
                 raise ValidationFailureError("binding voice profile does not belong to character scope")
-        payload = data.model_dump(mode="json")
-        binding = CharacterBinding(**payload, content_hash=content_hash(payload))
+        payload = _db_payload(data)
+        binding = CharacterBinding(**payload, content_hash=content_hash(_hash_payload(data)))
         self.session.add(binding)
         self.session.flush()
         return binding

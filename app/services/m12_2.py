@@ -25,6 +25,7 @@ from app.db.models import (
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
     Company,
+    EffectiveChannelRuntimeContextSnapshot,
     FirstScriptedVideoPackage,
     PromptAuditSnapshot,
     VideoGenerationBoundary,
@@ -33,6 +34,7 @@ from app.db.models import (
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
 from app.services.m12 import ProviderReadinessService
 from app.services.m12_1 import PromptRegistryService
+from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler, build_effective_channel_runtime_digest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -242,12 +244,31 @@ class FirstScriptedVideoPackageService:
                 next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
             ))
 
+        effective_context_snapshot = self._ensure_effective_context(video_project_id)
+        effective_context_block = self._effective_context_block(effective_context_snapshot)
+        if effective_context_block is not None:
+            return self._read(self._create_package(
+                channel_id=channel.id,
+                video_project_id=video_project_id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
+                provider_readiness_snapshot_id=readiness_snapshot.id,
+                status="REVIEW_REQUIRED" if effective_context_snapshot and effective_context_snapshot.compile_status == "REVIEW_REQUIRED" else "BLOCKED",
+                artifacts={"effective_context": effective_context_block},
+                limitations=["EffectiveChannelRuntimeContextSnapshot chưa PASS nên không chạy agent chain production."],
+                next_action=effective_context_block["next_action"],
+            ))
+
         if not data.topic:
             return self._read(self._create_package(
                 channel_id=channel.id,
                 video_project_id=video_project_id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
                 provider_readiness_snapshot_id=readiness_snapshot.id,
                 status="REVIEW_REQUIRED",
                 artifacts={"topic": {"status": "NEEDS_TOPIC"}},
@@ -261,6 +282,8 @@ class FirstScriptedVideoPackageService:
                 video_project_id=video_project_id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
                 provider_readiness_snapshot_id=readiness_snapshot.id,
                 status="REVIEW_REQUIRED",
                 artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
@@ -275,6 +298,8 @@ class FirstScriptedVideoPackageService:
                 video_project_id=video_project_id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
                 provider_readiness_snapshot_id=readiness_snapshot.id,
                 status="NOT_CONFIGURED",
                 artifacts={"llm_readiness": llm_block},
@@ -287,6 +312,7 @@ class FirstScriptedVideoPackageService:
             profile_version=profile_version,
             snapshot=snapshot,
             channel_contract=channel_contract,
+            effective_context_snapshot=effective_context_snapshot,
             provider_readiness_snapshot_id=readiness_snapshot.id,
             data=data,
             video_project_id=video_project_id,
@@ -333,6 +359,22 @@ class FirstScriptedVideoPackageService:
             if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
             else {}
         )
+        effective_context_snapshot = self._ensure_effective_context(video_project_id)
+        effective_context_block = self._effective_context_block(effective_context_snapshot)
+        if effective_context_block is not None:
+            return self._read(self._create_package(
+                channel_id=channel.id,
+                video_project_id=video_project_id,
+                channel_profile_version_id=profile_version.id,
+                compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
+                provider_readiness_snapshot_id=readiness_snapshot.id,
+                status="REVIEW_REQUIRED" if effective_context_snapshot and effective_context_snapshot.compile_status == "REVIEW_REQUIRED" else "BLOCKED",
+                artifacts={"effective_context": effective_context_block},
+                limitations=["EffectiveChannelRuntimeContextSnapshot chưa PASS nên không chạy full agent rehearsal."],
+                next_action=effective_context_block["next_action"],
+            ))
 
         if not data.topic:
             return self._read(self._create_package(
@@ -340,6 +382,8 @@ class FirstScriptedVideoPackageService:
                 video_project_id=video_project_id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
                 provider_readiness_snapshot_id=readiness_snapshot.id,
                 status="BLOCKED",
                 artifacts={"topic": {"status": "NEEDS_TOPIC"}},
@@ -353,6 +397,8 @@ class FirstScriptedVideoPackageService:
                 video_project_id=video_project_id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
+                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
                 provider_readiness_snapshot_id=readiness_snapshot.id,
                 status="REVIEW_REQUIRED",
                 artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
@@ -365,6 +411,7 @@ class FirstScriptedVideoPackageService:
             profile_version=profile_version,
             snapshot=snapshot,
             channel_contract=channel_contract,
+            effective_context_snapshot=effective_context_snapshot,
             provider_readiness_snapshot=readiness_snapshot.model_dump(mode="json"),
             data=data,
             video_project_id=video_project_id,
@@ -569,6 +616,11 @@ class FirstScriptedVideoPackageService:
                 "channel_profile_version_id": str(package.channel_profile_version_id) if package.channel_profile_version_id else None,
                 "compiled_policy_snapshot_id": str(package.compiled_policy_snapshot_id) if package.compiled_policy_snapshot_id else None,
             },
+            effective_context={
+                "effective_context_snapshot_id": str(package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None,
+                "effective_context_hash": package.effective_context_hash,
+                "snapshot_ref": package.artifacts.get("effective_context_snapshot_ref") or package.artifacts.get("effective_context"),
+            },
             human_review_checklist=package.artifacts.get("human_review_checklist", {}),
             agent_outputs={key: value for key, value in package.artifacts.items() if key not in {"human_review_checklist"}},
             prompt_snapshots={
@@ -588,6 +640,7 @@ class FirstScriptedVideoPackageService:
         profile_version: ChannelProfileVersion,
         snapshot: CompiledChannelPolicySnapshot,
         channel_contract: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
         provider_readiness_snapshot_id: uuid.UUID,
         data: FirstScriptedVideoPackageRequest,
         video_project_id: uuid.UUID | None,
@@ -601,6 +654,8 @@ class FirstScriptedVideoPackageService:
                 "compiled_policy_content_hash": snapshot.content_hash,
             }
         }
+        if effective_context_snapshot is not None:
+            artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
         agent_run_refs: list[dict[str, Any]] = []
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
@@ -731,6 +786,8 @@ class FirstScriptedVideoPackageService:
             "video_project_id": video_project_id,
             "channel_profile_version_id": profile_version.id,
             "compiled_policy_snapshot_id": snapshot.id,
+            "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
+            "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
             "provider_readiness_snapshot_id": provider_readiness_snapshot_id,
             "status": status,
             "agent_run_refs": agent_run_refs,
@@ -749,6 +806,7 @@ class FirstScriptedVideoPackageService:
         profile_version: ChannelProfileVersion,
         snapshot: CompiledChannelPolicySnapshot,
         channel_contract: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
         provider_readiness_snapshot: dict[str, Any],
         data: FirstScriptedVideoPackageRequest,
         video_project_id: uuid.UUID | None,
@@ -769,6 +827,8 @@ class FirstScriptedVideoPackageService:
                 "old_provider_smoke_disabled": True,
             },
         }
+        if effective_context_snapshot is not None:
+            artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
         agent_run_refs: list[dict[str, Any]] = []
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
@@ -824,6 +884,8 @@ class FirstScriptedVideoPackageService:
             "video_project_id": video_project_id,
             "channel_profile_version_id": profile_version.id,
             "compiled_policy_snapshot_id": snapshot.id,
+            "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
+            "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
             "provider_readiness_snapshot_id": uuid.UUID(provider_readiness_snapshot["id"]),
             "status": status,
             "agent_run_refs": agent_run_refs,
@@ -1103,6 +1165,30 @@ class FirstScriptedVideoPackageService:
         if project.policy_snapshot_id != snapshot_id:
             raise ValidationFailureError("video project is not bound to the active compiled policy snapshot")
         return project.id
+
+    def _ensure_effective_context(
+        self,
+        video_project_id: uuid.UUID | None,
+    ) -> EffectiveChannelRuntimeContextSnapshot | None:
+        if video_project_id is None:
+            return None
+        return EffectiveChannelRuntimeContextCompiler(self.session).ensure_for_project(video_project_id)
+
+    def _effective_context_block(
+        self,
+        snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+    ) -> dict[str, Any] | None:
+        if snapshot is None or snapshot.compile_status == "PASS":
+            return None
+        status = snapshot.compile_status
+        return {
+            "status": "NEEDS_EFFECTIVE_CONTEXT" if status == "BLOCK" else "REVIEW_REQUIRED",
+            "compile_status": status,
+            "effective_context_snapshot_id": str(snapshot.id),
+            "context_hash": snapshot.context_hash,
+            "reason_codes": snapshot.reason_codes_json,
+            "next_action": "Sửa Channel Contract/category/character scope rồi compile lại EffectiveChannelRuntimeContextSnapshot.",
+        }
 
     def _channel_contract_block(
         self,
@@ -1550,6 +1636,8 @@ class FirstScriptedVideoPackageService:
         video_project_id: uuid.UUID | None = None,
         channel_profile_version_id: uuid.UUID | None = None,
         compiled_policy_snapshot_id: uuid.UUID | None = None,
+        effective_context_snapshot_id: uuid.UUID | None = None,
+        effective_context_hash: str | None = None,
         provider_readiness_snapshot_id: uuid.UUID | None = None,
         agent_run_refs: list[dict[str, Any]] | None = None,
         prompt_render_run_refs: list[str] | None = None,
@@ -1564,6 +1652,8 @@ class FirstScriptedVideoPackageService:
             channel_id=channel_id,
             channel_profile_version_id=channel_profile_version_id,
             compiled_policy_snapshot_id=compiled_policy_snapshot_id,
+            effective_context_snapshot_id=effective_context_snapshot_id,
+            effective_context_hash=effective_context_hash,
             provider_readiness_snapshot_id=provider_readiness_snapshot_id,
             package_status=status,
             agent_run_refs=agent_run_refs or [],
@@ -1585,6 +1675,8 @@ class FirstScriptedVideoPackageService:
             channel_id=package.channel_id,
             channel_profile_version_id=package.channel_profile_version_id,
             compiled_policy_snapshot_id=package.compiled_policy_snapshot_id,
+            effective_context_snapshot_id=package.effective_context_snapshot_id,
+            effective_context_hash=package.effective_context_hash,
             provider_readiness_snapshot_id=package.provider_readiness_snapshot_id,
             package_status=package.package_status,  # type: ignore[arg-type]
             agent_run_refs=package.agent_run_refs,

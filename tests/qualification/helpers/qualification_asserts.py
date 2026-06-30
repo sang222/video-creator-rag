@@ -24,7 +24,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0024_r3d1_hierarchical_scope"
+EXPECTED_ALEMBIC_HEAD = "0025_r3d2_effective_context"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

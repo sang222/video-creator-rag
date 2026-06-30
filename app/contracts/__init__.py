@@ -306,6 +306,7 @@ from app.contracts.m12_2r import (
     UploadedVideoListRead,
     UploadedVideoVerificationResult,
 )
+from app.contracts.r3d2 import EffectiveChannelRuntimeContextSnapshotRead
 from app.contracts.m12_2p3 import (
     ChannelContractDraftRead,
     ChannelContractReviewRequest,
@@ -489,6 +490,7 @@ __all__ = [
     "UploadedVideoLedgerRead",
     "UploadedVideoListRead",
     "UploadedVideoVerificationResult",
+    "EffectiveChannelRuntimeContextSnapshotRead",
     "ProviderAttemptRead",
     "ProviderHealthCheckRequest",
     "ProviderHealthSnapshotRead",

@@ -66,6 +66,8 @@ class FirstScriptedVideoPackageRead(BaseModel):
     channel_id: uuid.UUID
     channel_profile_version_id: uuid.UUID | None
     compiled_policy_snapshot_id: uuid.UUID | None
+    effective_context_snapshot_id: uuid.UUID | None = None
+    effective_context_hash: str | None = None
     provider_readiness_snapshot_id: uuid.UUID | None
     package_status: FirstVideoPackageStatus
     agent_run_refs: list[dict[str, Any]] = Field(default_factory=list)
@@ -84,6 +86,7 @@ class FirstScriptedVideoPackageReviewRead(BaseModel):
     package_id: uuid.UUID
     package_status: FirstVideoPackageStatus
     channel_binding: dict[str, Any]
+    effective_context: dict[str, Any] = Field(default_factory=dict)
     human_review_checklist: dict[str, Any] = Field(default_factory=dict)
     agent_outputs: dict[str, Any] = Field(default_factory=dict)
     prompt_snapshots: dict[str, Any] = Field(default_factory=dict)

@@ -165,13 +165,14 @@ REQUIRED_TABLES = {
     "character_reference_assets",
     "voice_profiles",
     "character_bindings",
+    "effective_channel_runtime_context_snapshots",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0024_r3d1_hierarchical_scope"
+    assert revision == "0025_r3d2_effective_context"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

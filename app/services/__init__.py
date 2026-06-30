@@ -197,6 +197,15 @@ from app.services.r3d1 import (
     ProjectScopeAdmissionGuard,
     R3D1AdminService,
 )
+from app.services.r3d2 import (
+    EffectiveChannelRuntimeContextCompiler,
+    build_effective_channel_runtime_digest,
+    build_metadata_contract_digest,
+    build_publish_handoff_digest,
+    build_script_contract_digest,
+    build_thumbnail_contract_digest,
+    build_visual_contract_digest,
+)
 
 __all__ = [
     "AuditService",
@@ -356,6 +365,13 @@ __all__ = [
     "CharacterBindingResolver",
     "ProjectScopeAdmissionGuard",
     "R3D1AdminService",
+    "EffectiveChannelRuntimeContextCompiler",
+    "build_effective_channel_runtime_digest",
+    "build_script_contract_digest",
+    "build_visual_contract_digest",
+    "build_thumbnail_contract_digest",
+    "build_metadata_contract_digest",
+    "build_publish_handoff_digest",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

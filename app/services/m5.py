@@ -62,6 +62,7 @@ from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
 from app.services.ops import BudgetGateService
 from app.services.r3d1 import ProjectScopeAdmissionGuard
+from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
 from app.services.workflow import ArtifactService, VideoProjectService
 
 
@@ -1203,8 +1204,21 @@ class ProjectAdmissionService:
                 ),
                 correlation_id="m5-video-project-created-from-daily-run",
             )
+            effective_snapshot = EffectiveChannelRuntimeContextCompiler(self.session).compile_for_project(
+                project=admitted_project,
+                editorial_calendar_slot=self.session.get(EditorialCalendarSlot, daily_run.editorial_calendar_slot_id)
+                if daily_run.editorial_calendar_slot_id
+                else None,
+            )
             artifact_refs = self._create_initial_artifacts(admitted_project, idea, data.created_by_user_id)
-            reasons.extend(["PROJECT_CREATED_FROM_DAILY_RUN", "INITIAL_ARTIFACTS_CREATED"])
+            reasons.extend(
+                [
+                    "PROJECT_CREATED_FROM_DAILY_RUN",
+                    "EFFECTIVE_CONTEXT_SNAPSHOT_CREATED",
+                    f"EFFECTIVE_CONTEXT_{effective_snapshot.compile_status}",
+                    "INITIAL_ARTIFACTS_CREATED",
+                ]
+            )
         record = ProjectAdmissionDecision(
             channel_daily_run_id=daily_run.id,
             daily_idea_decision_id=idea.id,

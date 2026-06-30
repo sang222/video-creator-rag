@@ -26,7 +26,9 @@ class VideoProject(Base):
     category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("content_categories.id"))
     character_binding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("character_bindings.id"))
     channel_contract_content_hash: Mapped[str | None] = mapped_column(Text)
-    effective_context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    effective_context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("effective_channel_runtime_context_snapshots.id")
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
@@ -48,6 +50,7 @@ class VideoProject(Base):
         Index("ix_video_projects_category_id", "category_id"),
         Index("ix_video_projects_character_binding_id", "character_binding_id"),
         Index("ix_video_projects_channel_contract_hash", "channel_contract_content_hash"),
+        Index("ix_video_projects_effective_context_snapshot", "effective_context_snapshot_id"),
         Index("ix_video_projects_created_at", "created_at"),
     )
 

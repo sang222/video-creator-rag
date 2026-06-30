@@ -206,6 +206,7 @@ from app.db.models.r3d1 import (
     ContentCategory,
     VoiceProfile,
 )
+from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
 
 __all__ = [
     "AuditEvent",
@@ -377,4 +378,5 @@ __all__ = [
     "CharacterReferenceAsset",
     "VoiceProfile",
     "CharacterBinding",
+    "EffectiveChannelRuntimeContextSnapshot",
 ]

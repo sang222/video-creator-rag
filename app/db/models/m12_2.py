@@ -18,6 +18,10 @@ class FirstScriptedVideoPackage(Base):
     channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False)
     channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_profile_versions.id"))
     compiled_policy_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id"))
+    effective_context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("effective_channel_runtime_context_snapshots.id")
+    )
+    effective_context_hash: Mapped[str | None] = mapped_column(Text)
     provider_readiness_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("provider_readiness_snapshots.id"))
     package_status: Mapped[str] = mapped_column(String(40), nullable=False)
     agent_run_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
@@ -32,6 +36,7 @@ class FirstScriptedVideoPackage(Base):
     __table_args__ = (
         Index("ix_first_scripted_video_packages_channel", "channel_id"),
         Index("ix_first_scripted_video_packages_project", "video_project_id"),
+        Index("ix_first_scripted_video_packages_effective_context", "effective_context_snapshot_id"),
         Index("ix_first_scripted_video_packages_status", "package_status"),
         Index("ix_first_scripted_video_packages_created_at", "created_at"),
     )
