@@ -195,6 +195,17 @@ from app.db.models.m12_1 import (
 )
 from app.db.models.m12_2 import FirstScriptedVideoPackage, VideoGenerationBoundary
 from app.db.models.m12_2r import UploadedVideoBackfillEvent
+from app.db.models.r3d1 import (
+    CategoryCreativeDigest,
+    CharacterBinding,
+    CharacterImageBranch,
+    CharacterProfile,
+    CharacterReferenceAsset,
+    CharacterReferenceAssetPack,
+    CharacterVersion,
+    ContentCategory,
+    VoiceProfile,
+)
 
 __all__ = [
     "AuditEvent",
@@ -357,4 +368,13 @@ __all__ = [
     "FirstScriptedVideoPackage",
     "VideoGenerationBoundary",
     "UploadedVideoBackfillEvent",
+    "ContentCategory",
+    "CategoryCreativeDigest",
+    "CharacterProfile",
+    "CharacterVersion",
+    "CharacterImageBranch",
+    "CharacterReferenceAssetPack",
+    "CharacterReferenceAsset",
+    "VoiceProfile",
+    "CharacterBinding",
 ]

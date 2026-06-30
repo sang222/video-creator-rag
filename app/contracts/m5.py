@@ -36,6 +36,7 @@ class EditorialCalendarSlotCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
+    category_id: uuid.UUID | None = None
     slot_date: date
     slot_type: SlotType = "DAILY"
     status: SlotStatus = "OPEN"
@@ -44,6 +45,7 @@ class EditorialCalendarSlotCreate(BaseModel):
     content_pillar: str | None = None
     series_key: str | None = None
     format_hint: str | None = None
+    character_binding_policy_json: dict[str, Any] | None = None
     risk_level: RiskLevel = "UNKNOWN"
     operational_envelope: dict[str, Any] = Field(default_factory=dict)
     created_by_user_id: uuid.UUID | None = None
@@ -319,6 +321,8 @@ class ProjectAdmissionDecisionCreate(BaseModel):
     channel_daily_run_id: uuid.UUID
     daily_idea_decision_id: uuid.UUID
     idea_market_preflight_id: uuid.UUID | None = None
+    category_id: uuid.UUID | None = None
+    character_binding_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
     quota_account_id: uuid.UUID | None = None
     estimated_cost: Decimal = Decimal("0")

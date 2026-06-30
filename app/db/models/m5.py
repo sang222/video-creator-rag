@@ -25,6 +25,7 @@ class EditorialCalendarSlot(Base):
     policy_snapshot_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id"), nullable=False
     )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("content_categories.id"))
     slot_date: Mapped[date] = mapped_column(Date, nullable=False)
     slot_type: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="OPEN")
@@ -33,6 +34,7 @@ class EditorialCalendarSlot(Base):
     content_pillar: Mapped[str | None] = mapped_column(Text)
     series_key: Mapped[str | None] = mapped_column(Text)
     format_hint: Mapped[str | None] = mapped_column(Text)
+    character_binding_policy_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     risk_level: Mapped[str] = mapped_column(String(40), nullable=False, default="UNKNOWN")
     operational_envelope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
@@ -43,6 +45,7 @@ class EditorialCalendarSlot(Base):
         Index("ix_editorial_calendar_slots_company_id", "company_id"),
         Index("ix_editorial_calendar_slots_channel_workspace_id", "channel_workspace_id"),
         Index("ix_editorial_calendar_slots_policy_snapshot_id", "policy_snapshot_id"),
+        Index("ix_editorial_calendar_slots_category_id", "category_id"),
         Index("ix_editorial_calendar_slots_slot_date", "slot_date"),
         Index("ix_editorial_calendar_slots_status", "status"),
         Index("ix_editorial_calendar_slots_created_at", "created_at"),

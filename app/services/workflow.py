@@ -23,7 +23,9 @@ from app.db.models import (
     ArtifactVersion,
     AuditEvent,
     ChannelWorkspace,
+    CharacterBinding,
     CompiledChannelPolicySnapshot,
+    ContentCategory,
     DomainEvent,
     ReviewFinding,
     ReviewTask,
@@ -129,6 +131,20 @@ class VideoProjectService:
             raise ValidationFailureError("policy snapshot does not belong to project channel")
         if snapshot.status != "active" or channel.active_policy_snapshot_id != snapshot.id:
             raise ValidationFailureError("policy snapshot must be active for project creation")
+        if data.category_id is not None:
+            category = self.session.get(ContentCategory, data.category_id)
+            if category is None:
+                raise NotFoundError(f"content category not found: {data.category_id}")
+            if category.company_id != data.company_id or category.channel_workspace_id != data.channel_workspace_id:
+                raise ValidationFailureError("content category does not belong to project scope")
+        if data.character_binding_id is not None:
+            binding = self.session.get(CharacterBinding, data.character_binding_id)
+            if binding is None:
+                raise NotFoundError(f"character binding not found: {data.character_binding_id}")
+            if binding.company_id != data.company_id or binding.channel_workspace_id != data.channel_workspace_id:
+                raise ValidationFailureError("character binding does not belong to project scope")
+            if data.category_id is not None and binding.content_category_id not in (None, data.category_id):
+                raise ValidationFailureError("character binding does not belong to project category")
         _require_user(self.session, data.created_by_user_id, "created_by_user_id")
         if data.owner_user_id is not None:
             _require_user(self.session, data.owner_user_id, "owner_user_id")

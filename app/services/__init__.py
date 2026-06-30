@@ -190,6 +190,13 @@ from app.services.m12_2p3 import (
     evaluate_contract,
     leaf_values,
 )
+from app.services.r3d1 import (
+    CategoryScopeResolver,
+    CharacterBindingResolver,
+    ChannelRuntimeAuthorityService,
+    ProjectScopeAdmissionGuard,
+    R3D1AdminService,
+)
 
 __all__ = [
     "AuditService",
@@ -344,6 +351,11 @@ __all__ = [
     "build_channel_contract_from_profile",
     "prompt_context_hash",
     "prompt_template_hash",
+    "ChannelRuntimeAuthorityService",
+    "CategoryScopeResolver",
+    "CharacterBindingResolver",
+    "ProjectScopeAdmissionGuard",
+    "R3D1AdminService",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

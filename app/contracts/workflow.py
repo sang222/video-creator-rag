@@ -17,6 +17,10 @@ class VideoProjectCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
+    category_id: uuid.UUID | None = None
+    character_binding_id: uuid.UUID | None = None
+    channel_contract_content_hash: str | None = None
+    effective_context_snapshot_id: uuid.UUID | None = None
     title: str = Field(min_length=1)
     description: str | None = None
     status: ProjectStatus = "draft"

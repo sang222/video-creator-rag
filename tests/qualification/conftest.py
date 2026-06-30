@@ -17,6 +17,7 @@ from app.contracts.m5 import (
     ProjectAdmissionDecisionCreate,
     SearchDemandEvidenceCreate,
 )
+from app.contracts.r3d1 import ContentCategoryCreate
 from app.contracts.m6 import ProductionArtifactRunCreate
 from app.contracts.ops import ProviderRegistryEntryCreate, QuotaAccountCreate
 from app.contracts.workflow import VideoProjectCreate
@@ -37,6 +38,7 @@ from app.services import (
     ProviderHealthService,
     ProviderRegistryService,
     QuotaService,
+    R3D1AdminService,
     RBACService,
     SearchDemandEvidenceService,
     VideoProjectService,
@@ -170,6 +172,16 @@ class QualificationFactory:
                 company_id=scope.company.id,
                 channel_workspace_id=scope.channel.id,
                 policy_snapshot_id=scope.snapshot.id,
+                category_id=R3D1AdminService(self.session).create_content_category(
+                    ContentCategoryCreate(
+                        company_id=scope.company.id,
+                        channel_workspace_id=scope.channel.id,
+                        category_key=f"default-{uuid.uuid4().hex[:8]}",
+                        name="Default Production Category",
+                        character_policy_mode="NO_CHARACTER",
+                        status="ACTIVE",
+                    )
+                ).id,
                 slot_date=date(2026, 6, 24),
                 production_goal="Explain a budgeted VCOS workflow",
                 target_platforms=["YOUTUBE"],

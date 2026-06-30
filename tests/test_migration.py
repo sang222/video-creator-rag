@@ -156,13 +156,22 @@ REQUIRED_TABLES = {
     "first_scripted_video_packages",
     "video_generation_boundaries",
     "uploaded_video_backfill_events",
+    "content_categories",
+    "category_creative_digests",
+    "character_profiles",
+    "character_versions",
+    "character_image_branches",
+    "character_reference_asset_packs",
+    "character_reference_assets",
+    "voice_profiles",
+    "character_bindings",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0022_m12_2s_full_rehearsal"
+    assert revision == "0024_r3d1_hierarchical_scope"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

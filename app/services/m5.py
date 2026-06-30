@@ -61,6 +61,7 @@ from app.services.audit import AuditService
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
 from app.services.ops import BudgetGateService
+from app.services.r3d1 import ProjectScopeAdmissionGuard
 from app.services.workflow import ArtifactService, VideoProjectService
 
 
@@ -1162,6 +1163,24 @@ class ProjectAdmissionService:
         evidence_refs = list(idea.evidence_refs)
         if preflight is not None:
             evidence_refs.extend(preflight.evidence_blob.get("evidence_refs", []))
+        readiness_gate_refs: list[dict[str, Any]] = []
+        if decision == "ADMIT":
+            scope_result = ProjectScopeAdmissionGuard(self.session).evaluate_for_daily_run(
+                daily_run,
+                explicit_category_id=data.category_id,
+                explicit_character_binding_id=data.character_binding_id,
+            )
+            readiness_gate_refs = scope_result.readiness_refs()
+            if not scope_result.ok:
+                decision = "BLOCK"
+                reasons = [*scope_result.reason_codes, "IDEA_BLOCKED"]
+            else:
+                category_id = scope_result.category_id
+                character_binding_id = scope_result.character_binding_id
+                channel_contract_content_hash = scope_result.channel_contract_content_hash
+                if category_id is None or channel_contract_content_hash is None:
+                    decision = "BLOCK"
+                    reasons = ["CATEGORY_SCOPE_MISSING", "IDEA_BLOCKED"]
         if decision == "ADMIT":
             if data.created_by_user_id is None:
                 raise ValidationFailureError("created_by_user_id is required to admit a project")
@@ -1170,6 +1189,9 @@ class ProjectAdmissionService:
                     company_id=daily_run.company_id,
                     channel_workspace_id=daily_run.channel_workspace_id,
                     policy_snapshot_id=daily_run.policy_snapshot_id,
+                    category_id=category_id,
+                    character_binding_id=character_binding_id,
+                    channel_contract_content_hash=channel_contract_content_hash,
                     title=idea.proposed_title,
                     description=idea.proposed_angle,
                     project_type="m5_daily_run",
@@ -1188,7 +1210,7 @@ class ProjectAdmissionService:
             daily_idea_decision_id=idea.id,
             idea_market_preflight_id=preflight.id if preflight else None,
             budget_gate_result=budget_gate_result,
-            readiness_gate_refs=[],
+            readiness_gate_refs=readiness_gate_refs,
             decision=decision,
             reason_codes=reasons,
             evidence_refs=evidence_refs,

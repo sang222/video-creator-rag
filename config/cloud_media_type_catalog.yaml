@@ -1,5 +1,5 @@
 catalog_key: cloud_media_type_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -15,6 +15,16 @@ items:
     description: AI hero video asset.
   - key: CREATOMATE_ASSET
     description: Creatomate rendered or planned asset output.
+  - key: CHARACTER_REFERENCE
+    description: Character reference media archived in Drive by human workflow.
+  - key: CHARACTER_FACE_REF
+    description: Character face reference media archived in Drive by human workflow.
+  - key: CHARACTER_BRANCH
+    description: Character visual branch reference media archived in Drive by human workflow.
+  - key: VOICE_REFERENCE
+    description: Voice reference media archived in Drive by human workflow.
+  - key: REFERENCE_PACK
+    description: Reference asset pack archive or manifest media.
   - key: PUBLISH_PACKAGE
     description: Publish package file or archive.
   - key: QC_EXPORT

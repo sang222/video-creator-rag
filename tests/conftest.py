@@ -95,6 +95,15 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    character_reference_assets,
+                    character_bindings,
+                    voice_profiles,
+                    character_reference_asset_packs,
+                    character_image_branches,
+                    character_versions,
+                    character_profiles,
+                    category_creative_digests,
+                    content_categories,
                     channel_contract_drafts,
                     channel_init_drafts,
                     video_generation_boundaries,
