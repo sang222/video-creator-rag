@@ -37,6 +37,14 @@ from app.services.m12 import ProviderReadinessService
 from app.services.m12_1 import PromptRegistryService
 from app.services.r3d3 import AgentContextPackBuilder
 from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler, build_effective_channel_runtime_digest
+from app.services.r3d4 import (
+    AgentOutputValidationService,
+    GATE_BLOCK,
+    GATE_REVIEW,
+    PackageStatusReducer,
+    R3D4GateService,
+    compact_gate_report,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -171,6 +179,9 @@ class FirstScriptedVideoPackageService:
         self.settings = settings or get_settings()
         self.prompt_registry = prompt_registry or PromptRegistryService(session)
         self.llm_router = llm_router or LLMRouterService(session)
+        self.output_validation = AgentOutputValidationService(session)
+        self.deterministic_gates = R3D4GateService(session)
+        self.package_status_reducer = PackageStatusReducer()
         self.repo_root = repo_root
 
     def create(self, data: FirstScriptedVideoPackageRequest) -> FirstScriptedVideoPackageRead:
@@ -666,12 +677,22 @@ class FirstScriptedVideoPackageService:
         context_pack_refs: list[dict[str, Any]] = []
         status = "READY_FOR_HUMAN_REVIEW"
         next_action = HUMAN_APPROVAL_REQUIRED
+        pre_gatekeeper_batch = None
         limitations: list[str] = [
             "M12.2 chỉ tạo scripted video package; không render video, không TTS, không upload/publish.",
             "Google Drive chỉ là archive/storage; VCOS DB vẫn là source of truth.",
         ]
 
         for step in PACKAGE_AGENT_CHAIN:
+            if step.agent_key == "GatekeeperSoftReviewAgent" and pre_gatekeeper_batch is None:
+                pre_gatekeeper_batch = self._run_package_deterministic_gates(
+                    package_id=package_id,
+                    video_project_id=video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                    include_provider_boundary=False,
+                )
             context_result = self._build_agent_context_pack(
                 package_id=package_id,
                 step=step,
@@ -785,7 +806,34 @@ class FirstScriptedVideoPackageService:
                 break
 
             output = validation.parsed_output
-            artifacts[step.artifact_key] = output.get("artifact") or {}
+            output_validation = self._validate_agent_output(
+                package_id=package_id,
+                video_project_id=video_project_id,
+                step=step,
+                raw_output=raw_output,
+                parsed_output=output,
+                prompt_validation_result=validation.model_dump(mode="json"),
+                runtime_context_refs=self._runtime_context_refs(
+                    context_pack=context_result.context_pack,
+                    context_pack_snapshot=context_result.snapshot,
+                    render=render,
+                    snapshot=snapshot,
+                    effective_context_snapshot=effective_context_snapshot,
+                ),
+                render=render,
+                context_pack_snapshot=context_result.snapshot,
+            )
+            if agent_run_refs:
+                agent_run_refs[-1]["agent_output_validation_run_id"] = str(output_validation.validation_run.id)
+                agent_run_refs[-1]["canonical_artifact_hash"] = output_validation.validation_run.artifact_hash
+            if output_validation.status != "OK":
+                artifacts[step.artifact_key] = output_validation.blocking_report
+                status = "REVIEW_REQUIRED" if output_validation.status == "REVIEW_REQUIRED" else "BLOCKED"
+                next_action = "Sửa AgentOutputContract/envelope trước khi tiếp tục package."
+                break
+
+            artifacts[step.artifact_key] = output_validation.canonical_artifact or {}
+            output = {**output, "artifact": artifacts[step.artifact_key]}
             envelope_status = output.get("status")
             if step.agent_key == "VisualPlanningAgent":
                 visual_block = self._visual_plan_block(artifacts[step.artifact_key])
@@ -794,17 +842,31 @@ class FirstScriptedVideoPackageService:
                     status = "REVIEW_REQUIRED"
                     next_action = "Sửa visual plan để chỉ dùng nguồn DIAGRAM/CARD/SCREENSHOT/EXISTING_ASSET/VEO hoặc Creatomate candidate-only."
                     break
+            gate_stop = self._run_agent_deterministic_gates(
+                package_id=package_id,
+                video_project_id=video_project_id,
+                step=step,
+                artifacts=artifacts,
+                effective_context_snapshot=effective_context_snapshot,
+                provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+            )
+            if gate_stop is not None:
+                status = gate_stop["stop_status"]
+                next_action = gate_stop["next_action"]
+                break
             if step.agent_key == "GatekeeperSoftReviewAgent":
                 gatekeeper_result = self._gatekeeper_result(output)
-                if gatekeeper_result == "BLOCK":
-                    status = "BLOCKED"
-                    next_action = output.get("next_action") or "Sửa rủi ro gatekeeper trước khi đưa package vào human review."
-                elif gatekeeper_result == "REVIEW_REQUIRED":
-                    status = "REVIEW_REQUIRED"
-                    next_action = output.get("next_action") or HUMAN_APPROVAL_REQUIRED
+                reducer_decision = self.package_status_reducer.resolve(
+                    current_status="READY_FOR_HUMAN_REVIEW",
+                    deterministic_batch=pre_gatekeeper_batch,
+                    gatekeeper_result=gatekeeper_result,
+                )
+                artifacts["package_state_reducer"] = reducer_decision
+                status = reducer_decision["package_status"]
+                if reducer_decision["source"] == "gatekeeper_soft_review" and gatekeeper_result in {"BLOCK", "REVIEW_REQUIRED"}:
+                    next_action = output.get("next_action") or self._next_action_for_reducer_decision(reducer_decision)
                 else:
-                    status = "READY_FOR_HUMAN_REVIEW"
-                    next_action = HUMAN_APPROVAL_REQUIRED
+                    next_action = self._next_action_for_reducer_decision(reducer_decision)
                 break
             if envelope_status == "BLOCK":
                 status = "BLOCKED"
@@ -873,12 +935,22 @@ class FirstScriptedVideoPackageService:
         context_pack_refs: list[dict[str, Any]] = []
         status = "READY_FOR_MEDIA_PROVIDERS"
         next_action = HUMAN_APPROVAL_REQUIRED
+        pre_gatekeeper_batch = None
         limitations: list[str] = [
             "M12.2S chỉ chạy agent text/review bằng Ollama; không generate media, không TTS, không upload/publish.",
             "Veo/ElevenLabs/Creatomate chỉ xuất hiện trong readiness/boundary, không được gọi runtime.",
         ]
 
         for step in FULL_REHEARSAL_AGENT_CHAIN:
+            if step.agent_key == "GatekeeperSoftReviewAgent" and pre_gatekeeper_batch is None:
+                pre_gatekeeper_batch = self._run_package_deterministic_gates(
+                    package_id=package_id,
+                    video_project_id=video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_state=provider_readiness_snapshot,
+                    include_provider_boundary=False,
+                )
             result = self._execute_rehearsal_agent_step(
                 package_id=package_id,
                 step=step,
@@ -895,6 +967,18 @@ class FirstScriptedVideoPackageService:
                 prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
                 context_pack_refs=context_pack_refs,
             )
+            if step.agent_key == "GatekeeperSoftReviewAgent" and result["stop_status"] is None:
+                gatekeeper_result = self._gatekeeper_result(result.get("parsed_output") or {})
+                reducer_decision = self.package_status_reducer.resolve(
+                    current_status="READY_FOR_MEDIA_PROVIDERS",
+                    deterministic_batch=pre_gatekeeper_batch,
+                    gatekeeper_result=gatekeeper_result,
+                )
+                artifacts["package_state_reducer"] = reducer_decision
+                if reducer_decision["package_status"] != "READY_FOR_MEDIA_PROVIDERS":
+                    status = reducer_decision["package_status"]
+                    next_action = self._next_action_for_reducer_decision(reducer_decision)
+                    break
             if result["stop_status"] is not None:
                 status = result["stop_status"]
                 next_action = result["next_action"] or next_action
@@ -921,6 +1005,25 @@ class FirstScriptedVideoPackageService:
                 break
             if step.agent_key == "GatekeeperSoftReviewAgent":
                 agent_run_refs.append(self._safe_skip_ref("ScriptRewriteAgent", "Gatekeeper PASS; validation không yêu cầu rewrite."))
+
+        if status == "READY_FOR_MEDIA_PROVIDERS" and self._should_create_boundary(artifacts):
+            provider_boundary_batch = self._run_package_deterministic_gates(
+                package_id=package_id,
+                video_project_id=video_project_id,
+                artifacts=artifacts,
+                effective_context_snapshot=effective_context_snapshot,
+                provider_readiness_state=provider_readiness_snapshot,
+                include_provider_boundary=True,
+            )
+            if provider_boundary_batch and provider_boundary_batch.status in {GATE_BLOCK, GATE_REVIEW}:
+                reducer_decision = self.package_status_reducer.resolve(
+                    current_status=status,
+                    deterministic_batch=provider_boundary_batch,
+                    gatekeeper_result="PASS",
+                )
+                artifacts["package_state_reducer"] = reducer_decision
+                status = reducer_decision["package_status"]
+                next_action = self._next_action_for_reducer_decision(reducer_decision)
 
         artifacts["human_review_checklist"] = self._human_review_checklist(artifacts, provider_readiness_snapshot_id=uuid.UUID(provider_readiness_snapshot["id"]))
         risk_summary = self._risk_summary(artifacts, status)
@@ -1089,11 +1192,56 @@ class FirstScriptedVideoPackageService:
         artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
         if step.agent_key == "ProviderReadinessSummaryAgent" and not artifact:
             artifact = self._provider_readiness_summary_artifact(provider_readiness_snapshot, output)
-        artifacts[step.artifact_key] = artifact
+            output = {**output, "artifact": artifact}
+        output_validation = self._validate_agent_output(
+            package_id=package_id,
+            video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+            step=step,
+            raw_output=raw_output,
+            parsed_output=output,
+            prompt_validation_result=validation.model_dump(mode="json"),
+            runtime_context_refs=self._runtime_context_refs(
+                context_pack=context_result.context_pack,
+                context_pack_snapshot=context_result.snapshot,
+                render=render,
+                snapshot=snapshot,
+                effective_context_snapshot=effective_context_snapshot,
+            ),
+            render=render,
+            context_pack_snapshot=context_result.snapshot,
+        )
+        if agent_run_refs:
+            agent_run_refs[-1]["agent_output_validation_run_id"] = str(output_validation.validation_run.id)
+            agent_run_refs[-1]["canonical_artifact_hash"] = output_validation.validation_run.artifact_hash
+        if output_validation.status != "OK":
+            artifacts[step.artifact_key] = output_validation.blocking_report
+            return {
+                "stop_status": "REVIEW_REQUIRED" if output_validation.status == "REVIEW_REQUIRED" else "BLOCKED",
+                "next_action": "Sửa AgentOutputContract/envelope trước khi tiếp tục full rehearsal.",
+                "parsed_output": output,
+            }
+
+        artifacts[step.artifact_key] = output_validation.canonical_artifact or {}
+        output = {**output, "artifact": artifacts[step.artifact_key]}
         agent_block = self._full_rehearsal_artifact_block(step.agent_key, artifacts[step.artifact_key])
         if agent_block is not None:
             artifacts[f"{step.artifact_key}_review"] = agent_block
             return {"stop_status": "REVIEW_REQUIRED", "next_action": agent_block["next_action"], "parsed_output": output}
+
+        gate_stop = self._run_agent_deterministic_gates(
+            package_id=package_id,
+            video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+            step=step,
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+            provider_readiness_state=provider_readiness_snapshot,
+        )
+        if gate_stop is not None:
+            return {
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+                "parsed_output": output,
+            }
 
         if step.agent_key == "GatekeeperSoftReviewAgent":
             gatekeeper_result = self._gatekeeper_result(output)
@@ -1578,6 +1726,136 @@ class FirstScriptedVideoPackageService:
         snapshot.budget_report_json = budget
         self.session.flush()
 
+    def _runtime_context_refs(
+        self,
+        *,
+        context_pack: dict[str, Any],
+        context_pack_snapshot: AgentContextPackSnapshot | None,
+        render: Any,
+        snapshot: CompiledChannelPolicySnapshot,
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+    ) -> dict[str, Any]:
+        relevant_paths: list[str] = []
+        for digest in (context_pack.get("digests") or {}).values():
+            if isinstance(digest, dict):
+                relevant_paths.extend(str(path) for path in digest.get("relevant_contract_paths", []) if path)
+        audit_refs = context_pack.get("audit_refs") if isinstance(context_pack.get("audit_refs"), dict) else {}
+        return {
+            "effective_context_snapshot_id": str(effective_context_snapshot.id) if effective_context_snapshot else audit_refs.get("effective_context_snapshot_id"),
+            "compiled_policy_snapshot_id": str(snapshot.id),
+            "channel_contract_hash": (
+                effective_context_snapshot.channel_contract_hash
+                if effective_context_snapshot
+                else audit_refs.get("channel_contract_hash")
+            ),
+            "prompt_context_hash": render.prompt_context_hash,
+            "agent_context_pack_snapshot_id": str(context_pack_snapshot.id) if context_pack_snapshot else None,
+            "context_pack_hash": context_pack_snapshot.context_pack_hash if context_pack_snapshot else context_pack.get("context_pack_hash"),
+            "relevant_contract_paths_used": sorted(set(relevant_paths)) or ["effective_channel_runtime_context_snapshot"],
+        }
+
+    def _validate_agent_output(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        step: PackageAgentStep,
+        raw_output: Any,
+        parsed_output: dict[str, Any] | None,
+        prompt_validation_result: dict[str, Any],
+        runtime_context_refs: dict[str, Any],
+        render: Any,
+        context_pack_snapshot: AgentContextPackSnapshot | None,
+    ):
+        return self.output_validation.validate(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            agent_key=step.agent_key,
+            raw_output=raw_output,
+            parsed_output=parsed_output,
+            prompt_validation_result=prompt_validation_result,
+            runtime_context_refs=runtime_context_refs,
+            prompt_render_run_id=render.prompt_render_run_id,
+            agent_context_pack_snapshot_id=context_pack_snapshot.id if context_pack_snapshot else None,
+            raw_output_ref=f"prompt-output:{render.prompt_render_run_id}",
+        )
+
+    def _run_agent_deterministic_gates(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        step: PackageAgentStep,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if effective_context_snapshot is None:
+            return None
+        batch = self.deterministic_gates.run_after_agent(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            agent_key=step.agent_key,
+            artifacts=artifacts,
+            provider_readiness_state=provider_readiness_state,
+        )
+        if batch is None:
+            return None
+        artifacts["deterministic_gate_report"] = compact_gate_report(
+            artifacts.get("deterministic_gate_report"),
+            batch,
+        )
+        if batch.status in {GATE_BLOCK, GATE_REVIEW}:
+            decision = self.package_status_reducer.resolve(
+                current_status="READY_FOR_HUMAN_REVIEW",
+                deterministic_batch=batch,
+            )
+            artifacts["package_state_reducer"] = decision
+            return {
+                "stop_status": decision["package_status"],
+                "next_action": self._next_action_for_reducer_decision(decision),
+                "gate_batch": batch,
+            }
+        return None
+
+    def _run_package_deterministic_gates(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_state: dict[str, Any] | None = None,
+        include_provider_boundary: bool = False,
+    ):
+        if effective_context_snapshot is None:
+            return None
+        batch = self.deterministic_gates.run_final_package_gates(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            artifacts=artifacts,
+            provider_readiness_state=provider_readiness_state,
+            include_provider_boundary=include_provider_boundary,
+        )
+        artifacts["deterministic_gate_report"] = compact_gate_report(
+            artifacts.get("deterministic_gate_report"),
+            batch,
+        )
+        return batch
+
+    def _next_action_for_reducer_decision(self, decision: dict[str, Any]) -> str:
+        source = decision.get("source")
+        status = decision.get("package_status")
+        if status == "WAITING_PROVIDER_CONFIG":
+            return MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
+        if source == "deterministic_gates":
+            return "Sửa deterministic gate blockers trước khi chuyển trạng thái package."
+        if source == "gatekeeper_soft_review":
+            return "Review kết quả GatekeeperSoftReviewAgent trước khi tiếp tục."
+        return HUMAN_APPROVAL_REQUIRED
+
     def _agent_ref(
         self,
         step: PackageAgentStep,
@@ -1623,7 +1901,9 @@ class FirstScriptedVideoPackageService:
             return "PASS"
         if result in {"BLOCK", "BLOCKED"}:
             return "BLOCK"
-        return "REVIEW_REQUIRED" if result == "REVIEW_REQUIRED" else "PASS"
+        if result == "REVIEW_REQUIRED":
+            return "REVIEW_REQUIRED"
+        return "REVIEW_REQUIRED"
 
     def _full_rehearsal_artifact_block(self, agent_key: str, artifact: Any) -> dict[str, Any] | None:
         if agent_key == "VisualPlanningAgent":

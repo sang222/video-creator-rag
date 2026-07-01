@@ -212,6 +212,15 @@ from app.services.r3d3 import (
     ContextPackShapeGate,
     PromptBudgetGate,
 )
+from app.services.r3d4 import (
+    AgentOutputContractRegistry,
+    AgentOutputValidationService,
+    ArtifactCanonicalizer,
+    GateResultReducer,
+    PackageStatusReducer,
+    R3D4GateService,
+    StrictRepairService,
+)
 
 __all__ = [
     "AuditService",
@@ -382,6 +391,13 @@ __all__ = [
     "AgentContextPackBuilder",
     "ContextPackShapeGate",
     "PromptBudgetGate",
+    "AgentOutputContractRegistry",
+    "AgentOutputValidationService",
+    "ArtifactCanonicalizer",
+    "StrictRepairService",
+    "R3D4GateService",
+    "GateResultReducer",
+    "PackageStatusReducer",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

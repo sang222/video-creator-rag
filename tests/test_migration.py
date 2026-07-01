@@ -167,13 +167,17 @@ REQUIRED_TABLES = {
     "character_bindings",
     "effective_channel_runtime_context_snapshots",
     "agent_context_pack_snapshots",
+    "agent_output_validation_runs",
+    "schema_violation_ledger",
+    "r3d4_gate_batch_runs",
+    "r3d4_gate_runs",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0026_r3d3_agent_context_pack"
+    assert revision == "0027_r3d4_agent_output_gates"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

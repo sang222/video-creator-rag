@@ -208,6 +208,12 @@ from app.db.models.r3d1 import (
 )
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
 from app.db.models.r3d3 import AgentContextPackSnapshot
+from app.db.models.r3d4 import (
+    AgentOutputValidationRun,
+    R3D4GateBatchRun,
+    R3D4GateRun,
+    SchemaViolationLedger,
+)
 
 __all__ = [
     "AuditEvent",
@@ -381,4 +387,8 @@ __all__ = [
     "CharacterBinding",
     "EffectiveChannelRuntimeContextSnapshot",
     "AgentContextPackSnapshot",
+    "AgentOutputValidationRun",
+    "SchemaViolationLedger",
+    "R3D4GateBatchRun",
+    "R3D4GateRun",
 ]

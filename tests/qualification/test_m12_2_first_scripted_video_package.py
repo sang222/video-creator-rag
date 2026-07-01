@@ -149,9 +149,10 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
         "ScriptPlanningAgent": {"outline": ["hook", "problem", "mechanism", "result", "takeaway"]},
         "ScriptWriterAgent": {
             "sentences": [
-                {"sentence_id": "S1", "text": "M12.2 starts with a real channel contract.", "approx_seconds": 4},
-                {"sentence_id": "S2", "text": "The package stops at human review.", "approx_seconds": 4},
-            ]
+                {"sentence_id": "S1", "text": "M12.2 starts with a real channel contract.", "approx_seconds": 240},
+                {"sentence_id": "S2", "text": "The package stops at human review.", "approx_seconds": 240},
+            ],
+            "total_approx_seconds": 480,
         },
         "PublishingMetadataAgent": {
             "title": "VCOS M12.2: Production Prompt Activation",

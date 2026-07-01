@@ -296,6 +296,14 @@ from app.contracts.m12_2 import (
     VideoGenerationBoundaryRead,
 )
 from app.contracts.r3d3 import AgentContextPackSnapshotRead
+from app.contracts.r3d4 import (
+    AgentOutputValidationRunRead,
+    GateEvidenceRef,
+    GateSeverity,
+    GateStatus,
+    R3D4GateBatchResultRead,
+    R3D4GateResultRead,
+)
 from app.contracts.m12_2r import (
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
@@ -693,6 +701,12 @@ __all__ = [
     "ReadinessRunRequest",
     "RealSmokeRunRead",
     "AgentContextPackSnapshotRead",
+    "AgentOutputValidationRunRead",
+    "GateEvidenceRef",
+    "GateSeverity",
+    "GateStatus",
+    "R3D4GateBatchResultRead",
+    "R3D4GateResultRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

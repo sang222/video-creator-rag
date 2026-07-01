@@ -176,9 +176,10 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
         },
         "ScriptWriterAgent": {
             "sentences": [
-                {"sentence_id": "S1", "text": "VCOS bắt đầu từ channel contract đã COMPLETE.", "approx_seconds": 5},
-                {"sentence_id": "S2", "text": "Agent chạy qua Ollama nhưng không gọi provider media.", "approx_seconds": 5},
-            ]
+                {"sentence_id": "S1", "text": "VCOS bắt đầu từ channel contract đã COMPLETE.", "approx_seconds": 270},
+                {"sentence_id": "S2", "text": "Agent chạy qua Ollama nhưng không gọi provider media.", "approx_seconds": 270},
+            ],
+            "total_approx_seconds": 540,
         },
         "PublishingMetadataAgent": {
             "title": "VCOS M12.2S: rehearsal tới media boundary",
@@ -192,7 +193,6 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "scenes": [
                 {"sentence_id": "S1", "intended_visual_source": "DIAGRAM"},
                 {"sentence_id": "S2", "intended_visual_source": "CARD"},
-                {"sentence_id": "S2", "intended_visual_source": "VEO_HERO_CANDIDATE_ONLY"},
             ],
             "media_provider_calls": "NONE",
         },
@@ -208,7 +208,12 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "disclosure_notes": "Future generated media still needs source/provider manifest review.",
         },
         "GatekeeperSoftReviewAgent": {"result": gatekeeper_result, "findings": []},
-        "UploadCardCopyAgent": {"title": "VCOS M12.2S", "description": "Paste-ready only.", "not_uploaded": True},
+        "UploadCardCopyAgent": {
+            "title": "VCOS M12.2S",
+            "description": "Paste-ready only. Disclosure: AI-assisted draft; future generated media still needs provider review.",
+            "not_uploaded": True,
+            "disclosure_refs": ["rights_disclosure_review"],
+        },
         "ProviderReadinessSummaryAgent": {
             "providers": {
                 "elevenlabs": "NEEDS_CREDENTIAL",
@@ -240,7 +245,7 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
         _request(scope.channel.id, video_project_id=project.id)
     )
 
-    assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert len(router.calls) == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert {call["messages"][0]["role"] for call in router.calls} == {"system"}
     assert {call["messages"][1]["role"] for call in router.calls} == {"user"}
@@ -374,7 +379,7 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
         _request(scope.channel.id, video_project_id=project.id)
     )
 
-    assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key == "OLLAMA").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert db_session.query(LLMRunSnapshot).filter(LLMRunSnapshot.provider == "ollama").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     forbidden_attempts = db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key.in_(["ELEVENLABS", "CREATOMATE", "GOOGLE_VERTEX_VEO", "GOOGLE_DRIVE", "YOUTUBE"])).all()
@@ -413,7 +418,7 @@ def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qua
         llm_router=FakeRouter(outputs),
     ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
-    assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert package.artifacts["provider_readiness_summary_review"]["reason_codes"] == [
         "PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"
     ]
