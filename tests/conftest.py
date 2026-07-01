@@ -106,6 +106,7 @@ def clean_database(engine: Engine) -> None:
                     content_categories,
                     channel_contract_drafts,
                     channel_init_drafts,
+                    agent_context_pack_snapshots,
                     video_generation_boundaries,
                     uploaded_video_backfill_events,
                     first_scripted_video_packages,

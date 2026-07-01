@@ -295,6 +295,7 @@ from app.contracts.m12_2 import (
     M122SPreflightRead,
     VideoGenerationBoundaryRead,
 )
+from app.contracts.r3d3 import AgentContextPackSnapshotRead
 from app.contracts.m12_2r import (
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
@@ -691,6 +692,7 @@ __all__ = [
     "ProviderSummaryRead",
     "ReadinessRunRequest",
     "RealSmokeRunRead",
+    "AgentContextPackSnapshotRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

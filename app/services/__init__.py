@@ -206,6 +206,12 @@ from app.services.r3d2 import (
     build_thumbnail_contract_digest,
     build_visual_contract_digest,
 )
+from app.services.r3d3 import (
+    AgentContextContractRegistry,
+    AgentContextPackBuilder,
+    ContextPackShapeGate,
+    PromptBudgetGate,
+)
 
 __all__ = [
     "AuditService",
@@ -372,6 +378,10 @@ __all__ = [
     "build_thumbnail_contract_digest",
     "build_metadata_contract_digest",
     "build_publish_handoff_digest",
+    "AgentContextContractRegistry",
+    "AgentContextPackBuilder",
+    "ContextPackShapeGate",
+    "PromptBudgetGate",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

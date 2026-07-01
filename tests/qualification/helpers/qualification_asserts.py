@@ -24,7 +24,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0025_r3d2_effective_context"
+EXPECTED_ALEMBIC_HEAD = "0026_r3d3_agent_context_pack"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

@@ -10,8 +10,12 @@ from fastapi.testclient import TestClient
 
 from app.contracts.m10_1 import LLMRouteResponse
 from app.contracts.m12_2 import FirstScriptedVideoPackageRequest
+from app.contracts.r3d1 import ContentCategoryCreate
+from app.contracts.workflow import VideoProjectCreate
 from app.core.config import Settings
+from app.core.time import utc_now
 from app.db.models import (
+    AgentContextPackSnapshot,
     CompiledChannelPolicySnapshot,
     HumanUploadTask,
     LLMRunSnapshot,
@@ -21,11 +25,14 @@ from app.db.models import (
     ProviderAttempt,
     RealSmokeRun,
     VideoGenerationBoundary,
+    VideoProject,
 )
 from app.main import create_app
 from app.providers.ollama import OllamaLLMProvider
+from app.services import R3D1AdminService, VideoProjectService
 from app.services.m10_1 import LLMRouterService
 from app.services.m12_2 import FirstScriptedVideoPackageService, FULL_REHEARSAL_AGENT_CHAIN
+from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
 
 
 class FakeRouter:
@@ -84,9 +91,44 @@ def _complete_scope(qualification_factory):
     return scope
 
 
-def _request(channel_id: uuid.UUID) -> FirstScriptedVideoPackageRequest:
+def _project_with_effective_context(db_session, scope) -> VideoProject:
+    category = R3D1AdminService(db_session).create_content_category(
+        ContentCategoryCreate(
+            company_id=scope.company.id,
+            channel_workspace_id=scope.channel.id,
+            category_key=f"m122s-{uuid.uuid4().hex[:8]}",
+            name="M12.2S Category",
+            default_format_policy_json={"target_duration_seconds": 540, "structure": ["hook", "problem", "mechanism", "takeaway"]},
+            default_visual_style_json={"style_note": "operator dashboard cards"},
+            default_voice_style_json={"tone": "calm"},
+            default_thumbnail_style_json={"style": "clear operator board"},
+            visual_mode="DIAGRAM_FIRST",
+            character_policy_mode="NO_CHARACTER",
+            status="ACTIVE",
+            human_approved_at=utc_now(),
+        )
+    )
+    project_read = VideoProjectService(db_session).create_project(
+        data=VideoProjectCreate(
+            company_id=scope.company.id,
+            channel_workspace_id=scope.channel.id,
+            policy_snapshot_id=scope.snapshot.id,
+            category_id=category.id,
+            title="M12.2S rehearsal project",
+            description="Qualification fixture for R3D3 context pack.",
+            created_by_user_id=scope.operator.id,
+        )
+    )
+    project = db_session.get(VideoProject, project_read.id)
+    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    assert snapshot.compile_status == "PASS"
+    return project
+
+
+def _request(channel_id: uuid.UUID, *, video_project_id: uuid.UUID | None = None) -> FirstScriptedVideoPackageRequest:
     return FirstScriptedVideoPackageRequest(
         channel_id=channel_id,
+        video_project_id=video_project_id,
         topic="Cách kiểm soát agent video AI không gọi provider media khi chưa cấu hình",
         research_pack_text=(
             "Operator note: VCOS đã có channel contract COMPLETE, prompt registry, LLMRouter Ollama, "
@@ -191,14 +233,20 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
 
 def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
     router = FakeRouter(_outputs())
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(_request(scope.channel.id))
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
 
     assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
     assert len(router.calls) == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert {call["messages"][0]["role"] for call in router.calls} == {"system"}
     assert {call["messages"][1]["role"] for call in router.calls} == {"user"}
+    assert all("previous_artifacts" not in call["messages"][1]["content"] for call in router.calls)
+    assert all("channel_contract_json:" not in call["messages"][1]["content"] for call in router.calls)
+    assert all("compiled_policy_snapshot_json:" not in call["messages"][1]["content"] for call in router.calls)
     assert len(package.prompt_render_run_refs) == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert len(package.prompt_audit_snapshot_refs) >= len(FULL_REHEARSAL_AGENT_CHAIN)
     assert any(ref["agent_key"] == "ScriptRewriteAgent" and ref["route_status"] == "SKIPPED_SAFE" for ref in package.agent_run_refs)
@@ -209,6 +257,13 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert package.risk_limitations_summary["dry_run_success_used"] is False
     assert package.risk_limitations_summary["media_provider_calls_made"] is False
     assert package.risk_limitations_summary["upload_or_publish_calls_made"] is False
+    assert db_session.query(AgentContextPackSnapshot).count() == len(FULL_REHEARSAL_AGENT_CHAIN)
+    provider_pack = db_session.query(AgentContextPackSnapshot).filter(AgentContextPackSnapshot.agent_key == "ProviderReadinessSummaryAgent").one()
+    assert "provider_readiness_digest" in provider_pack.context_pack_json["digests"]
+    assert "script_digest" not in provider_pack.context_pack_json["digests"]
+    media_pack = db_session.query(AgentContextPackSnapshot).filter(AgentContextPackSnapshot.agent_key == "MediaQCExplanationAgent").one()
+    assert "package_summary_digest" in media_pack.context_pack_json["digests"]
+    assert "script_digest" not in media_pack.context_pack_json["digests"]
 
     boundary = db_session.query(VideoGenerationBoundary).one()
     assert boundary.package_id == package.id
@@ -260,7 +315,8 @@ def test_m12_2s_partial_contract_blocks_before_llm(db_session, qualification_fac
 
 def test_m12_2s_missing_topic_blocks_before_llm(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
-    request = _request(scope.channel.id).model_copy(update={"topic": None})
+    project = _project_with_effective_context(db_session, scope)
+    request = _request(scope.channel.id, video_project_id=project.id).model_copy(update={"topic": None})
     router = FakeRouter([])
 
     package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(request)
@@ -272,13 +328,14 @@ def test_m12_2s_missing_topic_blocks_before_llm(db_session, qualification_factor
 
 def test_m12_2s_real_ollama_disabled_returns_not_configured(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
     router = FakeRouter([])
 
     package = FirstScriptedVideoPackageService(
         db_session,
         settings=_settings(real_ollama_agent_run_enabled=False, llm_real_execution_enabled=False),
         llm_router=router,
-    ).rehearse_full(_request(scope.channel.id))
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "NOT_CONFIGURED"
     missing = package.artifacts["llm_readiness"]["missing_or_invalid_flags"]
@@ -289,6 +346,7 @@ def test_m12_2s_real_ollama_disabled_returns_not_configured(db_session, qualific
 
 def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_session, qualification_factory, monkeypatch) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
 
     monkeypatch.setenv("VCOS_LLM_REAL_EXECUTION_ENABLED", "true")
@@ -312,7 +370,9 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
     provider = OllamaLLMProvider(base_url="http://ollama.test", transport=transport)
     router = LLMRouterService(db_session, provider=provider)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(_request(scope.channel.id))
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
 
     assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
     assert db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key == "OLLAMA").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
@@ -324,12 +384,13 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
 @pytest.mark.parametrize("gatekeeper_result, expected_status", [("BLOCK", "BLOCKED"), ("REVIEW_REQUIRED", "REVIEW_REQUIRED")])
 def test_m12_2s_gatekeeper_stops_or_marks_review_required(db_session, qualification_factory, gatekeeper_result, expected_status) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
 
     package = FirstScriptedVideoPackageService(
         db_session,
         settings=_settings(),
         llm_router=FakeRouter(_outputs(gatekeeper_result=gatekeeper_result)),
-    ).rehearse_full(_request(scope.channel.id))
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == expected_status
     assert "upload_card_copy" not in package.artifacts
@@ -338,6 +399,7 @@ def test_m12_2s_gatekeeper_stops_or_marks_review_required(db_session, qualificat
 
 def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     for output in outputs:
         if output["agent_key"] == "ProviderReadinessSummaryAgent":
@@ -349,7 +411,7 @@ def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qua
         db_session,
         settings=_settings(),
         llm_router=FakeRouter(outputs),
-    ).rehearse_full(_request(scope.channel.id))
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "READY_FOR_MEDIA_PROVIDERS"
     assert package.artifacts["provider_readiness_summary_review"]["reason_codes"] == [
@@ -364,12 +426,13 @@ def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qua
 
 def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
 
     package = FirstScriptedVideoPackageService(
         db_session,
         settings=_settings(),
         llm_router=FakeRouter(_outputs(invalid_agent="ScriptWriterAgent")),
-    ).rehearse_full(_request(scope.channel.id))
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "REVIEW_REQUIRED"
     assert "validation_result" in package.artifacts["narration_script"]
@@ -379,10 +442,13 @@ def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_fa
 
 def test_m12_2s_thumbnail_and_media_qc_schema_guards(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[7]["artifact"]["image_url"] = "https://example.invalid/rendered.png"
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(_request(scope.channel.id))
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
 
     assert package.package_status == "REVIEW_REQUIRED"
     assert package.artifacts["thumbnail_brief_review"]["reason_codes"] == ["THUMBNAIL_RENDER_NOT_ALLOWED"]
@@ -391,8 +457,9 @@ def test_m12_2s_thumbnail_and_media_qc_schema_guards(db_session, qualification_f
 
 def test_m12_2s_package_retrieval_agent_runs_and_boundary(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
     service = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(_outputs()))
-    package = service.rehearse_full(_request(scope.channel.id))
+    package = service.rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     retrieved = service.get(package.id)
     agent_runs = service.agent_runs(package.id)

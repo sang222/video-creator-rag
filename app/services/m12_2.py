@@ -21,6 +21,7 @@ from app.contracts.m12_1 import PromptOutputValidationRequest, PromptRenderReque
 from app.core.config import Settings, get_settings
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models import (
+    AgentContextPackSnapshot,
     ChannelProfileVersion,
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
@@ -34,6 +35,7 @@ from app.db.models import (
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
 from app.services.m12 import ProviderReadinessService
 from app.services.m12_1 import PromptRegistryService
+from app.services.r3d3 import AgentContextPackBuilder
 from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler, build_effective_channel_runtime_digest
 
 
@@ -627,6 +629,7 @@ class FirstScriptedVideoPackageService:
                 "prompt_render_run_refs": package.prompt_render_run_refs,
                 "prompt_audit_snapshot_refs": package.prompt_audit_snapshot_refs,
                 "agent_run_refs": package.agent_run_refs,
+                "agent_context_pack_refs": package.artifacts.get("agent_context_pack_refs", []),
             },
             provider_readiness_snapshot_ref=package.provider_readiness_snapshot_id,
             limitations=package.limitations,
@@ -645,6 +648,7 @@ class FirstScriptedVideoPackageService:
         data: FirstScriptedVideoPackageRequest,
         video_project_id: uuid.UUID | None,
     ) -> dict[str, Any]:
+        package_id = uuid.uuid4()
         artifacts: dict[str, Any] = {
             "channel_contract_snapshot_ref": {
                 "channel_id": str(channel.id),
@@ -659,6 +663,7 @@ class FirstScriptedVideoPackageService:
         agent_run_refs: list[dict[str, Any]] = []
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
+        context_pack_refs: list[dict[str, Any]] = []
         status = "READY_FOR_HUMAN_REVIEW"
         next_action = HUMAN_APPROVAL_REQUIRED
         limitations: list[str] = [
@@ -667,10 +672,34 @@ class FirstScriptedVideoPackageService:
         ]
 
         for step in PACKAGE_AGENT_CHAIN:
-            task_payload = self._task_payload(
+            context_result = self._build_agent_context_pack(
+                package_id=package_id,
                 step=step,
                 data=data,
                 artifacts=artifacts,
+                snapshot=snapshot,
+                effective_context_snapshot=effective_context_snapshot,
+                provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                milestone="M12.2 Production Prompt Activation",
+            )
+            if context_result.snapshot is not None:
+                context_pack_refs.append(
+                    {
+                        "agent_key": step.agent_key,
+                        "agent_context_pack_snapshot_id": str(context_result.snapshot.id),
+                        "context_pack_hash": context_result.snapshot.context_pack_hash,
+                    }
+                )
+                artifacts["agent_context_pack_refs"] = context_pack_refs
+            if context_result.status != "OK" or context_result.context_pack is None:
+                artifacts[step.artifact_key] = context_result.blocking_report
+                status = "REVIEW_REQUIRED" if context_result.status == "REVIEW_REQUIRED" else "BLOCKED"
+                next_action = "Sửa AgentContextPack trước khi gọi LLM."
+                break
+            task_payload = self._task_payload(
+                step=step,
+                data=data,
+                context_pack=context_result.context_pack,
                 channel=channel,
                 snapshot=snapshot,
             )
@@ -689,6 +718,13 @@ class FirstScriptedVideoPackageService:
                     input_payload_ref=f"first-scripted-video-package:{channel.id}:{step.agent_key}",
                 )
             )
+            if context_result.snapshot is not None:
+                AgentContextPackBuilder(self.session).link_prompt_render_run(
+                    snapshot_id=context_result.snapshot.id,
+                    prompt_render_run_id=render.prompt_render_run_id,
+                    prompt_context_hash=render.prompt_context_hash,
+                )
+                self._record_prompt_budget_metrics(context_result.snapshot.id, render.rendered_messages)
             prompt_render_run_refs.append(str(render.prompt_render_run_id))
             prompt_audit_snapshot_refs.append(str(render.prompt_audit_snapshot_id))
             if render.status != "OK":
@@ -782,6 +818,7 @@ class FirstScriptedVideoPackageService:
         artifacts["human_review_checklist"] = self._human_review_checklist(artifacts, provider_readiness_snapshot_id)
         risk_summary = self._risk_summary(artifacts, status)
         return {
+            "id": package_id,
             "channel_id": channel.id,
             "video_project_id": video_project_id,
             "channel_profile_version_id": profile_version.id,
@@ -811,6 +848,7 @@ class FirstScriptedVideoPackageService:
         data: FirstScriptedVideoPackageRequest,
         video_project_id: uuid.UUID | None,
     ) -> dict[str, Any]:
+        package_id = uuid.uuid4()
         artifacts: dict[str, Any] = {
             "channel_contract_snapshot_ref": {
                 "channel_id": str(channel.id),
@@ -832,6 +870,7 @@ class FirstScriptedVideoPackageService:
         agent_run_refs: list[dict[str, Any]] = []
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
+        context_pack_refs: list[dict[str, Any]] = []
         status = "READY_FOR_MEDIA_PROVIDERS"
         next_action = HUMAN_APPROVAL_REQUIRED
         limitations: list[str] = [
@@ -841,6 +880,7 @@ class FirstScriptedVideoPackageService:
 
         for step in FULL_REHEARSAL_AGENT_CHAIN:
             result = self._execute_rehearsal_agent_step(
+                package_id=package_id,
                 step=step,
                 data=data,
                 artifacts=artifacts,
@@ -848,10 +888,12 @@ class FirstScriptedVideoPackageService:
                 profile_version=profile_version,
                 snapshot=snapshot,
                 channel_contract=channel_contract,
+                effective_context_snapshot=effective_context_snapshot,
                 provider_readiness_snapshot=provider_readiness_snapshot,
                 agent_run_refs=agent_run_refs,
                 prompt_render_run_refs=prompt_render_run_refs,
                 prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+                context_pack_refs=context_pack_refs,
             )
             if result["stop_status"] is not None:
                 status = result["stop_status"]
@@ -859,16 +901,19 @@ class FirstScriptedVideoPackageService:
                 if step.agent_key == "GatekeeperSoftReviewAgent":
                     rewrite = self._maybe_run_script_rewrite(
                         gatekeeper_output=result.get("parsed_output"),
+                        package_id=package_id,
                         data=data,
                         artifacts=artifacts,
                         channel=channel,
                         profile_version=profile_version,
                         snapshot=snapshot,
                         channel_contract=channel_contract,
+                        effective_context_snapshot=effective_context_snapshot,
                         provider_readiness_snapshot=provider_readiness_snapshot,
                         agent_run_refs=agent_run_refs,
                         prompt_render_run_refs=prompt_render_run_refs,
                         prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+                        context_pack_refs=context_pack_refs,
                     )
                     if rewrite["ran"]:
                         status = rewrite["stop_status"] or "REVIEW_REQUIRED"
@@ -880,6 +925,7 @@ class FirstScriptedVideoPackageService:
         artifacts["human_review_checklist"] = self._human_review_checklist(artifacts, provider_readiness_snapshot_id=uuid.UUID(provider_readiness_snapshot["id"]))
         risk_summary = self._risk_summary(artifacts, status)
         return {
+            "id": package_id,
             "channel_id": channel.id,
             "video_project_id": video_project_id,
             "channel_profile_version_id": profile_version.id,
@@ -900,6 +946,7 @@ class FirstScriptedVideoPackageService:
     def _execute_rehearsal_agent_step(
         self,
         *,
+        package_id: uuid.UUID,
         step: PackageAgentStep,
         data: FirstScriptedVideoPackageRequest,
         artifacts: dict[str, Any],
@@ -907,18 +954,46 @@ class FirstScriptedVideoPackageService:
         profile_version: ChannelProfileVersion,
         snapshot: CompiledChannelPolicySnapshot,
         channel_contract: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
         provider_readiness_snapshot: dict[str, Any],
         agent_run_refs: list[dict[str, Any]],
         prompt_render_run_refs: list[str],
         prompt_audit_snapshot_refs: list[str],
+        context_pack_refs: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        task_payload = self._full_rehearsal_task_payload(
+        context_result = self._build_agent_context_pack(
+            package_id=package_id,
             step=step,
             data=data,
             artifacts=artifacts,
+            snapshot=snapshot,
+            effective_context_snapshot=effective_context_snapshot,
+            provider_readiness_state=provider_readiness_snapshot,
+            milestone=FULL_REHEARSAL_MILESTONE,
+            required_stop_at="video_generation",
+        )
+        if context_result.snapshot is not None:
+            context_pack_refs.append(
+                {
+                    "agent_key": step.agent_key,
+                    "agent_context_pack_snapshot_id": str(context_result.snapshot.id),
+                    "context_pack_hash": context_result.snapshot.context_pack_hash,
+                }
+            )
+            artifacts["agent_context_pack_refs"] = context_pack_refs
+        if context_result.status != "OK" or context_result.context_pack is None:
+            artifacts[step.artifact_key] = context_result.blocking_report
+            return {
+                "stop_status": "REVIEW_REQUIRED" if context_result.status == "REVIEW_REQUIRED" else "BLOCKED",
+                "next_action": "Sửa AgentContextPack trước khi gọi LLM.",
+                "parsed_output": None,
+            }
+        task_payload = self._full_rehearsal_task_payload(
+            step=step,
+            data=data,
+            context_pack=context_result.context_pack,
             channel=channel,
             snapshot=snapshot,
-            provider_readiness_snapshot=provider_readiness_snapshot,
         )
         render = self.prompt_registry.render_prompt(
             PromptRenderRequest(
@@ -933,8 +1008,15 @@ class FirstScriptedVideoPackageService:
                 evidence_refs=self._evidence_refs(data),
                 artifact_refs=self._artifact_refs(artifacts),
                 input_payload_ref=f"full-agent-rehearsal:{channel.id}:{step.agent_key}",
+                )
             )
-        )
+        if context_result.snapshot is not None:
+            AgentContextPackBuilder(self.session).link_prompt_render_run(
+                snapshot_id=context_result.snapshot.id,
+                prompt_render_run_id=render.prompt_render_run_id,
+                prompt_context_hash=render.prompt_context_hash,
+            )
+            self._record_prompt_budget_metrics(context_result.snapshot.id, render.rendered_messages)
         prompt_render_run_refs.append(str(render.prompt_render_run_id))
         prompt_audit_snapshot_refs.append(str(render.prompt_audit_snapshot_id))
         if render.status != "OK":
@@ -1089,22 +1171,26 @@ class FirstScriptedVideoPackageService:
         self,
         *,
         gatekeeper_output: dict[str, Any] | None,
+        package_id: uuid.UUID,
         data: FirstScriptedVideoPackageRequest,
         artifacts: dict[str, Any],
         channel: ChannelWorkspace,
         profile_version: ChannelProfileVersion,
         snapshot: CompiledChannelPolicySnapshot,
         channel_contract: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
         provider_readiness_snapshot: dict[str, Any],
         agent_run_refs: list[dict[str, Any]],
         prompt_render_run_refs: list[str],
         prompt_audit_snapshot_refs: list[str],
+        context_pack_refs: list[dict[str, Any]],
     ) -> dict[str, Any]:
         if not _needs_script_rewrite(gatekeeper_output):
             agent_run_refs.append(self._safe_skip_ref("ScriptRewriteAgent", "Gatekeeper REVIEW_REQUIRED nhưng không yêu cầu rewrite."))
             return {"ran": False, "stop_status": None, "next_action": None}
         rewrite_step = PackageAgentStep("ScriptRewriteAgent", "long_context_text", "script_rewrite", "deep_rewrite")
         result = self._execute_rehearsal_agent_step(
+            package_id=package_id,
             step=rewrite_step,
             data=data,
             artifacts=artifacts,
@@ -1112,10 +1198,12 @@ class FirstScriptedVideoPackageService:
             profile_version=profile_version,
             snapshot=snapshot,
             channel_contract=channel_contract,
+            effective_context_snapshot=effective_context_snapshot,
             provider_readiness_snapshot=provider_readiness_snapshot,
             agent_run_refs=agent_run_refs,
             prompt_render_run_refs=prompt_render_run_refs,
             prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+            context_pack_refs=context_pack_refs,
         )
         return {"ran": True, "stop_status": result["stop_status"], "next_action": result["next_action"]}
 
@@ -1178,7 +1266,16 @@ class FirstScriptedVideoPackageService:
         self,
         snapshot: EffectiveChannelRuntimeContextSnapshot | None,
     ) -> dict[str, Any] | None:
-        if snapshot is None or snapshot.compile_status == "PASS":
+        if snapshot is None:
+            return {
+                "status": "NEEDS_EFFECTIVE_CONTEXT",
+                "compile_status": "MISSING",
+                "effective_context_snapshot_id": None,
+                "context_hash": None,
+                "reason_codes": ["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"],
+                "next_action": "Chọn VideoProject đã có EffectiveChannelRuntimeContextSnapshot PASS trước khi chạy agent package.",
+            }
+        if snapshot.compile_status == "PASS":
             return None
         status = snapshot.compile_status
         return {
@@ -1260,12 +1357,73 @@ class FirstScriptedVideoPackageService:
             "next_action": "Cấu hình Ollama/LLMRouter real execution trước khi chạy video package production.",
         }
 
+    def _build_agent_context_pack(
+        self,
+        *,
+        package_id: uuid.UUID,
+        step: PackageAgentStep,
+        data: FirstScriptedVideoPackageRequest,
+        artifacts: dict[str, Any],
+        snapshot: CompiledChannelPolicySnapshot,
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_state: dict[str, Any] | None = None,
+        milestone: str,
+        required_stop_at: str | None = None,
+    ):
+        current_package_state = {
+            "milestone": milestone,
+            "agent_task": step.artifact_key,
+            "seed_topic": data.topic,
+            "target_video_type": data.target_video_type,
+            "package_title_seed": data.package_title_seed,
+            "research_pack_text": data.research_pack_text,
+            "research_pack_ref": data.research_pack_ref,
+            "required_stop_at": required_stop_at,
+        }
+        runtime_guard_state = {
+            "human_review_only": True,
+            "llm_router_only": True,
+            "no_media_provider_calls": True,
+            "no_elevenlabs_call": True,
+            "no_google_vertex_veo_call": True,
+            "no_creatomate_call": True,
+            "no_google_drive_upload": True,
+            "no_youtube_upload": True,
+            "no_upload": True,
+            "no_publish": True,
+            "no_reupload": True,
+            "no_mock_fallback": True,
+            "no_dry_run_success": True,
+            "no_prompt_self_mutation": True,
+            "no_channel_config_mutation": True,
+            "google_drive_archive_only": True,
+            "media_boundary_state": "BLOCKED_UNTIL_HUMAN_APPROVED_PROVIDER_STAGE",
+        }
+        return AgentContextPackBuilder(self.session).build(
+            package_id=package_id,
+            video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+            agent_key=step.agent_key,
+            task_type=step.requested_task_type,
+            lane=step.router_lane,
+            effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
+            effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
+            compiled_policy_snapshot_id=snapshot.id,
+            compiled_policy_snapshot_hash=snapshot.content_hash,
+            channel_contract_hash=effective_context_snapshot.channel_contract_hash if effective_context_snapshot else None,
+            artifacts=artifacts,
+            evidence_refs=self._evidence_refs(data),
+            current_package_state=current_package_state,
+            runtime_guard_state=runtime_guard_state,
+            provider_readiness_state=provider_readiness_state,
+            schema_requirements={"base_envelope": "m12.1.0", "response_format": "json"},
+        )
+
     def _task_payload(
         self,
         *,
         step: PackageAgentStep,
         data: FirstScriptedVideoPackageRequest,
-        artifacts: dict[str, Any],
+        context_pack: dict[str, Any],
         channel: ChannelWorkspace,
         snapshot: CompiledChannelPolicySnapshot,
     ) -> dict[str, Any]:
@@ -1275,9 +1433,13 @@ class FirstScriptedVideoPackageService:
             "channel_id": str(channel.id),
             "compiled_policy_snapshot_id": str(snapshot.id),
             "seed_topic": data.topic,
-            "research_pack_text": data.research_pack_text,
             "research_pack_ref": data.research_pack_ref,
-            "previous_artifacts": artifacts,
+            "agent_context_pack": context_pack,
+            "input_refs": {
+                "research_pack_ref": data.research_pack_ref,
+                "effective_context_snapshot_id": context_pack["audit_refs"]["effective_context_snapshot_id"],
+                "context_pack_hash": context_pack["context_pack_hash"],
+            },
             "runtime_constraints": {
                 "human_review_only": True,
                 "no_media_provider_calls": True,
@@ -1295,10 +1457,9 @@ class FirstScriptedVideoPackageService:
         *,
         step: PackageAgentStep,
         data: FirstScriptedVideoPackageRequest,
-        artifacts: dict[str, Any],
+        context_pack: dict[str, Any],
         channel: ChannelWorkspace,
         snapshot: CompiledChannelPolicySnapshot,
-        provider_readiness_snapshot: dict[str, Any],
     ) -> dict[str, Any]:
         return {
             "milestone": FULL_REHEARSAL_MILESTONE,
@@ -1308,10 +1469,13 @@ class FirstScriptedVideoPackageService:
             "seed_topic": data.topic,
             "target_video_type": data.target_video_type,
             "package_title_seed": data.package_title_seed,
-            "research_pack_text": data.research_pack_text,
             "research_pack_ref": data.research_pack_ref,
-            "provider_readiness_snapshot": provider_readiness_snapshot,
-            "previous_artifacts": artifacts,
+            "agent_context_pack": context_pack,
+            "input_refs": {
+                "research_pack_ref": data.research_pack_ref,
+                "effective_context_snapshot_id": context_pack["audit_refs"]["effective_context_snapshot_id"],
+                "context_pack_hash": context_pack["context_pack_hash"],
+            },
             "required_stop_at": "video_generation",
             "runtime_constraints": {
                 "real_ollama_via_llm_router_only": True,
@@ -1390,6 +1554,29 @@ class FirstScriptedVideoPackageService:
         audit.final_output_ref = f"prompt-output:{render_run_id}"
         self.session.flush()
         return audit.id
+
+    def _record_prompt_budget_metrics(self, snapshot_id: uuid.UUID, rendered_messages: list[Any]) -> None:
+        snapshot = self.session.get(AgentContextPackSnapshot, snapshot_id)
+        if snapshot is None:
+            return
+        system_chars = 0
+        user_chars = 0
+        for message in rendered_messages:
+            role = getattr(message, "role", None)
+            content = getattr(message, "content", "")
+            if isinstance(message, dict):
+                role = message.get("role")
+                content = message.get("content", "")
+            if role == "system":
+                system_chars += len(str(content))
+            if role == "user":
+                user_chars += len(str(content))
+        budget = dict(snapshot.budget_report_json or {})
+        budget["prompt_chars_system"] = system_chars
+        budget["prompt_chars_user"] = user_chars
+        budget["prompt_tokens_estimated"] = max(1, (system_chars + user_chars) // 4)
+        snapshot.budget_report_json = budget
+        self.session.flush()
 
     def _agent_ref(
         self,
@@ -1631,6 +1818,7 @@ class FirstScriptedVideoPackageService:
     def _create_package(
         self,
         *,
+        id: uuid.UUID | None = None,
         channel_id: uuid.UUID,
         status: str,
         video_project_id: uuid.UUID | None = None,
@@ -1648,6 +1836,7 @@ class FirstScriptedVideoPackageService:
         next_action: str | None = None,
     ) -> FirstScriptedVideoPackage:
         package = FirstScriptedVideoPackage(
+            id=id or uuid.uuid4(),
             video_project_id=video_project_id,
             channel_id=channel_id,
             channel_profile_version_id=channel_profile_version_id,

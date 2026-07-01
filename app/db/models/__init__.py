@@ -207,6 +207,7 @@ from app.db.models.r3d1 import (
     VoiceProfile,
 )
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
+from app.db.models.r3d3 import AgentContextPackSnapshot
 
 __all__ = [
     "AuditEvent",
@@ -379,4 +380,5 @@ __all__ = [
     "VoiceProfile",
     "CharacterBinding",
     "EffectiveChannelRuntimeContextSnapshot",
+    "AgentContextPackSnapshot",
 ]

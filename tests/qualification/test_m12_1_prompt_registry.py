@@ -148,7 +148,8 @@ def test_render_binds_frozen_channel_contract_messages_and_eval_cases(db_session
     assert "common_channel_contract" in result.rendered_messages[0].content
     assert "PublishingMetadataAgent" in result.rendered_messages[0].content
     assert str(scope.profile.id) in result.rendered_messages[1].content
-    assert '"primary_market":"VN"' in result.rendered_messages[1].content
+    assert "channel_contract_ref_json" in result.rendered_messages[1].content
+    assert "channel_contract_json:" not in result.rendered_messages[1].content
     run = db_session.get(PromptRenderRun, result.prompt_render_run_id)
     assert run.channel_profile_version_id == scope.profile.id
     assert run.compiled_policy_snapshot_id == scope.snapshot.id

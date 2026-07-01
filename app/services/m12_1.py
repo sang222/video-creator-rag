@@ -36,6 +36,13 @@ from app.db.models import (
     StructuredOutputSchema,
 )
 from app.services.channel_contract import build_channel_contract
+from app.services.r3d3 import (
+    HARD_RULE_HEADER,
+    HARD_RULE_HEADER_HASH,
+    LANE_POLICY_VERSION,
+    build_common_skill_digest,
+    stable_hash,
+)
 
 
 PROMPT_CONTRACT_VERSION = "m12.1.0"
@@ -128,17 +135,20 @@ class PromptRegistryRepository:
         manifest = manifests.get(agent_key)
         if manifest is None:
             raise NotFoundError(f"prompt agent not found: {agent_key}")
-        common_parts: list[str] = []
-        for ref in manifest.get("common_skill_refs", []):
-            common_path = self._resolve(ref)
-            common_parts.append(f"## {Path(ref).stem}\n{common_path.read_text(encoding='utf-8').strip()}")
+        common_skill_digest = build_common_skill_digest()
+        common_parts = [
+            f"- {item['name']}: {item['ref']} hash={item['hash']}"
+            for item in common_skill_digest["payload"]["common_skill_refs"]
+        ]
         system_delta = self._resolve(manifest["system_delta_ref"]).read_text(encoding="utf-8").strip()
         user_template = self._resolve(manifest["user_template_ref"]).read_text(encoding="utf-8").strip()
         schema = json.loads(self._resolve(manifest["output_schema_ref"]).read_text(encoding="utf-8"))
         system_prompt = "\n\n".join(
             [
-                "# VCOS Common Skills",
-                *common_parts,
+                "# VCOS Hard-Rule Header",
+                HARD_RULE_HEADER,
+                "# VCOS Common Skill Digest",
+                "\n".join(common_parts),
                 "# Agent-Specific Skill",
                 system_delta,
                 "# Output Contract",
@@ -238,18 +248,11 @@ class PromptRegistryService:
             raise ValidationFailureError(f"router lane {router_lane} is not allowed for {data.agent_key}")
 
         contract_payload = self._resolve_channel_payload(data=data, profile=profile)
-        context_hash = prompt_context_hash(
-            render_vars={
-                "task_payload": data.task_payload,
-                "render_vars": data.render_vars,
-                "evidence_refs": data.evidence_refs,
-                "artifact_refs": data.artifact_refs,
-            },
-            channel_profile_version_id=data.channel_profile_version_id,
-            compiled_policy_snapshot_id=data.compiled_policy_snapshot_id,
-            channel_contract_json=contract_payload["channel_contract_json"],
-            market_locale_context_json=contract_payload["market_locale_context_json"],
-            artifact_refs=data.artifact_refs,
+        context_hash = self._prompt_context_hash(
+            data=data,
+            manifest=manifest,
+            router_lane=router_lane,
+            contract_payload=contract_payload,
         )
 
         missing_result = self._missing_channel_result(
@@ -493,6 +496,28 @@ class PromptRegistryService:
     def _render_vars(self, *, data: PromptRenderRequest, manifest: dict[str, Any], contract_payload: dict[str, Any]) -> dict[str, str]:
         channel_profile_version_id = str(data.channel_profile_version_id) if data.channel_profile_version_id else "null"
         compiled_policy_snapshot_id = str(data.compiled_policy_snapshot_id) if data.compiled_policy_snapshot_id else "null"
+        channel_contract_ref = {
+            "channel_profile_version_id": channel_profile_version_id,
+            "compiled_policy_snapshot_id": compiled_policy_snapshot_id,
+            "channel_contract_hash": sha256_text(canonical_json(contract_payload["channel_contract_json"])),
+            "contract_status": _dict(contract_payload["channel_contract_json"]).get("contract_status"),
+        }
+        compiled_policy_snapshot_ref = {
+            "compiled_policy_snapshot_id": compiled_policy_snapshot_id,
+            "compiled_policy_snapshot_hash": sha256_text(canonical_json(contract_payload["compiled_policy_snapshot_json"])),
+        }
+        market_locale_ref = {
+            "market_locale_context_hash": sha256_text(canonical_json(contract_payload["market_locale_context_json"])),
+        }
+        agent_context_pack = data.task_payload.get("agent_context_pack") if isinstance(data.task_payload, dict) else None
+        task_payload_for_render = dict(data.task_payload)
+        if isinstance(agent_context_pack, dict):
+            task_payload_for_render["agent_context_pack"] = {
+                "context_pack_hash": agent_context_pack.get("context_pack_hash"),
+                "context_pack_version": agent_context_pack.get("context_pack_version"),
+                "agent_key": agent_context_pack.get("agent_key"),
+            }
+        prompt_agent_context_pack = _prompt_safe_agent_context_pack(agent_context_pack)
         payload: dict[str, Any] = {
             **data.render_vars,
             "agent_key": data.agent_key,
@@ -500,15 +525,59 @@ class PromptRegistryService:
             "template_version": manifest["template_version"],
             "channel_profile_version_id": channel_profile_version_id,
             "compiled_policy_snapshot_id": compiled_policy_snapshot_id,
-            "task_payload_json": canonical_json(data.task_payload),
-            "channel_contract_json": canonical_json(contract_payload["channel_contract_json"]),
-            "compiled_policy_snapshot_json": canonical_json(contract_payload["compiled_policy_snapshot_json"]),
-            "market_locale_context_json": canonical_json(contract_payload["market_locale_context_json"]),
+            "channel_contract_ref_json": canonical_json(channel_contract_ref),
+            "compiled_policy_snapshot_ref_json": canonical_json(compiled_policy_snapshot_ref),
+            "market_locale_context_ref_json": canonical_json(market_locale_ref),
+            "agent_context_pack_json": canonical_json(prompt_agent_context_pack),
+            "task_payload_json": canonical_json(task_payload_for_render),
             "evidence_refs_json": canonical_json(data.evidence_refs),
             "artifact_refs_json": canonical_json(data.artifact_refs),
             "required_output_instruction": "Return JSON only using the BaseEnvelope schema. Do not add unknown fields.",
         }
         return {key: str(value) for key, value in payload.items()}
+
+    def _prompt_context_hash(
+        self,
+        *,
+        data: PromptRenderRequest,
+        manifest: dict[str, Any],
+        router_lane: str,
+        contract_payload: dict[str, Any],
+    ) -> str:
+        agent_context_pack = data.task_payload.get("agent_context_pack") if isinstance(data.task_payload, dict) else None
+        if isinstance(agent_context_pack, dict) and agent_context_pack.get("context_pack_hash"):
+            common_digest = _dict(_dict(agent_context_pack.get("digests")).get("common_skill_digest"))
+            schema_contract_hash = stable_hash(
+                {
+                    "input_contract": manifest.get("input_contract"),
+                    "output_contract": manifest.get("output_contract"),
+                    "schema_ref": manifest.get("schema_ref"),
+                    "schema_version": manifest.get("schema_version"),
+                }
+            )
+            return stable_hash(
+                {
+                    "template_version": manifest["template_version"],
+                    "lane_policy_version": f"{LANE_POLICY_VERSION}:{router_lane}",
+                    "hard_rule_header_hash": HARD_RULE_HEADER_HASH,
+                    "common_skill_digest_hash": common_digest.get("digest_hash"),
+                    "context_pack_hash": agent_context_pack.get("context_pack_hash"),
+                    "schema_contract_hash": schema_contract_hash,
+                }
+            )
+        return prompt_context_hash(
+            render_vars={
+                "task_payload": data.task_payload,
+                "render_vars": data.render_vars,
+                "evidence_refs": data.evidence_refs,
+                "artifact_refs": data.artifact_refs,
+            },
+            channel_profile_version_id=data.channel_profile_version_id,
+            compiled_policy_snapshot_id=data.compiled_policy_snapshot_id,
+            channel_contract_json=contract_payload["channel_contract_json"],
+            market_locale_context_json=contract_payload["market_locale_context_json"],
+            artifact_refs=data.artifact_refs,
+        )
 
     def _create_render_run(
         self,
@@ -700,6 +769,34 @@ class PromptRegistryService:
 def build_channel_contract_from_profile(session: Session, profile_version: ChannelProfileVersion) -> dict[str, Any]:
     channel = session.get(ChannelWorkspace, profile_version.channel_workspace_id)
     return build_channel_contract(profile_input=profile_version.profile_input, channel=channel)
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _prompt_safe_agent_context_pack(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    pack = dict(value)
+    contract = _dict(pack.get("agent_context_contract"))
+    if contract:
+        pack["agent_context_contract_ref"] = {
+            "agent_key": contract.get("agent_key"),
+            "task_type": contract.get("task_type"),
+            "lane": contract.get("lane"),
+            "contract_version": contract.get("contract_version"),
+            "content_hash": contract.get("content_hash"),
+            "required_context_sections": contract.get("required_context_sections"),
+            "optional_context_sections": contract.get("optional_context_sections"),
+            "max_context_chars": contract.get("max_context_chars"),
+            "max_memory_facets": contract.get("max_memory_facets"),
+            "max_artifact_refs": contract.get("max_artifact_refs"),
+            "raw_artifact_allowed": contract.get("raw_artifact_allowed"),
+            "full_debug_allowed": contract.get("full_debug_allowed"),
+        }
+    pack.pop("agent_context_contract", None)
+    return pack
 
 
 def prompt_template_hash(
