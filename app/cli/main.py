@@ -124,6 +124,7 @@ from app.services import (
     YouTubePublicStatsSyncService,
     AIHeroGenerationService,
     ProviderReadinessService,
+    ProviderReadinessM2Service,
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
     PublishHandoffLedgerService,
@@ -1941,6 +1942,16 @@ def integrations_readiness(run_snapshot: bool = typer.Option(False, "--run-snaps
             typer.echo(json.dumps(payload.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"integrations readiness failed: {exc}")
+
+
+@integrations_app.command("provider-wiring")
+def integrations_provider_wiring() -> None:
+    try:
+        payload = ProviderReadinessM2Service().snapshot()
+        typer.echo(json.dumps(payload.model_dump(mode="json")))
+    except Exception as exc:
+        _fail(f"integrations provider-wiring failed: {exc}")
+
 
 @integrations_app.command("smoke")
 def integrations_smoke(provider: str = typer.Option(..., "--provider")) -> None:

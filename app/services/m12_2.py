@@ -34,6 +34,7 @@ from app.db.models import (
 )
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
 from app.services.m1 import PackagingHandoffReadService
+from app.services.m2 import ProviderReadinessM2Service
 from app.services.m12 import ProviderReadinessService
 from app.services.m12_1 import PromptRegistryService
 from app.services.r3d3 import AgentContextPackBuilder
@@ -2022,10 +2023,18 @@ class FirstScriptedVideoPackageService:
             for summary in readiness_snapshot.get("provider_summaries", [])
             if isinstance(summary, dict) and summary.get("provider_key")
         }
+        m2 = {
+            item.provider_key: self._m2_provider_boundary_state(item.model_dump(mode="json"))
+            for item in ProviderReadinessM2Service(self.settings).snapshot().providers
+        }
         return {
-            "elevenlabs": self._provider_boundary_state(summaries.get("elevenlabs")),
-            "creatomate": self._provider_boundary_state(summaries.get("creatomate")),
+            "elevenlabs": m2.get("elevenlabs") or self._provider_boundary_state(summaries.get("elevenlabs")),
+            "creatomate": m2.get("creatomate_growth_10k") or self._provider_boundary_state(summaries.get("creatomate")),
             "veo": self._provider_boundary_state(summaries.get("google-vertex-veo"), optional=True),
+            "luma_api": {**m2.get("luma_api", {"status": "NOT_CONFIGURED"}), "required": False},
+            "pexels_api": {**m2.get("pexels_api", {"status": "NOT_CONFIGURED"}), "required": False},
+            "google_drive_archive": {**m2.get("google_drive_archive", {"status": "DISABLED"}), "required": False},
+            "youtube_readonly": {**m2.get("youtube_readonly", {"status": "DISABLED"}), "required": False},
         }
 
     def _provider_boundary_state(self, summary: dict[str, Any] | None, *, optional: bool = False) -> dict[str, Any]:
@@ -2053,6 +2062,29 @@ class FirstScriptedVideoPackageService:
             "missing_env_keys": missing_env_keys,
             "reason_codes": reason_codes,
             "next_action": summary.get("next_action"),
+        }
+
+    def _m2_provider_boundary_state(self, item: dict[str, Any]) -> dict[str, Any]:
+        readiness_state = str(item.get("readiness_state") or "UNKNOWN")
+        reason_codes = list(item.get("blocker_reason_codes") or [])
+        missing_env_keys = list(item.get("missing_env_keys") or [])
+        if readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION", "CAPABILITY_READY"}:
+            status = "CONFIGURED"
+        elif readiness_state == "DISABLED":
+            status = "DISABLED"
+        elif missing_env_keys or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes):
+            status = "NEEDS_CREDENTIAL"
+        else:
+            status = "NOT_CONFIGURED"
+        return {
+            "status": status,
+            "required": item.get("provider_key") in {"elevenlabs", "creatomate_growth_10k"},
+            "readiness_state": readiness_state,
+            "missing_env_keys": missing_env_keys,
+            "reason_codes": reason_codes,
+            "next_action": item.get("future_required_next_action"),
+            "m2_wiring_only": True,
+            "no_provider_calls_confirmed": True,
         }
 
     def _human_review_checklist(self, artifacts: dict[str, Any], provider_readiness_snapshot_id: uuid.UUID) -> dict[str, Any]:

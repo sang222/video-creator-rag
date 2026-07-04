@@ -74,6 +74,14 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "VCOS_ELEVENLABS_API_KEY"),
     )
+    elevenlabs_voice_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ELEVENLABS_VOICE_ID", "VCOS_ELEVENLABS_VOICE_ID"),
+    )
+    elevenlabs_model_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ELEVENLABS_MODEL_ID", "VCOS_ELEVENLABS_MODEL_ID"),
+    )
     voice_provider: str | None = Field(
         default=None,
         validation_alias=AliasChoices("VCOS_VOICE_PROVIDER", "VOICE_PROVIDER"),
@@ -102,9 +110,25 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("CREATOMATE_API_KEY", "VCOS_CREATOMATE_API_KEY"),
     )
+    creatomate_template_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CREATOMATE_TEMPLATE_ID", "VCOS_CREATOMATE_TEMPLATE_ID"),
+    )
+    creatomate_workspace_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CREATOMATE_WORKSPACE_ID", "VCOS_CREATOMATE_WORKSPACE_ID"),
+    )
     render_provider: str | None = Field(
         default=None,
         validation_alias=AliasChoices("VCOS_RENDER_PROVIDER", "RENDER_PROVIDER"),
+    )
+    cloud_final_assembly_renderer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CLOUD_FINAL_ASSEMBLY_RENDERER", "VCOS_CLOUD_FINAL_ASSEMBLY_RENDERER"),
+    )
+    cloud_template_renderer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CLOUD_TEMPLATE_RENDERER", "VCOS_CLOUD_TEMPLATE_RENDERER"),
     )
     cloud_final_renderer_provider: str | None = Field(
         default=None,
@@ -133,6 +157,26 @@ class Settings(BaseSettings):
     pexels_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("PEXELS_API_KEY", "VCOS_PEXELS_API_KEY"),
+    )
+    free_visual_fallback_provider: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FREE_VISUAL_FALLBACK_PROVIDER", "VCOS_FREE_VISUAL_FALLBACK_PROVIDER"),
+    )
+    pexels_attribution_required: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PEXELS_ATTRIBUTION_REQUIRED", "VCOS_PEXELS_ATTRIBUTION_REQUIRED"),
+    )
+    pexels_max_clips_per_long: int = Field(
+        default=3,
+        validation_alias=AliasChoices("PEXELS_MAX_CLIPS_PER_LONG", "VCOS_PEXELS_MAX_CLIPS_PER_LONG"),
+    )
+    pexels_max_runtime_pct_per_long: int = Field(
+        default=20,
+        validation_alias=AliasChoices("PEXELS_MAX_RUNTIME_PCT_PER_LONG", "VCOS_PEXELS_MAX_RUNTIME_PCT_PER_LONG"),
+    )
+    pexels_max_same_asset_reuse_per_30_days: int = Field(
+        default=2,
+        validation_alias=AliasChoices("PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS", "VCOS_PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS"),
     )
     pixabay_api_key: SecretStr | None = Field(
         default=None,
@@ -185,6 +229,10 @@ class Settings(BaseSettings):
     google_drive_offload_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("GOOGLE_DRIVE_OFFLOAD_ENABLED", "VCOS_GOOGLE_DRIVE_OFFLOAD_ENABLED"),
+    )
+    google_drive_archive_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_ARCHIVE_ENABLED", "VCOS_GOOGLE_DRIVE_ARCHIVE_ENABLED"),
     )
     google_drive_oauth_client_secrets_file: str | None = Field(
         default=None,
@@ -257,6 +305,34 @@ class Settings(BaseSettings):
     ai_hero_provider: str | None = Field(
         default=None,
         validation_alias=AliasChoices("VCOS_AI_HERO_PROVIDER", "AI_HERO_PROVIDER"),
+    )
+    ai_video_hero_provider: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AI_VIDEO_HERO_PROVIDER", "VCOS_AI_VIDEO_HERO_PROVIDER"),
+    )
+    luma_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LUMA_API_KEY", "VCOS_LUMA_API_KEY"),
+    )
+    luma_hero_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LUMA_HERO_MODEL", "VCOS_LUMA_HERO_MODEL"),
+    )
+    luma_default_duration_seconds: int = Field(
+        default=8,
+        validation_alias=AliasChoices("LUMA_DEFAULT_DURATION_SECONDS", "VCOS_LUMA_DEFAULT_DURATION_SECONDS"),
+    )
+    luma_max_duration_seconds: int = Field(
+        default=8,
+        validation_alias=AliasChoices("LUMA_MAX_DURATION_SECONDS", "VCOS_LUMA_MAX_DURATION_SECONDS"),
+    )
+    luma_video_only: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("LUMA_VIDEO_ONLY", "VCOS_LUMA_VIDEO_ONLY"),
+    )
+    provider_real_readiness_probe_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("PROVIDER_REAL_READINESS_PROBE_ENABLED", "VCOS_PROVIDER_REAL_READINESS_PROBE_ENABLED"),
     )
     google_cloud_project_id: str | None = Field(
         default=None,
@@ -369,6 +445,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "elevenlabs_api_key",
+        "luma_api_key",
         "creatomate_api_key",
         "cloud_final_renderer_api_key",
         "pexels_api_key",
@@ -405,13 +482,22 @@ class Settings(BaseSettings):
         "ollama_base_url",
         "llm_provider",
         "voice_provider",
+        "elevenlabs_voice_id",
+        "elevenlabs_model_id",
         "elevenlabs_plan",
         "elevenlabs_budget_basis",
         "render_provider",
+        "cloud_final_assembly_renderer",
+        "cloud_template_renderer",
         "cloud_final_renderer_provider",
+        "creatomate_template_id",
+        "creatomate_workspace_id",
         "creatomate_plan",
+        "free_visual_fallback_provider",
         "budget_mode",
         "llm_budget_note",
+        "ai_video_hero_provider",
+        "luma_hero_model",
         "veo_model_id",
         "veo_mode",
         "veo_resolution",
@@ -433,6 +519,11 @@ class Settings(BaseSettings):
         "veo_max_duration_seconds",
         "veo_cost_per_second_1080p_video_only",
         "veo_monthly_budget_usd",
+        "luma_default_duration_seconds",
+        "luma_max_duration_seconds",
+        "pexels_max_clips_per_long",
+        "pexels_max_runtime_pct_per_long",
+        "pexels_max_same_asset_reuse_per_30_days",
         "monthly_ai_budget_usd",
         "llm_monthly_budget_usd",
         "stock_monthly_budget_usd",

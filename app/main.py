@@ -224,6 +224,7 @@ from app.contracts import (
     VideoProjectLocalizationRead,
     IntegrationReadinessRead,
     ProviderReadinessSnapshotRead,
+    ProviderReadinessSnapshotM2Read,
     ProviderSmokeRequest,
     PromptEvaluationRunRead,
     PromptOutputValidationRequest,
@@ -369,6 +370,7 @@ from app.services import (
     PublishTimingPolicyService,
     PublishTimingSuggestionService,
     ProviderReadinessService,
+    ProviderReadinessM2Service,
     PromptRegistryService,
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
@@ -533,6 +535,13 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return ProviderReadinessService(session).readiness()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/integrations/provider-wiring", response_model=ProviderReadinessSnapshotM2Read)
+    def get_provider_wiring_readiness() -> ProviderReadinessSnapshotM2Read:
+        try:
+            return ProviderReadinessM2Service().snapshot()
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

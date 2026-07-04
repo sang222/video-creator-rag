@@ -1230,4 +1230,24 @@ def _provider_readiness_map(provider_readiness_state: dict[str, Any]) -> dict[st
         reason_codes = _strings(summary.get("reason_codes"))
         status = "PASS" if readiness_state == "PASS" else ("NEEDS_CREDENTIAL" if missing_env or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes) else "NOT_CONFIGURED")
         mapped[key] = {"status": status, "readiness_state": readiness_state, "reason_codes": reason_codes}
+    m2_snapshot = _dict(provider_readiness_state.get("m2_provider_wiring")) or _dict(_dict(provider_readiness_state.get("technical_appendix")).get("m2_provider_wiring"))
+    for item in _list(m2_snapshot.get("providers")):
+        if not isinstance(item, dict) or not item.get("provider_key"):
+            continue
+        key = str(item["provider_key"]).lower()
+        readiness_state = str(item.get("readiness_state") or "UNKNOWN")
+        reason_codes = _strings(item.get("blocker_reason_codes"))
+        if readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION", "CAPABILITY_READY"}:
+            status = "CONFIGURED"
+        elif readiness_state == "DISABLED":
+            status = "DISABLED"
+        elif item.get("missing_env_keys") or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes):
+            status = "NEEDS_CREDENTIAL"
+        else:
+            status = "NOT_CONFIGURED"
+        mapped[key] = {"status": status, "readiness_state": readiness_state, "reason_codes": reason_codes}
+        if key == "creatomate_growth_10k":
+            mapped["creatomate"] = mapped[key]
+        if key == "luma_api":
+            mapped["luma"] = mapped[key]
     return mapped

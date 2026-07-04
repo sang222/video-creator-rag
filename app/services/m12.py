@@ -42,6 +42,7 @@ from app.services.m10_3 import (
     YouTubePublicStatsProvider,
 )
 from app.services.m10_5 import GoogleDriveConfigService, GoogleDriveOAuthCredentialService, GoogleDriveUploadService
+from app.services.m2 import ProviderReadinessM2Service
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -875,7 +876,11 @@ class ProviderReadinessService:
                 "local_storage_secrets_allowed": False,
                 "plain_db_secret_fields_added": False,
             },
-            technical_appendix={"source": "M12 ProviderReadinessService", "no_provider_calls_on_get": True},
+            technical_appendix={
+                "source": "M12 ProviderReadinessService",
+                "no_provider_calls_on_get": True,
+                "m2_provider_wiring": ProviderReadinessM2Service(self.settings).snapshot().model_dump(mode="json"),
+            },
         )
 
     def run(self) -> ProviderReadinessSnapshotRead:
@@ -916,7 +921,11 @@ class ProviderReadinessService:
             next_actions=actions,
             budget_cards=[],
             security_summary={"raw_secret_values_exposed": False},
-            technical_appendix={"source": "M12 provider scoped readiness", "no_provider_calls_on_get": True},
+            technical_appendix={
+                "source": "M12 provider scoped readiness",
+                "no_provider_calls_on_get": True,
+                "m2_provider_wiring": ProviderReadinessM2Service(self.settings).snapshot().model_dump(mode="json"),
+            },
         )
 
     def _evaluate(self, *, persist: bool) -> tuple[list[ProviderCheckDraft], list[ProviderSummaryRead]]:

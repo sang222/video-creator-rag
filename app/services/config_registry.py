@@ -201,6 +201,18 @@ class MediaProviderRoutingPolicyCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
+class PexelsPolicyCatalogItem(BaseModel):
+    key: str
+    provider_type: str
+    allowed: list[str] = Field(default_factory=list)
+    blocked: list[str] = Field(default_factory=list)
+    limits: dict[str, Any] = Field(default_factory=dict)
+    required_manifest: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RetryPolicyCatalogItem(BaseModel):
     policy_key: str
     provider_key: str | None = None
@@ -442,6 +454,7 @@ class ConfigRegistryService:
             "media_provider_capability_matrix_catalog": MediaProviderCapabilityMatrixCatalogItem,
             "media_provider_budget_policy_catalog": MediaProviderBudgetPolicyCatalogItem,
             "media_provider_routing_policy_catalog": MediaProviderRoutingPolicyCatalogItem,
+            "pexels_policy_catalog": PexelsPolicyCatalogItem,
             "provider_capability_catalog": SimpleKeyCatalogItem,
             "media_routing_result_catalog": SimpleKeyCatalogItem,
             "media_budget_state_catalog": SimpleKeyCatalogItem,

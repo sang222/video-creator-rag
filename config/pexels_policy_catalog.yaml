@@ -1,0 +1,32 @@
+catalog_key: pexels_policy_catalog
+catalog_version: "1.0.0"
+schema_version: "1.0.0"
+status: active
+items:
+  - key: pexels_policy
+    provider_type: FREE_VISUAL_FALLBACK_PROVIDER
+    allowed:
+      - background_visual
+      - short_broll
+      - thumbnail_background
+      - mood_support
+    blocked:
+      - factual_evidence
+      - fake_testimonial
+      - implied_endorsement
+      - core_visual_backbone
+      - recurring_host_identity
+      - every_scene_default_stock
+    limits:
+      max_pexels_runtime_pct_per_long: 20
+      max_pexels_clips_per_long: 3
+      max_same_asset_reuse_per_30_days: 2
+    required_manifest:
+      - provider
+      - asset_id
+      - source_url
+      - creator_name
+      - creator_url
+      - downloaded_at
+      - license_snapshot_ref
+      - usage_role
