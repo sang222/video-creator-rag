@@ -315,7 +315,7 @@ from app.services.r3d9_ux2 import (
     PackagingPatchRouter,
     PackagingReviewQueueService,
 )
-from app.services.r3d10 import RuntimeLTSFreezeVerifier
+from app.services.r3d10 import PackageRuntimeDispositionService, RuntimeLTSFreezeVerifier
 
 __all__ = [
     "AuditService",
@@ -571,6 +571,7 @@ __all__ = [
     "PackagingPatchApprovalService",
     "PackagingPatchApplyService",
     "PackagingGateRerunService",
+    "PackageRuntimeDispositionService",
     "ProviderStackDriftGuard",
     "RuntimeLTSFreezeVerifier",
     "OllamaReadinessCheck",

@@ -247,6 +247,7 @@ from app.db.models.r3d9_ux2 import (
     PackagingProposedPatch,
     PackagingReviewQueueItem,
 )
+from app.db.models.r3d10 import PackageRuntimeDisposition
 
 __all__ = [
     "AuditEvent",
@@ -451,4 +452,5 @@ __all__ = [
     "PackagingPatchApprovalDecision",
     "PackagingPatchApplyRun",
     "PackagingGateRerunRecord",
+    "PackageRuntimeDisposition",
 ]

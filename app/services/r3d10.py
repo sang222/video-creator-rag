@@ -7,29 +7,38 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fastapi import FastAPI
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.contracts.r3d10 import RuntimeInvariantCheckRead, RuntimeLTSFreezeCheckRead
 from app.core.config import Settings, get_settings
+from app.core.errors import NotFoundError
 from app.core.time import utc_now
 from app.db.models import (
     AgentContextPackSnapshot,
     AgentOutputValidationRun,
     ChannelMemoryItem,
+    CloudMediaRef,
     EffectiveChannelRuntimeContextSnapshot,
+    FinalMediaRef,
     FirstScriptedVideoPackage,
     HumanUploadTask,
+    MediaOffloadJob,
+    MediaRenderJob,
     MemoryFacet,
     MemoryInfluenceManifest,
     PaidAttemptLimitRecord,
     PaidProviderCallLedger,
+    PackageRuntimeDisposition,
     PromptAuditSnapshot,
     PromptRenderRun,
     QualityDeltaAttribution,
     R3D4GateBatchRun,
     R3D4GateRun,
+    RenderRevision,
+    UploadedVideo,
     VectorRetrievalManifest,
+    VideoGenerationBoundary,
     VideoProject,
 )
 from app.services.dx2 import ProviderStackDriftGuard
@@ -41,6 +50,8 @@ from app.services.r3d4 import AgentOutputContractRegistry, ArtifactCanonicalizer
 
 
 MEDIA_READY_STATUSES = {"READY_FOR_MEDIA", "READY_FOR_MEDIA_PROVIDERS"}
+EXCLUDED_RUNTIME_DISPOSITIONS = {"PRE_LTS_HISTORICAL_EXCLUDED", "TEST_REHEARSAL_EXCLUDED"}
+BLOCKING_RUNTIME_DISPOSITIONS = {"CORRUPT_BLOCKED_NEEDS_REVIEW"}
 PACKAGE_RUNTIME_STATUSES = {
     "READY_FOR_HUMAN_REVIEW",
     "READY_FOR_MEDIA",
@@ -64,6 +75,34 @@ FORBIDDEN_JOB_CONTROL_PATTERNS = (
 )
 
 
+class PackageRuntimeDispositionService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(
+        self,
+        *,
+        package_id: uuid.UUID,
+        disposition: str,
+        reason_codes: list[str],
+        decided_by: str,
+        evidence: dict[str, Any],
+    ) -> PackageRuntimeDisposition:
+        package = self.session.get(FirstScriptedVideoPackage, package_id)
+        if package is None:
+            raise NotFoundError(f"first scripted video package not found: {package_id}")
+        row = PackageRuntimeDisposition(
+            package_id=package.id,
+            disposition=disposition,
+            reason_codes_json=sorted(set(reason_codes)),
+            decided_by=decided_by,
+            evidence_json=evidence,
+        )
+        self.session.add(row)
+        self.session.flush()
+        return row
+
+
 class RuntimeLTSFreezeVerifier:
     def __init__(
         self,
@@ -84,6 +123,7 @@ class RuntimeLTSFreezeVerifier:
     def verify(self) -> RuntimeLTSFreezeCheckRead:
         self._checks = []
         self._check_channel_runtime_authority()
+        self._check_package_runtime_dispositions()
         self._check_agent_context_prompt_path()
         self._check_output_validation_and_gates()
         self._check_packaging_manual_handoff()
@@ -129,6 +169,7 @@ class RuntimeLTSFreezeVerifier:
                 "no_upload_calls": True,
                 "provider_real_execution_default": self._settings_default("provider_real_execution_enabled"),
                 "canonical_provider_keys": list(CANONICAL_PROVIDER_KEYS),
+                "package_runtime_disposition_summary": self._runtime_disposition_summary(),
             },
         )
 
@@ -163,6 +204,70 @@ class RuntimeLTSFreezeVerifier:
             [],
             [{"module": "app.services.r3d3.ContextPackShapeGate", "latest_channel_settings_read_required_false": True}],
             "service_import_and_contract_guard",
+        )
+
+    def _check_package_runtime_dispositions(self) -> None:
+        packages = self._all_runtime_status_packages()
+        dispositions = self._latest_runtime_dispositions()
+        excluded: list[dict[str, Any]] = []
+        risky_excluded: list[dict[str, Any]] = []
+        disposition_blocked: list[str] = []
+        media_ready_missing_disposition: list[str] = []
+
+        for package in packages:
+            disposition = dispositions.get(package.id)
+            if disposition is None and package.package_status in MEDIA_READY_STATUSES and self._package_missing_lts_invariants(package):
+                media_ready_missing_disposition.append(str(package.id))
+                continue
+            if disposition is None:
+                continue
+            if disposition.disposition in BLOCKING_RUNTIME_DISPOSITIONS:
+                disposition_blocked.append(str(package.id))
+            if disposition.disposition in EXCLUDED_RUNTIME_DISPOSITIONS:
+                refs = self._runtime_execution_refs(package)
+                excluded.append(
+                    {
+                        "package_id": str(package.id),
+                        "disposition": disposition.disposition,
+                        "reason_codes": disposition.reason_codes_json,
+                        "created_at": disposition.created_at.isoformat(),
+                    }
+                )
+                if refs:
+                    risky_excluded.append(
+                        {
+                            "package_id": str(package.id),
+                            "disposition": disposition.disposition,
+                            "execution_refs": refs,
+                        }
+                    )
+
+        self._record(
+            "package_runtime_disposition_exclusions",
+            "Pre-LTS/test package co disposition excluded khong duoc tinh vao active runtime surface.",
+            "P1",
+            "WARNING" if excluded else "PASS",
+            ["PRE_LTS_PACKAGE_EXCLUDED_FROM_RUNTIME_SURFACE"] if excluded else [],
+            [{"excluded_package_count": len(excluded), "latest_excluded_packages": excluded[:10]}],
+            "db_query",
+        )
+        blocked = bool(risky_excluded or disposition_blocked or media_ready_missing_disposition)
+        self._record(
+            "package_runtime_disposition_execution_risk",
+            "Excluded/corrupt package khong duoc co provider/media/upload execution refs; media-ready missing invariants can phai co disposition.",
+            "P0",
+            "BLOCKED" if blocked else "PASS",
+            [
+                *(["EXCLUDED_PACKAGE_RUNTIME_EXECUTION_REF_FOUND"] if risky_excluded else []),
+                *(["PACKAGE_RUNTIME_DISPOSITION_BLOCKED"] if disposition_blocked else []),
+                *(["MEDIA_READY_PACKAGE_RUNTIME_DISPOSITION_MISSING"] if media_ready_missing_disposition else []),
+            ],
+            [
+                {"risky_excluded_packages": risky_excluded[:10]},
+                {"disposition_blocked_package_ids": disposition_blocked[:10]},
+                {"media_ready_missing_disposition_package_ids": media_ready_missing_disposition[:10]},
+            ],
+            "db_query",
         )
 
     def _check_agent_context_prompt_path(self) -> None:
@@ -620,9 +725,88 @@ class RuntimeLTSFreezeVerifier:
             if hasattr(route, "path") and hasattr(route, "methods")
         }
 
-    def _runtime_packages(self) -> list[FirstScriptedVideoPackage]:
+    def _all_runtime_status_packages(self) -> list[FirstScriptedVideoPackage]:
         rows = self.session.scalars(select(FirstScriptedVideoPackage)).all()
         return [row for row in rows if str(row.package_status or "").upper() in PACKAGE_RUNTIME_STATUSES]
+
+    def _runtime_packages(self) -> list[FirstScriptedVideoPackage]:
+        dispositions = self._latest_runtime_dispositions()
+        return [
+            row
+            for row in self._all_runtime_status_packages()
+            if not (
+                (disposition := dispositions.get(row.id)) is not None
+                and disposition.disposition in EXCLUDED_RUNTIME_DISPOSITIONS
+                and not self._runtime_execution_refs(row)
+            )
+        ]
+
+    def _latest_runtime_dispositions(self) -> dict[uuid.UUID, PackageRuntimeDisposition]:
+        rows = self.session.scalars(
+            select(PackageRuntimeDisposition).order_by(desc(PackageRuntimeDisposition.created_at), desc(PackageRuntimeDisposition.id))
+        ).all()
+        latest: dict[uuid.UUID, PackageRuntimeDisposition] = {}
+        for row in rows:
+            latest.setdefault(row.package_id, row)
+        return latest
+
+    def _package_missing_lts_invariants(self, package: FirstScriptedVideoPackage) -> bool:
+        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None
+        return effective is None or not self._context_packs(package.id) or not self._gate_runs(package.id)
+
+    def _runtime_execution_refs(self, package: FirstScriptedVideoPackage) -> dict[str, int]:
+        render_revision_ids = [
+            row.id for row in self.session.scalars(select(RenderRevision).where(RenderRevision.package_id == package.id)).all()
+        ]
+        uploaded_video_ids = [
+            row.id
+            for row in self.session.scalars(
+                select(UploadedVideo).where(UploadedVideo.first_scripted_video_package_id == package.id)
+            ).all()
+        ]
+        refs: dict[str, int] = {
+            "human_upload_tasks": self._count(HumanUploadTask, HumanUploadTask.first_scripted_video_package_id == package.id),
+            "uploaded_videos": len(uploaded_video_ids),
+            "render_revisions": len(render_revision_ids),
+        }
+        if render_revision_ids:
+            refs["provider_job_snapshots"] = self._count(ProviderJobSnapshot, ProviderJobSnapshot.render_revision_id.in_(render_revision_ids))
+            refs["paid_provider_call_ledger_executed"] = self._count(
+                PaidProviderCallLedger,
+                PaidProviderCallLedger.render_revision_id.in_(render_revision_ids),
+                PaidProviderCallLedger.call_status == "EXECUTED",
+            )
+        if package.video_project_id:
+            refs["media_render_jobs"] = self._count(MediaRenderJob, MediaRenderJob.video_project_id == package.video_project_id)
+            refs["final_media_refs_by_project"] = self._count(FinalMediaRef, FinalMediaRef.video_project_id == package.video_project_id)
+            refs["media_offload_jobs_by_project"] = self._count(MediaOffloadJob, MediaOffloadJob.video_project_id == package.video_project_id)
+            refs["cloud_media_refs_by_project"] = self._count(CloudMediaRef, CloudMediaRef.video_project_id == package.video_project_id)
+        if uploaded_video_ids:
+            refs["final_media_refs_by_uploaded_video"] = self._count(FinalMediaRef, FinalMediaRef.uploaded_video_id.in_(uploaded_video_ids))
+            refs["media_offload_jobs_by_uploaded_video"] = self._count(MediaOffloadJob, MediaOffloadJob.uploaded_video_id.in_(uploaded_video_ids))
+            refs["cloud_media_refs_by_uploaded_video"] = self._count(CloudMediaRef, CloudMediaRef.uploaded_video_id.in_(uploaded_video_ids))
+        boundary = self.session.scalars(
+            select(VideoGenerationBoundary)
+            .where(VideoGenerationBoundary.package_id == package.id)
+            .order_by(desc(VideoGenerationBoundary.created_at), desc(VideoGenerationBoundary.id))
+            .limit(1)
+        ).one_or_none()
+        if boundary is not None and not boundary.no_provider_calls_confirmed:
+            refs["video_generation_boundary_provider_not_confirmed"] = 1
+        return {key: value for key, value in refs.items() if value}
+
+    def _runtime_disposition_summary(self) -> dict[str, Any]:
+        dispositions = self._latest_runtime_dispositions()
+        excluded = [
+            row
+            for row in dispositions.values()
+            if row.disposition in EXCLUDED_RUNTIME_DISPOSITIONS
+        ]
+        return {
+            "excluded_package_count": len(excluded),
+            "latest_excluded_package_ids": [str(row.package_id) for row in sorted(excluded, key=lambda item: item.created_at, reverse=True)[:10]],
+            "blocking_disposition_count": sum(1 for row in dispositions.values() if row.disposition in BLOCKING_RUNTIME_DISPOSITIONS),
+        }
 
     def _context_packs(self, package_id: uuid.UUID) -> list[AgentContextPackSnapshot]:
         return self.session.scalars(select(AgentContextPackSnapshot).where(AgentContextPackSnapshot.package_id == package_id)).all()

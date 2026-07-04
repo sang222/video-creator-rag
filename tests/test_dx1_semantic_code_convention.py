@@ -217,6 +217,7 @@ def test_dx1_db_tables_not_renamed(engine) -> None:
         "packaging_patch_approval_decisions",
         "packaging_patch_apply_runs",
         "packaging_gate_rerun_records",
+        "package_runtime_dispositions",
         "first_scripted_video_packages",
         "publish_handoff_packages",
         "uploaded_videos",
@@ -228,7 +229,7 @@ def test_dx1_alembic_history_not_rewritten() -> None:
     config = Config("alembic.ini")
     config.set_main_option("script_location", "alembic")
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "0032_r3d9_ux2_review_queue"
+    assert script.get_current_head() == "0033_p1_pre_lts_disposition"
     assert script.get_revision("0030_r3d7_closed_learning_loop") is not None
     r3d8 = script.get_revision("0031_r3d8_cost_firewall")
     assert r3d8 is not None
@@ -236,6 +237,11 @@ def test_dx1_alembic_history_not_rewritten() -> None:
     r3d9_ux2 = script.get_revision("0032_r3d9_ux2_review_queue")
     assert r3d9_ux2 is not None
     assert r3d9_ux2.down_revision == "0031_r3d8_cost_firewall"
+    p1_pre_lts = script.get_revision("0033_p1_pre_lts_disposition")
+    assert p1_pre_lts is not None
+    assert p1_pre_lts.down_revision == "0032_r3d9_ux2_review_queue"
     assert Path("alembic/versions/0030_r3d7_closed_learning_loop.py").exists()
     assert Path("alembic/versions/0031_r3d8_production_cost_firewall.py").exists()
+    assert Path("alembic/versions/0032_r3d9_ux2_packaging_review_queue.py").exists()
+    assert Path("alembic/versions/0033_p1_pre_lts_package_runtime_disposition.py").exists()
     assert Path("alembic/versions/0032_r3d9_ux2_packaging_review_queue.py").exists()

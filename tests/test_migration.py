@@ -198,13 +198,14 @@ REQUIRED_TABLES = {
     "packaging_patch_approval_decisions",
     "packaging_patch_apply_runs",
     "packaging_gate_rerun_records",
+    "package_runtime_dispositions",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert revision == "0032_r3d9_ux2_review_queue"
+        assert revision == "0033_p1_pre_lts_disposition"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

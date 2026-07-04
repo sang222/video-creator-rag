@@ -95,6 +95,7 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    package_runtime_dispositions,
                     packaging_gate_rerun_records,
                     packaging_patch_apply_runs,
                     packaging_patch_approval_decisions,
