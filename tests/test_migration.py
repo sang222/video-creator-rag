@@ -171,13 +171,19 @@ REQUIRED_TABLES = {
     "schema_violation_ledger",
     "r3d4_gate_batch_runs",
     "r3d4_gate_runs",
+    "channel_memory_items",
+    "memory_facets",
+    "memory_review_queue_items",
+    "memory_approval_decisions",
+    "memory_usage_manifests",
+    "memory_source_links",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0027_r3d4_agent_output_gates"
+    assert revision == "0028_r3d5_controlled_memory"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

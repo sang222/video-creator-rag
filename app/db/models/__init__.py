@@ -214,6 +214,14 @@ from app.db.models.r3d4 import (
     R3D4GateRun,
     SchemaViolationLedger,
 )
+from app.db.models.r3d5 import (
+    ChannelMemoryItem,
+    MemoryApprovalDecision,
+    MemoryFacet,
+    MemoryReviewQueueItem,
+    MemorySourceLink,
+    MemoryUsageManifest,
+)
 
 __all__ = [
     "AuditEvent",
@@ -391,4 +399,10 @@ __all__ = [
     "SchemaViolationLedger",
     "R3D4GateBatchRun",
     "R3D4GateRun",
+    "ChannelMemoryItem",
+    "MemoryFacet",
+    "MemoryReviewQueueItem",
+    "MemoryApprovalDecision",
+    "MemoryUsageManifest",
+    "MemorySourceLink",
 ]

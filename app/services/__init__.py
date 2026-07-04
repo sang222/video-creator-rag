@@ -243,6 +243,18 @@ from app.services.r3d4 import (
     R3D4GateService,
     StrictRepairService,
 )
+from app.services.r3d5 import (
+    ControlledMemoryService,
+    MemoryApprovalGate,
+    MemoryDuplicationGate,
+    MemoryFacetExtractor,
+    MemoryFreshnessGate,
+    MemoryPromptBudgetGate as MemoryFacetPromptBudgetGate,
+    MemoryPromptSafetyGate,
+    MemoryRightsGate,
+    MemoryScopeGate,
+    RetrievalAuditGate,
+)
 
 __all__ = [
     "AuditService",
@@ -440,6 +452,16 @@ __all__ = [
     "R3D4GateService",
     "GateResultReducer",
     "PackageStatusReducer",
+    "ControlledMemoryService",
+    "MemoryFacetExtractor",
+    "MemoryApprovalGate",
+    "MemoryRightsGate",
+    "MemoryPromptSafetyGate",
+    "MemoryScopeGate",
+    "MemoryFacetPromptBudgetGate",
+    "MemoryDuplicationGate",
+    "MemoryFreshnessGate",
+    "RetrievalAuditGate",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

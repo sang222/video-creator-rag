@@ -326,6 +326,19 @@ from app.contracts.r3d4 import (
     R3D4GateBatchResultRead,
     R3D4GateResultRead,
 )
+from app.contracts.r3d5 import (
+    ChannelMemoryDraftCreate,
+    ChannelMemoryItemRead,
+    MemoryApprovalDecisionRead,
+    MemoryApprovalRequest,
+    MemoryFacetInput,
+    MemoryFacetRead,
+    MemoryFromApprovedPlaybookCreate,
+    MemoryReviewQueueItemRead,
+    MemorySourceLinkRead,
+    MemoryUsageManifestCreate,
+    MemoryUsageManifestRead,
+)
 from app.contracts.m12_2r import (
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
@@ -747,6 +760,17 @@ __all__ = [
     "GateStatus",
     "R3D4GateBatchResultRead",
     "R3D4GateResultRead",
+    "ChannelMemoryDraftCreate",
+    "ChannelMemoryItemRead",
+    "MemoryApprovalDecisionRead",
+    "MemoryApprovalRequest",
+    "MemoryFacetInput",
+    "MemoryFacetRead",
+    "MemoryFromApprovedPlaybookCreate",
+    "MemoryReviewQueueItemRead",
+    "MemorySourceLinkRead",
+    "MemoryUsageManifestCreate",
+    "MemoryUsageManifestRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

@@ -24,7 +24,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0027_r3d4_agent_output_gates"
+EXPECTED_ALEMBIC_HEAD = "0028_r3d5_controlled_memory"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

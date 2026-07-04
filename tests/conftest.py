@@ -95,6 +95,12 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    memory_source_links,
+                    memory_usage_manifests,
+                    memory_approval_decisions,
+                    memory_review_queue_items,
+                    memory_facets,
+                    channel_memory_items,
                     character_reference_assets,
                     character_bindings,
                     voice_profiles,

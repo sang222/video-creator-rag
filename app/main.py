@@ -249,6 +249,12 @@ from app.contracts import (
     UploadedVideoLedgerRead,
     UploadedVideoListRead,
     UploadedVideoVerificationResult,
+    ChannelMemoryItemRead,
+    MemoryApprovalDecisionRead,
+    MemoryApprovalRequest,
+    MemoryFacetRead,
+    MemoryFromApprovedPlaybookCreate,
+    MemoryReviewQueueItemRead,
     ChannelContractDraftRead,
     ChannelContractPreviewRead,
     ChannelContractReviewRequest,
@@ -376,6 +382,7 @@ from app.services import (
     FirstScriptedVideoPackageService,
     PackagingHandoffReadService,
     PublishHandoffLedgerService,
+    ControlledMemoryService,
     ChannelContractCompiler,
     ChannelContractReviewService,
     ChannelInitDraftService,
@@ -2713,6 +2720,84 @@ def create_app() -> FastAPI:
             with session_scope() as session:
                 draft = LearningReadService(session).require_playbook_candidate_draft(draft_id)
                 return PlaybookCandidateDraftRead.model_validate(_playbook_candidate_draft(draft))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/memory/review-queue", response_model=list[MemoryReviewQueueItemRead])
+    def list_memory_review_queue(queue_status: str | None = None) -> list[MemoryReviewQueueItemRead]:
+        try:
+            with session_scope() as session:
+                items = ControlledMemoryService(session).list_review_queue(queue_status=queue_status)
+                return [MemoryReviewQueueItemRead.model_validate(item) for item in items]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/memory/items/{memory_item_id}", response_model=ChannelMemoryItemRead)
+    def get_memory_item(memory_item_id: uuid.UUID) -> ChannelMemoryItemRead:
+        try:
+            with session_scope() as session:
+                item = ControlledMemoryService(session).require_item(memory_item_id)
+                return ChannelMemoryItemRead.model_validate(item)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/memory/items/{memory_item_id}/facets", response_model=list[MemoryFacetRead])
+    def get_memory_item_facets(memory_item_id: uuid.UUID) -> list[MemoryFacetRead]:
+        try:
+            with session_scope() as session:
+                facets = ControlledMemoryService(session).list_facets(memory_item_id=memory_item_id)
+                return [MemoryFacetRead.model_validate(facet) for facet in facets]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/memory/from-approved-playbook-entry/{playbook_entry_id}", response_model=ChannelMemoryItemRead)
+    def create_memory_from_approved_playbook_entry(
+        playbook_entry_id: uuid.UUID,
+        data: MemoryFromApprovedPlaybookCreate | None = None,
+    ) -> ChannelMemoryItemRead:
+        try:
+            with session_scope() as session:
+                item = ControlledMemoryService(session).create_from_approved_playbook_entry(
+                    playbook_entry_id=playbook_entry_id,
+                    data=data,
+                )
+                return ChannelMemoryItemRead.model_validate(item)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/memory/items/{memory_item_id}/approve", response_model=MemoryApprovalDecisionRead)
+    def approve_memory_item(memory_item_id: uuid.UUID, data: MemoryApprovalRequest | None = None) -> MemoryApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ControlledMemoryService(session).approve(
+                    memory_item_id=memory_item_id,
+                    data=data or MemoryApprovalRequest(),
+                )
+                return MemoryApprovalDecisionRead.model_validate(decision)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/memory/items/{memory_item_id}/reject", response_model=MemoryApprovalDecisionRead)
+    def reject_memory_item(memory_item_id: uuid.UUID, data: MemoryApprovalRequest | None = None) -> MemoryApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ControlledMemoryService(session).reject(
+                    memory_item_id=memory_item_id,
+                    data=data or MemoryApprovalRequest(),
+                )
+                return MemoryApprovalDecisionRead.model_validate(decision)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/memory/items/{memory_item_id}/archive", response_model=MemoryApprovalDecisionRead)
+    def archive_memory_item(memory_item_id: uuid.UUID, data: MemoryApprovalRequest | None = None) -> MemoryApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                decision = ControlledMemoryService(session).archive(
+                    memory_item_id=memory_item_id,
+                    data=data or MemoryApprovalRequest(),
+                )
+                return MemoryApprovalDecisionRead.model_validate(decision)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
