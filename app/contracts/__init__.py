@@ -394,6 +394,7 @@ from app.contracts.r3d9 import (
     UploadedVideoOpsSummaryRead,
 )
 from app.contracts.dx2 import ProviderStackDriftGuardRead
+from app.contracts.r3d10 import RuntimeInvariantCheckRead, RuntimeLTSFreezeCheckRead
 from app.contracts.m12_2r import (
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
@@ -873,6 +874,8 @@ __all__ = [
     "RuntimeDashboardRead",
     "UploadedVideoOpsSummaryRead",
     "ProviderStackDriftGuardRead",
+    "RuntimeInvariantCheckRead",
+    "RuntimeLTSFreezeCheckRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

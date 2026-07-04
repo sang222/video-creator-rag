@@ -1,5 +1,11 @@
 # Source Of Truth
 
+## Runtime LTS v1
+
+R3D10 freezes VCOS backend/core as Runtime LTS v1. Freeze truth is verified by `RuntimeLTSFreezeVerifier`, documented in `docs/architecture/runtime_lts_v1.md`, and governed by `docs/operations/post_freeze_protocol.md`.
+
+Runtime LTS v1 is additive/read-only at the freeze layer. It does not rename DB tables, rewrite Alembic history, remove public API routes, activate providers, or add upload/publish automation.
+
 ## Runtime State
 
 Runtime traceability state belongs in PostgreSQL when it must be queried, audited, replayed, correlated, or joined with operational records.
@@ -58,7 +64,7 @@ M11.1 localization truth is canonical-video language-package truth. One `Uploade
 
 M11.1 publish timing truth is configured-window truth. `channel_publish_timing_policies` stores IANA timezones and human-owned windows. `publish_timing_suggestions` stores target local time, UTC equivalent, and operator local time. VCOS does not auto-schedule or auto-publish.
 
-M12 provider readiness truth is pre-production credential/config truth. `provider_readiness_checks` store provider-specific CONFIG, CREDENTIAL, CONNECTION, REAL_SMOKE, CAPABILITY, BUDGET, and SECURITY checks with Vietnamese operator summary and next action. `provider_readiness_snapshots` aggregate provider summaries, blocking items, warnings, and next actions. `real_smoke_runs` records guarded smoke state and stores only boolean/redacted env flags. M12 readiness reads do not call real providers. Real smoke calls are disabled by default and require explicit env flags. Hard-env AI budget cards display configured monthly caps only and do not calculate actual spend or remaining budget. Cloud Final Renderer is `REQUIRED_GAP` in M12; long-form final render remains blocked until a later milestone selects/configures a capable renderer. Creatomate remains a light renderer for shorts/cards/thumbnails and is not the long-form final renderer in M12.
+M12 provider readiness truth is pre-production credential/config truth. `provider_readiness_checks` store provider-specific CONFIG, CREDENTIAL, CONNECTION, REAL_SMOKE, CAPABILITY, BUDGET, and SECURITY checks with Vietnamese operator summary and next action. `provider_readiness_snapshots` aggregate provider summaries, blocking items, warnings, and next actions. `real_smoke_runs` records guarded smoke state and stores only boolean/redacted env flags. M12 readiness reads do not call real providers. Real smoke calls are disabled by default and require explicit env flags. Hard-env AI budget cards display configured monthly caps only and do not calculate actual spend or remaining budget. DX2/R3D10 supersede earlier renderer-gap wording: active final/template/card/thumbnail/Shorts renderer truth is `creatomate_growth_10k`; active AI hero truth is `luma_api`; stale Veo/Essential/TBD renderer keys are inactive.
 
 Prompt registry truth is repo-authored and audit-snapshotted. Canonical prompt templates, common skills, agent deltas, user templates, schemas, and eval fixtures live under `app/prompts/`. `prompt_template_records`, `agent_prompt_profiles`, `prompt_contract_versions`, and `structured_output_schemas` mirror the repo state for activation, audit, and replay. `prompt_render_runs` store rendered chat messages, prompt hash, context hash, router lane, output schema ref, frozen `channel_contract_json`, frozen `compiled_policy_snapshot_json`, `channel_profile_version_id`, and `compiled_policy_snapshot_id`. `prompt_audit_snapshots` preserve validation and repair outcomes. If required channel contract data is missing, incomplete, stale, or contradictory, content agents return REVIEW_REQUIRED/BLOCK instead of guessing defaults. Prompt rendering does not mutate ChannelProfileVersion, does not choose concrete models, and does not call real providers.
 

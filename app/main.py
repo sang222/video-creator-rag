@@ -290,6 +290,7 @@ from app.contracts import (
     RecoveryOpsQueueRead,
     RetrievalManifestOpsRead,
     RuntimeDashboardRead,
+    RuntimeLTSFreezeCheckRead,
     UploadedVideoOpsSummaryRead,
     ChannelContractDraftRead,
     ChannelContractPreviewRead,
@@ -446,6 +447,7 @@ from app.services import (
     RecoveryOpsService,
     RetrievalOpsTraceService,
     RuntimeDashboardService,
+    RuntimeLTSFreezeVerifier,
     UploadedVideoOpsService,
     evaluate_contract,
     leaf_values,
@@ -594,6 +596,14 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return RuntimeDashboardService(session).next_actions()
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/ops/runtime-lts-freeze-check", response_model=RuntimeLTSFreezeCheckRead)
+    def get_runtime_lts_freeze_check() -> RuntimeLTSFreezeCheckRead:
+        try:
+            with session_scope() as session:
+                return RuntimeLTSFreezeVerifier(session, application=application).verify()
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

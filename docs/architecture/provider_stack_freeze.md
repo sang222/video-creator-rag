@@ -1,18 +1,18 @@
-# DX2 Provider Stack Freeze
+# DX2 / R3D10 Provider Stack Freeze
 
-DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. Đây là read/write source-of-truth kỹ thuật cho provider stack hiện hành.
+DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ nguyên stack này trong Runtime LTS v1.
 
 ## Active Provider Keys
 
-- `elevenlabs`: voice/TTS only.
-- `luma_api`: AI hero/metaphor video only.
-- `creatomate_growth_10k`: final assembly + template/card/thumbnail/Shorts renderer.
-- `pexels_api`: free visual fallback only.
+- `elevenlabs` / ElevenLabs: voice/TTS only.
+- `luma_api` / Luma API: AI hero/metaphor video only.
+- `creatomate_growth_10k` / Creatomate Growth 10K: final assembly + template/card/thumbnail/Shorts renderer.
+- `pexels_api` / Pexels API: free visual fallback only.
 
 ## Manual / Storage Boundary
 
-- YouTube: manual publish; analytics/read-only later. No YouTube upload API.
-- Drive/object storage: archive optional/later. No Drive upload in DX2/R3D9.
+- YouTube: manual publish + read-only analytics/verification. No YouTube upload API.
+- Drive/object storage: optional archive/later. No Drive upload in DX2/R3D9/R3D10.
 
 ## Deferred / Inactive
 

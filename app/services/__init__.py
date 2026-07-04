@@ -307,6 +307,7 @@ from app.services.r3d9 import (
     RuntimeDashboardService,
     UploadedVideoOpsService,
 )
+from app.services.r3d10 import RuntimeLTSFreezeVerifier
 
 __all__ = [
     "AuditService",
@@ -557,6 +558,7 @@ __all__ = [
     "ProviderCostOpsService",
     "OperatorNextActionService",
     "ProviderStackDriftGuard",
+    "RuntimeLTSFreezeVerifier",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",
