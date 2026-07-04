@@ -51,7 +51,14 @@ class AgentOutputContract:
 
 
 DEFAULT_OUTPUT_CONTRACTS: dict[str, AgentOutputContract] = {
-    "ChannelAuthorityAgent": AgentOutputContract("ChannelAuthorityAgent", "admission_decision", "channel_authority", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
+    "ChannelAuthorityAgent": AgentOutputContract(
+        "ChannelAuthorityAgent",
+        "admission_decision",
+        "channel_authority",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+        ("decision",),
+    ),
     "TopicIdeaScoringAgent": AgentOutputContract("TopicIdeaScoringAgent", "topic_scores", "topic_scoring", R3D4_SCHEMA_VERSION, "REVIEWABLE"),
     "ResearchPackSummarizer": AgentOutputContract("ResearchPackSummarizer", "research_notes", "research_summary", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
     "ScriptPlanningAgent": AgentOutputContract("ScriptPlanningAgent", "script_outline", "script_plan", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),

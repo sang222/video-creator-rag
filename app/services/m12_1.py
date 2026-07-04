@@ -932,6 +932,67 @@ def repair_envelope_shape(
     if len(attempts) >= max_attempts:
         return repaired, attempts[:max_attempts]
 
+    metadata_shape_fields: list[str] = []
+    metadata_shape_reason_codes: list[str] = []
+
+    appendix_value = repaired.get("technical_appendix")
+    if not isinstance(appendix_value, dict):
+        if appendix_value in (None, "", []):
+            repaired["technical_appendix"] = {}
+            metadata_shape_fields.append("technical_appendix")
+            metadata_shape_reason_codes.append("TECHNICAL_APPENDIX_EMPTY_OBJECT_DEFAULTED")
+        else:
+            repaired["technical_appendix"] = {"repaired_non_object_value": appendix_value}
+            metadata_shape_fields.append("technical_appendix")
+            metadata_shape_reason_codes.append("TECHNICAL_APPENDIX_OBJECT_REPAIRED")
+
+    limitations_value = repaired.get("limitations")
+    if isinstance(limitations_value, str):
+        repaired["limitations"] = [limitations_value]
+        metadata_shape_fields.append("limitations")
+        metadata_shape_reason_codes.append("LIMITATIONS_STRING_LIST_REPAIRED")
+    elif isinstance(limitations_value, dict):
+        repaired["limitations"] = _limitation_object_to_string_list(limitations_value)
+        metadata_shape_fields.append("limitations")
+        metadata_shape_reason_codes.append("LIMITATIONS_OBJECT_LIST_REPAIRED")
+
+    operator_summary = repaired.get("operator_summary_vi")
+    if expected_agent_key == "ChannelAuthorityAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
+        artifact = repaired.get("artifact") if isinstance(repaired.get("artifact"), dict) else {}
+        summary_source = artifact.get("reason") or repaired.get("next_action")
+        if isinstance(summary_source, str) and summary_source.strip():
+            repaired["operator_summary_vi"] = f"ChannelAuthorityAgent cần review: {summary_source.strip()}"
+            metadata_shape_fields.append("operator_summary_vi")
+            metadata_shape_reason_codes.append("CHANNEL_AUTHORITY_OPERATOR_SUMMARY_REPAIRED")
+
+    if repaired.get("risk_level") == "MODERATE":
+        repaired["risk_level"] = "MEDIUM"
+        metadata_shape_fields.append("risk_level")
+        metadata_shape_reason_codes.append("RISK_LEVEL_MODERATE_TO_MEDIUM_REPAIRED")
+
+    if repaired.get("confidence_label") == "UNKNOWN":
+        repaired["confidence_label"] = "LOW"
+        metadata_shape_fields.append("confidence_label")
+        metadata_shape_reason_codes.append("CONFIDENCE_UNKNOWN_TO_LOW_REPAIRED")
+
+    if repaired.get("status") in {"SUCCESS", "PASS"}:
+        repaired["status"] = "OK"
+        metadata_shape_fields.append("status")
+        metadata_shape_reason_codes.append("STATUS_SUCCESS_TO_OK_REPAIRED")
+
+    if metadata_shape_fields:
+        attempts.append(
+            {
+                "repair_type": "normalize_envelope_metadata_shape",
+                "semantic_change_allowed": False,
+                "fields": sorted(set(metadata_shape_fields)),
+                "reason_codes": sorted(set(metadata_shape_reason_codes)),
+            }
+        )
+
+    if len(attempts) >= max_attempts:
+        return repaired, attempts[:max_attempts]
+
     enum_changed = False
     enum_fields = {
         "status": ENVELOPE_ALLOWED_STATUS,
@@ -953,6 +1014,19 @@ def repair_envelope_shape(
         attempts.append({"repair_type": "normalize_envelope_enum_casing", "semantic_change_allowed": False})
 
     return repaired, attempts[:max_attempts]
+
+
+def _limitation_object_to_string_list(value: dict[str, Any]) -> list[str]:
+    limitations: list[str] = []
+    for key, item in value.items():
+        if isinstance(item, list):
+            for nested in item:
+                if nested not in (None, "", []):
+                    limitations.append(f"{key}: {nested if isinstance(nested, str) else canonical_json(nested)}")
+            continue
+        if item not in (None, "", []):
+            limitations.append(f"{key}: {item if isinstance(item, str) else canonical_json(item)}")
+    return limitations or ["ChannelAuthorityAgent returned limitations as an object; review original output audit."]
 
 
 def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], expected_agent_key: str) -> dict[str, Any]:
@@ -979,6 +1053,8 @@ def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], ex
         errors.append("technical_appendix must be an object")
     if not isinstance(parsed.get("operator_summary_vi"), str) or not parsed.get("operator_summary_vi"):
         errors.append("operator_summary_vi is required")
+    if parsed.get("artifact") is not None and not isinstance(parsed.get("artifact"), dict):
+        errors.append("artifact must be an object or null")
     return {
         "valid": not errors,
         "errors": errors,

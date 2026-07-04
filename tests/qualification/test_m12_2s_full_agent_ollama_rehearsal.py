@@ -447,6 +447,24 @@ def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_fa
     assert db_session.query(PromptAuditSnapshot).count() >= 5
 
 
+def test_m12_2s_channel_authority_requires_decision(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    outputs[0]["artifact"] = {"reason": "Missing machine-readable decision."}
+    router = FakeRouter(outputs)
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "REVIEW_REQUIRED"
+    assert package.artifacts["admission_decision"]["reason_codes"] == ["REQUIRED_ARTIFACT_FIELDS_MISSING"]
+    assert package.artifacts["admission_decision"]["missing_fields"] == ["decision"]
+    assert len(router.calls) == 1
+    assert db_session.query(MediaRenderJob).count() == 0
+
+
 def test_m12_2s_thumbnail_and_media_qc_schema_guards(db_session, qualification_factory) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)

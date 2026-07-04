@@ -211,6 +211,144 @@ def test_output_validation_repairs_syntax_only_and_rejects_unknown_fields(db_ses
     assert repaired_null.parsed_output["risk_level"] is None
 
 
+def test_channel_authority_schema_shape_repair_is_bounded_and_strict(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = {
+        "contract_version": "m12.1.0",
+        "agent_key": "ChannelAuthorityAgent",
+        "status": "REVIEW_REQUIRED",
+        "confidence_label": "MEDIUM",
+        "risk_level": "LOW",
+        "evidence_refs": [{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "int2"}],
+        "limitations": ["20-hour claim needs human verification."],
+        "next_action": "Review the claim before upload.",
+        "operator_summary_vi": "Cần human review.",
+        "technical_appendix": "debug notes from model",
+        "artifact": {"decision": "REVIEW_REQUIRED", "reason": "Claim needs evidence."},
+    }
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ChannelAuthorityAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.validation_result["valid"] is True
+    assert repaired.parsed_output["technical_appendix"] == {"repaired_non_object_value": "debug notes from model"}
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["technical_appendix"],
+            "reason_codes": ["TECHNICAL_APPENDIX_OBJECT_REPAIRED"],
+        }
+    ]
+
+    invalid_status = service.validate_output(
+        PromptOutputValidationRequest(agent_key="ChannelAuthorityAgent", raw_output={**raw, "status": "ADMIT", "technical_appendix": {}})
+    )
+    assert invalid_status.status == "REVIEW_REQUIRED"
+    assert "status is not allowed" in invalid_status.validation_result["errors"]
+
+    invalid_artifact = service.validate_output(
+        PromptOutputValidationRequest(agent_key="ChannelAuthorityAgent", raw_output={**raw, "artifact": [{"decision": "ADMIT"}]})
+    )
+    assert invalid_artifact.status == "REVIEW_REQUIRED"
+    assert "artifact must be an object or null" in invalid_artifact.validation_result["errors"]
+    assert invalid_artifact.repair_attempts[0]["repair_type"] == "normalize_envelope_metadata_shape"
+
+    repaired_limitations = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="ChannelAuthorityAgent",
+            raw_output={**raw, "technical_appendix": {}, "limitations": {"claim_review": ["Needs evidence."]}},
+        )
+    )
+    assert repaired_limitations.status == "OK"
+    assert repaired_limitations.parsed_output["limitations"] == ["claim_review: Needs evidence."]
+    assert repaired_limitations.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["limitations"],
+            "reason_codes": ["LIMITATIONS_OBJECT_LIST_REPAIRED"],
+        }
+    ]
+
+    repaired_summary = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="ChannelAuthorityAgent",
+            raw_output={**raw, "technical_appendix": {}, "operator_summary_vi": ""},
+        )
+    )
+    assert repaired_summary.status == "OK"
+    assert repaired_summary.parsed_output["operator_summary_vi"] == "ChannelAuthorityAgent cần review: Claim needs evidence."
+    assert repaired_summary.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["operator_summary_vi"],
+            "reason_codes": ["CHANNEL_AUTHORITY_OPERATOR_SUMMARY_REPAIRED"],
+        }
+    ]
+
+    repaired_risk = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="ChannelAuthorityAgent",
+            raw_output={**raw, "technical_appendix": {}, "risk_level": "MODERATE"},
+        )
+    )
+    assert repaired_risk.status == "OK"
+    assert repaired_risk.parsed_output["risk_level"] == "MEDIUM"
+    assert repaired_risk.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["risk_level"],
+            "reason_codes": ["RISK_LEVEL_MODERATE_TO_MEDIUM_REPAIRED"],
+        }
+    ]
+
+    shared_repair = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="PublishingMetadataAgent",
+            raw_output={
+                **raw,
+                "agent_key": "PublishingMetadataAgent",
+                "status": "SUCCESS",
+                "confidence_label": "UNKNOWN",
+                "limitations": "Needs evidence.",
+            },
+        )
+    )
+    assert shared_repair.status == "OK"
+    assert shared_repair.parsed_output["status"] == "OK"
+    assert shared_repair.parsed_output["confidence_label"] == "LOW"
+    assert shared_repair.parsed_output["limitations"] == ["Needs evidence."]
+    assert shared_repair.parsed_output["technical_appendix"] == {"repaired_non_object_value": "debug notes from model"}
+    assert shared_repair.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["confidence_label", "limitations", "status", "technical_appendix"],
+            "reason_codes": [
+                "CONFIDENCE_UNKNOWN_TO_LOW_REPAIRED",
+                "LIMITATIONS_STRING_LIST_REPAIRED",
+                "STATUS_SUCCESS_TO_OK_REPAIRED",
+                "TECHNICAL_APPENDIX_OBJECT_REPAIRED",
+            ],
+        }
+    ]
+
+
+def test_channel_authority_prompt_forbids_bad_envelope_shape(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("ChannelAuthorityAgent")
+
+    assert "technical_appendix must always be an object" in bundle.system_prompt
+    assert "limitations must be a list of strings" in bundle.system_prompt
+    assert "operator_summary_vi must be a non-empty Vietnamese sentence" in bundle.system_prompt
+    assert "Use MEDIUM, not MODERATE" in bundle.system_prompt
+    assert "artifact must be an object, never an array or string" in bundle.system_prompt
+    assert "Do not put a status key inside artifact" in bundle.system_prompt
+
+
 def test_ollama_and_router_transmit_system_user_messages(db_session, monkeypatch) -> None:
     payload = OllamaLLMProvider().build_chat_payload(
         request=OllamaChatRequest(

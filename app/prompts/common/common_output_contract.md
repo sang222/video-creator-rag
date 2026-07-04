@@ -7,6 +7,7 @@ Use contract_version "m12.1.0".
 Use the exact agent_key from the task.
 Use uppercase enum values only:
 status = OK, REVIEW_REQUIRED, BLOCK, REFUSAL, or ERROR.
+Use OK, not SUCCESS or PASS, for a successful envelope.
 confidence_label = LOW, MEDIUM, or HIGH.
 risk_level = LOW, MEDIUM, HIGH, CRITICAL, or null.
 evidence_refs must be a list of objects. limitations must be a list of strings. technical_appendix must be an object. artifact must be an object or null.
