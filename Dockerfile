@@ -10,6 +10,8 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY config ./config
+COPY docs ./docs
+COPY frontend/src ./frontend/src
 
 RUN pip install --no-cache-dir -e .
 
