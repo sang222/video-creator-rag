@@ -255,6 +255,29 @@ from app.contracts import (
     MemoryFacetRead,
     MemoryFromApprovedPlaybookCreate,
     MemoryReviewQueueItemRead,
+    ClosedLearningLoopStatusRead,
+    LearningToMemoryPromotionRequest,
+    LearningToMemoryPromotionRunRead,
+    MemoryInfluenceManifestRead,
+    QualityDeltaAttributionRead,
+    QualityDeltaAttributionRunRequest,
+    CostEstimateCreateRequest,
+    CostEstimateSnapshotRead,
+    HumanPaidRenderApprovalCreateRequest,
+    HumanPaidRenderApprovalDecisionRequest,
+    HumanPaidRenderApprovalRead,
+    PaidAttemptLimitRecordRead,
+    PaidProviderCallLedgerRead,
+    ProviderBoundaryDecisionRead,
+    ProviderBoundaryPreflightRequest,
+    ProviderIdempotencyKeyCreateRequest,
+    ProviderIdempotencyKeyRead,
+    ProviderJobCreateRequest,
+    ProviderJobSnapshotRead,
+    ProxyPreviewArtifactFlagCreateRequest,
+    ProxyPreviewArtifactFlagRead,
+    RenderRevisionCreateRequest,
+    RenderRevisionRead,
     ChannelContractDraftRead,
     ChannelContractPreviewRead,
     ChannelContractReviewRequest,
@@ -383,10 +406,21 @@ from app.services import (
     PackagingHandoffReadService,
     PublishHandoffLedgerService,
     ControlledMemoryService,
+    ClosedLearningLoopService,
     ChannelContractCompiler,
     ChannelContractReviewService,
     ChannelInitDraftService,
     ChannelSetupResearchAgentService,
+    LearningToMemoryPromotionService,
+    MemoryInfluenceManifestService,
+    QualityDeltaAttributionService,
+    CostEstimateService,
+    HumanPaidRenderApprovalService,
+    PaidProviderBoundaryService,
+    ProviderIdempotencyService,
+    ProviderJobService,
+    ProxyPreviewGate,
+    RenderRevisionService,
     evaluate_contract,
     leaf_values,
 )
@@ -2798,6 +2832,213 @@ def create_app() -> FastAPI:
                     data=data or MemoryApprovalRequest(),
                 )
                 return MemoryApprovalDecisionRead.model_validate(decision)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/learning-loop/promotions/from-approved-playbook/{playbook_entry_id}", response_model=LearningToMemoryPromotionRunRead)
+    def promote_approved_playbook_to_memory(
+        playbook_entry_id: uuid.UUID,
+        data: LearningToMemoryPromotionRequest | None = None,
+    ) -> LearningToMemoryPromotionRunRead:
+        try:
+            payload = data or LearningToMemoryPromotionRequest()
+            payload = payload.model_copy(update={"approved_playbook_entry_id": playbook_entry_id})
+            with session_scope() as session:
+                run = LearningToMemoryPromotionService(session).promote_approved_playbook(payload)
+                return LearningToMemoryPromotionRunRead.model_validate(run)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/learning-loop/promotions/from-learning-candidate/{candidate_id}", response_model=LearningToMemoryPromotionRunRead)
+    def promote_learning_candidate_to_memory(candidate_id: uuid.UUID) -> LearningToMemoryPromotionRunRead:
+        try:
+            with session_scope() as session:
+                run = LearningToMemoryPromotionService(session).promote_learning_candidate(learning_candidate_id=candidate_id)
+                return LearningToMemoryPromotionRunRead.model_validate(run)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/memory-influence-manifests", response_model=list[MemoryInfluenceManifestRead])
+    def list_memory_influence_manifests(
+        video_project_id: uuid.UUID | None = None,
+        package_id: uuid.UUID | None = None,
+        agent_key: str | None = None,
+        limit: int = 100,
+    ) -> list[MemoryInfluenceManifestRead]:
+        try:
+            with session_scope() as session:
+                manifests = MemoryInfluenceManifestService(session).list_manifests(
+                    video_project_id=video_project_id,
+                    package_id=package_id,
+                    agent_key=agent_key,
+                    limit=limit,
+                )
+                return [MemoryInfluenceManifestRead.model_validate(manifest) for manifest in manifests]
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/memory-influence-manifests/{manifest_id}", response_model=MemoryInfluenceManifestRead)
+    def read_memory_influence_manifest(manifest_id: uuid.UUID) -> MemoryInfluenceManifestRead:
+        try:
+            with session_scope() as session:
+                return MemoryInfluenceManifestRead.model_validate(MemoryInfluenceManifestService(session).require_manifest(manifest_id))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/quality-delta-attributions/run", response_model=QualityDeltaAttributionRead)
+    def run_quality_delta_attribution(data: QualityDeltaAttributionRunRequest) -> QualityDeltaAttributionRead:
+        try:
+            with session_scope() as session:
+                attribution = QualityDeltaAttributionService(session).run(data)
+                return QualityDeltaAttributionRead.model_validate(attribution)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/learning-loop/status", response_model=ClosedLearningLoopStatusRead)
+    def read_closed_learning_loop_status(
+        uploaded_video_id: uuid.UUID | None = None,
+        target_video_project_id: uuid.UUID | None = None,
+    ) -> ClosedLearningLoopStatusRead:
+        try:
+            with session_scope() as session:
+                return ClosedLearningLoopStatusRead.model_validate(
+                    ClosedLearningLoopService(session).status(
+                        uploaded_video_id=uploaded_video_id,
+                        target_video_project_id=target_video_project_id,
+                    )
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/render-revisions", response_model=RenderRevisionRead)
+    def create_render_revision(data: RenderRevisionCreateRequest) -> RenderRevisionRead:
+        try:
+            with session_scope() as session:
+                revision = RenderRevisionService(session).create(data)
+                return RenderRevisionRead.model_validate(revision)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/render-revisions/{revision_id}", response_model=RenderRevisionRead)
+    def read_render_revision(revision_id: uuid.UUID) -> RenderRevisionRead:
+        try:
+            with session_scope() as session:
+                return RenderRevisionRead.model_validate(RenderRevisionService(session).get(revision_id))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/cost-estimates", response_model=CostEstimateSnapshotRead)
+    def create_cost_estimate(data: CostEstimateCreateRequest) -> CostEstimateSnapshotRead:
+        try:
+            with session_scope() as session:
+                estimate = CostEstimateService(session).create(data)
+                return CostEstimateSnapshotRead.model_validate(estimate)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/paid-render-approvals", response_model=HumanPaidRenderApprovalRead)
+    def create_paid_render_approval(data: HumanPaidRenderApprovalCreateRequest) -> HumanPaidRenderApprovalRead:
+        try:
+            with session_scope() as session:
+                approval = HumanPaidRenderApprovalService(session).create_pending(data)
+                return HumanPaidRenderApprovalRead.model_validate(approval)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/paid-render-approvals/{approval_id}/approve", response_model=HumanPaidRenderApprovalRead)
+    def approve_paid_render(approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApprovalRead:
+        try:
+            with session_scope() as session:
+                approval = HumanPaidRenderApprovalService(session).approve(approval_id, data or HumanPaidRenderApprovalDecisionRequest())
+                return HumanPaidRenderApprovalRead.model_validate(approval)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/paid-render-approvals/{approval_id}/reject", response_model=HumanPaidRenderApprovalRead)
+    def reject_paid_render(approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApprovalRead:
+        try:
+            with session_scope() as session:
+                approval = HumanPaidRenderApprovalService(session).reject(approval_id, data)
+                return HumanPaidRenderApprovalRead.model_validate(approval)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/paid-render-approvals/{approval_id}/revoke", response_model=HumanPaidRenderApprovalRead)
+    def revoke_paid_render(approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApprovalRead:
+        try:
+            with session_scope() as session:
+                approval = HumanPaidRenderApprovalService(session).revoke(approval_id, data)
+                return HumanPaidRenderApprovalRead.model_validate(approval)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/provider-idempotency-keys", response_model=ProviderIdempotencyKeyRead)
+    def create_provider_idempotency_key(data: ProviderIdempotencyKeyCreateRequest) -> ProviderIdempotencyKeyRead:
+        try:
+            with session_scope() as session:
+                record = ProviderIdempotencyService(session).get_or_create(data)
+                return ProviderIdempotencyKeyRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/provider-boundary/preflight", response_model=ProviderBoundaryDecisionRead)
+    def provider_boundary_preflight(data: ProviderBoundaryPreflightRequest) -> ProviderBoundaryDecisionRead:
+        try:
+            with session_scope() as session:
+                return PaidProviderBoundaryService(session).preflight(data)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/provider-jobs", response_model=ProviderJobSnapshotRead)
+    def create_provider_job_snapshot(data: ProviderJobCreateRequest) -> ProviderJobSnapshotRead:
+        try:
+            with session_scope() as session:
+                job = ProviderJobService(session).create_not_submitted(data)
+                return ProviderJobSnapshotRead.model_validate(job)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/provider-jobs/{job_id}/timeout", response_model=ProviderJobSnapshotRead)
+    def timeout_provider_job(job_id: uuid.UUID) -> ProviderJobSnapshotRead:
+        try:
+            with session_scope() as session:
+                job = ProviderJobService(session).mark_timeout_resume_required(job_id)
+                return ProviderJobSnapshotRead.model_validate(job)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/proxy-preview-artifact-flags", response_model=ProxyPreviewArtifactFlagRead)
+    def create_proxy_preview_flag(data: ProxyPreviewArtifactFlagCreateRequest) -> ProxyPreviewArtifactFlagRead:
+        try:
+            with session_scope() as session:
+                flag = ProxyPreviewGate(session).flag(data)
+                return ProxyPreviewArtifactFlagRead.model_validate(flag)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/paid-provider-call-ledger/{ledger_id}", response_model=PaidProviderCallLedgerRead)
+    def read_paid_provider_call_ledger(ledger_id: uuid.UUID) -> PaidProviderCallLedgerRead:
+        try:
+            with session_scope() as session:
+                from app.db.models import PaidProviderCallLedger
+
+                ledger = session.get(PaidProviderCallLedger, ledger_id)
+                if ledger is None:
+                    raise NotFoundError(f"paid provider call ledger not found: {ledger_id}")
+                return PaidProviderCallLedgerRead.model_validate(ledger)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/paid-attempt-limit-records/{record_id}", response_model=PaidAttemptLimitRecordRead)
+    def read_paid_attempt_limit_record(record_id: uuid.UUID) -> PaidAttemptLimitRecordRead:
+        try:
+            with session_scope() as session:
+                from app.db.models import PaidAttemptLimitRecord
+
+                record = session.get(PaidAttemptLimitRecord, record_id)
+                if record is None:
+                    raise NotFoundError(f"paid attempt limit record not found: {record_id}")
+                return PaidAttemptLimitRecordRead.model_validate(record)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

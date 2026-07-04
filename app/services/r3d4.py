@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `output_validation_gates` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import re
 import uuid
 from dataclasses import dataclass

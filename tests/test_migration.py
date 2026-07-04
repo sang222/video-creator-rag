@@ -180,13 +180,26 @@ REQUIRED_TABLES = {
     "embedding_facets",
     "embedding_jobs",
     "vector_retrieval_manifests",
+    "memory_influence_manifests",
+    "quality_delta_attributions",
+    "learning_to_memory_promotion_runs",
+    "agent_memory_application_records",
+    "memory_confidence_update_ledger",
+    "render_revisions",
+    "cost_estimate_snapshots",
+    "human_paid_render_approvals",
+    "provider_idempotency_keys",
+    "provider_job_snapshots",
+    "paid_provider_call_ledger",
+    "paid_attempt_limit_records",
+    "proxy_preview_artifact_flags",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0029_r3d6_vector_safe_retrieval"
+        assert revision == "0031_r3d8_cost_firewall"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

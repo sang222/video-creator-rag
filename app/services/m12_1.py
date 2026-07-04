@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facades `prompt_registry` and `prompt_audit` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import hashlib
 import json
 import re

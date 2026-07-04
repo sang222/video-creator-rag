@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `learning_candidates` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import uuid
 from dataclasses import dataclass
 from typing import Any

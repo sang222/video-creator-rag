@@ -1,3 +1,4 @@
+# Compatibility note: semantic facade `channel_scope_authority` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import uuid
 from dataclasses import dataclass
 from enum import Enum

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `provider_wiring` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 from typing import Any
 
 from app.contracts.m2 import (

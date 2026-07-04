@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `packaging_handoff` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import os
 import re
 import uuid

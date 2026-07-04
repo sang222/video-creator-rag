@@ -65,6 +65,25 @@ from app.contracts import (
     ProviderSmokeRequest,
     FirstScriptedVideoPackageRequest,
     BackfillUploadedVideoRequest,
+    LearningToMemoryPromotionRequest,
+    LearningToMemoryPromotionRunRead,
+    MemoryInfluenceManifestRead,
+    QualityDeltaAttributionRead,
+    QualityDeltaAttributionRunRequest,
+    CostEstimateCreateRequest,
+    CostEstimateSnapshotRead,
+    HumanPaidRenderApprovalCreateRequest,
+    HumanPaidRenderApprovalDecisionRequest,
+    HumanPaidRenderApprovalRead,
+    ProviderBoundaryPreflightRequest,
+    ProviderIdempotencyKeyCreateRequest,
+    ProviderIdempotencyKeyRead,
+    ProviderJobCreateRequest,
+    ProviderJobSnapshotRead,
+    ProxyPreviewArtifactFlagCreateRequest,
+    ProxyPreviewArtifactFlagRead,
+    RenderRevisionCreateRequest,
+    RenderRevisionRead,
 )
 from app.contracts.m6 import QCRunRequest
 from app.services import (
@@ -128,6 +147,17 @@ from app.services import (
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
     PublishHandoffLedgerService,
+    ClosedLearningLoopService,
+    LearningToMemoryPromotionService,
+    MemoryInfluenceManifestService,
+    QualityDeltaAttributionService,
+    CostEstimateService,
+    HumanPaidRenderApprovalService,
+    PaidProviderBoundaryService,
+    ProviderIdempotencyService,
+    ProviderJobService,
+    ProxyPreviewGate,
+    RenderRevisionService,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -177,6 +207,9 @@ drive_app = typer.Typer(no_args_is_help=True)
 integrations_app = typer.Typer(no_args_is_help=True)
 post_publish_app = typer.Typer(no_args_is_help=True)
 package_app = typer.Typer(no_args_is_help=True)
+learning_loop_app = typer.Typer(no_args_is_help=True)
+memory_influence_app = typer.Typer(no_args_is_help=True)
+cost_firewall_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(data_app, name="data")
 app.add_typer(config_app, name="config")
@@ -224,6 +257,9 @@ app.add_typer(drive_app, name="drive")
 app.add_typer(integrations_app, name="integrations")
 app.add_typer(post_publish_app, name="post-publish")
 app.add_typer(package_app, name="package")
+app.add_typer(learning_loop_app, name="learning-loop")
+app.add_typer(memory_influence_app, name="memory-influence")
+app.add_typer(cost_firewall_app, name="cost-firewall")
 
 
 def _fail(message: str) -> None:
@@ -254,6 +290,276 @@ def data_purge_mock_runtime(
             typer.echo(json.dumps(result))
     except Exception as exc:
         _fail(f"data purge-mock-runtime failed: {exc}")
+
+
+@learning_loop_app.command("promote")
+def learning_loop_promote(
+    approved_playbook_entry_id: uuid.UUID = typer.Option(..., "--approved-playbook-entry-id"),
+    evidence_bundle_id: uuid.UUID | None = typer.Option(None, "--evidence-bundle-id"),
+    source_uploaded_video_id: uuid.UUID | None = typer.Option(None, "--source-uploaded-video-id"),
+    embedding_eligible: bool = typer.Option(True, "--embedding-eligible/--no-embedding-eligible"),
+) -> None:
+    try:
+        with session_scope() as session:
+            run = LearningToMemoryPromotionService(session).promote_approved_playbook(
+                LearningToMemoryPromotionRequest(
+                    approved_playbook_entry_id=approved_playbook_entry_id,
+                    evidence_bundle_id=evidence_bundle_id,
+                    source_uploaded_video_id=source_uploaded_video_id,
+                    embedding_eligible=embedding_eligible,
+                )
+            )
+            typer.echo(LearningToMemoryPromotionRunRead.model_validate(run).model_dump_json())
+    except Exception as exc:
+        _fail(f"learning-loop promote failed: {exc}")
+
+
+@learning_loop_app.command("attribution-run")
+def learning_loop_attribution_run(
+    source_memory_influence_manifest_id: uuid.UUID = typer.Option(..., "--source-memory-influence-manifest-id"),
+    expected_metric_family: str = typer.Option(..., "--expected-metric-family"),
+    target_uploaded_video_id: uuid.UUID | None = typer.Option(None, "--target-uploaded-video-id"),
+    target_video_project_id: uuid.UUID | None = typer.Option(None, "--target-video-project-id"),
+    baseline_json: str | None = typer.Option(None, "--baseline-json"),
+    observed_json: str | None = typer.Option(None, "--observed-json"),
+    direction: str = typer.Option("HIGHER", "--direction"),
+) -> None:
+    try:
+        baseline = json.loads(baseline_json) if baseline_json else None
+        observed = json.loads(observed_json) if observed_json else None
+        with session_scope() as session:
+            attribution = QualityDeltaAttributionService(session).run(
+                QualityDeltaAttributionRunRequest(
+                    source_memory_influence_manifest_id=source_memory_influence_manifest_id,
+                    target_uploaded_video_id=target_uploaded_video_id,
+                    target_video_project_id=target_video_project_id,
+                    expected_metric_family=expected_metric_family,
+                    expected_improvement_direction=direction,
+                    baseline_snapshot_ref=baseline,
+                    observed_snapshot_ref=observed,
+                )
+            )
+            typer.echo(QualityDeltaAttributionRead.model_validate(attribution).model_dump_json())
+    except Exception as exc:
+        _fail(f"learning-loop attribution-run failed: {exc}")
+
+
+@learning_loop_app.command("status")
+def learning_loop_status(
+    uploaded_video_id: uuid.UUID | None = typer.Option(None, "--uploaded-video-id"),
+    target_video_project_id: uuid.UUID | None = typer.Option(None, "--target-video-project-id"),
+) -> None:
+    try:
+        with session_scope() as session:
+            typer.echo(json.dumps(ClosedLearningLoopService(session).status(uploaded_video_id=uploaded_video_id, target_video_project_id=target_video_project_id)))
+    except Exception as exc:
+        _fail(f"learning-loop status failed: {exc}")
+
+
+@memory_influence_app.command("list")
+def memory_influence_list(
+    video_project_id: uuid.UUID | None = typer.Option(None, "--video-project-id"),
+    package_id: uuid.UUID | None = typer.Option(None, "--package-id"),
+    agent_key: str | None = typer.Option(None, "--agent-key"),
+    limit: int = typer.Option(100, "--limit"),
+) -> None:
+    try:
+        with session_scope() as session:
+            rows = MemoryInfluenceManifestService(session).list_manifests(
+                video_project_id=video_project_id,
+                package_id=package_id,
+                agent_key=agent_key,
+                limit=limit,
+            )
+            typer.echo(json.dumps([MemoryInfluenceManifestRead.model_validate(row).model_dump(mode="json") for row in rows]))
+    except Exception as exc:
+        _fail(f"memory-influence list failed: {exc}")
+
+
+@memory_influence_app.command("read")
+def memory_influence_read(manifest_id: uuid.UUID = typer.Option(..., "--manifest-id")) -> None:
+    try:
+        with session_scope() as session:
+            manifest = MemoryInfluenceManifestService(session).require_manifest(manifest_id)
+            typer.echo(MemoryInfluenceManifestRead.model_validate(manifest).model_dump_json())
+    except Exception as exc:
+        _fail(f"memory-influence read failed: {exc}")
+
+
+@cost_firewall_app.command("create-revision")
+def cost_firewall_create_revision(
+    package_id: uuid.UUID = typer.Option(..., "--package-id"),
+    provider_plan_json: str | None = typer.Option(None, "--provider-plan-json"),
+    created_by: str = typer.Option("operator", "--created-by"),
+) -> None:
+    try:
+        provider_plan = json.loads(provider_plan_json) if provider_plan_json else {}
+        with session_scope() as session:
+            revision = RenderRevisionService(session).create(
+                RenderRevisionCreateRequest(
+                    package_id=package_id,
+                    provider_plan_json=provider_plan,
+                    created_by=created_by,
+                )
+            )
+            typer.echo(RenderRevisionRead.model_validate(revision).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall create-revision failed: {exc}")
+
+
+@cost_firewall_app.command("estimate")
+def cost_firewall_estimate(
+    render_revision_id: uuid.UUID = typer.Option(..., "--render-revision-id"),
+    currency: str = typer.Option("USD", "--currency"),
+) -> None:
+    try:
+        with session_scope() as session:
+            estimate = CostEstimateService(session).create(
+                CostEstimateCreateRequest(render_revision_id=render_revision_id, currency=currency)
+            )
+            typer.echo(CostEstimateSnapshotRead.model_validate(estimate).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall estimate failed: {exc}")
+
+
+@cost_firewall_app.command("approval-create")
+def cost_firewall_approval_create(
+    render_revision_id: uuid.UUID = typer.Option(..., "--render-revision-id"),
+    max_approved_cost: str | None = typer.Option(None, "--max-approved-cost"),
+    stages_json: str = typer.Option("[]", "--stages-json"),
+    rationale: str = typer.Option("Pending paid render approval.", "--rationale"),
+) -> None:
+    try:
+        stages = json.loads(stages_json)
+        with session_scope() as session:
+            approval = HumanPaidRenderApprovalService(session).create_pending(
+                HumanPaidRenderApprovalCreateRequest(
+                    render_revision_id=render_revision_id,
+                    max_approved_cost=max_approved_cost,
+                    approved_provider_stages_json=stages,
+                    rationale=rationale,
+                )
+            )
+            typer.echo(HumanPaidRenderApprovalRead.model_validate(approval).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall approval-create failed: {exc}")
+
+
+@cost_firewall_app.command("approval-approve")
+def cost_firewall_approval_approve(
+    approval_id: uuid.UUID = typer.Option(..., "--approval-id"),
+    approved_by: str = typer.Option("operator", "--approved-by"),
+    stages_json: str | None = typer.Option(None, "--stages-json"),
+) -> None:
+    try:
+        stages = json.loads(stages_json) if stages_json else None
+        with session_scope() as session:
+            approval = HumanPaidRenderApprovalService(session).approve(
+                approval_id,
+                HumanPaidRenderApprovalDecisionRequest(
+                    approved_by=approved_by,
+                    approved_provider_stages_json=stages,
+                    rationale="Human paid provider boundary approved.",
+                ),
+            )
+            typer.echo(HumanPaidRenderApprovalRead.model_validate(approval).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall approval-approve failed: {exc}")
+
+
+@cost_firewall_app.command("idempotency")
+def cost_firewall_idempotency(
+    render_revision_id: uuid.UUID = typer.Option(..., "--render-revision-id"),
+    provider_key: str = typer.Option(..., "--provider-key"),
+    provider_stage: str = typer.Option(..., "--provider-stage"),
+    request_json: str = typer.Option("{}", "--request-json"),
+) -> None:
+    try:
+        payload = json.loads(request_json)
+        with session_scope() as session:
+            record = ProviderIdempotencyService(session).get_or_create(
+                ProviderIdempotencyKeyCreateRequest(
+                    render_revision_id=render_revision_id,
+                    provider_key=provider_key,
+                    provider_stage=provider_stage,
+                    request_payload_json=payload,
+                )
+            )
+            typer.echo(ProviderIdempotencyKeyRead.model_validate(record).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall idempotency failed: {exc}")
+
+
+@cost_firewall_app.command("preflight")
+def cost_firewall_preflight(
+    render_revision_id: uuid.UUID = typer.Option(..., "--render-revision-id"),
+    provider_key: str = typer.Option(..., "--provider-key"),
+    provider_stage: str = typer.Option(..., "--provider-stage"),
+    request_json: str = typer.Option("{}", "--request-json"),
+    cost_estimate_snapshot_id: uuid.UUID | None = typer.Option(None, "--cost-estimate-snapshot-id"),
+    human_approval_id: uuid.UUID | None = typer.Option(None, "--human-approval-id"),
+) -> None:
+    try:
+        payload = json.loads(request_json)
+        with session_scope() as session:
+            decision = PaidProviderBoundaryService(session).preflight(
+                ProviderBoundaryPreflightRequest(
+                    render_revision_id=render_revision_id,
+                    provider_key=provider_key,
+                    provider_stage=provider_stage,
+                    request_payload_json=payload,
+                    cost_estimate_snapshot_id=cost_estimate_snapshot_id,
+                    human_approval_id=human_approval_id,
+                )
+            )
+            typer.echo(decision.model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall preflight failed: {exc}")
+
+
+@cost_firewall_app.command("job-create")
+def cost_firewall_job_create(
+    render_revision_id: uuid.UUID = typer.Option(..., "--render-revision-id"),
+    provider_key: str = typer.Option(..., "--provider-key"),
+    provider_stage: str = typer.Option(..., "--provider-stage"),
+    request_json: str = typer.Option("{}", "--request-json"),
+) -> None:
+    try:
+        payload = json.loads(request_json)
+        with session_scope() as session:
+            job = ProviderJobService(session).create_not_submitted(
+                ProviderJobCreateRequest(
+                    render_revision_id=render_revision_id,
+                    provider_key=provider_key,
+                    provider_stage=provider_stage,
+                    provider_request_json=payload,
+                )
+            )
+            typer.echo(ProviderJobSnapshotRead.model_validate(job).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall job-create failed: {exc}")
+
+
+@cost_firewall_app.command("proxy-flag")
+def cost_firewall_proxy_flag(
+    artifact_ref: str = typer.Option(..., "--artifact-ref"),
+    video_project_id: uuid.UUID = typer.Option(..., "--video-project-id"),
+    package_id: uuid.UUID = typer.Option(..., "--package-id"),
+    source_type: str = typer.Option("PROXY_PREVIEW", "--source-type"),
+) -> None:
+    try:
+        with session_scope() as session:
+            flag = ProxyPreviewGate(session).flag(
+                ProxyPreviewArtifactFlagCreateRequest(
+                    artifact_ref=artifact_ref,
+                    video_project_id=video_project_id,
+                    package_id=package_id,
+                    source_type=source_type,
+                )
+            )
+            typer.echo(ProxyPreviewArtifactFlagRead.model_validate(flag).model_dump_json())
+    except Exception as exc:
+        _fail(f"cost-firewall proxy-flag failed: {exc}")
 
 
 @config_app.command("seed")

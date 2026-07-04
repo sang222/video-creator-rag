@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `vector_retrieval` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import hashlib
 import json
 import math
@@ -726,7 +727,7 @@ def _selected_ref(candidate: _PolicyCandidate) -> dict[str, Any]:
         "memory_item_id": str(candidate.item.id),
         "memory_facet_id": str(candidate.facet.id),
         "facet_type": candidate.facet.facet_type,
-        "facet_text_hash": candidate.facet.facet_text_hash,
+        "text_hash": candidate.facet.facet_text_hash,
         "final_score": round(candidate.final_score, 6),
     }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facades `video_package_generation`, `agent_rehearsal`, and `package_generation_rehearsal` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import subprocess
 import uuid
 from dataclasses import dataclass

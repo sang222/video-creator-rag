@@ -24,7 +24,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0029_r3d6_vector_safe_retrieval"
+EXPECTED_ALEMBIC_HEAD = "0031_r3d8_cost_firewall"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

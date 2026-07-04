@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `runtime_provider_boundary` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 from typing import Any
 
 from sqlalchemy import func, or_, select, text

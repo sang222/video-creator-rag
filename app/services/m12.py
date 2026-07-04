@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `provider_readiness` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import os
 import tempfile
 import uuid

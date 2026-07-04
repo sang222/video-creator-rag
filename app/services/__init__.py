@@ -243,7 +243,7 @@ from app.services.r3d4 import (
     R3D4GateService,
     StrictRepairService,
 )
-from app.services.r3d5 import (
+from app.services.controlled_memory import (
     ControlledMemoryService,
     MemoryApprovalGate,
     MemoryDuplicationGate,
@@ -255,13 +255,39 @@ from app.services.r3d5 import (
     MemoryScopeGate,
     RetrievalAuditGate,
 )
-from app.services.r3d6 import (
+from app.services.vector_retrieval import (
     AgentMemoryDigestBuilder,
     EmbeddingEligibilityGate,
     EmbeddingJobService,
     MemoryDigestBuilder,
     VectorSafeRetrievalService,
     VectorUnavailableSafeFallback,
+)
+from app.services.learning_loop import (
+    AgentMemoryDigestInjectionService,
+    ClosedLearningLoopService,
+    LearningLoopEligibilityGate,
+    LearningToMemoryPromotionService,
+    MemoryInfluenceManifestGate,
+    MemoryInfluenceManifestService,
+    QualityAttributionDataQualityGate,
+    QualityDeltaAttributionService,
+)
+from app.services.cost_firewall import (
+    CostEstimateService,
+    HumanPaidRenderApprovalService,
+    PaidAttemptLimitGate,
+    PaidProviderBoundaryService,
+    PaidRenderApprovalGate,
+    PexelsUsagePolicyGate,
+    ProviderBoundaryAuditService,
+    ProviderCharacterInputGate,
+    ProviderIdempotencyService,
+    ProviderJobService,
+    ProviderVoiceInputGate,
+    ProxyPreviewGate,
+    RenderRevisionService,
+    VisualSourceMixGate,
 )
 
 __all__ = [
@@ -476,6 +502,28 @@ __all__ = [
     "AgentMemoryDigestBuilder",
     "MemoryDigestBuilder",
     "VectorUnavailableSafeFallback",
+    "LearningToMemoryPromotionService",
+    "ClosedLearningLoopService",
+    "MemoryInfluenceManifestService",
+    "AgentMemoryDigestInjectionService",
+    "QualityDeltaAttributionService",
+    "LearningLoopEligibilityGate",
+    "MemoryInfluenceManifestGate",
+    "QualityAttributionDataQualityGate",
+    "RenderRevisionService",
+    "CostEstimateService",
+    "HumanPaidRenderApprovalService",
+    "ProviderIdempotencyService",
+    "PaidProviderBoundaryService",
+    "ProviderJobService",
+    "PaidAttemptLimitGate",
+    "PaidRenderApprovalGate",
+    "ProviderCharacterInputGate",
+    "ProviderVoiceInputGate",
+    "PexelsUsagePolicyGate",
+    "VisualSourceMixGate",
+    "ProxyPreviewGate",
+    "ProviderBoundaryAuditService",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

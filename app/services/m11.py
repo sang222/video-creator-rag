@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facades `learning_review` and `approved_playbook` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import uuid
 from typing import Any
 

@@ -1,3 +1,4 @@
+# Compatibility note: semantic facades `daily_operations`, `context_resolver`, and `project_admission` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal

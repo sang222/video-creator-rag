@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `agent_context_pack` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import hashlib
 import json
 import re
@@ -523,6 +524,9 @@ class ContextPackShapeGate:
             errors.append("raw channel_contract_json key present")
         if _contains_key(context_pack, "compiled_policy_snapshot_json"):
             errors.append("raw compiled_policy_snapshot_json key present")
+        memory_digest = _dict(digests.get("memory_digest"))
+        if memory_digest and not memory_digest.get("memory_influence_manifest_id"):
+            errors.append("memory digest injected without MemoryInfluenceManifest")
         status = "OK" if not errors else "BLOCK"
         return ShapeGateResult(
             status=status,
@@ -856,6 +860,16 @@ class AgentContextPackBuilder:
                 }
             )
             run.artifact_refs = refs
+        memory_digest = _dict(_dict(snapshot.context_pack_json).get("digests")).get("memory_digest")
+        manifest_id = _dict(memory_digest).get("memory_influence_manifest_id")
+        if manifest_id:
+            from app.services.r3d7 import MemoryInfluenceManifestService
+
+            MemoryInfluenceManifestService(self.session).link_prompt_render_run(
+                manifest_id=uuid.UUID(str(manifest_id)),
+                prompt_render_run_id=prompt_render_run_id,
+                prompt_context_hash=prompt_context_hash,
+            )
         self.session.flush()
 
     def _candidate_sections(
@@ -944,8 +958,7 @@ class AgentContextPackBuilder:
         settings = get_settings()
         if not settings.controlled_memory_retrieval_enabled:
             return None
-        from app.contracts.r3d6 import RetrievalPolicy, RetrievalRequest
-        from app.services.r3d6 import VectorSafeRetrievalService
+        from app.services.r3d7 import AgentMemoryDigestInjectionService
 
         max_facets = max(0, contract.max_memory_facets)
         query_text = " ".join(
@@ -957,26 +970,17 @@ class AgentContextPackBuilder:
             ]
             if value
         )
-        request = RetrievalRequest(
-            effective_context_snapshot_id=effective.id,
+        return AgentMemoryDigestInjectionService(self.session).retrieve_and_record_digest(
+            package_id=package_id,
+            effective=effective,
             agent_key=agent_key,
             use_case=_memory_use_case_for_agent(agent_key),
-            package_id=package_id,
-            video_project_id=effective.video_project_id,
             query_text=query_text,
-            policy=RetrievalPolicy(
-                max_selected_facets=max_facets,
-                max_digest_chars=1200,
-                requested_facet_types=AGENT_MEMORY_FACET_TYPES.get(agent_key, []),
-                vector_enabled=settings.vector_retrieval_enabled,
-            ),
+            max_selected_facets=max_facets,
+            max_digest_chars=1200,
+            requested_facet_types=AGENT_MEMORY_FACET_TYPES.get(agent_key, []),
+            vector_enabled=settings.vector_retrieval_enabled,
         )
-        result = VectorSafeRetrievalService(self.session).retrieve(request)
-        digest = dict(result.digest)
-        digest["retrieval_manifest_id"] = str(result.manifest_id)
-        digest["retrieval_hash"] = result.retrieval_hash
-        digest["context_pack_payload"] = "digest_only"
-        return digest
 
     def _assemble_pack(
         self,

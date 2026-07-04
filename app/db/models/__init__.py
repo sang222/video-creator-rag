@@ -223,6 +223,23 @@ from app.db.models.r3d5 import (
     MemoryUsageManifest,
 )
 from app.db.models.r3d6 import EmbeddingFacet, EmbeddingJob, VectorRetrievalManifest
+from app.db.models.r3d7 import (
+    AgentMemoryApplicationRecord,
+    LearningToMemoryPromotionRun,
+    MemoryConfidenceUpdateLedger,
+    MemoryInfluenceManifest,
+    QualityDeltaAttribution,
+)
+from app.db.models.r3d8 import (
+    CostEstimateSnapshot,
+    HumanPaidRenderApproval,
+    PaidAttemptLimitRecord,
+    PaidProviderCallLedger,
+    ProviderIdempotencyKey,
+    ProviderJobSnapshot,
+    ProxyPreviewArtifactFlag,
+    RenderRevision,
+)
 
 __all__ = [
     "AuditEvent",
@@ -409,4 +426,17 @@ __all__ = [
     "EmbeddingFacet",
     "EmbeddingJob",
     "VectorRetrievalManifest",
+    "MemoryInfluenceManifest",
+    "QualityDeltaAttribution",
+    "LearningToMemoryPromotionRun",
+    "AgentMemoryApplicationRecord",
+    "MemoryConfidenceUpdateLedger",
+    "RenderRevision",
+    "CostEstimateSnapshot",
+    "HumanPaidRenderApproval",
+    "ProviderIdempotencyKey",
+    "ProviderJobSnapshot",
+    "PaidProviderCallLedger",
+    "PaidAttemptLimitRecord",
+    "ProxyPreviewArtifactFlag",
 ]

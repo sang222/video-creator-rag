@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facades `publish_handoff` and `uploaded_video_backfill` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import re
 import uuid
 from datetime import datetime

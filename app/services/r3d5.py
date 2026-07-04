@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `controlled_memory` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import hashlib
 import json
 import re

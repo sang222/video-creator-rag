@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facades `channel_init_research` and `channel_contract_compiler` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import re
 import uuid
 from copy import deepcopy

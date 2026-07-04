@@ -95,6 +95,19 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    paid_provider_call_ledger,
+                    paid_attempt_limit_records,
+                    provider_job_snapshots,
+                    provider_idempotency_keys,
+                    human_paid_render_approvals,
+                    cost_estimate_snapshots,
+                    proxy_preview_artifact_flags,
+                    render_revisions,
+                    memory_confidence_update_ledger,
+                    agent_memory_application_records,
+                    quality_delta_attributions,
+                    learning_to_memory_promotion_runs,
+                    memory_influence_manifests,
                     vector_retrieval_manifests,
                     embedding_jobs,
                     embedding_facets,

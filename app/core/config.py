@@ -346,6 +346,30 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("LUMA_VIDEO_ONLY", "VCOS_LUMA_VIDEO_ONLY"),
     )
+    provider_real_execution_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("PROVIDER_REAL_EXECUTION_ENABLED", "VCOS_PROVIDER_REAL_EXECUTION_ENABLED"),
+    )
+    elevenlabs_real_generation_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ELEVENLABS_REAL_GENERATION_ENABLED", "VCOS_ELEVENLABS_REAL_GENERATION_ENABLED"),
+    )
+    luma_real_generation_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LUMA_REAL_GENERATION_ENABLED", "VCOS_LUMA_REAL_GENERATION_ENABLED"),
+    )
+    creatomate_real_render_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CREATOMATE_REAL_RENDER_ENABLED", "VCOS_CREATOMATE_REAL_RENDER_ENABLED"),
+    )
+    pexels_real_search_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("PEXELS_REAL_SEARCH_ENABLED", "VCOS_PEXELS_REAL_SEARCH_ENABLED"),
+    )
+    google_drive_real_archive_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED", "VCOS_GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED"),
+    )
     provider_real_readiness_probe_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("PROVIDER_REAL_READINESS_PROBE_ENABLED", "VCOS_PROVIDER_REAL_READINESS_PROBE_ENABLED"),

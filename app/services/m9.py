@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Compatibility note: semantic facade `post_publish_diagnostics` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
