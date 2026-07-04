@@ -35,6 +35,7 @@ from app.db.models import (
 )
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
+from app.services.m1 import PackagingHandoffReadService
 from app.services.m10_3 import YouTubePublicStatsProvider
 
 
@@ -137,7 +138,8 @@ class PublishHandoffLedgerService:
         if existing is not None:
             return self._read_task(existing)
         channel = self._require_channel(package.channel_id)
-        snapshot = _package_task_snapshot(package)
+        handoff = PackagingHandoffReadService(self.session).build(package.id)
+        snapshot = _package_task_snapshot(package, handoff.model_dump(mode="json"))
         task = HumanUploadTask(
             company_id=channel.company_id,
             channel_workspace_id=channel.id,
@@ -156,6 +158,7 @@ class PublishHandoffLedgerService:
             required_assets=snapshot["required_assets"],
             checklist=snapshot["checklist"],
             required_checklist=snapshot["checklist"],
+            scheduled_time_suggestion=_coerce_datetime(snapshot.get("scheduled_time_suggestion")),
             actual_uploaded_video_id=None,
         )
         self.session.add(task)
@@ -766,25 +769,37 @@ def _task_next_action(status: str) -> str:
     }.get(status, "Kiểm tra task upload thủ công.")
 
 
-def _package_task_snapshot(package: FirstScriptedVideoPackage) -> dict[str, Any]:
+def _package_task_snapshot(package: FirstScriptedVideoPackage, handoff: dict[str, Any] | None = None) -> dict[str, Any]:
     artifacts = package.artifacts or {}
+    upload_handoff = _dict((handoff or {}).get("upload_handoff_copy"))
+    thumbnail_handoff = _dict((handoff or {}).get("thumbnail_handoff"))
+    timing = _dict((handoff or {}).get("publish_timing_recommendation"))
     upload_copy = artifacts.get("upload_card_copy") if isinstance(artifacts.get("upload_card_copy"), dict) else {}
     metadata = artifacts.get("metadata_package") if isinstance(artifacts.get("metadata_package"), dict) else {}
     visual = artifacts.get("visual_plan") if isinstance(artifacts.get("visual_plan"), dict) else {}
-    title = str(upload_copy.get("title") or metadata.get("title") or f"First scripted package {package.id}")
-    description = upload_copy.get("description") or metadata.get("description")
+    title = str(upload_handoff.get("title") or upload_copy.get("title") or metadata.get("title") or f"First scripted package {package.id}")
+    description = upload_handoff.get("description") or upload_copy.get("description") or metadata.get("description")
     checklist_blob = artifacts.get("human_review_checklist") if isinstance(artifacts.get("human_review_checklist"), dict) else {}
-    checklist = [{"item": key, "state": value} for key, value in sorted(checklist_blob.items())]
+    checklist = _json_list(upload_handoff.get("checklist_items_json")) or [{"item": key, "state": value} for key, value in sorted(checklist_blob.items())]
+    if handoff:
+        checklist.append(
+            {
+                "item": "packaging_gate_status",
+                "state": _dict(handoff.get("packaging_gate_summary")).get("overall_status", "REVIEW_REQUIRED"),
+            }
+        )
     return {
         "title": title,
         "description": str(description) if description else None,
-        "thumbnail_ref": metadata.get("thumbnail_ref") or metadata.get("planned_thumbnail_ref"),
-        "subtitle_refs": _json_list(metadata.get("subtitle_refs") or metadata.get("caption_refs")),
+        "thumbnail_ref": thumbnail_handoff.get("drive_ref") or thumbnail_handoff.get("thumbnail_ref") or metadata.get("thumbnail_ref") or metadata.get("planned_thumbnail_ref"),
+        "subtitle_refs": _json_list(upload_handoff.get("subtitle_refs_json") or metadata.get("subtitle_refs") or metadata.get("caption_refs")),
         "required_assets": [
             {"type": "metadata_package", "ready": bool(metadata)},
             {"type": "visual_plan", "ready": bool(visual)},
             {"type": "upload_card_copy", "ready": bool(upload_copy)},
+            {"type": "packaging_handoff", "ready": bool(handoff)},
         ],
+        "scheduled_time_suggestion": timing.get("suggested_publish_time_channel_tz"),
         "checklist": checklist
         or [
             {"item": "upload_manual_only", "state": "PENDING"},
@@ -845,6 +860,10 @@ def _json_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item if isinstance(item, dict) else {"value": item} for item in value]
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _jsonable(value: Any) -> Any:

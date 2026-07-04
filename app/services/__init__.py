@@ -90,6 +90,7 @@ from app.services.m10_1 import (
     ShortCandidateRankingService,
     UploadCardService,
 )
+from app.services.m1 import PackagingGateRunner, PackagingHandoffReadService
 from app.services.m10_2 import (
     AIHeroAssetPlanningService,
     AIHeroGenerationService,
@@ -296,6 +297,8 @@ __all__ = [
     "ShortCandidateExtractionService",
     "ShortCandidateRankingService",
     "UploadCardService",
+    "PackagingGateRunner",
+    "PackagingHandoffReadService",
     "AIHeroAssetPlanningService",
     "AIHeroGenerationService",
     "GoogleVertexVeoConfigService",

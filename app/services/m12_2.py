@@ -33,6 +33,7 @@ from app.db.models import (
     VideoProject,
 )
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
+from app.services.m1 import PackagingHandoffReadService
 from app.services.m12 import ProviderReadinessService
 from app.services.m12_1 import PromptRegistryService
 from app.services.r3d3 import AgentContextPackBuilder
@@ -634,6 +635,7 @@ class FirstScriptedVideoPackageService:
                 "effective_context_hash": package.effective_context_hash,
                 "snapshot_ref": package.artifacts.get("effective_context_snapshot_ref") or package.artifacts.get("effective_context"),
             },
+            packaging_handoff=PackagingHandoffReadService(self.session).build(package.id),
             human_review_checklist=package.artifacts.get("human_review_checklist", {}),
             agent_outputs={key: value for key, value in package.artifacts.items() if key not in {"human_review_checklist"}},
             prompt_snapshots={

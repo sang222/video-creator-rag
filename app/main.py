@@ -231,6 +231,7 @@ from app.contracts import (
     PromptRegistrySyncSummary,
     PromptRenderRequest,
     PromptRenderResult,
+    PackagingHandoffSnapshotRead,
     ReadinessRunRequest,
     RealSmokeRunRead,
     FirstScriptedVideoPackageAgentRunsRead,
@@ -371,6 +372,7 @@ from app.services import (
     PromptRegistryService,
     RealSmokeOrchestratorService,
     FirstScriptedVideoPackageService,
+    PackagingHandoffReadService,
     PublishHandoffLedgerService,
     ChannelContractCompiler,
     ChannelContractReviewService,
@@ -2826,6 +2828,14 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return FirstScriptedVideoPackageService(session).review(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/{package_id}/packaging-handoff", response_model=PackagingHandoffSnapshotRead)
+    def get_first_scripted_video_package_packaging_handoff(package_id: uuid.UUID) -> PackagingHandoffSnapshotRead:
+        try:
+            with session_scope() as session:
+                return PackagingHandoffReadService(session).build(package_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

@@ -442,6 +442,108 @@ export type PublishLedger = PublishLedgerCounts & {
   operator_summary_vi: string;
 };
 
+export type PackagingGateStatus = "PASS" | "REVIEW_REQUIRED" | "BLOCK" | "SKIPPED_NOT_APPLICABLE" | string;
+
+export type PackagingGateResult = {
+  gate_key: string;
+  status: PackagingGateStatus;
+  reason_codes: string[];
+  checked_artifact_refs: Array<Record<string, unknown>>;
+  checked_contract_paths: string[];
+  summary_vi: string;
+  next_action_vi?: string | null;
+};
+
+export type PackagingHandoff = {
+  package_id: string;
+  package_status: string;
+  channel_id: string;
+  video_project_id?: string | null;
+  effective_context_snapshot_id?: string | null;
+  effective_context_hash?: string | null;
+  hook_spec: {
+    id: string;
+    package_id: string;
+    video_project_id?: string | null;
+    effective_context_snapshot_id?: string | null;
+    hook_type: string;
+    first_3_seconds_script?: string | null;
+    first_3_seconds_visual?: string | null;
+    promise_made?: string | null;
+    payoff_location?: string | null;
+    clickbait_risk: string;
+    evidence_refs_json: Array<Record<string, unknown>>;
+    contract_paths_used_json: string[];
+    content_hash: string;
+    created_at: string;
+  };
+  upload_handoff_copy: {
+    title?: string | null;
+    description?: string | null;
+    hashtags_json?: string[] | null;
+    subtitle_refs_json: Array<Record<string, unknown>>;
+    disclosure_notes_json: Array<Record<string, unknown>>;
+    checklist_items_json: Array<Record<string, unknown>>;
+    language?: string | null;
+    locale?: string | null;
+    channel_contract_hash?: string | null;
+    effective_context_snapshot_id?: string | null;
+    packaging_gate_status: PackagingGateStatus;
+    source_artifact_refs_json: Array<Record<string, unknown>>;
+  };
+  thumbnail_handoff: {
+    concept?: string | null;
+    text_overlay?: string | null;
+    main_subject?: string | null;
+    composition?: string | null;
+    mobile_readability_notes?: string | null;
+    thumbnail_ref?: unknown;
+    drive_ref?: unknown;
+    character_image_branch_id?: string | null;
+    reference_asset_pack_id?: string | null;
+    thumbnail_variant_plan_json?: unknown;
+    contract_paths_used_json: string[];
+    source_artifact_refs_json: Array<Record<string, unknown>>;
+  };
+  publish_timing_recommendation: {
+    channel_timezone?: string | null;
+    audience_timezone?: string | null;
+    operator_local_timezone?: string | null;
+    configured_publish_window_json?: unknown;
+    suggested_publish_time_channel_tz?: string | null;
+    suggested_publish_time_operator_local?: string | null;
+    publish_timing_policy_ref?: string | null;
+    manual_publish_only: boolean;
+    source_contract_paths: string[];
+    reason_codes_json: string[];
+  };
+  packaging_gate_summary: {
+    overall_status: PackagingGateStatus;
+    gate_results: PackagingGateResult[];
+    r3d4_gate_batch_refs: string[];
+    next_action_vi: string;
+  };
+  manual_upload: Record<string, unknown>;
+  provider_readiness_summary: Record<string, unknown>;
+  manual_publish_only: boolean;
+  no_upload_or_publish_calls_made: boolean;
+  created_at: string;
+};
+
+export type VideoPackageReview = {
+  package_id: string;
+  package_status: string;
+  channel_binding: Record<string, unknown>;
+  effective_context: Record<string, unknown>;
+  packaging_handoff?: PackagingHandoff | null;
+  human_review_checklist: Record<string, unknown>;
+  agent_outputs: Record<string, unknown>;
+  prompt_snapshots: Record<string, unknown>;
+  provider_readiness_snapshot_ref?: string | null;
+  limitations: string[];
+  next_action?: string | null;
+};
+
 export type BackfillUploadedVideoInput = {
   youtube_url_or_video_id: string;
   actual_title?: string | null;

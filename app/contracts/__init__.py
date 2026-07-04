@@ -287,6 +287,15 @@ from app.contracts.m12_1 import (
     PromptTemplateRecordRead,
     StructuredOutputSchemaRead,
 )
+from app.contracts.m1 import (
+    HookSpecRead,
+    PackagingGateResultRead,
+    PackagingGateSummaryRead,
+    PackagingHandoffSnapshotRead,
+    PublishTimingRecommendationRead,
+    ThumbnailHandoffRead,
+    UploadHandoffCopyRead,
+)
 from app.contracts.m12_2 import (
     FirstScriptedVideoPackageAgentRunsRead,
     FirstScriptedVideoPackageRead,
@@ -484,6 +493,13 @@ __all__ = [
     "PromptRenderResult",
     "PromptRenderRunRead",
     "PromptTemplateRecordRead",
+    "HookSpecRead",
+    "PackagingGateResultRead",
+    "PackagingGateSummaryRead",
+    "PackagingHandoffSnapshotRead",
+    "PublishTimingRecommendationRead",
+    "ThumbnailHandoffRead",
+    "UploadHandoffCopyRead",
     "FirstScriptedVideoPackageRead",
     "FirstScriptedVideoPackageRequest",
     "FirstScriptedVideoPackageReviewRead",

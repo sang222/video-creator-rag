@@ -19,6 +19,7 @@ import type {
   HumanUploadTask,
   HumanUploadTaskList,
   PublishLedger,
+  VideoPackageReview,
   UploadedVideoLedgerList
 } from "./types";
 
@@ -48,6 +49,7 @@ export const queryKeys = {
   channelPublishLedger: (channelId: string) => ["channel-publish-ledger", channelId],
   channelUploadTasks: (channelId: string) => ["channel-upload-tasks", channelId],
   channelUploadedVideos: (channelId: string) => ["channel-uploaded-videos", channelId],
+  videoPackageReview: (packageId: string) => ["video-package-review", packageId],
   uploadedVideos: ["uploaded-videos"],
   uploadedVideo: (uploadedVideoId: string) => ["uploaded-video", uploadedVideoId],
   channelLifecycle: (channelId: string) => ["channel-lifecycle", channelId],
@@ -151,6 +153,17 @@ export function getChannelUploadTasks(channelId: string) {
 
 export function getChannelUploadedVideos(channelId: string) {
   return request<UploadedVideoLedgerList>(`/channels/${channelId}/uploaded-videos`);
+}
+
+export function getVideoPackageReview(packageId: string) {
+  return request<VideoPackageReview>(`/video-packages/${packageId}/review`);
+}
+
+export function createUploadTaskFromPackage(packageId: string) {
+  return request<HumanUploadTask>(`/video-packages/${packageId}/upload-task`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
 }
 
 export function startUploadTask(taskId: string) {

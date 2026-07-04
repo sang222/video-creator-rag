@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, CheckCircle2, ClipboardEdit, Database, ExternalLink, Gauge, ListChecks, RefreshCw, UploadCloud, Video } from "lucide-react";
@@ -487,6 +488,11 @@ function UploadTasksTable({
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
                   <Button onClick={() => onSelect(task)}>Mở gói upload</Button>
+                  {task.first_scripted_video_package_id ? (
+                    <Button asChild>
+                      <Link href={`/video-packages/${task.first_scripted_video_package_id}/review`}>Review gói</Link>
+                    </Button>
+                  ) : null}
                   <Button onClick={() => onStart(task)} disabled={task.status !== "READY_FOR_HUMAN_UPLOAD" || busyTaskId === task.id}>
                     Đánh dấu đã upload
                   </Button>

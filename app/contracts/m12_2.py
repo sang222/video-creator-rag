@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from app.contracts.m1 import PackagingHandoffSnapshotRead
+
 
 FirstVideoPackageStatus = Literal[
     "READY_FOR_HUMAN_REVIEW",
@@ -88,6 +90,7 @@ class FirstScriptedVideoPackageReviewRead(BaseModel):
     package_status: FirstVideoPackageStatus
     channel_binding: dict[str, Any]
     effective_context: dict[str, Any] = Field(default_factory=dict)
+    packaging_handoff: PackagingHandoffSnapshotRead | None = None
     human_review_checklist: dict[str, Any] = Field(default_factory=dict)
     agent_outputs: dict[str, Any] = Field(default_factory=dict)
     prompt_snapshots: dict[str, Any] = Field(default_factory=dict)
