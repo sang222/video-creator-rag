@@ -95,6 +95,9 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    vector_retrieval_manifests,
+                    embedding_jobs,
+                    embedding_facets,
                     memory_source_links,
                     memory_usage_manifests,
                     memory_approval_decisions,

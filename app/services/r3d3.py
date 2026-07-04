@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import AgentContextPackSnapshot, EffectiveChannelRuntimeContextSnapshot, PromptRenderRun
 
 
@@ -53,6 +54,24 @@ LANE_CONTEXT_BUDGETS = {
     "visual_creative_review": 12000,
     "gatekeeper_soft_review": 18000,
     "engineering_architect": 12000,
+}
+AGENT_MEMORY_FACET_LIMITS = {
+    "ScriptWriterAgent": 5,
+    "ScriptPlanningAgent": 5,
+    "VisualPlanningAgent": 4,
+    "ThumbnailBriefAgent": 4,
+    "PublishingMetadataAgent": 4,
+    "GatekeeperSoftReviewAgent": 8,
+    "ProviderReadinessSummaryAgent": 0,
+    "MediaQCExplanationAgent": 0,
+}
+AGENT_MEMORY_FACET_TYPES = {
+    "ScriptWriterAgent": ["WINNING_HOOK", "FAILED_HOOK", "RETENTION_LESSON", "AVOID_REPEAT", "CATEGORY_STYLE"],
+    "ScriptPlanningAgent": ["RETENTION_LESSON", "PACKAGING_PATTERN", "AVOID_REPEAT", "CATEGORY_STYLE"],
+    "VisualPlanningAgent": ["VISUAL_PATTERN", "SOURCE_QUALITY_LESSON", "CHARACTER_CONTINUITY_LESSON"],
+    "ThumbnailBriefAgent": ["THUMBNAIL_PATTERN", "PACKAGING_PATTERN", "CHARACTER_CONTINUITY_LESSON"],
+    "PublishingMetadataAgent": ["METADATA_PATTERN", "MARKET_LOCALE_LESSON", "PACKAGING_PATTERN"],
+    "GatekeeperSoftReviewAgent": ["WINNING_HOOK", "FAILED_HOOK", "RETENTION_LESSON", "VISUAL_PATTERN", "THUMBNAIL_PATTERN", "METADATA_PATTERN", "AVOID_REPEAT"],
 }
 
 
@@ -386,6 +405,37 @@ class AgentContextContractRegistry:
         return contract
 
 
+def _contract_with_memory_digest(contract: AgentContextContract) -> AgentContextContract:
+    optional = list(contract.optional_context_sections)
+    if "memory_digest" not in optional:
+        optional.append("memory_digest")
+    max_memory_facets = AGENT_MEMORY_FACET_LIMITS.get(contract.agent_key, 3)
+    payload = {
+        **contract.to_dict(),
+        "optional_context_sections": optional,
+        "max_memory_facets": max_memory_facets,
+    }
+    payload.pop("content_hash", None)
+    return replace(
+        contract,
+        optional_context_sections=optional,
+        max_memory_facets=max_memory_facets,
+        content_hash=stable_hash(payload),
+    )
+
+
+def _memory_use_case_for_agent(agent_key: str) -> str:
+    return {
+        "ScriptWriterAgent": "script",
+        "ScriptPlanningAgent": "script_planning",
+        "VisualPlanningAgent": "visual_planning",
+        "ThumbnailBriefAgent": "thumbnail",
+        "PublishingMetadataAgent": "metadata",
+        "GatekeeperSoftReviewAgent": "gatekeeper",
+        "MediaQCExplanationAgent": "media_qc_gate_report",
+    }.get(agent_key, agent_key)
+
+
 @dataclass(frozen=True)
 class PromptBudgetResult:
     status: str
@@ -650,6 +700,8 @@ class AgentContextPackBuilder:
         schema_requirements: dict[str, Any] | None = None,
     ) -> AgentContextPackBuildResult:
         contract = self.contract_registry.resolve(agent_key, task_type=task_type, lane=lane)
+        if get_settings().controlled_memory_retrieval_enabled:
+            contract = _contract_with_memory_digest(contract)
         if video_project_id is None or effective_context_snapshot_id is None or not effective_context_hash:
             return self._blocked(
                 reason_codes=["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"],
@@ -686,6 +738,7 @@ class AgentContextPackBuilder:
         candidate_sections = self._candidate_sections(
             package_id=package_id,
             effective=effective,
+            contract=contract,
             agent_key=agent_key,
             artifacts=artifacts,
             evidence_refs=evidence_refs,
@@ -810,6 +863,7 @@ class AgentContextPackBuilder:
         *,
         package_id: uuid.UUID,
         effective: EffectiveChannelRuntimeContextSnapshot,
+        contract: AgentContextContract,
         agent_key: str,
         artifacts: dict[str, Any],
         evidence_refs: list[dict[str, Any]],
@@ -867,7 +921,62 @@ class AgentContextPackBuilder:
             "media_inventory_digest": build_media_inventory_digest(artifacts=artifacts, package_id=package_id),
             "gate_summary_digest": build_gate_summary_digest(artifacts=artifacts),
         }
+        memory_digest = self._optional_memory_digest(
+            package_id=package_id,
+            effective=effective,
+            contract=contract,
+            agent_key=agent_key,
+            current_package_state=current_package_state,
+        )
+        if memory_digest is not None:
+            sections["memory_digest"] = memory_digest
         return sections
+
+    def _optional_memory_digest(
+        self,
+        *,
+        package_id: uuid.UUID,
+        effective: EffectiveChannelRuntimeContextSnapshot,
+        contract: AgentContextContract,
+        agent_key: str,
+        current_package_state: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        settings = get_settings()
+        if not settings.controlled_memory_retrieval_enabled:
+            return None
+        from app.contracts.r3d6 import RetrievalPolicy, RetrievalRequest
+        from app.services.r3d6 import VectorSafeRetrievalService
+
+        max_facets = max(0, contract.max_memory_facets)
+        query_text = " ".join(
+            str(value)
+            for value in [
+                current_package_state.get("topic"),
+                current_package_state.get("research_pack_ref"),
+                current_package_state.get("research_pack_text"),
+            ]
+            if value
+        )
+        request = RetrievalRequest(
+            effective_context_snapshot_id=effective.id,
+            agent_key=agent_key,
+            use_case=_memory_use_case_for_agent(agent_key),
+            package_id=package_id,
+            video_project_id=effective.video_project_id,
+            query_text=query_text,
+            policy=RetrievalPolicy(
+                max_selected_facets=max_facets,
+                max_digest_chars=1200,
+                requested_facet_types=AGENT_MEMORY_FACET_TYPES.get(agent_key, []),
+                vector_enabled=settings.vector_retrieval_enabled,
+            ),
+        )
+        result = VectorSafeRetrievalService(self.session).retrieve(request)
+        digest = dict(result.digest)
+        digest["retrieval_manifest_id"] = str(result.manifest_id)
+        digest["retrieval_hash"] = result.retrieval_hash
+        digest["context_pack_payload"] = "digest_only"
+        return digest
 
     def _assemble_pack(
         self,

@@ -339,6 +339,15 @@ from app.contracts.r3d5 import (
     MemoryUsageManifestCreate,
     MemoryUsageManifestRead,
 )
+from app.contracts.r3d6 import (
+    EmbeddingFacetRead,
+    EmbeddingJobRead,
+    RetrievalCandidate,
+    RetrievalPolicy,
+    RetrievalRequest,
+    RetrievalResult,
+    VectorRetrievalManifestRead,
+)
 from app.contracts.m12_2r import (
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
@@ -771,6 +780,13 @@ __all__ = [
     "MemorySourceLinkRead",
     "MemoryUsageManifestCreate",
     "MemoryUsageManifestRead",
+    "EmbeddingFacetRead",
+    "EmbeddingJobRead",
+    "RetrievalCandidate",
+    "RetrievalPolicy",
+    "RetrievalRequest",
+    "RetrievalResult",
+    "VectorRetrievalManifestRead",
     "VideoProjectCreate",
     "VideoProjectRead",
 ]

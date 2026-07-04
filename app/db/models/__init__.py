@@ -222,6 +222,7 @@ from app.db.models.r3d5 import (
     MemorySourceLink,
     MemoryUsageManifest,
 )
+from app.db.models.r3d6 import EmbeddingFacet, EmbeddingJob, VectorRetrievalManifest
 
 __all__ = [
     "AuditEvent",
@@ -405,4 +406,7 @@ __all__ = [
     "MemoryApprovalDecision",
     "MemoryUsageManifest",
     "MemorySourceLink",
+    "EmbeddingFacet",
+    "EmbeddingJob",
+    "VectorRetrievalManifest",
 ]

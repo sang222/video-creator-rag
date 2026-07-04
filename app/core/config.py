@@ -70,6 +70,22 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VCOS_DISABLE_OLD_PROVIDER_SMOKE", "DISABLE_OLD_PROVIDER_SMOKE"),
     )
+    controlled_memory_retrieval_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CONTROLLED_MEMORY_RETRIEVAL_ENABLED", "VCOS_CONTROLLED_MEMORY_RETRIEVAL_ENABLED"),
+    )
+    vector_retrieval_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VECTOR_RETRIEVAL_ENABLED", "VCOS_VECTOR_RETRIEVAL_ENABLED"),
+    )
+    vector_provider: str | None = Field(
+        default="json",
+        validation_alias=AliasChoices("VECTOR_PROVIDER", "VCOS_VECTOR_PROVIDER"),
+    )
+    embedding_execution_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("EMBEDDING_EXECUTION_ENABLED", "VCOS_EMBEDDING_EXECUTION_ENABLED"),
+    )
     elevenlabs_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "VCOS_ELEVENLABS_API_KEY"),
@@ -481,6 +497,7 @@ class Settings(BaseSettings):
         "bootstrap_admin_role",
         "ollama_base_url",
         "llm_provider",
+        "vector_provider",
         "voice_provider",
         "elevenlabs_voice_id",
         "elevenlabs_model_id",

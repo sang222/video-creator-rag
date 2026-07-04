@@ -177,13 +177,16 @@ REQUIRED_TABLES = {
     "memory_approval_decisions",
     "memory_usage_manifests",
     "memory_source_links",
+    "embedding_facets",
+    "embedding_jobs",
+    "vector_retrieval_manifests",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0028_r3d5_controlled_memory"
+    assert revision == "0029_r3d6_vector_safe_retrieval"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

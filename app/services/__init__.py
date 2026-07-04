@@ -255,6 +255,14 @@ from app.services.r3d5 import (
     MemoryScopeGate,
     RetrievalAuditGate,
 )
+from app.services.r3d6 import (
+    AgentMemoryDigestBuilder,
+    EmbeddingEligibilityGate,
+    EmbeddingJobService,
+    MemoryDigestBuilder,
+    VectorSafeRetrievalService,
+    VectorUnavailableSafeFallback,
+)
 
 __all__ = [
     "AuditService",
@@ -462,6 +470,12 @@ __all__ = [
     "MemoryDuplicationGate",
     "MemoryFreshnessGate",
     "RetrievalAuditGate",
+    "EmbeddingEligibilityGate",
+    "EmbeddingJobService",
+    "VectorSafeRetrievalService",
+    "AgentMemoryDigestBuilder",
+    "MemoryDigestBuilder",
+    "VectorUnavailableSafeFallback",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",
