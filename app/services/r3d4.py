@@ -617,7 +617,16 @@ class ProviderBoundaryGate:
     def run(self, *, artifacts: dict[str, Any], provider_readiness_state: dict[str, Any] | None = None, **_: Any) -> GateResult:
         fail_codes: list[str] = []
         attempts = [item for item in _list(artifacts.get("provider_attempts")) if isinstance(item, dict)]
-        forbidden_media = {"ELEVENLABS", "CREATOMATE", "GOOGLE_VERTEX_VEO", "GOOGLE_DRIVE", "YOUTUBE"}
+        forbidden_media = {
+            "ELEVENLABS",
+            "CREATOMATE",
+            "CREATOMATE_GROWTH_10K",
+            "LUMA_API",
+            "PEXELS_API",
+            "GOOGLE_VERTEX_VEO",
+            "GOOGLE_DRIVE",
+            "YOUTUBE",
+        }
         forbidden_attempts = [item for item in attempts if str(item.get("provider_key") or "").upper() in forbidden_media]
         if forbidden_attempts:
             fail_codes.append("FORBIDDEN_PROVIDER_OR_UPLOAD_ATTEMPT")

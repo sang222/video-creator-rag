@@ -137,8 +137,8 @@ def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None
         },
         "media_policy": {
             "voice_provider": media_source.get("voice_provider") or "ElevenLabs",
-            "ai_hero_provider": media_source.get("ai_hero_provider") or "Google Vertex Veo",
-            "ai_hero_model_id": media_source.get("ai_hero_model_id") or "veo-3.1-fast-generate-001",
+            "ai_hero_provider": media_source.get("ai_hero_provider") or "Luma API",
+            "ai_hero_model_id": media_source.get("ai_hero_model_id") or "luma_api_video_only",
             "ai_hero_allowed_durations_seconds": _int_list(media_source.get("ai_hero_allowed_durations_seconds") or [4, 6, 8]),
             "ai_hero_default_duration_seconds": media_source.get("ai_hero_default_duration_seconds", 8),
             "ai_hero_audio": media_source.get("ai_hero_audio", False),

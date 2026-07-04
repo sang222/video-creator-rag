@@ -1009,8 +1009,8 @@ def _research_risks(draft: ChannelInitDraft) -> list[dict[str, Any]]:
 def _locked_media_policy() -> dict[str, Any]:
     return {
         "voice_provider": "ElevenLabs",
-        "ai_hero_provider": "Google Vertex Veo",
-        "ai_hero_model_id": "veo-3.1-fast-generate-001",
+        "ai_hero_provider": "Luma API",
+        "ai_hero_model_id": "luma_api_video_only",
         "ai_hero_allowed_durations_seconds": [4, 6, 8],
         "ai_hero_default_duration_seconds": 8,
         "ai_hero_audio": False,

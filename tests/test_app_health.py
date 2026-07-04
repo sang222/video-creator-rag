@@ -40,10 +40,9 @@ def test_provider_api_keys_load_from_env(monkeypatch) -> None:
     monkeypatch.setenv("CLOUD_FINAL_RENDERER_API_KEY", "cloud-final-test")
     monkeypatch.setenv("PEXELS_API_KEY", "pexels-test")
     monkeypatch.setenv("PIXABAY_API_KEY", "pixabay-test")
-    monkeypatch.setenv("VCOS_AI_HERO_PROVIDER", "google_vertex_veo")
-    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT_ID", "vcos-test-project")
-    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/absolute/path/to/service_account.json")
+    monkeypatch.setenv("VCOS_AI_HERO_PROVIDER", "luma_api")
+    monkeypatch.setenv("LUMA_API_KEY", "luma-test")
+    monkeypatch.setenv("LUMA_HERO_MODEL", "ray-2")
     monkeypatch.setenv("VCOS_VEO_MODEL_ID", VEO_GA_MODEL_ID)
     monkeypatch.setenv("VCOS_VEO_COST_PER_SECOND_1080P_VIDEO_ONLY", "0.10")
     monkeypatch.setenv("VCOS_VEO_MONTHLY_BUDGET_USD", "175")
@@ -59,10 +58,10 @@ def test_provider_api_keys_load_from_env(monkeypatch) -> None:
         assert settings.pexels_api_key.get_secret_value() == "pexels-test"
         assert settings.pixabay_api_key is not None
         assert settings.pixabay_api_key.get_secret_value() == "pixabay-test"
-        assert settings.ai_hero_provider == "google_vertex_veo"
-        assert settings.google_cloud_project_id == "vcos-test-project"
-        assert settings.google_cloud_location == "us-central1"
-        assert settings.google_application_credentials == "/absolute/path/to/service_account.json"
+        assert settings.ai_hero_provider == "luma_api"
+        assert settings.luma_api_key is not None
+        assert settings.luma_api_key.get_secret_value() == "luma-test"
+        assert settings.luma_hero_model == "ray-2"
         assert settings.veo_model_id == VEO_GA_MODEL_ID
         assert settings.veo_model == VEO_GA_MODEL_ID
         assert str(settings.veo_cost_per_second_1080p_video_only) == "0.10"

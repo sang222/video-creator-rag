@@ -61,12 +61,11 @@ items:
     retry_policy_blob: {}
     metadata:
       readiness_provider_key: google-drive
-  - provider_key: google-vertex-veo
-    provider_name: Google Vertex Veo
+  - provider_key: luma_api
+    provider_name: Luma API
     provider_type: VIDEO
     status: ACTIVE
     capability_blob:
-      model_id: veo-3.1-fast-generate-001
       mode: video_only
       allowed_duration_seconds: [4, 6, 8]
       max_duration_seconds: 8
@@ -74,11 +73,11 @@ items:
     policy_fit_blob:
       production_enabled_when_configured: true
     cost_model_blob:
-      cost_per_second_1080p_video_only: "0.10"
+      pricing_metadata_deferred: true
     quota_model_blob: {}
     retry_policy_blob: {}
     metadata:
-      readiness_provider_key: google-vertex-veo
+      readiness_provider_key: luma_api
   - provider_key: elevenlabs
     provider_name: ElevenLabs
     provider_type: TTS
@@ -94,14 +93,17 @@ items:
     retry_policy_blob: {}
     metadata:
       readiness_provider_key: elevenlabs
-  - provider_key: creatomate
+  - provider_key: creatomate_growth_10k
     provider_name: Creatomate Growth 10K
     provider_type: VIDEO
     status: ACTIVE
     capability_blob:
+      long_form_final_render: true
       cloud_template_rendering: true
       growth_10k_required: true
-      final_renderer_candidate: true
+      final_renderer: true
+      thumbnail_composition: true
+      shorts_render: true
     policy_fit_blob:
       production_enabled_when_configured: true
     cost_model_blob:
@@ -110,21 +112,4 @@ items:
       monthly_credits: 10000
     retry_policy_blob: {}
     metadata:
-      readiness_provider_key: creatomate
-  - provider_key: cloud-final-renderer
-    provider_name: Cloud Final Renderer = Creatomate Growth 10K
-    provider_type: VIDEO
-    status: ACTIVE
-    capability_blob:
-      long_form_final_render: true
-      configured_provider_required: creatomate
-      required_plan: growth_10k
-    policy_fit_blob:
-      production_enabled_when_configured: true
-    cost_model_blob:
-      provider: creatomate
-      plan: growth_10k
-    quota_model_blob: {}
-    retry_policy_blob: {}
-    metadata:
-      readiness_provider_key: cloud-final-renderer
+      readiness_provider_key: creatomate_growth_10k

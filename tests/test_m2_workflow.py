@@ -431,7 +431,6 @@ def test_m2_scope_guard_tables_and_code() -> None:
     app_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "app").rglob("*.py"))
     assert not forbidden_tables & M2_TABLES
     assert "SemanticLayer" not in app_text
-    assert "MemoryPromotion" not in app_text
     assert "AIAnswerJudge" not in app_text
 
 

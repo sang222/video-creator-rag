@@ -116,20 +116,19 @@ C7 common_market_locale_context
 C8 common_media_constraints
 
 * Voice: ElevenLabs.
-* AI hero: Google Vertex Veo only.
-* Veo model: veo-3.1-fast-generate-001.
-* Veo mode: video_only, 1080p, audio=false.
-* Veo durations: 4, 6, 8 seconds only.
+* AI hero: Luma API only.
+* Luma mode: video_only, audio=false.
+* Luma durations: 4, 6, 8 seconds only; max 8 seconds.
 * Renderer: Creatomate Growth 10K.
 * Creatomate is CLOUD_RENDER_ENGINE and final renderer when configured.
 * Google Drive access: CTA only.
 * Do not propose Runway/Luma/Envato as production default.
-* Do not use Veo for diagrams/data charts.
+* Do not use Luma for diagrams/data charts.
 
 C9 common_cost_awareness
 
 * Prefer safe reuse.
-* Do not overuse Veo.
+* Do not overuse Luma API.
 * Do not claim exact spend if unavailable.
 * M12 budget display is hard-env cap only, not actual spend tracking.
 

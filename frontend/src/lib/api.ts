@@ -18,8 +18,17 @@ import type {
   BackfillUploadedVideoResult,
   HumanUploadTask,
   HumanUploadTaskList,
+  MemoryInfluenceOps,
+  OpsQueue,
+  PackageOpsSummary,
   PublishLedger,
+  ProviderCostOps,
+  QualityDeltaOps,
+  RetrievalManifestOps,
+  RuntimeOpsCommandCenter,
+  ChannelRuntimeTrace,
   VideoPackageReview,
+  UploadedVideoOpsSummary,
   UploadedVideoLedgerList
 } from "./types";
 
@@ -55,7 +64,21 @@ export const queryKeys = {
   channelLifecycle: (channelId: string) => ["channel-lifecycle", channelId],
   companies: ["companies"],
   providerOps: ["provider-ops"],
-  integrationsReadiness: ["integrations-readiness"]
+  integrationsReadiness: ["integrations-readiness"],
+  runtimeOpsCommandCenter: ["runtime-ops-command-center"],
+  opsNextActions: ["runtime-ops-next-actions"],
+  channelRuntimeTrace: (channelId: string) => ["channel-runtime-trace", channelId],
+  projectRuntimeTrace: (projectId: string) => ["project-runtime-trace", projectId],
+  packageOpsSummary: (packageId: string) => ["package-ops-summary", packageId],
+  uploadedVideoOpsSummary: (uploadedVideoId: string) => ["uploaded-video-ops-summary", uploadedVideoId],
+  diagnosticsQueue: ["diagnostics-queue"],
+  recoveryQueue: ["recovery-queue"],
+  learningOpsQueue: ["learning-ops-queue"],
+  memoryOpsQueue: ["memory-ops-queue"],
+  retrievalManifestOps: (manifestId: string) => ["retrieval-manifest-ops", manifestId],
+  memoryInfluenceOps: (manifestId: string) => ["memory-influence-ops", manifestId],
+  qualityDeltaOps: (qualityDeltaId: string) => ["quality-delta-ops", qualityDeltaId],
+  providerCostOps: (packageId: string) => ["provider-cost-ops", packageId]
 } as const;
 
 export function getCurrentUser() {
@@ -191,6 +214,58 @@ export function getUploadedVideoDashboard(uploadedVideoId: string) {
 
 export function getProviderOps() {
   return request<ProviderOps>("/providers/status");
+}
+
+export function getRuntimeOpsCommandCenter() {
+  return request<RuntimeOpsCommandCenter>("/ops/command-center");
+}
+
+export function getChannelRuntimeTrace(channelId: string) {
+  return request<ChannelRuntimeTrace>(`/channels/${channelId}/runtime-trace`);
+}
+
+export function getProjectRuntimeTrace(projectId: string) {
+  return request<ChannelRuntimeTrace>(`/video-projects/${projectId}/runtime-trace`);
+}
+
+export function getPackageOpsSummary(packageId: string) {
+  return request<PackageOpsSummary>(`/video-packages/${packageId}/ops-summary`);
+}
+
+export function getUploadedVideoOpsSummary(uploadedVideoId: string) {
+  return request<UploadedVideoOpsSummary>(`/uploaded-videos/${uploadedVideoId}/ops-summary`);
+}
+
+export function getDiagnosticsQueue() {
+  return request<OpsQueue>("/diagnostics/queue");
+}
+
+export function getRecoveryQueue() {
+  return request<OpsQueue>("/recovery/queue");
+}
+
+export function getLearningOpsQueue() {
+  return request<OpsQueue>("/learning/queue");
+}
+
+export function getMemoryOpsQueue() {
+  return request<OpsQueue>("/memory/review-queue/ops");
+}
+
+export function getRetrievalManifestOps(manifestId: string) {
+  return request<RetrievalManifestOps>(`/retrieval-manifests/${manifestId}`);
+}
+
+export function getMemoryInfluenceOps(manifestId: string) {
+  return request<MemoryInfluenceOps>(`/memory-influence/${manifestId}`);
+}
+
+export function getQualityDeltaOps(qualityDeltaId: string) {
+  return request<QualityDeltaOps>(`/quality-delta/${qualityDeltaId}`);
+}
+
+export function getProviderCostOps(packageId: string) {
+  return request<ProviderCostOps>(`/provider-cost/${packageId}`);
 }
 
 export function getIntegrationsReadiness() {
@@ -367,8 +442,8 @@ export async function initChannel(input: ChannelInitInput) {
     },
     media_policy: {
       voice_provider: "ElevenLabs",
-      ai_hero_provider: "Google Vertex Veo",
-      ai_hero_model_id: "veo-3.1-fast-generate-001",
+      ai_hero_provider: "Luma API",
+      ai_hero_model_id: "luma_api_video_only",
       ai_hero_allowed_durations_seconds: [4, 6, 8],
       ai_hero_default_duration_seconds: 8,
       ai_hero_audio: false,

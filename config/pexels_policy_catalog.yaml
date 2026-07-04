@@ -4,6 +4,7 @@ schema_version: "1.0.0"
 status: active
 items:
   - key: pexels_policy
+    provider_key: pexels_api
     provider_type: FREE_VISUAL_FALLBACK_PROVIDER
     allowed:
       - background_visual

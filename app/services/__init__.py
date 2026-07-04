@@ -115,6 +115,7 @@ from app.services.m2 import (
 from app.services.m10_2 import (
     AIHeroAssetPlanningService,
     AIHeroGenerationService,
+    LumaHeroVideoConfigService,
     GoogleVertexVeoConfigService,
     CreatomateRenderAssetPlanningService,
     FinalMediaRefService,
@@ -183,6 +184,7 @@ from app.services.m12 import (
     GoogleDriveReadinessCheck,
     GoogleVertexVeoReadinessCheck,
     IntegrationDashboardReadService,
+    LumaApiReadinessCheck,
     OllamaReadinessCheck,
     ProviderNextActionService,
     ProviderReadinessService,
@@ -191,6 +193,7 @@ from app.services.m12 import (
     YouTubeOwnerAnalyticsReadinessCheck,
     YouTubePublicReadinessCheck,
 )
+from app.services.dx2 import ProviderStackDriftGuard
 from app.services.m12_1r import MockRuntimePurgeService
 from app.services.m12_1 import (
     PromptRegistryRepository,
@@ -289,6 +292,21 @@ from app.services.cost_firewall import (
     RenderRevisionService,
     VisualSourceMixGate,
 )
+from app.services.r3d9 import (
+    ChannelRuntimeTraceService,
+    DiagnosticOpsService,
+    LearningOpsService,
+    MemoryInfluenceOpsService,
+    MemoryOpsReadModelService,
+    OperatorNextActionService,
+    PackageOpsSummaryService,
+    ProviderCostOpsService,
+    QualityDeltaOpsService,
+    RecoveryOpsService,
+    RetrievalOpsTraceService,
+    RuntimeDashboardService,
+    UploadedVideoOpsService,
+)
 
 __all__ = [
     "AuditService",
@@ -386,6 +404,7 @@ __all__ = [
     "validate_pexels_policy",
     "AIHeroAssetPlanningService",
     "AIHeroGenerationService",
+    "LumaHeroVideoConfigService",
     "GoogleVertexVeoConfigService",
     "CreatomateRenderAssetPlanningService",
     "FinalMediaRefService",
@@ -524,10 +543,25 @@ __all__ = [
     "VisualSourceMixGate",
     "ProxyPreviewGate",
     "ProviderBoundaryAuditService",
+    "RuntimeDashboardService",
+    "ChannelRuntimeTraceService",
+    "PackageOpsSummaryService",
+    "UploadedVideoOpsService",
+    "DiagnosticOpsService",
+    "RecoveryOpsService",
+    "LearningOpsService",
+    "MemoryOpsReadModelService",
+    "RetrievalOpsTraceService",
+    "MemoryInfluenceOpsService",
+    "QualityDeltaOpsService",
+    "ProviderCostOpsService",
+    "OperatorNextActionService",
+    "ProviderStackDriftGuard",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",
     "GoogleDriveReadinessCheck",
+    "LumaApiReadinessCheck",
     "GoogleVertexVeoReadinessCheck",
     "ElevenLabsReadinessCheck",
     "CreatomateReadinessCheck",

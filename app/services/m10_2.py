@@ -60,11 +60,6 @@ from app.db.models import (
     ThumbnailVariant,
     VideoProject,
 )
-from app.providers.google_vertex_veo import (
-    GoogleVertexVeoExecutionConfig,
-    GoogleVertexVeoProvider,
-    GoogleVertexVeoRequest,
-)
 
 
 WORKFLOW_ORCHESTRATOR = "WORKFLOW_ORCHESTRATOR"
@@ -83,6 +78,7 @@ DEFERRED_MANUAL_LIBRARY = "DEFERRED_MANUAL_LIBRARY"
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 GOOGLE_VERTEX_VEO_PROVIDER_KEY = "GOOGLE_VERTEX_VEO"
+LUMA_API_PROVIDER_KEY = "luma_api"
 
 LONG_FORM_FINAL_RENDER = "LONG_FORM_FINAL_RENDER"
 VOICE_JOBS = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
@@ -249,7 +245,7 @@ def _routing_policy() -> dict[str, dict[str, str]]:
 
 
 @dataclass(frozen=True)
-class GoogleVertexVeoResolvedConfig:
+class LumaHeroVideoResolvedConfig:
     provider_key: str
     model_id: str | None
     mode: str | None
@@ -276,78 +272,71 @@ class GoogleVertexVeoResolvedConfig:
         return self.model_id
 
 
-class GoogleVertexVeoConfigService:
+class LumaHeroVideoConfigService:
     def __init__(self, session: Session):
         self.session = session
 
-    def resolve(self) -> GoogleVertexVeoResolvedConfig:
+    def resolve(self) -> LumaHeroVideoResolvedConfig:
         settings = get_settings()
         role = self.session.scalars(
-            select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY)
+            select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == LUMA_API_PROVIDER_KEY)
         ).one_or_none()
-        seed = next((item for item in _provider_role_seeds() if item["provider_key"] == GOOGLE_VERTEX_VEO_PROVIDER_KEY), None)
+        seed = next((item for item in _provider_role_seeds() if item["provider_key"] == LUMA_API_PROVIDER_KEY), None)
         defaults = (role.monthly_budget_assumption if role else seed.get("monthly_budget_assumption") if seed else {}) or {}
         allowed_duration_seconds = _resolve_veo_allowed_duration_seconds(defaults.get("allowed_duration_seconds"))
         default_duration_seconds = _decimal_or_none(
-            settings.veo_default_duration_seconds
-            if settings.veo_default_duration_seconds is not None
+            settings.luma_default_duration_seconds
+            if settings.luma_default_duration_seconds is not None
             else defaults.get("default_duration_seconds")
         )
         max_duration_seconds = _decimal_or_none(
-            settings.veo_max_duration_seconds if settings.veo_max_duration_seconds is not None else defaults.get("max_duration_seconds")
+            settings.luma_max_duration_seconds if settings.luma_max_duration_seconds is not None else defaults.get("max_duration_seconds")
         )
-        model_id = _resolve_veo_model_id(settings.veo_model_id or defaults.get("model_id") or defaults.get("model"))
-        mode = settings.veo_mode or defaults.get("video_mode")
-        _validate_veo_resolved_defaults(
+        model_id = settings.luma_hero_model or defaults.get("model_id") or defaults.get("model")
+        mode = defaults.get("video_mode") or "video_only"
+        if mode != "video_only":
+            raise ValidationFailureError("Luma mode must be video_only")
+        if allowed_duration_seconds != tuple(Decimal(str(item)) for item in (4, 6, 8)):
+            raise ValidationFailureError("Luma allowed durations must be exactly [4, 6, 8]")
+        if default_duration_seconds not in {Decimal("4"), Decimal("6"), Decimal("8")}:
+            raise ValidationFailureError("Luma default duration must be one of 4, 6, 8 seconds")
+        if max_duration_seconds != Decimal("8"):
+            raise ValidationFailureError("Luma max duration must be 8 seconds")
+        return LumaHeroVideoResolvedConfig(
+            provider_key=role.provider_key if role else LUMA_API_PROVIDER_KEY,
             model_id=model_id,
             mode=mode,
+            resolution=defaults.get("resolution"),
+            audio_enabled=defaults.get("audio_enabled", False),
             allowed_duration_seconds=allowed_duration_seconds,
             default_duration_seconds=default_duration_seconds,
             max_duration_seconds=max_duration_seconds,
-        )
-        return GoogleVertexVeoResolvedConfig(
-            provider_key=role.provider_key if role else GOOGLE_VERTEX_VEO_PROVIDER_KEY,
-            model_id=model_id,
-            mode=mode,
-            resolution=settings.veo_resolution or defaults.get("resolution"),
-            audio_enabled=settings.veo_audio_enabled if settings.veo_audio_enabled is not None else defaults.get("audio_enabled"),
-            allowed_duration_seconds=allowed_duration_seconds,
-            default_duration_seconds=default_duration_seconds,
-            max_duration_seconds=max_duration_seconds,
-            cost_per_second_1080p=_decimal_or_none(
-                settings.veo_cost_per_second_1080p_video_only
-                if settings.veo_cost_per_second_1080p_video_only is not None
-                else defaults.get("cost_per_second_1080p_video_only", defaults.get("cost_per_second_1080p"))
-            ),
-            monthly_budget_usd=_decimal_or_none(
-                settings.veo_monthly_budget_usd if settings.veo_monthly_budget_usd is not None else defaults.get("monthly_budget_usd")
-            ),
-            project_id=settings.google_cloud_project_id,
-            location=settings.google_cloud_location,
-            service_account_path=settings.google_application_credentials,
-            real_execution_enabled=settings.veo_real_execution_enabled,
-            real_smoke_enabled=settings.veo_real_smoke,
+            cost_per_second_1080p=None,
+            monthly_budget_usd=None,
+            project_id=None,
+            location=None,
+            service_account_path=None,
+            real_execution_enabled=settings.luma_real_generation_enabled,
+            real_smoke_enabled=False,
         )
 
-    def readiness_reason_codes(self, config: GoogleVertexVeoResolvedConfig | None = None) -> list[str]:
+    def readiness_reason_codes(self, config: LumaHeroVideoResolvedConfig | None = None) -> list[str]:
         resolved = config or self.resolve()
         reasons: list[str] = []
-        if _normalized_ai_hero_provider(get_settings().ai_hero_provider) not in {None, GOOGLE_VERTEX_VEO_PROVIDER_KEY}:
+        if _normalized_ai_hero_provider(get_settings().ai_hero_provider) not in {None, LUMA_API_PROVIDER_KEY}:
             reasons.append("UNSUPPORTED_AI_HERO_PROVIDER")
-        if not resolved.model_id or not resolved.mode or not resolved.resolution:
-            reasons.append("VEO_CONFIG_MISSING")
-        if _veo_duration_block(resolved, resolved.default_duration_seconds) is not None:
-            reasons.append("VEO_DURATION_CONFIG_INVALID")
-        if resolved.cost_per_second_1080p is None:
-            reasons.append("VEO_COST_CONFIG_MISSING")
-        if resolved.real_execution_enabled:
-            if not resolved.project_id:
-                reasons.append("GOOGLE_CLOUD_PROJECT_ID_MISSING")
-            if not resolved.location:
-                reasons.append("GOOGLE_CLOUD_LOCATION_MISSING")
-            if not resolved.service_account_path:
-                reasons.append("GOOGLE_APPLICATION_CREDENTIALS_MISSING")
-        return reasons or ["VEO_PROVIDER_CONFIG_READY"]
+        if not resolved.model_id or not resolved.mode:
+            reasons.append("LUMA_CONFIG_MISSING")
+        if _luma_duration_block(resolved, resolved.default_duration_seconds) is not None:
+            reasons.append("LUMA_DURATION_CONFIG_INVALID")
+        return reasons or ["LUMA_PROVIDER_CONFIG_READY"]
+
+
+GoogleVertexVeoResolvedConfig = LumaHeroVideoResolvedConfig
+
+
+class GoogleVertexVeoConfigService(LumaHeroVideoConfigService):
+    """Compatibility wrapper: Veo is deferred; active AI hero config is Luma API."""
 
 
 class MediaProviderRoleService:
@@ -496,8 +485,8 @@ class MediaRenderJobRouterService:
                 technical_appendix={"reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED", **data.technical_appendix},
             )
         duration_block = _duration_block(entry, data.target_duration_seconds)
-        if duration_block is None and role.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY and job_type in AI_HERO_JOBS:
-            duration_block = _veo_duration_block(GoogleVertexVeoConfigService(self.session).resolve(), data.target_duration_seconds)
+        if duration_block is None and role.provider_key == LUMA_API_PROVIDER_KEY and job_type in AI_HERO_JOBS:
+            duration_block = _luma_duration_block(LumaHeroVideoConfigService(self.session).resolve(), data.target_duration_seconds)
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block:
             return self._record_decision(
@@ -681,8 +670,8 @@ class ProviderCapabilityGateService:
                 operator_summary=f"{role.provider_key} has no declared support for {job_type}.",
             )
         duration_block = _duration_block(entry, data.target_duration_seconds)
-        if duration_block is None and role.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY and job_type in AI_HERO_JOBS:
-            duration_block = _veo_duration_block(GoogleVertexVeoConfigService(self.session).resolve(), data.target_duration_seconds)
+        if duration_block is None and role.provider_key == LUMA_API_PROVIDER_KEY and job_type in AI_HERO_JOBS:
+            duration_block = _luma_duration_block(LumaHeroVideoConfigService(self.session).resolve(), data.target_duration_seconds)
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block or entry.capability != "SUPPORTED":
             reason = (
@@ -732,8 +721,8 @@ class MediaProviderBudgetService:
     def ensure_default_policies(self) -> list[MediaProviderBudgetPolicy]:
         records: list[MediaProviderBudgetPolicy] = []
         for seed in _default_budget_policy_seeds():
-            if seed["provider_key"] == GOOGLE_VERTEX_VEO_PROVIDER_KEY:
-                config = GoogleVertexVeoConfigService(self.session).resolve()
+            if seed["provider_key"] == LUMA_API_PROVIDER_KEY:
+                config = LumaHeroVideoConfigService(self.session).resolve()
                 if config.monthly_budget_usd is not None:
                     seed = {**seed, "monthly_cap_usd": config.monthly_budget_usd}
             policy = self.session.scalars(
@@ -832,11 +821,11 @@ class MediaProviderBudgetService:
     def _with_configured_cost_estimate(self, data: MediaProviderBudgetCheckRequest) -> MediaProviderBudgetCheckRequest:
         if (
             data.provider_type == AI_VIDEO_HERO_PROVIDER
-            and data.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY
+            and data.provider_key == LUMA_API_PROVIDER_KEY
             and data.estimated_usage_usd is None
             and data.estimated_usage_seconds is not None
         ):
-            estimated_cost = GoogleVertexVeoConfigService(self.session).resolve().estimate_cost(data.estimated_usage_seconds)
+            estimated_cost = LumaHeroVideoConfigService(self.session).resolve().estimate_cost(data.estimated_usage_seconds)
             if estimated_cost is not None:
                 return data.model_copy(update={"estimated_usage_usd": estimated_cost})
         return data
@@ -1095,7 +1084,7 @@ class AIHeroAssetPlanningService:
 
     def plan(self, *, video_project_id: uuid.UUID, data: AIHeroAssetPlanRequest) -> AIHeroAsset:
         project = _require_project(self.session, video_project_id)
-        config = GoogleVertexVeoConfigService(self.session).resolve()
+        config = LumaHeroVideoConfigService(self.session).resolve()
         duration_seconds = data.duration_seconds or config.default_duration_seconds
         estimated_cost = config.estimate_cost(duration_seconds)
         decision = MediaRenderJobRouterService(self.session).decide(
@@ -1140,9 +1129,8 @@ class AIHeroGenerationService:
         self.session = session
 
     def execute(self, *, asset_id: uuid.UUID, data: AIHeroGenerationExecuteRequest | None = None) -> AIHeroGenerationJobRead:
-        request_data = data or AIHeroGenerationExecuteRequest()
         asset = AIHeroAssetPlanningService(self.session).require(asset_id)
-        config_service = GoogleVertexVeoConfigService(self.session)
+        config_service = LumaHeroVideoConfigService(self.session)
         config = config_service.resolve()
         estimated_cost = config.estimate_cost(asset.duration_seconds)
         budget_gate = MediaProviderBudgetService(self.session).check(
@@ -1155,14 +1143,14 @@ class AIHeroGenerationService:
             )
         )
         readiness = config_service.readiness_reason_codes(config)
-        if asset.provider_key != GOOGLE_VERTEX_VEO_PROVIDER_KEY:
+        if asset.provider_key != LUMA_API_PROVIDER_KEY:
             return self._result(
                 asset=asset,
                 config=config,
                 estimated_cost=estimated_cost,
                 budget_gate=budget_gate,
                 reason_codes=["UNSUPPORTED_AI_HERO_PROVIDER"],
-                operator_summary="AI hero asset is not bound to Google Vertex Veo.",
+                operator_summary="AI hero asset is not bound to Luma API.",
             )
         if asset.generation_state not in {"READY_FOR_PROVIDER", "GENERATED"}:
             return self._result(
@@ -1173,7 +1161,7 @@ class AIHeroGenerationService:
                 reason_codes=["AI_HERO_ASSET_NOT_PROVIDER_READY"],
                 operator_summary="AI hero asset is not provider-ready.",
             )
-        blocking_readiness = [reason for reason in readiness if reason not in {"VEO_PROVIDER_CONFIG_READY"}]
+        blocking_readiness = [reason for reason in readiness if reason not in {"LUMA_PROVIDER_CONFIG_READY"}]
         if blocking_readiness and config.real_execution_enabled:
             return self._result(
                 asset=asset,
@@ -1181,7 +1169,7 @@ class AIHeroGenerationService:
                 estimated_cost=estimated_cost,
                 budget_gate=budget_gate,
                 reason_codes=blocking_readiness,
-                operator_summary="Veo real execution config is incomplete.",
+                operator_summary="Luma real execution config is incomplete.",
             )
         if budget_gate.decision != "PASS":
             return self._result(
@@ -1192,73 +1180,20 @@ class AIHeroGenerationService:
                 reason_codes=budget_gate.reason_codes,
                 operator_summary=budget_gate.operator_summary,
             )
-        if not config.real_execution_enabled or not config.real_smoke_enabled:
-            return self._result(
-                asset=asset,
-                config=config,
-                estimated_cost=estimated_cost,
-                budget_gate=budget_gate,
-                reason_codes=["VEO_REAL_EXECUTION_DISABLED"],
-                operator_summary="Veo provider binding is ready; real execution is disabled by env guard.",
-            )
-        if not config.model_id or not config.mode or not config.resolution or asset.duration_seconds is None:
-            return self._result(
-                asset=asset,
-                config=config,
-                estimated_cost=estimated_cost,
-                budget_gate=budget_gate,
-                reason_codes=["VEO_CONFIG_MISSING"],
-                operator_summary="Veo generation config is incomplete.",
-            )
-        response = GoogleVertexVeoProvider().generate_video(
-            request=GoogleVertexVeoRequest(
-                prompt=asset.prompt,
-                model=config.model_id,
-                mode=config.mode,
-                resolution=config.resolution,
-                duration_seconds=asset.duration_seconds,
-                audio_enabled=bool(config.audio_enabled),
-                output_gcs_uri=request_data.output_gcs_uri,
-            ),
-            config=GoogleVertexVeoExecutionConfig(
-                project_id=config.project_id,
-                location=config.location,
-                service_account_path=config.service_account_path,
-                real_execution_enabled=config.real_execution_enabled,
-                real_smoke_enabled=config.real_smoke_enabled,
-            ),
-        )
-        if not response.ok:
-            return self._result(
-                asset=asset,
-                config=config,
-                estimated_cost=estimated_cost,
-                budget_gate=budget_gate,
-                reason_codes=[response.error_code or "VEO_PROVIDER_ERROR"],
-                operator_summary=response.error_message or "Veo provider call failed.",
-                real_execution_attempted=True,
-            )
-        asset.asset_ref = response.output.get("asset_ref")
-        asset.still_frame_ref = response.output.get("still_frame_ref")
-        asset.rights_evidence_ref = f"provider://{GOOGLE_VERTEX_VEO_PROVIDER_KEY}/rights/provider-generated"
-        asset.generation_state = "GENERATED"
-        self.session.flush()
         return self._result(
             asset=asset,
             config=config,
             estimated_cost=estimated_cost,
             budget_gate=budget_gate,
-            reason_codes=["VEO_REAL_SMOKE_COMPLETED"],
-            operator_summary="Veo real smoke request completed.",
-            real_execution_attempted=True,
-            provider_operation_ref=response.output.get("operation_ref"),
+            reason_codes=["LUMA_REAL_EXECUTION_DISABLED"],
+            operator_summary="Luma API binding is provider-ready; DX2/R3D9-P0 does not call Luma.",
         )
 
     def _result(
         self,
         *,
         asset: AIHeroAsset,
-        config: GoogleVertexVeoResolvedConfig,
+        config: LumaHeroVideoResolvedConfig,
         estimated_cost: Decimal | None,
         budget_gate: MediaProviderBudgetGateRead | None,
         reason_codes: list[str],
@@ -1312,7 +1247,7 @@ class CreatomateRenderAssetPlanningService:
             template_key=data.template_key,
             input_payload=data.input_payload,
             output_ref=None,
-            provider_type=CLOUD_TEMPLATE_RENDERER_LIGHT,
+            provider_type=decision.selected_provider_type or CLOUD_FINAL_ASSEMBLY_RENDERER,
             provider_key=decision.selected_provider_key,
             render_state="READY_FOR_PROVIDER",
         )
@@ -1352,7 +1287,7 @@ class ThumbnailVariantPlanningService:
                 subtitle_text=item.subtitle_text,
                 hero_still_ref=item.hero_still_ref,
                 output_ref=None,
-                provider_type=CLOUD_TEMPLATE_RENDERER_LIGHT,
+                provider_type=decision.selected_provider_type or CLOUD_FINAL_ASSEMBLY_RENDERER,
                 provider_key=decision.selected_provider_key,
                 state="READY_FOR_PROVIDER" if decision.routing_result == "ROUTED" else "DRAFT",
             )
@@ -1399,9 +1334,10 @@ def _provider_key_for_job(job_type: str) -> str | None:
 
 def _route_reason_code(provider_type: str) -> str:
     return {
-        CLOUD_TEMPLATE_RENDERER_LIGHT: "CREATOMATE_LIGHT_RENDER_ROUTED",
+        CLOUD_TEMPLATE_RENDERER_LIGHT: "CREATOMATE_GROWTH_10K_RENDER_ROUTED",
+        CLOUD_FINAL_ASSEMBLY_RENDERER: "CREATOMATE_GROWTH_10K_RENDER_ROUTED",
         API_NATIVE_TTS: "ELEVENLABS_VOICE_ROUTED",
-        AI_VIDEO_HERO_PROVIDER: "AI_HERO_PROVIDER_ROUTED",
+        AI_VIDEO_HERO_PROVIDER: "LUMA_AI_HERO_PROVIDER_ROUTED",
     }.get(provider_type, "ROUTING_DECISION_CREATED")
 
 
@@ -1451,14 +1387,18 @@ def _duration_block(entry: ProviderCapabilityMatrixEntry, target_duration_second
     return None
 
 
-def _veo_duration_block(config: GoogleVertexVeoResolvedConfig, target_duration_seconds: Decimal | None) -> str | None:
+def _luma_duration_block(config: LumaHeroVideoResolvedConfig, target_duration_seconds: Decimal | None) -> str | None:
     if target_duration_seconds is None:
         return None
     allowed = set(config.allowed_duration_seconds)
     if target_duration_seconds not in allowed:
         formatted = ", ".join(str(int(item)) for item in config.allowed_duration_seconds)
-        return f"{config.provider_key} supports Veo durations exactly [{formatted}] seconds."
+        return f"{config.provider_key} supports Luma durations exactly [{formatted}] seconds."
     return None
+
+
+def _veo_duration_block(config: LumaHeroVideoResolvedConfig, target_duration_seconds: Decimal | None) -> str | None:
+    return _luma_duration_block(config, target_duration_seconds)
 
 
 def _aspect_block(entry: ProviderCapabilityMatrixEntry, target_aspect_ratio: str | None) -> str | None:
@@ -1483,7 +1423,7 @@ def _budget_state(policy: MediaProviderBudgetPolicy, data: MediaProviderBudgetCh
         return "UNKNOWN"
     if (
         policy.provider_type == AI_VIDEO_HERO_PROVIDER
-        and policy.provider_key == GOOGLE_VERTEX_VEO_PROVIDER_KEY
+        and policy.provider_key == LUMA_API_PROVIDER_KEY
         and policy.monthly_cap_usd is not None
         and data.estimated_usage_seconds is not None
         and data.estimated_usage_usd is None
@@ -1514,8 +1454,10 @@ def _normalized_ai_hero_provider(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip().lower().replace("-", "_")
+    if normalized in {"luma", "luma_api"}:
+        return LUMA_API_PROVIDER_KEY
     if normalized == "google_vertex_veo":
-        return GOOGLE_VERTEX_VEO_PROVIDER_KEY
+        return "google_vertex_veo"
     return value
 
 

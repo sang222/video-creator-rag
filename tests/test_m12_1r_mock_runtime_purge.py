@@ -76,12 +76,11 @@ def test_readiness_excludes_mock_providers(db_session) -> None:
         "youtube-public",
         "youtube-owner",
         "google-drive",
-        "google-vertex-veo",
         "elevenlabs",
-        "creatomate",
-        "cloud-final-renderer",
+        "luma_api",
+        "creatomate_growth_10k",
     }
-    assert payload.provider_summaries[-1].safe_config["provider"] == "creatomate"
+    assert payload.provider_summaries[-1].provider_key == "creatomate_growth_10k"
 
 
 def test_no_production_module_imports_runtime_mock_provider() -> None:

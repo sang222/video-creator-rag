@@ -563,3 +563,186 @@ export type BackfillUploadedVideoResult = {
   parsed_video_id: string;
   next_action: string;
 };
+
+export type OperatorNextAction = {
+  next_action_code: string;
+  next_action_label_vi: string;
+  allowed_actor_role: string;
+  blocking_reason_codes: string[];
+  target_url?: string | null;
+  action_ref?: Record<string, unknown> | null;
+  is_manual_only: boolean;
+};
+
+export type OpsCard = {
+  key: string;
+  entity_type: string;
+  entity_id?: string | null;
+  title: string;
+  status: string;
+  severity: string;
+  blocker_reason_codes: string[];
+  next_action: OperatorNextAction;
+  owner_role?: string | null;
+  link_target?: string | null;
+  updated_at?: string | null;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type RuntimeOpsCommandCenter = {
+  generated_at: string;
+  active_channels: OpsCard[];
+  packages_waiting_review: OpsCard[];
+  upload_tasks_waiting_human: OpsCard[];
+  uploaded_videos_waiting_verification_or_analytics: OpsCard[];
+  diagnostics_needing_review: OpsCard[];
+  recovery_proposals_needing_action: OpsCard[];
+  learning_candidates_needing_review: OpsCard[];
+  memory_approvals_needing_review: OpsCard[];
+  provider_cost_blockers: OpsCard[];
+  gate_failures: OpsCard[];
+  next_actions: OperatorNextAction[];
+  forbidden_actions: string[];
+  technical_appendix: Record<string, unknown>;
+};
+
+export type ChannelRuntimeTrace = {
+  channel_id: string;
+  video_project_id?: string | null;
+  package_id?: string | null;
+  channel_profile_version_id?: string | null;
+  compiled_policy_snapshot_id?: string | null;
+  channel_contract_hash?: string | null;
+  effective_context_snapshot_id: string;
+  context_hash: string;
+  category_id?: string | null;
+  character_binding_id?: string | null;
+  market_locale_language: Record<string, unknown>;
+  voice_profile: Record<string, unknown>;
+  thumbnail_style: Record<string, unknown>;
+  publish_timing_policy: Record<string, unknown>;
+  provider_boundary: Record<string, unknown>;
+  budget_cost_policy: Record<string, unknown>;
+  source_refs: Array<Record<string, unknown>>;
+  snapshot_refs: Record<string, unknown>;
+  latest_mutable_settings_used: boolean;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type PackageOpsSummary = {
+  package_id: string;
+  package_status: string;
+  video_project_id?: string | null;
+  channel_id: string;
+  effective_context_snapshot_id?: string | null;
+  effective_context_hash?: string | null;
+  agent_context_pack_refs: Array<Record<string, unknown>>;
+  prompt_budget_summary: Array<Record<string, unknown>>;
+  hook_first_3_seconds: Record<string, unknown>;
+  title_description_subtitles_disclosure: Record<string, unknown>;
+  thumbnail_handoff: Record<string, unknown>;
+  publish_timing_recommendation: Record<string, unknown>;
+  r3d4_deterministic_gate_results: Array<Record<string, unknown>>;
+  gatekeeper_soft_review_result?: Record<string, unknown> | null;
+  packaging_gate_results: Array<Record<string, unknown>>;
+  provider_boundary_summary: Record<string, unknown>;
+  manual_publish_handoff: Record<string, unknown>;
+  next_action: OperatorNextAction;
+  no_provider_media_upload_execution: boolean;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type UploadedVideoOpsSummary = {
+  uploaded_video_id: string;
+  platform: string;
+  platform_video_id: string;
+  platform_url: string;
+  backfill_history: Array<Record<string, unknown>>;
+  verification_status: string;
+  actual_upload_time?: string | null;
+  actual_publish_time?: string | null;
+  channel_timezone?: string | null;
+  operator_timezone?: string | null;
+  analytics_sync_status: string;
+  analytics_maturity: string;
+  analytics_confidence: string;
+  enforcement_restriction_flags: string[];
+  linked_package_project: Record<string, unknown>;
+  diagnostics: Array<Record<string, unknown>>;
+  recovery_proposal_refs: Array<Record<string, unknown>>;
+  learning_candidate_refs: Array<Record<string, unknown>>;
+  next_action: OperatorNextAction;
+  no_youtube_studio_scraping: boolean;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type OpsQueue<T = Record<string, unknown>> = {
+  generated_at: string;
+  items: T[];
+  prompt_eligibility_rule_vi?: string;
+};
+
+export type RetrievalManifestOps = {
+  manifest_id: string;
+  effective_context_snapshot_id: string;
+  agent_key: string;
+  use_case: string;
+  sql_filter: Record<string, unknown>;
+  candidate_count_before_vector: number;
+  candidate_count_after_policy: number;
+  selected_facets: Array<Record<string, unknown>>;
+  blocked_refs: Array<Record<string, unknown>>;
+  rejected_refs: Array<Record<string, unknown>>;
+  retrieval_hash: string;
+  digest_hash?: string | null;
+  raw_memory_hidden: boolean;
+  advanced_refs_collapsed_by_default: boolean;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type MemoryInfluenceOps = {
+  manifest_id: string;
+  video_project_id: string;
+  package_id?: string | null;
+  agent_key: string;
+  retrieval_manifest_id: string;
+  memory_facets_used: Array<Record<string, unknown>>;
+  digest_hash: string;
+  prompt_context_hash: string;
+  applied_as: Record<string, unknown>;
+  ignored_memory_refs: Array<Record<string, unknown>>;
+  blocked_memory_refs: Array<Record<string, unknown>>;
+  scope_status: string;
+  next_action: OperatorNextAction;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type QualityDeltaOps = {
+  quality_delta_id: string;
+  memory_facets_used: Array<Record<string, unknown>>;
+  expected_metric_family: string;
+  expected_direction: string;
+  baseline_snapshot?: Record<string, unknown> | null;
+  observed_snapshot?: Record<string, unknown> | null;
+  result: string;
+  confidence_delta: number;
+  reason_codes: string[];
+  next_action: OperatorNextAction;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type ProviderCostOps = {
+  package_id: string;
+  provider_readiness: Record<string, unknown>;
+  missing_config: string[];
+  render_revisions: Array<Record<string, unknown>>;
+  cost_estimates: Array<Record<string, unknown>>;
+  human_paid_render_approvals: Array<Record<string, unknown>>;
+  paid_attempt_limits: Array<Record<string, unknown>>;
+  provider_boundary_decisions: Array<Record<string, unknown>>;
+  paid_provider_call_ledger: Array<Record<string, unknown>>;
+  proxy_preview_flags: Array<Record<string, unknown>>;
+  will_execute: boolean;
+  next_action: OperatorNextAction;
+  technical_appendix: Record<string, unknown>;
+};

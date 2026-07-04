@@ -22,7 +22,7 @@ from app.contracts.m12 import (
     ProviderSummaryRead,
     RealSmokeRunRead,
 )
-from app.core.config import Settings, VEO_ALLOWED_DURATION_SECONDS, VEO_GA_MODEL_ID, VEO_MAX_DURATION_SECONDS, get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -32,10 +32,9 @@ from app.db.models import (
     RealSmokeRun,
     YouTubeMonitoringCredential,
 )
-from app.providers.google_vertex_veo import GoogleVertexVeoExecutionConfig, GoogleVertexVeoProvider, GoogleVertexVeoRequest
 from app.providers.ollama import OllamaLLMProvider
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
-from app.services.m10_2 import GoogleVertexVeoConfigService
+from app.services.m10_2 import LumaHeroVideoConfigService
 from app.services.m10_3 import (
     YouTubeMonitoringConfigService,
     YouTubeOAuthCredentialService,
@@ -58,10 +57,9 @@ PROVIDER_ORDER = (
     "youtube-public",
     "youtube-owner",
     "google-drive",
-    "google-vertex-veo",
     "elevenlabs",
-    "creatomate",
-    "cloud-final-renderer",
+    "luma_api",
+    "creatomate_growth_10k",
 )
 SECRET_KEY_FRAGMENTS = ("secret", "token", "api_key", "apikey", "password", "private", "credential", "authorization")
 RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "ya29.", "ghp_", "xoxb-", "client_secret")
@@ -184,34 +182,34 @@ class EnvConfigAuditService:
                 appendix={"credit_cap": self.integer(settings.elevenlabs_monthly_credit_cap, "credits/chars")},
             ),
             self._budget_card(
-                key="google-vertex-veo",
-                provider_name="Google Vertex Veo",
+                key="luma_api",
+                provider_name="Luma API",
                 role="AI hero video-only",
-                configured_plan=settings.veo_model_id or VEO_GA_MODEL_ID,
-                configured_monthly_cap=self.money(settings.veo_monthly_budget_usd),
-                budget_basis=f"{self.money(settings.veo_cost_per_second_1080p_video_only) or 'Chưa cấu hình'} / giây 1080p",
-                readiness_state=readiness.get("google-vertex-veo", "UNKNOWN"),
+                configured_plan=settings.luma_hero_model,
+                configured_monthly_cap=None,
+                budget_basis="provider_pricing_metadata_deferred",
+                readiness_state=readiness.get("luma_api", "UNKNOWN"),
                 missing_env_keys=_missing(
-                    ("VCOS_AI_HERO_PROVIDER", _normalized(settings.ai_hero_provider) == "google_vertex_veo"),
-                    ("VCOS_VEO_MONTHLY_CAP_USD", settings.veo_monthly_budget_usd is not None),
-                    ("VCOS_VEO_COST_PER_SECOND_1080P", settings.veo_cost_per_second_1080p_video_only is not None),
-                    ("VCOS_VEO_ALLOWED_DURATIONS", True),
-                    ("VCOS_VEO_MAX_DURATION_SECONDS", settings.veo_max_duration_seconds is not None),
+                    ("VCOS_AI_HERO_PROVIDER", _normalized(settings.ai_hero_provider) in {None, "luma_api"}),
+                    ("LUMA_HERO_MODEL", self.string_configured(settings.luma_hero_model)),
+                    ("LUMA_ALLOWED_DURATIONS", True),
+                    ("LUMA_MAX_DURATION_SECONDS", settings.luma_max_duration_seconds is not None),
                 ),
                 appendix={
-                    "allowed_durations": list(VEO_ALLOWED_DURATION_SECONDS),
-                    "default_duration_seconds": settings.veo_default_duration_seconds,
-                    "max_duration_seconds": settings.veo_max_duration_seconds,
+                    "allowed_durations": [4, 6, 8],
+                    "default_duration_seconds": settings.luma_default_duration_seconds,
+                    "max_duration_seconds": settings.luma_max_duration_seconds,
+                    "luma_max_duration_locked_at_8s": True,
                 },
             ),
             self._budget_card(
-                key="creatomate",
-                provider_name="Creatomate",
-                role="Shorts/cards/thumbnails; không phải renderer ráp video dài",
+                key="creatomate_growth_10k",
+                provider_name="Creatomate Growth 10K",
+                role="Final assembly + template/card/thumbnail/Shorts renderer",
                 configured_plan=settings.creatomate_plan,
                 configured_monthly_cap=self.money(settings.creatomate_monthly_budget_usd),
                 budget_basis="credits/renders",
-                readiness_state=readiness.get("creatomate", "UNKNOWN"),
+                readiness_state=readiness.get("creatomate_growth_10k", "UNKNOWN"),
                 missing_env_keys=_missing(
                     ("CREATOMATE_PLAN", self.string_configured(settings.creatomate_plan)),
                     ("CREATOMATE_MONTHLY_CREDITS", settings.creatomate_monthly_credits is not None),
@@ -591,81 +589,74 @@ class GoogleDriveReadinessCheck(_BaseReadinessCheck):
         return self.session.scalars(select(GoogleDriveMediaCredential).order_by(desc(GoogleDriveMediaCredential.updated_at)).limit(1)).one_or_none()
 
 
-class GoogleVertexVeoReadinessCheck(_BaseReadinessCheck):
-    provider_key = "google-vertex-veo"
-    provider_name = "Google Vertex Veo"
+class LumaApiReadinessCheck(_BaseReadinessCheck):
+    provider_key = "luma_api"
+    provider_name = "Luma API"
     provider_type = "AI_VIDEO_HERO_PROVIDER"
 
     def evaluate(self) -> list[ProviderCheckDraft]:
         try:
-            config = GoogleVertexVeoConfigService(self.session).resolve()
+            config = LumaHeroVideoConfigService(self.session).resolve()
             config_error = None
         except Exception as exc:
             config = None
             config_error = str(exc)
-        configured = config is not None and config.model_id == VEO_GA_MODEL_ID and list(config.allowed_duration_seconds) == [Decimal("4"), Decimal("6"), Decimal("8")]
-        env_missing = []
-        if config and config.real_execution_enabled:
-            env_missing = _missing(
-                ("GOOGLE_CLOUD_PROJECT_ID", bool(config.project_id)),
-                ("GOOGLE_CLOUD_LOCATION", bool(config.location)),
-                ("GOOGLE_APPLICATION_CREDENTIALS", bool(config.service_account_path)),
-            )
-        provider_selected = _normalized(self.settings.ai_hero_provider) in {None, "google_vertex_veo"}
+        configured = config is not None and list(config.allowed_duration_seconds) == [Decimal("4"), Decimal("6"), Decimal("8")]
+        provider_selected = _normalized(self.settings.ai_hero_provider) in {None, "luma_api"}
         audio_ok = config is not None and config.audio_enabled is False
-        max_ok = config is not None and config.max_duration_seconds == Decimal(str(VEO_MAX_DURATION_SECONDS))
+        max_ok = config is not None and config.max_duration_seconds == Decimal("8")
+        model_ok = bool(config and config.model_id)
         return [
             self._check(
                 "CONFIG",
-                "PASS" if configured and provider_selected and audio_ok and max_ok else "BLOCKED",
-                "Google Vertex Veo đã cấu hình đúng model/duration/audio guard." if configured and provider_selected and audio_ok and max_ok else "Veo config chưa đúng guard M10.4/M12.",
-                next_action=None if configured and provider_selected and audio_ok and max_ok else "Đặt model veo-3.1-fast-generate-001, duration 4/6/8, max 8, audio=false.",
-                reason_codes=("VEO_CONFIG_READY",) if configured and provider_selected and audio_ok and max_ok else ("VEO_CONFIG_MISSING_OR_INVALID",),
+                "PASS" if configured and provider_selected and audio_ok and max_ok and model_ok else "BLOCKED",
+                "Luma API đã cấu hình đúng model/duration guard." if configured and provider_selected and audio_ok and max_ok and model_ok else "Luma API thiếu model hoặc duration guard chưa đúng.",
+                next_action=None if configured and provider_selected and audio_ok and max_ok and model_ok else "Đặt VCOS_AI_HERO_PROVIDER=luma_api, LUMA_HERO_MODEL, duration 4/6/8, max 8.",
+                reason_codes=("LUMA_CONFIG_READY",) if configured and provider_selected and audio_ok and max_ok and model_ok else ("LUMA_CONFIG_MISSING_OR_INVALID",),
                 technical_appendix={
                     "config_error": config_error,
                     "model_id": config.model_id if config else None,
                     "allowed_durations": [str(item) for item in config.allowed_duration_seconds] if config else [],
                     "max_duration_seconds": str(config.max_duration_seconds) if config else None,
                     "audio_enabled": config.audio_enabled if config else None,
-                    "GOOGLE_APPLICATION_CREDENTIALS": _redacted_presence(config.service_account_path if config else None),
-                    "missing_env_keys": env_missing,
+                    "missing_env_keys": [] if model_ok else ["LUMA_HERO_MODEL"],
                 },
             ),
             self._check(
-                "BUDGET",
-                "PASS" if self.settings.veo_monthly_budget_usd is not None else "WARNING",
-                "Veo monthly cap hard-env đã hiển thị." if self.settings.veo_monthly_budget_usd is not None else "Veo monthly cap chưa cấu hình trong env.",
-                next_action=None if self.settings.veo_monthly_budget_usd is not None else "Thêm VCOS_VEO_MONTHLY_CAP_USD hoặc VCOS_VEO_MONTHLY_BUDGET_USD vào .env.",
-                reason_codes=("VEO_HARD_ENV_BUDGET_CONFIGURED",) if self.settings.veo_monthly_budget_usd is not None else ("VEO_HARD_ENV_BUDGET_MISSING",),
-                technical_appendix={"no_actual_usage_calculation": True},
+                "CAPABILITY",
+                "PASS",
+                "Luma API chỉ là AI hero provider; max duration khóa 8s.",
+                reason_codes=("LUMA_VIDEO_ONLY_4_6_8_MAX_8",),
+                technical_appendix={"allowed_durations": [4, 6, 8], "max_duration_seconds": 8, "no_luma_call": True},
             ),
             self._check(
                 "REAL_SMOKE",
-                "SKIPPED" if not (config and config.real_execution_enabled and config.real_smoke_enabled) else ("BLOCKED" if env_missing else "UNKNOWN"),
-                "Veo smoke bị bỏ qua theo env guard." if not (config and config.real_execution_enabled and config.real_smoke_enabled) else "Veo real smoke đã bật; cần credential/project trước khi gọi.",
-                next_action="Chỉ bật VCOS_VEO_REAL_EXECUTION_ENABLED=true và VCOS_VEO_REAL_SMOKE=true khi đã sẵn sàng chịu chi phí."
-                if not (config and config.real_execution_enabled and config.real_smoke_enabled)
-                else ("Bổ sung Google project/location/service account." if env_missing else "Chạy smoke Veo có guard."),
-                reason_codes=("VEO_SMOKE_SKIPPED",) if not (config and config.real_execution_enabled and config.real_smoke_enabled) else ("VEO_REAL_EXECUTION_CONFIG_MISSING",) if env_missing else ("VEO_SMOKE_READY_TO_RUN",),
-                technical_appendix={"real_execution_enabled": bool(config and config.real_execution_enabled), "real_smoke_enabled": bool(config and config.real_smoke_enabled)},
+                "SKIPPED",
+                "Luma generation smoke bị bỏ qua; DX2/R3D9-P0 không gọi Luma.",
+                next_action="Không bật Luma generation trong DX2/R3D9-P0.",
+                reason_codes=("LUMA_SMOKE_SKIPPED_NO_GENERATION",),
+                technical_appendix={"real_execution_enabled": bool(config and config.real_execution_enabled), "no_luma_generation": True},
             ),
         ]
 
     def safe_config(self) -> dict[str, Any]:
         try:
-            config = GoogleVertexVeoConfigService(self.session).resolve()
+            config = LumaHeroVideoConfigService(self.session).resolve()
         except Exception:
-            return {"configured": False, "service_account_path": "[REDACTED_PATH]"}
+            return {"configured": False}
         return {
             "model_id": config.model_id,
             "duration_rules": "4,6,8; max 8s",
             "audio_enabled": config.audio_enabled,
-            "project_configured": bool(config.project_id),
-            "location_configured": bool(config.location),
-            "service_account_path": _redacted_presence(config.service_account_path),
             "real_execution_enabled": config.real_execution_enabled,
-            "real_smoke": config.real_smoke_enabled,
+            "real_smoke": False,
+            "no_luma_generation": True,
         }
+
+
+class GoogleVertexVeoReadinessCheck(LumaApiReadinessCheck):
+    provider_key = "google-vertex-veo"
+    provider_name = "Google Vertex Veo (deferred compatibility)"
 
 
 class ElevenLabsReadinessCheck(_BaseReadinessCheck):
@@ -725,9 +716,9 @@ class ElevenLabsReadinessCheck(_BaseReadinessCheck):
 
 
 class CreatomateReadinessCheck(_BaseReadinessCheck):
-    provider_key = "creatomate"
-    provider_name = "Creatomate"
-    provider_type = "CLOUD_TEMPLATE_RENDERER_LIGHT"
+    provider_key = "creatomate_growth_10k"
+    provider_name = "Creatomate Growth 10K"
+    provider_type = "CLOUD_FINAL_ASSEMBLY_RENDERER"
 
     def evaluate(self) -> list[ProviderCheckDraft]:
         key_configured = self.env.secret_configured(self.settings.creatomate_api_key)
@@ -748,11 +739,12 @@ class CreatomateReadinessCheck(_BaseReadinessCheck):
             self._check(
                 "CAPABILITY",
                 "PASS",
-                "Creatomate giữ vai trò shorts/cards/thumbnails; không phải renderer ráp video dài trong M12.",
-                reason_codes=("CREATOMATE_LIGHT_RENDERER_ONLY",),
+                "Creatomate Growth 10K là final assembly + template/card/thumbnail/Shorts renderer.",
+                reason_codes=("CREATOMATE_GROWTH_10K_RENDER_STACK",),
                 technical_appendix={
-                    "role": "CLOUD_TEMPLATE_RENDERER_LIGHT",
-                    "not_final_long_form_renderer": True,
+                    "role": "CLOUD_FINAL_ASSEMBLY_RENDERER",
+                    "final_assembly_renderer": True,
+                    "template_card_thumbnail_shorts_renderer": True,
                     "final_renderer_execution_added": False,
                 },
             ),
@@ -779,8 +771,9 @@ class CreatomateReadinessCheck(_BaseReadinessCheck):
         return {
             "api_key_configured": api_key_configured,
             "plan": self.settings.creatomate_plan,
-            "role": "Shorts/cards/thumbnails",
-            "not_final_long_form_renderer": True,
+            "role": "final assembly + template/card/thumbnail/Shorts",
+            "final_assembly_renderer": True,
+            "template_card_thumbnail_shorts_renderer": True,
             "real_render_added": False,
         }
 
@@ -959,10 +952,9 @@ class ProviderReadinessService:
             YouTubePublicReadinessCheck(self.session, self.settings, self.redactor),
             YouTubeOwnerAnalyticsReadinessCheck(self.session, self.settings, self.redactor),
             GoogleDriveReadinessCheck(self.session, self.settings, self.redactor),
-            GoogleVertexVeoReadinessCheck(self.session, self.settings, self.redactor),
             ElevenLabsReadinessCheck(self.session, self.settings, self.redactor),
+            LumaApiReadinessCheck(self.session, self.settings, self.redactor),
             CreatomateReadinessCheck(self.session, self.settings, self.redactor),
-            CloudFinalRendererReadinessCheck(self.session, self.settings, self.redactor),
         ]
 
 
@@ -1025,10 +1017,9 @@ class RealSmokeOrchestratorService:
             "youtube-public": self._youtube_public,
             "youtube-owner": self._youtube_owner,
             "google-drive": self._google_drive,
-            "google-vertex-veo": self._google_vertex_veo,
             "elevenlabs": self._elevenlabs,
-            "creatomate": self._creatomate,
-            "cloud-final-renderer": self._cloud_final_renderer,
+            "luma_api": self._luma_api,
+            "creatomate_growth_10k": self._creatomate,
         }[provider_key]()
 
     def _ollama(self) -> dict[str, Any]:
@@ -1180,43 +1171,23 @@ class RealSmokeOrchestratorService:
             },
         )
 
-    def _google_vertex_veo(self) -> dict[str, Any]:
+    def _luma_api(self) -> dict[str, Any]:
         try:
-            config = GoogleVertexVeoConfigService(self.session).resolve()
+            config = LumaHeroVideoConfigService(self.session).resolve()
         except Exception as exc:
-            return _smoke_result("BLOCKED", "Veo config invalid nên không chạy smoke.", env_flags={}, error_code="VEO_CONFIG_INVALID", error_message=str(exc))
+            return _smoke_result("BLOCKED", "Luma config invalid nên không chạy smoke.", env_flags={}, error_code="LUMA_CONFIG_INVALID", error_message=str(exc))
         flags = {
-            "VCOS_VEO_REAL_EXECUTION_ENABLED": config.real_execution_enabled,
-            "VCOS_VEO_REAL_SMOKE": config.real_smoke_enabled,
-            "GOOGLE_CLOUD_PROJECT_ID_CONFIGURED": bool(config.project_id),
-            "GOOGLE_CLOUD_LOCATION_CONFIGURED": bool(config.location),
-            "GOOGLE_APPLICATION_CREDENTIALS_CONFIGURED": bool(config.service_account_path),
+            "VCOS_LUMA_REAL_GENERATION_ENABLED": config.real_execution_enabled,
+            "LUMA_HERO_MODEL_CONFIGURED": bool(config.model_id),
+            "LUMA_MAX_DURATION_SECONDS": str(config.max_duration_seconds),
         }
-        if not config.real_execution_enabled or not config.real_smoke_enabled:
-            return _smoke_result("SKIPPED", "Veo smoke bị bỏ qua vì env guard đang tắt.", env_flags=flags, reason="VEO_SMOKE_SKIPPED")
-        if not config.project_id or not config.location or not config.service_account_path:
-            return _smoke_result("BLOCKED", "Veo smoke thiếu Google project/location/service account.", env_flags=flags, error_code="VEO_REAL_EXECUTION_CONFIG_MISSING")
-        response = GoogleVertexVeoProvider().generate_video(
-            request=GoogleVertexVeoRequest(
-                prompt="VCOS readiness smoke: abstract operator dashboard pulse, no brand, no people.",
-                model=config.model_id or VEO_GA_MODEL_ID,
-                mode=config.mode or "video_only",
-                resolution=config.resolution or "1080p",
-                duration_seconds=Decimal("4"),
-                audio_enabled=False,
-                output_gcs_uri=None,
-            ),
-            config=GoogleVertexVeoExecutionConfig(
-                project_id=config.project_id,
-                location=config.location,
-                service_account_path=config.service_account_path,
-                real_execution_enabled=config.real_execution_enabled,
-                real_smoke_enabled=config.real_smoke_enabled,
-            ),
+        return _smoke_result(
+            "SKIPPED",
+            "Luma smoke bị bỏ qua; DX2/R3D9-P0 không gọi Luma API.",
+            env_flags=flags,
+            reason="LUMA_SMOKE_SKIPPED_NO_GENERATION",
+            technical_appendix={"no_luma_generation": True},
         )
-        if not response.ok:
-            return _smoke_result("FAILED", "Veo guarded smoke thất bại.", env_flags=flags, error_code=response.error_code, error_message=response.error_message)
-        return _smoke_result("PASS", "Veo guarded smoke đã gửi request tối thiểu.", env_flags=flags, technical_appendix={"operation_ref_present": bool(response.output.get("operation_ref"))})
 
     def _elevenlabs(self) -> dict[str, Any]:
         flags = {
@@ -1235,7 +1206,13 @@ class RealSmokeOrchestratorService:
             "CREATOMATE_API_KEY_CONFIGURED": self.env.secret_configured(self.settings.creatomate_api_key),
         }
         if not self.settings.creatomate_real_account_smoke:
-            return _smoke_result("SKIPPED", "Creatomate smoke bị bỏ qua; không render mặc định.", env_flags=flags, reason="CREATOMATE_SMOKE_SKIPPED")
+            return _smoke_result(
+                "SKIPPED",
+                "Creatomate smoke bị bỏ qua; không render mặc định.",
+                env_flags=flags,
+                reason="CREATOMATE_SMOKE_SKIPPED",
+                technical_appendix={"real_render_added": False, "provider_key": "creatomate_growth_10k"},
+            )
         if not self.env.secret_configured(self.settings.creatomate_api_key):
             return _smoke_result("BLOCKED", "Thiếu Creatomate API key.", env_flags=flags, error_code="CREATOMATE_API_KEY_MISSING")
         return _smoke_result("SKIPPED", "Chưa có adapter account/template-check an toàn; M12 không render thật.", env_flags=flags, reason="CREATOMATE_ADAPTER_NOT_AVAILABLE")
@@ -1297,9 +1274,10 @@ def _provider_key(value: str) -> str:
         "youtube-owner-analytics": "youtube-owner",
         "drive": "google-drive",
         "google-drive-offload": "google-drive",
-        "veo": "google-vertex-veo",
-        "google-vertex": "google-vertex-veo",
-        "cloud-final": "cloud-final-renderer",
+        "luma": "luma_api",
+        "luma-api": "luma_api",
+        "creatomate": "creatomate_growth_10k",
+        "creatomate-growth-10k": "creatomate_growth_10k",
     }
     return aliases.get(normalized, normalized)
 

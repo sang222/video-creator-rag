@@ -254,7 +254,7 @@ def test_m2_m12_media_boundary_still_blocks_safely_with_empty_keys(db_session) -
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
     assert boundary.no_provider_calls_confirmed is True
     assert boundary.provider_readiness["elevenlabs"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
-    assert boundary.provider_readiness["creatomate"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
+    assert boundary.provider_readiness["creatomate_growth_10k"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
     assert boundary.provider_readiness["luma_api"]["required"] is False
     assert db_session.query(VideoGenerationBoundary).count() == 1
     assert db_session.query(ProviderAttempt).count() == 0

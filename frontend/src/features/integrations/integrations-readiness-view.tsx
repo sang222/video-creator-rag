@@ -16,10 +16,9 @@ const providerOrder = [
   "youtube-public",
   "youtube-owner",
   "google-drive",
-  "google-vertex-veo",
   "elevenlabs",
-  "creatomate",
-  "cloud-final-renderer"
+  "luma_api",
+  "creatomate_growth_10k"
 ];
 
 export function IntegrationsReadinessView() {
@@ -338,10 +337,9 @@ function roleCopy(summary: ProviderSummary) {
     "youtube-public": "Theo dõi thống kê công khai, độ tin cậy học yếu",
     "youtube-owner": "Analytics chủ sở hữu qua OAuth, độ tin cậy học mạnh",
     "google-drive": "Offload media qua quyền drive.file",
-    "google-vertex-veo": "Video AI hero, thời lượng 4/6/8 giây, không âm thanh",
     elevenlabs: "Nhà cung cấp giọng đọc theo gói Creator",
-    creatomate: "Shorts, card và thumbnail; không ráp video dài",
-    "cloud-final-renderer": "Thiếu renderer ráp video dài"
+    luma_api: "AI hero/metaphor, thời lượng 4/6/8 giây, không âm thanh",
+    creatomate_growth_10k: "Final assembly, template, card, thumbnail và Shorts"
   };
   return role[summary.provider_key] ?? "Nhà cung cấp đã cấu hình";
 }
@@ -366,24 +364,18 @@ function safeFields(summary: ProviderSummary) {
       { label: "Kết nối", value: yesNo(config.connected) },
       { label: "Thư mục gốc", value: yesNo(config.root_folder_configured) }
     ],
-    "google-vertex-veo": [
-      { label: "Model", value: String(config.model_id ?? "veo-3.1-fast-generate-001") },
+    luma_api: [
+      { label: "Model", value: String(config.model_id ?? "Luma API") },
       { label: "Quy tắc thời lượng", value: durationRulesLabel(config.duration_rules) }
     ],
     elevenlabs: [
       { label: "Khóa API", value: yesNo(config.api_key_configured) },
       { label: "Cơ sở ngân sách", value: String(config.budget_basis ?? "credits/characters") }
     ],
-    creatomate: [
+    creatomate_growth_10k: [
       { label: "Khóa API", value: yesNo(config.api_key_configured) },
       { label: "Vai trò", value: creatomateRoleLabel(config.role) },
-      { label: "Renderer video dài", value: config.not_final_long_form_renderer ? "Không dùng" : "Chưa có dữ liệu" }
-    ],
-    "cloud-final-renderer": [
-      { label: "Nhà cung cấp", value: providerNameLabel(config.provider) },
-      { label: "Trạng thái", value: providerStateLabel(config.status) },
-      { label: "Video dài", value: config.long_form_final_render_blocked ? "Đang bị chặn" : "Chưa có dữ liệu" },
-      { label: "Việc tiếp theo", value: String(config.next_action ?? "Chọn renderer ráp video dài sau") }
+      { label: "Renderer video dài", value: config.final_assembly_renderer ? "Creatomate Growth 10K" : "Chưa cấu hình" }
     ]
   };
   return fields[summary.provider_key] ?? [{ label: "Loại nhà cung cấp", value: "Chưa có dữ liệu" }];
@@ -396,24 +388,4 @@ function durationRulesLabel(value: unknown) {
 function creatomateRoleLabel(value: unknown) {
   const raw = String(value ?? "");
   return raw ? raw.replaceAll("/", ", ") : "Shorts, card, thumbnail";
-}
-
-function providerNameLabel(value: unknown) {
-  const raw = String(value ?? "");
-  return {
-    creatomate: "Creatomate",
-    not_selected: "Chưa chọn"
-  }[raw] ?? (raw ? "Nhà cung cấp đã cấu hình" : "Chưa cấu hình");
-}
-
-function providerStateLabel(value: unknown) {
-  return {
-    READY: "Đã sẵn sàng",
-    PASS: "Đã sẵn sàng",
-    READY_FOR_SMOKE: "Sẵn sàng kiểm tra",
-    CONFIGURED: "Đã cấu hình",
-    NEEDS_CONFIG: "Cần cấu hình",
-    BLOCKED: "Đang bị chặn",
-    REQUIRED_GAP: "Thiếu renderer"
-  }[String(value ?? "NEEDS_CONFIG").toUpperCase()] ?? "Chưa có dữ liệu";
 }

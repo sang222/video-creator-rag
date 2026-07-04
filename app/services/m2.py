@@ -17,6 +17,7 @@ from app.contracts.m2 import (
 from app.core.config import Settings, get_settings
 from app.core.time import utc_now
 from app.services.r3d3 import stable_hash
+from app.services.provider_stack import normalize_provider_key, provider_key_rejection_reasons
 
 
 LOCKED_PROVIDERS = {
@@ -34,6 +35,7 @@ PAID_CAPABILITIES = {
     "TEMPLATE_RENDER",
     "CARD_RENDER",
     "THUMBNAIL_COMPOSITION",
+    "SHORT_RENDER",
 }
 
 PEXELS_ALLOWED_ROLES = ["background_visual", "short_broll", "thumbnail_background", "mood_support"]
@@ -124,8 +126,8 @@ class ProviderCapabilityMatrix:
                 provider_key="creatomate_growth_10k",
                 provider_name="Creatomate Growth 10K",
                 provider_type="CLOUD_FINAL_ASSEMBLY_RENDERER",
-                capabilities=["FINAL_ASSEMBLY_RENDER", "TEMPLATE_RENDER", "CARD_RENDER", "THUMBNAIL_COMPOSITION"],
-                requires=["API key", "template id", "workspace id"],
+                capabilities=["FINAL_ASSEMBLY_RENDER", "TEMPLATE_RENDER", "CARD_RENDER", "THUMBNAIL_COMPOSITION", "SHORT_RENDER"],
+                requires=["API key", "default MVP template id", "workspace id"],
                 future_execution="R3D8 only",
                 no_call_in_m2=True,
             ),
@@ -480,13 +482,13 @@ class ProviderBoundaryPreflight:
         paid_attempt_limit_ref: str | None = None,
         usage_metrics: dict[str, Any] | None = None,
     ) -> ProviderBoundaryPreflightResultRead:
-        provider_key = _norm(provider_key) or provider_key
+        provider_key = _norm(provider_key) or str(provider_key)
         payload = payload or {}
         usage_metrics = usage_metrics or {}
         providers = self.readiness.provider_map()
         provider = providers.get(provider_key)
-        reason_codes: list[str] = []
-        if provider is None or provider.readiness_state not in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}:
+        reason_codes: list[str] = provider_key_rejection_reasons(provider_key)
+        if not reason_codes and (provider is None or provider.readiness_state not in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}):
             reason_codes.append("BLOCKED_PROVIDER_NOT_CONFIGURED")
             if provider is not None:
                 reason_codes.extend(provider.blocker_reason_codes)
@@ -816,10 +818,7 @@ def _present(value: Any) -> bool:
 
 
 def _norm(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip().lower().replace("-", "_")
-    return text or None
+    return normalize_provider_key(value)
 
 
 def _int(value: Any) -> int:

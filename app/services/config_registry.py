@@ -11,7 +11,16 @@ from sqlalchemy.orm import Session
 
 from app.contracts.config_catalog import CatalogDocument
 from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
-from app.core.config import VEO_ALLOWED_DURATION_SECONDS, VEO_DEFAULT_DURATION_SECONDS, VEO_GA_MODEL_ID, VEO_MAX_DURATION_SECONDS, VEO_VIDEO_ONLY_MODE
+from app.core.config import (
+    LUMA_ALLOWED_DURATION_SECONDS,
+    LUMA_DEFAULT_DURATION_SECONDS,
+    LUMA_MAX_DURATION_SECONDS,
+    VEO_ALLOWED_DURATION_SECONDS,
+    VEO_DEFAULT_DURATION_SECONDS,
+    VEO_GA_MODEL_ID,
+    VEO_MAX_DURATION_SECONDS,
+    VEO_VIDEO_ONLY_MODE,
+)
 from app.core.errors import ConfigVersionConflictError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import ConfigCatalogVersion, Role
@@ -204,6 +213,7 @@ class MediaProviderRoutingPolicyCatalogItem(BaseModel):
 
 class PexelsPolicyCatalogItem(BaseModel):
     key: str
+    provider_key: str | None = None
     provider_type: str
     allowed: list[str] = Field(default_factory=list)
     blocked: list[str] = Field(default_factory=list)
@@ -529,6 +539,15 @@ class ConfigRegistryService:
     def _validate_media_provider_catalog_item(self, catalog_key: str, parsed: BaseModel) -> None:
         if catalog_key == "media_provider_role_profile_catalog":
             provider_key = getattr(parsed, "provider_key", None)
+            if provider_key == "luma_api":
+                assumption = getattr(parsed, "monthly_budget_assumption", {})
+                if assumption.get("allowed_duration_seconds") != list(LUMA_ALLOWED_DURATION_SECONDS):
+                    raise ValidationFailureError("luma_api allowed durations must be exactly [4, 6, 8]")
+                if assumption.get("default_duration_seconds") != LUMA_DEFAULT_DURATION_SECONDS:
+                    raise ValidationFailureError("luma_api default duration must be 8")
+                if assumption.get("max_duration_seconds") != LUMA_MAX_DURATION_SECONDS:
+                    raise ValidationFailureError("luma_api max duration must be 8")
+                return
             if provider_key != "GOOGLE_VERTEX_VEO":
                 return
             assumption = getattr(parsed, "monthly_budget_assumption", {})
@@ -554,6 +573,9 @@ class ConfigRegistryService:
         if catalog_key == "media_provider_capability_matrix_catalog":
             provider_key = getattr(parsed, "provider_key", None)
             job_type = getattr(parsed, "job_type", None)
+            if provider_key == "luma_api" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
+                if getattr(parsed, "max_duration_seconds", None) != LUMA_MAX_DURATION_SECONDS:
+                    raise ValidationFailureError("luma_api capability max duration must be 8")
             if provider_key == "GOOGLE_VERTEX_VEO" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
                 if getattr(parsed, "max_duration_seconds", None) != VEO_MAX_DURATION_SECONDS:
                     raise ValidationFailureError("GOOGLE_VERTEX_VEO capability max duration must be 8")

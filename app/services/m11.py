@@ -451,10 +451,10 @@ class M11DashboardService:
             manual_actions=manual_actions,
             integrations={
                 "ollama_router": {"state": _state_from_count(self._count_provider_key_like("ollama"), "DISABLED", "CONFIGURED")},
-                "google_vertex_veo": {"state": _state_from_count(self._count_provider_key_like("GOOGLE_VERTEX_VEO"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
+                "luma_api": {"state": _state_from_count(self._count_provider_key_like("luma_api"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
+                "creatomate_growth_10k": {"state": _state_from_count(self._count_provider_key_like("creatomate_growth_10k"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
                 "google_drive": {"state": "CONNECTED" if not self._drive_auth_needed() else "NEEDS_AUTH"},
                 "youtube_analytics": {"state": "CONNECTED" if not self._youtube_auth_needed() else "NEEDS_AUTH"},
-                "cloud_final_renderer": {"state": self._cloud_final_renderer_state()},
             },
             safety_warnings=_safety_warnings(),
         )

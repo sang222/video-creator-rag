@@ -65,53 +65,53 @@ items:
     reason_code: ROUTING_DECISION_CREATED
   - key: THUMBNAIL_RENDER
     job_type: THUMBNAIL_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: SHORT_RENDER
     job_type: SHORT_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: TITLE_CARD_RENDER
     job_type: TITLE_CARD_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: DIAGRAM_CARD_RENDER
     job_type: DIAGRAM_CARD_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: STAT_CARD_RENDER
     job_type: STAT_CARD_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: LOWER_THIRD_RENDER
     job_type: LOWER_THIRD_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: HERO_COMPOSITION_RENDER
     job_type: HERO_COMPOSITION_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: PREVIEW_CLIP_RENDER
     job_type: PREVIEW_CLIP_RENDER
-    provider_key: creatomate_essential_2k
-    reason_code: CREATOMATE_LIGHT_RENDER_ROUTED
+    provider_key: creatomate_growth_10k
+    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
   - key: LONG_VOICE_GENERATION
     job_type: LONG_VOICE_GENERATION
-    provider_key: elevenlabs_flash_turbo
+    provider_key: elevenlabs
     reason_code: ELEVENLABS_VOICE_ROUTED
   - key: SHORT_VOICE_GENERATION
     job_type: SHORT_VOICE_GENERATION
-    provider_key: elevenlabs_flash_turbo
+    provider_key: elevenlabs
     reason_code: ELEVENLABS_VOICE_ROUTED
   - key: VOICE_GENERATION
     job_type: VOICE_GENERATION
-    provider_key: elevenlabs_flash_turbo
+    provider_key: elevenlabs
     reason_code: ELEVENLABS_VOICE_ROUTED
   - key: AI_HERO_GENERATION
     job_type: AI_HERO_GENERATION
-    provider_key: GOOGLE_VERTEX_VEO
-    reason_code: AI_HERO_PROVIDER_ROUTED
+    provider_key: luma_api
+    reason_code: LUMA_AI_HERO_PROVIDER_ROUTED
   - key: AI_METAPHOR_GENERATION
     job_type: AI_METAPHOR_GENERATION
-    provider_key: GOOGLE_VERTEX_VEO
-    reason_code: AI_HERO_PROVIDER_ROUTED
+    provider_key: luma_api
+    reason_code: LUMA_AI_HERO_PROVIDER_ROUTED

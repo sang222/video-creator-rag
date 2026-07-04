@@ -1,4 +1,5 @@
 import copy
+import uuid
 
 import pytest
 from sqlalchemy import func, select
@@ -40,7 +41,8 @@ REQUIRED_SECTIONS = {
 
 
 def _channel(db_session):
-    company = CompanyService(db_session).create_company(name="Acme")
+    suffix = uuid.uuid4().hex[:8]
+    company = CompanyService(db_session).create_company(name=f"Acme {suffix}", slug=f"acme-{suffix}")
     return ChannelWorkspaceService(db_session).create_channel(
         company_id=company.id,
         data=ChannelWorkspaceCreate(key="main", name="Main"),

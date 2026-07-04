@@ -217,8 +217,8 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
         "ProviderReadinessSummaryAgent": {
             "providers": {
                 "elevenlabs": "NEEDS_CREDENTIAL",
-                "creatomate": "NEEDS_CREDENTIAL",
-                "veo": "NOT_CONFIGURED_OPTIONAL",
+                "creatomate_growth_10k": "NEEDS_CREDENTIAL",
+                "luma_api": "NOT_CONFIGURED_OPTIONAL",
             }
         },
         "MediaQCExplanationAgent": {
@@ -275,12 +275,12 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
     assert boundary.no_provider_calls_confirmed is True
     assert boundary.provider_readiness["elevenlabs"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
-    assert boundary.provider_readiness["creatomate"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
-    assert boundary.provider_readiness["veo"]["required"] is False
+    assert boundary.provider_readiness["creatomate_growth_10k"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
+    assert boundary.provider_readiness["luma_api"]["required"] is False
     assert boundary.operator_summary_vi == (
         "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
     )
-    assert boundary.next_action == "Cấu hình Creatomate và ElevenLabs trước; Veo là optional cho hero shot."
+    assert boundary.next_action == "Cấu hình ElevenLabs và Creatomate Growth 10K; Luma API chỉ là AI hero optional và không được gọi trong VCOS."
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
     assert db_session.query(RealSmokeRun).count() == 0
@@ -382,7 +382,9 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key == "OLLAMA").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert db_session.query(LLMRunSnapshot).filter(LLMRunSnapshot.provider == "ollama").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
-    forbidden_attempts = db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key.in_(["ELEVENLABS", "CREATOMATE", "GOOGLE_VERTEX_VEO", "GOOGLE_DRIVE", "YOUTUBE"])).all()
+    forbidden_attempts = db_session.query(ProviderAttempt).filter(
+        ProviderAttempt.provider_key.in_(["ELEVENLABS", "CREATOMATE_GROWTH_10K", "LUMA_API", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"])
+    ).all()
     assert forbidden_attempts == []
 
 

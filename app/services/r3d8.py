@@ -40,6 +40,7 @@ from app.db.models import (
     VoiceProfile,
 )
 from app.services.m2 import PAID_CAPABILITIES, ProviderReadinessM2Service, validate_pexels_policy
+from app.services.provider_stack import normalize_provider_key, provider_key_rejection_reasons
 
 
 PAID_PROVIDER_KEYS = {"elevenlabs", "luma_api", "creatomate_growth_10k"}
@@ -197,19 +198,23 @@ class CostEstimateService:
             blockers.extend(["PROVIDER_PLAN_EMPTY", "ESTIMATE_PENDING_PROVIDER_CONFIG"])
 
         for item in provider_items:
-            provider_key = str(item.get("provider_key") or "").strip().lower()
+            provider_key = normalize_provider_key(item.get("provider_key")) or str(item.get("provider_key") or "").strip().lower()
             provider_stage = str(item.get("provider_stage") or item.get("stage") or "").strip().upper()
             provider = provider_map.get(provider_key)
             configured = bool(provider and provider.readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"})
+            stale_reasons = provider_key_rejection_reasons(provider_key)
             key = _stage_key(provider_key, provider_stage)
             provider_estimates[key] = {
                 "provider_key": provider_key,
                 "provider_stage": provider_stage,
                 "configured": configured,
-                "readiness_state": provider.readiness_state if provider else "UNKNOWN",
+                "readiness_state": "STALE_PROVIDER_KEY" if stale_reasons else provider.readiness_state if provider else "UNKNOWN",
                 "estimated_cost": _decimal_string(item.get("estimated_cost")),
                 "currency": data.currency,
             }
+            if stale_reasons:
+                blockers.extend(stale_reasons)
+                continue
             if provider_key == "pexels_api":
                 costs["pexels"] = Decimal("0")
                 if not item.get("attribution_manifest_ref") or not item.get("usage_policy_manifest_ref"):
@@ -650,6 +655,8 @@ class PaidProviderBoundaryService:
         effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, revision.effective_context_snapshot_id)
         if effective is None:
             raise NotFoundError(f"effective context not found: {revision.effective_context_snapshot_id}")
+        provider_key = normalize_provider_key(data.provider_key) or data.provider_key
+        provider_stage = data.provider_stage.strip().upper()
         request_fingerprint = stable_hash(data.request_payload_json)
         idempotency = (
             self.session.get(ProviderIdempotencyKey, data.idempotency_key_id)
@@ -657,8 +664,8 @@ class PaidProviderBoundaryService:
             else ProviderIdempotencyService(self.session).get_or_create(
                 ProviderIdempotencyKeyCreateRequest(
                     render_revision_id=revision.id,
-                    provider_key=data.provider_key,
-                    provider_stage=data.provider_stage,
+                    provider_key=provider_key,
+                    provider_stage=provider_stage,
                     request_payload_json=data.request_payload_json,
                     request_fingerprint=request_fingerprint,
                 )
@@ -666,11 +673,11 @@ class PaidProviderBoundaryService:
         )
         estimate = self._estimate(revision=revision, estimate_id=data.cost_estimate_snapshot_id)
         approval = self.session.get(HumanPaidRenderApproval, data.human_approval_id) if data.human_approval_id else self._latest_approved_revision_approval(revision)
-        reasons: list[str] = []
-        status = "READY_FOR_PROVIDER_BOUNDARY"
+        reasons: list[str] = provider_key_rejection_reasons(provider_key)
+        status = "BLOCKED_PROVIDER_NOT_CONFIGURED" if reasons else "READY_FOR_PROVIDER_BOUNDARY"
 
-        provider_check = self._provider_ready(data.provider_key)
-        if not provider_check.passed:
+        provider_check = self._provider_ready(provider_key)
+        if not reasons and not provider_check.passed:
             reasons.extend(provider_check.reason_codes)
             status = "BLOCKED_PROVIDER_NOT_CONFIGURED"
         gate_check = self._deterministic_gate_check(revision)
@@ -683,11 +690,11 @@ class PaidProviderBoundaryService:
         elif estimate.estimate_status != "ESTIMATED":
             reasons.extend(estimate.blocker_reason_codes_json or [f"COST_ESTIMATE_{estimate.estimate_status}"])
             status = "BLOCKED_COST_ESTIMATE"
-        if _is_paid_provider(data.provider_key, data.provider_stage):
+        if _is_paid_provider(provider_key, provider_stage):
             approval_check = PaidRenderApprovalGate(self.session).check(
                 approval=approval,
                 revision=revision,
-                provider_stage=data.provider_stage,
+                provider_stage=provider_stage,
                 estimate=estimate,
             )
             if not approval_check.passed:
@@ -695,16 +702,16 @@ class PaidProviderBoundaryService:
                 status = approval_check.status
         attempt_record = PaidAttemptLimitGate(self.session).check(
             render_revision_id=revision.id,
-            provider_key=data.provider_key,
-            provider_stage=data.provider_stage,
+            provider_key=provider_key,
+            provider_stage=provider_stage,
         )
         if attempt_record.status == "BLOCKED":
             reasons.extend(attempt_record.reason_codes_json)
             status = "BLOCKED_ATTEMPT_LIMIT"
         character_check = ProviderCharacterInputGate().check(
             effective=effective,
-            provider_key=data.provider_key,
-            provider_stage=data.provider_stage,
+            provider_key=provider_key,
+            provider_stage=provider_stage,
             request_payload=data.request_payload_json,
         )
         if not character_check.passed:
@@ -712,14 +719,14 @@ class PaidProviderBoundaryService:
             status = "BLOCKED_CHARACTER_INPUT"
         voice_check = ProviderVoiceInputGate(self.session).check(
             effective=effective,
-            provider_key=data.provider_key,
-            provider_stage=data.provider_stage,
+            provider_key=provider_key,
+            provider_stage=provider_stage,
             request_payload=data.request_payload_json,
         )
         if not voice_check.passed:
             reasons.extend(voice_check.reason_codes)
             status = "BLOCKED_VOICE_INPUT"
-        if data.provider_key == "pexels_api" or data.provider_stage in PEXELS_STAGES:
+        if provider_key == "pexels_api" or provider_stage in PEXELS_STAGES:
             pexels_check = PexelsUsagePolicyGate(self.settings).check(request_payload=data.request_payload_json)
             if not pexels_check.passed:
                 reasons.extend(pexels_check.reason_codes)
@@ -727,8 +734,8 @@ class PaidProviderBoundaryService:
         visual_check = VisualSourceMixGate(self.settings).check(
             revision=revision,
             request_payload=data.request_payload_json,
-            provider_key=data.provider_key,
-            provider_stage=data.provider_stage,
+            provider_key=provider_key,
+            provider_stage=provider_stage,
         )
         if not visual_check.passed:
             reasons.extend(visual_check.reason_codes)
@@ -743,13 +750,8 @@ class PaidProviderBoundaryService:
             call_status = "BLOCKED"
             allowed = False
         else:
-            if data.consume_attempt and data.call_type == "SUBMIT":
-                attempt_record = PaidAttemptLimitGate(self.session).record_attempt(
-                    render_revision_id=revision.id,
-                    provider_key=data.provider_key,
-                    provider_stage=data.provider_stage,
-                )
-            if not self._real_execution_enabled(data.provider_key):
+            real_execution_enabled = self._real_execution_enabled(provider_key)
+            if not real_execution_enabled:
                 reasons.append("PROVIDER_REAL_EXECUTION_DISABLED")
                 status = "ALLOWED_NOT_EXECUTED"
                 call_status = "ALLOWED_NOT_EXECUTED"
@@ -762,8 +764,8 @@ class PaidProviderBoundaryService:
 
         ledger = ProviderBoundaryAuditService(self.session).log(
             revision=revision,
-            provider_key=data.provider_key,
-            provider_stage=data.provider_stage,
+            provider_key=provider_key,
+            provider_stage=provider_stage,
             call_type=data.call_type,
             call_status=call_status,
             request_fingerprint=request_fingerprint,
@@ -774,8 +776,8 @@ class PaidProviderBoundaryService:
         )
         return ProviderBoundaryDecisionRead(
             render_revision_id=revision.id,
-            provider_key=data.provider_key,
-            provider_stage=data.provider_stage,
+            provider_key=provider_key,
+            provider_stage=provider_stage,
             status=status,
             call_status=call_status,
             allowed=allowed,

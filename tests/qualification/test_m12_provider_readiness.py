@@ -31,11 +31,11 @@ def _settings(**overrides) -> Settings:
         "google_drive_oauth_client_id": None,
         "google_drive_oauth_client_secret": None,
         "google_drive_root_folder_id": None,
-        "veo_real_execution_enabled": False,
-        "veo_real_smoke": False,
+        "ai_hero_provider": "luma_api",
+        "luma_hero_model": None,
+        "luma_real_generation_enabled": False,
         "elevenlabs_api_key": None,
         "creatomate_api_key": None,
-        "cloud_final_renderer_api_key": None,
         "budget_mode": None,
         "monthly_ai_budget_usd": None,
     }
@@ -43,7 +43,7 @@ def _settings(**overrides) -> Settings:
     return Settings(**base)
 
 
-def test_m12_readiness_classifies_missing_config_and_cloud_final_needs_config(db_session) -> None:
+def test_m12_readiness_classifies_missing_config_and_creatomate_growth_needs_config(db_session) -> None:
     payload = ProviderReadinessService(db_session, _settings()).readiness()
 
     by_provider = {summary.provider_key: summary for summary in payload.provider_summaries}
@@ -52,42 +52,31 @@ def test_m12_readiness_classifies_missing_config_and_cloud_final_needs_config(db
     assert by_provider["youtube-public"].readiness_state == "BLOCKED"
     assert by_provider["youtube-owner"].readiness_state == "BLOCKED"
     assert by_provider["google-drive"].readiness_state == "BLOCKED"
-    assert by_provider["google-vertex-veo"].safe_config["duration_rules"] == "4,6,8; max 8s"
+    assert by_provider["luma_api"].safe_config["duration_rules"] == "4,6,8; max 8s"
     assert by_provider["elevenlabs"].readiness_state == "BLOCKED"
-    assert by_provider["creatomate"].readiness_state == "BLOCKED"
-    assert by_provider["cloud-final-renderer"].readiness_state == "BLOCKED"
-    assert "CREATOMATE_GROWTH_10K_REQUIRED" in by_provider["cloud-final-renderer"].reason_codes
-    assert "CREATOMATE_API_KEY_MISSING" in by_provider["cloud-final-renderer"].reason_codes
-    assert by_provider["cloud-final-renderer"].safe_config["status"] == "NOT_CONFIGURED"
-    assert any(item["provider_key"] == "cloud-final-renderer" for item in payload.blocking_items)
+    assert by_provider["creatomate_growth_10k"].readiness_state == "BLOCKED"
+    assert "CREATOMATE_API_KEY_MISSING" in by_provider["creatomate_growth_10k"].reason_codes
+    assert any(item["provider_key"] == "creatomate_growth_10k" for item in payload.blocking_items)
 
 
-def test_m12_cloud_final_renderer_remains_required_gap_even_if_creatomate_env_present(db_session) -> None:
+def test_m12_creatomate_growth_10k_is_active_final_renderer_when_configured(db_session) -> None:
     payload = ProviderReadinessService(
         db_session,
         _settings(
-            cloud_final_renderer_provider="creatomate",
             creatomate_plan="growth_10k",
             creatomate_api_key="creatomate-secret",
-            cloud_final_renderer_api_key="cloud-final-secret",
         ),
     ).readiness()
 
     by_provider = {item.provider_key: item for item in payload.provider_summaries}
-    cloud = by_provider["cloud-final-renderer"]
-    creatomate = by_provider["creatomate"]
-    assert cloud.readiness_state == "PASS"
-    assert cloud.safe_config["configuration_state"] == "CONFIGURED"
-    assert cloud.safe_config["status"] == "READY_FOR_CONFIGURED_PROVIDER"
-    assert cloud.safe_config["provider"] == "creatomate"
-    assert cloud.safe_config["long_form_final_render_blocked"] is False
-    assert "CLOUD_FINAL_RENDERER_READY" in cloud.reason_codes
-    assert not any(item["provider_key"] == "cloud-final-renderer" for item in payload.blocking_items)
-    assert creatomate.safe_config["role"] == "Shorts/cards/thumbnails"
-    assert creatomate.safe_config["not_final_long_form_renderer"] is True
+    creatomate = by_provider["creatomate_growth_10k"]
+    assert creatomate.readiness_state in {"PASS", "WARNING"}
+    assert creatomate.safe_config["role"] == "final assembly + template/card/thumbnail/Shorts"
+    assert creatomate.safe_config["final_assembly_renderer"] is True
+    assert creatomate.safe_config["template_card_thumbnail_shorts_renderer"] is True
+    assert "cloud-final-renderer" not in by_provider
     raw = payload.model_dump_json()
     assert "creatomate-secret" not in raw
-    assert "cloud-final-secret" not in raw
 
 
 def test_m12_budget_cards_are_hard_env_display_only(db_session) -> None:
@@ -100,9 +89,9 @@ def test_m12_budget_cards_are_hard_env_display_only(db_session) -> None:
         elevenlabs_monthly_cap_usd=22,
         elevenlabs_monthly_credit_cap=121000,
         elevenlabs_budget_basis="credits_characters",
-        veo_monthly_budget_usd=75,
-        veo_cost_per_second_1080p_video_only="0.10",
-        veo_max_duration_seconds=8,
+        ai_hero_provider="luma_api",
+        luma_hero_model="ray-2",
+        luma_max_duration_seconds=8,
         creatomate_plan="growth_10k",
         creatomate_monthly_credits=10000,
         creatomate_monthly_budget_usd=149,
@@ -114,7 +103,8 @@ def test_m12_budget_cards_are_hard_env_display_only(db_session) -> None:
     cards = {card.key: card for card in payload.budget_cards}
 
     assert cards["total-ai"].configured_monthly_cap == "$250 USD"
-    assert cards["google-vertex-veo"].configured_monthly_cap == "$75 USD"
+    assert cards["luma_api"].provider_name == "Luma API"
+    assert cards["creatomate_growth_10k"].provider_name == "Creatomate Growth 10K"
     assert cards["elevenlabs"].budget_basis == "credits_characters"
     assert "remaining" not in json.dumps(payload.model_dump(mode="json")).lower()
     assert "chi phí thực tế" in cards["total-ai"].note
@@ -195,32 +185,29 @@ def test_m12_smoke_guards_skip_without_external_calls(db_session, monkeypatch) -
 
     ollama = RealSmokeOrchestratorService(db_session, settings).run_provider("ollama")
     drive = RealSmokeOrchestratorService(db_session, settings).run_provider("google-drive")
-    veo = RealSmokeOrchestratorService(db_session, settings).run_provider("google-vertex-veo")
+    luma = RealSmokeOrchestratorService(db_session, settings).run_provider("luma_api")
 
     assert ollama.run_state == "SKIPPED"
     assert drive.run_state == "SKIPPED"
-    assert veo.run_state == "SKIPPED"
+    assert luma.run_state == "SKIPPED"
     assert db_session.query(RealSmokeRun).count() == 3
     assert all("secret" not in json.dumps(run.env_flags).lower() for run in db_session.query(RealSmokeRun).all())
 
 
-def test_m12_cloud_final_renderer_smoke_skips_without_render(db_session, monkeypatch) -> None:
+def test_m12_creatomate_growth_smoke_skips_without_render(db_session, monkeypatch) -> None:
     install_network_sentinel(monkeypatch)
     settings = _settings(
-        cloud_final_renderer_provider="creatomate",
         creatomate_plan="growth_10k",
         creatomate_api_key="creatomate-secret",
-        cloud_final_renderer_api_key="cloud-final-secret",
     )
 
-    run = RealSmokeOrchestratorService(db_session, settings).run_provider("cloud-final-renderer")
+    run = RealSmokeOrchestratorService(db_session, settings).run_provider("creatomate_growth_10k")
 
     assert run.run_state == "SKIPPED"
-    assert run.technical_appendix["real_final_render_added"] is False
+    assert run.technical_appendix["real_render_added"] is False
     assert run.error_code is None
     raw = run.model_dump_json()
     assert "creatomate-secret" not in raw
-    assert "cloud-final-secret" not in raw
 
 
 def test_m12_enabled_smoke_blocks_when_credentials_missing(db_session, monkeypatch) -> None:
@@ -259,7 +246,7 @@ def test_m12_api_exposes_readiness_without_secrets(monkeypatch) -> None:
     assert payload["snapshot_state"] == "BLOCKED"
     assert "sk-raw-secret" not in response.text
     assert "creatomate-raw-secret" not in response.text
-    assert any(summary["provider_key"] == "cloud-final-renderer" for summary in payload["provider_summaries"])
+    assert any(summary["provider_key"] == "creatomate_growth_10k" for summary in payload["provider_summaries"])
 
 
 def test_m12_scope_guard_no_forbidden_routes() -> None:
@@ -270,7 +257,7 @@ def test_m12_scope_guard_no_forbidden_routes() -> None:
         "/youtube/reupload",
         "/browser/scrape-dashboard",
         "/traffic/fake-engagement",
-        "/providers/cloud-final-renderer/select",
+        "/providers/creatomate_growth_10k/execute",
         "/tiktok/analytics-loop",
         "/facebook/analytics-loop",
     ]
