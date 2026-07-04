@@ -20,6 +20,10 @@ import type {
   HumanUploadTaskList,
   MemoryInfluenceOps,
   OpsQueue,
+  PackagingPatchApplyRun,
+  PackagingPatchApprovalDecision,
+  PackagingGateRerunRecord,
+  PackagingReviewQueue,
   PackageOpsSummary,
   PublishLedger,
   ProviderCostOps,
@@ -59,6 +63,7 @@ export const queryKeys = {
   channelUploadTasks: (channelId: string) => ["channel-upload-tasks", channelId],
   channelUploadedVideos: (channelId: string) => ["channel-uploaded-videos", channelId],
   videoPackageReview: (packageId: string) => ["video-package-review", packageId],
+  packagingReviewQueue: (packageId: string) => ["packaging-review-queue", packageId],
   uploadedVideos: ["uploaded-videos"],
   uploadedVideo: (uploadedVideoId: string) => ["uploaded-video", uploadedVideoId],
   channelLifecycle: (channelId: string) => ["channel-lifecycle", channelId],
@@ -180,6 +185,52 @@ export function getChannelUploadedVideos(channelId: string) {
 
 export function getVideoPackageReview(packageId: string) {
   return request<VideoPackageReview>(`/video-packages/${packageId}/review`);
+}
+
+export function getPackagingReviewQueue(packageId: string) {
+  return request<PackagingReviewQueue>(`/video-packages/${packageId}/packaging-review-queue`);
+}
+
+export function buildPackagingReviewQueueFromGates(packageId: string) {
+  return request<PackagingReviewQueue>(`/video-packages/${packageId}/packaging-review-queue/build-from-gates`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function approvePackagingProposedPatch(patchId: string, rationale?: string) {
+  return request<PackagingPatchApprovalDecision>(`/packaging-proposed-patches/${patchId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ decided_by: "operator", rationale: rationale ?? null })
+  });
+}
+
+export function rejectPackagingProposedPatch(patchId: string, rationale?: string) {
+  return request<PackagingPatchApprovalDecision>(`/packaging-proposed-patches/${patchId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ decided_by: "operator", rationale: rationale ?? null })
+  });
+}
+
+export function requestChangesPackagingProposedPatch(patchId: string, rationale?: string) {
+  return request<PackagingPatchApprovalDecision>(`/packaging-proposed-patches/${patchId}/request-changes`, {
+    method: "POST",
+    body: JSON.stringify({ decided_by: "operator", rationale: rationale ?? null })
+  });
+}
+
+export function applyPackagingProposedPatch(patchId: string) {
+  return request<PackagingPatchApplyRun>(`/packaging-proposed-patches/${patchId}/apply`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function rerunPackagingGates(packageId: string) {
+  return request<PackagingGateRerunRecord>(`/video-packages/${packageId}/rerun-packaging-gates`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
 }
 
 export function createUploadTaskFromPackage(packageId: string) {

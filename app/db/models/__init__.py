@@ -240,6 +240,13 @@ from app.db.models.r3d8 import (
     ProxyPreviewArtifactFlag,
     RenderRevision,
 )
+from app.db.models.r3d9_ux2 import (
+    PackagingGateRerunRecord,
+    PackagingPatchApplyRun,
+    PackagingPatchApprovalDecision,
+    PackagingProposedPatch,
+    PackagingReviewQueueItem,
+)
 
 __all__ = [
     "AuditEvent",
@@ -439,4 +446,9 @@ __all__ = [
     "PaidProviderCallLedger",
     "PaidAttemptLimitRecord",
     "ProxyPreviewArtifactFlag",
+    "PackagingReviewQueueItem",
+    "PackagingProposedPatch",
+    "PackagingPatchApprovalDecision",
+    "PackagingPatchApplyRun",
+    "PackagingGateRerunRecord",
 ]

@@ -8,6 +8,7 @@ import type { ApprovalQueueItem } from "@/lib/types";
 
 const queueLabels: Record<string, string> = {
   learning: "Bài học chờ duyệt",
+  packaging_review: "Packaging review",
   publish_confirmation: "Gói publish",
   recovery: "Đề xuất phục hồi",
   ops_manual_action: "Thao tác ops"
@@ -17,6 +18,8 @@ const actionLabels: Record<string, string> = {
   APPROVE: "Duyệt",
   REJECT: "Từ chối",
   REQUEST_MORE_EVIDENCE: "Cần thêm bằng chứng",
+  REQUEST_CHANGES: "Yêu cầu chỉnh",
+  OPEN_PACKAGE_REVIEW: "Mở review package",
   SUPPRESS: "Ẩn khỏi hàng chờ",
   EXPIRE: "Đánh dấu hết hạn",
   OPEN_DRIVE: "Mở Google Drive",

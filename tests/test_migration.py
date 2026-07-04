@@ -193,13 +193,18 @@ REQUIRED_TABLES = {
     "paid_provider_call_ledger",
     "paid_attempt_limit_records",
     "proxy_preview_artifact_flags",
+    "packaging_review_queue_items",
+    "packaging_proposed_patches",
+    "packaging_patch_approval_decisions",
+    "packaging_patch_apply_runs",
+    "packaging_gate_rerun_records",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert revision == "0031_r3d8_cost_firewall"
+        assert revision == "0032_r3d9_ux2_review_queue"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

@@ -41,6 +41,7 @@ from app.db.models import (
     CredentialHealthSnapshot,
     CredentialReference,
     FailureTraceReport,
+    FirstScriptedVideoPackage,
     GoogleDriveMediaCredential,
     HumanUploadTask,
     LearningCandidate,
@@ -52,6 +53,8 @@ from app.db.models import (
     ManualAction,
     MediaOffloadJob,
     OpsIncident,
+    PackagingProposedPatch,
+    PackagingReviewQueueItem,
     PlaybookCandidateDraft,
     ProviderCapabilityMatrixEntry,
     ProviderHealthSnapshot,
@@ -178,6 +181,7 @@ class M11DashboardService:
         if queue_type in {None, "learning"}:
             items.extend(self._learning_queue_items())
         if queue_type in {None, "publish"}:
+            items.extend(self._packaging_review_queue_items())
             items.extend(self._publish_queue_items())
         if queue_type in {None, "recovery"}:
             items.extend(self._recovery_queue_items())
@@ -571,6 +575,63 @@ class M11DashboardService:
                     source_refs=handoff.cloud_media_refs,
                     audit_refs=[{"type": "publish_handoff_package", "id": str(handoff.id)}],
                     technical_appendix={"no_youtube_upload_api": True, "no_backend_download_proxy": True},
+                )
+            )
+        return items
+
+    def _packaging_review_queue_items(self) -> list[ApprovalQueueItem]:
+        statement = (
+            select(PackagingReviewQueueItem)
+            .where(PackagingReviewQueueItem.status != "CLOSED")
+            .order_by(PackagingReviewQueueItem.created_at.desc(), PackagingReviewQueueItem.id.desc())
+            .limit(100)
+        )
+        items: list[ApprovalQueueItem] = []
+        for queue_item in self.session.scalars(statement).all():
+            package = self.session.get(FirstScriptedVideoPackage, queue_item.package_id)
+            channel = self.session.get(ChannelWorkspace, package.channel_id) if package else None
+            project = self.session.get(VideoProject, queue_item.video_project_id) if queue_item.video_project_id else None
+            patch = self.session.scalars(
+                select(PackagingProposedPatch)
+                .where(PackagingProposedPatch.queue_item_id == queue_item.id)
+                .order_by(PackagingProposedPatch.created_at.desc(), PackagingProposedPatch.id.desc())
+                .limit(1)
+            ).one_or_none()
+            actions = ["OPEN_PACKAGE_REVIEW"]
+            if patch is not None and patch.status == "READY_FOR_REVIEW":
+                actions = ["APPROVE", "REJECT", "REQUEST_CHANGES"]
+            items.append(
+                ApprovalQueueItem(
+                    queue_item_id=queue_item.id,
+                    queue_type="packaging_review",
+                    entity_type="packaging_review_queue_item",
+                    entity_id=queue_item.id,
+                    channel=_channel_ref(channel),
+                    project=_project_ref(project),
+                    operator_summary=f"{queue_item.human_readable_title} ({str(queue_item.package_id)[:8]})",
+                    friendly_status=f"{queue_item.gate_key}: {queue_item.status}",
+                    priority="HIGH" if queue_item.severity == "BLOCK" else "NORMAL",
+                    risk_level=queue_item.severity,
+                    confidence_label=patch.status if patch else "NEEDS_PROPOSED_PATCH",
+                    freshness_label="CURRENT",
+                    evidence_summary=queue_item.human_readable_why,
+                    next_action=queue_item.human_readable_fix,
+                    allowed_actions=actions,
+                    source_refs=[
+                        {
+                            "package_id": str(queue_item.package_id),
+                            "gate": queue_item.gate_key,
+                            "issue": queue_item.issue_code,
+                            "proposed_patch_status": patch.status if patch else None,
+                            "approval_status": queue_item.status,
+                        }
+                    ],
+                    audit_refs=[],
+                    technical_appendix={
+                        "target_artifact_type": queue_item.target_artifact_type,
+                        "target_artifact_ref": queue_item.target_artifact_ref,
+                        "next_action_code": queue_item.next_action_code,
+                    },
                 )
             )
         return items
@@ -1031,6 +1092,7 @@ def _safety_warnings() -> list[DashboardWarning]:
 def _queue_label(queue_type: str) -> str:
     return {
         "learning": "Bài học chờ duyệt",
+        "packaging_review": "Packaging review",
         "publish_confirmation": "Gói publish",
         "recovery": "Đề xuất phục hồi",
         "ops_manual_action": "Thao tác ops",

@@ -307,6 +307,14 @@ from app.services.r3d9 import (
     RuntimeDashboardService,
     UploadedVideoOpsService,
 )
+from app.services.r3d9_ux2 import (
+    PackagingGateRerunService,
+    PackagingPatchApplyService,
+    PackagingPatchApprovalService,
+    PackagingPatchProposalService,
+    PackagingPatchRouter,
+    PackagingReviewQueueService,
+)
 from app.services.r3d10 import RuntimeLTSFreezeVerifier
 
 __all__ = [
@@ -557,6 +565,12 @@ __all__ = [
     "QualityDeltaOpsService",
     "ProviderCostOpsService",
     "OperatorNextActionService",
+    "PackagingReviewQueueService",
+    "PackagingPatchRouter",
+    "PackagingPatchProposalService",
+    "PackagingPatchApprovalService",
+    "PackagingPatchApplyService",
+    "PackagingGateRerunService",
     "ProviderStackDriftGuard",
     "RuntimeLTSFreezeVerifier",
     "OllamaReadinessCheck",

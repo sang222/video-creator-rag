@@ -530,12 +530,97 @@ export type PackagingHandoff = {
   created_at: string;
 };
 
+export type PackagingProposedPatch = {
+  id: string;
+  queue_item_id: string;
+  package_id: string;
+  proposal_source: string;
+  routed_agent_key?: string | null;
+  patch_type: string;
+  before_snapshot_ref: string;
+  proposed_patch_json: Record<string, unknown>;
+  after_preview_json: Record<string, unknown>;
+  affected_artifact_refs_json: Array<Record<string, unknown>>;
+  risk_level: string;
+  requires_human_approval: boolean;
+  patch_hash: string;
+  status: string;
+  created_at: string;
+};
+
+export type PackagingReviewQueueItem = {
+  id: string;
+  package_id: string;
+  video_project_id?: string | null;
+  effective_context_snapshot_id?: string | null;
+  gate_key: string;
+  issue_code: string;
+  severity: "BLOCK" | "REVIEW_REQUIRED" | "WARNING" | string;
+  target_artifact_type: string;
+  target_artifact_ref?: string | null;
+  source_gate_run_id?: string | null;
+  source_gate_batch_id?: string | null;
+  status: string;
+  next_action_code: string;
+  human_readable_title: string;
+  human_readable_why: string;
+  human_readable_fix: string;
+  section: string;
+  proposed_patch?: PackagingProposedPatch | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PackagingReviewQueue = {
+  package_id: string;
+  review_verdict: "READY_FOR_MANUAL_UPLOAD" | "REVIEW_REQUIRED" | "BLOCKED" | "WAITING_PROVIDER_CONFIG" | string;
+  plain_language_status: string;
+  must_fix_count: number;
+  next_safe_action: string;
+  upload_task_creation_allowed: boolean;
+  items: PackagingReviewQueueItem[];
+  technical_appendix: Record<string, unknown>;
+};
+
+export type PackagingPatchApprovalDecision = {
+  id: string;
+  proposed_patch_id: string;
+  decision: "APPROVE" | "REJECT" | "REQUEST_CHANGES" | string;
+  decided_by: string;
+  rationale?: string | null;
+  created_at: string;
+};
+
+export type PackagingPatchApplyRun = {
+  id: string;
+  proposed_patch_id: string;
+  package_id: string;
+  apply_status: string;
+  created_artifact_ref?: string | null;
+  created_handoff_override_ref?: string | null;
+  created_version_hash?: string | null;
+  reason_codes_json: string[];
+  created_at: string;
+};
+
+export type PackagingGateRerunRecord = {
+  id: string;
+  package_id: string;
+  proposed_patch_id?: string | null;
+  gate_keys_json: string[];
+  rerun_status: string;
+  gate_batch_run_id?: string | null;
+  reason_codes_json: string[];
+  created_at: string;
+};
+
 export type VideoPackageReview = {
   package_id: string;
   package_status: string;
   channel_binding: Record<string, unknown>;
   effective_context: Record<string, unknown>;
   packaging_handoff?: PackagingHandoff | null;
+  packaging_review_queue?: PackagingReviewQueue | null;
   human_review_checklist: Record<string, unknown>;
   agent_outputs: Record<string, unknown>;
   prompt_snapshots: Record<string, unknown>;

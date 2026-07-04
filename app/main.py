@@ -285,6 +285,11 @@ from app.contracts import (
     MemoryOpsQueueRead,
     OperatorNextActionRead,
     PackageOpsSummaryRead,
+    PackagingGateRerunRecordRead,
+    PackagingPatchApplyRunRead,
+    PackagingPatchApprovalDecisionRead,
+    PackagingPatchDecisionRequest,
+    PackagingReviewQueueRead,
     ProviderCostOpsRead,
     QualityDeltaOpsRead,
     RecoveryOpsQueueRead,
@@ -437,6 +442,10 @@ from app.services import (
     MemoryOpsReadModelService,
     OperatorNextActionService,
     PackageOpsSummaryService,
+    PackagingGateRerunService,
+    PackagingPatchApplyService,
+    PackagingPatchApprovalService,
+    PackagingReviewQueueService,
     PaidProviderBoundaryService,
     ProviderCostOpsService,
     ProviderIdempotencyService,
@@ -3319,6 +3328,86 @@ def create_app() -> FastAPI:
         try:
             with session_scope() as session:
                 return PackagingHandoffReadService(session).build(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.get("/video-packages/{package_id}/packaging-review-queue", response_model=PackagingReviewQueueRead)
+    def get_packaging_review_queue(package_id: uuid.UUID) -> PackagingReviewQueueRead:
+        try:
+            with session_scope() as session:
+                return PackagingReviewQueueService(session).read(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-packages/{package_id}/packaging-review-queue/build-from-gates", response_model=PackagingReviewQueueRead)
+    def build_packaging_review_queue_from_gates(package_id: uuid.UUID) -> PackagingReviewQueueRead:
+        try:
+            with session_scope() as session:
+                return PackagingReviewQueueService(session).build_from_gates(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/packaging-proposed-patches/{patch_id}/approve", response_model=PackagingPatchApprovalDecisionRead)
+    def approve_packaging_proposed_patch(
+        patch_id: uuid.UUID,
+        data: PackagingPatchDecisionRequest | None = None,
+    ) -> PackagingPatchApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                payload = data or PackagingPatchDecisionRequest()
+                return PackagingPatchApprovalService(session).approve(
+                    patch_id,
+                    decided_by=payload.decided_by,
+                    rationale=payload.rationale,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/packaging-proposed-patches/{patch_id}/reject", response_model=PackagingPatchApprovalDecisionRead)
+    def reject_packaging_proposed_patch(
+        patch_id: uuid.UUID,
+        data: PackagingPatchDecisionRequest | None = None,
+    ) -> PackagingPatchApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                payload = data or PackagingPatchDecisionRequest()
+                return PackagingPatchApprovalService(session).reject(
+                    patch_id,
+                    decided_by=payload.decided_by,
+                    rationale=payload.rationale,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/packaging-proposed-patches/{patch_id}/request-changes", response_model=PackagingPatchApprovalDecisionRead)
+    def request_changes_packaging_proposed_patch(
+        patch_id: uuid.UUID,
+        data: PackagingPatchDecisionRequest | None = None,
+    ) -> PackagingPatchApprovalDecisionRead:
+        try:
+            with session_scope() as session:
+                payload = data or PackagingPatchDecisionRequest()
+                return PackagingPatchApprovalService(session).request_changes(
+                    patch_id,
+                    decided_by=payload.decided_by,
+                    rationale=payload.rationale,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/packaging-proposed-patches/{patch_id}/apply", response_model=PackagingPatchApplyRunRead)
+    def apply_packaging_proposed_patch(patch_id: uuid.UUID) -> PackagingPatchApplyRunRead:
+        try:
+            with session_scope() as session:
+                return PackagingPatchApplyService(session).apply(patch_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @application.post("/video-packages/{package_id}/rerun-packaging-gates", response_model=PackagingGateRerunRecordRead)
+    def rerun_packaging_gates(package_id: uuid.UUID) -> PackagingGateRerunRecordRead:
+        try:
+            with session_scope() as session:
+                return PackagingGateRerunService(session).rerun_for_package(package_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

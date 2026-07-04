@@ -128,6 +128,9 @@ class PublishHandoffLedgerService:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
         if package.package_status != "READY_FOR_HUMAN_REVIEW":
             raise ValidationFailureError("package must be READY_FOR_HUMAN_REVIEW before manual upload handoff")
+        from app.services.r3d9_ux2 import PackagingReviewQueueService
+
+        PackagingReviewQueueService(self.session).assert_upload_task_allowed(package.id)
         existing = self.session.scalars(
             select(HumanUploadTask)
             .where(HumanUploadTask.first_scripted_video_package_id == package.id)

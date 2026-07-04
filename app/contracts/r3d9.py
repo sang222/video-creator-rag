@@ -103,6 +103,109 @@ class PackageOpsSummaryRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PackagingProposedPatchRead(BaseModel):
+    id: uuid.UUID
+    queue_item_id: uuid.UUID
+    package_id: uuid.UUID
+    proposal_source: str
+    routed_agent_key: str | None = None
+    patch_type: str
+    before_snapshot_ref: str
+    proposed_patch_json: dict[str, Any] = Field(default_factory=dict)
+    after_preview_json: dict[str, Any] = Field(default_factory=dict)
+    affected_artifact_refs_json: list[dict[str, Any]] = Field(default_factory=list)
+    risk_level: str
+    requires_human_approval: bool = True
+    patch_hash: str
+    status: str
+    created_at: AwareDatetime
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class PackagingReviewQueueItemRead(BaseModel):
+    id: uuid.UUID
+    package_id: uuid.UUID
+    video_project_id: uuid.UUID | None = None
+    effective_context_snapshot_id: uuid.UUID | None = None
+    gate_key: str
+    issue_code: str
+    severity: str
+    target_artifact_type: str
+    target_artifact_ref: str | None = None
+    source_gate_run_id: uuid.UUID | None = None
+    source_gate_batch_id: uuid.UUID | None = None
+    status: str
+    next_action_code: str
+    human_readable_title: str
+    human_readable_why: str
+    human_readable_fix: str
+    section: str
+    proposed_patch: PackagingProposedPatchRead | None = None
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PackagingReviewQueueRead(BaseModel):
+    package_id: uuid.UUID
+    review_verdict: str
+    plain_language_status: str
+    must_fix_count: int
+    next_safe_action: str
+    upload_task_creation_allowed: bool
+    items: list[PackagingReviewQueueItemRead] = Field(default_factory=list)
+    technical_appendix: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PackagingPatchApprovalDecisionRead(BaseModel):
+    id: uuid.UUID
+    proposed_patch_id: uuid.UUID
+    decision: str
+    decided_by: str
+    rationale: str | None = None
+    created_at: AwareDatetime
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class PackagingPatchDecisionRequest(BaseModel):
+    decided_by: str = "operator"
+    rationale: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PackagingPatchApplyRunRead(BaseModel):
+    id: uuid.UUID
+    proposed_patch_id: uuid.UUID
+    package_id: uuid.UUID
+    apply_status: str
+    created_artifact_ref: str | None = None
+    created_handoff_override_ref: str | None = None
+    created_version_hash: str | None = None
+    reason_codes_json: list[str] = Field(default_factory=list)
+    created_at: AwareDatetime
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class PackagingGateRerunRecordRead(BaseModel):
+    id: uuid.UUID
+    package_id: uuid.UUID
+    proposed_patch_id: uuid.UUID | None = None
+    gate_keys_json: list[str] = Field(default_factory=list)
+    rerun_status: str
+    gate_batch_run_id: uuid.UUID | None = None
+    reason_codes_json: list[str] = Field(default_factory=list)
+    created_at: AwareDatetime
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
 class UploadedVideoOpsSummaryRead(BaseModel):
     uploaded_video_id: uuid.UUID
     platform: str

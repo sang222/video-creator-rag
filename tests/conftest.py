@@ -95,6 +95,11 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    packaging_gate_rerun_records,
+                    packaging_patch_apply_runs,
+                    packaging_patch_approval_decisions,
+                    packaging_proposed_patches,
+                    packaging_review_queue_items,
                     paid_provider_call_ledger,
                     paid_attempt_limit_records,
                     provider_job_snapshots,

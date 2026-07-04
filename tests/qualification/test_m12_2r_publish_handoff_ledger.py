@@ -13,6 +13,7 @@ from app.core.config import Settings
 from app.core.errors import ConflictError, ValidationFailureError
 from app.db.models import FirstScriptedVideoPackage, UploadedVideo, UploadedVideoBackfillEvent
 from app.main import create_app
+from app.services import EffectiveChannelRuntimeContextCompiler
 from app.services.m12_2r import PublishHandoffLedgerService, parse_youtube_video_id
 
 
@@ -28,20 +29,60 @@ def _settings() -> Settings:
 
 
 def _ready_package(db_session, scope, *, status: str = "READY_FOR_HUMAN_REVIEW") -> FirstScriptedVideoPackage:
+    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(scope.project.id)
+    effective.publish_timing_context_json = {
+        "channel_timezone": "Asia/Ho_Chi_Minh",
+        "manual_publish_only": True,
+        "configured_publish_window": {"windows": [{"day": "MONDAY", "start": "09:00", "end": "11:00"}]},
+        "source_contract_paths": ["publish_timing"],
+    }
+    effective.thumbnail_style_context_json = {"style": "clear operator handoff"}
+    db_session.flush()
     package = FirstScriptedVideoPackage(
         video_project_id=getattr(scope, "project", None).id if getattr(scope, "project", None) else None,
         channel_id=scope.channel.id,
         channel_profile_version_id=scope.profile.id,
         compiled_policy_snapshot_id=scope.snapshot.id,
+        effective_context_snapshot_id=effective.id,
+        effective_context_hash=effective.context_hash,
         provider_readiness_snapshot_id=None,
         package_status=status,
         agent_run_refs=[],
         prompt_render_run_refs=[],
         prompt_audit_snapshot_refs=[],
         artifacts={
-            "metadata_package": {"title": "M12.2R Ledger", "description": "Manual upload only."},
-            "upload_card_copy": {"title": "M12.2R Ledger", "description": "Paste-ready YouTube copy."},
-            "visual_plan": {"scenes": [{"kind": "CARD"}]},
+            "hook_spec": {
+                "hook_type": "DIRECT",
+                "first_3_seconds_script": "M12.2R Ledger prepares manual upload only.",
+                "first_3_seconds_visual": "Operator reviews a manual handoff card.",
+                "promise_made": "M12.2R Ledger prepares manual upload only",
+                "payoff_location": "S2",
+                "clickbait_risk": "LOW",
+            },
+            "narration_script": {
+                "sentences": [
+                    {"sentence_id": "S1", "text": "M12.2R Ledger prepares manual upload only."},
+                    {"sentence_id": "S2", "text": "M12.2R Ledger prepares manual upload only and never calls provider media or upload APIs."},
+                ]
+            },
+            "metadata_package": {
+                "title": "M12.2R Ledger",
+                "description": "M12.2R Ledger prepares paste-ready YouTube copy for manual upload only.",
+                "subtitle_refs": [{"ref": "subtitle:final", "lifecycle_state": "FINAL"}],
+            },
+            "upload_card_copy": {
+                "title": "M12.2R Ledger",
+                "description": "M12.2R Ledger prepares paste-ready YouTube copy for manual upload only.",
+                "subtitle_refs": [{"ref": "subtitle:final", "lifecycle_state": "FINAL"}],
+            },
+            "thumbnail_brief": {
+                "concept": "Operator ledger handoff",
+                "text_overlay": "Manual only",
+                "main_subject": "VCOS package review",
+                "composition": "Clear dashboard crop",
+                "mobile_readability_notes": "Short overlay.",
+            },
+            "visual_plan": {"scenes": [{"kind": "CARD", "description": "Operator reviews a manual handoff card."}]},
             "human_review_checklist": {"final_human_review": "PENDING", "upload_card_copy_ready": True},
         },
         limitations=["No upload/publish API."],

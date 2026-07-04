@@ -140,6 +140,7 @@ def _fixture(db_session, qualification_factory):
     effective.publish_timing_context_json = {
         "channel_timezone": "Asia/Ho_Chi_Minh",
         "manual_publish_only": True,
+        "configured_publish_window": {"windows": [{"day": "MONDAY", "start": "09:00", "end": "11:00"}]},
         "source_contract_paths": ["publish_timing"],
     }
     effective.voice_audio_context_json = {"voice_profile_id": None, "language": "vi"}
@@ -166,6 +167,18 @@ def _fixture(db_session, qualification_factory):
     db_session.add(package)
     db_session.flush()
     handoff = PackagingHandoffReadService(db_session).build(package.id)
+
+    task = PublishHandoffLedgerService(db_session).create_upload_task_from_package(package.id)
+    backfill = PublishHandoffLedgerService(db_session).backfill_uploaded_video(
+        task_id=task.id,
+        data=BackfillUploadedVideoRequest(
+            youtube_url_or_video_id="abcDEF12345",
+            actual_title="VCOS manual publish handoff",
+            operator_note="manual paste-back",
+        ),
+    )
+    uploaded = db_session.get(UploadedVideo, backfill.uploaded_video.id)
+    assert uploaded is not None
 
     batch = R3D4GateBatchRun(
         package_id=package.id,
@@ -224,18 +237,6 @@ def _fixture(db_session, qualification_factory):
         shape_gate_result_json={"status": "PASS"},
     )
     db_session.add(pack)
-
-    task = PublishHandoffLedgerService(db_session).create_upload_task_from_package(package.id)
-    backfill = PublishHandoffLedgerService(db_session).backfill_uploaded_video(
-        task_id=task.id,
-        data=BackfillUploadedVideoRequest(
-            youtube_url_or_video_id="abcDEF12345",
-            actual_title="VCOS manual publish handoff",
-            operator_note="manual paste-back",
-        ),
-    )
-    uploaded = db_session.get(UploadedVideo, backfill.uploaded_video.id)
-    assert uploaded is not None
     metrics = UploadedVideoMetricsSummary(
         uploaded_video_id=uploaded.id,
         company_id=scope.company.id,

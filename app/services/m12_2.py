@@ -624,6 +624,8 @@ class FirstScriptedVideoPackageService:
         package = self.session.get(FirstScriptedVideoPackage, package_id)
         if package is None:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
+        from app.services.r3d9_ux2 import PackagingReviewQueueService
+
         return FirstScriptedVideoPackageReviewRead(
             package_id=package.id,
             package_status=package.package_status,  # type: ignore[arg-type]
@@ -638,6 +640,7 @@ class FirstScriptedVideoPackageService:
                 "snapshot_ref": package.artifacts.get("effective_context_snapshot_ref") or package.artifacts.get("effective_context"),
             },
             packaging_handoff=PackagingHandoffReadService(self.session).build(package.id),
+            packaging_review_queue=PackagingReviewQueueService(self.session).read(package.id),
             human_review_checklist=package.artifacts.get("human_review_checklist", {}),
             agent_outputs={key: value for key, value in package.artifacts.items() if key not in {"human_review_checklist"}},
             prompt_snapshots={
