@@ -13,6 +13,7 @@ DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ ngu
 
 - YouTube: manual publish + read-only analytics/verification. No YouTube upload API.
 - Drive/object storage: optional archive/later. No Drive upload in DX2/R3D9/R3D10.
+- Post-freeze Drive archive smoke, when explicitly enabled, treats `GOOGLE_DRIVE_ROOT_FOLDER_ID` as the archive root and writes relative folders below it only. New unscoped smoke writes use `smoke_tests/YYYY-MM-DD`; new project-scoped archive writes use `company_{company_id}/channel_{channel_workspace_id}/project_{video_project_id}/{media_type_or_subfolder}`. Historical `VCOS/company_unknown/channel_unknown/project_unknown` folders may be cleaned manually if desired; VCOS does not move/delete old Drive folders automatically.
 
 ## Deferred / Inactive
 

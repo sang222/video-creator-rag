@@ -14,6 +14,7 @@ build/
 var/generated/
 var/credentials/
 var/logs/
+var/tmp/
 test-render-output/
 client_secret*.json
 *_client_secret.json

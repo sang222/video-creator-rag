@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 from urllib import request as urlrequest
@@ -80,6 +80,56 @@ class GoogleDriveVerificationResult:
     checksum_verified: bool
     checksum_unavailable: bool
     error_message: str | None = None
+
+
+DRIVE_ARCHIVE_PATH_MODE_PROJECT_SCOPED = "PROJECT_SCOPED"
+DRIVE_ARCHIVE_PATH_MODE_UPLOADED_VIDEO_SCOPED = "UPLOADED_VIDEO_SCOPED"
+DRIVE_ARCHIVE_PATH_MODE_SMOKE_TEST_UNSCOPED = "SMOKE_TEST_UNSCOPED"
+
+
+@dataclass(frozen=True)
+class DriveArchivePath:
+    mode: str
+    folder_path: list[str]
+
+
+class DriveArchivePathBuilder:
+    def __init__(self, *, today: date | None = None):
+        self.today = today
+
+    def build(
+        self,
+        *,
+        company_id: Any | None,
+        channel_workspace_id: Any | None,
+        video_project_id: Any | None,
+        uploaded_video_id: Any | None,
+        media_type: str,
+    ) -> DriveArchivePath:
+        subfolder = _drive_media_subfolder(media_type)
+        if uploaded_video_id:
+            folder_path = []
+            if company_id:
+                folder_path.append(f"company_{company_id}")
+            if channel_workspace_id:
+                folder_path.append(f"channel_{channel_workspace_id}")
+            folder_path.extend([f"uploaded_video_{uploaded_video_id}", subfolder])
+            return DriveArchivePath(mode=DRIVE_ARCHIVE_PATH_MODE_UPLOADED_VIDEO_SCOPED, folder_path=folder_path)
+        if company_id and channel_workspace_id and video_project_id:
+            return DriveArchivePath(
+                mode=DRIVE_ARCHIVE_PATH_MODE_PROJECT_SCOPED,
+                folder_path=[
+                    f"company_{company_id}",
+                    f"channel_{channel_workspace_id}",
+                    f"project_{video_project_id}",
+                    subfolder,
+                ],
+            )
+        smoke_date = self.today or utc_now().date()
+        return DriveArchivePath(
+            mode=DRIVE_ARCHIVE_PATH_MODE_SMOKE_TEST_UNSCOPED,
+            folder_path=["smoke_tests", smoke_date.isoformat()],
+        )
 
 
 class TokenExchanger(Protocol):
@@ -922,12 +972,14 @@ class GoogleDriveUploadService:
         credential_service: GoogleDriveOAuthCredentialService | None = None,
         provider: GoogleDriveMediaStorageProvider | None = None,
         verifier: GoogleDriveUploadVerifier | None = None,
+        archive_path_builder: DriveArchivePathBuilder | None = None,
     ):
         self.session = session
         self.config_service = config_service or GoogleDriveConfigService()
         self.credential_service = credential_service or GoogleDriveOAuthCredentialService(session, config_service=self.config_service)
         self.provider = provider or GoogleDriveMediaStorageProvider()
         self.verifier = verifier or GoogleDriveUploadVerifier()
+        self.archive_path_builder = archive_path_builder or DriveArchivePathBuilder()
 
     def upload_verified(
         self,
@@ -955,12 +1007,14 @@ class GoogleDriveUploadService:
             raise ValidationFailureError("Google Drive OAuth credential needs reauthorization")
         local_size = local_path.stat().st_size
         local_sha256 = _sha256_file(local_path)
-        folder_path = _default_drive_folder_path(
+        archive_path = self.archive_path_builder.build(
             company_id=company_id,
             channel_workspace_id=channel_workspace_id,
             video_project_id=video_project_id,
+            uploaded_video_id=uploaded_video_id,
             media_type=media_type,
         )
+        folder_path = archive_path.folder_path
         folder_id = self.provider.ensure_folder_path(access_token=access_token, root_folder_id=root_folder_id, folder_path=folder_path)
         mime_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
         upload_result = self.provider.upload_file(
@@ -980,7 +1034,12 @@ class GoogleDriveUploadService:
             size_bytes=metadata.size_bytes if metadata.size_bytes is not None else upload_result.size_bytes,
             checksum_sha256=metadata.checksum_sha256 or upload_result.checksum_sha256,
             upload_mode=upload_result.upload_mode,
-            technical_appendix={"folder_path": folder_path, "upload_mode": upload_result.upload_mode, "root_folder_configured": True},
+            technical_appendix={
+                "folder_path": folder_path,
+                "folder_path_mode": archive_path.mode,
+                "upload_mode": upload_result.upload_mode,
+                "root_folder_configured": True,
+            },
         )
         verification = self.verifier.verify(upload_result=upload_result, local_size_bytes=local_size, local_sha256=local_sha256)
         if not verification.ok:
@@ -1260,7 +1319,17 @@ def _default_drive_folder_path(
     video_project_id: Any | None,
     media_type: str,
 ) -> list[str]:
-    subfolder = {
+    return DriveArchivePathBuilder().build(
+        company_id=company_id,
+        channel_workspace_id=channel_workspace_id,
+        video_project_id=video_project_id,
+        uploaded_video_id=None,
+        media_type=media_type,
+    ).folder_path
+
+
+def _drive_media_subfolder(media_type: str) -> str:
+    return {
         "LONG_FORM_FINAL": "long_form",
         "SHORT_FINAL": "shorts",
         "THUMBNAIL": "thumbnails",
@@ -1270,13 +1339,6 @@ def _default_drive_folder_path(
         "PUBLISH_PACKAGE": "publish_package",
         "QC_EXPORT": "qc",
     }.get(media_type, "misc")
-    return [
-        "VCOS",
-        f"company_{company_id or 'unknown'}",
-        f"channel_{channel_workspace_id or 'unknown'}",
-        f"project_{video_project_id or 'unknown'}",
-        subfolder,
-    ]
 
 
 def _source_refs_for_job(job: MediaOffloadJob) -> list[dict[str, Any]]:
