@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import uuid
 from pathlib import Path
 
@@ -224,12 +225,26 @@ def _add_gate_pass(db_session, fx: dict, *, gate_key: str) -> R3D4GateRun:
 
 def _artifact_for_issue(issue_code: str) -> str:
     return {
+        "SCRIPT_FORBIDDEN_STYLE_USED": "narration_script",
         "HOOK_PROMISE_MISSING": "hook_spec",
+        "HOOK_VISUAL_MISSING": "hook_spec",
+        "TITLE_MISSING": "metadata_package",
         "THUMBNAIL_BRIEF_MISSING": "thumbnail_brief",
+        "DESCRIPTION_MISSING": "metadata_package",
         "PUBLISH_WINDOW_MISSING": "publish_timing",
         "TITLE_OVER_PROMISE_UNSUPPORTED_CLAIM": "metadata_package",
         "SUBTITLE_REFS_MISSING": "subtitle_package",
     }.get(issue_code, "upload_card_copy")
+
+
+def _replace_artifacts(package: FirstScriptedVideoPackage, updates: dict) -> None:
+    artifacts = deepcopy(package.artifacts)
+    for key, value in updates.items():
+        if value is None:
+            artifacts.pop(key, None)
+        else:
+            artifacts[key] = value
+    package.artifacts = artifacts
 
 
 def test_gate_results_create_deduped_queue_items_and_human_action_copy(db_session, qualification_factory) -> None:
@@ -246,13 +261,19 @@ def test_gate_results_create_deduped_queue_items_and_human_action_copy(db_sessio
     assert item.human_readable_title == "Hook thiếu promise rõ ràng"
     assert item.human_readable_fix == "Duyệt patch bổ sung promise và payoff location cho hook."
     assert item.section == "Hook Review"
-    assert item.next_action_code == "NEEDS_PROPOSED_PATCH"
+    assert item.next_action_code == "REVIEW_PROPOSED_PATCH"
+    assert item.proposed_patch is not None
+    assert item.proposed_patch.patch_type == "HOOK_SPEC"
 
 
 def test_issue_copy_maps_thumbnail_publish_window_and_title(db_session, qualification_factory) -> None:
     cases = [
         ("ThumbnailTruthfulnessGate", "THUMBNAIL_BRIEF_MISSING", "Thiếu thumbnail brief", "Thumbnail Handoff"),
         ("PublishTimingComplianceGate", "PUBLISH_WINDOW_MISSING", "Thiếu publish window", "Publish Timing"),
+        ("script_style_compliance_gate", "SCRIPT_FORBIDDEN_STYLE_USED", "Script dùng style bị cấm", "Script Review"),
+        ("VisualHookRelevanceGate", "HOOK_VISUAL_MISSING", "Hook thiếu visual 3 giây đầu", "Hook Review"),
+        ("TitlePromiseGate", "TITLE_MISSING", "Thiếu title upload", "Upload Copy"),
+        ("DescriptionCompletenessGate", "DESCRIPTION_MISSING", "Thiếu description upload", "Upload Copy"),
         ("TitlePromiseGate", "TITLE_OVER_PROMISE_UNSUPPORTED_CLAIM", "Title đang hứa quá mức", "Upload Copy"),
     ]
     for gate_key, issue_code, title, section in cases:
@@ -265,16 +286,149 @@ def test_issue_copy_maps_thumbnail_publish_window_and_title(db_session, qualific
 
 def test_patch_router_reuses_existing_agent_keys() -> None:
     router = PackagingPatchRouter()
+    script = router.route(issue_code="SCRIPT_FORBIDDEN_STYLE_USED", gate_key="script_style_compliance_gate")
     hook = router.route(issue_code="HOOK_PROMISE_MISSING", gate_key="HookTruthfulnessGate")
-    title = router.route(issue_code="TITLE_OVER_PROMISE_UNSUPPORTED_CLAIM", gate_key="TitlePromiseGate")
+    visual = router.route(issue_code="HOOK_VISUAL_MISSING", gate_key="VisualHookRelevanceGate")
+    title = router.route(issue_code="TITLE_MISSING", gate_key="TitlePromiseGate")
+    description = router.route(issue_code="DESCRIPTION_MISSING", gate_key="DescriptionCompletenessGate")
     thumbnail = router.route(issue_code="THUMBNAIL_BRIEF_MISSING", gate_key="ThumbnailTruthfulnessGate")
 
+    assert script is not None and script.routed_agent_key in {"ScriptRewriteAgent", "ScriptWriterAgent"}
+    assert script.patch_type == "SCRIPT_STYLE_PATCH"
     assert hook is not None and hook.routed_agent_key in {"ScriptRewriteAgent", "ScriptPlanningAgent"}
     assert hook.patch_type == "HOOK_SPEC"
+    assert visual is not None and visual.routed_agent_key == "VisualPlanningAgent"
+    assert visual.patch_type == "VISUAL_HOOK"
     assert title is not None and title.routed_agent_key == "PublishingMetadataAgent"
     assert title.patch_type == "METADATA"
+    assert description is not None and description.routed_agent_key in {"PublishingMetadataAgent", "UploadCardCopyAgent"}
+    assert description.patch_type == "METADATA"
     assert thumbnail is not None and thumbnail.routed_agent_key == "ThumbnailBriefAgent"
     assert thumbnail.patch_type == "THUMBNAIL_BRIEF"
+
+
+@pytest.mark.parametrize(
+    ("gate_key", "issue_code", "expected_patch_type", "expected_operation"),
+    [
+        ("script_style_compliance_gate", "SCRIPT_FORBIDDEN_STYLE_USED", "SCRIPT_STYLE_PATCH", "rewrite_script_style_only"),
+        ("HookTruthfulnessGate", "HOOK_PROMISE_MISSING", "HOOK_SPEC", "create_hook_spec_patch"),
+        ("VisualHookRelevanceGate", "HOOK_VISUAL_MISSING", "VISUAL_HOOK", "create_visual_hook_patch"),
+        ("TitlePromiseGate", "TITLE_MISSING", "METADATA", "create_metadata_title_patch"),
+        ("DescriptionCompletenessGate", "DESCRIPTION_MISSING", "METADATA", "create_upload_description_patch"),
+        ("ThumbnailTruthfulnessGate", "THUMBNAIL_BRIEF_MISSING", "THUMBNAIL_BRIEF", "create_thumbnail_brief_patch"),
+    ],
+)
+def test_r3d9_ux3_reason_codes_create_ready_human_review_patches(
+    db_session,
+    qualification_factory,
+    gate_key: str,
+    issue_code: str,
+    expected_patch_type: str,
+    expected_operation: str,
+) -> None:
+    fx = _package_fixture(db_session, qualification_factory)
+    if issue_code == "SCRIPT_FORBIDDEN_STYLE_USED":
+        fx["effective"].brand_voice_persona_context_json = {"forbidden_style": ["hype bait"]}
+        script = deepcopy(fx["package"].artifacts["narration_script"])
+        script["sentences"][0]["text"] = "This hype bait automation claim needs calmer wording."
+        _replace_artifacts(fx["package"], {"narration_script": script})
+    elif issue_code == "HOOK_PROMISE_MISSING":
+        hook = deepcopy(fx["package"].artifacts["hook_spec"])
+        hook["promise_made"] = None
+        hook["payoff_location"] = None
+        _replace_artifacts(fx["package"], {"hook_spec": hook})
+    elif issue_code == "HOOK_VISUAL_MISSING":
+        hook = deepcopy(fx["package"].artifacts["hook_spec"])
+        hook["first_3_seconds_visual"] = None
+        _replace_artifacts(fx["package"], {"hook_spec": hook, "visual_plan": {}})
+    elif issue_code == "TITLE_MISSING":
+        metadata = deepcopy(fx["package"].artifacts["metadata_package"])
+        upload = deepcopy(fx["package"].artifacts["upload_card_copy"])
+        metadata.pop("title", None)
+        upload.pop("title", None)
+        _replace_artifacts(fx["package"], {"metadata_package": metadata, "upload_card_copy": upload})
+    elif issue_code == "DESCRIPTION_MISSING":
+        metadata = deepcopy(fx["package"].artifacts["metadata_package"])
+        upload = deepcopy(fx["package"].artifacts["upload_card_copy"])
+        metadata.pop("description", None)
+        upload.pop("description", None)
+        _replace_artifacts(fx["package"], {"metadata_package": metadata, "upload_card_copy": upload})
+    elif issue_code == "THUMBNAIL_BRIEF_MISSING":
+        _replace_artifacts(fx["package"], {"thumbnail_brief": {}})
+    db_session.flush()
+    _add_gate_issue(db_session, fx, gate_key=gate_key, issue_code=issue_code, status="BLOCK" if issue_code == "SCRIPT_FORBIDDEN_STYLE_USED" else "REVIEW_REQUIRED")
+
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    item = next(item for item in queue.items if item.gate_key == gate_key and item.issue_code == issue_code)
+
+    assert item.status == "PENDING_HUMAN_REVIEW"
+    assert item.next_action_code == "REVIEW_PROPOSED_PATCH"
+    assert item.proposed_patch is not None
+    assert item.proposed_patch.patch_type == expected_patch_type
+    assert item.proposed_patch.status == "READY_FOR_REVIEW"
+    assert item.proposed_patch.requires_human_approval is True
+    assert item.proposed_patch.proposed_patch_json["operation"] == expected_operation
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApprovalDecision)) == 0
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApplyRun)) == 0
+    if issue_code == "SCRIPT_FORBIDDEN_STYLE_USED":
+        preview = item.proposed_patch.after_preview_json["before_after_preview"]
+        assert preview
+        assert "hype bait" not in preview[0]["after_text"].lower()
+    if issue_code == "HOOK_PROMISE_MISSING":
+        hook_patch = item.proposed_patch.proposed_patch_json["hook_spec_patch"]
+        assert hook_patch["promise_made"]
+        assert hook_patch["payoff_location"]
+        assert hook_patch["first_3_seconds_script"]
+    if issue_code == "TITLE_MISSING":
+        assert len(item.proposed_patch.proposed_patch_json["title_candidates"]) == 3
+        assert item.proposed_patch.proposed_patch_json["recommended_title"]
+    if issue_code == "DESCRIPTION_MISSING":
+        assert item.proposed_patch.proposed_patch_json["description"]
+        assert "VCOS does not upload" in item.proposed_patch.proposed_patch_json["description"]
+    if issue_code == "THUMBNAIL_BRIEF_MISSING":
+        brief = item.proposed_patch.proposed_patch_json["thumbnail_brief"]
+        assert brief["concept"]
+        assert brief["text_overlay"]
+        assert brief["rendered"] is False
+
+
+def test_r3d9_ux3_blocked_package_stays_upload_task_disabled_with_proposed_patch(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory)
+    fx["effective"].brand_voice_persona_context_json = {"forbidden_style": ["hype bait"]}
+    script = deepcopy(fx["package"].artifacts["narration_script"])
+    script["sentences"][0]["text"] = "This hype bait phrase should be rewritten before upload."
+    _replace_artifacts(fx["package"], {"narration_script": script})
+    db_session.flush()
+    _add_gate_issue(db_session, fx, gate_key="script_style_compliance_gate", issue_code="SCRIPT_FORBIDDEN_STYLE_USED", status="BLOCK")
+
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+
+    assert queue.review_verdict == "BLOCKED"
+    assert queue.upload_task_creation_allowed is False
+    assert queue.must_fix_count >= 1
+    script_item = next(item for item in queue.items if item.issue_code == "SCRIPT_FORBIDDEN_STYLE_USED")
+    assert script_item.proposed_patch is not None
+    with pytest.raises(ValidationFailureError, match="PACKAGING_REVIEW_UNRESOLVED"):
+        PublishHandoffLedgerService(db_session).create_upload_task_from_package(fx["package"].id)
+    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
+
+
+def test_r3d9_ux3_proposal_generation_has_no_provider_media_upload_youtube_calls(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory)
+    _replace_artifacts(fx["package"], {"thumbnail_brief": {}})
+    db_session.flush()
+    _add_gate_issue(db_session, fx, gate_key="ThumbnailTruthfulnessGate", issue_code="THUMBNAIL_BRIEF_MISSING", status="REVIEW_REQUIRED")
+
+    PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+
+    assert db_session.scalar(select(func.count()).select_from(PackagingProposedPatch).where(PackagingProposedPatch.package_id == fx["package"].id)) >= 1
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApprovalDecision)) == 0
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApplyRun)) == 0
+    assert db_session.scalar(select(func.count()).select_from(ProviderAttempt)) == 0
+    assert db_session.scalar(select(func.count()).select_from(MediaRenderJob)) == 0
+    assert db_session.scalar(select(func.count()).select_from(FinalMediaRef)) == 0
+    assert db_session.scalar(select(func.count()).select_from(UploadedVideo)) == 0
+    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
 
 
 def test_deterministic_publish_timing_patch_does_not_mutate_frozen_context(db_session, qualification_factory) -> None:

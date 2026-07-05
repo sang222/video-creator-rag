@@ -201,7 +201,7 @@ function MustFixBeforeUploadPanel({
               </div>
               <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
                 <div className="text-xs uppercase text-muted-foreground">Proposed fix</div>
-                <div className="mt-1">{readyPatch ? patchSummary(readyPatch.after_preview_json || readyPatch.proposed_patch_json) : "Đang cần proposed patch"}</div>
+                <div className="mt-1">{readyPatch ? patchSummary(readyPatch.after_preview_json || readyPatch.proposed_patch_json) : missingPatchReason(item)}</div>
                 <div className="mt-2 text-muted-foreground">{item.human_readable_fix}</div>
               </div>
               {readyPatch ? (
@@ -507,6 +507,24 @@ function issueCopy(issue: string) {
       fix: "Duyệt patch bổ sung promise và payoff location cho hook.",
       section: "Hook Review"
     },
+    HOOK_VISUAL_MISSING: {
+      title: "Hook thiếu visual 3 giây đầu",
+      why: "Operator chưa có ý tưởng visual mở đầu khớp với script hook.",
+      fix: "Duyệt patch visual hook không chạy render/provider.",
+      section: "Hook Review"
+    },
+    SCRIPT_FORBIDDEN_STYLE_USED: {
+      title: "Script dùng style bị cấm",
+      why: "Narration script chứa wording/style nằm trong frozen channel/runtime contract.",
+      fix: "Duyệt patch rewrite đúng câu vi phạm, giữ topic/claim/audience/evidence.",
+      section: "Script Review"
+    },
+    TITLE_MISSING: {
+      title: "Thiếu title upload",
+      why: "Package chưa có title paste-ready cho YouTube.",
+      fix: "Duyệt patch metadata có 3 title candidates và title khuyến nghị.",
+      section: "Upload Copy"
+    },
     SUBTITLE_REFS_MISSING: {
       title: "Chưa có subtitle refs",
       why: "Operator chưa biết subtitle là draft hay final.",
@@ -518,6 +536,12 @@ function issueCopy(issue: string) {
       why: "Chưa có concept/overlay/subject để human tạo thumbnail.",
       fix: "Duyệt patch thumbnail brief.",
       section: "Thumbnail Handoff"
+    },
+    DESCRIPTION_MISSING: {
+      title: "Thiếu description upload",
+      why: "Package chưa có description ngắn gọn để paste sang YouTube.",
+      fix: "Duyệt patch description không thêm CTA/resource giả.",
+      section: "Upload Copy"
     },
     PUBLISH_WINDOW_MISSING: {
       title: "Thiếu publish window",
@@ -555,6 +579,15 @@ function issueCopy(issue: string) {
 function patchSummary(value: Record<string, unknown>) {
   const text = safeJson(value);
   return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+}
+
+function missingPatchReason(item: PackagingReviewQueueItem) {
+  const reasons: Record<string, string> = {
+    ROUTE_NOT_AVAILABLE: "Cần proposed patch: chưa có route an toàn cho issue này.",
+    LLM_PROPOSAL_DISABLED: "Cần proposed patch: LLM proposal đang tắt hoặc chưa được phép.",
+    NEEDS_PROPOSED_PATCH: "Đang cần proposed patch"
+  };
+  return reasons[item.next_action_code] ?? "Đang cần proposed patch";
 }
 
 function shortValue(value?: string | null) {

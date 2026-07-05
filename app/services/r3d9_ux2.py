@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import uuid
 from typing import Any
 
@@ -20,6 +21,7 @@ from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models import (
     Artifact,
     ArtifactVersion,
+    EffectiveChannelRuntimeContextSnapshot,
     FirstScriptedVideoPackage,
     PackagingGateRerunRecord,
     PackagingPatchApplyRun,
@@ -53,6 +55,24 @@ ISSUE_ACTION_COPY: dict[str, dict[str, str]] = {
         "fix": "Duyệt patch bổ sung promise và payoff location cho hook.",
         "section": "Hook Review",
     },
+    "HOOK_VISUAL_MISSING": {
+        "title": "Hook thiếu visual 3 giây đầu",
+        "why": "Operator chưa có ý tưởng visual mở đầu khớp với script hook.",
+        "fix": "Duyệt patch visual hook không chạy render/provider.",
+        "section": "Hook Review",
+    },
+    "SCRIPT_FORBIDDEN_STYLE_USED": {
+        "title": "Script dùng style bị cấm",
+        "why": "Narration script chứa wording/style nằm trong frozen channel/runtime contract.",
+        "fix": "Duyệt patch rewrite đúng câu vi phạm, giữ topic/claim/audience/evidence.",
+        "section": "Script Review",
+    },
+    "TITLE_MISSING": {
+        "title": "Thiếu title upload",
+        "why": "Package chưa có title paste-ready cho YouTube.",
+        "fix": "Duyệt patch metadata có 3 title candidates và title khuyến nghị.",
+        "section": "Upload Copy",
+    },
     "SUBTITLE_REFS_MISSING": {
         "title": "Chưa có subtitle refs",
         "why": "Operator chưa biết subtitle là draft hay final.",
@@ -64,6 +84,12 @@ ISSUE_ACTION_COPY: dict[str, dict[str, str]] = {
         "why": "Chưa có concept/overlay/subject để human tạo thumbnail.",
         "fix": "Duyệt patch thumbnail brief.",
         "section": "Thumbnail Handoff",
+    },
+    "DESCRIPTION_MISSING": {
+        "title": "Thiếu description upload",
+        "why": "Package chưa có description ngắn gọn để paste sang YouTube.",
+        "fix": "Duyệt patch description không thêm CTA/resource giả.",
+        "section": "Upload Copy",
     },
     "PUBLISH_WINDOW_MISSING": {
         "title": "Thiếu publish window",
@@ -106,6 +132,8 @@ ISSUE_ACTION_COPY: dict[str, dict[str, str]] = {
 
 PATCH_TYPE_RERUN_GATES: dict[str, list[str]] = {
     "HOOK_SPEC": ["HookTruthfulnessGate", "HookPayoffGate", "VisualHookRelevanceGate"],
+    "VISUAL_HOOK": ["VisualHookRelevanceGate"],
+    "SCRIPT_STYLE_PATCH": ["script_style_compliance_gate"],
     "METADATA": ["TitlePromiseGate", "MetadataTruthfulnessGate", "DescriptionCompletenessGate"],
     "THUMBNAIL_BRIEF": ["ThumbnailTruthfulnessGate", "MobileThumbnailLegibilityGate", "CharacterThumbnailConsistencyGate"],
     "SUBTITLE_HANDOFF": ["CaptionCoverageGate"],
@@ -126,9 +154,13 @@ class PackagingPatchRoute:
 
 class PackagingPatchRouter:
     ROUTES: dict[str, PackagingPatchRoute] = {
-        "HOOK_PROMISE_MISSING": PackagingPatchRoute("EXISTING_AGENT", "HOOK_SPEC", "ScriptRewriteAgent", "script_rewrite_agent.patch_proposal"),
+        "SCRIPT_FORBIDDEN_STYLE_USED": PackagingPatchRoute("DETERMINISTIC_SERVICE", "SCRIPT_STYLE_PATCH", "ScriptRewriteAgent", "script_rewrite_agent.patch_proposal", True),
+        "HOOK_PROMISE_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "HOOK_SPEC", "ScriptRewriteAgent", "script_rewrite_agent.patch_proposal", True),
+        "HOOK_VISUAL_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "VISUAL_HOOK", "VisualPlanningAgent", "visual_planning_agent.patch_proposal", True),
+        "TITLE_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "METADATA", "PublishingMetadataAgent", "publishing_metadata_agent.patch_proposal", True),
         "TITLE_OVER_PROMISE_UNSUPPORTED_CLAIM": PackagingPatchRoute("EXISTING_AGENT", "METADATA", "PublishingMetadataAgent", "publishing_metadata_agent.patch_proposal"),
-        "THUMBNAIL_BRIEF_MISSING": PackagingPatchRoute("EXISTING_AGENT", "THUMBNAIL_BRIEF", "ThumbnailBriefAgent", "thumbnail_brief_agent.patch_proposal"),
+        "DESCRIPTION_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "METADATA", "PublishingMetadataAgent", "publishing_metadata_agent.patch_proposal", True),
+        "THUMBNAIL_BRIEF_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "THUMBNAIL_BRIEF", "ThumbnailBriefAgent", "thumbnail_brief_agent.patch_proposal", True),
         "SUBTITLE_REFS_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "SUBTITLE_HANDOFF", None, "subtitle_handoff_service.patch_proposal", True),
         "PUBLISH_WINDOW_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "PUBLISH_TIMING_OVERRIDE", None, "publish_timing_service.patch_proposal", True),
         "DISCLOSURE_CONFLICT": PackagingPatchRoute("EXISTING_AGENT", "DISCLOSURE_COPY", "RightsDisclosureReviewer+UploadCardCopyAgent", "rights_disclosure_upload_copy.patch_proposal"),
@@ -417,12 +449,12 @@ class PackagingPatchProposalService:
             return existing
         route = self.router.route(issue_code=item.issue_code, gate_key=item.gate_key)
         if route is None:
-            item.next_action_code = "NEEDS_PROPOSED_PATCH"
+            item.next_action_code = "ROUTE_NOT_AVAILABLE"
             return None
         if route.deterministic:
             return self._create_deterministic_patch(item, route)
-        item.next_action_code = "NEEDS_PROPOSED_PATCH"
         if not self._llm_patch_proposal_enabled():
+            item.next_action_code = "LLM_PROPOSAL_DISABLED"
             return None
         item.next_action_code = "NEEDS_PROPOSED_PATCH"
         return None
@@ -501,12 +533,260 @@ class PackagingPatchProposalService:
                 "affected_artifact_refs_json": [{"artifact_key": "publish_timing"}, {"artifact_key": "manual_publish_handoff"}],
                 "risk_level": "LOW",
             }
+        if route.patch_type == "SCRIPT_STYLE_PATCH":
+            return self._script_style_patch_payload(item, route, package)
+        if route.patch_type == "HOOK_SPEC":
+            return self._hook_spec_patch_payload(item, route, package)
+        if route.patch_type == "VISUAL_HOOK":
+            return self._visual_hook_patch_payload(item, route, package)
+        if route.patch_type == "METADATA" and item.issue_code == "TITLE_MISSING":
+            return self._title_patch_payload(item, route, package)
+        if route.patch_type == "METADATA" and item.issue_code == "DESCRIPTION_MISSING":
+            return self._description_patch_payload(item, route, package)
+        if route.patch_type == "THUMBNAIL_BRIEF":
+            return self._thumbnail_brief_patch_payload(item, route, package)
         return {
             "proposed_patch_json": {"operation": "route_to_existing_agent", "route_key": route.route_key, "reason_code": item.issue_code},
             "after_preview_json": {},
             "affected_artifact_refs_json": [{"artifact_key": item.target_artifact_ref or item.target_artifact_type}],
             "risk_level": "MEDIUM",
         }
+
+    def _script_style_patch_payload(
+        self,
+        item: PackagingReviewQueueItem,
+        route: PackagingPatchRoute,
+        package: FirstScriptedVideoPackage,
+    ) -> dict[str, Any]:
+        artifacts = package.artifacts or {}
+        script = _dict(artifacts.get("narration_script"))
+        effective_context = self._effective_context(package)
+        forbidden_terms = _strings(_dict(effective_context.brand_voice_persona_context_json if effective_context else {}).get("forbidden_style"))
+        sentence_patches: list[dict[str, str | None]] = []
+        for sentence in _list(script.get("sentences")):
+            if not isinstance(sentence, dict):
+                continue
+            before = str(sentence.get("text") or "")
+            after = _remove_forbidden_terms(before, forbidden_terms)
+            if after != before:
+                sentence_patches.append(
+                    {
+                        "sentence_id": str(sentence.get("sentence_id") or len(sentence_patches) + 1),
+                        "before_text": before,
+                        "after_text": after,
+                    }
+                )
+        proposed = {
+            "operation": "rewrite_script_style_only",
+            "reason_code": item.issue_code,
+            "route_key": route.route_key,
+            "routed_agent_key": route.routed_agent_key,
+            "target_artifact_key": "narration_script",
+            "forbidden_style_terms": forbidden_terms,
+            "sentence_patches": sentence_patches,
+            "preserve": ["topic", "claim", "duration_target", "audience", "evidence_refs", "sentence_order"],
+            "requires_human_approval": True,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        return {
+            "proposed_patch_json": proposed,
+            "after_preview_json": {
+                "before_after_preview": sentence_patches,
+                "style_contract_note": "Chỉ xoá/rewrite wording vi phạm trong narration_script; không sửa frozen contract.",
+            },
+            "affected_artifact_refs_json": [{"artifact_key": "narration_script"}],
+            "risk_level": "MEDIUM",
+        }
+
+    def _hook_spec_patch_payload(
+        self,
+        item: PackagingReviewQueueItem,
+        route: PackagingPatchRoute,
+        package: FirstScriptedVideoPackage,
+    ) -> dict[str, Any]:
+        artifacts = package.artifacts or {}
+        hook = _existing_hook_payload(artifacts)
+        topic = _topic_from_package(self.session, package)
+        first_script = _first_sentence_text(artifacts) or _clean_text(hook.get("first_3_seconds_script")) or _shorten(topic, 96)
+        payoff_location = _payoff_location(artifacts)
+        promise = _safe_promise(topic)
+        visual = _clean_text(hook.get("first_3_seconds_visual")) or _first_visual_scene(artifacts)
+        proposed_hook = {
+            "promise_made": promise,
+            "payoff_location": payoff_location,
+            "first_3_seconds_script": first_script,
+            "first_3_seconds_visual": visual,
+            "no_overpromise_note": "Promise dùng framing thận trọng từ topic/script hiện có; không thêm claim mới.",
+        }
+        proposed = {
+            "operation": "create_hook_spec_patch",
+            "reason_code": item.issue_code,
+            "route_key": route.route_key,
+            "routed_agent_key": route.routed_agent_key,
+            "target_artifact_key": "hook_spec",
+            "hook_spec_patch": proposed_hook,
+            "requires_human_approval": True,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        return {
+            "proposed_patch_json": proposed,
+            "after_preview_json": {"hook_spec": {**hook, **proposed_hook}},
+            "affected_artifact_refs_json": [{"artifact_key": "hook_spec"}, {"artifact_key": "narration_script"}],
+            "risk_level": "LOW",
+        }
+
+    def _visual_hook_patch_payload(
+        self,
+        item: PackagingReviewQueueItem,
+        route: PackagingPatchRoute,
+        package: FirstScriptedVideoPackage,
+    ) -> dict[str, Any]:
+        artifacts = package.artifacts or {}
+        effective_context = self._effective_context(package)
+        hook = _existing_hook_payload(artifacts)
+        first_script = _clean_text(hook.get("first_3_seconds_script")) or _first_sentence_text(artifacts)
+        topic = _topic_from_package(self.session, package)
+        character_policy = (
+            effective_context.character_policy_mode
+            or _dict(effective_context.character_identity_context_json).get("character_policy_mode")
+            if effective_context
+            else None
+        )
+        visual = _visual_hook_idea(first_script=first_script, topic=topic, character_policy=character_policy)
+        proposed = {
+            "operation": "create_visual_hook_patch",
+            "reason_code": item.issue_code,
+            "route_key": route.route_key,
+            "routed_agent_key": route.routed_agent_key,
+            "target_artifact_key": "hook_spec",
+            "first_3_seconds_visual": visual,
+            "alignment_note": "Visual hook bám first_3_seconds_script/promise hiện có.",
+            "character_policy_note": _character_policy_note(character_policy),
+            "requires_human_approval": True,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        return {
+            "proposed_patch_json": proposed,
+            "after_preview_json": {"hook_spec": {**hook, "first_3_seconds_visual": visual}},
+            "affected_artifact_refs_json": [{"artifact_key": "hook_spec"}, {"artifact_key": "visual_plan"}],
+            "risk_level": "LOW",
+        }
+
+    def _title_patch_payload(
+        self,
+        item: PackagingReviewQueueItem,
+        route: PackagingPatchRoute,
+        package: FirstScriptedVideoPackage,
+    ) -> dict[str, Any]:
+        topic = _topic_from_package(self.session, package)
+        candidates = _title_candidates(topic)
+        recommended = candidates[0]
+        proposed = {
+            "operation": "create_metadata_title_patch",
+            "reason_code": item.issue_code,
+            "route_key": route.route_key,
+            "routed_agent_key": route.routed_agent_key,
+            "target_artifact_key": "metadata_package",
+            "title_candidates": candidates,
+            "recommended_title": recommended,
+            "promise_payoff_alignment_note": "Title giữ đúng topic/script hiện có và không hứa asset, demo, kết quả bảo đảm.",
+            "requires_human_approval": True,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        return {
+            "proposed_patch_json": proposed,
+            "after_preview_json": {"metadata_package": {"title": recommended, "title_candidates": candidates}},
+            "affected_artifact_refs_json": [{"artifact_key": "metadata_package"}, {"artifact_key": "upload_card_copy"}],
+            "risk_level": "LOW",
+        }
+
+    def _description_patch_payload(
+        self,
+        item: PackagingReviewQueueItem,
+        route: PackagingPatchRoute,
+        package: FirstScriptedVideoPackage,
+    ) -> dict[str, Any]:
+        artifacts = package.artifacts or {}
+        topic = _topic_from_package(self.session, package)
+        summary = _script_summary(artifacts, topic)
+        description = (
+            f"{summary}\n\n"
+            "Human review note: verify claims, assets, subtitles, and thumbnail before manual upload. "
+            "VCOS does not upload, publish, schedule, or generate media from this patch."
+        )
+        proposed = {
+            "operation": "create_upload_description_patch",
+            "reason_code": item.issue_code,
+            "route_key": route.route_key,
+            "routed_agent_key": route.routed_agent_key,
+            "target_artifact_key": "metadata_package",
+            "summary": summary,
+            "description": description,
+            "unsupported_cta_guard": "Không thêm fake resource, demo, checklist, limited-time CTA, hoặc asset chưa có manifest.",
+            "requires_human_approval": True,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        return {
+            "proposed_patch_json": proposed,
+            "after_preview_json": {"metadata_package": {"description": description}, "upload_card_copy": {"description": description}},
+            "affected_artifact_refs_json": [{"artifact_key": "metadata_package"}, {"artifact_key": "upload_card_copy"}],
+            "risk_level": "LOW",
+        }
+
+    def _thumbnail_brief_patch_payload(
+        self,
+        item: PackagingReviewQueueItem,
+        route: PackagingPatchRoute,
+        package: FirstScriptedVideoPackage,
+    ) -> dict[str, Any]:
+        topic = _topic_from_package(self.session, package)
+        hook = _existing_hook_payload(package.artifacts or {})
+        effective_context = self._effective_context(package)
+        character_policy = (
+            effective_context.character_policy_mode
+            or _dict(effective_context.character_identity_context_json).get("character_policy_mode")
+            if effective_context
+            else None
+        )
+        overlay = _thumbnail_overlay(topic)
+        brief = {
+            "concept": f"Concrete operator workflow around: {_shorten(topic, 72)}",
+            "text_overlay": overlay,
+            "main_subject": "Workflow board, automation trigger, and time-saved marker; no stock face.",
+            "composition": "Large subject left, short overlay right, high contrast, plenty of negative space.",
+            "mobile_readability_notes": "Overlay is 2-4 words, high contrast, readable at small size.",
+            "truthfulness_note": "Thumbnail repeats only topic/hook framing already present; no new proof/result claim.",
+            "character_policy_note": _character_policy_note(character_policy),
+            "aligned_hook": _clean_text(hook.get("promise_made") or hook.get("first_3_seconds_script")),
+            "rendered": False,
+        }
+        proposed = {
+            "operation": "create_thumbnail_brief_patch",
+            "reason_code": item.issue_code,
+            "route_key": route.route_key,
+            "routed_agent_key": route.routed_agent_key,
+            "target_artifact_key": "thumbnail_brief",
+            "thumbnail_brief": brief,
+            "requires_human_approval": True,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        return {
+            "proposed_patch_json": proposed,
+            "after_preview_json": {"thumbnail_brief": brief},
+            "affected_artifact_refs_json": [{"artifact_key": "thumbnail_brief"}],
+            "risk_level": "LOW",
+        }
+
+    def _effective_context(self, package: FirstScriptedVideoPackage) -> EffectiveChannelRuntimeContextSnapshot | None:
+        if not package.effective_context_snapshot_id:
+            return None
+        return self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id)
 
     def _llm_patch_proposal_enabled(self) -> bool:
         return bool(self.settings.llm_real_execution_enabled and self.settings.real_llm_package_run_enabled)
@@ -749,7 +1029,11 @@ def _next_safe_action(verdict: str, unresolved: list[PackagingReviewQueueItem]) 
     if verdict == "WAITING_PROVIDER_CONFIG":
         return "Kiểm tra provider/cost boundary; không chạy provider từ dashboard."
     if unresolved:
-        needs_patch = sum(1 for item in unresolved if item.next_action_code == "NEEDS_PROPOSED_PATCH")
+        needs_patch = sum(
+            1
+            for item in unresolved
+            if item.next_action_code in {"NEEDS_PROPOSED_PATCH", "ROUTE_NOT_AVAILABLE", "LLM_PROPOSAL_DISABLED"}
+        )
         if needs_patch:
             return "Tạo hoặc chờ proposed patch cho các gate đang fail."
         return "Duyệt, reject hoặc request changes trên proposed patch."
@@ -759,6 +1043,8 @@ def _next_safe_action(verdict: str, unresolved: list[PackagingReviewQueueItem]) 
 def _artifact_type_for_patch(patch_type: str) -> str:
     return {
         "HOOK_SPEC": "packaging_hook_patch",
+        "VISUAL_HOOK": "packaging_visual_hook_patch",
+        "SCRIPT_STYLE_PATCH": "packaging_script_style_patch",
         "METADATA": "packaging_metadata_patch",
         "THUMBNAIL_BRIEF": "packaging_thumbnail_patch",
         "SUBTITLE_HANDOFF": "packaging_subtitle_handoff_patch",
@@ -766,3 +1052,169 @@ def _artifact_type_for_patch(patch_type: str) -> str:
         "DISCLOSURE_COPY": "packaging_disclosure_copy_patch",
         "UPLOAD_COPY": "packaging_upload_copy_patch",
     }.get(patch_type, "packaging_patch")
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def _strings(value: Any) -> list[str]:
+    return [str(item).strip() for item in _list(value) if str(item).strip()]
+
+
+def _clean_text(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    return text or None
+
+
+def _shorten(value: Any, limit: int) -> str:
+    text = _clean_text(value) or "Package topic cần human review"
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,:;") + "..."
+
+
+def _remove_forbidden_terms(text: str, forbidden_terms: list[str]) -> str:
+    rewritten = text
+    for term in sorted(forbidden_terms, key=len, reverse=True):
+        if not term:
+            continue
+        rewritten = re.sub(re.escape(term), _neutral_style_replacement(term), rewritten, flags=re.IGNORECASE)
+    rewritten = re.sub(r"\s+", " ", rewritten).strip()
+    return rewritten or text
+
+
+def _neutral_style_replacement(term: str) -> str:
+    normalized = term.lower().strip()
+    if normalized == "hype":
+        return "overstatement"
+    if "hype" in normalized:
+        return "measured framing"
+    if "fear" in normalized:
+        return "calm framing"
+    if "urgency" in normalized:
+        return "specific timing"
+    return "neutral wording"
+
+
+def _existing_hook_payload(artifacts: dict[str, Any]) -> dict[str, Any]:
+    script = _dict(artifacts.get("narration_script"))
+    outline = _dict(artifacts.get("script_outline"))
+    return {
+        **_dict(script.get("hook_spec")),
+        **_dict(outline.get("hook_spec")),
+        **_dict(artifacts.get("hook_spec")),
+    }
+
+
+def _first_sentence_text(artifacts: dict[str, Any]) -> str | None:
+    script = _dict(artifacts.get("narration_script"))
+    for sentence in _list(script.get("sentences")):
+        if isinstance(sentence, dict):
+            text = _clean_text(sentence.get("text"))
+            if text:
+                return text
+    return _clean_text(script.get("text") or script.get("script"))
+
+
+def _first_visual_scene(artifacts: dict[str, Any]) -> str | None:
+    visual = _dict(artifacts.get("visual_plan"))
+    for scene in _list(visual.get("scenes")):
+        if isinstance(scene, dict):
+            text = _clean_text(scene.get("description") or scene.get("visual") or scene.get("kind"))
+            if text:
+                return text
+    return None
+
+
+def _topic_from_package(session: Session, package: FirstScriptedVideoPackage) -> str:
+    project = session.get(VideoProject, package.video_project_id) if package.video_project_id else None
+    artifacts = package.artifacts or {}
+    outline = _dict(artifacts.get("script_outline"))
+    metadata = _dict(artifacts.get("metadata_package"))
+    topic = (
+        getattr(project, "title", None)
+        or metadata.get("title")
+        or outline.get("title")
+        or outline.get("topic")
+        or _dict(artifacts.get("admission_decision")).get("topic")
+        or _first_sentence_text(artifacts)
+    )
+    return _shorten(topic, 120)
+
+
+def _payoff_location(artifacts: dict[str, Any]) -> str:
+    script = _dict(artifacts.get("narration_script"))
+    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    if len(sentences) >= 2:
+        return str(sentences[min(1, len(sentences) - 1)].get("sentence_id") or "S2")
+    if sentences:
+        return str(sentences[0].get("sentence_id") or "S1")
+    return "SCRIPT_REVIEW_REQUIRED"
+
+
+def _safe_promise(topic: str) -> str:
+    return f"Explain {_shorten(topic, 90)} with evidence-aware steps and human-reviewable limits."
+
+
+def _visual_hook_idea(*, first_script: str | None, topic: str, character_policy: Any) -> str:
+    base = _shorten(first_script or topic, 96)
+    character_note = "without stock faces or recurring characters" if str(character_policy or "").upper() != "REQUIRED_CHARACTER" else "using only the frozen character branch if approved"
+    return f"First 3-5 seconds: fast operator-dashboard/workflow close-up for '{base}', {character_note}; no media/provider render."
+
+
+def _character_policy_note(character_policy: Any) -> str:
+    if str(character_policy or "").upper() == "REQUIRED_CHARACTER":
+        return "Use only the frozen character branch if the human approves this brief."
+    return "No stock face, host, or recurring character is introduced."
+
+
+def _title_candidates(topic: str) -> list[str]:
+    base = _shorten(topic, 82).rstrip(".")
+    candidates = [
+        base,
+        f"Practical Workflow: {base}" if len(base) <= 58 else f"Practical Workflow: {_shorten(base, 58)}",
+        f"What Operators Should Check: {_shorten(base, 56)}",
+    ]
+    deduped: list[str] = []
+    for candidate in candidates:
+        clean = _clean_text(candidate)
+        if clean and clean not in deduped:
+            deduped.append(clean)
+    while len(deduped) < 3:
+        deduped.append(f"{base} - review candidate {len(deduped) + 1}")
+    return deduped[:3]
+
+
+def _script_summary(artifacts: dict[str, Any], topic: str) -> str:
+    sentences: list[str] = []
+    script = _dict(artifacts.get("narration_script"))
+    for sentence in _list(script.get("sentences")):
+        if isinstance(sentence, dict):
+            text = _clean_text(sentence.get("text"))
+            if text:
+                sentences.append(text)
+        if len(sentences) >= 2:
+            break
+    if sentences:
+        return _shorten(" ".join(sentences), 240)
+    return f"This video walks through {_shorten(topic, 120)} for a human-reviewed manual publish workflow."
+
+
+def _thumbnail_overlay(topic: str) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", topic)
+    if "20" in words or "hours" in [word.lower() for word in words]:
+        return "20 Hours Back?"
+    if len(words) >= 2:
+        return " ".join(words[:3]).title()
+    return "Workflow Check"
