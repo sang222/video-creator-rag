@@ -11,7 +11,7 @@ from app.cli.main import app as cli_app
 from app.contracts.m12_2r import BackfillUploadedVideoRequest
 from app.core.config import Settings
 from app.core.errors import ConflictError, ValidationFailureError
-from app.db.models import FirstScriptedVideoPackage, UploadedVideo, UploadedVideoBackfillEvent
+from app.db.models import FinalMediaRef, FirstScriptedVideoPackage, UploadedVideo, UploadedVideoBackfillEvent
 from app.main import create_app
 from app.services import EffectiveChannelRuntimeContextCompiler
 from app.services.m12_2r import PublishHandoffLedgerService, parse_youtube_video_id
@@ -94,9 +94,26 @@ def _ready_package(db_session, scope, *, status: str = "READY_FOR_HUMAN_REVIEW")
     return package
 
 
+def _add_final_media_ref(db_session, scope, package: FirstScriptedVideoPackage) -> FinalMediaRef:
+    ref = FinalMediaRef(
+        company_id=scope.company.id,
+        channel_workspace_id=scope.channel.id,
+        video_project_id=scope.project.id,
+        uploaded_video_id=None,
+        media_type="LONG_FORM_FINAL",
+        file_ref=f"fixture://final-media/{package.id}.mp4",
+        provider_key=None,
+        provider_type=None,
+    )
+    db_session.add(ref)
+    db_session.flush()
+    return ref
+
+
 def _task(db_session, qualification_factory):
     scope = qualification_factory.m2_project()
     package = _ready_package(db_session, scope)
+    _add_final_media_ref(db_session, scope, package)
     service = PublishHandoffLedgerService(db_session, settings=_settings())
     task = service.create_upload_task_from_package(package.id)
     return scope, package, task, service
@@ -105,6 +122,7 @@ def _task(db_session, qualification_factory):
 def test_m12_2r_create_human_upload_task_from_ready_package_is_idempotent(db_session, qualification_factory) -> None:
     scope = qualification_factory.m2_project()
     package = _ready_package(db_session, scope)
+    _add_final_media_ref(db_session, scope, package)
     service = PublishHandoffLedgerService(db_session, settings=_settings())
 
     first = service.create_upload_task_from_package(package.id)
@@ -118,6 +136,15 @@ def test_m12_2r_create_human_upload_task_from_ready_package_is_idempotent(db_ses
     assert first.destination == "YOUTUBE"
     assert first.title_snapshot == "M12.2R Ledger"
     assert first.required_assets
+
+
+def test_m12_2r_cannot_create_upload_task_without_final_media_asset(db_session, qualification_factory) -> None:
+    scope = qualification_factory.m2_project()
+    package = _ready_package(db_session, scope)
+    service = PublishHandoffLedgerService(db_session, settings=_settings())
+
+    with pytest.raises(ValidationFailureError, match="WAITING_FINAL_MEDIA_ASSET"):
+        service.create_upload_task_from_package(package.id)
 
 
 def test_m12_2r_cannot_create_upload_task_for_not_ready_package(db_session, qualification_factory) -> None:
@@ -194,6 +221,7 @@ def test_m12_2r_backfill_detects_duplicate_video_id(db_session, qualification_fa
         data=BackfillUploadedVideoRequest(youtube_url_or_video_id=VALID_VIDEO_ID),
     )
     second_package = _ready_package(db_session, scope)
+    _add_final_media_ref(db_session, scope, second_package)
     second_task = service.create_upload_task_from_package(second_package.id)
 
     with pytest.raises(ConflictError):

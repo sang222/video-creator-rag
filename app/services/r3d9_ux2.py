@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import re
 import uuid
@@ -22,17 +23,28 @@ from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models import (
     Artifact,
     ArtifactVersion,
+    CloudMediaRef,
     EffectiveChannelRuntimeContextSnapshot,
+    FinalMediaRef,
     FirstScriptedVideoPackage,
     PackagingGateRerunRecord,
     PackagingPatchApplyRun,
     PackagingPatchApprovalDecision,
     PackagingProposedPatch,
     PackagingReviewQueueItem,
+    R3D4GateBatchRun,
     R3D4GateRun,
     VideoProject,
 )
-from app.services.m1 import PackagingHandoffReadService
+from app.services.m1 import (
+    PACKAGING_GATE_ORDER,
+    PackagingGateRunner,
+    PackagingHandoffReadService,
+    _extract_hook_spec,
+    _extract_thumbnail_handoff,
+    _publish_timing_recommendation,
+)
+from app.services.r3d4 import R3D4GateService
 from app.services.r3d3 import stable_hash
 
 
@@ -56,6 +68,8 @@ PACKAGE_APPLY_RECHECK_STATUSES = {
     "APPLY_FAILED",
     "NOOP_ALREADY_APPLIED",
 }
+
+VERIFIED_FINAL_MEDIA_STATUSES = {"SIZE_VERIFIED", "CHECKSUM_VERIFIED", "VERIFIED"}
 
 ISSUE_ACTION_COPY: dict[str, dict[str, str]] = {
     "HOOK_PROMISE_MISSING": {
@@ -207,10 +221,7 @@ class PackagingPatchRouter:
 def _patch_inventory_for_package(session: Session, package_id: uuid.UUID) -> PackagingPatchInventory:
     items = session.scalars(
         select(PackagingReviewQueueItem)
-        .where(
-            PackagingReviewQueueItem.package_id == package_id,
-            PackagingReviewQueueItem.status.in_(UNRESOLVED_QUEUE_STATUSES),
-        )
+        .where(PackagingReviewQueueItem.package_id == package_id)
         .order_by(PackagingReviewQueueItem.created_at.asc(), PackagingReviewQueueItem.id.asc())
     ).all()
     patches: list[PackagingProposedPatch] = []
@@ -329,7 +340,17 @@ class PackagingReviewQueueService:
                 active_keys.add((item.gate_key, item.issue_code, item.target_artifact_ref))
                 PackagingPatchProposalService(self.session).ensure_proposal(item.id)
 
+        latest_r3d4_by_gate: dict[str, str] = {}
+        for gate_key, status in self.session.execute(
+            select(R3D4GateRun.gate_key, R3D4GateRun.status)
+            .where(R3D4GateRun.package_id == package.id)
+            .order_by(desc(R3D4GateRun.created_at), desc(R3D4GateRun.id))
+        ).all():
+            latest_r3d4_by_gate.setdefault(gate_key, status)
+
         for gate in handoff.packaging_gate_summary.gate_results:
+            if gate.gate_key in latest_r3d4_by_gate:
+                continue
             if gate.status not in {"BLOCK", "REVIEW_REQUIRED"}:
                 continue
             for issue_code in gate.reason_codes:
@@ -346,13 +367,6 @@ class PackagingReviewQueueService:
                 PackagingPatchProposalService(self.session).ensure_proposal(item.id)
 
         pass_gates = {gate.gate_key for gate in handoff.packaging_gate_summary.gate_results if gate.status == "PASS"}
-        latest_r3d4_by_gate: dict[str, str] = {}
-        for gate_key, status in self.session.execute(
-            select(R3D4GateRun.gate_key, R3D4GateRun.status)
-            .where(R3D4GateRun.package_id == package.id)
-            .order_by(desc(R3D4GateRun.created_at), desc(R3D4GateRun.id))
-        ).all():
-            latest_r3d4_by_gate.setdefault(gate_key, status)
         pass_gates.update(gate_key for gate_key, status in latest_r3d4_by_gate.items() if status == "PASS")
         self._close_passed_gates(package.id, pass_gates, active_keys)
         self.session.flush()
@@ -367,9 +381,10 @@ class PackagingReviewQueueService:
         ).all()
         handoff = PackagingHandoffReadService(self.session).build(package.id)
         unresolved = [item for item in items if item.status in UNRESOLVED_QUEUE_STATUSES]
-        gate_status = self._combined_gate_status(package.id, handoff.packaging_gate_summary.overall_status)
-        verdict = self._review_verdict(package, unresolved, gate_status)
-        upload_allowed = verdict == "READY_FOR_MANUAL_UPLOAD"
+        gate_status = self._combined_gate_status(package.id, handoff.packaging_gate_summary)
+        has_uploadable_final_media = _has_uploadable_final_media(self.session, package)
+        verdict = self._review_verdict(package, unresolved, gate_status, has_uploadable_final_media)
+        upload_allowed = verdict == "READY_FOR_MANUAL_UPLOAD" and has_uploadable_final_media
         inventory = _patch_inventory_for_package(self.session, package.id)
         apply_state = _apply_approved_changes_state(inventory, unresolved)
         return PackagingReviewQueueRead(
@@ -398,6 +413,7 @@ class PackagingReviewQueueService:
                 "rejected_patch_count": inventory.rejected_count,
                 "request_changes_patch_count": inventory.request_changes_count,
                 "applied_patch_count": inventory.applied_count,
+                "has_uploadable_final_media": has_uploadable_final_media,
                 "no_provider_media_upload_execution": True,
                 "does_not_mutate_channel_contract": True,
                 "does_not_mutate_effective_context_snapshot": True,
@@ -484,7 +500,11 @@ class PackagingReviewQueueService:
             existing.human_readable_title = copy["title"]
             existing.human_readable_why = copy["why"]
             existing.human_readable_fix = copy["fix"]
-            if existing.status == "CLOSED":
+            latest_patch = PackagingPatchProposalService(self.session).latest_patch_for_item(existing.id)
+            if latest_patch is not None and latest_patch.status == "APPLIED" and source_gate_run_id is not None:
+                existing.status = "APPLIED"
+                existing.next_action_code = "RECHECK_STILL_REQUIRES_REVIEW"
+            elif existing.status == "CLOSED":
                 existing.status = "PENDING_PATCH"
                 existing.next_action_code = "NEEDS_PROPOSED_PATCH"
         self.session.flush()
@@ -540,6 +560,7 @@ class PackagingReviewQueueService:
         package: FirstScriptedVideoPackage,
         unresolved: list[PackagingReviewQueueItem],
         gate_status: str,
+        has_uploadable_final_media: bool,
     ) -> str:
         if package.package_status == "WAITING_PROVIDER_CONFIG":
             return "WAITING_PROVIDER_CONFIG"
@@ -547,10 +568,12 @@ class PackagingReviewQueueService:
             return "BLOCKED"
         if unresolved or gate_status == "REVIEW_REQUIRED":
             return "REVIEW_REQUIRED"
+        if not has_uploadable_final_media:
+            return "WAITING_FINAL_MEDIA_ASSET"
         return "READY_FOR_MANUAL_UPLOAD"
 
-    def _combined_gate_status(self, package_id: uuid.UUID, m1_gate_status: str) -> str:
-        statuses = [m1_gate_status]
+    def _combined_gate_status(self, package_id: uuid.UUID, m1_gate_summary: Any) -> str:
+        statuses: list[str] = []
         latest_by_gate: dict[str, str] = {}
         for gate_key, status in self.session.execute(
             select(R3D4GateRun.gate_key, R3D4GateRun.status)
@@ -558,6 +581,9 @@ class PackagingReviewQueueService:
             .order_by(desc(R3D4GateRun.created_at), desc(R3D4GateRun.id))
         ).all():
             latest_by_gate.setdefault(gate_key, status)
+        for gate in getattr(m1_gate_summary, "gate_results", []):
+            if gate.gate_key not in latest_by_gate:
+                statuses.append(gate.status)
         statuses.extend(latest_by_gate.values())
         if "BLOCK" in statuses:
             return "BLOCK"
@@ -1283,36 +1309,263 @@ class PackagingGateRerunService:
             .order_by(desc(PackagingGateRerunRecord.created_at), desc(PackagingGateRerunRecord.id))
             .limit(1)
         ).one_or_none()
-        if existing is not None:
+        if existing is not None and existing.gate_batch_run_id is not None:
             return PackagingGateRerunRecordRead.model_validate(existing)
         gate_keys = PATCH_TYPE_RERUN_GATES.get(patch.patch_type, [])
-        record = PackagingGateRerunRecord(
+        package = PackagingReviewQueueService(self.session)._require_package(patch.package_id)
+        batch_ids, rerun_status, reason_codes = self._run_relevant_gates(
+            package=package,
+            gate_keys=gate_keys,
+            trigger_agent_key=f"packaging_patch_rerun:{patch.patch_type}",
+        )
+        record = existing or PackagingGateRerunRecord(
             package_id=patch.package_id,
             proposed_patch_id=patch.id,
             gate_keys_json=gate_keys,
-            rerun_status="REVIEW_REQUIRED",
-            gate_batch_run_id=None,
-            reason_codes_json=["PATCH_VERSION_CREATED_RELEVANT_GATE_RERUN_REQUIRED"],
+            rerun_status=rerun_status,
+            gate_batch_run_id=batch_ids[0] if batch_ids else None,
+            reason_codes_json=reason_codes,
         )
+        record.gate_keys_json = gate_keys
+        record.rerun_status = rerun_status
+        record.gate_batch_run_id = batch_ids[0] if batch_ids else None
+        record.reason_codes_json = reason_codes
         self.session.add(record)
         self.session.flush()
         return PackagingGateRerunRecordRead.model_validate(record)
 
     def rerun_for_package(self, package_id: uuid.UUID) -> PackagingGateRerunRecordRead:
-        PackagingReviewQueueService(self.session)._require_package(package_id)
+        package = PackagingReviewQueueService(self.session)._require_package(package_id)
         queue = PackagingReviewQueueService(self.session).read(package_id)
         gate_keys = sorted({item.gate_key for item in queue.items if item.status in UNRESOLVED_QUEUE_STATUSES})
+        batch_ids, rerun_status, reason_codes = self._run_relevant_gates(
+            package=package,
+            gate_keys=gate_keys,
+            trigger_agent_key="manual_package_recheck",
+        )
         record = PackagingGateRerunRecord(
             package_id=package_id,
             proposed_patch_id=None,
             gate_keys_json=gate_keys,
-            rerun_status="REVIEW_REQUIRED" if gate_keys else "PASS",
-            gate_batch_run_id=None,
-            reason_codes_json=["MANUAL_RERUN_REQUEST_RECORDED"] if gate_keys else ["NO_UNRESOLVED_QUEUE_ITEMS"],
+            rerun_status=rerun_status,
+            gate_batch_run_id=batch_ids[0] if batch_ids else None,
+            reason_codes_json=reason_codes,
         )
         self.session.add(record)
         self.session.flush()
+        PackagingReviewQueueService(self.session).build_from_gates(package_id)
         return PackagingGateRerunRecordRead.model_validate(record)
+
+    def _run_relevant_gates(
+        self,
+        *,
+        package: FirstScriptedVideoPackage,
+        gate_keys: list[str],
+        trigger_agent_key: str,
+    ) -> tuple[list[uuid.UUID], str, list[str]]:
+        if not gate_keys:
+            return [], "PASS", ["NO_UNRESOLVED_QUEUE_ITEMS"]
+        if package.effective_context_snapshot_id is None:
+            return [], "BLOCK", ["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"]
+        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id)
+        if effective is None:
+            return [], "BLOCK", ["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"]
+
+        artifacts = _artifacts_with_applied_patch_overlays(self.session, package)
+        batch_ids: list[uuid.UUID] = []
+        statuses: list[str] = []
+        m1_gate_keys = [key for key in gate_keys if key in PACKAGING_GATE_ORDER]
+        r3d4_gate_keys = [key for key in gate_keys if key in R3D4GateService.GATES_BY_KEY]
+
+        m1_batch = _run_packaging_gate_batch(
+            self.session,
+            package=package,
+            effective_context=effective,
+            artifacts=artifacts,
+            gate_keys=m1_gate_keys,
+            trigger_agent_key=trigger_agent_key,
+        )
+        if m1_batch is not None:
+            batch_ids.append(m1_batch.id)
+            statuses.append(m1_batch.status)
+
+        if r3d4_gate_keys:
+            r3d4_batch = R3D4GateService(self.session).run_batch(
+                package_id=package.id,
+                video_project_id=package.video_project_id,
+                effective_context=effective,
+                artifacts=artifacts,
+                gate_keys=r3d4_gate_keys,
+                trigger_agent_key=trigger_agent_key,
+            )
+            if r3d4_batch.gate_batch_run_id is not None:
+                batch_ids.append(r3d4_batch.gate_batch_run_id)
+            statuses.append(r3d4_batch.status)
+
+        unknown_gate_keys = sorted(set(gate_keys) - set(m1_gate_keys) - set(r3d4_gate_keys))
+        if unknown_gate_keys:
+            statuses.append("REVIEW_REQUIRED")
+        status = _reduce_statuses(statuses)
+        reason_codes = ["DETERMINISTIC_GATE_RERUN_EXECUTED"]
+        if unknown_gate_keys:
+            reason_codes.append(f"UNKNOWN_GATE_KEYS:{','.join(unknown_gate_keys)}")
+        return batch_ids, status, reason_codes
+
+
+def _artifacts_with_applied_patch_overlays(
+    session: Session,
+    package: FirstScriptedVideoPackage,
+) -> dict[str, Any]:
+    artifacts = deepcopy(_dict(package.artifacts))
+    patches = session.scalars(
+        select(PackagingProposedPatch)
+        .where(PackagingProposedPatch.package_id == package.id, PackagingProposedPatch.status == "APPLIED")
+        .order_by(PackagingProposedPatch.created_at.asc(), PackagingProposedPatch.id.asc())
+    ).all()
+    for patch in patches:
+        _apply_patch_overlay(artifacts, patch)
+    return artifacts
+
+
+def _apply_patch_overlay(artifacts: dict[str, Any], patch: PackagingProposedPatch) -> None:
+    preview = _dict(patch.after_preview_json)
+    proposed = _dict(patch.proposed_patch_json)
+    for artifact_key in ("hook_spec", "metadata_package", "upload_card_copy", "thumbnail_brief", "visual_plan"):
+        payload = _dict(preview.get(artifact_key))
+        if payload:
+            artifacts[artifact_key] = {**_dict(artifacts.get(artifact_key)), **payload}
+
+    if patch.patch_type == "SCRIPT_STYLE_PATCH":
+        script = deepcopy(_dict(artifacts.get("narration_script")))
+        sentences = _list(script.get("sentences"))
+        patch_rows = _list(proposed.get("sentence_patches") or preview.get("before_after_preview"))
+        for row in patch_rows:
+            row_dict = _dict(row)
+            sentence_id = str(row_dict.get("sentence_id") or "")
+            before_text = str(row_dict.get("before_text") or "")
+            after_text = row_dict.get("after_text")
+            if after_text in (None, ""):
+                continue
+            for sentence in sentences:
+                sentence_dict = _dict(sentence)
+                if str(sentence_dict.get("sentence_id") or "") == sentence_id or str(sentence_dict.get("text") or "") == before_text:
+                    sentence_dict["text"] = str(after_text)
+        script["sentences"] = sentences
+        artifacts["narration_script"] = script
+
+    if patch.patch_type == "SUBTITLE_HANDOFF":
+        artifacts["subtitle_package"] = {
+            **_dict(artifacts.get("subtitle_package")),
+            "lifecycle_state": proposed.get("subtitle_state") or "SUBTITLE_NOT_READY",
+            "status": "NOT_READY",
+            "reason_code": proposed.get("reason_code"),
+            "operator_note_vi": proposed.get("operator_note_vi"),
+        }
+
+    if patch.patch_type == "PUBLISH_TIMING_OVERRIDE":
+        override = _dict(preview.get("manual_publish_timing_override") or proposed)
+        if override:
+            artifacts["manual_publish_timing_override"] = override
+            artifacts["publish_timing"] = {**_dict(artifacts.get("publish_timing")), **override}
+
+
+def _run_packaging_gate_batch(
+    session: Session,
+    *,
+    package: FirstScriptedVideoPackage,
+    effective_context: EffectiveChannelRuntimeContextSnapshot,
+    artifacts: dict[str, Any],
+    gate_keys: list[str],
+    trigger_agent_key: str,
+) -> R3D4GateBatchRun | None:
+    if not gate_keys:
+        return None
+    hook = _extract_hook_spec(package, artifacts, effective_context)
+    thumbnail = _extract_thumbnail_handoff(artifacts, effective_context)
+    timing = _publish_timing_recommendation(package, effective_context, artifacts)
+    results = [
+        result
+        for result in PackagingGateRunner().run(
+            package=package,
+            artifacts=artifacts,
+            effective_context=effective_context,
+            hook=hook,
+            thumbnail=thumbnail,
+            timing=timing,
+        )
+        if result.gate_key in set(gate_keys)
+    ]
+    status = _reduce_statuses([result.status for result in results])
+    hard_blocks = sum(1 for result in results if result.status == "BLOCK")
+    reviews = sum(1 for result in results if result.status == "REVIEW_REQUIRED")
+    batch = R3D4GateBatchRun(
+        package_id=package.id,
+        video_project_id=package.video_project_id,
+        effective_context_snapshot_id=effective_context.id,
+        context_hash=effective_context.context_hash,
+        trigger_agent_key=trigger_agent_key,
+        status=status,
+        hard_block_count=hard_blocks,
+        review_required_count=reviews,
+        gate_results_json=[_packaging_gate_result_dict(result) for result in results],
+        reducer_decision_json={"status": status, "hard_block_count": hard_blocks, "review_required_count": reviews},
+    )
+    session.add(batch)
+    session.flush()
+    for result in results:
+        session.add(
+            R3D4GateRun(
+                gate_batch_run_id=batch.id,
+                package_id=package.id,
+                video_project_id=package.video_project_id,
+                effective_context_snapshot_id=effective_context.id,
+                gate_key=result.gate_key,
+                status=result.status,
+                severity=_severity_for_packaging_gate(result.status),
+                measurements_json={},
+                fail_codes=result.reason_codes,
+                blocking_refs=[],
+                checked_artifact_refs=result.checked_artifact_refs,
+                checked_contract_paths=result.checked_contract_paths,
+                evidence_refs=[],
+                repair_hint=result.next_action_vi,
+                human_readable_summary=result.summary_vi,
+            )
+        )
+    session.flush()
+    return batch
+
+
+def _packaging_gate_result_dict(result: Any) -> dict[str, Any]:
+    return {
+        "gate_key": result.gate_key,
+        "status": result.status,
+        "severity": _severity_for_packaging_gate(result.status),
+        "measurements_json": {},
+        "fail_codes": result.reason_codes,
+        "blocking_refs": [],
+        "checked_artifact_refs": result.checked_artifact_refs,
+        "checked_contract_paths": result.checked_contract_paths,
+        "repair_hint": result.next_action_vi,
+        "human_readable_summary": result.summary_vi,
+        "evidence_refs": [],
+    }
+
+
+def _severity_for_packaging_gate(status: str) -> str:
+    if status == "BLOCK":
+        return "HARD_RULE"
+    if status == "REVIEW_REQUIRED":
+        return "REVIEW_REQUIRED"
+    return "INFO"
+
+
+def _reduce_statuses(statuses: list[str]) -> str:
+    if "BLOCK" in statuses:
+        return "BLOCK"
+    if "REVIEW_REQUIRED" in statuses:
+        return "REVIEW_REQUIRED"
+    return "PASS"
 
 
 def _issue_copy(issue_code: str) -> dict[str, str]:
@@ -1335,9 +1588,43 @@ def _target_from_refs(refs: list[dict[str, Any]]) -> tuple[str, str | None]:
     return "package_artifact", None
 
 
+def _has_uploadable_final_media(session: Session, package: FirstScriptedVideoPackage) -> bool:
+    if package.video_project_id is None:
+        return False
+    final_media_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(FinalMediaRef)
+            .where(
+                FinalMediaRef.video_project_id == package.video_project_id,
+                FinalMediaRef.media_type == "LONG_FORM_FINAL",
+                FinalMediaRef.file_ref != "",
+            )
+        )
+        or 0
+    )
+    if final_media_count > 0:
+        return True
+    cloud_media_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(CloudMediaRef)
+            .where(
+                CloudMediaRef.video_project_id == package.video_project_id,
+                CloudMediaRef.media_type == "LONG_FORM_FINAL",
+                CloudMediaRef.upload_status == "VERIFIED",
+                CloudMediaRef.verification_status.in_(VERIFIED_FINAL_MEDIA_STATUSES),
+            )
+        )
+        or 0
+    )
+    return cloud_media_count > 0
+
+
 def _verdict_label(verdict: str) -> str:
     return {
         "READY_FOR_MANUAL_UPLOAD": "Sẵn sàng tạo task upload thủ công.",
+        "WAITING_FINAL_MEDIA_ASSET": "Package review đã pass; chưa có video final để upload.",
         "REVIEW_REQUIRED": "Còn mục cần review trước upload.",
         "BLOCKED": "Đang bị block trước upload.",
         "WAITING_PROVIDER_CONFIG": "Đang chờ cấu hình provider; không tạo task upload.",
@@ -1347,9 +1634,13 @@ def _verdict_label(verdict: str) -> str:
 def _next_safe_action(verdict: str, unresolved: list[PackagingReviewQueueItem]) -> str:
     if verdict == "READY_FOR_MANUAL_UPLOAD":
         return "Có thể tạo task upload thủ công; VCOS vẫn không upload/publish."
+    if verdict == "WAITING_FINAL_MEDIA_ASSET":
+        return "Cần tạo hoặc đính kèm final video asset đã verify trước khi tạo task upload. VCOS không chạy provider từ review cockpit."
     if verdict == "WAITING_PROVIDER_CONFIG":
         return "Kiểm tra provider/cost boundary; không chạy provider từ dashboard."
     if unresolved:
+        if all(item.status in {"APPLIED", "GATE_RERUN_REQUIRED"} for item in unresolved):
+            return "Patch đã apply; xem blocker còn lại sau recheck hoặc request patch mới nếu gate vẫn fail."
         needs_patch = sum(
             1
             for item in unresolved
@@ -1372,6 +1663,12 @@ def _apply_approved_changes_state(
             "disabled_reason": "Không có thay đổi cần apply",
         }
     if inventory.approved_count == 0:
+        if inventory.applied_count > 0:
+            return {
+                "can_apply": False,
+                "label": "Đã apply, còn blocker sau recheck",
+                "disabled_reason": "Các patch đã được apply; xem blocker còn lại sau recheck.",
+            }
         return {
             "can_apply": False,
             "label": "Chưa có patch được duyệt",

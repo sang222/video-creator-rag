@@ -617,6 +617,11 @@ class M11DashboardService:
                     evidence_summary=queue_item.human_readable_why,
                     next_action=queue_item.human_readable_fix,
                     allowed_actions=actions,
+                    action_ref={
+                        "package_id": str(queue_item.package_id),
+                        "queue_item_id": str(queue_item.id),
+                        "proposed_patch_id": str(patch.id) if patch else None,
+                    },
                     source_refs=[
                         {
                             "package_id": str(queue_item.package_id),

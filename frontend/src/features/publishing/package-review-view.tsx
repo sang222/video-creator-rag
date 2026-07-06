@@ -106,10 +106,10 @@ export function PackageReviewView({ packageId }: { packageId: string }) {
         onApply={() => applyRecheckMutation.mutate()}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricSummaryCard icon={ShieldCheck} label="Trạng thái package" value={<StatusBadge value={handoff.package_status} />} hint="Human final approval vẫn bắt buộc." />
-        <MetricSummaryCard icon={Check} label="Gate packaging" value={<StatusBadge value={handoff.packaging_gate_summary.overall_status} />} hint={handoff.packaging_gate_summary.next_action_vi} />
+        <MetricSummaryCard icon={ShieldCheck} label="Trạng thái review" value={<StatusBadge value={summaryReviewStatus(handoff, query.data?.packaging_review_queue ?? null)} />} hint={summaryReviewHint(query.data?.packaging_review_queue ?? null)} />
+        <MetricSummaryCard icon={Check} label="Gate packaging" value={<StatusBadge value={summaryGateStatus(handoff, query.data?.packaging_review_queue ?? null)} />} hint={summaryGateHint(handoff, query.data?.packaging_review_queue ?? null)} />
         <MetricSummaryCard icon={Clock} label="Publish thủ công" value={handoff.publish_timing_recommendation.channel_timezone ?? "Chưa có timezone"} hint="VCOS chỉ nhắc thời điểm, không schedule." />
-        <MetricSummaryCard icon={UploadCloud} label="Paste-back" value={String(handoff.manual_upload.task_status ?? "Chưa tạo task")} hint={String(handoff.manual_upload.next_action_vi ?? "Nhập URL/video_id sau khi upload thủ công.")} />
+        <MetricSummaryCard icon={UploadCloud} label="Paste-back" value={summaryPasteBackValue(handoff, query.data?.packaging_review_queue ?? null)} hint={summaryPasteBackHint(handoff, query.data?.packaging_review_queue ?? null)} />
       </div>
       {taskMessage ? <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">{taskMessage}</div> : null}
       {taskMutation.isError ? <div className="rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">{taskMutation.error.message}</div> : null}
@@ -148,7 +148,7 @@ export function PackageReviewView({ packageId }: { packageId: string }) {
 function ReviewVerdictCard({ handoff, queue }: { handoff: PackagingHandoff; queue?: PackagingReviewQueue | null }) {
   const verdict = queue?.review_verdict ?? fallbackVerdict(handoff);
   const mustFix = queue?.must_fix_count ?? failingGateItems(handoff).length;
-  const uploadAllowed = queue?.upload_task_creation_allowed ?? handoff.packaging_gate_summary.overall_status === "PASS";
+  const uploadAllowed = queue?.upload_task_creation_allowed ?? false;
   return (
     <Panel>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -252,7 +252,8 @@ function MustFixBeforeUploadPanel({
       </div>
       <div className="mt-4 space-y-3">
         {unresolved.map((item) => {
-          const readyPatch = item.proposed_patch?.status === "READY_FOR_REVIEW" ? item.proposed_patch : null;
+          const patch = item.proposed_patch ?? null;
+          const readyPatch = patch?.status === "READY_FOR_REVIEW" ? patch : null;
           return (
             <div key={item.id} className="rounded-md border border-border bg-background/40 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -272,7 +273,9 @@ function MustFixBeforeUploadPanel({
               </div>
               <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
                 <div className="text-xs uppercase text-muted-foreground">Proposed fix</div>
-                <div className="mt-1">{readyPatch ? patchSummary(readyPatch.after_preview_json || readyPatch.proposed_patch_json) : missingPatchReason(item)}</div>
+                <div className="mt-1">
+                  {patch ? patchStateSummary(patch.status, patch.after_preview_json || patch.proposed_patch_json) : missingPatchReason(item)}
+                </div>
                 <div className="mt-2 text-muted-foreground">{item.human_readable_fix}</div>
               </div>
               {readyPatch ? (
@@ -511,10 +514,49 @@ function findGate(handoff: PackagingHandoff, gateKey: string) {
 function uploadButtonState(handoff: PackagingHandoff, queue: PackagingReviewQueue | null, pending: boolean) {
   const verdict = queue?.review_verdict ?? fallbackVerdict(handoff);
   if (pending) return { disabled: true, label: "Đang tạo task" };
+  if (!queue) return { disabled: true, label: "Chưa có trạng thái review" };
   if (verdict === "BLOCKED") return { disabled: true, label: "Đang bị block" };
   if (verdict === "REVIEW_REQUIRED") return { disabled: true, label: "Còn mục cần review" };
   if (verdict === "WAITING_PROVIDER_CONFIG") return { disabled: true, label: "Chờ cấu hình provider" };
+  if (verdict === "WAITING_FINAL_MEDIA_ASSET") return { disabled: true, label: "Chưa có video final" };
+  if (!queue.upload_task_creation_allowed) return { disabled: true, label: "Chưa được phép upload task" };
   return { disabled: false, label: "Tạo task upload thủ công" };
+}
+
+function summaryReviewStatus(handoff: PackagingHandoff, queue: PackagingReviewQueue | null) {
+  return queue?.review_verdict ?? handoff.package_status;
+}
+
+function summaryReviewHint(queue: PackagingReviewQueue | null) {
+  return queue?.next_safe_action ?? "Human final approval vẫn bắt buộc.";
+}
+
+function summaryGateStatus(handoff: PackagingHandoff, queue: PackagingReviewQueue | null) {
+  if (queue?.must_fix_count === 0 && ["READY_FOR_MANUAL_UPLOAD", "WAITING_FINAL_MEDIA_ASSET"].includes(queue.review_verdict)) {
+    return "PASS";
+  }
+  if (queue?.review_verdict === "BLOCKED") return "BLOCK";
+  if (queue?.review_verdict === "REVIEW_REQUIRED") return "REVIEW_REQUIRED";
+  return handoff.packaging_gate_summary.overall_status;
+}
+
+function summaryGateHint(handoff: PackagingHandoff, queue: PackagingReviewQueue | null) {
+  if (queue?.must_fix_count === 0 && ["READY_FOR_MANUAL_UPLOAD", "WAITING_FINAL_MEDIA_ASSET"].includes(queue.review_verdict)) {
+    return "Review queue đã sạch sau recheck.";
+  }
+  return handoff.packaging_gate_summary.next_action_vi;
+}
+
+function summaryPasteBackValue(handoff: PackagingHandoff, queue: PackagingReviewQueue | null) {
+  if (queue?.review_verdict === "WAITING_FINAL_MEDIA_ASSET") return "Chưa có video final";
+  return String(handoff.manual_upload.task_status ?? "Chưa tạo task");
+}
+
+function summaryPasteBackHint(handoff: PackagingHandoff, queue: PackagingReviewQueue | null) {
+  if (queue?.review_verdict === "WAITING_FINAL_MEDIA_ASSET") {
+    return "Chưa tạo upload task; cần final media đã verify trước.";
+  }
+  return String(handoff.manual_upload.next_action_vi ?? "Nhập URL/video_id sau khi upload thủ công.");
 }
 
 function fallbackVerdict(handoff: PackagingHandoff) {
@@ -528,6 +570,7 @@ function fallbackVerdict(handoff: PackagingHandoff) {
 function verdictLabel(verdict: string) {
   const labels: Record<string, string> = {
     READY_FOR_MANUAL_UPLOAD: "Sẵn sàng tạo task upload thủ công.",
+    WAITING_FINAL_MEDIA_ASSET: "Package review đã pass; chưa có video final để upload.",
     REVIEW_REQUIRED: "Còn mục cần review trước upload.",
     BLOCKED: "Đang bị block trước upload.",
     WAITING_PROVIDER_CONFIG: "Đang chờ cấu hình provider."
@@ -661,6 +704,18 @@ function issueCopy(issue: string) {
 function patchSummary(value: Record<string, unknown>) {
   const text = safeJson(value);
   return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+}
+
+function patchStateSummary(status: string, value: Record<string, unknown>) {
+  const labels: Record<string, string> = {
+    READY_FOR_REVIEW: "Đang chờ duyệt",
+    APPROVED: "Đã duyệt, chờ apply & recheck",
+    APPLIED: "Đã apply patch; nếu gate vẫn còn fail thì cần review blocker sau recheck",
+    REJECTED: "Patch đã bị từ chối",
+    REQUEST_CHANGES: "Patch cần chỉnh trước khi apply",
+    SUPERSEDED: "Patch đã được thay thế"
+  };
+  return `${labels[status] ?? status}: ${patchSummary(value)}`;
 }
 
 function missingPatchReason(item: PackagingReviewQueueItem) {

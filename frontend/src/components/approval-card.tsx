@@ -32,7 +32,19 @@ const actionLabels: Record<string, string> = {
   ADD_NOTE: "Thêm ghi chú"
 };
 
-export function ApprovalCard({ item, onAction }: { item: ApprovalQueueItem; onAction?: (action: string) => void }) {
+export function ApprovalCard({
+  item,
+  onAction,
+  pendingAction,
+  actionMessage,
+  actionError
+}: {
+  item: ApprovalQueueItem;
+  onAction?: (action: string) => void;
+  pendingAction?: string | null;
+  actionMessage?: string | null;
+  actionError?: string | null;
+}) {
   return (
     <Panel className="min-h-48">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -61,12 +73,20 @@ export function ApprovalCard({ item, onAction }: { item: ApprovalQueueItem; onAc
         </div>
         <div className="flex flex-wrap gap-2">
           {item.allowed_actions.slice(0, 4).map((action) => (
-            <Button key={action} type="button" variant="secondary" onClick={() => onAction?.(action)}>
-              {actionLabels[action] ?? "Xem chi tiết"}
+            <Button
+              key={action}
+              type="button"
+              variant="secondary"
+              disabled={!onAction || Boolean(pendingAction)}
+              onClick={() => onAction?.(action)}
+            >
+              {pendingAction === action ? "Đang xử lý..." : (actionLabels[action] ?? "Xem chi tiết")}
             </Button>
           ))}
         </div>
       </div>
+      {actionMessage ? <p className="mt-3 text-sm text-emerald-100">{actionMessage}</p> : null}
+      {actionError ? <p className="mt-3 text-sm text-rose-100">{actionError}</p> : null}
       <p className="mt-3 text-sm text-primary">{item.next_action}</p>
       {item.freshness_label ? (
         <div className="mt-3">

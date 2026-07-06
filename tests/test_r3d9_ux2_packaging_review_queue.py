@@ -158,6 +158,22 @@ def _package_fixture(db_session, qualification_factory, *, publish_window: bool 
     return {"scope": scope, "project": project, "effective": effective, "package": package}
 
 
+def _add_final_media_ref(db_session, fx: dict) -> FinalMediaRef:
+    ref = FinalMediaRef(
+        company_id=fx["scope"].company.id,
+        channel_workspace_id=fx["scope"].channel.id,
+        video_project_id=fx["project"].id,
+        uploaded_video_id=None,
+        media_type="LONG_FORM_FINAL",
+        file_ref=f"fixture://final-media/{fx['package'].id}.mp4",
+        provider_key=None,
+        provider_type=None,
+    )
+    db_session.add(ref)
+    db_session.flush()
+    return ref
+
+
 def _add_gate_issue(db_session, fx: dict, *, gate_key: str, issue_code: str, status: str = "BLOCK") -> R3D4GateRun:
     batch = R3D4GateBatchRun(
         package_id=fx["package"].id,
@@ -532,7 +548,8 @@ def test_approved_patch_creates_versioned_artifact_and_gate_rerun_record(db_sess
     assert db_session.scalar(select(func.count()).select_from(PackagingPatchApplyRun).where(PackagingPatchApplyRun.apply_status == "APPLIED")) == 1
     rerun = db_session.scalars(select(PackagingGateRerunRecord).where(PackagingGateRerunRecord.proposed_patch_id == patch_id)).one()
     assert rerun.gate_keys_json == ["PublishTimingComplianceGate"]
-    assert rerun.rerun_status == "REVIEW_REQUIRED"
+    assert rerun.rerun_status == "PASS"
+    assert rerun.gate_batch_run_id is not None
     package_after = db_session.get(FirstScriptedVideoPackage, fx["package"].id)
     assert package_after is not None
     assert stable_hash(package_after.artifacts) == before_artifacts_hash
@@ -547,6 +564,16 @@ def test_upload_task_creation_is_gated_by_unresolved_queue_and_gate_status(db_se
         PublishHandoffLedgerService(db_session).create_upload_task_from_package(blocked_fx["package"].id)
 
     allowed_fx = _package_fixture(db_session, qualification_factory)
+    queue_without_media = PackagingReviewQueueService(db_session).read(allowed_fx["package"].id)
+    assert queue_without_media.review_verdict == "WAITING_FINAL_MEDIA_ASSET"
+    assert queue_without_media.upload_task_creation_allowed is False
+    with pytest.raises(ValidationFailureError, match="PACKAGING_REVIEW_UNRESOLVED"):
+        PublishHandoffLedgerService(db_session).create_upload_task_from_package(allowed_fx["package"].id)
+
+    _add_final_media_ref(db_session, allowed_fx)
+    queue_with_media = PackagingReviewQueueService(db_session).read(allowed_fx["package"].id)
+    assert queue_with_media.review_verdict == "READY_FOR_MANUAL_UPLOAD"
+    assert queue_with_media.upload_task_creation_allowed is True
     task = PublishHandoffLedgerService(db_session).create_upload_task_from_package(allowed_fx["package"].id)
     assert task.status == "READY_FOR_HUMAN_UPLOAD"
     assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 1
@@ -562,7 +589,13 @@ def test_latest_gate_pass_closes_queue_item_and_allows_manual_upload(db_session,
     second = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
 
     assert second.items[0].status == "CLOSED"
-    assert second.upload_task_creation_allowed is True
+    assert second.review_verdict == "WAITING_FINAL_MEDIA_ASSET"
+    assert second.upload_task_creation_allowed is False
+
+    _add_final_media_ref(db_session, fx)
+    third = PackagingReviewQueueService(db_session).read(fx["package"].id)
+    assert third.review_verdict == "READY_FOR_MANUAL_UPLOAD"
+    assert third.upload_task_creation_allowed is True
 
 
 def test_no_provider_media_upload_youtube_or_channel_contract_mutation(db_session, qualification_factory) -> None:
@@ -694,8 +727,9 @@ def test_apply_approved_changes_rebuilds_queue_and_preserves_no_execution_bounda
 
     assert result.status == "APPLIED_AND_RECHECKED"
     assert rebuilt.applied_patch_count == 1
-    assert rebuilt.items[0].status == "GATE_RERUN_REQUIRED"
+    assert rebuilt.items[0].status == "CLOSED"
     assert rebuilt.last_apply_recheck_result is not None
+    assert result.review_verdict == "WAITING_FINAL_MEDIA_ASSET"
     assert result.upload_task_creation_allowed is False
     assert result.no_execution_proof["no_upload_task_created"] is True
     assert db_session.scalar(select(func.count()).select_from(ProviderAttempt)) == 0
@@ -741,6 +775,13 @@ def test_packaging_review_queue_api_endpoints(db_session, qualification_factory)
     assert payload["upload_task_creation_allowed"] is False
     patch_id = next(item["proposed_patch"]["id"] for item in payload["items"] if item["proposed_patch"])
 
+    dashboard_queue = client.get("/dashboard/queues/publish")
+    assert dashboard_queue.status_code == 200, dashboard_queue.text
+    dashboard_item = next(item for item in dashboard_queue.json()["items"] if item["queue_type"] == "packaging_review")
+    assert dashboard_item["allowed_actions"] == ["APPROVE", "REJECT", "REQUEST_CHANGES"]
+    assert dashboard_item["action_ref"]["package_id"] == str(fx["package"].id)
+    assert dashboard_item["action_ref"]["proposed_patch_id"] == patch_id
+
     approve = client.post(f"/packaging-proposed-patches/{patch_id}/approve", json={"decided_by": "operator", "rationale": "ok"})
     assert approve.status_code == 200, approve.text
     apply = client.post(f"/packaging-proposed-patches/{patch_id}/apply")
@@ -750,4 +791,7 @@ def test_packaging_review_queue_api_endpoints(db_session, qualification_factory)
 
     get_queue = client.get(f"/video-packages/{fx['package'].id}/packaging-review-queue")
     assert get_queue.status_code == 200, get_queue.text
-    assert get_queue.json()["items"][0]["status"] == "GATE_RERUN_REQUIRED"
+    queue_payload = get_queue.json()
+    assert queue_payload["items"][0]["status"] == "CLOSED"
+    assert queue_payload["review_verdict"] == "WAITING_FINAL_MEDIA_ASSET"
+    assert queue_payload["upload_task_creation_allowed"] is False

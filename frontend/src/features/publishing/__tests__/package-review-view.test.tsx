@@ -436,6 +436,42 @@ describe("PackageReviewView", () => {
     expect(details).not.toHaveAttribute("open");
   });
 
+  it("keeps upload task disabled when review passes but final video is missing", async () => {
+    packageReview = {
+      ...structuredClone(reviewRequired),
+      packaging_handoff: {
+        ...structuredClone(baseHandoff),
+        packaging_gate_summary: { ...baseHandoff.packaging_gate_summary, overall_status: "PASS" }
+      },
+      packaging_review_queue: {
+        package_id: "pkg-12345678",
+        review_verdict: "WAITING_FINAL_MEDIA_ASSET",
+        plain_language_status: "Package review đã pass; chưa có video final để upload.",
+        must_fix_count: 0,
+        next_safe_action: "Cần tạo hoặc đính kèm final video asset đã verify trước khi tạo task upload.",
+        upload_task_creation_allowed: false,
+        approved_patch_count: 0,
+        ready_for_review_patch_count: 0,
+        rejected_patch_count: 0,
+        request_changes_patch_count: 0,
+        applied_patch_count: 0,
+        can_apply_approved_changes: false,
+        apply_approved_changes_label: "Không có thay đổi cần apply",
+        apply_approved_changes_disabled_reason: "Không có thay đổi cần apply",
+        last_apply_recheck_result: null,
+        technical_appendix: { has_uploadable_final_media: false },
+        items: []
+      }
+    };
+    renderWithQuery();
+
+    expect(await screen.findByRole("button", { name: /Chưa có video final/ })).toBeDisabled();
+    expect(screen.getByText("Trạng thái review")).toBeInTheDocument();
+    expect(screen.getAllByText("Chờ video final").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Đã sẵn sàng").length).toBeGreaterThan(0);
+    expect(screen.getByText("Package review đã pass; chưa có video final để upload.")).toBeInTheDocument();
+  });
+
   it("enables upload task only when all required review items are closed/pass", async () => {
     packageReview = {
       ...structuredClone(reviewRequired),

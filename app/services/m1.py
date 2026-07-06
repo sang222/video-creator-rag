@@ -428,9 +428,21 @@ def _publish_timing_recommendation(
     artifacts: dict[str, Any],
 ) -> PublishTimingRecommendationRead:
     timing = _dict(effective_context.publish_timing_context_json) if effective_context else {}
+    override = _dict(artifacts.get("manual_publish_timing_override") or artifacts.get("publish_timing"))
     channel_tz = _str_or_none(timing.get("channel_timezone"))
     audience_tz = _str_or_none(timing.get("audience_timezone") or channel_tz)
-    configured_window = timing.get("configured_publish_window") or timing.get("suggested_publish_window_policy")
+    configured_window = (
+        timing.get("configured_publish_window")
+        or timing.get("suggested_publish_window_policy")
+        or override.get("configured_publish_window")
+        or override.get("manual_publish_window")
+    )
+    if not configured_window and override.get("publish_window_state"):
+        configured_window = {
+            "source": "manual_publish_timing_override",
+            "state": override.get("publish_window_state"),
+            "manual_publish_only": override.get("manual_publish_only", True),
+        }
     operator_tz = os.getenv("VCOS_OPERATOR_TIMEZONE") or os.getenv("TZ") or "Asia/Ho_Chi_Minh"
     reason_codes: list[str] = []
     suggested_channel, suggested_operator = _suggest_times(

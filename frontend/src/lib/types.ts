@@ -139,6 +139,7 @@ export type ApprovalQueueItem = {
   next_action: string;
   due_at?: string | null;
   allowed_actions: string[];
+  action_ref?: Record<string, unknown> | null;
   source_refs: Array<Record<string, unknown>>;
   audit_refs: Array<Record<string, unknown>>;
   technical_appendix: Record<string, unknown>;
@@ -573,7 +574,13 @@ export type PackagingReviewQueueItem = {
 
 export type PackagingReviewQueue = {
   package_id: string;
-  review_verdict: "READY_FOR_MANUAL_UPLOAD" | "REVIEW_REQUIRED" | "BLOCKED" | "WAITING_PROVIDER_CONFIG" | string;
+  review_verdict:
+    | "READY_FOR_MANUAL_UPLOAD"
+    | "WAITING_FINAL_MEDIA_ASSET"
+    | "REVIEW_REQUIRED"
+    | "BLOCKED"
+    | "WAITING_PROVIDER_CONFIG"
+    | string;
   plain_language_status: string;
   must_fix_count: number;
   next_safe_action: string;

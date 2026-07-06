@@ -181,4 +181,35 @@ Acceptance result:
 - Human approval boundary is preserved.
 - No provider/media/upload/YouTube execution.
 - Package remains safe before human approval.
-- No commit/tag.
+- Commit/tag only happen by explicit operator request; the UX4 workflow itself does not create git commits/tags.
+
+## Post-Approval Hotfix Addendum: No Final Video, No Upload Task
+
+After the operator later approved/applied the 9 proposed patches and reran gates, the live package reached deterministic review pass but still had no final video media asset. That state must not be treated as upload-ready.
+
+Additional behavior now enforced:
+- Review/gate pass without `LONG_FORM_FINAL` media returns `WAITING_FINAL_MEDIA_ASSET`.
+- `upload_task_creation_allowed=false` unless a project has a `FinalMediaRef` with `media_type=LONG_FORM_FINAL` and a real `file_ref`, or a verified `CloudMediaRef` with `media_type=LONG_FORM_FINAL`.
+- `POST /video-packages/{package_id}/upload-task` remains blocked when there is no uploadable final media.
+- The package review summary cards prefer the packaging review queue/read-model, so stale handoff/package status does not show "blocked/review required" after a successful recheck.
+
+Live package `81c48d7a-dfc3-4207-b585-744673491b59` after Docker sync:
+- `review_verdict=WAITING_FINAL_MEDIA_ASSET`
+- `must_fix_count=0`
+- `upload_task_creation_allowed=false`
+- `applied_patch_count=9`
+- `has_uploadable_final_media=false`
+- `FinalMediaRef` for project: 0
+- `CloudMediaRef` for project: 0
+- `HumanUploadTask` for package: 0
+
+Additional tests run:
+- `PYTHONPATH=. .venv/bin/pytest tests/qualification/test_m12_2r_publish_handoff_ledger.py -q` -> 15 passed
+- `cd frontend && npm run test` -> 35 passed
+- `cd frontend && npm run typecheck` -> passed after `next build` regenerated `.next/types`
+- `cd frontend && npm run lint` -> passed
+- `cd frontend && npm run build` -> passed
+
+Docker sync:
+- `docker compose up -d --build api frontend` completed.
+- API and frontend containers healthy.

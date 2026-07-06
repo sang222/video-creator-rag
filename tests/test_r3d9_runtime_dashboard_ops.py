@@ -16,6 +16,7 @@ from app.db.models import (
     ChannelMemoryItem,
     CostEstimateSnapshot,
     FailureTraceReport,
+    FinalMediaRef,
     FirstScriptedVideoPackage,
     HumanPaidRenderApproval,
     LearningCandidate,
@@ -167,6 +168,19 @@ def _fixture(db_session, qualification_factory):
     db_session.add(package)
     db_session.flush()
     handoff = PackagingHandoffReadService(db_session).build(package.id)
+
+    final_media = FinalMediaRef(
+        company_id=scope.company.id,
+        channel_workspace_id=scope.channel.id,
+        video_project_id=project.id,
+        uploaded_video_id=None,
+        media_type="LONG_FORM_FINAL",
+        file_ref=f"fixture://final-media/{package.id}.mp4",
+        provider_key=None,
+        provider_type=None,
+    )
+    db_session.add(final_media)
+    db_session.flush()
 
     task = PublishHandoffLedgerService(db_session).create_upload_task_from_package(package.id)
     backfill = PublishHandoffLedgerService(db_session).backfill_uploaded_video(

@@ -1,13 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApprovalCard } from "@/components/approval-card";
 import { ActionHintCard, EmptyStateCard, MetricSummaryCard, PageHeader } from "@/components/cockpit";
 import { ErrorState, LoadingState } from "@/components/states";
-import { getQueues, queryKeys } from "@/lib/api";
+import {
+  approvePackagingProposedPatch,
+  getQueues,
+  queryKeys,
+  rejectPackagingProposedPatch,
+  requestChangesPackagingProposedPatch
+} from "@/lib/api";
+import type { ApprovalQueueItem } from "@/lib/types";
 
 const filters = ["all", "learning", "publish", "recovery", "ops"];
 const filterLabels: Record<string, string> = {
@@ -21,9 +29,55 @@ const filterLabels: Record<string, string> = {
 export function QueuesView({ queueType }: { queueType?: string }) {
   const active = queueType ?? "all";
   const copy = queueCopy(active);
+  const queryClient = useQueryClient();
+  const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const query = useQuery({
     queryKey: queryKeys.queues(active),
     queryFn: () => getQueues(active === "all" ? undefined : active)
+  });
+  const actionMutation = useMutation({
+    mutationFn: async ({ item, action }: { item: ApprovalQueueItem; action: string }) => {
+      if (action === "OPEN_PACKAGE_REVIEW") {
+        const packageId = packageIdFromItem(item);
+        if (!packageId) throw new Error("Thiếu package_id để mở trang review.");
+        window.location.assign(`/video-packages/${packageId}/review`);
+        return null;
+      }
+      if (item.queue_type !== "packaging_review") {
+        throw new Error("Action này cần xử lý ở trang chuyên trách.");
+      }
+      const patchId = proposedPatchIdFromItem(item);
+      if (!patchId) {
+        throw new Error("Thiếu proposed_patch_id trong hàng chờ. Hãy tải lại hoặc rebuild queue.");
+      }
+      if (action === "APPROVE") return approvePackagingProposedPatch(patchId, "Duyệt từ hàng chờ duyệt.");
+      if (action === "REJECT") return rejectPackagingProposedPatch(patchId, "Từ chối từ hàng chờ duyệt.");
+      if (action === "REQUEST_CHANGES") return requestChangesPackagingProposedPatch(patchId, "Yêu cầu chỉnh từ hàng chờ duyệt.");
+      throw new Error("Action này chưa được hỗ trợ trực tiếp từ hàng chờ.");
+    },
+    onMutate: ({ item }) => {
+      const key = queueItemKey(item);
+      setActionErrors((current) => ({ ...current, [key]: "" }));
+      setActionMessages((current) => ({ ...current, [key]: "" }));
+    },
+    onSuccess: async (_result, { item, action }) => {
+      if (action === "OPEN_PACKAGE_REVIEW") return;
+      const key = queueItemKey(item);
+      setActionMessages((current) => ({ ...current, [key]: decisionMessage(action) }));
+      const packageId = packageIdFromItem(item);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.queues(active) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.queues("publish") }),
+        packageId ? queryClient.invalidateQueries({ queryKey: queryKeys.videoPackageReview(packageId) }) : Promise.resolve(),
+        packageId ? queryClient.invalidateQueries({ queryKey: queryKeys.packagingReviewQueue(packageId) }) : Promise.resolve()
+      ]);
+    },
+    onError: (error, { item }) => {
+      const key = queueItemKey(item);
+      const message = error instanceof Error ? error.message : "Không ghi được quyết định.";
+      setActionErrors((current) => ({ ...current, [key]: message }));
+    }
   });
 
   if (query.isLoading) return <div className="p-4 md:p-8"><LoadingState label="Đang tải hàng chờ duyệt" /></div>;
@@ -64,9 +118,22 @@ export function QueuesView({ queueType }: { queueType?: string }) {
       </div>
       {query.data.items.length ? (
         <div className="grid gap-4 xl:grid-cols-2">
-          {query.data.items.map((item) => (
-            <ApprovalCard key={`${item.queue_type}-${item.queue_item_id ?? item.entity_id}`} item={item} />
-          ))}
+          {query.data.items.map((item) => {
+            const key = queueItemKey(item);
+            const pendingAction = actionMutation.isPending && actionMutation.variables && queueItemKey(actionMutation.variables.item) === key
+              ? actionMutation.variables.action
+              : null;
+            return (
+              <ApprovalCard
+                key={key}
+                item={item}
+                pendingAction={pendingAction}
+                actionMessage={actionMessages[key]}
+                actionError={actionErrors[key]}
+                onAction={(action) => actionMutation.mutate({ item, action })}
+              />
+            );
+          })}
         </div>
       ) : (
         <EmptyStateCard
@@ -77,6 +144,32 @@ export function QueuesView({ queueType }: { queueType?: string }) {
       )}
     </div>
   );
+}
+
+function queueItemKey(item: ApprovalQueueItem) {
+  return `${item.queue_type}-${item.queue_item_id ?? item.entity_id ?? item.operator_summary}`;
+}
+
+function stringRef(item: ApprovalQueueItem, key: string) {
+  const direct = item.action_ref?.[key];
+  if (typeof direct === "string" && direct.length > 0) return direct;
+  const source = item.source_refs.find((ref) => typeof ref[key] === "string" && String(ref[key]).length > 0);
+  return source ? String(source[key]) : null;
+}
+
+function proposedPatchIdFromItem(item: ApprovalQueueItem) {
+  return stringRef(item, "proposed_patch_id");
+}
+
+function packageIdFromItem(item: ApprovalQueueItem) {
+  return stringRef(item, "package_id");
+}
+
+function decisionMessage(action: string) {
+  if (action === "APPROVE") return "Đã duyệt patch.";
+  if (action === "REJECT") return "Đã từ chối patch.";
+  if (action === "REQUEST_CHANGES") return "Đã yêu cầu chỉnh patch.";
+  return "Đã ghi quyết định.";
 }
 
 function filterHref(filter: string) {

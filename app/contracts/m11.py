@@ -110,6 +110,7 @@ class ApprovalQueueItem(BaseModel):
     next_action: str
     due_at: AwareDatetime | None = None
     allowed_actions: list[str] = Field(default_factory=list)
+    action_ref: dict[str, Any] | None = None
     source_refs: list[dict[str, Any]] = Field(default_factory=list)
     audit_refs: list[dict[str, Any]] = Field(default_factory=list)
     technical_appendix: dict[str, Any] = Field(default_factory=dict)
