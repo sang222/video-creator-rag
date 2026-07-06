@@ -308,6 +308,7 @@ from app.services.r3d9 import (
     UploadedVideoOpsService,
 )
 from app.services.r3d9_ux2 import (
+    PackagingApprovedPatchApplyAndRecheckService,
     PackagingGateRerunService,
     PackagingPatchApplyService,
     PackagingPatchApprovalService,
@@ -565,6 +566,7 @@ __all__ = [
     "QualityDeltaOpsService",
     "ProviderCostOpsService",
     "OperatorNextActionService",
+    "PackagingApprovedPatchApplyAndRecheckService",
     "PackagingReviewQueueService",
     "PackagingPatchRouter",
     "PackagingPatchProposalService",

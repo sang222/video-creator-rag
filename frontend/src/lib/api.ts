@@ -20,6 +20,7 @@ import type {
   HumanUploadTaskList,
   MemoryInfluenceOps,
   OpsQueue,
+  PackagingApplyApprovedChangesResult,
   PackagingPatchApplyRun,
   PackagingPatchApprovalDecision,
   PackagingGateRerunRecord,
@@ -228,6 +229,13 @@ export function applyPackagingProposedPatch(patchId: string) {
 
 export function rerunPackagingGates(packageId: string) {
   return request<PackagingGateRerunRecord>(`/video-packages/${packageId}/rerun-packaging-gates`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function applyApprovedChangesAndRecheckPackage(packageId: string) {
+  return request<PackagingApplyApprovedChangesResult>(`/video-packages/${packageId}/apply-approved-changes-and-recheck`, {
     method: "POST",
     body: JSON.stringify({})
   });

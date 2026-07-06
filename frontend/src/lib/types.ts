@@ -578,6 +578,15 @@ export type PackagingReviewQueue = {
   must_fix_count: number;
   next_safe_action: string;
   upload_task_creation_allowed: boolean;
+  approved_patch_count: number;
+  ready_for_review_patch_count: number;
+  rejected_patch_count: number;
+  request_changes_patch_count: number;
+  applied_patch_count: number;
+  can_apply_approved_changes: boolean;
+  apply_approved_changes_label: string;
+  apply_approved_changes_disabled_reason?: string | null;
+  last_apply_recheck_result?: Record<string, unknown> | null;
   items: PackagingReviewQueueItem[];
   technical_appendix: Record<string, unknown>;
 };
@@ -612,6 +621,23 @@ export type PackagingGateRerunRecord = {
   gate_batch_run_id?: string | null;
   reason_codes_json: string[];
   created_at: string;
+};
+
+export type PackagingApplyApprovedChangesResult = {
+  status: string;
+  package_id: string;
+  applied_patch_ids: string[];
+  skipped_patch_ids: string[];
+  gate_rerun_record_ids: string[];
+  package_status: string;
+  final_package_status: string;
+  review_verdict: string;
+  must_fix_count: number;
+  upload_task_creation_allowed: boolean;
+  remaining_blockers: Array<Record<string, unknown>>;
+  next_safe_action: string;
+  no_provider_media_upload_execution: boolean;
+  no_execution_proof: Record<string, unknown>;
 };
 
 export type VideoPackageReview = {

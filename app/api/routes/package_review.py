@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
 from app.api.routes.imports import (
+    AUTH_COOKIE_NAME,
+    AuthService,
     BackfillUploadedVideoRequest,
     BackfillUploadedVideoResult,
     FirstScriptedVideoPackageAgentRunsRead,
@@ -10,6 +12,8 @@ from app.api.routes.imports import (
     FirstScriptedVideoPackageService,
     HumanUploadTaskLedgerRead,
     M122SPreflightRead,
+    PackagingApprovedPatchApplyAndRecheckResultRead,
+    PackagingApprovedPatchApplyAndRecheckService,
     PackagingGateRerunRecordRead,
     PackagingGateRerunService,
     PackagingHandoffReadService,
@@ -22,8 +26,13 @@ from app.api.routes.imports import (
     PackagingReviewQueueRead,
     PackagingReviewQueueService,
     PublishHandoffLedgerService,
+    Request,
     VideoGenerationBoundaryRead,
+    ForbiddenError,
+    get_settings,
     session_scope,
+    status,
+    HTTPException,
     uuid,
 )
 
@@ -97,6 +106,23 @@ def create_router() -> APIRouter:
         try:
             with session_scope() as session:
                 return PackagingReviewQueueService(session).build_from_gates(package_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/video-packages/{package_id}/apply-approved-changes-and-recheck",
+        response_model=PackagingApprovedPatchApplyAndRecheckResultRead,
+    )
+    def apply_approved_changes_and_recheck_package(
+        package_id: uuid.UUID,
+        request: Request,
+    ) -> PackagingApprovedPatchApplyAndRecheckResultRead:
+        try:
+            with session_scope() as session:
+                _require_operator_review_action(session, request)
+                return PackagingApprovedPatchApplyAndRecheckService(session).apply_and_recheck(package_id)
+        except ForbiddenError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bạn chưa có quyền thực hiện thao tác này.") from exc
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -209,3 +235,11 @@ def create_router() -> APIRouter:
 
 
     return router
+
+
+def _require_operator_review_action(session, request: Request) -> None:
+    auth = AuthService(session, get_settings()).current_user(request.cookies.get(AUTH_COOKIE_NAME))
+    if not auth.auth_enabled:
+        return
+    if auth.user is None or auth.user.role == "READ_ONLY":
+        raise ForbiddenError("Bạn chưa có quyền thực hiện thao tác này.")

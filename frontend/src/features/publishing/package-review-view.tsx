@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import {
+  applyApprovedChangesAndRecheckPackage,
   approvePackagingProposedPatch,
   buildPackagingReviewQueueFromGates,
   createUploadTaskFromPackage,
@@ -18,12 +19,13 @@ import {
   rejectPackagingProposedPatch,
   requestChangesPackagingProposedPatch
 } from "@/lib/api";
-import type { PackagingGateResult, PackagingHandoff, PackagingReviewQueue, PackagingReviewQueueItem } from "@/lib/types";
+import type { PackagingApplyApprovedChangesResult, PackagingGateResult, PackagingHandoff, PackagingReviewQueue, PackagingReviewQueueItem } from "@/lib/types";
 
 export function PackageReviewView({ packageId }: { packageId: string }) {
   const queryClient = useQueryClient();
   const [taskMessage, setTaskMessage] = useState<string | null>(null);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<PackagingApplyApprovedChangesResult | null>(null);
   const query = useQuery({
     queryKey: queryKeys.videoPackageReview(packageId),
     queryFn: () => getVideoPackageReview(packageId)
@@ -51,6 +53,14 @@ export function PackageReviewView({ packageId }: { packageId: string }) {
       return requestChangesPackagingProposedPatch(patchId, "Cần chỉnh proposal trước khi duyệt.");
     },
     onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.videoPackageReview(packageId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.packagingReviewQueue(packageId) });
+    }
+  });
+  const applyRecheckMutation = useMutation({
+    mutationFn: () => applyApprovedChangesAndRecheckPackage(packageId),
+    onSuccess: async (result) => {
+      setApplyResult(result);
       await queryClient.invalidateQueries({ queryKey: queryKeys.videoPackageReview(packageId) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.packagingReviewQueue(packageId) });
     }
@@ -89,6 +99,12 @@ export function PackageReviewView({ packageId }: { packageId: string }) {
         );
       })()}
       <ReviewVerdictCard handoff={handoff} queue={query.data?.packaging_review_queue ?? null} />
+      <ApplyApprovedChangesCard
+        queue={query.data?.packaging_review_queue ?? null}
+        pending={applyRecheckMutation.isPending}
+        result={applyResult}
+        onApply={() => applyRecheckMutation.mutate()}
+      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricSummaryCard icon={ShieldCheck} label="Trạng thái package" value={<StatusBadge value={handoff.package_status} />} hint="Human final approval vẫn bắt buộc." />
         <MetricSummaryCard icon={Check} label="Gate packaging" value={<StatusBadge value={handoff.packaging_gate_summary.overall_status} />} hint={handoff.packaging_gate_summary.next_action_vi} />
@@ -100,6 +116,7 @@ export function PackageReviewView({ packageId }: { packageId: string }) {
       {queueMessage ? <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">{queueMessage}</div> : null}
       {buildQueueMutation.isError ? <div className="rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">{buildQueueMutation.error.message}</div> : null}
       {patchDecisionMutation.isError ? <div className="rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">{patchDecisionMutation.error.message}</div> : null}
+      {applyRecheckMutation.isError ? <div className="rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">{applyRecheckMutation.error.message}</div> : null}
 
       <MustFixBeforeUploadPanel
         handoff={handoff}
@@ -150,6 +167,60 @@ function ReviewVerdictCard({ handoff, queue }: { handoff: PackagingHandoff; queu
         <InfoLine label="Tạo upload task" value={uploadAllowed ? "Được phép" : "Chưa được phép"} compact />
         <InfoLine label="Manual-only" value={handoff.manual_publish_only ? "Có" : "Cần kiểm tra"} compact />
       </div>
+    </Panel>
+  );
+}
+
+function ApplyApprovedChangesCard({
+  queue,
+  pending,
+  result,
+  onApply
+}: {
+  queue?: PackagingReviewQueue | null;
+  pending: boolean;
+  result?: PackagingApplyApprovedChangesResult | null;
+  onApply: () => void;
+}) {
+  const label = pending ? "Đang apply và kiểm tra lại..." : queue?.apply_approved_changes_label ?? "Chưa có patch được duyệt";
+  const disabled = pending || !queue?.can_apply_approved_changes;
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2 text-xs uppercase text-muted-foreground">
+            <ShieldCheck size={14} aria-hidden="true" />
+            Hành động review
+          </div>
+          <h2 className="mt-2 text-base font-semibold">Apply approved changes & recheck package</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">Áp dụng các patch đã được duyệt và kiểm tra lại package.</p>
+        </div>
+        <Button type="button" variant="primary" onClick={onApply} disabled={disabled}>
+          <RefreshCw size={14} aria-hidden="true" /> {label}
+        </Button>
+      </div>
+      <div className="mt-4 grid gap-3 text-sm md:grid-cols-5">
+        <InfoLine label="Đã duyệt" value={queue?.approved_patch_count ?? 0} compact />
+        <InfoLine label="Chưa quyết định" value={queue?.ready_for_review_patch_count ?? 0} compact />
+        <InfoLine label="Đã từ chối" value={queue?.rejected_patch_count ?? 0} compact />
+        <InfoLine label="Cần chỉnh" value={queue?.request_changes_patch_count ?? 0} compact />
+        <InfoLine label="Đã apply" value={queue?.applied_patch_count ?? 0} compact />
+      </div>
+      {!queue?.can_apply_approved_changes && queue?.apply_approved_changes_disabled_reason ? (
+        <p className="mt-3 text-sm text-muted-foreground">{queue.apply_approved_changes_disabled_reason}</p>
+      ) : null}
+      {result ? (
+        <div className="mt-4 rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
+          <div className="font-medium">{applyResultLabel(result.status)}</div>
+          <div className="mt-2 grid gap-2 md:grid-cols-4">
+            <InfoLine label="Patch đã apply" value={`${result.applied_patch_ids.length} mục`} compact />
+            <InfoLine label="Kiểm tra gate" value={result.gate_rerun_record_ids.length ? `${result.gate_rerun_record_ids.length} lượt` : "Không chạy"} compact />
+            <InfoLine label="Blocker còn lại" value={`${result.remaining_blockers.length} mục`} compact />
+            <InfoLine label="Task thủ công" value={result.upload_task_creation_allowed ? "Được phép" : "Chưa được phép"} compact />
+          </div>
+          <p className="mt-2 text-muted-foreground">{result.next_safe_action}</p>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -462,6 +533,17 @@ function verdictLabel(verdict: string) {
     WAITING_PROVIDER_CONFIG: "Đang chờ cấu hình provider."
   };
   return labels[verdict] ?? "Chưa rõ trạng thái review.";
+}
+
+function applyResultLabel(status: string) {
+  const labels: Record<string, string> = {
+    APPLIED_AND_RECHECKED: "Đã apply patch được duyệt và kiểm tra lại.",
+    BLOCKED_WAITING_HUMAN_APPROVAL: "Chưa có patch được duyệt.",
+    BLOCKED_PENDING_HUMAN_DECISIONS: "Còn patch chưa quyết định.",
+    APPLY_FAILED: "Apply chưa thành công.",
+    NOOP_ALREADY_APPLIED: "Không có patch mới cần apply."
+  };
+  return labels[status] ?? "Đã nhận kết quả apply/recheck.";
 }
 
 function reviewDisplayItems(handoff: PackagingHandoff, queue?: PackagingReviewQueue | null): PackagingReviewQueueItem[] {

@@ -155,6 +155,15 @@ class PackagingReviewQueueRead(BaseModel):
     must_fix_count: int
     next_safe_action: str
     upload_task_creation_allowed: bool
+    approved_patch_count: int = 0
+    ready_for_review_patch_count: int = 0
+    rejected_patch_count: int = 0
+    request_changes_patch_count: int = 0
+    applied_patch_count: int = 0
+    can_apply_approved_changes: bool = False
+    apply_approved_changes_label: str = "Không có thay đổi cần apply"
+    apply_approved_changes_disabled_reason: str | None = "Không có thay đổi cần apply"
+    last_apply_recheck_result: dict[str, Any] | None = None
     items: list[PackagingReviewQueueItemRead] = Field(default_factory=list)
     technical_appendix: dict[str, Any] = Field(default_factory=dict)
 
@@ -204,6 +213,25 @@ class PackagingGateRerunRecordRead(BaseModel):
     created_at: AwareDatetime
 
     model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class PackagingApprovedPatchApplyAndRecheckResultRead(BaseModel):
+    status: str
+    package_id: uuid.UUID
+    applied_patch_ids: list[uuid.UUID] = Field(default_factory=list)
+    skipped_patch_ids: list[uuid.UUID] = Field(default_factory=list)
+    gate_rerun_record_ids: list[uuid.UUID] = Field(default_factory=list)
+    package_status: str
+    final_package_status: str
+    review_verdict: str
+    must_fix_count: int
+    upload_task_creation_allowed: bool
+    remaining_blockers: list[dict[str, Any]] = Field(default_factory=list)
+    next_safe_action: str
+    no_provider_media_upload_execution: bool = True
+    no_execution_proof: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class UploadedVideoOpsSummaryRead(BaseModel):

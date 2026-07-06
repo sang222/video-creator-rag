@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PackageReviewView } from "@/features/publishing/package-review-view";
+import { applyApprovedChangesAndRecheckPackage } from "@/lib/api";
 import type { VideoPackageReview } from "@/lib/types";
 
 const baseHandoff = {
@@ -133,6 +135,15 @@ const reviewRequired: VideoPackageReview = {
     must_fix_count: 3,
     next_safe_action: "Duyệt, reject hoặc request changes trên proposed patch.",
     upload_task_creation_allowed: false,
+    approved_patch_count: 0,
+    ready_for_review_patch_count: 1,
+    rejected_patch_count: 0,
+    request_changes_patch_count: 0,
+    applied_patch_count: 0,
+    can_apply_approved_changes: false,
+    apply_approved_changes_label: "Chưa có patch được duyệt",
+    apply_approved_changes_disabled_reason: "Chưa có patch được duyệt",
+    last_apply_recheck_result: null,
     technical_appendix: {},
     items: [
       {
@@ -239,6 +250,22 @@ vi.mock("@/lib/api", () => ({
     updated_at: "2026-07-04T00:00:00Z"
   })),
   buildPackagingReviewQueueFromGates: vi.fn(async () => reviewRequired.packaging_review_queue),
+  applyApprovedChangesAndRecheckPackage: vi.fn(async () => ({
+    status: "APPLIED_AND_RECHECKED",
+    package_id: "pkg-12345678",
+    applied_patch_ids: ["patch-publish"],
+    skipped_patch_ids: [],
+    gate_rerun_record_ids: ["rerun-1"],
+    package_status: "READY_FOR_HUMAN_REVIEW",
+    final_package_status: "READY_FOR_HUMAN_REVIEW",
+    review_verdict: "REVIEW_REQUIRED",
+    must_fix_count: 2,
+    upload_task_creation_allowed: false,
+    remaining_blockers: [{ issue_code: "HOOK_PROMISE_MISSING" }],
+    next_safe_action: "Operator reviews remaining queue items.",
+    no_provider_media_upload_execution: true,
+    no_execution_proof: { no_upload_task_created: true }
+  })),
   approvePackagingProposedPatch: vi.fn(async () => ({ id: "decision-1", proposed_patch_id: "patch-publish", decision: "APPROVE", decided_by: "operator", created_at: "2026-07-04T00:00:00Z" })),
   rejectPackagingProposedPatch: vi.fn(async () => ({ id: "decision-2", proposed_patch_id: "patch-publish", decision: "REJECT", decided_by: "operator", created_at: "2026-07-04T00:00:00Z" })),
   requestChangesPackagingProposedPatch: vi.fn(async () => ({ id: "decision-3", proposed_patch_id: "patch-publish", decision: "REQUEST_CHANGES", decided_by: "operator", created_at: "2026-07-04T00:00:00Z" })),
@@ -257,8 +284,31 @@ function renderWithQuery() {
   );
 }
 
+function setApplyState({
+  approved,
+  ready,
+  canApply,
+  label,
+  disabledReason
+}: {
+  approved: number;
+  ready: number;
+  canApply: boolean;
+  label: string;
+  disabledReason?: string | null;
+}) {
+  const queue = packageReview.packaging_review_queue;
+  if (!queue) throw new Error("missing queue fixture");
+  queue.approved_patch_count = approved;
+  queue.ready_for_review_patch_count = ready;
+  queue.can_apply_approved_changes = canApply;
+  queue.apply_approved_changes_label = label;
+  queue.apply_approved_changes_disabled_reason = disabledReason ?? null;
+}
+
 describe("PackageReviewView", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     packageReview = structuredClone(reviewRequired);
   });
 
@@ -286,6 +336,98 @@ describe("PackageReviewView", () => {
     expect(screen.getAllByText("Đang cần proposed patch").length).toBe(2);
   });
 
+  it("disables apply/recheck when no patch has been approved", async () => {
+    renderWithQuery();
+
+    expect(await screen.findByRole("button", { name: /Chưa có patch được duyệt/ })).toBeDisabled();
+    expect(screen.getByText("Áp dụng các patch đã được duyệt và kiểm tra lại package.")).toBeInTheDocument();
+  });
+
+  it("disables apply/recheck while a patch is still waiting for a decision", async () => {
+    setApplyState({
+      approved: 1,
+      ready: 1,
+      canApply: false,
+      label: "Còn patch chưa quyết định",
+      disabledReason: "Còn patch chưa quyết định"
+    });
+    renderWithQuery();
+
+    expect(await screen.findByRole("button", { name: /Còn patch chưa quyết định/ })).toBeDisabled();
+  });
+
+  it("enables apply/recheck when approved patches exist and all current patches have decisions", async () => {
+    setApplyState({
+      approved: 1,
+      ready: 0,
+      canApply: true,
+      label: "Apply approved changes & recheck package",
+      disabledReason: null
+    });
+    renderWithQuery();
+
+    expect(await screen.findByRole("button", { name: /Apply approved changes & recheck package/ })).toBeEnabled();
+  });
+
+  it("clicking apply/recheck calls the package endpoint", async () => {
+    setApplyState({
+      approved: 1,
+      ready: 0,
+      canApply: true,
+      label: "Apply approved changes & recheck package",
+      disabledReason: null
+    });
+    const user = userEvent.setup();
+    renderWithQuery();
+
+    await user.click(await screen.findByRole("button", { name: /Apply approved changes & recheck package/ }));
+
+    await waitFor(() => expect(applyApprovedChangesAndRecheckPackage).toHaveBeenCalledWith("pkg-12345678"));
+  });
+
+  it("renders loading and result state for apply/recheck", async () => {
+    setApplyState({
+      approved: 1,
+      ready: 0,
+      canApply: true,
+      label: "Apply approved changes & recheck package",
+      disabledReason: null
+    });
+    let resolveApply: (value: Awaited<ReturnType<typeof applyApprovedChangesAndRecheckPackage>>) => void = () => {};
+    vi.mocked(applyApprovedChangesAndRecheckPackage).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveApply = resolve;
+        })
+    );
+    const user = userEvent.setup();
+    renderWithQuery();
+
+    await user.click(await screen.findByRole("button", { name: /Apply approved changes & recheck package/ }));
+
+    expect(screen.getByRole("button", { name: /Đang apply và kiểm tra lại/ })).toBeDisabled();
+    resolveApply({
+      status: "APPLIED_AND_RECHECKED",
+      package_id: "pkg-12345678",
+      applied_patch_ids: ["patch-publish"],
+      skipped_patch_ids: [],
+      gate_rerun_record_ids: ["rerun-1"],
+      package_status: "READY_FOR_HUMAN_REVIEW",
+      final_package_status: "READY_FOR_HUMAN_REVIEW",
+      review_verdict: "REVIEW_REQUIRED",
+      must_fix_count: 2,
+      upload_task_creation_allowed: false,
+      remaining_blockers: [{ issue_code: "HOOK_PROMISE_MISSING" }],
+      next_safe_action: "Operator reviews remaining queue items.",
+      no_provider_media_upload_execution: true,
+      no_execution_proof: { no_upload_task_created: true }
+    });
+
+    expect(await screen.findByText("Đã apply patch được duyệt và kiểm tra lại.")).toBeInTheDocument();
+    expect(screen.getAllByText("1 mục").length).toBeGreaterThan(0);
+    expect(screen.getByText("Operator reviews remaining queue items.")).toBeInTheDocument();
+  });
+
   it("keeps raw gate table collapsed under technical details", async () => {
     renderWithQuery();
 
@@ -308,6 +450,15 @@ describe("PackageReviewView", () => {
         must_fix_count: 0,
         next_safe_action: "Có thể tạo task upload thủ công; VCOS vẫn không upload/publish.",
         upload_task_creation_allowed: true,
+        approved_patch_count: 0,
+        ready_for_review_patch_count: 0,
+        rejected_patch_count: 0,
+        request_changes_patch_count: 0,
+        applied_patch_count: 0,
+        can_apply_approved_changes: false,
+        apply_approved_changes_label: "Không có thay đổi cần apply",
+        apply_approved_changes_disabled_reason: "Không có thay đổi cần apply",
+        last_apply_recheck_result: null,
         technical_appendix: {},
         items: []
       }
@@ -321,6 +472,20 @@ describe("PackageReviewView", () => {
     renderWithQuery();
 
     expect(await screen.findByText("Must Fix Before Upload")).toBeInTheDocument();
+    [
+      /Generate video/i,
+      /^Render$/i,
+      /Run provider/i,
+      /Execute provider/i,
+      /Upload YouTube/i,
+      /^Publish$/i,
+      /Auto publish/i,
+      /Run daily/i,
+      /Run vector/i,
+      /Run NoView scanner/i
+    ].forEach((name) => {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    });
     expect(screen.queryByRole("button", { name: /daily/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /NoView/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /vector/i })).not.toBeInTheDocument();

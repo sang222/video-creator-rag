@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 import uuid
 from pathlib import Path
 
@@ -15,26 +16,34 @@ from app.core.time import utc_now
 from app.db.models import (
     ArtifactVersion,
     ChannelProfileVersion,
+    CloudMediaRef,
     EffectiveChannelRuntimeContextSnapshot,
     FinalMediaRef,
     FirstScriptedVideoPackage,
     HumanUploadTask,
     MediaRenderJob,
+    OperatorAuthSession,
+    OperatorUser,
+    PaidProviderCallLedger,
     PackagingGateRerunRecord,
     PackagingPatchApplyRun,
     PackagingPatchApprovalDecision,
     PackagingProposedPatch,
     PackagingReviewQueueItem,
+    ProviderJobSnapshot,
     ProviderAttempt,
     R3D4GateBatchRun,
     R3D4GateRun,
+    RenderRevision,
     UploadedVideo,
     VideoProject,
 )
 from app.main import create_app
 from app.services import EffectiveChannelRuntimeContextCompiler, PublishHandoffLedgerService, R3D1AdminService, VideoProjectService
+from app.services.m11_1 import AUTH_COOKIE_NAME, hash_password, hash_session_token
 from app.services.r3d3 import stable_hash
 from app.services.r3d9_ux2 import (
+    PackagingApprovedPatchApplyAndRecheckService,
     PackagingPatchApplyService,
     PackagingPatchApprovalService,
     PackagingPatchRouter,
@@ -245,6 +254,33 @@ def _replace_artifacts(package: FirstScriptedVideoPackage, updates: dict) -> Non
         else:
             artifacts[key] = value
     package.artifacts = artifacts
+
+
+def _patch_id_for_issue(queue, issue_code: str) -> uuid.UUID:
+    item = next(item for item in queue.items if item.issue_code == issue_code)
+    assert item.proposed_patch is not None
+    return item.proposed_patch.id
+
+
+def _operator_session_token(db_session) -> str:
+    token = f"test-operator-{uuid.uuid4()}"
+    user = OperatorUser(
+        email=f"r3d9-ux4-{uuid.uuid4().hex[:12]}@example.com",
+        password_hash=hash_password("unused"),
+        display_name="R3D9 UX4 Reviewer",
+        role="REVIEWER",
+        status="ACTIVE",
+    )
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(
+        OperatorAuthSession(
+            user_id=user.id,
+            session_token_hash=hash_session_token(token),
+            expires_at=utc_now() + timedelta(hours=1),
+        )
+    )
+    return token
 
 
 def test_gate_results_create_deduped_queue_items_and_human_action_copy(db_session, qualification_factory) -> None:
@@ -551,6 +587,146 @@ def test_no_provider_media_upload_youtube_or_channel_contract_mutation(db_sessio
     source = Path("app/services/r3d9_ux2.py").read_text(encoding="utf-8").lower()
     assert "googledriveuploadservice" not in source
     assert "youtubeupload" not in source
+
+
+def test_apply_approved_changes_endpoint_blocks_when_no_patch_is_approved(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory, publish_window=False)
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    assert queue.approved_patch_count == 0
+    assert queue.ready_for_review_patch_count >= 1
+    assert queue.can_apply_approved_changes is False
+    assert queue.apply_approved_changes_disabled_reason == "Chưa có patch được duyệt"
+    token = _operator_session_token(db_session)
+    db_session.commit()
+    client = TestClient(create_app())
+    client.cookies.set(AUTH_COOKIE_NAME, token)
+
+    response = client.post(f"/video-packages/{fx['package'].id}/apply-approved-changes-and-recheck")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "BLOCKED_WAITING_HUMAN_APPROVAL"
+    assert payload["applied_patch_ids"] == []
+    assert payload["gate_rerun_record_ids"] == []
+    assert payload["no_provider_media_upload_execution"] is True
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApplyRun)) == 0
+    assert db_session.scalar(select(func.count()).select_from(PackagingGateRerunRecord)) == 0
+
+
+def test_apply_approved_changes_blocks_when_any_patch_remains_ready_for_review(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory)
+    _add_gate_issue(db_session, fx, gate_key="HookTruthfulnessGate", issue_code="HOOK_PROMISE_MISSING", status="REVIEW_REQUIRED")
+    _add_gate_issue(db_session, fx, gate_key="ThumbnailTruthfulnessGate", issue_code="THUMBNAIL_BRIEF_MISSING", status="REVIEW_REQUIRED")
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    approved_patch_id = _patch_id_for_issue(queue, "HOOK_PROMISE_MISSING")
+    PackagingPatchApprovalService(db_session).approve(approved_patch_id, decided_by="operator")
+
+    result = PackagingApprovedPatchApplyAndRecheckService(db_session).apply_and_recheck(fx["package"].id)
+
+    assert result.status == "BLOCKED_PENDING_HUMAN_DECISIONS"
+    assert result.applied_patch_ids == []
+    assert result.gate_rerun_record_ids == []
+    assert db_session.scalar(select(func.count()).select_from(ArtifactVersion)) == 0
+    assert db_session.scalar(select(func.count()).select_from(PackagingGateRerunRecord)) == 0
+
+
+def test_apply_approved_changes_applies_only_approved_and_skips_rejected_or_request_changes(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory)
+    _add_gate_issue(db_session, fx, gate_key="HookTruthfulnessGate", issue_code="HOOK_PROMISE_MISSING", status="REVIEW_REQUIRED")
+    _add_gate_issue(db_session, fx, gate_key="ThumbnailTruthfulnessGate", issue_code="THUMBNAIL_BRIEF_MISSING", status="REVIEW_REQUIRED")
+    _add_gate_issue(db_session, fx, gate_key="DescriptionCompletenessGate", issue_code="DESCRIPTION_MISSING", status="REVIEW_REQUIRED")
+    before_context_hash = fx["effective"].context_hash
+    before_profile_count = db_session.scalar(select(func.count()).select_from(ChannelProfileVersion))
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    approved_patch_id = _patch_id_for_issue(queue, "HOOK_PROMISE_MISSING")
+    rejected_patch_id = _patch_id_for_issue(queue, "THUMBNAIL_BRIEF_MISSING")
+    request_changes_patch_id = _patch_id_for_issue(queue, "DESCRIPTION_MISSING")
+    approval = PackagingPatchApprovalService(db_session)
+    approval.approve(approved_patch_id, decided_by="operator")
+    approval.reject(rejected_patch_id, decided_by="operator")
+    approval.request_changes(request_changes_patch_id, decided_by="operator")
+
+    result = PackagingApprovedPatchApplyAndRecheckService(db_session).apply_and_recheck(fx["package"].id)
+
+    assert result.status == "APPLIED_AND_RECHECKED"
+    assert result.applied_patch_ids == [approved_patch_id]
+    assert rejected_patch_id in result.skipped_patch_ids
+    assert request_changes_patch_id in result.skipped_patch_ids
+    assert len(result.gate_rerun_record_ids) == 1
+    assert result.upload_task_creation_allowed is False
+    assert db_session.scalar(select(func.count()).select_from(ArtifactVersion)) == 1
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApplyRun).where(PackagingPatchApplyRun.apply_status == "APPLIED")) == 1
+    assert db_session.scalar(select(func.count()).select_from(PackagingGateRerunRecord)) == 1
+    assert db_session.get(PackagingProposedPatch, approved_patch_id).status == "APPLIED"
+    assert db_session.get(PackagingProposedPatch, request_changes_patch_id).status == "REQUEST_CHANGES"
+    effective = db_session.get(EffectiveChannelRuntimeContextSnapshot, fx["effective"].id)
+    assert effective is not None and effective.context_hash == before_context_hash
+    assert db_session.scalar(select(func.count()).select_from(ChannelProfileVersion)) == before_profile_count
+
+
+def test_apply_approved_changes_duplicate_call_does_not_create_duplicate_versions_or_reruns(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory, publish_window=False)
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    patch_id = next(item.proposed_patch.id for item in queue.items if item.proposed_patch)
+    PackagingPatchApprovalService(db_session).approve(patch_id, decided_by="operator")
+
+    first = PackagingApprovedPatchApplyAndRecheckService(db_session).apply_and_recheck(fx["package"].id)
+    second = PackagingApprovedPatchApplyAndRecheckService(db_session).apply_and_recheck(fx["package"].id)
+
+    assert first.status == "APPLIED_AND_RECHECKED"
+    assert second.status == "NOOP_ALREADY_APPLIED"
+    assert second.applied_patch_ids == []
+    assert db_session.scalar(select(func.count()).select_from(ArtifactVersion)) == 1
+    assert db_session.scalar(select(func.count()).select_from(PackagingPatchApplyRun).where(PackagingPatchApplyRun.apply_status == "APPLIED")) == 1
+    assert db_session.scalar(select(func.count()).select_from(PackagingGateRerunRecord)) == 1
+
+
+def test_apply_approved_changes_rebuilds_queue_and_preserves_no_execution_boundaries(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory, publish_window=False)
+    before_profile_id = fx["package"].channel_profile_version_id
+    before_context_hash = fx["effective"].context_hash
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    patch_id = next(item.proposed_patch.id for item in queue.items if item.proposed_patch)
+    PackagingPatchApprovalService(db_session).approve(patch_id, decided_by="operator")
+
+    result = PackagingApprovedPatchApplyAndRecheckService(db_session).apply_and_recheck(fx["package"].id)
+    rebuilt = PackagingReviewQueueService(db_session).read(fx["package"].id)
+
+    assert result.status == "APPLIED_AND_RECHECKED"
+    assert rebuilt.applied_patch_count == 1
+    assert rebuilt.items[0].status == "GATE_RERUN_REQUIRED"
+    assert rebuilt.last_apply_recheck_result is not None
+    assert result.upload_task_creation_allowed is False
+    assert result.no_execution_proof["no_upload_task_created"] is True
+    assert db_session.scalar(select(func.count()).select_from(ProviderAttempt)) == 0
+    assert db_session.scalar(select(func.count()).select_from(MediaRenderJob)) == 0
+    assert db_session.scalar(select(func.count()).select_from(FinalMediaRef)) == 0
+    assert db_session.scalar(select(func.count()).select_from(CloudMediaRef)) == 0
+    assert db_session.scalar(select(func.count()).select_from(UploadedVideo)) == 0
+    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
+    assert db_session.scalar(select(func.count()).select_from(RenderRevision)) == 0
+    assert db_session.scalar(select(func.count()).select_from(ProviderJobSnapshot)) == 0
+    assert db_session.scalar(select(func.count()).select_from(PaidProviderCallLedger).where(PaidProviderCallLedger.call_status == "EXECUTED")) == 0
+    package = db_session.get(FirstScriptedVideoPackage, fx["package"].id)
+    effective = db_session.get(EffectiveChannelRuntimeContextSnapshot, fx["effective"].id)
+    assert package is not None and package.channel_profile_version_id == before_profile_id
+    assert effective is not None and effective.context_hash == before_context_hash
+
+
+def test_direct_patch_apply_endpoint_still_blocks_non_approved_patch(db_session, qualification_factory) -> None:
+    fx = _package_fixture(db_session, qualification_factory, publish_window=False)
+    queue = PackagingReviewQueueService(db_session).build_from_gates(fx["package"].id)
+    patch_id = next(item.proposed_patch.id for item in queue.items if item.proposed_patch)
+    db_session.commit()
+    client = TestClient(create_app())
+
+    response = client.post(f"/packaging-proposed-patches/{patch_id}/apply")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["apply_status"] == "BLOCKED"
+    assert "PATCH_NOT_APPROVED" in payload["reason_codes_json"]
+    assert db_session.scalar(select(func.count()).select_from(ArtifactVersion)) == 0
 
 
 def test_packaging_review_queue_api_endpoints(db_session, qualification_factory) -> None:

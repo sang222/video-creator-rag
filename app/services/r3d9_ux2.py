@@ -9,6 +9,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.contracts.r3d9 import (
+    PackagingApprovedPatchApplyAndRecheckResultRead,
     PackagingGateRerunRecordRead,
     PackagingPatchApplyRunRead,
     PackagingPatchApprovalDecisionRead,
@@ -47,6 +48,14 @@ UNRESOLVED_QUEUE_STATUSES = {
 }
 
 READY_PATCH_STATUSES = {"READY_FOR_REVIEW", "APPROVED", "APPLIED"}
+
+PACKAGE_APPLY_RECHECK_STATUSES = {
+    "APPLIED_AND_RECHECKED",
+    "BLOCKED_WAITING_HUMAN_APPROVAL",
+    "BLOCKED_PENDING_HUMAN_DECISIONS",
+    "APPLY_FAILED",
+    "NOOP_ALREADY_APPLIED",
+}
 
 ISSUE_ACTION_COPY: dict[str, dict[str, str]] = {
     "HOOK_PROMISE_MISSING": {
@@ -152,6 +161,24 @@ class PackagingPatchRoute:
     deterministic: bool = False
 
 
+@dataclass(frozen=True)
+class PackagingPatchReviewState:
+    item: PackagingReviewQueueItem
+    patch: PackagingProposedPatch
+    latest_decision: str | None
+    applied_run: PackagingPatchApplyRun | None
+
+
+@dataclass(frozen=True)
+class PackagingPatchInventory:
+    states: list[PackagingPatchReviewState]
+    approved_count: int
+    ready_for_review_count: int
+    rejected_count: int
+    request_changes_count: int
+    applied_count: int
+
+
 class PackagingPatchRouter:
     ROUTES: dict[str, PackagingPatchRoute] = {
         "SCRIPT_FORBIDDEN_STYLE_USED": PackagingPatchRoute("DETERMINISTIC_SERVICE", "SCRIPT_STYLE_PATCH", "ScriptRewriteAgent", "script_rewrite_agent.patch_proposal", True),
@@ -175,6 +202,99 @@ class PackagingPatchRouter:
         if gate_key in {"HookTruthfulnessGate", "HookPayoffGate", "VisualHookRelevanceGate"}:
             return PackagingPatchRoute("EXISTING_AGENT", "HOOK_SPEC", "ScriptPlanningAgent", "script_planning_agent.patch_proposal")
         return None
+
+
+def _patch_inventory_for_package(session: Session, package_id: uuid.UUID) -> PackagingPatchInventory:
+    items = session.scalars(
+        select(PackagingReviewQueueItem)
+        .where(
+            PackagingReviewQueueItem.package_id == package_id,
+            PackagingReviewQueueItem.status.in_(UNRESOLVED_QUEUE_STATUSES),
+        )
+        .order_by(PackagingReviewQueueItem.created_at.asc(), PackagingReviewQueueItem.id.asc())
+    ).all()
+    patches: list[PackagingProposedPatch] = []
+    states_by_patch_id: dict[uuid.UUID, PackagingReviewQueueItem] = {}
+    for item in items:
+        patch = _latest_patch_for_item(session, item.id)
+        if patch is None:
+            continue
+        patches.append(patch)
+        states_by_patch_id[patch.id] = item
+
+    latest_decisions = _latest_decisions_for_patches(session, [patch.id for patch in patches])
+    applied_runs = _latest_applied_runs_for_patches(session, [patch.id for patch in patches])
+    states = [
+        PackagingPatchReviewState(
+            item=states_by_patch_id[patch.id],
+            patch=patch,
+            latest_decision=latest_decisions.get(patch.id),
+            applied_run=applied_runs.get(patch.id),
+        )
+        for patch in patches
+    ]
+    return PackagingPatchInventory(
+        states=states,
+        approved_count=sum(1 for state in states if _state_is_human_approved(state)),
+        ready_for_review_count=sum(1 for state in states if state.patch.status == "READY_FOR_REVIEW"),
+        rejected_count=sum(1 for state in states if _state_is_rejected(state)),
+        request_changes_count=sum(1 for state in states if _state_is_request_changes(state)),
+        applied_count=sum(1 for state in states if _state_is_applied(state)),
+    )
+
+
+def _latest_patch_for_item(session: Session, queue_item_id: uuid.UUID) -> PackagingProposedPatch | None:
+    return session.scalars(
+        select(PackagingProposedPatch)
+        .where(PackagingProposedPatch.queue_item_id == queue_item_id)
+        .order_by(desc(PackagingProposedPatch.created_at), desc(PackagingProposedPatch.id))
+        .limit(1)
+    ).one_or_none()
+
+
+def _latest_decisions_for_patches(session: Session, patch_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not patch_ids:
+        return {}
+    decisions: dict[uuid.UUID, str] = {}
+    for decision in session.scalars(
+        select(PackagingPatchApprovalDecision)
+        .where(PackagingPatchApprovalDecision.proposed_patch_id.in_(patch_ids))
+        .order_by(desc(PackagingPatchApprovalDecision.created_at), desc(PackagingPatchApprovalDecision.id))
+    ).all():
+        decisions.setdefault(decision.proposed_patch_id, decision.decision)
+    return decisions
+
+
+def _latest_applied_runs_for_patches(session: Session, patch_ids: list[uuid.UUID]) -> dict[uuid.UUID, PackagingPatchApplyRun]:
+    if not patch_ids:
+        return {}
+    runs: dict[uuid.UUID, PackagingPatchApplyRun] = {}
+    for run in session.scalars(
+        select(PackagingPatchApplyRun)
+        .where(
+            PackagingPatchApplyRun.proposed_patch_id.in_(patch_ids),
+            PackagingPatchApplyRun.apply_status == "APPLIED",
+        )
+        .order_by(desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id))
+    ).all():
+        runs.setdefault(run.proposed_patch_id, run)
+    return runs
+
+
+def _state_is_human_approved(state: PackagingPatchReviewState) -> bool:
+    return state.patch.status == "APPROVED" and state.latest_decision == "APPROVE"
+
+
+def _state_is_rejected(state: PackagingPatchReviewState) -> bool:
+    return state.patch.status == "REJECTED" or state.latest_decision == "REJECT"
+
+
+def _state_is_request_changes(state: PackagingPatchReviewState) -> bool:
+    return state.patch.status == "REQUEST_CHANGES" or state.latest_decision == "REQUEST_CHANGES" or state.item.status == "NEEDS_CHANGES"
+
+
+def _state_is_applied(state: PackagingPatchReviewState) -> bool:
+    return state.patch.status == "APPLIED" or state.applied_run is not None
 
 
 class PackagingReviewQueueService:
@@ -250,6 +370,8 @@ class PackagingReviewQueueService:
         gate_status = self._combined_gate_status(package.id, handoff.packaging_gate_summary.overall_status)
         verdict = self._review_verdict(package, unresolved, gate_status)
         upload_allowed = verdict == "READY_FOR_MANUAL_UPLOAD"
+        inventory = _patch_inventory_for_package(self.session, package.id)
+        apply_state = _apply_approved_changes_state(inventory, unresolved)
         return PackagingReviewQueueRead(
             package_id=package.id,
             review_verdict=verdict,
@@ -257,11 +379,25 @@ class PackagingReviewQueueService:
             must_fix_count=sum(1 for item in unresolved if item.severity in {"BLOCK", "REVIEW_REQUIRED"}),
             next_safe_action=_next_safe_action(verdict, unresolved),
             upload_task_creation_allowed=upload_allowed,
+            approved_patch_count=inventory.approved_count,
+            ready_for_review_patch_count=inventory.ready_for_review_count,
+            rejected_patch_count=inventory.rejected_count,
+            request_changes_patch_count=inventory.request_changes_count,
+            applied_patch_count=inventory.applied_count,
+            can_apply_approved_changes=apply_state["can_apply"],
+            apply_approved_changes_label=apply_state["label"],
+            apply_approved_changes_disabled_reason=apply_state["disabled_reason"],
+            last_apply_recheck_result=_last_apply_recheck_result(self.session, package.id),
             items=[self._read_item(item) for item in items],
             technical_appendix={
                 "source": "PackagingReviewQueueService",
                 "packaging_gate_overall_status": gate_status,
                 "unresolved_item_count": len(unresolved),
+                "approved_patch_count": inventory.approved_count,
+                "ready_for_review_patch_count": inventory.ready_for_review_count,
+                "rejected_patch_count": inventory.rejected_count,
+                "request_changes_patch_count": inventory.request_changes_count,
+                "applied_patch_count": inventory.applied_count,
                 "no_provider_media_upload_execution": True,
                 "does_not_mutate_channel_contract": True,
                 "does_not_mutate_effective_context_snapshot": True,
@@ -839,7 +975,7 @@ class PackagingPatchApprovalService:
                 item.status = "REJECTED"
                 item.next_action_code = "PATCH_REJECTED_NEEDS_NEW_PROPOSAL"
         else:
-            patch.status = "DRAFT"
+            patch.status = "REQUEST_CHANGES"
             if item is not None:
                 item.status = "NEEDS_CHANGES"
                 item.next_action_code = "REQUEST_PATCH_CHANGES"
@@ -857,10 +993,21 @@ class PackagingPatchApplyService:
     def __init__(self, session: Session):
         self.session = session
 
-    def apply(self, patch_id: uuid.UUID) -> PackagingPatchApplyRunRead:
+    def apply(self, patch_id: uuid.UUID, *, rerun_gates: bool = True) -> PackagingPatchApplyRunRead:
         patch = self.session.get(PackagingProposedPatch, patch_id)
         if patch is None:
             raise NotFoundError(f"packaging proposed patch not found: {patch_id}")
+        existing_run = self._existing_applied_run(patch.id)
+        if existing_run is not None:
+            patch.status = "APPLIED"
+            item = self.session.get(PackagingReviewQueueItem, patch.queue_item_id)
+            if item is not None and item.status != "CLOSED":
+                item.status = "GATE_RERUN_REQUIRED"
+                item.next_action_code = "RERUN_PACKAGING_GATES"
+            self.session.flush()
+            return _apply_run_read(existing_run, apply_status="ALREADY_APPLIED")
+        if patch.status == "APPLIED":
+            return PackagingPatchApplyRunRead.model_validate(self._already_applied_run(patch, ["PATCH_STATUS_ALREADY_APPLIED"]))
         if patch.status != "APPROVED":
             return PackagingPatchApplyRunRead.model_validate(self._blocked_run(patch, ["PATCH_NOT_APPROVED"]))
         package = self.session.get(FirstScriptedVideoPackage, patch.package_id)
@@ -938,8 +1085,20 @@ class PackagingPatchApplyService:
         )
         self.session.add(run)
         self.session.flush()
-        PackagingGateRerunService(self.session).rerun_for_patch(patch.id)
+        if rerun_gates:
+            PackagingGateRerunService(self.session).rerun_for_patch(patch.id)
         return PackagingPatchApplyRunRead.model_validate(run)
+
+    def _existing_applied_run(self, patch_id: uuid.UUID) -> PackagingPatchApplyRun | None:
+        return self.session.scalars(
+            select(PackagingPatchApplyRun)
+            .where(
+                PackagingPatchApplyRun.proposed_patch_id == patch_id,
+                PackagingPatchApplyRun.apply_status == "APPLIED",
+            )
+            .order_by(desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id))
+            .limit(1)
+        ).one_or_none()
 
     def _blocked_run(self, patch: PackagingProposedPatch, reason_codes: list[str]) -> PackagingPatchApplyRun:
         run = PackagingPatchApplyRun(
@@ -955,6 +1114,160 @@ class PackagingPatchApplyService:
         self.session.flush()
         return run
 
+    def _already_applied_run(self, patch: PackagingProposedPatch, reason_codes: list[str]) -> PackagingPatchApplyRun:
+        run = PackagingPatchApplyRun(
+            proposed_patch_id=patch.id,
+            package_id=patch.package_id,
+            apply_status="ALREADY_APPLIED",
+            created_artifact_ref=None,
+            created_handoff_override_ref=None,
+            created_version_hash=None,
+            reason_codes_json=reason_codes,
+        )
+        self.session.add(run)
+        self.session.flush()
+        return run
+
+
+class PackagingApprovedPatchApplyAndRecheckService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def apply_and_recheck(self, package_id: uuid.UUID) -> PackagingApprovedPatchApplyAndRecheckResultRead:
+        package = PackagingReviewQueueService(self.session)._require_package(package_id)
+        queue_before = PackagingReviewQueueService(self.session).read(package.id)
+        inventory = _patch_inventory_for_package(self.session, package.id)
+        skipped_patch_ids = [state.patch.id for state in inventory.states if not _state_is_human_approved(state)]
+
+        if inventory.approved_count == 0:
+            status = (
+                "NOOP_ALREADY_APPLIED"
+                if inventory.applied_count > 0 and inventory.ready_for_review_count == 0
+                else "BLOCKED_WAITING_HUMAN_APPROVAL"
+            )
+            return self._result(
+                status=status,
+                package_id=package.id,
+                applied_patch_ids=[],
+                skipped_patch_ids=skipped_patch_ids,
+                gate_rerun_record_ids=[],
+                queue=queue_before,
+            )
+        if inventory.ready_for_review_count > 0:
+            return self._result(
+                status="BLOCKED_PENDING_HUMAN_DECISIONS",
+                package_id=package.id,
+                applied_patch_ids=[],
+                skipped_patch_ids=skipped_patch_ids,
+                gate_rerun_record_ids=[],
+                queue=queue_before,
+            )
+
+        approved_states = [state for state in inventory.states if _state_is_human_approved(state)]
+        validation_errors = self._validate_approved_patch_eligibility(approved_states)
+        if validation_errors:
+            return self._result(
+                status="APPLY_FAILED",
+                package_id=package.id,
+                applied_patch_ids=[],
+                skipped_patch_ids=[state.patch.id for state in inventory.states],
+                gate_rerun_record_ids=[],
+                queue=queue_before,
+                extra_proof={"apply_validation_errors": validation_errors},
+            )
+
+        applied_patch_ids: list[uuid.UUID] = []
+        already_applied_patch_ids: list[uuid.UUID] = []
+        failed_patch_ids: list[uuid.UUID] = []
+        for state in approved_states:
+            run = PackagingPatchApplyService(self.session).apply(state.patch.id, rerun_gates=False)
+            if run.apply_status == "APPLIED":
+                applied_patch_ids.append(state.patch.id)
+            elif run.apply_status == "ALREADY_APPLIED":
+                already_applied_patch_ids.append(state.patch.id)
+            else:
+                failed_patch_ids.append(state.patch.id)
+
+        if failed_patch_ids:
+            return self._result(
+                status="APPLY_FAILED",
+                package_id=package.id,
+                applied_patch_ids=applied_patch_ids,
+                skipped_patch_ids=skipped_patch_ids + already_applied_patch_ids + failed_patch_ids,
+                gate_rerun_record_ids=[],
+                queue=queue_before,
+                extra_proof={"failed_patch_ids": [str(patch_id) for patch_id in failed_patch_ids]},
+            )
+        if not applied_patch_ids:
+            return self._result(
+                status="NOOP_ALREADY_APPLIED",
+                package_id=package.id,
+                applied_patch_ids=[],
+                skipped_patch_ids=skipped_patch_ids + already_applied_patch_ids,
+                gate_rerun_record_ids=[],
+                queue=queue_before,
+            )
+
+        gate_rerun_record_ids: list[uuid.UUID] = []
+        for patch_id in applied_patch_ids:
+            rerun = PackagingGateRerunService(self.session).rerun_for_patch(patch_id)
+            gate_rerun_record_ids.append(rerun.id)
+        queue_after = PackagingReviewQueueService(self.session).build_from_gates(package.id)
+        return self._result(
+            status="APPLIED_AND_RECHECKED",
+            package_id=package.id,
+            applied_patch_ids=applied_patch_ids,
+            skipped_patch_ids=skipped_patch_ids + already_applied_patch_ids,
+            gate_rerun_record_ids=gate_rerun_record_ids,
+            queue=queue_after,
+        )
+
+    def _validate_approved_patch_eligibility(self, approved_states: list[PackagingPatchReviewState]) -> list[str]:
+        reason_codes: list[str] = []
+        for state in approved_states:
+            if state.patch.status != "APPROVED" or state.latest_decision != "APPROVE":
+                reason_codes.append(f"{state.patch.id}:PATCH_NOT_HUMAN_APPROVED")
+            if not state.patch.requires_human_approval:
+                reason_codes.append(f"{state.patch.id}:PATCH_APPROVAL_BOUNDARY_INVALID")
+            package = self.session.get(FirstScriptedVideoPackage, state.patch.package_id)
+            if package is None or package.video_project_id is None:
+                reason_codes.append(f"{state.patch.id}:PACKAGE_OR_PROJECT_MISSING")
+                continue
+            if self.session.get(VideoProject, package.video_project_id) is None:
+                reason_codes.append(f"{state.patch.id}:PROJECT_MISSING")
+        return reason_codes
+
+    def _result(
+        self,
+        *,
+        status: str,
+        package_id: uuid.UUID,
+        applied_patch_ids: list[uuid.UUID],
+        skipped_patch_ids: list[uuid.UUID],
+        gate_rerun_record_ids: list[uuid.UUID],
+        queue: PackagingReviewQueueRead,
+        extra_proof: dict[str, Any] | None = None,
+    ) -> PackagingApprovedPatchApplyAndRecheckResultRead:
+        if status not in PACKAGE_APPLY_RECHECK_STATUSES:
+            raise ValidationFailureError(f"unknown apply/recheck status: {status}")
+        package = PackagingReviewQueueService(self.session)._require_package(package_id)
+        return PackagingApprovedPatchApplyAndRecheckResultRead(
+            status=status,
+            package_id=package.id,
+            applied_patch_ids=applied_patch_ids,
+            skipped_patch_ids=_dedupe_uuid(skipped_patch_ids),
+            gate_rerun_record_ids=_dedupe_uuid(gate_rerun_record_ids),
+            package_status=package.package_status,
+            final_package_status=package.package_status,
+            review_verdict=queue.review_verdict,
+            must_fix_count=queue.must_fix_count,
+            upload_task_creation_allowed=queue.upload_task_creation_allowed,
+            remaining_blockers=_remaining_blockers(queue),
+            next_safe_action=queue.next_safe_action,
+            no_provider_media_upload_execution=True,
+            no_execution_proof=_no_execution_proof(status=status, extra=extra_proof),
+        )
+
 
 class PackagingGateRerunService:
     def __init__(self, session: Session):
@@ -964,6 +1277,14 @@ class PackagingGateRerunService:
         patch = self.session.get(PackagingProposedPatch, patch_id)
         if patch is None:
             raise NotFoundError(f"packaging proposed patch not found: {patch_id}")
+        existing = self.session.scalars(
+            select(PackagingGateRerunRecord)
+            .where(PackagingGateRerunRecord.proposed_patch_id == patch.id)
+            .order_by(desc(PackagingGateRerunRecord.created_at), desc(PackagingGateRerunRecord.id))
+            .limit(1)
+        ).one_or_none()
+        if existing is not None:
+            return PackagingGateRerunRecordRead.model_validate(existing)
         gate_keys = PATCH_TYPE_RERUN_GATES.get(patch.patch_type, [])
         record = PackagingGateRerunRecord(
             package_id=patch.package_id,
@@ -1038,6 +1359,122 @@ def _next_safe_action(verdict: str, unresolved: list[PackagingReviewQueueItem]) 
             return "Tạo hoặc chờ proposed patch cho các gate đang fail."
         return "Duyệt, reject hoặc request changes trên proposed patch."
     return "Review gate kỹ thuật trước khi upload."
+
+
+def _apply_approved_changes_state(
+    inventory: PackagingPatchInventory,
+    unresolved: list[PackagingReviewQueueItem],
+) -> dict[str, str | bool | None]:
+    if not unresolved:
+        return {
+            "can_apply": False,
+            "label": "Không có thay đổi cần apply",
+            "disabled_reason": "Không có thay đổi cần apply",
+        }
+    if inventory.approved_count == 0:
+        return {
+            "can_apply": False,
+            "label": "Chưa có patch được duyệt",
+            "disabled_reason": "Chưa có patch được duyệt",
+        }
+    if inventory.ready_for_review_count > 0:
+        return {
+            "can_apply": False,
+            "label": "Còn patch chưa quyết định",
+            "disabled_reason": "Còn patch chưa quyết định",
+        }
+    return {
+        "can_apply": True,
+        "label": "Apply approved changes & recheck package",
+        "disabled_reason": None,
+    }
+
+
+def _last_apply_recheck_result(session: Session, package_id: uuid.UUID) -> dict[str, Any] | None:
+    latest_apply = session.scalars(
+        select(PackagingPatchApplyRun)
+        .where(PackagingPatchApplyRun.package_id == package_id)
+        .order_by(desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id))
+        .limit(1)
+    ).one_or_none()
+    latest_rerun = session.scalars(
+        select(PackagingGateRerunRecord)
+        .where(PackagingGateRerunRecord.package_id == package_id)
+        .order_by(desc(PackagingGateRerunRecord.created_at), desc(PackagingGateRerunRecord.id))
+        .limit(1)
+    ).one_or_none()
+    if latest_apply is None and latest_rerun is None:
+        return None
+    return {
+        "latest_apply_run_id": str(latest_apply.id) if latest_apply else None,
+        "latest_apply_status": latest_apply.apply_status if latest_apply else None,
+        "latest_gate_rerun_record_id": str(latest_rerun.id) if latest_rerun else None,
+        "latest_gate_rerun_status": latest_rerun.rerun_status if latest_rerun else None,
+        "no_provider_media_upload_execution": True,
+    }
+
+
+def _apply_run_read(run: PackagingPatchApplyRun, *, apply_status: str | None = None) -> PackagingPatchApplyRunRead:
+    return PackagingPatchApplyRunRead(
+        id=run.id,
+        proposed_patch_id=run.proposed_patch_id,
+        package_id=run.package_id,
+        apply_status=apply_status or run.apply_status,
+        created_artifact_ref=run.created_artifact_ref,
+        created_handoff_override_ref=run.created_handoff_override_ref,
+        created_version_hash=run.created_version_hash,
+        reason_codes_json=run.reason_codes_json,
+        created_at=run.created_at,
+    )
+
+
+def _remaining_blockers(queue: PackagingReviewQueueRead) -> list[dict[str, Any]]:
+    return [
+        {
+            "queue_item_id": str(item.id),
+            "gate_key": item.gate_key,
+            "issue_code": item.issue_code,
+            "severity": item.severity,
+            "status": item.status,
+            "next_action_code": item.next_action_code,
+        }
+        for item in queue.items
+        if item.status in UNRESOLVED_QUEUE_STATUSES
+    ]
+
+
+def _no_execution_proof(*, status: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    proof: dict[str, Any] = {
+        "status": status,
+        "no_provider_media_upload_execution": True,
+        "no_upload_task_created": True,
+        "no_youtube_upload_publish_reupload": True,
+        "no_real_video_or_media_generation": True,
+        "no_provider_render_job": True,
+        "no_paid_provider_execution": True,
+        "providers_not_called": ["ElevenLabs", "Luma", "Creatomate", "Pexels", "Google Drive upload", "YouTube"],
+        "does_not_mutate": [
+            "Channel Contract",
+            "ChannelProfileVersion",
+            "EffectiveChannelRuntimeContextSnapshot",
+        ],
+        "learning_auto_promotion": False,
+        "prompt_self_mutation": False,
+    }
+    if extra:
+        proof.update(extra)
+    return proof
+
+
+def _dedupe_uuid(values: list[uuid.UUID]) -> list[uuid.UUID]:
+    seen: set[uuid.UUID] = set()
+    result: list[uuid.UUID] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _artifact_type_for_patch(patch_type: str) -> str:
