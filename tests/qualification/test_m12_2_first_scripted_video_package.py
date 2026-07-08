@@ -127,7 +127,6 @@ def _envelope(agent_key: str, artifact: dict, *, status: str = "OK") -> dict:
         "agent_key": agent_key,
         "status": status,
         "confidence_label": "HIGH",
-        "risk_level": "LOW",
         "evidence_refs": [{"type": "operator_research_pack", "id": "m12_2"}],
         "limitations": ["Human review required."],
         "next_action": "Human review required.",
@@ -137,22 +136,79 @@ def _envelope(agent_key: str, artifact: dict, *, status: str = "OK") -> dict:
     }
 
 
+def _long_script_sentences(count: int = 32) -> list[dict]:
+    text = (
+        "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
+        "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
+        "for deterministic duration validation without adding claims or media."
+    )
+    return [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 15} for index in range(1, count + 1)]
+
+
+def _visual_scenes(count: int = 32) -> list[dict]:
+    return [
+        {"sentence_id": f"S{index}", "intended_visual_source": "DIAGRAM" if index % 2 else "CARD"}
+        for index in range(1, count + 1)
+    ]
+
+
 def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = None) -> list[dict]:
     artifacts = {
         "ChannelAuthorityAgent": {"decision": "ADMIT", "reason": "Fits channel contract."},
-        "TopicIdeaScoringAgent": {"scores": [{"topic": "VCOS M12.2", "score": 86}]},
+        "TopicIdeaScoringAgent": {"topic_score": {"topic": "VCOS M12.2", "score": 86}, "risk_assessment": {"risk_level": "LOW"}},
         "ResearchPackSummarizer": {
             "summary": "M12.2 activates production prompts for a human-review package.",
             "source_notes": ["operator research pack"],
             "evidence_refs": [{"id": "m12_2"}],
         },
-        "ScriptPlanningAgent": {"outline": ["hook", "problem", "mechanism", "result", "takeaway"]},
-        "ScriptWriterAgent": {
-            "sentences": [
-                {"sentence_id": "S1", "text": "M12.2 starts with a real channel contract.", "approx_seconds": 240},
-                {"sentence_id": "S2", "text": "The package stops at human review.", "approx_seconds": 240},
+        "ScriptPlanningAgent": {
+            "outline": ["hook", "problem", "mechanism", "result", "takeaway"],
+            "duration_model": {
+                "target_format": "long_form",
+                "target_duration_seconds": 480,
+                "allowed_duration_range_seconds": {"min": 432, "max": 528},
+                "narration_words_target": 1120,
+                "words_per_minute_assumption": 140,
+            },
+            "section_budgets": [
+                {"section": "hook", "target_seconds": 45, "target_words": 105},
+                {"section": "body", "target_seconds": 360, "target_words": 840},
+                {"section": "takeaway", "target_seconds": 75, "target_words": 175},
             ],
+            "hook_spec": {
+                "hook_type": "DIRECT",
+                "first_3_seconds_script": "M12.2 starts with a real channel contract.",
+                "first_3_seconds_visual": "Diagram of contract to package boundary.",
+                "promise_made": "M12.2 stops at human review",
+                "payoff_location": "S2",
+                "clickbait_risk": "LOW",
+                "visual_hook_relevance": "Visual shows the contract boundary discussed in S1.",
+                "title_hook_alignment": "Title names M12.2 production prompt activation.",
+            },
+        },
+        "ScriptWriterAgent": {
+            "hook_spec": {
+                "hook_type": "DIRECT",
+                "first_3_seconds_script": "M12.2 starts with a real channel contract.",
+                "first_3_seconds_visual": "Diagram of contract to package boundary.",
+                "promise_made": "M12.2 stops at human review",
+                "payoff_location": "S2",
+                "clickbait_risk": "LOW",
+                "visual_hook_relevance": "Visual shows the contract boundary discussed in S1.",
+                "title_hook_alignment": "Title names M12.2 production prompt activation.",
+            },
+            "sentences": _long_script_sentences(),
             "total_approx_seconds": 480,
+            "duration_self_check": {
+                "actual_total_seconds": 480,
+                "target_seconds": 480,
+                "min_seconds": 432,
+                "max_seconds": 528,
+                "coverage_ratio": 1,
+                "sentence_count": 32,
+                "narration_word_count": 1120,
+                "minimum_word_count": 1008,
+            },
         },
         "PublishingMetadataAgent": {
             "title": "VCOS M12.2: Production Prompt Activation",
@@ -163,10 +219,7 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "disclosure_notes": ["AI-assisted script draft."],
         },
         "VisualPlanningAgent": {
-            "scenes": [
-                {"sentence_id": "S1", "intended_visual_source": "DIAGRAM"},
-                {"sentence_id": "S2", "intended_visual_source": "CARD"},
-            ],
+            "scenes": _visual_scenes(),
             "media_provider_calls": "NONE",
         },
         "UploadCardCopyAgent": {"title": "VCOS M12.2", "description": "Paste-ready copy.", "not_uploaded": True},
@@ -252,7 +305,7 @@ def test_m12_2_first_package_uses_prompt_registry_and_reaches_human_review(db_se
         _request(scope.channel.id, video_project_id=project.id)
     )
 
-    assert package.package_status == "READY_FOR_HUMAN_REVIEW", package.artifacts
+    assert package.package_status == "READY_FOR_HUMAN_REVIEW", package.artifacts.get("deterministic_gate_report")
     assert len(router.calls) == len(PACKAGE_AGENT_CHAIN)
     assert len(package.agent_run_refs) == len(PACKAGE_AGENT_CHAIN)
     assert len(package.prompt_render_run_refs) == len(PACKAGE_AGENT_CHAIN)

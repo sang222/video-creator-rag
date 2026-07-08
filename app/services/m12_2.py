@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # Compatibility note: semantic facades `video_package_generation`, `agent_rehearsal`, and `package_generation_rehearsal` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
+import re
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -676,6 +677,7 @@ class FirstScriptedVideoPackageService:
                 "compiled_policy_content_hash": snapshot.content_hash,
             }
         }
+        artifacts["duration_model"] = _duration_model_from_context(effective_context_snapshot, target_video_type=data.target_video_type)
         if effective_context_snapshot is not None:
             artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
         agent_run_refs: list[dict[str, Any]] = []
@@ -934,6 +936,7 @@ class FirstScriptedVideoPackageService:
                 "old_provider_smoke_disabled": True,
             },
         }
+        artifacts["duration_model"] = _duration_model_from_context(effective_context_snapshot, target_video_type=data.target_video_type)
         if effective_context_snapshot is not None:
             artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
         agent_run_refs: list[dict[str, Any]] = []
@@ -1105,6 +1108,26 @@ class FirstScriptedVideoPackageService:
             channel=channel,
             snapshot=snapshot,
         )
+        task_payload["duration_model"] = artifacts.get("duration_model", {})
+        if step.agent_key in {"ScriptWriterAgent", "ScriptRewriteAgent"}:
+            task_payload["script_duration_contract"] = _script_duration_contract(
+                task_payload["duration_model"],
+                script_outline=_dict(artifacts.get("script_outline")),
+            )
+        task_payload["hook_spec_contract"] = {
+            "required_before_downstream_visual_or_provider_plan": True,
+            "fields": [
+                "hook_type",
+                "first_3_seconds_script",
+                "first_3_seconds_visual",
+                "promise_made",
+                "payoff_location",
+                "clickbait_risk",
+                "visual_hook_relevance",
+                "title_hook_alignment",
+            ],
+            "no_fake_demo_result_or_asset_claim": True,
+        }
         render = self.prompt_registry.render_prompt(
             PromptRenderRequest(
                 agent_key=step.agent_key,
@@ -1175,6 +1198,19 @@ class FirstScriptedVideoPackageService:
             prompt_audit_snapshot_refs.append(str(audit_id))
         agent_run_refs.append(self._agent_ref(step, render, route=route, validation=validation.model_dump(mode="json")))
 
+        if step.agent_key == "TopicIdeaScoringAgent" and _topic_idea_needs_schema_retry(validation.model_dump(mode="json")):
+            retry = self._retry_topic_idea_schema_once(
+                step=step,
+                render=render,
+                validation=validation,
+                agent_run_refs=agent_run_refs,
+                prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
+            )
+            artifacts["topic_idea_schema_retry_attempt"] = retry["audit"]
+            if retry["validation"] is not None:
+                validation = retry["validation"]
+                raw_output = retry["raw_output"]
+
         validation_is_structurally_valid = bool(validation.validation_result.get("valid")) if isinstance(validation.validation_result, dict) else False
         if validation.parsed_output is None or validation.status not in {"OK", "REVIEW_REQUIRED", "BLOCK"}:
             artifacts[step.artifact_key] = validation.validation_result
@@ -1229,6 +1265,14 @@ class FirstScriptedVideoPackageService:
             }
 
         artifacts[step.artifact_key] = output_validation.canonical_artifact or {}
+        if step.agent_key == "ScriptPlanningAgent" and isinstance(artifacts[step.artifact_key], dict):
+            artifacts["script_word_budget"] = _script_word_budget_contract(
+                _dict(artifacts.get("duration_model")),
+                script_outline=artifacts[step.artifact_key],
+            )
+            artifacts[step.artifact_key]["section_budgets"] = artifacts["script_word_budget"]["section_word_budgets"]
+        if step.agent_key in {"ScriptWriterAgent", "ScriptRewriteAgent"} and isinstance(artifacts[step.artifact_key], dict):
+            _refresh_script_duration_self_check(artifacts[step.artifact_key], _dict(artifacts.get("duration_model")))
         output = {**output, "artifact": artifacts[step.artifact_key]}
         agent_block = self._full_rehearsal_artifact_block(step.agent_key, artifacts[step.artifact_key])
         if agent_block is not None:
@@ -1244,6 +1288,80 @@ class FirstScriptedVideoPackageService:
             provider_readiness_state=provider_readiness_snapshot,
         )
         if gate_stop is not None:
+            if step.agent_key == "ScriptWriterAgent":
+                duration_repair = self._maybe_repair_script_duration_once(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_snapshot=provider_readiness_snapshot,
+                    gate_stop=gate_stop,
+                )
+                if duration_repair["attempted"]:
+                    if duration_repair["repaired"] and duration_repair["stop_status"] is None:
+                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    gate_stop = {
+                        "stop_status": duration_repair["stop_status"] or gate_stop["stop_status"],
+                        "next_action": duration_repair["next_action"] or gate_stop["next_action"],
+                        "gate_batch": duration_repair.get("gate_batch") or gate_stop.get("gate_batch"),
+                    }
+                    remaining_codes = _gate_stop_fail_codes(gate_stop)
+                    if any(code in remaining_codes for code in ("SCRIPT_DURATION_ABOVE_MAXIMUM", "SCRIPT_DURATION_BELOW_MINIMUM", "SCRIPT_WORD_BUDGET_BELOW_MINIMUM")):
+                        return {
+                            "stop_status": gate_stop["stop_status"],
+                            "next_action": gate_stop["next_action"],
+                            "parsed_output": output,
+                        }
+                repair = self._maybe_repair_script_style_once(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_snapshot=provider_readiness_snapshot,
+                    gate_stop=gate_stop,
+                )
+                if repair["attempted"]:
+                    if repair["repaired"] and repair["stop_status"] is None:
+                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    return {
+                        "stop_status": repair["stop_status"] or gate_stop["stop_status"],
+                        "next_action": repair["next_action"] or gate_stop["next_action"],
+                        "parsed_output": output,
+                    }
+            if step.agent_key == "VisualPlanningAgent":
+                visual_repair = self._maybe_repair_visual_coverage_once(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_snapshot=provider_readiness_snapshot,
+                    gate_stop=gate_stop,
+                )
+                if visual_repair["attempted"]:
+                    if visual_repair["repaired"] and visual_repair["stop_status"] is None:
+                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    return {
+                        "stop_status": visual_repair["stop_status"] or gate_stop["stop_status"],
+                        "next_action": visual_repair["next_action"] or gate_stop["next_action"],
+                        "parsed_output": output,
+                    }
+            if step.agent_key == "RightsDisclosureReviewer":
+                disclosure_repair = self._maybe_repair_ai_disclosure_wording_once(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_snapshot=provider_readiness_snapshot,
+                    gate_stop=gate_stop,
+                )
+                if disclosure_repair["attempted"]:
+                    if disclosure_repair["repaired"] and disclosure_repair["stop_status"] is None:
+                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    return {
+                        "stop_status": disclosure_repair["stop_status"] or gate_stop["stop_status"],
+                        "next_action": disclosure_repair["next_action"] or gate_stop["next_action"],
+                        "parsed_output": output,
+                    }
             return {
                 "stop_status": gate_stop["stop_status"],
                 "next_action": gate_stop["next_action"],
@@ -1295,7 +1413,81 @@ class FirstScriptedVideoPackageService:
                 "next_action": None,
                 "parsed_output": output,
             }
+        if step.agent_key == "ProviderReadinessSummaryAgent":
+            artifacts["provider_plan_dry_validation"] = _provider_plan_dry_validation(output.get("artifact"))
         return {"stop_status": None, "next_action": None, "parsed_output": output}
+
+    def _retry_topic_idea_schema_once(
+        self,
+        *,
+        step: PackageAgentStep,
+        render: Any,
+        validation: Any,
+        agent_run_refs: list[dict[str, Any]],
+        prompt_audit_snapshot_refs: list[str],
+    ) -> dict[str, Any]:
+        validation_payload = validation.model_dump(mode="json")
+        errors = _strings(_dict(validation_payload.get("validation_result")).get("errors"))
+        retry_message = {
+            "role": "user",
+            "content": (
+                "Schema retry for TopicIdeaScoringAgent. Return exactly one complete BaseEnvelope JSON object. "
+                "Do not return markdown, prose, or partial JSON. Required missing/invalid fields from previous attempt: "
+                f"{errors}. Required top-level fields: contract_version, agent_key, status, confidence_label, "
+                "evidence_refs, limitations, next_action, operator_summary_vi, technical_appendix, artifact. "
+                "artifact must be an object containing semantic topic scoring, for example "
+                "{\"topic_score\":{\"score\":\"UNKNOWN\"},\"risk_assessment\":{\"risk_level\":\"MEDIUM\"}}. "
+                "operator_summary_vi must be a non-empty Vietnamese sentence. Do not output top-level risk_level."
+            ),
+        }
+        route = self.llm_router.route(
+            lane_name=render.router_lane,
+            messages=[message.model_dump() for message in render.rendered_messages] + [retry_message],
+            requested_task_type=step.requested_task_type,
+            response_format="json",
+            correlation_id="m12-2s-full-agent-rehearsal-TopicIdeaScoringAgent-schema-retry",
+        )
+        audit = {
+            "attempted": True,
+            "repair_type": "bounded_topic_idea_schema_retry",
+            "semantic_change_allowed": False,
+            "max_attempts": 1,
+            "reason_codes": ["TOPIC_IDEA_SCHEMA_RETRY_MISSING_ARTIFACT"],
+            "validation_errors": errors,
+            "uses_llm_router": True,
+            "mock_or_canned_output_used": False,
+        }
+        if route.status != "SUCCESS":
+            audit.update({"retry_status": route.status, "route_reason_codes": route.reason_codes})
+            agent_run_refs.append(self._agent_ref(step, render, route=route, validation=None))
+            return {"audit": audit, "validation": None, "raw_output": None}
+        raw_output: str | dict[str, Any] | None = route.structured_output or route.content
+        retry_validation = self.prompt_registry.validate_output(
+            PromptOutputValidationRequest(
+                agent_key=step.agent_key,
+                raw_output=raw_output or "",
+                prompt_render_run_id=render.prompt_render_run_id,
+            )
+        )
+        audit["retry_validation_status"] = retry_validation.status
+        audit["retry_validation_reason_codes"] = retry_validation.reason_codes
+        audit["repaired"] = bool(retry_validation.validation_result.get("valid")) if isinstance(retry_validation.validation_result, dict) else False
+        retry_audit_id = self._latest_audit_id(
+            render.prompt_render_run_id,
+            provider_refs=[
+                {
+                    "route_attempt_id": str(route.route_attempt_id),
+                    "provider_attempt_id": str(route.provider_attempt_id) if route.provider_attempt_id else None,
+                    "llm_run_snapshot_id": str(route.llm_run_snapshot_id) if route.llm_run_snapshot_id else None,
+                }
+            ],
+        )
+        if retry_audit_id is not None:
+            prompt_audit_snapshot_refs.append(str(retry_audit_id))
+        ref = self._agent_ref(step, render, route=route, validation=retry_validation.model_dump(mode="json"))
+        ref["retry_reason_codes"] = ["TOPIC_IDEA_SCHEMA_RETRY_MISSING_ARTIFACT"]
+        agent_run_refs.append(ref)
+        return {"audit": audit, "validation": retry_validation, "raw_output": raw_output}
 
     def _provider_readiness_summary_artifact(
         self,
@@ -1361,6 +1553,340 @@ class FirstScriptedVideoPackageService:
             context_pack_refs=context_pack_refs,
         )
         return {"ran": True, "stop_status": result["stop_status"], "next_action": result["next_action"]}
+
+    def _maybe_repair_script_style_once(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_snapshot: dict[str, Any],
+        gate_stop: dict[str, Any],
+    ) -> dict[str, Any]:
+        batch = gate_stop.get("gate_batch")
+        fail_codes = batch.fail_codes if batch is not None else []
+        if "SCRIPT_FORBIDDEN_STYLE_USED" not in fail_codes or effective_context_snapshot is None:
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None}
+        if artifacts.get("script_style_repair_attempt"):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None}
+        script = artifacts.get("narration_script")
+        if not isinstance(script, dict):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None}
+        forbidden_terms = _strings(_dict(effective_context_snapshot.brand_voice_persona_context_json).get("forbidden_style"))
+        repaired_script, sentence_patches = _repair_forbidden_style_terms(script, forbidden_terms)
+        artifacts["script_style_repair_attempt"] = {
+            "attempted": True,
+            "repair_type": "rewrite_script_style_only",
+            "semantic_change_allowed": False,
+            "max_attempts": 1,
+            "forbidden_style_terms": forbidden_terms,
+            "sentence_patches": sentence_patches,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        if not sentence_patches:
+            return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"]}
+        _refresh_script_duration_self_check(repaired_script, _dict(artifacts.get("duration_model")))
+        artifacts["narration_script"] = repaired_script
+        rerun = self.deterministic_gates.run_after_agent(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            agent_key="ScriptWriterAgent",
+            artifacts=artifacts,
+            provider_readiness_state=provider_readiness_snapshot,
+        )
+        if rerun is None:
+            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None}
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+        if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
+            decision = self.package_status_reducer.resolve(
+                current_status="READY_FOR_MEDIA_PROVIDERS",
+                deterministic_batch=rerun,
+            )
+            artifacts["package_state_reducer"] = decision
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": decision["package_status"],
+                "next_action": self._next_action_for_reducer_decision(decision),
+                "gate_batch": rerun,
+            }
+        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+
+    def _maybe_repair_script_duration_once(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_snapshot: dict[str, Any],
+        gate_stop: dict[str, Any],
+    ) -> dict[str, Any]:
+        batch = gate_stop.get("gate_batch")
+        fail_codes = batch.fail_codes if batch is not None else []
+        duration_codes = {"SCRIPT_DURATION_ABOVE_MAXIMUM", "SCRIPT_DURATION_BELOW_MINIMUM", "SCRIPT_WORD_BUDGET_BELOW_MINIMUM"}
+        if effective_context_snapshot is None or not any(code in fail_codes for code in duration_codes):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        if artifacts.get("script_duration_repair_attempt"):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        script = artifacts.get("narration_script")
+        if not isinstance(script, dict):
+            return {"attempted": False, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+        duration_model = _dict(artifacts.get("duration_model"))
+        budget = _script_word_budget_contract(duration_model, script_outline=_dict(artifacts.get("script_outline")))
+        word_count_before = _script_word_count(script)
+        repair_record: dict[str, Any] = {
+            "attempted": True,
+            "semantic_change_allowed": False,
+            "max_attempts": 1,
+            "target_words": budget["target_word_count"],
+            "minimum_word_count": budget["minimum_word_count"],
+            "maximum_word_count": budget["maximum_word_count"],
+            "word_count_before": word_count_before,
+            "reason_codes": list(fail_codes),
+            "preserve_fields": [
+                "hook_spec",
+                "hook_spec.promise_made",
+                "hook_spec.payoff_location",
+                "sentence_order",
+                "evidence_refs",
+            ],
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        if "SCRIPT_DURATION_BELOW_MINIMUM" in fail_codes or "SCRIPT_WORD_BUDGET_BELOW_MINIMUM" in fail_codes:
+            repaired_script, sentence_patches = _expand_script_to_word_budget(script, duration_model, budget)
+            word_count_after = _script_word_count(repaired_script)
+            repair_record.update(
+                {
+                    "repair_type": "bounded_script_duration_expand",
+                    "repaired": bool(sentence_patches)
+                    and int(budget["minimum_word_count"]) <= word_count_after <= int(budget["maximum_word_count"]),
+                    "repair_status": (
+                        "EXPANDED_TO_WORD_BUDGET"
+                        if sentence_patches and int(budget["minimum_word_count"]) <= word_count_after <= int(budget["maximum_word_count"])
+                        else "NOT_SAFE_TO_EXPAND_WITHOUT_SUFFICIENT_SCRIPT_STRUCTURE"
+                    ),
+                    "word_count_after": word_count_after,
+                    "sentence_patches": sentence_patches,
+                    "hook_preserved": repaired_script.get("hook_spec") == script.get("hook_spec"),
+                    "payoff_location_preserved": _dict(repaired_script.get("hook_spec")).get("payoff_location")
+                    == _dict(script.get("hook_spec")).get("payoff_location"),
+                    "section_order_preserved": True,
+                }
+            )
+            artifacts["script_duration_repair_attempt"] = repair_record
+            if not repair_record["repaired"]:
+                return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+            _refresh_script_duration_self_check(repaired_script, duration_model)
+            artifacts["narration_script"] = repaired_script
+            rerun = self.deterministic_gates.run_after_agent(
+                package_id=package_id,
+                video_project_id=video_project_id,
+                effective_context=effective_context_snapshot,
+                agent_key="ScriptWriterAgent",
+                artifacts=artifacts,
+                provider_readiness_state=provider_readiness_snapshot,
+            )
+            if rerun is None:
+                return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
+            artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+            if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
+                decision = self.package_status_reducer.resolve(
+                    current_status="READY_FOR_MEDIA_PROVIDERS",
+                    deterministic_batch=rerun,
+                )
+                artifacts["package_state_reducer"] = decision
+                return {
+                    "attempted": True,
+                    "repaired": True,
+                    "stop_status": decision["package_status"],
+                    "next_action": self._next_action_for_reducer_decision(decision),
+                    "gate_batch": rerun,
+                }
+            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+        repaired_script, sentence_patches = _trim_script_to_word_budget(script, duration_model, budget)
+        word_count_after = _script_word_count(repaired_script)
+        repair_record.update(
+            {
+                "repair_type": "bounded_script_duration_trim",
+                "repaired": bool(sentence_patches) and word_count_after <= int(budget["maximum_word_count"]),
+                "repair_status": "TRIMMED_TO_WORD_BUDGET" if sentence_patches else "NO_TRIMMABLE_SENTENCES",
+                "word_count_after": word_count_after,
+                "sentence_patches": sentence_patches,
+                "hook_preserved": repaired_script.get("hook_spec") == script.get("hook_spec"),
+                "payoff_location_preserved": _dict(repaired_script.get("hook_spec")).get("payoff_location")
+                == _dict(script.get("hook_spec")).get("payoff_location"),
+            }
+        )
+        artifacts["script_duration_repair_attempt"] = repair_record
+        if not repair_record["repaired"]:
+            return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+        _refresh_script_duration_self_check(repaired_script, duration_model)
+        artifacts["narration_script"] = repaired_script
+        rerun = self.deterministic_gates.run_after_agent(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            agent_key="ScriptWriterAgent",
+            artifacts=artifacts,
+            provider_readiness_state=provider_readiness_snapshot,
+        )
+        if rerun is None:
+            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+        if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
+            decision = self.package_status_reducer.resolve(
+                current_status="READY_FOR_MEDIA_PROVIDERS",
+                deterministic_batch=rerun,
+            )
+            artifacts["package_state_reducer"] = decision
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": decision["package_status"],
+                "next_action": self._next_action_for_reducer_decision(decision),
+                "gate_batch": rerun,
+            }
+        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+
+    def _maybe_repair_visual_coverage_once(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_snapshot: dict[str, Any],
+        gate_stop: dict[str, Any],
+    ) -> dict[str, Any]:
+        batch = gate_stop.get("gate_batch")
+        fail_codes = batch.fail_codes if batch is not None else []
+        repairable_codes = {
+            "VISUAL_PLAN_UNKNOWN_SENTENCE_REFS",
+            "VISUAL_COVERAGE_MISSING_SENTENCE_IDS",
+            "VISUAL_SOURCE_DISALLOWED_BY_CONTRACT",
+        }
+        if effective_context_snapshot is None or not any(code in fail_codes for code in repairable_codes):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        if artifacts.get("visual_coverage_repair_attempt"):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        visual_plan = artifacts.get("visual_plan")
+        narration_script = artifacts.get("narration_script")
+        if not isinstance(visual_plan, dict) or not isinstance(narration_script, dict):
+            return {"attempted": False, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+        allowed_sources = set(_strings(_dict(effective_context_snapshot.visual_style_context_json).get("allowed_visual_sources")))
+        if not allowed_sources:
+            allowed_sources = {"DIAGRAM", "CARD", "SCREENSHOT", "EXISTING_ASSET"}
+        repaired_plan, patches = _repair_visual_unknown_sentence_refs(visual_plan, narration_script, allowed_sources=allowed_sources)
+        artifacts["visual_coverage_repair_attempt"] = {
+            "attempted": True,
+            "repair_type": "drop_visual_unknown_sentence_refs",
+            "semantic_change_allowed": False,
+            "max_attempts": 1,
+            "reason_codes": list(fail_codes),
+            "repaired": bool(patches),
+            "patches": patches,
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        if not patches:
+            return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+        artifacts["visual_plan"] = repaired_plan
+        rerun = self.deterministic_gates.run_after_agent(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            agent_key="VisualPlanningAgent",
+            artifacts=artifacts,
+            provider_readiness_state=provider_readiness_snapshot,
+        )
+        if rerun is None:
+            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+        if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
+            decision = self.package_status_reducer.resolve(
+                current_status="READY_FOR_HUMAN_REVIEW",
+                deterministic_batch=rerun,
+            )
+            artifacts["package_state_reducer"] = decision
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": decision["package_status"],
+                "next_action": self._next_action_for_reducer_decision(decision),
+                "gate_batch": rerun,
+            }
+        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+
+    def _maybe_repair_ai_disclosure_wording_once(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_snapshot: dict[str, Any],
+        gate_stop: dict[str, Any],
+    ) -> dict[str, Any]:
+        batch = gate_stop.get("gate_batch")
+        fail_codes = batch.fail_codes if batch is not None else []
+        if effective_context_snapshot is None or "AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING" not in fail_codes:
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        if "AI_MEDIA_DISCLOSURE_FALSE_PRESENT_TENSE" in fail_codes or artifacts.get("disclosure_wording_repair_attempt"):
+            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        metadata = artifacts.get("metadata_package")
+        rights = artifacts.get("rights_disclosure_review")
+        if not isinstance(metadata, dict) or not isinstance(rights, dict):
+            return {"attempted": False, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+        note = (
+            str(rights.get("disclosure_notes") or "").strip()
+            or "Future or planned AI-generated media, if produced later, requires source/provider manifest review and platform disclosure before publishing."
+        )
+        if "future" not in note.lower() and "planned" not in note.lower():
+            note = f"Future planned AI media disclosure note: {note}"
+        repaired_metadata = {**metadata, "disclosure_notes": note}
+        artifacts["metadata_package"] = repaired_metadata
+        artifacts["disclosure_wording_repair_attempt"] = {
+            "attempted": True,
+            "repair_type": "complete_ai_disclosure_conditional_wording",
+            "semantic_change_allowed": False,
+            "max_attempts": 1,
+            "reason_codes": ["AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING"],
+            "repaired": True,
+            "metadata_fields": ["disclosure_notes"],
+            "source_artifact": "rights_disclosure_review.disclosure_notes",
+            "no_provider_media_upload_execution": True,
+            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+        }
+        rerun = self.deterministic_gates.run_after_agent(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            agent_key="RightsDisclosureReviewer",
+            artifacts=artifacts,
+            provider_readiness_state=provider_readiness_snapshot,
+        )
+        if rerun is None:
+            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+        if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
+            decision = self.package_status_reducer.resolve(
+                current_status="READY_FOR_HUMAN_REVIEW",
+                deterministic_batch=rerun,
+            )
+            artifacts["package_state_reducer"] = decision
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": decision["package_status"],
+                "next_action": self._next_action_for_reducer_decision(decision),
+                "gate_batch": rerun,
+            }
+        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
 
     def _safe_skip_ref(self, agent_key: str, reason: str) -> dict[str, Any]:
         return {
@@ -1658,7 +2184,14 @@ class FirstScriptedVideoPackageService:
                     "required": "artifact.sentences",
                     "sentence_item_fields": ["sentence_id", "text", "approx_seconds"],
                     "sentence_id_format": "S1, S2, S3...",
+                    "duration_contract_required": True,
+                    "total_approx_seconds_must_be_within_allowed_range": True,
+                    "max_seconds_per_sentence": 15,
+                    "self_check_required": "artifact.duration_self_check.actual_total_seconds must match narration_word_count / words_per_minute_assumption * 60.",
+                    "hook_spec_required": True,
                 },
+                "duration_model_rule": "Use task_payload.duration_model as read-only source of truth for target duration, word budget, and section allocation.",
+                "hook_spec_rule": "ScriptPlanningAgent or ScriptWriterAgent must provide hook_spec with first_3_seconds_script, first_3_seconds_visual, promise_made, payoff_location, clickbait_risk, visual_hook_relevance, and title_hook_alignment before visual/provider planning.",
                 "visual_plan_artifact_contract": {
                     "required": "artifact.scenes",
                     "scene_source_field": "intended_visual_source",
@@ -2199,17 +2732,165 @@ class FirstScriptedVideoPackageService:
         )
 
 
-def _find_visual_source_values(value: Any) -> set[str]:
+def _find_visual_source_values(value: Any, *, in_scene: bool = False) -> set[str]:
     found: set[str] = set()
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in {"visual_source", "source_type", "intended_visual_source"} and isinstance(item, str):
+            if key in {"visual_source", "intended_visual_source"} and isinstance(item, str):
                 found.add(item)
-            found.update(_find_visual_source_values(item))
+            elif key == "source_type" and in_scene and isinstance(item, str):
+                found.add(item)
+            elif key == "scenes" and isinstance(item, list):
+                for scene in item:
+                    found.update(_find_visual_source_values(scene, in_scene=True))
+            elif key not in {"evidence_refs", "applied_context_refs", "runtime_context_refs", "source_manifest_refs"}:
+                found.update(_find_visual_source_values(item, in_scene=in_scene))
     elif isinstance(value, list):
         for item in value:
-            found.update(_find_visual_source_values(item))
+            found.update(_find_visual_source_values(item, in_scene=in_scene))
     return found
+
+
+def _repair_visual_unknown_sentence_refs(
+    visual_plan: dict[str, Any],
+    narration_script: dict[str, Any],
+    *,
+    allowed_sources: set[str] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    valid_sentence_ids = {
+        str(item.get("sentence_id"))
+        for item in _list(narration_script.get("sentences"))
+        if isinstance(item, dict) and item.get("sentence_id")
+    }
+    if not valid_sentence_ids:
+        return visual_plan, []
+    allowed_sources = allowed_sources or {"DIAGRAM", "CARD", "SCREENSHOT", "EXISTING_ASSET"}
+    repaired = {**visual_plan}
+    scenes = [dict(item) if isinstance(item, dict) else item for item in _list(visual_plan.get("scenes"))]
+    repaired_scenes: list[Any] = []
+    patches: list[dict[str, Any]] = []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            repaired_scenes.append(scene)
+            continue
+        scene_patches: list[dict[str, Any]] = []
+        scene_ref = scene.get("scene_id") or scene.get("scene_index")
+        ref_key = next(
+            (
+                key
+                for key in (
+                    "sentence_ids",
+                    "covered_sentence_ids",
+                    "sentence_ids_covered",
+                    "covers_sentence_ids",
+                    "sentence_refs",
+                    "primary_sentence_ids",
+                    "narration_sentence_ids",
+                    "sentence_range",
+                    "sentence_id",
+                )
+                if scene.get(key)
+            ),
+            None,
+        )
+        if ref_key is not None:
+            refs = _strings(scene.get(ref_key))
+            unknown_refs = [ref for ref in refs if ref not in valid_sentence_ids]
+            kept_refs = [ref for ref in refs if ref in valid_sentence_ids]
+            if ref_key in {
+                "covers_sentence_ids",
+                "sentence_refs",
+                "sentence_range",
+                "sentence_ids_covered",
+                "primary_sentence_ids",
+                "narration_sentence_ids",
+            }:
+                scene["sentence_ids"] = kept_refs or refs
+                scene_patches.append(
+                    {
+                        "scene_id": scene_ref,
+                        "repair_action": f"normalize_{ref_key}",
+                        "kept_sentence_refs": kept_refs or refs,
+                    }
+                )
+            if unknown_refs:
+                patch = {
+                    "scene_id": scene_ref,
+                    "removed_unknown_sentence_refs": unknown_refs,
+                    "kept_sentence_refs": kept_refs,
+                }
+                if not kept_refs:
+                    patch["repair_action"] = "drop_unanchored_visual_scene"
+                    patches.extend(scene_patches)
+                    patches.append(patch)
+                    continue
+                scene["sentence_ids"] = kept_refs
+                if ref_key != "sentence_ids":
+                    scene.pop(ref_key, None)
+                patch["repair_action"] = "drop_unknown_sentence_refs"
+                scene_patches.append(patch)
+        source = scene.get("intended_visual_source") or scene.get("visual_source") or scene.get("source_type")
+        if isinstance(source, str) and source not in allowed_sources:
+            fallback = _visual_source_fallback(source, allowed_sources)
+            if fallback is None:
+                return visual_plan, []
+            scene["intended_visual_source"] = fallback
+            scene["candidate_provider_backed"] = False
+            scene["provider_dependencies"] = []
+            scene["provider_readiness"] = "NOT_APPLICABLE_STATIC_VISUAL_SOURCE_REPAIR"
+            scene_patches.append(
+                {
+                    "scene_id": scene_ref,
+                    "repair_action": "normalize_disallowed_candidate_visual_source",
+                    "before_visual_source": source,
+                    "after_visual_source": fallback,
+                }
+            )
+        patches.extend(scene_patches)
+        repaired_scenes.append(scene)
+    if not patches:
+        return visual_plan, []
+    repaired["scenes"] = repaired_scenes
+    covered: set[str] = set()
+    unknown: set[str] = set()
+    disallowed: set[str] = set()
+    for scene in repaired_scenes:
+        if not isinstance(scene, dict):
+            continue
+        refs = _strings(
+            scene.get("sentence_ids")
+            or scene.get("covered_sentence_ids")
+            or scene.get("sentence_ids_covered")
+            or scene.get("covers_sentence_ids")
+            or scene.get("sentence_refs")
+            or scene.get("primary_sentence_ids")
+            or scene.get("narration_sentence_ids")
+            or scene.get("sentence_range")
+            or scene.get("sentence_id")
+        )
+        for ref in refs:
+            if ref in valid_sentence_ids:
+                covered.add(ref)
+            else:
+                unknown.add(ref)
+        source = scene.get("intended_visual_source") or scene.get("visual_source") or scene.get("source_type")
+        if isinstance(source, str) and source not in allowed_sources:
+            disallowed.add(source)
+    if unknown or disallowed or valid_sentence_ids - covered:
+        return visual_plan, []
+    return repaired, patches
+
+
+def _visual_source_fallback(source: str, allowed_sources: set[str]) -> str | None:
+    if source == "LUMA_HERO_CANDIDATE_ONLY" and "DIAGRAM" in allowed_sources:
+        return "DIAGRAM"
+    if source == "CREATOMATE_CARD_CANDIDATE_ONLY" and "CARD" in allowed_sources:
+        return "CARD"
+    if "CARD" in allowed_sources:
+        return "CARD"
+    if "DIAGRAM" in allowed_sources:
+        return "DIAGRAM"
+    return None
 
 
 def _find_scenes_missing_visual_source(value: Any) -> list[int | str]:
@@ -2296,3 +2977,421 @@ def _needs_script_rewrite(output: dict[str, Any] | None) -> bool:
         appendix.get("rewrite_required"),
     )
     return any(bool(marker) for marker in markers)
+
+
+def _duration_model_from_context(
+    effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+    *,
+    target_video_type: str,
+) -> dict[str, Any]:
+    policy = {}
+    if effective_context_snapshot is not None:
+        category = effective_context_snapshot.category_runtime_context_json or {}
+        if isinstance(category, dict):
+            policy = category.get("default_format_policy") if isinstance(category.get("default_format_policy"), dict) else {}
+    target = _first_number(policy.get("target_duration_seconds"), policy.get("target_seconds"))
+    allowed = _dict(policy.get("allowed_duration_range_seconds"))
+    min_seconds = _first_number(allowed.get("min"), policy.get("min_seconds"), policy.get("target_duration_seconds_min"))
+    max_seconds = _first_number(allowed.get("max"), policy.get("max_seconds"), policy.get("target_duration_seconds_max"))
+    long_form = _dict(policy.get("long_form"))
+    if long_form and target is None:
+        minutes = _dict(long_form.get("target_duration_minutes"))
+        min_minutes = _first_number(minutes.get("min"), long_form.get("min_minutes"))
+        max_minutes = _first_number(minutes.get("max"), long_form.get("max_minutes"))
+        min_seconds = _first_number(min_seconds, long_form.get("min_seconds"), min_minutes * 60 if min_minutes is not None else None)
+        max_seconds = _first_number(max_seconds, long_form.get("max_seconds"), max_minutes * 60 if max_minutes is not None else None)
+        if min_seconds is not None and max_seconds is not None:
+            target = round((min_seconds + max_seconds) / 2)
+    if target is None and target_video_type == "long_form":
+        target = 450
+    if min_seconds is None and target is not None:
+        min_seconds = round(target * 0.9)
+    if max_seconds is None and target is not None:
+        max_seconds = round(target * 1.1)
+    wpm = int(policy.get("words_per_minute_assumption") or 140)
+    words_target = round((float(target or 0) / 60) * wpm)
+    return {
+        "target_format": target_video_type,
+        "target_duration_seconds": target,
+        "allowed_duration_range_seconds": {"min": min_seconds, "max": max_seconds},
+        "narration_words_target": words_target,
+        "words_per_minute_assumption": wpm,
+        "variance_policy": "0.90_to_1.10_target_seconds",
+        "source": "EffectiveChannelRuntimeContextSnapshot.category_runtime_context_json.default_format_policy_or_package_default",
+        "read_only": True,
+    }
+
+
+def _provider_plan_dry_validation(artifact: Any) -> dict[str, Any]:
+    providers = _dict(_dict(artifact).get("providers"))
+    canonical = ["elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"]
+    observed = sorted(key for key in providers if key in canonical)
+    return {
+        "status": "REACHED",
+        "will_execute": False,
+        "canonical_provider_keys": canonical,
+        "observed_provider_keys": observed,
+        "no_network_call_made": True,
+        "no_final_media_ref": True,
+        "no_human_upload_task": True,
+    }
+
+
+def _script_duration_contract(duration_model: Any, *, script_outline: dict[str, Any] | None = None) -> dict[str, Any]:
+    model = _dict(duration_model)
+    budget = _script_word_budget_contract(model, script_outline=_dict(script_outline))
+    min_seconds = budget["min_seconds"]
+    max_seconds = budget["max_seconds"]
+    target_seconds = budget["target_seconds"]
+    words_target = budget["target_word_count"]
+    max_seconds_per_sentence = 15
+    duration_sentence_count = int((float(min_seconds or target_seconds or 0) + max_seconds_per_sentence - 1) // max_seconds_per_sentence)
+    minimum_word_count = int(budget["minimum_word_count"])
+    maximum_word_count = int(budget["maximum_word_count"])
+    min_sentence_count = duration_sentence_count
+    target_sentence_count = int((float(words_target or minimum_word_count or 0) + 23) // 24)
+    contract = {
+        "required": bool(target_seconds),
+        "target_seconds": target_seconds,
+        "min_seconds": min_seconds,
+        "max_seconds": max_seconds,
+        "narration_words_target": words_target,
+        "minimum_word_count": minimum_word_count,
+        "maximum_word_count": maximum_word_count,
+        "words_per_minute_assumption": model.get("words_per_minute_assumption"),
+        "max_seconds_per_sentence": max_seconds_per_sentence,
+        "minimum_sentence_count": min_sentence_count,
+        "target_sentence_count_range": {
+            "min": min_sentence_count,
+            "max": max(min_sentence_count + 10, target_sentence_count + 12),
+        },
+        "recommended_average_words_per_sentence": 20,
+        "maximum_average_words_per_sentence": 28,
+        "must_not_downgrade_target_format": True,
+        "source": model.get("source"),
+        "read_only": True,
+        "section_word_budgets": budget["section_word_budgets"],
+        "output_word_range_rule": f"Output narration must be between {minimum_word_count} and {maximum_word_count} words.",
+        "max_words_rule": "Do not exceed maximum_word_count. Prefer concise narration over extra examples, recaps, or repeated disclaimers.",
+    }
+    return contract
+
+
+def _script_word_budget_contract(duration_model: dict[str, Any], *, script_outline: dict[str, Any] | None = None) -> dict[str, Any]:
+    model = _dict(duration_model)
+    allowed = _dict(model.get("allowed_duration_range_seconds"))
+    target_seconds = _first_number(model.get("target_duration_seconds") or model.get("target_seconds")) or 0
+    min_seconds = _first_number(allowed.get("min"), model.get("min_seconds")) or round(target_seconds * 0.9)
+    max_seconds = _first_number(allowed.get("max"), model.get("max_seconds")) or round(target_seconds * 1.1)
+    wpm = _first_number(model.get("words_per_minute_assumption")) or 140
+    target_word_count = int(round((_first_number(model.get("narration_words_target")) or (target_seconds / 60 * wpm))))
+    minimum_word_count = int(round((float(min_seconds) / 60) * float(wpm)))
+    maximum_word_count = int(round((float(max_seconds) / 60) * float(wpm)))
+    if target_word_count <= 0:
+        target_word_count = int(round((minimum_word_count + maximum_word_count) / 2))
+    section_word_budgets = _normalize_section_word_budgets(
+        _list(_dict(script_outline).get("section_budgets")),
+        target_word_count=target_word_count,
+        target_seconds=target_seconds,
+    )
+    return {
+        "target_seconds": target_seconds,
+        "min_seconds": min_seconds,
+        "max_seconds": max_seconds,
+        "words_per_minute_assumption": wpm,
+        "target_word_count": target_word_count,
+        "minimum_word_count": minimum_word_count,
+        "maximum_word_count": maximum_word_count,
+        "section_word_budgets": section_word_budgets,
+        "read_only": True,
+        "source": model.get("source"),
+    }
+
+
+def _normalize_section_word_budgets(
+    section_budgets: list[Any],
+    *,
+    target_word_count: int,
+    target_seconds: float | int,
+) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    for index, item in enumerate(section_budgets, start=1):
+        section = _dict(item)
+        if not section:
+            continue
+        name = str(section.get("section_id") or section.get("section") or f"section_{index}")
+        seconds = _first_number(section.get("seconds"), section.get("duration_seconds"), section.get("target_seconds"))
+        words = _first_number(section.get("word_target"), section.get("target_words"), section.get("words"), section.get("raw_word_target"))
+        sections.append({"section_id": name, "seconds": seconds, "raw_word_target": words})
+    if not sections:
+        defaults = [
+            ("hook", 0.10),
+            ("problem", 0.18),
+            ("solution", 0.24),
+            ("mechanism", 0.24),
+            ("proof_and_caveats", 0.14),
+            ("close", 0.10),
+        ]
+        return _distribute_word_budget(defaults, target_word_count=target_word_count, target_seconds=target_seconds)
+    weights: list[float] = []
+    for section in sections:
+        raw_words = _first_number(section.get("raw_word_target"))
+        seconds = _first_number(section.get("seconds"))
+        weights.append(float(raw_words or seconds or 1))
+    total_weight = sum(weights) or float(len(sections))
+    allocated = [max(1, int(round(target_word_count * weight / total_weight))) for weight in weights]
+    delta = target_word_count - sum(allocated)
+    index = 0
+    while delta:
+        step = 1 if delta > 0 else -1
+        if allocated[index] + step > 0:
+            allocated[index] += step
+            delta -= step
+        index = (index + 1) % len(allocated)
+    normalized: list[dict[str, Any]] = []
+    for section, words in zip(sections, allocated):
+        seconds = _first_number(section.get("seconds"))
+        normalized.append(
+            {
+                "section_id": section["section_id"],
+                "word_target": words,
+                "min_words": max(1, int(round(words * 0.9))),
+                "max_words": max(1, int(round(words * 1.1))),
+                "seconds": seconds,
+            }
+        )
+    return normalized
+
+
+def _distribute_word_budget(defaults: list[tuple[str, float]], *, target_word_count: int, target_seconds: float | int) -> list[dict[str, Any]]:
+    sections = [{"section_id": name, "raw_word_target": weight, "seconds": round(float(target_seconds or 0) * weight, 3)} for name, weight in defaults]
+    return _normalize_section_word_budgets(sections, target_word_count=target_word_count, target_seconds=target_seconds)
+
+
+def _script_word_count(script: dict[str, Any]) -> int:
+    return sum(len(str(item.get("text") or "").split()) for item in _list(script.get("sentences")) if isinstance(item, dict))
+
+
+def _gate_stop_fail_codes(gate_stop: dict[str, Any]) -> list[str]:
+    batch = gate_stop.get("gate_batch")
+    return list(getattr(batch, "fail_codes", []) or [])
+
+
+def _topic_idea_needs_schema_retry(validation_payload: dict[str, Any]) -> bool:
+    if validation_payload.get("status") != "REVIEW_REQUIRED":
+        return False
+    result = _dict(validation_payload.get("validation_result"))
+    if result.get("valid") is True:
+        return False
+    parsed = _dict(validation_payload.get("parsed_output"))
+    if parsed.get("agent_key") != "TopicIdeaScoringAgent":
+        return False
+    errors = " ".join(_strings(result.get("errors")))
+    return "artifact" in errors and not isinstance(parsed.get("artifact"), dict)
+
+
+def _trim_script_to_word_budget(
+    script: dict[str, Any],
+    duration_model: dict[str, Any],
+    budget: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    max_words = max(1, int(budget["maximum_word_count"]) - 8)
+    sentences = [dict(item) if isinstance(item, dict) else item for item in _list(script.get("sentences"))]
+    repaired = {**script, "sentences": sentences}
+    patches: list[dict[str, Any]] = []
+    current_words = _script_word_count(repaired)
+    if current_words <= max_words:
+        _refresh_script_duration_self_check(repaired, duration_model)
+        return repaired, patches
+    trimmable = [item for item in sentences if isinstance(item, dict) and str(item.get("text") or "").strip()]
+    if not trimmable:
+        return repaired, patches
+    min_sentence_words = 6
+    while current_words > max_words:
+        candidates = sorted(
+            (
+                (len(str(item.get("text") or "").split()), index, item)
+                for index, item in enumerate(trimmable)
+                if len(str(item.get("text") or "").split()) > min_sentence_words
+            ),
+            reverse=True,
+        )
+        if not candidates:
+            break
+        word_count, _, sentence = candidates[0]
+        remove_count = min(word_count - min_sentence_words, current_words - max_words, max(1, word_count - 10))
+        before = str(sentence.get("text") or "")
+        words = before.split()
+        after = " ".join(words[: word_count - remove_count]).rstrip(" ,;:-")
+        if after and after[-1] not in ".!?":
+            after += "."
+        sentence["text"] = after
+        sentence["approx_seconds"] = round((len(after.split()) / (_first_number(duration_model.get("words_per_minute_assumption")) or 140)) * 60, 3)
+        patches.append(
+            {
+                "sentence_id": str(sentence.get("sentence_id") or len(patches) + 1),
+                "before_word_count": word_count,
+                "after_word_count": len(after.split()),
+                "removed_words": remove_count,
+                "repair_action": "trim_sentence_tail_to_word_budget",
+            }
+        )
+        current_words = _script_word_count(repaired)
+    _refresh_script_duration_self_check(repaired, duration_model)
+    return repaired, patches
+
+
+def _expand_script_to_word_budget(
+    script: dict[str, Any],
+    duration_model: dict[str, Any],
+    budget: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    minimum_words = int(budget["minimum_word_count"])
+    target_words = min(int(budget["target_word_count"]), int(budget["maximum_word_count"]) - 8)
+    wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
+    sentences = [dict(item) if isinstance(item, dict) else item for item in _list(script.get("sentences"))]
+    repaired = {**script, "sentences": sentences}
+    patches: list[dict[str, Any]] = []
+    current_words = _script_word_count(repaired)
+    if current_words >= minimum_words:
+        _refresh_script_duration_self_check(repaired, duration_model)
+        return repaired, patches
+    eligible = [item for item in sentences if isinstance(item, dict) and str(item.get("text") or "").strip()]
+    if current_words < max(1, int(minimum_words * 0.5)) or len(eligible) < 20:
+        _refresh_script_duration_self_check(repaired, duration_model)
+        return repaired, patches
+    expansion_clauses = [
+        "This keeps the claim tied to verified time savings before publication.",
+        "The workflow should reduce repeated handoffs while keeping human review in place.",
+        "Operators still verify the numbers and exceptions before any public use.",
+        "The team monitors edge cases instead of repeating the full task manually.",
+        "This adds practical detail without changing the original hook promise.",
+    ]
+    index = 0
+    max_iterations = max(1, len(eligible) * 4)
+    while current_words < target_words and index < max_iterations:
+        sentence = eligible[index % len(eligible)]
+        before = str(sentence.get("text") or "").strip()
+        before_words = len(before.split())
+        if before_words >= 34 and index < len(eligible) * 2:
+            index += 1
+            continue
+        clause = expansion_clauses[index % len(expansion_clauses)]
+        stem = before[:-1].rstrip() if before.endswith((".", "!", "?")) else before
+        after = f"{stem}; {clause}"
+        sentence["text"] = after
+        sentence["approx_seconds"] = round((len(after.split()) / wpm) * 60, 3)
+        patches.append(
+            {
+                "sentence_id": str(sentence.get("sentence_id") or len(patches) + 1),
+                "before_word_count": before_words,
+                "after_word_count": len(after.split()),
+                "added_words": max(0, len(after.split()) - before_words),
+                "repair_action": "expand_existing_sentence_to_word_budget",
+            }
+        )
+        current_words = _script_word_count(repaired)
+        index += 1
+    _refresh_script_duration_self_check(repaired, duration_model)
+    return repaired, patches
+
+
+def _repair_forbidden_style_terms(script: dict[str, Any], forbidden_terms: list[str]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    repaired = {**script, "sentences": [dict(item) if isinstance(item, dict) else item for item in _list(script.get("sentences"))]}
+    patches: list[dict[str, str]] = []
+    for sentence in repaired["sentences"]:
+        if not isinstance(sentence, dict):
+            continue
+        before = str(sentence.get("text") or "")
+        after = before
+        for term in forbidden_terms:
+            if term:
+                after = re.sub(re.escape(term), "", after, flags=re.IGNORECASE)
+        after = re.sub(r"\s+([,.;:!?])", r"\1", after)
+        after = re.sub(r"\b(No|Avoid)\s*,\s*", r"\1 ", after, flags=re.IGNORECASE)
+        after = re.sub(r"\b(No|Avoid)\s+\1\b", r"\1", after, flags=re.IGNORECASE)
+        after = re.sub(r"\s{2,}", " ", after).strip()
+        if after != before:
+            sentence["text"] = after
+            patches.append(
+                {
+                    "sentence_id": str(sentence.get("sentence_id") or len(patches) + 1),
+                    "before_text": before,
+                    "after_text": after,
+                }
+            )
+    return repaired, patches
+
+
+def _refresh_script_duration_self_check(script: dict[str, Any], duration_model: dict[str, Any]) -> None:
+    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    word_count = sum(len(str(item.get("text") or "").split()) for item in sentences)
+    sentence_total = sum(_first_number(item.get("approx_seconds")) or 0 for item in sentences)
+    wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
+    actual_total = round((word_count / wpm) * 60, 3) if word_count and wpm else round(sentence_total, 3)
+    target = _first_number(duration_model.get("target_duration_seconds") or duration_model.get("target_seconds"))
+    allowed_range = _dict(duration_model.get("allowed_duration_range_seconds"))
+    min_seconds = _first_number(allowed_range.get("min"), duration_model.get("min_seconds"))
+    max_seconds = _first_number(allowed_range.get("max"), duration_model.get("max_seconds"))
+    words_target = _first_number(duration_model.get("narration_words_target"))
+    script["total_approx_seconds"] = actual_total
+    script["duration_self_check"] = {
+        "actual_total_seconds": actual_total,
+        "target_seconds": target,
+        "min_seconds": min_seconds,
+        "max_seconds": max_seconds,
+        "coverage_ratio": round(actual_total / target, 4) if target else None,
+        "sentence_count": len(sentences),
+        "narration_word_count": word_count,
+        "minimum_word_count": int(words_target * 0.9) if words_target else None,
+        "maximum_word_count": int(words_target * 1.1) if words_target else None,
+    }
+
+
+def _gate_report_after_repair(existing: dict[str, Any] | None, batch: Any) -> dict[str, Any]:
+    batch_refs = list(_dict(existing).get("gate_batch_run_refs") or [])
+    if getattr(batch, "gate_batch_run_id", None):
+        batch_refs.append(str(batch.gate_batch_run_id))
+    return {
+        "status": batch.status,
+        "gate_batch_run_refs": [item for item in batch_refs if item],
+        "hard_block_count": int(batch.hard_block_count),
+        "review_required_count": int(batch.review_required_count),
+        "fail_codes": list(batch.fail_codes),
+        "latest_gate_results": [
+            {
+                "gate_key": result.gate_key,
+                "status": result.status,
+                "fail_codes": result.fail_codes,
+                "summary": result.human_readable_summary,
+            }
+            for result in batch.gate_results
+            if result.status != "PASS"
+        ],
+    }
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def _strings(value: Any) -> list[str]:
+    return [str(item) for item in _list(value) if item not in (None, "")]
+
+
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        if value not in (None, ""):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None

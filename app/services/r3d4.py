@@ -166,6 +166,7 @@ class ArtifactCanonicalizer:
         output = parsed_output if isinstance(parsed_output, dict) else {}
         artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
         artifact = dict(artifact)
+        artifact, artifact_repair_reason_codes = _repair_required_artifact_aliases(contract, artifact)
         output_hash = stable_hash({"agent_key": contract.agent_key, "output": output})
         base_artifact_hash = stable_hash({"artifact_type": contract.artifact_type, "artifact": artifact})
         evidence_refs = [item for item in _list(output.get("evidence_refs")) if isinstance(item, dict)]
@@ -190,6 +191,9 @@ class ArtifactCanonicalizer:
             reason_codes.append("REQUIRED_ARTIFACT_FIELDS_MISSING")
         if invalid_fields:
             reason_codes.append("AGENT_OUTPUT_INVALID_FIELDS")
+        validation_reason_codes = sorted(
+            set((reason_codes or ["AGENT_OUTPUT_CANONICALIZED"]) + artifact_repair_reason_codes)
+        )
 
         if missing_context and contract.criticality == "PACKAGE_CRITICAL":
             status = "BLOCK"
@@ -215,7 +219,7 @@ class ArtifactCanonicalizer:
             "output_hash": output_hash,
             "artifact_hash": base_artifact_hash,
             "validation_state": validation_state,
-            "reason_codes": sorted(set(reason_codes + _strings(artifact.get("reason_codes")))),
+            "reason_codes": sorted(set(reason_codes + artifact_repair_reason_codes + _strings(artifact.get("reason_codes")))),
         }
         return CanonicalArtifactResult(
             canonical_artifact=canonical,
@@ -224,7 +228,7 @@ class ArtifactCanonicalizer:
                 validation_state=validation_state,
                 missing_fields=[*(f"applied_context_refs.{field}" for field in missing_context), *missing_artifact],
                 invalid_fields=invalid_fields,
-                reason_codes=reason_codes or ["AGENT_OUTPUT_CANONICALIZED"],
+                reason_codes=validation_reason_codes,
             ),
             applied_context_refs=applied_context_refs,
             evidence_refs=evidence_refs,
@@ -233,6 +237,18 @@ class ArtifactCanonicalizer:
             artifact_hash=base_artifact_hash,
             raw_output_ref=raw_output_ref,
         )
+
+
+def _repair_required_artifact_aliases(
+    contract: AgentOutputContract,
+    artifact: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    if contract.agent_key == "MediaQCExplanationAgent" and not _field_present(artifact, "status"):
+        for alias_key in ("artifact_status", "artifact.status"):
+            alias_value = artifact.get(alias_key)
+            if isinstance(alias_value, str) and alias_value.strip():
+                return {**artifact, "status": alias_value}, ["MEDIA_QC_ARTIFACT_STATUS_ALIAS_REPAIRED"]
+    return artifact, []
 
 
 @dataclass(frozen=True)
@@ -434,27 +450,65 @@ class ScriptDurationGate:
         sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
         missing_timing = [str(item.get("sentence_id") or index + 1) for index, item in enumerate(sentences) if item.get("approx_seconds") is None]
         actual = sum(_float(item.get("approx_seconds")) for item in sentences)
-        policy = _duration_policy(effective_context)
+        policy = _duration_policy(effective_context, artifacts=artifacts)
         target = _float(policy.get("target_duration_seconds") or policy.get("target_seconds"))
-        min_seconds = _float(policy.get("min_seconds") or policy.get("target_duration_seconds_min") or policy.get("long_form_min_seconds") or target)
-        max_seconds = _float(policy.get("max_seconds") or policy.get("target_duration_seconds_max") or (target * 1.2 if target else 0))
+        allowed_range = _dict(policy.get("allowed_duration_range_seconds"))
+        min_seconds = _float(
+            allowed_range.get("min")
+            or policy.get("min_seconds")
+            or policy.get("target_duration_seconds_min")
+            or policy.get("long_form_min_seconds")
+            or (target * 0.9 if target else 0)
+        )
+        max_seconds = _float(
+            allowed_range.get("max")
+            or policy.get("max_seconds")
+            or policy.get("target_duration_seconds_max")
+            or (target * 1.1 if target else 0)
+        )
         declared = _first_number(script.get("total_approx_seconds"), script.get("declared_total_seconds"), _dict(script.get("summary")).get("total_approx_seconds"))
+        self_check = _dict(script.get("duration_self_check"))
+        self_check_total = _first_number(self_check.get("actual_total_seconds"), self_check.get("total_approx_seconds"))
+        word_count = _word_count(" ".join(str(item.get("text") or "") for item in sentences))
+        wpm = _float(policy.get("words_per_minute_assumption"))
+        words_target = _float(policy.get("narration_words_target"))
+        min_words = int(words_target * 0.9) if words_target else 0
+        sentence_approx_total = actual
+        word_estimated_seconds = round((word_count / wpm) * 60, 3) if wpm and word_count else None
+        actual = word_estimated_seconds if word_estimated_seconds is not None else sentence_approx_total
+        coverage_ratio = round(actual / target, 4) if target else None
         fail_codes: list[str] = []
         measurements = {
             "sentence_count": len(sentences),
             "actual_total_seconds": actual,
+            "sentence_approx_total_seconds": sentence_approx_total,
+            "word_estimated_total_seconds": word_estimated_seconds,
             "declared_total_seconds": declared,
+            "duration_self_check_total_seconds": self_check_total,
             "target_seconds": target,
+            "delta_seconds": round(actual - target, 3) if target else None,
+            "coverage_ratio": coverage_ratio,
             "min_seconds": min_seconds,
             "max_seconds": max_seconds,
+            "narration_word_count": word_count,
+            "words_per_minute_assumption": wpm or policy.get("words_per_minute_assumption"),
+            "narration_words_target": policy.get("narration_words_target"),
+            "minimum_word_count": min_words,
+            "target_format": policy.get("target_format"),
             "missing_timing_sentence_ids": missing_timing,
         }
         if not sentences or missing_timing:
             fail_codes.append("SCRIPT_SENTENCE_TIMING_MISSING")
+        if target <= 0:
+            fail_codes.append("SCRIPT_DURATION_TARGET_MISSING")
         if min_seconds and actual < min_seconds:
             fail_codes.append("SCRIPT_DURATION_BELOW_MINIMUM")
         if max_seconds and actual > max_seconds:
             fail_codes.append("SCRIPT_DURATION_ABOVE_MAXIMUM")
+        if self_check_total is not None and abs(self_check_total - actual) > max(10, actual * 0.1):
+            fail_codes.append("SCRIPT_DURATION_SELF_CHECK_MISMATCH")
+        if min_words and word_count < min_words:
+            fail_codes.append("SCRIPT_WORD_BUDGET_BELOW_MINIMUM")
         if declared is not None and abs(declared - actual) > max(10, actual * 0.1):
             fail_codes.append("SCRIPT_DECLARED_DURATION_MISMATCH")
         metadata_duration = _first_number(_dict(artifacts.get("metadata_package")).get("duration_seconds"))
@@ -463,6 +517,51 @@ class ScriptDurationGate:
         if fail_codes:
             return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, fail_codes, ["narration_script"], ["category.default_format_policy_json"], "Sửa timing script theo duration policy.")
         return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script"], ["category.default_format_policy_json"], None)
+
+
+class HookSpecGate:
+    gate_key = "hook_3s_gate"
+    REQUIRED_FIELDS = (
+        "hook_type",
+        "first_3_seconds_script",
+        "first_3_seconds_visual",
+        "promise_made",
+        "payoff_location",
+        "clickbait_risk",
+        "visual_hook_relevance",
+        "title_hook_alignment",
+    )
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        hook = _hook_spec(artifacts)
+        missing = [field for field in self.REQUIRED_FIELDS if hook.get(field) in (None, "", [])]
+        fail_codes: list[str] = [f"HOOK_{field.upper()}_MISSING" for field in missing]
+        text = _text_blob(hook)
+        fake_claim_terms = ["fake demo", "product demo", "actual result", "real result", "generated video is ready", "final video"]
+        fake_claims = [term for term in fake_claim_terms if term in text.lower()]
+        if fake_claims:
+            fail_codes.append("HOOK_FAKE_RESULT_OR_ASSET_CLAIM")
+        clickbait_risk = str(hook.get("clickbait_risk") or "").upper()
+        if clickbait_risk == "HIGH":
+            fail_codes.append("HOOK_CLICKBAIT_RISK_HIGH")
+        status = GATE_REVIEW if fail_codes == ["HOOK_CLICKBAIT_RISK_HIGH"] else (GATE_BLOCK if fail_codes else GATE_PASS)
+        severity = SEVERITY_HIGH if status != GATE_PASS else SEVERITY_INFO
+        measurements = {
+            "hook_fields_present": sorted(field for field in self.REQUIRED_FIELDS if field not in missing),
+            "missing_hook_fields": missing,
+            "clickbait_risk": clickbait_risk or None,
+            "fake_claim_terms": fake_claims,
+        }
+        return _gate_result(
+            self.gate_key,
+            status,
+            severity,
+            measurements,
+            sorted(set(fail_codes)),
+            ["hook_spec", "narration_script", "script_outline"],
+            ["script_contract.hook_spec", "safety_forbidden_claims_context"],
+            "Bổ sung HookSpec 3 giây đầu trước visual/provider plan." if fail_codes else None,
+        )
 
 
 class SRTTimingGate:
@@ -510,7 +609,17 @@ class VisualCoverageGate:
         source_types: set[str] = set()
         scene_duration = 0.0
         for scene in scenes:
-            refs = _strings(scene.get("sentence_ids") or scene.get("covered_sentence_ids") or scene.get("sentence_id"))
+            refs = _strings(
+                scene.get("sentence_ids")
+                or scene.get("covered_sentence_ids")
+                or scene.get("sentence_ids_covered")
+                or scene.get("covers_sentence_ids")
+                or scene.get("sentence_refs")
+                or scene.get("primary_sentence_ids")
+                or scene.get("narration_sentence_ids")
+                or scene.get("sentence_range")
+                or scene.get("sentence_id")
+            )
             for ref in refs:
                 if ref in sentence_ids:
                     covered.add(ref)
@@ -664,13 +773,23 @@ class ScriptStyleComplianceGate:
         expected = _dict(effective_context.market_locale_context_json).get("content_language")
         forbidden = _strings(_dict(effective_context.brand_voice_persona_context_json).get("forbidden_style"))
         text = " ".join(str(item.get("text") or "") for item in _list(script.get("sentences")) if isinstance(item, dict)).lower()
+        matched_terms = [term for term in forbidden if term and term.lower() in text]
         fail_codes: list[str] = []
         if language and expected and str(language).lower() != str(expected).lower():
             fail_codes.append("SCRIPT_LANGUAGE_CONTRACT_MISMATCH")
-        if any(term.lower() in text for term in forbidden if term):
+        if matched_terms:
             fail_codes.append("SCRIPT_FORBIDDEN_STYLE_USED")
         status = GATE_BLOCK if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_HIGH if fail_codes else SEVERITY_INFO, {"expected_language": expected, "observed_language": language}, fail_codes, ["narration_script"], ["market_locale_context.content_language", "brand_voice_persona_context"], "Sửa script language/style theo contract." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
+            {"expected_language": expected, "observed_language": language, "forbidden_style_terms_found": matched_terms},
+            fail_codes,
+            ["narration_script"],
+            ["market_locale_context.content_language", "brand_voice_persona_context"],
+            "Sửa script language/style theo contract." if fail_codes else None,
+        )
 
 
 class VoiceProfileComplianceGate:
@@ -928,6 +1047,7 @@ class R3D4GateService:
         "disclosure_consistency_gate": DisclosureConsistencyGate(),
         "upload_copy_truthfulness_gate": UploadCopyTruthfulnessGate(),
         "provider_boundary_gate": ProviderBoundaryGate(),
+        "hook_3s_gate": HookSpecGate(),
         "character_binding_gate": CharacterBindingGate(),
         "character_asset_readiness_gate": CharacterAssetReadinessGate(),
         "voice_profile_readiness_gate": VoiceProfileReadinessGate(),
@@ -935,8 +1055,8 @@ class R3D4GateService:
         "provider_character_input_gate": ProviderCharacterInputGate(),
     }
     GATES_AFTER_AGENT = {
-        "ScriptWriterAgent": ["script_duration_gate", "script_style_compliance_gate"],
-        "ScriptRewriteAgent": ["script_duration_gate", "script_style_compliance_gate"],
+        "ScriptWriterAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate"],
+        "ScriptRewriteAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate"],
         "VisualPlanningAgent": ["visual_coverage_gate", "visual_style_compliance_gate", "character_runtime_compliance_gate"],
         "ThumbnailBriefAgent": ["thumbnail_style_compliance_gate", "character_consistency_gate"],
         "PublishingMetadataAgent": ["metadata_locale_compliance_gate"],
@@ -1150,8 +1270,30 @@ def _field_present(value: dict[str, Any], field: str) -> bool:
     return True
 
 
-def _duration_policy(effective_context: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
-    return _dict(_dict(effective_context.category_runtime_context_json).get("default_format_policy"))
+def _duration_policy(effective_context: EffectiveChannelRuntimeContextSnapshot, *, artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
+    frozen = _dict(_dict(artifacts or {}).get("duration_model"))
+    if frozen:
+        return frozen
+    policy = _dict(_dict(effective_context.category_runtime_context_json).get("default_format_policy"))
+    long_form = _dict(policy.get("long_form"))
+    if long_form:
+        minutes = _dict(long_form.get("target_duration_minutes"))
+        min_minutes = _first_number(minutes.get("min"))
+        max_minutes = _first_number(minutes.get("max"))
+        min_seconds = _first_number(long_form.get("min_seconds"), min_minutes * 60 if min_minutes is not None else None)
+        max_seconds = _first_number(long_form.get("max_seconds"), max_minutes * 60 if max_minutes is not None else None)
+        target = _first_number(long_form.get("target_duration_seconds"), long_form.get("target_seconds"))
+        if target is None and min_seconds is not None and max_seconds is not None:
+            target = (min_seconds + max_seconds) / 2
+        return {
+            **policy,
+            "target_format": "long_form",
+            "target_duration_seconds": target,
+            "allowed_duration_range_seconds": {"min": min_seconds, "max": max_seconds},
+            "min_seconds": min_seconds,
+            "max_seconds": max_seconds,
+        }
+    return policy
 
 
 def _float(value: Any) -> float:
@@ -1178,6 +1320,29 @@ def _first(value: list[Any]) -> Any:
 def _script_total_seconds(script: dict[str, Any]) -> float:
     sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
     return sum(_float(item.get("approx_seconds")) for item in sentences)
+
+
+def _word_count(value: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", value))
+
+
+def _hook_spec(artifacts: dict[str, Any]) -> dict[str, Any]:
+    script = _dict(artifacts.get("narration_script"))
+    plan = _dict(artifacts.get("script_outline"))
+    hook = _dict(artifacts.get("hook_spec") or script.get("hook_spec") or plan.get("hook_spec"))
+    return dict(hook)
+
+
+def _text_blob(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_text_blob(item) for item in value.values())
+    if isinstance(value, list):
+        return " ".join(_text_blob(item) for item in value)
+    return str(value)
 
 
 def _parse_srt(content: str) -> dict[str, Any]:

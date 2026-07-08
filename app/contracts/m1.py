@@ -20,6 +20,8 @@ class HookSpecRead(BaseModel):
     promise_made: str | None = None
     payoff_location: str | None = None
     clickbait_risk: ClickbaitRisk = "MEDIUM"
+    visual_hook_relevance: str | None = None
+    title_hook_alignment: str | None = None
     evidence_refs_json: list[dict[str, Any]] = Field(default_factory=list)
     contract_paths_used_json: list[str] = Field(default_factory=list)
     content_hash: str

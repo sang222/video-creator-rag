@@ -169,7 +169,6 @@ def test_output_validation_repairs_syntax_only_and_rejects_unknown_fields(db_ses
       "agent_key": "PublishingMetadataAgent",
       "status": "OK",
       "confidence_label": "HIGH",
-      "risk_level": "LOW",
       "evidence_refs": [],
       "limitations": [],
       "next_action": null,
@@ -201,14 +200,669 @@ def test_output_validation_repairs_syntax_only_and_rejects_unknown_fields(db_ses
     assert repaired_key.parsed_output["agent_key"] == "PublishingMetadataAgent"
     assert repaired_key.repair_attempts[0]["repair_type"] == "normalize_envelope_agent_key"
 
-    repaired_null = service.validate_output(
+    moved_risk = service.validate_output(
         PromptOutputValidationRequest(
-            agent_key="PublishingMetadataAgent",
-            raw_output={**valid.parsed_output, "risk_level": "null"},
+            agent_key="TopicIdeaScoringAgent",
+            raw_output={**valid.parsed_output, "agent_key": "TopicIdeaScoringAgent", "risk_level": "LOW"},
         )
     )
-    assert repaired_null.status == "OK"
-    assert repaired_null.parsed_output["risk_level"] is None
+    assert moved_risk.status == "OK"
+    assert "risk_level" not in moved_risk.parsed_output
+    assert moved_risk.parsed_output["artifact"]["risk_assessment"]["risk_level"] == "LOW"
+    assert moved_risk.repair_attempts[0]["repair_type"] == "move_top_level_risk_level_to_artifact"
+
+
+def _topic_envelope(**overrides) -> dict:
+    envelope = {
+        "contract_version": "m12.1.0",
+        "agent_key": "TopicIdeaScoringAgent",
+        "status": "REVIEW_REQUIRED",
+        "confidence_label": "LOW",
+        "evidence_refs": [{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "int2"}],
+        "limitations": ["20-hour claim requires human verification."],
+        "next_action": "HUMAN_REVIEW_REQUIRED",
+        "operator_summary_vi": "Topic needs review before publication.",
+        "technical_appendix": {},
+        "artifact": {"topic_score": {"score": "UNKNOWN"}},
+    }
+    envelope.update(overrides)
+    return envelope
+
+
+def test_topic_idea_scoring_extracts_base_envelope_from_prose_without_silent_success(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    I will explain first, which is invalid prose.
+    Here is a small artifact example: {"topic":"bad intermediate object"}.
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "TopicIdeaScoringAgent",
+      "status": "REVIEW_REQUIRED",
+      "confidence_label": "LOW",
+      "evidence_refs": [{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "int2"}],
+      "limitations": ["20-hour claim requires human verification."],
+      "next_action": "HUMAN_REVIEW_REQUIRED",
+      "operator_summary_vi": "Topic needs review before publication.",
+      "technical_appendix": {},
+      "artifact": {"topic_score": {"score": "UNKNOWN"}}
+    }
+    trailing prose is also invalid outside the extracted object.
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["agent_key"] == "TopicIdeaScoringAgent"
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "extract_base_envelope_json_object",
+            "semantic_change_allowed": False,
+            "reason_codes": ["BASE_ENVELOPE_OBJECT_EXTRACTED_FROM_TEXT"],
+        }
+    ]
+
+
+def test_topic_idea_scoring_repairs_fenced_json_only_when_content_is_valid_json(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """```json
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "TopicIdeaScoringAgent",
+      "status": "REVIEW_REQUIRED",
+      "confidence_label": "LOW",
+      "evidence_refs": [],
+      "limitations": ["Needs evidence."],
+      "next_action": "HUMAN_REVIEW_REQUIRED",
+      "operator_summary_vi": "Topic needs review.",
+      "technical_appendix": {},
+      "artifact": {"topic_score": {"score": "UNKNOWN"}}
+    }
+    ```"""
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.repair_attempts == [{"repair_type": "strip_code_fence", "semantic_change_allowed": False}]
+
+
+def test_topic_idea_scoring_malformed_json_remains_error(db_session) -> None:
+    service = PromptRegistryService(db_session)
+
+    result = service.validate_output(
+        PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output='reasoning first {"contract_version": "m12.1.0", bad')
+    )
+
+    assert result.status == "ERROR"
+    assert result.reason_codes == ["JSON_PARSE_FAILED"]
+    assert result.parsed_output is None
+
+
+def test_topic_idea_scoring_wraps_valid_artifact_only_output_with_audit(db_session) -> None:
+    service = PromptRegistryService(db_session)
+
+    repaired = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="TopicIdeaScoringAgent",
+            raw_output={
+                "topic_score": {"score": "UNKNOWN"},
+                "risk_assessment": {"risk_level": "MEDIUM"},
+                "recommendation": "REVIEW_REQUIRED",
+            },
+        )
+    )
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["agent_key"] == "TopicIdeaScoringAgent"
+    assert repaired.parsed_output["artifact"]["topic_score"]["score"] == "UNKNOWN"
+    assert repaired.parsed_output["operator_summary_vi"]
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "wrap_topic_idea_artifact_in_base_envelope",
+            "semantic_change_allowed": False,
+            "reason_codes": ["TOPIC_IDEA_ARTIFACT_WRAPPED"],
+        }
+    ]
+
+
+def test_topic_idea_scoring_completes_missing_operator_summary_with_audit(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = _topic_envelope()
+    raw.pop("operator_summary_vi")
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["operator_summary_vi"] == "Chủ đề cần được người vận hành kiểm tra trước khi tiếp tục."
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["operator_summary_vi"],
+            "reason_codes": ["OPERATOR_SUMMARY_VI_COMPLETED"],
+        }
+    ]
+
+
+def test_topic_idea_scoring_missing_artifact_does_not_pass_registry_validation(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = _topic_envelope()
+    raw.pop("artifact")
+
+    result = service.validate_output(PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output=raw))
+
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.validation_result["valid"] is False
+    assert any("artifact" in error for error in result.validation_result["errors"])
+
+
+def test_topic_idea_scoring_rejects_unknown_artifact_only_shape(db_session) -> None:
+    service = PromptRegistryService(db_session)
+
+    result = service.validate_output(
+        PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output={"topic": "bad intermediate object"})
+    )
+
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.validation_result["valid"] is False
+
+
+def test_script_writer_repairs_stray_colon_before_timing_object(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "ScriptWriterAgent",
+      "status": "OK",
+      "confidence_label": "HIGH",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Review.",
+      "operator_summary_vi": "OK.",
+      "technical_appendix": {},
+      "artifact": {
+        "sentences": [
+          {
+            "sentence_id": "S1",
+            "text": "Measure the time before and after automation": {
+              "approx_seconds": 8.4
+            }
+          }
+        ]
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ScriptWriterAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["artifact"]["sentences"][0]["text"] == "Measure the time before and after automation"
+    assert repaired.parsed_output["artifact"]["sentences"][0]["approx_seconds"] == 8.4
+    assert repaired.repair_attempts == [{"repair_type": "repair_stray_colon_object_property", "semantic_change_allowed": False}]
+
+
+def test_publishing_metadata_repairs_smart_quote_json_string_delimiter(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "PublishingMetadataAgent",
+      "status": "REVIEW_REQUIRED",
+      "confidence_label": "LOW",
+      "evidence_refs": [],
+      "limitations": ["Channel contract remains frozen; no channel configuration changes are permitted.”],
+      "next_action": "Human review.",
+      "operator_summary_vi": "Cần human review.",
+      "technical_appendix": {},
+      "artifact": {"title": "How One Automation Can Save a Small Team 20 Hours Every Week"}
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="PublishingMetadataAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["limitations"] == [
+        "Channel contract remains frozen; no channel configuration changes are permitted."
+    ]
+    assert repaired.repair_attempts == [{"repair_type": "repair_json_smart_quote_delimiters", "semantic_change_allowed": False}]
+
+
+def test_rights_disclosure_repairs_contract_version_equals_typo(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version="12.1.0",
+      "agent_key": "RightsDisclosureReviewer",
+      "status": "OK",
+      "confidence_label": "HIGH",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Rights check hop le cho rehearsal text-only.",
+      "technical_appendix": {},
+      "artifact": {
+        "result": "PASS",
+        "source_manifest_status": "NOT_REQUIRED_TEXT_ONLY",
+        "ai_disclosure_needed": false,
+        "rights_risk": "LOW",
+        "disclosure_notes": "Future generated media needs source manifest review before upload."
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="RightsDisclosureReviewer", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["contract_version"] == "m12.1.0"
+    assert repaired.parsed_output["agent_key"] == "RightsDisclosureReviewer"
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_contract_version_equals_typo", "semantic_change_allowed": False}
+    ]
+
+
+def test_rights_disclosure_repairs_bare_artifact_present_marker(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "RightsDisclosureReviewer",
+      "status": "REVIEW_REQUIRED",
+      "confidence_label": "HIGH",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Rights review hop le.",
+      "technical_appendix": {},
+      "artifact": {
+        "artifact_present_and_valid",
+        "source_manifest_status": "NOT_REQUIRED_TEXT_ONLY",
+        "ai_disclosure_needed": false,
+        "rights_risk": "LOW",
+        "disclosure_notes": "Future media needs review."
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="RightsDisclosureReviewer", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["artifact"]["result"] == "PASS"
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_rights_artifact_present_marker", "semantic_change_allowed": False}
+    ]
+
+
+def test_visual_planning_repairs_string_replace_expression_literal(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "VisualPlanningAgent",
+      "status": "OK",
+      "confidence_label": "MEDIUM",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Visual plan hợp lệ.",
+      "technical_appendix": {
+        "context_pack_hash": "95775aa6e6cced3d2a1c3449b13b724c7a2c32656065b7821e663fc113dfee94".replace("ee94", "ee95")
+      },
+      "artifact": {
+        "scenes": [{"sentence_id": "S1", "intended_visual_source": "DIAGRAM"}]
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="VisualPlanningAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["technical_appendix"]["context_pack_hash"].endswith("ee95")
+    assert repaired.repair_attempts == [{"repair_type": "repair_json_string_replace_expression", "semantic_change_allowed": False}]
+
+
+def test_visual_planning_repairs_artifact_compliance_chained_properties(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "VisualPlanningAgent",
+      "status": "OK",
+      "confidence_label": "MEDIUM",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Visual plan hop le.",
+      "technical_appendix": {
+        "artifact_compliance": {
+          "required":"artifact.scenes":"present",
+          "scene_source_field":"intended_visual_source":"present",
+          "provider_backed_assets":"candidate-only":"confirmed"
+        }
+      },
+      "artifact": {
+        "scenes": [{"sentence_id": "S1", "intended_visual_source": "DIAGRAM"}]
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="VisualPlanningAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["technical_appendix"]["artifact_compliance"] == {
+        "required_artifact_scenes": "present",
+        "scene_source_field_intended_visual_source": "present",
+        "provider_backed_assets_candidate_only": "confirmed",
+    }
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_artifact_compliance_chained_properties", "semantic_change_allowed": False}
+    ]
+
+
+def test_visual_planning_repairs_generic_chained_string_properties(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "VisualPlanningAgent",
+      "status": "OK",
+      "confidence_label": "MEDIUM",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Visual plan hop le.",
+      "technical_appendix": {
+        "candidate_only_provider_options_considered": {
+          "LUMA_HERO_CANDIDATE_ONLY": {
+            "status":"not_selected_in_primary_plan_reason":"Allowed visual sources restrict this plan."
+          }
+        }
+      },
+      "artifact": {
+        "scenes": [{"sentence_id": "S1", "intended_visual_source": "DIAGRAM"}]
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="VisualPlanningAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["technical_appendix"]["candidate_only_provider_options_considered"][
+        "LUMA_HERO_CANDIDATE_ONLY"
+    ]["status_not_selected_in_primary_plan_reason"] == "Allowed visual sources restrict this plan."
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_chained_string_properties", "semantic_change_allowed": False}
+    ]
+
+
+def test_upload_card_copy_repairs_missing_evidence_refs_array_close(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "UploadCardCopyAgent",
+      "status": "OK",
+      "confidence_label": "HIGH",
+      "evidence_refs": [{"source_type": "OPERATOR_RESEARCH_PACK"}, {"provided": true}, "limitations": ["Manual upload only."],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Upload copy hop le.",
+      "technical_appendix": {},
+      "artifact": {"title": "How One Automation Can Save a Small Team 20 Hours Every Week"}
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="UploadCardCopyAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["evidence_refs"] == [
+        {"source_type": "OPERATOR_RESEARCH_PACK"},
+        {"provided": True},
+    ]
+    assert repaired.parsed_output["limitations"] == ["Manual upload only."]
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "repair_missing_evidence_refs_array_close_before_limitations",
+            "semantic_change_allowed": False,
+        }
+    ]
+
+
+def test_gatekeeper_repairs_unquoted_percent_number_value(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "GatekeeperSoftReviewAgent",
+      "status": "OK",
+      "confidence_label": "HIGH",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Gatekeeper hop le.",
+      "technical_appendix": {"script_metrics": {"duration_variance": -18.13%, "within_allowed_range": true}},
+      "artifact": {"risk_assessment": {"level": "LOW"}}
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="GatekeeperSoftReviewAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["technical_appendix"]["script_metrics"]["duration_variance"] == "-18.13%"
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_unquoted_percent_number_values", "semantic_change_allowed": False}
+    ]
+
+
+def test_gatekeeper_repairs_unclosed_array_string_before_delimiter(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "GatekeeperSoftReviewAgent",
+      "status": "OK",
+      "confidence_label": "HIGH",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "Gatekeeper hop le.",
+      "technical_appendix": {
+        "script_outline_check": {
+          "key_findings": [
+            "No fake result claims.",
+            "Source_refs indicate operator research pack as basis - no external fabrication.
+          ]
+        }
+      },
+      "artifact": {"risk_assessment": {"level": "LOW"}}
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="GatekeeperSoftReviewAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["technical_appendix"]["script_outline_check"]["key_findings"][-1].endswith("fabrication.")
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_unclosed_string_before_json_delimiter", "semantic_change_allowed": False}
+    ]
+
+
+def test_provider_readiness_moves_nested_artifact_from_technical_appendix(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = {
+        "contract_version": "m12.1.0",
+        "agent_key": "ProviderReadinessSummaryAgent",
+        "status": "OK",
+        "confidence_label": "VERY_HIGH",
+        "evidence_refs": [],
+        "limitations": "Provider gaps are expected before purchase.",
+        "next_action": "Review provider credentials.",
+        "operator_summary_vi": "Provider readiness cần kiểm tra.",
+        "technical_appendix": {
+            "provider_ready_summary": {"elevenlabs": {"readiness_state": "BLOCKED"}},
+            "artifact": {"providers": {"elevenlabs": {"status": "NEEDS_CREDENTIAL"}}},
+        },
+    }
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ProviderReadinessSummaryAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["confidence_label"] == "HIGH"
+    assert repaired.parsed_output["artifact"]["providers"]["elevenlabs"]["status"] == "NEEDS_CREDENTIAL"
+    assert "artifact" not in repaired.parsed_output["technical_appendix"]
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["artifact", "confidence_label", "limitations", "technical_appendix"],
+            "reason_codes": [
+                "CONFIDENCE_VERY_HIGH_TO_HIGH_REPAIRED",
+                "LIMITATIONS_STRING_LIST_REPAIRED",
+                "PROVIDER_READINESS_ARTIFACT_MOVED_FROM_TECHNICAL_APPENDIX",
+            ],
+        }
+    ]
+
+
+def test_provider_readiness_completes_empty_summary_and_metadata_shapes(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = {
+        "contract_version": "m12.1.0",
+        "agent_key": "ProviderReadinessSummaryAgent",
+        "status": "OK",
+        "confidence_label": "MEDIUM",
+        "evidence_refs": [],
+        "limitations": [{"type": "PROVIDER_GAP", "providers": ["elevenlabs"]}],
+        "next_action": ["Add ELEVENLABS_API_KEY.", "Re-run readiness."],
+        "operator_summary_vi": "",
+        "technical_appendix": {},
+        "artifact": {
+            "providers": {
+                "elevenlabs": {"readiness_state": "BLOCKED"},
+                "google-drive": {"readiness_state": "PASS"},
+            }
+        },
+    }
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ProviderReadinessSummaryAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert "Provider cần cấu hình" in repaired.parsed_output["operator_summary_vi"]
+    assert repaired.parsed_output["next_action"] == "Add ELEVENLABS_API_KEY.; Re-run readiness."
+    assert repaired.parsed_output["limitations"] == ['{"providers":["elevenlabs"],"type":"PROVIDER_GAP"}']
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["limitations", "next_action", "operator_summary_vi"],
+            "reason_codes": [
+                "LIMITATIONS_OBJECT_LIST_REPAIRED",
+                "NEXT_ACTION_LIST_STRING_REPAIRED",
+                "PROVIDER_READINESS_OPERATOR_SUMMARY_REPAIRED",
+            ],
+        }
+    ]
+
+
+def test_script_planning_repairs_duplicate_standalone_number_after_numeric_property(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "ScriptPlanningAgent",
+      "status": "REVIEW_REQUIRED",
+      "confidence_label": "MEDIUM",
+      "evidence_refs": [],
+      "limitations": ["Needs review."],
+      "next_action": "HUMAN_REVIEW",
+      "operator_summary_vi": "OK.",
+      "technical_appendix": {},
+      "artifact": {
+        "section_budgets": [
+          {
+            "section_id": "automation_explained",
+            "seconds": 90,
+            "word_target": 210
+            210
+          }
+        ]
+      }
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ScriptPlanningAgent", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["artifact"]["section_budgets"][0]["word_target"] == 210
+    assert repaired.repair_attempts == [
+        {
+            "repair_type": "remove_duplicate_standalone_number_after_numeric_property",
+            "semantic_change_allowed": False,
+        }
+    ]
+
+
+def test_output_validation_repairs_single_missing_root_closing_delimiter(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "ResearchPackSummarizer",
+      "status": "OK",
+      "confidence_label": "MEDIUM",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "OK.",
+      "technical_appendix": {},
+      "artifact": {"summary": "Compact digest."}
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ResearchPackSummarizer", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["artifact"]["summary"] == "Compact digest."
+    assert repaired.repair_attempts == [
+        {"repair_type": "append_missing_json_closing_delimiters", "semantic_change_allowed": False}
+    ]
+
+
+def test_output_validation_repairs_embedded_agent_key_value(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    raw = """
+    {
+      "contract_version": "m12.1.0",
+      "agent_key": "ResearchPackSummarvinh: "ResearchPackSummarizer",
+      "status": "OK",
+      "confidence_label": "MEDIUM",
+      "evidence_refs": [],
+      "limitations": [],
+      "next_action": "Continue.",
+      "operator_summary_vi": "OK.",
+      "technical_appendix": {},
+      "artifact": {"summary": "Compact digest."}
+    }
+    """
+
+    repaired = service.validate_output(PromptOutputValidationRequest(agent_key="ResearchPackSummarizer", raw_output=raw))
+
+    assert repaired.status == "OK"
+    assert repaired.parsed_output["agent_key"] == "ResearchPackSummarizer"
+    assert repaired.repair_attempts == [
+        {"repair_type": "repair_embedded_agent_key_value", "semantic_change_allowed": False}
+    ]
+
+
+def test_topic_idea_scoring_metadata_shape_repairs_and_no_extra_allow(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    for value in ("debug notes", ["debug notes"], None):
+        repaired = service.validate_output(
+            PromptOutputValidationRequest(agent_key="TopicIdeaScoringAgent", raw_output=_topic_envelope(technical_appendix=value))
+        )
+        assert repaired.status == "OK"
+        assert isinstance(repaired.parsed_output["technical_appendix"], dict)
+        assert repaired.repair_attempts[0]["repair_type"] == "normalize_envelope_metadata_shape"
+        assert repaired.repair_attempts[0]["semantic_change_allowed"] is False
+
+    schema = service.repository.load_schema("base_agent_envelope")
+    assert schema["additionalProperties"] is False
 
 
 def test_channel_authority_schema_shape_repair_is_bounded_and_strict(db_session) -> None:
@@ -218,7 +872,6 @@ def test_channel_authority_schema_shape_repair_is_bounded_and_strict(db_session)
         "agent_key": "ChannelAuthorityAgent",
         "status": "REVIEW_REQUIRED",
         "confidence_label": "MEDIUM",
-        "risk_level": "LOW",
         "evidence_refs": [{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "int2"}],
         "limitations": ["20-hour claim needs human verification."],
         "next_action": "Review the claim before upload.",
@@ -288,20 +941,38 @@ def test_channel_authority_schema_shape_repair_is_bounded_and_strict(db_session)
         }
     ]
 
-    repaired_risk = service.validate_output(
+    repaired_medium_high = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="ThumbnailBriefAgent",
+            raw_output={**raw, "agent_key": "ThumbnailBriefAgent", "technical_appendix": {}, "confidence_label": "MEDIUM_HIGH"},
+        )
+    )
+    assert repaired_medium_high.status == "OK"
+    assert repaired_medium_high.parsed_output["confidence_label"] == "MEDIUM"
+    assert repaired_medium_high.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["confidence_label"],
+            "reason_codes": ["CONFIDENCE_MEDIUM_HIGH_TO_MEDIUM_REPAIRED"],
+        }
+    ]
+
+    moved_moderate_risk = service.validate_output(
         PromptOutputValidationRequest(
             agent_key="ChannelAuthorityAgent",
             raw_output={**raw, "technical_appendix": {}, "risk_level": "MODERATE"},
         )
     )
-    assert repaired_risk.status == "OK"
-    assert repaired_risk.parsed_output["risk_level"] == "MEDIUM"
-    assert repaired_risk.repair_attempts == [
+    assert moved_moderate_risk.status == "OK"
+    assert "risk_level" not in moved_moderate_risk.parsed_output
+    assert moved_moderate_risk.parsed_output["artifact"]["risk_assessment"]["risk_level"] == "MEDIUM"
+    assert moved_moderate_risk.repair_attempts == [
         {
-            "repair_type": "normalize_envelope_metadata_shape",
+            "repair_type": "move_top_level_risk_level_to_artifact",
             "semantic_change_allowed": False,
-            "fields": ["risk_level"],
-            "reason_codes": ["RISK_LEVEL_MODERATE_TO_MEDIUM_REPAIRED"],
+            "fields": ["risk_level", "artifact.risk_assessment.risk_level"],
+            "reason_codes": ["RISK_LEVEL_MODERATE_TO_MEDIUM_REPAIRED", "TOP_LEVEL_RISK_LEVEL_MOVED_TO_ARTIFACT"],
         }
     ]
 
@@ -336,6 +1007,57 @@ def test_channel_authority_schema_shape_repair_is_bounded_and_strict(db_session)
         }
     ]
 
+    complete_status = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="PublishingMetadataAgent",
+            raw_output={**raw, "agent_key": "PublishingMetadataAgent", "status": "COMPLETE", "technical_appendix": {}},
+        )
+    )
+    assert complete_status.status == "OK"
+    assert complete_status.parsed_output["status"] == "OK"
+    assert complete_status.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["status"],
+            "reason_codes": ["STATUS_COMPLETE_TO_OK_REPAIRED"],
+        }
+    ]
+
+    completed_status = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="PublishingMetadataAgent",
+            raw_output={**raw, "agent_key": "PublishingMetadataAgent", "status": "COMPLETED", "technical_appendix": {}},
+        )
+    )
+    assert completed_status.status == "OK"
+    assert completed_status.parsed_output["status"] == "OK"
+    assert completed_status.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["status"],
+            "reason_codes": ["STATUS_COMPLETED_TO_OK_REPAIRED"],
+        }
+    ]
+
+    ready_for_review_status = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="ThumbnailBriefAgent",
+            raw_output={**raw, "agent_key": "ThumbnailBriefAgent", "status": "READY_FOR_HUMAN_REVIEW", "technical_appendix": {}},
+        )
+    )
+    assert ready_for_review_status.status == "OK"
+    assert ready_for_review_status.parsed_output["status"] == "OK"
+    assert ready_for_review_status.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["status"],
+            "reason_codes": ["STATUS_READY_FOR_HUMAN_REVIEW_TO_OK_REPAIRED"],
+        }
+    ]
+
 
 def test_channel_authority_prompt_forbids_bad_envelope_shape(db_session) -> None:
     service = PromptRegistryService(db_session)
@@ -345,8 +1067,120 @@ def test_channel_authority_prompt_forbids_bad_envelope_shape(db_session) -> None
     assert "limitations must be a list of strings" in bundle.system_prompt
     assert "operator_summary_vi must be a non-empty Vietnamese sentence" in bundle.system_prompt
     assert "Use MEDIUM, not MODERATE" in bundle.system_prompt
+    assert "Do not output top-level risk_level" in bundle.system_prompt
     assert "artifact must be an object, never an array or string" in bundle.system_prompt
     assert "Do not put a status key inside artifact" in bundle.system_prompt
+    assert "Never omit required top-level fields" in bundle.system_prompt
+    assert "Minimal valid REVIEW_REQUIRED shape" in bundle.system_prompt
+
+
+def test_topic_idea_prompt_requires_full_base_envelope_shape(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("TopicIdeaScoringAgent")
+
+    assert "Return JSON only" in bundle.system_prompt
+    assert "Never omit required top-level fields" in bundle.system_prompt
+    assert "operator_summary_vi must be a non-empty Vietnamese sentence" in bundle.system_prompt
+    assert '"artifact":{"topic_score":{"score":"UNKNOWN"}' in bundle.system_prompt
+    assert "Do not output top-level risk_level" in bundle.system_prompt
+
+
+def test_publishing_metadata_prompt_forbids_smart_quote_json_delimiters(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("PublishingMetadataAgent")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in bundle.system_prompt
+    assert "Use plain ASCII double quotes" in bundle.system_prompt
+    assert "Do not use smart quotes" in bundle.system_prompt
+    assert '"agent_key":"PublishingMetadataAgent"' in bundle.system_prompt
+    assert '"manual_publishing_copy":""' in bundle.system_prompt
+
+
+def test_thumbnail_prompt_forbids_package_status_as_envelope_status(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("ThumbnailBriefAgent")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in bundle.system_prompt
+    assert "Use only allowed top-level status enum values" in bundle.system_prompt
+    assert "Do not use package/workflow statuses such as READY_FOR_HUMAN_REVIEW" in bundle.system_prompt
+
+
+def test_visual_planning_prompt_forbids_json_expressions(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("VisualPlanningAgent")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in bundle.system_prompt
+    assert "Use only JSON literals" in bundle.system_prompt
+    assert "Never write expressions" in bundle.system_prompt
+    assert ".replace" in bundle.system_prompt
+    assert "Never write chained key/value fragments" in bundle.system_prompt
+    assert "artifact must include `scenes`" in bundle.system_prompt
+
+
+def test_rights_and_gatekeeper_prompts_defer_text_only_media_manifest_gaps(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    rights = service.repository.load_bundle("RightsDisclosureReviewer")
+    gatekeeper = service.repository.load_bundle("GatekeeperSoftReviewAgent")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in gatekeeper.system_prompt
+    assert "write percentages as strings" in gatekeeper.system_prompt
+    assert "M12.2S text-only rehearsal" in rights.system_prompt
+    assert "do not mark the text package HIGH risk" in rights.system_prompt
+    assert "source_manifest_status=NOT_REQUIRED_TEXT_ONLY" in rights.system_prompt
+    assert "future generated media will need provider/source manifest review" in rights.system_prompt
+    assert 'never put bare marker strings such as `"artifact_present_and_valid"`' in rights.system_prompt
+    assert "scenario claim such as \"can save up to 20 hours\" may PASS provider dry preview" in gatekeeper.system_prompt
+    assert "requires human verification before publish" in gatekeeper.system_prompt
+    assert "Do not treat that scenario framing as publish approval" in gatekeeper.system_prompt
+    assert 'top-level status must be "OK" and artifact.result must be "PASS"' in gatekeeper.system_prompt
+    assert 'artifact must include a result field' in gatekeeper.system_prompt
+
+
+def test_provider_readiness_prompt_requires_top_level_artifact(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("ProviderReadinessSummaryAgent")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in bundle.system_prompt
+    assert "never VERY_HIGH" in bundle.system_prompt
+    assert "top-level artifact.providers" in bundle.system_prompt
+    assert "Do not put artifact inside technical_appendix" in bundle.system_prompt
+
+
+def test_media_qc_prompt_requires_artifact_status_key(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("MediaQCExplanationAgent")
+
+    assert 'put `"status": "NOT_AVAILABLE"` or `"status": "WAITING_MEDIA_GENERATION"` inside the artifact object' in bundle.system_prompt
+    assert 'do not use `"artifact.status"`' in bundle.system_prompt
+    assert "`artifact_status`" in bundle.system_prompt
+    assert "Do not return PASS, QC_PASS, or equivalent when no media file exists" in bundle.system_prompt
+
+
+def test_upload_card_copy_prompt_requires_strict_base_envelope(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("UploadCardCopyAgent")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in bundle.system_prompt
+    assert "evidence_refs must be a closed array before limitations begins" in bundle.system_prompt
+    assert "technical_appendix must be an object" in bundle.system_prompt
+
+
+def test_script_writer_prompt_forbids_non_json_literal_values(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("ScriptWriterAgent")
+
+    assert "Return only strict JSON literals" in bundle.system_prompt
+    assert "never an expression such as 60 / 140" in bundle.system_prompt
+
+
+def test_research_pack_summarizer_prompt_keeps_artifact_compact(db_session) -> None:
+    service = PromptRegistryService(db_session)
+    bundle = service.repository.load_bundle("ResearchPackSummarizer")
+
+    assert "Return only strict JSON as one complete BaseEnvelope object" in bundle.system_prompt
+    assert 'agent_key must be exactly "ResearchPackSummarizer"' in bundle.system_prompt
+    assert "Do not copy full provider readiness maps" in bundle.system_prompt
+    assert "summarize them as a small digest" in bundle.system_prompt
 
 
 def test_ollama_and_router_transmit_system_user_messages(db_session, monkeypatch) -> None:

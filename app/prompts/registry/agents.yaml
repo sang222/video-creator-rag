@@ -40,7 +40,6 @@ output_contract: &output_contract
     - agent_key
     - status
     - confidence_label
-    - risk_level
     - evidence_refs
     - limitations
     - next_action
@@ -500,7 +499,6 @@ agents:
         - agent_key
         - status
         - confidence_label
-        - risk_level
         - evidence_refs
         - limitations
         - next_action

@@ -18,6 +18,7 @@ from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
 from app.services.r3d3 import (
     AgentContextContractRegistry,
     AgentContextPackBuilder,
+    ArtifactDigestBuilder,
     ContextPackShapeGate,
     DEFAULT_CONTRACTS,
     stable_hash,
@@ -35,7 +36,6 @@ class FakeRouter:
             "agent_key": "ScriptWriterAgent",
             "status": "OK",
             "confidence_label": "HIGH",
-            "risk_level": "LOW",
             "evidence_refs": [],
             "limitations": [],
             "next_action": "Review.",
@@ -185,6 +185,100 @@ def test_context_pack_hash_stable_and_changes_when_artifact_digest_changes(db_se
 
     assert first.context_pack["context_pack_hash"] == second.context_pack["context_pack_hash"]
     assert first.context_pack["context_pack_hash"] != changed.context_pack["context_pack_hash"]
+
+
+def test_artifact_digest_prioritizes_core_package_artifacts() -> None:
+    artifacts = {
+        "admission_decision": {"summary": "x" * 2000},
+        "channel_contract_snapshot_ref": {"summary": "x" * 2000},
+        "narration_script": {"sentences": [{"sentence_id": "S1", "text": "ok", "approx_seconds": 1}]},
+        "metadata_package": {"title": "T", "description": "D"},
+        "visual_plan": {"scenes": [{"sentence_ids": ["S1"], "intended_visual_source": "DIAGRAM"}]},
+        "thumbnail_brief": {"variants": [{"concept": "C"}]},
+        "rights_disclosure_review": {"result": "REVIEW_REQUIRED"},
+    }
+
+    refs = ArtifactDigestBuilder().build_many(package_id=uuid.uuid4(), artifacts=artifacts, max_refs=5)
+
+    assert [ref["artifact_id"] for ref in refs] == [
+        "narration_script",
+        "metadata_package",
+        "visual_plan",
+        "thumbnail_brief",
+        "rights_disclosure_review",
+    ]
+
+
+def test_gatekeeper_context_pack_honors_max_artifact_refs(db_session, qualification_factory) -> None:
+    scope = qualification_factory.channel_scope(name="R3D3 Gatekeeper Artifact Ref Cap")
+    project = _project_with_effective_context(db_session, scope)
+    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    artifacts = {
+        "narration_script": {"sentences": [{"sentence_id": "S1", "text": "ok", "approx_seconds": 1}]},
+        "script_outline": {"section_budgets": []},
+        "metadata_package": {"title": "T", "description": "D"},
+        "visual_plan": {"scenes": [{"sentence_ids": ["S1"], "intended_visual_source": "DIAGRAM"}]},
+        "thumbnail_brief": {"variants": [{"concept": "C", "notes": "x" * 1200}]},
+        "rights_disclosure_review": {"result": "REVIEW_REQUIRED", "disclosure_notes": "Future media review required."},
+        "topic_scores": {"score": 80},
+        "research_notes": {"facts": ["x" * 1000]},
+        "deterministic_gate_report": {"status": "PASS", "fail_codes": []},
+    }
+
+    result = AgentContextPackBuilder(db_session).build(
+        package_id=uuid.uuid4(),
+        video_project_id=project.id,
+        agent_key="GatekeeperSoftReviewAgent",
+        task_type="policy_soft_review",
+        lane="gatekeeper_soft_review",
+        effective_context_snapshot_id=snapshot.id,
+        effective_context_hash=snapshot.context_hash,
+        compiled_policy_snapshot_id=scope.snapshot.id,
+        compiled_policy_snapshot_hash=scope.snapshot.content_hash,
+        channel_contract_hash=snapshot.channel_contract_hash,
+        artifacts=artifacts,
+        evidence_refs=[{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "r3d3"}],
+        current_package_state={"research_pack_text": "Fact: gatekeeper uses capped artifact refs.", "research_pack_ref": "r3d3"},
+        runtime_guard_state={"no_media_provider_calls": True, "no_upload": True, "no_publish": True},
+    )
+
+    assert result.status == "OK"
+    assert len(result.context_pack["digests"]["artifact_digests"]) <= DEFAULT_CONTRACTS["GatekeeperSoftReviewAgent"].max_artifact_refs
+
+
+def test_visual_context_pack_keeps_long_form_script_digest_within_budget(db_session, qualification_factory) -> None:
+    scope = qualification_factory.channel_scope(name="R3D3 Long Script Digest")
+    project = _project_with_effective_context(db_session, scope)
+    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    text = (
+        "This long form fixture sentence preserves deterministic timing, source references, operator safeguards, "
+        "and provider boundary language while avoiding raw media claims or upload promises."
+    )
+    sentences = [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 15} for index in range(1, 49)]
+
+    result = AgentContextPackBuilder(db_session).build(
+        package_id=uuid.uuid4(),
+        video_project_id=project.id,
+        agent_key="VisualPlanningAgent",
+        task_type="visual_plan",
+        lane="visual_creative_review",
+        effective_context_snapshot_id=snapshot.id,
+        effective_context_hash=snapshot.context_hash,
+        compiled_policy_snapshot_id=scope.snapshot.id,
+        compiled_policy_snapshot_hash=scope.snapshot.content_hash,
+        channel_contract_hash=snapshot.channel_contract_hash,
+        artifacts={"narration_script": {"sentences": sentences}},
+        evidence_refs=[{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "r3d3"}],
+        current_package_state={"research_pack_text": "Fact: visual planning uses compact script digest.", "research_pack_ref": "r3d3"},
+        runtime_guard_state={"no_media_provider_calls": True, "no_upload": True, "no_publish": True},
+    )
+
+    assert result.status == "OK"
+    script_digest = result.context_pack["digests"]["script_sentence_digest"]["payload"]
+    assert script_digest["sentence_count"] == 48
+    assert len(script_digest["sentence_ids"]) == 48
+    assert len(script_digest["timeline_slice"]) == 10
+    assert script_digest["timeline_slice_omitted_count"] == 38
 
 
 def test_prompt_budget_gate_blocks_when_required_context_cannot_fit(db_session, qualification_factory) -> None:

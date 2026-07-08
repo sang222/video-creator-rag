@@ -20,6 +20,7 @@ from app.services.r3d4 import (
     GATE_REVIEW,
     GateBatchResult,
     GateResult,
+    HookSpecGate,
     MarketRuntimeComplianceGate,
     PackageStatusReducer,
     ProviderBoundaryGate,
@@ -96,6 +97,19 @@ def _script(seconds: list[int], *, declared: int | None = None, language: str = 
     if declared is not None:
         payload["total_approx_seconds"] = declared
     return payload
+
+
+def _valid_hook() -> dict[str, Any]:
+    return {
+        "hook_type": "DIRECT",
+        "first_3_seconds_script": "One automation can remove repeated weekly handoffs.",
+        "first_3_seconds_visual": "Dashboard card showing repeated handoffs collapsing into one workflow.",
+        "promise_made": "One automation can save a small team repeated weekly work",
+        "payoff_location": "S2",
+        "clickbait_risk": "LOW",
+        "visual_hook_relevance": "Visual shows the workflow consolidation described in the hook.",
+        "title_hook_alignment": "Title promises one automation saving time, matching payoff.",
+    }
 
 
 def _batch(status: str, fail_codes: list[str] | None = None) -> GateBatchResult:
@@ -182,6 +196,31 @@ def test_schema_violation_ledger_records_missing_required_artifact_fields(db_ses
     assert db_session.query(AgentOutputValidationRun).count() == 1
 
 
+def test_media_qc_artifact_status_alias_is_repaired_before_required_field_check(db_session) -> None:
+    service = AgentOutputValidationService(db_session)
+
+    result = service.validate(
+        package_id=uuid.uuid4(),
+        video_project_id=None,
+        agent_key="MediaQCExplanationAgent",
+        raw_output={"artifact": {"artifact.status": "NOT_AVAILABLE"}},
+        parsed_output={
+            "agent_key": "MediaQCExplanationAgent",
+            "status": "OK",
+            "artifact": {"artifact.status": "NOT_AVAILABLE", "details": "Waiting for media generation."},
+        },
+        prompt_validation_result={"valid": True},
+        runtime_context_refs=RUNTIME_REFS,
+        prompt_render_run_id=None,
+        agent_context_pack_snapshot_id=None,
+    )
+
+    assert result.status == "OK"
+    assert result.canonical_artifact["status"] == "NOT_AVAILABLE"
+    assert "MEDIA_QC_ARTIFACT_STATUS_ALIAS_REPAIRED" in result.reason_codes
+    assert db_session.query(SchemaViolationLedger).count() == 0
+
+
 def test_unknown_empty_gatekeeper_result_becomes_review_required(db_session) -> None:
     service = FirstScriptedVideoPackageService(db_session)
 
@@ -220,6 +259,56 @@ def test_script_duration_gate_catches_short_long_form_script() -> None:
     assert "SCRIPT_DURATION_BELOW_MINIMUM" in result.fail_codes
 
 
+def test_script_duration_gate_blocks_450_target_with_71_second_script() -> None:
+    result = ScriptDurationGate().run(
+        artifacts={"duration_model": {"target_format": "long_form", "target_duration_seconds": 450, "allowed_duration_range_seconds": {"min": 405, "max": 495}}, "narration_script": _script([35, 36], declared=71)},
+        effective_context=_ctx(duration=450),
+    )
+
+    assert result.status == "BLOCK"
+    assert "SCRIPT_DURATION_BELOW_MINIMUM" in result.fail_codes
+    assert result.measurements_json["actual_total_seconds"] == 71.0
+    assert result.measurements_json["target_seconds"] == 450.0
+    assert result.measurements_json["coverage_ratio"] < 0.2
+
+
+def test_script_duration_gate_blocks_450_target_with_1506_words() -> None:
+    text = " ".join(f"word{index}" for index in range(1506))
+    script = {
+        "sentences": [{"sentence_id": "S1", "text": text, "approx_seconds": 450}],
+        "duration_self_check": {"actual_total_seconds": 645.429},
+    }
+
+    result = ScriptDurationGate().run(
+        artifacts={
+            "duration_model": {
+                "target_format": "long_form",
+                "target_duration_seconds": 450,
+                "allowed_duration_range_seconds": {"min": 405, "max": 495},
+                "words_per_minute_assumption": 140,
+                "narration_words_target": 1050,
+            },
+            "narration_script": script,
+        },
+        effective_context=_ctx(duration=450),
+    )
+
+    assert result.status == "BLOCK"
+    assert "SCRIPT_DURATION_ABOVE_MAXIMUM" in result.fail_codes
+    assert result.measurements_json["actual_total_seconds"] == 645.429
+    assert result.measurements_json["narration_word_count"] == 1506
+
+
+def test_script_duration_gate_passes_long_form_range() -> None:
+    result = ScriptDurationGate().run(
+        artifacts={"duration_model": {"target_format": "long_form", "target_duration_seconds": 450, "allowed_duration_range_seconds": {"min": 405, "max": 495}}, "narration_script": _script([225, 225], declared=450)},
+        effective_context=_ctx(duration=450),
+    )
+
+    assert result.status == "PASS"
+    assert result.measurements_json["target_format"] == "long_form"
+
+
 def test_script_duration_gate_catches_declared_duration_mismatch() -> None:
     result = ScriptDurationGate().run(artifacts={"narration_script": _script([88, 88], declared=600)}, effective_context=_ctx(duration=176))
 
@@ -248,6 +337,31 @@ def test_draft_srt_cannot_be_treated_as_final() -> None:
     assert "DRAFT_SRT_MARKED_FINAL" in result.fail_codes
 
 
+def test_hook_3s_gate_requires_dedicated_fields() -> None:
+    for field, expected_code in [
+        ("first_3_seconds_script", "HOOK_FIRST_3_SECONDS_SCRIPT_MISSING"),
+        ("first_3_seconds_visual", "HOOK_FIRST_3_SECONDS_VISUAL_MISSING"),
+        ("promise_made", "HOOK_PROMISE_MADE_MISSING"),
+        ("payoff_location", "HOOK_PAYOFF_LOCATION_MISSING"),
+    ]:
+        hook = _valid_hook()
+        hook[field] = ""
+        result = HookSpecGate().run(artifacts={"narration_script": {"hook_spec": hook}})
+        assert result.status == "BLOCK"
+        assert expected_code in result.fail_codes
+
+
+def test_hook_3s_gate_reviews_high_clickbait_and_passes_valid_hook() -> None:
+    risky = _valid_hook()
+    risky["clickbait_risk"] = "HIGH"
+    review = HookSpecGate().run(artifacts={"narration_script": {"hook_spec": risky}})
+    assert review.status == "REVIEW_REQUIRED"
+    assert "HOOK_CLICKBAIT_RISK_HIGH" in review.fail_codes
+
+    passed = HookSpecGate().run(artifacts={"narration_script": {"hook_spec": _valid_hook()}})
+    assert passed.status == "PASS"
+
+
 def test_visual_coverage_gate_catches_missing_sentence_ids() -> None:
     result = VisualCoverageGate().run(
         artifacts={
@@ -272,6 +386,26 @@ def test_visual_coverage_gate_catches_unknown_sentence_refs() -> None:
 
     assert result.status == "BLOCK"
     assert "VISUAL_PLAN_UNKNOWN_SENTENCE_REFS" in result.fail_codes
+
+
+def test_visual_coverage_gate_accepts_covers_sentence_ids_alias() -> None:
+    result = VisualCoverageGate().run(
+        artifacts={
+            "narration_script": _script([5, 5, 5]),
+            "visual_plan": {
+                "scenes": [
+                    {"sentence_range": ["S1"], "intended_visual_source": "DIAGRAM"},
+                    {"covers_sentence_ids": ["S2"], "intended_visual_source": "CARD"},
+                    {"narration_sentence_ids": ["S3"], "intended_visual_source": "CARD"},
+                ]
+            },
+        },
+        effective_context=_ctx(),
+    )
+
+    assert result.status == "PASS"
+
+    assert result.status == "PASS"
 
 
 def test_visual_coverage_gate_catches_large_duration_mismatch() -> None:

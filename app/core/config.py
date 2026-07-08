@@ -37,6 +37,11 @@ class Settings(BaseSettings):
         default=OLLAMA_LOCAL_BASE_URL,
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "VCOS_OLLAMA_BASE_URL"),
     )
+    ollama_timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        validation_alias=AliasChoices("VCOS_OLLAMA_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT_SECONDS"),
+    )
     llm_provider: str = Field(
         default="ollama",
         validation_alias=AliasChoices("VCOS_LLM_PROVIDER", "LLM_PROVIDER"),

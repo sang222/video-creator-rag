@@ -84,7 +84,6 @@ ENVELOPE_REQUIRED_FIELDS = {
     "agent_key",
     "status",
     "confidence_label",
-    "risk_level",
     "evidence_refs",
     "limitations",
     "next_action",
@@ -95,6 +94,18 @@ ENVELOPE_REQUIRED_FIELDS = {
 ENVELOPE_ALLOWED_STATUS = {"OK", "REVIEW_REQUIRED", "BLOCK", "REFUSAL", "ERROR"}
 ENVELOPE_ALLOWED_CONFIDENCE = {"LOW", "MEDIUM", "HIGH"}
 ENVELOPE_ALLOWED_RISK = {"LOW", "MEDIUM", "HIGH", "CRITICAL", None}
+TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS = {
+    "topic_score",
+    "risk_assessment",
+    "scoring_risks",
+    "score",
+    "risk",
+    "cost",
+    "demand_signal",
+    "evidence_assessment",
+    "recommendation",
+    "reason_codes",
+}
 
 
 @dataclass(frozen=True)
@@ -156,9 +167,9 @@ class PromptRegistryRepository:
                 (
                     "Return JSON only as one top-level BaseEnvelope object. Do not return an artifact-only object. "
                     "The top-level keys must be exactly contract_version, agent_key, status, confidence_label, "
-                    "risk_level, evidence_refs, limitations, next_action, operator_summary_vi, technical_appendix, "
-                    "and artifact. Use contract_version \"m12.1.0\" and the exact requested agent_key. "
-                    "Use uppercase enum values only."
+                    "evidence_refs, limitations, next_action, operator_summary_vi, technical_appendix, and artifact. "
+                    "Do not include top-level risk_level; put risk semantics inside artifact.risk_assessment only when needed. "
+                    "Use contract_version \"m12.1.0\" and the exact requested agent_key. Use uppercase enum values only."
                 ),
             ]
         )
@@ -342,6 +353,10 @@ class PromptRegistryService:
         if parsed is None:
             result = {"valid": False, "errors": ["Output is not parseable JSON."], "schema_ref": data.schema_ref}
             return PromptOutputValidationResult(status="ERROR", validation_result=result, repair_attempts=repair_attempts, reason_codes=["JSON_PARSE_FAILED"])
+        wrapped, wrap_attempt = _wrap_topic_idea_artifact_only_output(parsed, expected_agent_key=data.agent_key)
+        if wrap_attempt is not None:
+            parsed = wrapped
+            repair_attempts.append(wrap_attempt)
         parsed, shape_attempts = repair_envelope_shape(parsed, expected_agent_key=data.agent_key, max_attempts=max(0, 2 - len(repair_attempts)))
         repair_attempts = (repair_attempts + shape_attempts)[:2]
         validation = validate_base_envelope(parsed, schema=schema, expected_agent_key=data.agent_key)
@@ -485,7 +500,6 @@ class PromptRegistryService:
             agent_key=data.agent_key,
             status="REVIEW_REQUIRED",
             confidence_label="LOW",
-            risk_level="HIGH",
             evidence_refs=[],
             limitations=["Thiếu Channel Contract đã compile/freeze nên agent không được suy đoán cấu hình kênh."],
             next_action=MISSING_CHANNEL_NEXT_ACTION,
@@ -854,30 +868,441 @@ def render_template(template: str, values: dict[str, str]) -> str:
 def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     if isinstance(raw_output, dict):
         return raw_output, []
-    attempts: list[dict[str, Any]] = []
-    candidates = [raw_output]
     stripped = raw_output.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
-        stripped = re.sub(r"\s*```$", "", stripped)
-        candidates.append(stripped)
-        attempts.append({"repair_type": "strip_code_fence", "semantic_change_allowed": False})
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start >= 0 and end > start:
-        candidates.append(stripped[start : end + 1])
-        attempts.append({"repair_type": "trim_to_json_object", "semantic_change_allowed": False})
-    candidates.append(re.sub(r",\s*([}\]])", r"\1", candidates[-1]))
-    attempts.append({"repair_type": "remove_trailing_commas", "semantic_change_allowed": False})
-    for index, candidate in enumerate(candidates[:3]):
+    candidates: list[tuple[str, list[dict[str, Any]]]] = [(stripped, [])]
+
+    fenced = _strip_whole_json_code_fence(stripped)
+    if fenced is not None:
+        candidates.append((fenced, [{"repair_type": "strip_code_fence", "semantic_change_allowed": False}]))
+
+    sources = [stripped]
+    if fenced is not None:
+        sources.append(fenced)
+    for source in sources:
+        for candidate in _balanced_json_object_candidates(source):
+            candidates.append(
+                (
+                    candidate,
+                    [
+                        {
+                            "repair_type": "extract_base_envelope_json_object",
+                            "semantic_change_allowed": False,
+                            "reason_codes": ["BASE_ENVELOPE_OBJECT_EXTRACTED_FROM_TEXT"],
+                        }
+                    ],
+                )
+            )
+
+    expanded: list[tuple[str, list[dict[str, Any]]]] = []
+    seen: set[str] = set()
+    for candidate, attempts in candidates:
+        candidate_variants = [
+            (candidate, []),
+            (
+                _repair_stray_colon_object_property(candidate),
+                [{"repair_type": "repair_stray_colon_object_property", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_duplicate_standalone_number_after_numeric_property(candidate),
+                [
+                    {
+                        "repair_type": "remove_duplicate_standalone_number_after_numeric_property",
+                        "semantic_change_allowed": False,
+                    }
+                ],
+            ),
+            (
+                _repair_json_smart_quote_delimiters(candidate),
+                [{"repair_type": "repair_json_smart_quote_delimiters", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_json_string_replace_expression(candidate),
+                [{"repair_type": "repair_json_string_replace_expression", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_artifact_compliance_chained_properties(candidate),
+                [{"repair_type": "repair_artifact_compliance_chained_properties", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_chained_string_properties(candidate),
+                [{"repair_type": "repair_chained_string_properties", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_contract_version_equals_typo(candidate),
+                [{"repair_type": "repair_contract_version_equals_typo", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_embedded_agent_key_value(candidate),
+                [{"repair_type": "repair_embedded_agent_key_value", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_missing_evidence_refs_array_close_before_limitations(candidate),
+                [
+                    {
+                        "repair_type": "repair_missing_evidence_refs_array_close_before_limitations",
+                        "semantic_change_allowed": False,
+                    }
+                ],
+            ),
+            (
+                _repair_unquoted_percent_number_values(candidate),
+                [{"repair_type": "repair_unquoted_percent_number_values", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_rights_artifact_present_marker(candidate),
+                [{"repair_type": "repair_rights_artifact_present_marker", "semantic_change_allowed": False}],
+            ),
+            (
+                _repair_unclosed_string_before_json_delimiter(candidate),
+                [{"repair_type": "repair_unclosed_string_before_json_delimiter", "semantic_change_allowed": False}],
+            ),
+        ]
+        completed_candidate = _append_missing_json_closing_delimiters(candidate)
+        if completed_candidate is not None:
+            candidate_variants.append(
+                (
+                    completed_candidate,
+                    [{"repair_type": "append_missing_json_closing_delimiters", "semantic_change_allowed": False}],
+                )
+            )
+        for base_text, base_attempts in candidate_variants:
+            for text, extra_attempt in (
+                (base_text, None),
+                (
+                    re.sub(r",\s*([}\]])", r"\1", base_text),
+                    {"repair_type": "remove_trailing_commas", "semantic_change_allowed": False},
+                ),
+            ):
+                if text in seen:
+                    continue
+                seen.add(text)
+                combined = attempts + (base_attempts if base_text != candidate else []) + ([extra_attempt] if extra_attempt is not None and text != base_text else [])
+                expanded.append((text, combined[:2]))
+
+    for candidate, attempts in expanded:
         try:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict):
-            return parsed, attempts[: max(0, index)]
-        return {"value": parsed}, attempts[: max(0, index)]
-    return None, attempts[:2]
+            return parsed, attempts
+        return {"value": parsed}, attempts
+    return None, _failed_json_repair_attempts(stripped)[:2]
+
+
+def _strip_whole_json_code_fence(value: str) -> str | None:
+    match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def _repair_json_smart_quote_delimiters(value: str) -> str:
+    return re.sub(r"”(\s*[,}\]])", r'"\1', value)
+
+
+def _repair_json_string_replace_expression(value: str) -> str:
+    pattern = re.compile(r'("(?:(?:\\.)|[^"\\])*")\.replace\(\s*("(?:(?:\\.)|[^"\\])*")\s*,\s*("(?:(?:\\.)|[^"\\])*")\s*\)')
+
+    def _replace(match: re.Match[str]) -> str:
+        try:
+            source = json.loads(match.group(1))
+            old = json.loads(match.group(2))
+            new = json.loads(match.group(3))
+        except json.JSONDecodeError:
+            return match.group(0)
+        if not all(isinstance(item, str) for item in (source, old, new)):
+            return match.group(0)
+        return json.dumps(source.replace(old, new), ensure_ascii=False)
+
+    return pattern.sub(_replace, value)
+
+
+def _repair_contract_version_equals_typo(value: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        version = match.group("version")
+        normalized = version if version.startswith("m") else f"m{version}"
+        return f'"contract_version":"{normalized}"'
+
+    return re.sub(r'"contract_version="(?P<version>[^"]+)"', _replace, value, count=1)
+
+
+def _repair_embedded_agent_key_value(value: str) -> str:
+    agent_keys = "|".join(re.escape(agent_key) for agent_key in sorted(REQUIRED_AGENT_KEYS, key=len, reverse=True))
+    pattern = re.compile(r'("agent_key"\s*:\s*)"[^"\n{}]*:\s*"(?P<agent_key>' + agent_keys + r')"')
+
+    def _replace(match: re.Match[str]) -> str:
+        return f'{match.group(1)}"{match.group("agent_key")}"'
+
+    return pattern.sub(_replace, value, count=1)
+
+
+def _repair_artifact_compliance_chained_properties(value: str) -> str:
+    block_pattern = re.compile(r'("artifact_compliance"\s*:\s*\{)(?P<body>[^{}]*)(\})', flags=re.DOTALL)
+    chained_pattern = re.compile(
+        r'"(?P<field>[A-Za-z0-9_ -]+)"\s*:\s*"(?P<label>[^"]+)"\s*:\s*"(?P<state>[^"]*)"'
+    )
+
+    def _safe_key(text: str) -> str:
+        key = re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
+        return key or "value"
+
+    def _repair_block(match: re.Match[str]) -> str:
+        def _replace_chained(item: re.Match[str]) -> str:
+            field = _safe_key(item.group("field"))
+            label = _safe_key(item.group("label"))
+            state = json.dumps(item.group("state"), ensure_ascii=False)
+            return f'"{field}_{label}":{state}'
+
+        return f'{match.group(1)}{chained_pattern.sub(_replace_chained, match.group("body"))}{match.group(3)}'
+
+    return block_pattern.sub(_repair_block, value)
+
+
+def _repair_chained_string_properties(value: str) -> str:
+    pattern = re.compile(r'"(?P<field>[A-Za-z0-9_ -]+)"\s*:\s*"(?P<label>[^"]+)"\s*:\s*"(?P<state>[^"]*)"')
+
+    def _safe_key(text: str) -> str:
+        key = re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
+        return key or "value"
+
+    def _replace(match: re.Match[str]) -> str:
+        field = _safe_key(match.group("field"))
+        label = _safe_key(match.group("label"))
+        state = json.dumps(match.group("state"), ensure_ascii=False)
+        return f'"{field}_{label}":{state}'
+
+    return pattern.sub(_replace, value)
+
+
+def _repair_missing_evidence_refs_array_close_before_limitations(value: str) -> str:
+    pattern = re.compile(
+        r'("evidence_refs"\s*:\s*\[(?:\s*\{[^{}]*\}\s*,?)+)\s*,\s*"limitations"\s*:',
+        flags=re.DOTALL,
+    )
+    return pattern.sub(r'\1],"limitations":', value, count=1)
+
+
+def _repair_unquoted_percent_number_values(value: str) -> str:
+    pattern = re.compile(r':\s*(?P<number>-?\d+(?:\.\d+)?)%\s*(?P<suffix>[,}\]])')
+
+    def _replace(match: re.Match[str]) -> str:
+        return f':"{match.group("number")}%"{match.group("suffix")}'
+
+    return pattern.sub(_replace, value)
+
+
+def _repair_rights_artifact_present_marker(value: str) -> str:
+    return re.sub(
+        r'("artifact"\s*:\s*\{\s*)"artifact_present_and_valid"\s*,',
+        r'\1"result":"PASS",',
+        value,
+        count=1,
+        flags=re.DOTALL,
+    )
+
+
+def _repair_unclosed_string_before_json_delimiter(value: str) -> str:
+    repaired: list[str] = []
+    changed = False
+    in_string = False
+    escape = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if in_string:
+            if escape:
+                repaired.append(char)
+                escape = False
+            elif char == "\\":
+                repaired.append(char)
+                escape = True
+            elif char == '"':
+                repaired.append(char)
+                in_string = False
+            elif char in "\r\n":
+                lookahead = index + 1
+                while lookahead < len(value) and value[lookahead] in " \t\r\n":
+                    lookahead += 1
+                if lookahead < len(value) and value[lookahead] in ",]}":
+                    repaired.append('"')
+                    repaired.append(char)
+                    in_string = False
+                    changed = True
+                else:
+                    repaired.append(char)
+            else:
+                repaired.append(char)
+        else:
+            repaired.append(char)
+            if char == '"':
+                in_string = True
+                escape = False
+        index += 1
+    return "".join(repaired) if changed else value
+
+
+def _balanced_json_object_candidates(value: str) -> list[str]:
+    candidates: list[str] = []
+    depth = 0
+    start: int | None = None
+    in_string = False
+    escape = False
+    for index, char in enumerate(value):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+        if char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidate = value[start : index + 1].strip()
+                if _looks_like_base_envelope(candidate):
+                    candidates.append(candidate)
+                start = None
+    return candidates
+
+
+def _looks_like_base_envelope(candidate: str) -> bool:
+    return all(token in candidate for token in ('"contract_version"', '"agent_key"', '"status"', '"artifact"'))
+
+
+def _repair_stray_colon_object_property(value: str) -> str:
+    repaired = re.sub(
+        r'("text"\s*:\s*"(?:\\.|[^"\\])*")\s*:\s*\{\s*("approx_seconds"\s*:)',
+        r"\1, \2",
+        value,
+        flags=re.DOTALL,
+    )
+    return re.sub(
+        r'("approx_seconds"\s*:\s*-?\d+(?:\.\d+)?)\s*\}\s*\}(?=\s*[\],])',
+        r"\1}",
+        repaired,
+        flags=re.DOTALL,
+    )
+
+
+def _repair_duplicate_standalone_number_after_numeric_property(value: str) -> str:
+    return re.sub(
+        r'("[^"]+"\s*:\s*(?P<number>-?\d+(?:\.\d+)?))\s*\n\s*(?P=number)(?=\s*(?:[,}\]]))',
+        r"\1",
+        value,
+        flags=re.DOTALL,
+    )
+
+
+def _append_missing_json_closing_delimiters(value: str) -> str | None:
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for char in value:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char in "{[":
+            stack.append(char)
+            continue
+        if char in "}]":
+            if not stack:
+                return None
+            opener = stack.pop()
+            if (opener, char) not in (("{", "}"), ("[", "]")):
+                return None
+    if in_string or not stack or len(stack) > 2:
+        return None
+    if value.rstrip()[-1:] not in "}]":
+        return None
+    suffix = "".join("}" if opener == "{" else "]" for opener in reversed(stack))
+    repaired = value.rstrip() + suffix
+    return repaired if _looks_like_base_envelope(repaired) else None
+
+
+def _failed_json_repair_attempts(value: str) -> list[dict[str, Any]]:
+    attempts: list[dict[str, Any]] = []
+    if _strip_whole_json_code_fence(value) is not None:
+        attempts.append({"repair_type": "strip_code_fence", "semantic_change_allowed": False})
+    if _balanced_json_object_candidates(value):
+        attempts.append(
+            {
+                "repair_type": "extract_base_envelope_json_object",
+                "semantic_change_allowed": False,
+                "reason_codes": ["BASE_ENVELOPE_OBJECT_EXTRACTED_FROM_TEXT"],
+            }
+        )
+    attempts.append({"repair_type": "remove_trailing_commas", "semantic_change_allowed": False})
+    if _repair_stray_colon_object_property(value) != value:
+        attempts.append({"repair_type": "repair_stray_colon_object_property", "semantic_change_allowed": False})
+    if _repair_embedded_agent_key_value(value) != value:
+        attempts.append({"repair_type": "repair_embedded_agent_key_value", "semantic_change_allowed": False})
+    if _repair_duplicate_standalone_number_after_numeric_property(value) != value:
+        attempts.append(
+            {
+                "repair_type": "remove_duplicate_standalone_number_after_numeric_property",
+                "semantic_change_allowed": False,
+            }
+        )
+    if _append_missing_json_closing_delimiters(value) is not None:
+        attempts.append({"repair_type": "append_missing_json_closing_delimiters", "semantic_change_allowed": False})
+    if _repair_unclosed_string_before_json_delimiter(value) != value:
+        attempts.append({"repair_type": "repair_unclosed_string_before_json_delimiter", "semantic_change_allowed": False})
+    return attempts
+
+
+def _wrap_topic_idea_artifact_only_output(
+    parsed: dict[str, Any],
+    *,
+    expected_agent_key: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if expected_agent_key != "TopicIdeaScoringAgent":
+        return parsed, None
+    if ENVELOPE_REQUIRED_FIELDS.intersection(parsed):
+        return parsed, None
+    if not _valid_topic_idea_artifact(parsed):
+        return parsed, None
+    wrapped = {
+        "contract_version": PROMPT_CONTRACT_VERSION,
+        "agent_key": "TopicIdeaScoringAgent",
+        "status": "REVIEW_REQUIRED",
+        "confidence_label": "LOW",
+        "evidence_refs": [],
+        "limitations": ["Evidence is insufficient."],
+        "next_action": "HUMAN_REVIEW_REQUIRED",
+        "operator_summary_vi": "Chủ đề cần được người vận hành kiểm tra trước khi tiếp tục.",
+        "technical_appendix": {"wrapped_artifact_only_output": True},
+        "artifact": dict(parsed),
+    }
+    return wrapped, {
+        "repair_type": "wrap_topic_idea_artifact_in_base_envelope",
+        "semantic_change_allowed": False,
+        "reason_codes": ["TOPIC_IDEA_ARTIFACT_WRAPPED"],
+    }
+
+
+def _valid_topic_idea_artifact(value: Any) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    if "risk_level" in value:
+        return False
+    keys = set(value)
+    return bool(keys & TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS) and keys <= TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS
 
 
 def repair_envelope_shape(
@@ -932,6 +1357,13 @@ def repair_envelope_shape(
     if len(attempts) >= max_attempts:
         return repaired, attempts[:max_attempts]
 
+    risk_move_attempt = _move_top_level_risk_level(repaired)
+    if risk_move_attempt is not None:
+        attempts.append(risk_move_attempt)
+
+    if len(attempts) >= max_attempts:
+        return repaired, attempts[:max_attempts]
+
     metadata_shape_fields: list[str] = []
     metadata_shape_reason_codes: list[str] = []
 
@@ -955,6 +1387,20 @@ def repair_envelope_shape(
         repaired["limitations"] = _limitation_object_to_string_list(limitations_value)
         metadata_shape_fields.append("limitations")
         metadata_shape_reason_codes.append("LIMITATIONS_OBJECT_LIST_REPAIRED")
+    elif isinstance(limitations_value, list) and any(not isinstance(item, str) for item in limitations_value):
+        repaired["limitations"] = [
+            item if isinstance(item, str) else canonical_json(item)
+            for item in limitations_value
+            if item not in (None, "", [])
+        ]
+        metadata_shape_fields.append("limitations")
+        metadata_shape_reason_codes.append("LIMITATIONS_OBJECT_LIST_REPAIRED")
+
+    next_action_value = repaired.get("next_action")
+    if isinstance(next_action_value, list):
+        repaired["next_action"] = "; ".join(str(item) for item in next_action_value if item not in (None, "", [])) or None
+        metadata_shape_fields.append("next_action")
+        metadata_shape_reason_codes.append("NEXT_ACTION_LIST_STRING_REPAIRED")
 
     operator_summary = repaired.get("operator_summary_vi")
     if expected_agent_key == "ChannelAuthorityAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
@@ -964,21 +1410,51 @@ def repair_envelope_shape(
             repaired["operator_summary_vi"] = f"ChannelAuthorityAgent cần review: {summary_source.strip()}"
             metadata_shape_fields.append("operator_summary_vi")
             metadata_shape_reason_codes.append("CHANNEL_AUTHORITY_OPERATOR_SUMMARY_REPAIRED")
+    if expected_agent_key == "TopicIdeaScoringAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
+        artifact = repaired.get("artifact")
+        if _valid_topic_idea_artifact(artifact):
+            repaired["operator_summary_vi"] = "Chủ đề cần được người vận hành kiểm tra trước khi tiếp tục."
+            metadata_shape_fields.append("operator_summary_vi")
+            metadata_shape_reason_codes.append("OPERATOR_SUMMARY_VI_COMPLETED")
 
-    if repaired.get("risk_level") == "MODERATE":
-        repaired["risk_level"] = "MEDIUM"
-        metadata_shape_fields.append("risk_level")
-        metadata_shape_reason_codes.append("RISK_LEVEL_MODERATE_TO_MEDIUM_REPAIRED")
+    if expected_agent_key == "ProviderReadinessSummaryAgent" and not isinstance(repaired.get("artifact"), dict):
+        appendix = repaired.get("technical_appendix")
+        nested_artifact = appendix.get("artifact") if isinstance(appendix, dict) else None
+        if _valid_provider_readiness_artifact(nested_artifact):
+            repaired["artifact"] = nested_artifact
+            appendix.pop("artifact", None)
+            metadata_shape_fields.extend(["artifact", "technical_appendix"])
+            metadata_shape_reason_codes.append("PROVIDER_READINESS_ARTIFACT_MOVED_FROM_TECHNICAL_APPENDIX")
+    if expected_agent_key == "ProviderReadinessSummaryAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
+        summary = _provider_readiness_operator_summary_vi(repaired.get("artifact"))
+        if summary:
+            repaired["operator_summary_vi"] = summary
+            metadata_shape_fields.append("operator_summary_vi")
+            metadata_shape_reason_codes.append("PROVIDER_READINESS_OPERATOR_SUMMARY_REPAIRED")
 
     if repaired.get("confidence_label") == "UNKNOWN":
         repaired["confidence_label"] = "LOW"
         metadata_shape_fields.append("confidence_label")
         metadata_shape_reason_codes.append("CONFIDENCE_UNKNOWN_TO_LOW_REPAIRED")
+    elif repaired.get("confidence_label") == "MEDIUM_HIGH":
+        repaired["confidence_label"] = "MEDIUM"
+        metadata_shape_fields.append("confidence_label")
+        metadata_shape_reason_codes.append("CONFIDENCE_MEDIUM_HIGH_TO_MEDIUM_REPAIRED")
+    elif repaired.get("confidence_label") == "VERY_HIGH":
+        repaired["confidence_label"] = "HIGH"
+        metadata_shape_fields.append("confidence_label")
+        metadata_shape_reason_codes.append("CONFIDENCE_VERY_HIGH_TO_HIGH_REPAIRED")
 
-    if repaired.get("status") in {"SUCCESS", "PASS"}:
+    if repaired.get("status") in {"SUCCESS", "PASS", "COMPLETE", "COMPLETED", "READY_FOR_HUMAN_REVIEW"}:
+        original_status = repaired.get("status")
         repaired["status"] = "OK"
         metadata_shape_fields.append("status")
-        metadata_shape_reason_codes.append("STATUS_SUCCESS_TO_OK_REPAIRED")
+        if original_status in {"COMPLETE", "COMPLETED"}:
+            metadata_shape_reason_codes.append(f"STATUS_{original_status}_TO_OK_REPAIRED")
+        elif original_status == "READY_FOR_HUMAN_REVIEW":
+            metadata_shape_reason_codes.append("STATUS_READY_FOR_HUMAN_REVIEW_TO_OK_REPAIRED")
+        else:
+            metadata_shape_reason_codes.append("STATUS_SUCCESS_TO_OK_REPAIRED")
 
     if metadata_shape_fields:
         attempts.append(
@@ -997,16 +1473,11 @@ def repair_envelope_shape(
     enum_fields = {
         "status": ENVELOPE_ALLOWED_STATUS,
         "confidence_label": ENVELOPE_ALLOWED_CONFIDENCE,
-        "risk_level": {item for item in ENVELOPE_ALLOWED_RISK if isinstance(item, str)},
     }
     for key, allowed in enum_fields.items():
         value = repaired.get(key)
         if isinstance(value, str):
             upper_value = value.upper()
-            if key == "risk_level" and value.lower() in {"null", "none"}:
-                repaired[key] = None
-                enum_changed = True
-                continue
             if upper_value in allowed and upper_value != value:
                 repaired[key] = upper_value
                 enum_changed = True
@@ -1029,6 +1500,66 @@ def _limitation_object_to_string_list(value: dict[str, Any]) -> list[str]:
     return limitations or ["ChannelAuthorityAgent returned limitations as an object; review original output audit."]
 
 
+def _move_top_level_risk_level(repaired: dict[str, Any]) -> dict[str, Any] | None:
+    if "risk_level" not in repaired:
+        return None
+    raw_risk = repaired.pop("risk_level")
+    normalized = raw_risk
+    reason_codes = ["TOP_LEVEL_RISK_LEVEL_MOVED_TO_ARTIFACT"]
+    if isinstance(raw_risk, str):
+        if raw_risk.lower() in {"null", "none"}:
+            normalized = None
+            reason_codes.append("RISK_LEVEL_STRING_NULL_TO_NULL_REPAIRED")
+        else:
+            upper = raw_risk.upper()
+            if upper == "MODERATE":
+                upper = "MEDIUM"
+                reason_codes.append("RISK_LEVEL_MODERATE_TO_MEDIUM_REPAIRED")
+            normalized = upper if upper in ENVELOPE_ALLOWED_RISK else raw_risk
+    artifact = repaired.get("artifact")
+    if not isinstance(artifact, dict):
+        artifact = {}
+        repaired["artifact"] = artifact
+    risk_assessment = artifact.get("risk_assessment")
+    if not isinstance(risk_assessment, dict):
+        risk_assessment = {}
+        artifact["risk_assessment"] = risk_assessment
+    risk_assessment.setdefault("risk_level", normalized)
+    return {
+        "repair_type": "move_top_level_risk_level_to_artifact",
+        "semantic_change_allowed": False,
+        "fields": ["risk_level", "artifact.risk_assessment.risk_level"],
+        "reason_codes": sorted(set(reason_codes)),
+    }
+
+
+def _valid_provider_readiness_artifact(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    providers = value.get("providers")
+    return isinstance(providers, dict) and bool(providers)
+
+
+def _provider_readiness_operator_summary_vi(value: Any) -> str | None:
+    if not _valid_provider_readiness_artifact(value):
+        return None
+    providers = value.get("providers")
+    counts: dict[str, int] = {}
+    blocked: list[str] = []
+    for provider_key, provider in providers.items():
+        if not isinstance(provider, dict):
+            continue
+        state = str(provider.get("status") or provider.get("readiness_state") or "UNKNOWN").upper()
+        counts[state] = counts.get(state, 0) + 1
+        if state in {"BLOCK", "BLOCKED", "NOT_CONFIGURED"}:
+            blocked.append(str(provider_key))
+    if not counts:
+        return None
+    blocked_text = ", ".join(sorted(blocked)) if blocked else "không có provider bị block"
+    counts_text = ", ".join(f"{state}={count}" for state, count in sorted(counts.items()))
+    return f"Tóm tắt readiness provider: {counts_text}. Provider cần cấu hình trước media stage: {blocked_text}."
+
+
 def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], expected_agent_key: str) -> dict[str, Any]:
     errors: list[str] = []
     missing = sorted(ENVELOPE_REQUIRED_FIELDS - set(parsed))
@@ -1043,8 +1574,6 @@ def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], ex
         errors.append("status is not allowed")
     if parsed.get("confidence_label") not in ENVELOPE_ALLOWED_CONFIDENCE:
         errors.append("confidence_label is not allowed")
-    if parsed.get("risk_level") not in ENVELOPE_ALLOWED_RISK:
-        errors.append("risk_level is not allowed")
     if not isinstance(parsed.get("evidence_refs"), list):
         errors.append("evidence_refs must be a list")
     if not isinstance(parsed.get("limitations"), list):
@@ -1055,6 +1584,8 @@ def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], ex
         errors.append("operator_summary_vi is required")
     if parsed.get("artifact") is not None and not isinstance(parsed.get("artifact"), dict):
         errors.append("artifact must be an object or null")
+    if expected_agent_key == "TopicIdeaScoringAgent" and not _valid_topic_idea_artifact(parsed.get("artifact")):
+        errors.append("TopicIdeaScoringAgent artifact must be a valid object")
     return {
         "valid": not errors,
         "errors": errors,

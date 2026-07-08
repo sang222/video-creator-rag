@@ -31,7 +31,12 @@ from app.main import create_app
 from app.providers.ollama import OllamaLLMProvider
 from app.services import R3D1AdminService, VideoProjectService
 from app.services.m10_1 import LLMRouterService
-from app.services.m12_2 import FirstScriptedVideoPackageService, FULL_REHEARSAL_AGENT_CHAIN
+from app.services.m12_2 import (
+    FirstScriptedVideoPackageService,
+    FULL_REHEARSAL_AGENT_CHAIN,
+    _find_visual_source_values,
+    _repair_visual_unknown_sentence_refs,
+)
 from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
 
 
@@ -146,7 +151,6 @@ def _envelope(agent_key: str, artifact: dict[str, Any], *, status: str = "OK") -
         "agent_key": agent_key,
         "status": status,
         "confidence_label": "HIGH",
-        "risk_level": "LOW",
         "evidence_refs": [{"type": "operator_research_pack", "id": "m12_2s"}],
         "limitations": ["Human review required before media generation."],
         "next_action": "Review package before media provider setup.",
@@ -154,6 +158,27 @@ def _envelope(agent_key: str, artifact: dict[str, Any], *, status: str = "OK") -
         "technical_appendix": {"test_output": True},
         "artifact": artifact,
     }
+
+
+def _long_script_sentences(count: int = 36) -> list[dict[str, Any]]:
+    text = (
+        "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
+        "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
+        "for deterministic duration validation without adding claims or media."
+    )
+    return [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 15} for index in range(1, count + 1)]
+
+
+def _underlong_script_sentences(count: int = 42) -> list[dict[str, Any]]:
+    text = "This narration keeps review boundaries clear, preserves the hook promise, and avoids provider execution today."
+    return [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 4.7} for index in range(1, count + 1)]
+
+
+def _visual_scenes(count: int = 36) -> list[dict[str, Any]]:
+    return [
+        {"sentence_id": f"S{index}", "intended_visual_source": "DIAGRAM" if index % 2 else "CARD"}
+        for index in range(1, count + 1)
+    ]
 
 
 def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = None) -> list[dict[str, Any]]:
@@ -173,13 +198,52 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "mechanism": "LLMRouter + prompt snapshots + boundary.",
             "result": "Text package ready for review.",
             "takeaway": "Không fake media QC.",
+            "duration_model": {
+                "target_format": "long_form",
+                "target_duration_seconds": 540,
+                "allowed_duration_range_seconds": {"min": 486, "max": 594},
+                "narration_words_target": 1260,
+                "words_per_minute_assumption": 140,
+            },
+            "section_budgets": [
+                {"section": "hook", "target_seconds": 60, "target_words": 140},
+                {"section": "mechanism", "target_seconds": 390, "target_words": 910},
+                {"section": "takeaway", "target_seconds": 90, "target_words": 210},
+            ],
+            "hook_spec": {
+                "hook_type": "DIRECT",
+                "first_3_seconds_script": "VCOS bắt đầu từ channel contract đã COMPLETE.",
+                "first_3_seconds_visual": "Operator cockpit shows contract, Ollama, and provider boundary.",
+                "promise_made": "Agent chạy qua Ollama nhưng không gọi provider media",
+                "payoff_location": "S2",
+                "clickbait_risk": "LOW",
+                "visual_hook_relevance": "Visual shows the same Ollama and boundary flow.",
+                "title_hook_alignment": "Title promises a rehearsal to media boundary.",
+            },
         },
         "ScriptWriterAgent": {
-            "sentences": [
-                {"sentence_id": "S1", "text": "VCOS bắt đầu từ channel contract đã COMPLETE.", "approx_seconds": 270},
-                {"sentence_id": "S2", "text": "Agent chạy qua Ollama nhưng không gọi provider media.", "approx_seconds": 270},
-            ],
+            "hook_spec": {
+                "hook_type": "DIRECT",
+                "first_3_seconds_script": "VCOS bắt đầu từ channel contract đã COMPLETE.",
+                "first_3_seconds_visual": "Operator cockpit shows contract, Ollama, and provider boundary.",
+                "promise_made": "Agent chạy qua Ollama nhưng không gọi provider media",
+                "payoff_location": "S2",
+                "clickbait_risk": "LOW",
+                "visual_hook_relevance": "Visual shows the same Ollama and boundary flow.",
+                "title_hook_alignment": "Title promises a rehearsal to media boundary.",
+            },
+            "sentences": _long_script_sentences(),
             "total_approx_seconds": 540,
+            "duration_self_check": {
+                "actual_total_seconds": 540,
+                "target_seconds": 540,
+                "min_seconds": 486,
+                "max_seconds": 594,
+                "coverage_ratio": 1.003,
+                "sentence_count": 36,
+                "narration_word_count": 1264,
+                "minimum_word_count": 1134,
+            },
         },
         "PublishingMetadataAgent": {
             "title": "VCOS M12.2S: rehearsal tới media boundary",
@@ -190,10 +254,7 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "disclosure_notes": ["AI-assisted draft."],
         },
         "VisualPlanningAgent": {
-            "scenes": [
-                {"sentence_id": "S1", "intended_visual_source": "DIAGRAM"},
-                {"sentence_id": "S2", "intended_visual_source": "CARD"},
-            ],
+            "scenes": _visual_scenes(),
             "media_provider_calls": "NONE",
         },
         "ThumbnailBriefAgent": {
@@ -258,6 +319,14 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert package.artifacts["visual_plan"]["scenes"][0]["intended_visual_source"] == "DIAGRAM"
     assert package.artifacts["thumbnail_brief"]["rendered"] is False
     assert package.artifacts["media_qc_explanation"]["status"] == "WAITING_MEDIA_GENERATION"
+    assert package.artifacts["provider_plan_dry_validation"]["status"] == "REACHED"
+    assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
+    assert package.artifacts["provider_plan_dry_validation"]["no_network_call_made"] is True
+    assert package.artifacts["duration_model"]["read_only"] is True
+    assert package.artifacts["duration_model"]["target_duration_seconds"] == 540.0
+    assert sum(item["word_target"] for item in package.artifacts["script_word_budget"]["section_word_budgets"]) == 1260
+    assert package.artifacts["script_word_budget"]["minimum_word_count"] == 1134
+    assert package.artifacts["script_word_budget"]["maximum_word_count"] == 1386
     assert package.risk_limitations_summary["mock_fallback_used"] is False
     assert package.risk_limitations_summary["dry_run_success_used"] is False
     assert package.risk_limitations_summary["media_provider_calls_made"] is False
@@ -284,6 +353,32 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
     assert db_session.query(RealSmokeRun).count() == 0
+
+
+def test_m12_2s_rights_disclosure_conditional_wording_repair_reaches_provider_boundary(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    outputs[5]["artifact"].pop("disclosure_notes", None)
+    outputs[5]["artifact"]["description"] = "Paste-ready metadata, no upload. Content is generated using AI tools."
+    outputs[8]["artifact"]["ai_disclosure_needed"] = True
+    outputs[8]["artifact"]["disclosure_notes"] = "Future generated media still needs source/provider manifest review."
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
+    repair = package.artifacts["disclosure_wording_repair_attempt"]
+    assert repair["attempted"] is True
+    assert repair["repaired"] is True
+    assert repair["semantic_change_allowed"] is False
+    assert repair["reason_codes"] == ["AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING"]
+    assert "Future generated media" in package.artifacts["metadata_package"]["disclosure_notes"]
+    assert "AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING" not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
+    assert db_session.query(MediaRenderJob).count() == 0
+    assert db_session.query(HumanUploadTask).count() == 0
 
 
 def test_m12_2s_partial_contract_blocks_before_llm(db_session, qualification_factory) -> None:
@@ -445,6 +540,316 @@ def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_fa
     assert "validation_result" in package.artifacts["narration_script"]
     assert len(package.prompt_render_run_refs) == 5
     assert db_session.query(PromptAuditSnapshot).count() >= 5
+
+
+def test_m12_2s_topic_idea_missing_artifact_triggers_schema_retry(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    bad_topic = dict(outputs[1])
+    bad_topic.pop("artifact")
+    retry_topic = _envelope(
+        "TopicIdeaScoringAgent",
+        {"topic_score": {"score": "UNKNOWN"}, "risk_assessment": {"risk_level": "MEDIUM"}},
+        status="REVIEW_REQUIRED",
+    )
+    router = FakeRouter([outputs[0], bad_topic, retry_topic, *outputs[2:]])
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
+    retry_audit = package.artifacts["topic_idea_schema_retry_attempt"]
+    assert retry_audit["attempted"] is True
+    assert retry_audit["mock_or_canned_output_used"] is False
+    assert retry_audit["reason_codes"] == ["TOPIC_IDEA_SCHEMA_RETRY_MISSING_ARTIFACT"]
+    assert package.artifacts["topic_scores"]["topic_score"]["score"] == "UNKNOWN"
+    assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
+    assert len(router.calls) == len(FULL_REHEARSAL_AGENT_CHAIN) + 1
+
+
+def test_m12_2s_topic_idea_missing_artifact_retry_failure_blocks(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    bad_topic = dict(outputs[1])
+    bad_topic.pop("artifact")
+    retry_bad_topic = dict(bad_topic)
+    router = FakeRouter([outputs[0], bad_topic, retry_bad_topic])
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "REVIEW_REQUIRED"
+    assert package.artifacts["topic_idea_schema_retry_attempt"]["attempted"] is True
+    assert package.artifacts["topic_scores"]["validation_result"]["valid"] is False
+    assert any("artifact" in error for error in package.artifacts["topic_scores"]["validation_result"]["errors"])
+    assert "research_digest" not in package.artifacts
+    assert "provider_plan_dry_validation" not in package.artifacts
+    assert len(router.calls) == 3
+
+
+def test_m12_2s_duration_gate_blocks_before_visual_or_provider_plan(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    outputs[4]["artifact"]["sentences"] = [
+        {"sentence_id": "S1", "text": "Short opening.", "approx_seconds": 35},
+        {"sentence_id": "S2", "text": "Short payoff.", "approx_seconds": 36},
+    ]
+    outputs[4]["artifact"]["total_approx_seconds"] = 71
+    router = FakeRouter(outputs)
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "BLOCKED"
+    assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert "visual_plan" not in package.artifacts
+    assert "provider_plan_dry_validation" not in package.artifacts
+    assert [call["requested_task_type"] for call in router.calls][-1] == "long_form_script"
+
+
+def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    overlong_text = (
+        "This overlong narration sentence repeats useful context, adds extra explanatory detail, "
+        "and remains intentionally verbose for deterministic duration repair validation."
+    )
+    outputs[4]["artifact"]["sentences"] = [
+        {"sentence_id": f"S{index}", "text": overlong_text, "approx_seconds": 9.0}
+        for index in range(1, 96)
+    ]
+    outputs[6]["artifact"]["scenes"] = _visual_scenes(95)
+    original_hook = dict(outputs[4]["artifact"]["hook_spec"])
+    router = FakeRouter(outputs)
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
+    repair = package.artifacts["script_duration_repair_attempt"]
+    assert repair["attempted"] is True
+    assert repair["repaired"] is True
+    assert repair["word_count_before"] > repair["maximum_word_count"]
+    assert repair["word_count_after"] <= repair["maximum_word_count"]
+    assert repair["hook_preserved"] is True
+    assert repair["payoff_location_preserved"] is True
+    assert package.artifacts["narration_script"]["hook_spec"] == original_hook
+    assert "SCRIPT_DURATION_ABOVE_MAXIMUM" not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
+    assert db_session.query(MediaRenderJob).count() == 0
+    assert db_session.query(HumanUploadTask).count() == 0
+
+
+def test_m12_2s_underlong_script_triggers_bounded_duration_expansion(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    outputs[4]["artifact"]["sentences"] = _underlong_script_sentences()
+    outputs[4]["artifact"]["total_approx_seconds"] = 276
+    outputs[4]["artifact"]["duration_self_check"]["actual_total_seconds"] = 276
+    outputs[4]["artifact"]["duration_self_check"]["narration_word_count"] = 420
+    outputs[6]["artifact"]["scenes"] = _visual_scenes(42)
+    original_hook = dict(outputs[4]["artifact"]["hook_spec"])
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
+    repair = package.artifacts["script_duration_repair_attempt"]
+    assert repair["attempted"] is True
+    assert repair["repair_type"] == "bounded_script_duration_expand"
+    assert repair["repaired"] is True
+    assert repair["word_count_before"] < repair["minimum_word_count"]
+    assert repair["minimum_word_count"] <= repair["word_count_after"] <= repair["maximum_word_count"]
+    assert repair["hook_preserved"] is True
+    assert repair["payoff_location_preserved"] is True
+    assert repair["section_order_preserved"] is True
+    assert package.artifacts["narration_script"]["hook_spec"] == original_hook
+    assert "SCRIPT_DURATION_BELOW_MINIMUM" not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
+    assert db_session.query(MediaRenderJob).count() == 0
+    assert db_session.query(HumanUploadTask).count() == 0
+
+
+def test_m12_2s_duration_expansion_failure_keeps_package_blocked(db_session, qualification_factory, monkeypatch) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    outputs[4]["artifact"]["sentences"] = _underlong_script_sentences()
+    outputs[4]["artifact"]["total_approx_seconds"] = 276
+    monkeypatch.setattr("app.services.m12_2._expand_script_to_word_budget", lambda script, duration_model, budget: (script, []))
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "BLOCKED"
+    repair = package.artifacts["script_duration_repair_attempt"]
+    assert repair["attempted"] is True
+    assert repair["repair_type"] == "bounded_script_duration_expand"
+    assert repair["repaired"] is False
+    assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert "visual_plan" not in package.artifacts
+    assert "provider_plan_dry_validation" not in package.artifacts
+
+
+def test_m12_2s_duration_repair_failure_keeps_package_blocked(db_session, qualification_factory, monkeypatch) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    overlong_text = (
+        "This overlong narration sentence repeats useful context, adds extra explanatory detail, "
+        "and remains intentionally verbose for deterministic duration repair validation."
+    )
+    outputs[4]["artifact"]["sentences"] = [
+        {"sentence_id": f"S{index}", "text": overlong_text, "approx_seconds": 9.0}
+        for index in range(1, 96)
+    ]
+    monkeypatch.setattr("app.services.m12_2._trim_script_to_word_budget", lambda script, duration_model, budget: (script, []))
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "BLOCKED"
+    assert package.artifacts["script_duration_repair_attempt"]["attempted"] is True
+    assert package.artifacts["script_duration_repair_attempt"]["repaired"] is False
+    assert "SCRIPT_DURATION_ABOVE_MAXIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert "visual_plan" not in package.artifacts
+    assert "provider_plan_dry_validation" not in package.artifacts
+
+
+def test_m12_2s_missing_hook_fields_block_before_visual_or_provider_plan(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    outputs = _outputs()
+    outputs[4]["artifact"]["hook_spec"].pop("first_3_seconds_visual")
+    router = FakeRouter(outputs)
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "BLOCKED"
+    assert "HOOK_FIRST_3_SECONDS_VISUAL_MISSING" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert "visual_plan" not in package.artifacts
+    assert "provider_plan_dry_validation" not in package.artifacts
+
+
+def test_m12_2s_visual_source_scan_ignores_evidence_source_type() -> None:
+    artifact = {
+        "evidence_refs": [{"source_type": "OPERATOR_RESEARCH_PACK", "ref": "pack"}],
+        "applied_context_refs": {"source_type": "FROZEN_DIGEST"},
+        "scenes": [
+            {"scene_id": "SCN01", "intended_visual_source": "DIAGRAM"},
+            {"scene_id": "SCN02", "source_type": "CARD"},
+        ],
+    }
+
+    assert _find_visual_source_values(artifact) == {"DIAGRAM", "CARD"}
+
+
+def test_m12_2s_visual_unknown_sentence_ref_repair_is_bounded() -> None:
+    script = {"sentences": [{"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1} for index in range(1, 4)]}
+    visual = {
+        "scenes": [
+            {"scene_id": "SCN01", "sentence_ids": ["S1", "S2"], "intended_visual_source": "DIAGRAM"},
+            {"scene_id": "SCN02", "sentence_ids": ["S3", "S4"], "intended_visual_source": "CARD"},
+            {"scene_id": "SCN03", "sentence_ids": ["S5"], "intended_visual_source": "CARD"},
+        ]
+    }
+
+    repaired, patches = _repair_visual_unknown_sentence_refs(visual, script)
+
+    assert patches == [
+        {
+            "scene_id": "SCN02",
+            "removed_unknown_sentence_refs": ["S4"],
+            "kept_sentence_refs": ["S3"],
+            "repair_action": "drop_unknown_sentence_refs",
+        },
+        {
+            "scene_id": "SCN03",
+            "removed_unknown_sentence_refs": ["S5"],
+            "kept_sentence_refs": [],
+            "repair_action": "drop_unanchored_visual_scene",
+        },
+    ]
+    assert len(repaired["scenes"]) == 2
+    assert repaired["scenes"][1]["sentence_ids"] == ["S3"]
+
+
+def test_m12_2s_visual_repair_normalizes_covers_refs_and_candidate_source() -> None:
+    script = {"sentences": [{"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1} for index in range(1, 4)]}
+    visual = {
+        "scenes": [
+            {"scene_id": "SCN01", "sentence_range": ["S1"], "intended_visual_source": "LUMA_HERO_CANDIDATE_ONLY"},
+            {"scene_id": "SCN02", "sentence_ids_covered": ["S2"], "intended_visual_source": "CREATOMATE_CARD_CANDIDATE_ONLY"},
+            {"scene_id": "SCN03", "narration_sentence_ids": ["S3"], "intended_visual_source": "CARD"},
+        ]
+    }
+
+    repaired, patches = _repair_visual_unknown_sentence_refs(visual, script, allowed_sources={"DIAGRAM", "CARD"})
+
+    assert repaired["scenes"][0]["sentence_ids"] == ["S1"]
+    assert repaired["scenes"][0]["intended_visual_source"] == "DIAGRAM"
+    assert repaired["scenes"][1]["sentence_ids"] == ["S2"]
+    assert repaired["scenes"][1]["intended_visual_source"] == "CARD"
+    assert repaired["scenes"][2]["sentence_ids"] == ["S3"]
+    assert {patch["repair_action"] for patch in patches} == {
+        "normalize_sentence_ids_covered",
+        "normalize_narration_sentence_ids",
+        "normalize_sentence_range",
+        "normalize_disallowed_candidate_visual_source",
+    }
+
+
+def test_m12_2s_bounded_style_repair_can_remove_forbidden_style(db_session, qualification_factory) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    effective.brand_voice_persona_context_json = {"forbidden_style": ["hype bait"]}
+    db_session.flush()
+    outputs = _outputs()
+    outputs[4]["artifact"]["sentences"][0]["text"] = "This hype bait line still describes the COMPLETE channel contract."
+    router = FakeRouter(outputs)
+
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "WAITING_PROVIDER_CONFIG"
+    assert package.artifacts["script_style_repair_attempt"]["attempted"] is True
+    assert package.artifacts["script_style_repair_attempt"]["sentence_patches"]
+    repaired_text = package.artifacts["narration_script"]["sentences"][0]["text"].lower()
+    assert "hype bait" not in repaired_text
+
+
+def test_m12_2s_style_gate_still_blocks_if_repair_fails(db_session, qualification_factory, monkeypatch) -> None:
+    scope = _complete_scope(qualification_factory)
+    project = _project_with_effective_context(db_session, scope)
+    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    effective.brand_voice_persona_context_json = {"forbidden_style": ["hype bait"]}
+    db_session.flush()
+    monkeypatch.setattr("app.services.m12_2._repair_forbidden_style_terms", lambda script, terms: (script, []))
+    outputs = _outputs()
+    outputs[4]["artifact"]["sentences"][0]["text"] = "This hype bait line still describes the COMPLETE channel contract."
+    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
+
+    assert package.package_status == "BLOCKED"
+    assert package.artifacts["script_style_repair_attempt"]["attempted"] is True
+    assert "SCRIPT_FORBIDDEN_STYLE_USED" in package.artifacts["deterministic_gate_report"]["fail_codes"]
 
 
 def test_m12_2s_channel_authority_requires_decision(db_session, qualification_factory) -> None:

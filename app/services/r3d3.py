@@ -324,7 +324,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "common_skill_digest",
         ],
         optional=["provider_media_state_digest", "package_status_digest"],
-        max_artifact_refs=10,
+        max_artifact_refs=6,
     ),
     "UploadCardCopyAgent": _contract(
         "UploadCardCopyAgent",
@@ -563,10 +563,28 @@ class ArtifactDigestBuilder:
         "provider_readiness_summary": "provider_readiness_summary",
         "upload_card_copy": "upload_card_copy",
     }
+    PRIORITY_KEYS = [
+        "narration_script",
+        "script_outline",
+        "metadata_package",
+        "visual_plan",
+        "thumbnail_brief",
+        "rights_disclosure_review",
+        "topic_scores",
+        "research_notes",
+        "deterministic_gate_report",
+        "package_state_reducer",
+        "provider_readiness_summary",
+        "media_qc_explanation",
+        "admission_decision",
+    ]
 
     def build_many(self, *, package_id: uuid.UUID, artifacts: dict[str, Any], max_refs: int = 8) -> list[dict[str, Any]]:
         digests: list[dict[str, Any]] = []
-        for key in sorted(artifacts):
+        prioritized = [key for key in self.PRIORITY_KEYS if key in artifacts]
+        prioritized_set = set(prioritized)
+        ordered_keys = [*prioritized, *(key for key in sorted(artifacts) if key not in prioritized_set)]
+        for key in ordered_keys:
             if key in {"agent_context_pack_refs", "human_review_checklist"}:
                 continue
             value = artifacts[key]
@@ -885,7 +903,11 @@ class AgentContextPackBuilder:
         runtime_guard_state: dict[str, Any],
         provider_readiness_state: dict[str, Any],
     ) -> dict[str, Any]:
-        artifact_digests = self.artifacts.build_many(package_id=package_id, artifacts=artifacts, max_refs=12)
+        artifact_digests = self.artifacts.build_many(
+            package_id=package_id,
+            artifacts=artifacts,
+            max_refs=contract.max_artifact_refs,
+        )
         artifact_by_key = {item["artifact_id"]: item for item in artifact_digests}
         runtime_guard = build_runtime_guard_digest(
             effective=effective,
@@ -1488,17 +1510,21 @@ def build_allowed_visual_source_policy_digest(snapshot: EffectiveChannelRuntimeC
 def build_script_sentence_digest(*, package_id: uuid.UUID, artifacts: dict[str, Any]) -> dict[str, Any]:
     script = _dict(artifacts.get("narration_script"))
     sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    preview_sentences = sentences[:8]
+    if len(sentences) > 10:
+        preview_sentences = [*preview_sentences, *sentences[-2:]]
     payload = {
         "sentence_count": len(sentences),
+        "sentence_ids": [item.get("sentence_id") for item in sentences if item.get("sentence_id")],
         "timeline_slice": [
             {
                 "sentence_id": item.get("sentence_id"),
                 "approx_seconds": item.get("approx_seconds"),
-                "text_preview": _short_text(item.get("text"), 96),
-                "text_hash": stable_hash({"text": item.get("text")}) if item.get("text") else None,
+                "text_preview": _short_text(item.get("text"), 48),
             }
-            for item in sentences[:80]
+            for item in preview_sentences
         ],
+        "timeline_slice_omitted_count": max(0, len(sentences) - len(preview_sentences)),
         "full_script_ref": f"first_scripted_video_package:{package_id}:artifacts.narration_script",
     }
     return _compact_digest(

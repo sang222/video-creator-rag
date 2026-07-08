@@ -358,6 +358,8 @@ def _extract_hook_spec(
         "promise_made": _str_or_none(source.get("promise_made") or source.get("promise") or plan.get("promise_made")),
         "payoff_location": _str_or_none(source.get("payoff_location") or source.get("payoff") or source.get("payoff_sentence_id")),
         "clickbait_risk": _risk(source.get("clickbait_risk") or source.get("risk")),
+        "visual_hook_relevance": _str_or_none(source.get("visual_hook_relevance") or source.get("visual_alignment_note")),
+        "title_hook_alignment": _str_or_none(source.get("title_hook_alignment") or source.get("title_alignment_note")),
         "evidence_refs_json": _json_list(source.get("evidence_refs") or source.get("evidence_refs_json")),
         "contract_paths_used_json": _strings(source.get("contract_paths_used_json") or source.get("contract_paths_used") or _applied_contract_paths(script)),
     }

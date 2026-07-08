@@ -189,7 +189,9 @@ class LLMRouterConfigLoader:
 
     def ensure_default_profile(self, *, profile_key: str | None = None) -> LLMRouterProfile:
         profile_key = profile_key or os.getenv("VCOS_LLM_ROUTER_PROFILE", "default")
-        base_url = get_settings().ollama_base_url
+        settings = get_settings()
+        base_url = settings.ollama_base_url
+        timeout_seconds = max(1, int(settings.ollama_timeout_seconds))
         real_enabled = _env_bool("VCOS_LLM_REAL_EXECUTION_ENABLED", False)
         provider = os.getenv("VCOS_LLM_PROVIDER", "ollama").lower()
         if provider != "ollama":
@@ -201,7 +203,7 @@ class LLMRouterConfigLoader:
                 provider_key="OLLAMA",
                 base_url=base_url,
                 real_execution_enabled=real_enabled,
-                default_timeout_seconds=30,
+                default_timeout_seconds=timeout_seconds,
             )
             self.session.add(profile)
             self.session.flush()
@@ -218,6 +220,7 @@ class LLMRouterConfigLoader:
         else:
             profile.base_url = base_url
             profile.real_execution_enabled = real_enabled
+            profile.default_timeout_seconds = timeout_seconds
         self._ensure_lanes(profile, real_enabled=real_enabled)
         self._ensure_model_profiles()
         self.session.flush()

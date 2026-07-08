@@ -8,7 +8,6 @@ PromptRecordStatus = Literal["DRAFT", "ACTIVE", "DEPRECATED"]
 PromptValidationStatus = Literal["OK", "REVIEW_REQUIRED", "BLOCK", "ERROR"]
 AgentEnvelopeStatus = Literal["OK", "REVIEW_REQUIRED", "BLOCK", "REFUSAL", "ERROR"]
 ConfidenceLabel = Literal["LOW", "MEDIUM", "HIGH"]
-RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 PromptEvaluationRunState = Literal["PASS", "FAIL", "SKIPPED", "ERROR"]
 MessageRole = Literal["system", "user", "assistant"]
 
@@ -29,7 +28,6 @@ class AgentOutputEnvelope(BaseModel):
     agent_key: str
     status: AgentEnvelopeStatus
     confidence_label: ConfidenceLabel
-    risk_level: RiskLevel | None = None
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     next_action: str | None = None

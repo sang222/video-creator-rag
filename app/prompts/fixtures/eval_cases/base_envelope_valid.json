@@ -8,7 +8,6 @@
     "agent_key": "PublishingMetadataAgent",
     "status": "OK",
     "confidence_label": "HIGH",
-    "risk_level": "LOW",
     "evidence_refs": [],
     "limitations": [],
     "next_action": null,
