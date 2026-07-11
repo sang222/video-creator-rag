@@ -14,12 +14,10 @@ const readinessPayload = {
     summary("youtube-owner", "YouTube Owner Analytics", "BLOCKED", { connected: false, learning_authority: "STRONG" }, ["YOUTUBE_OAUTH_CLIENT_SECRETS_FILE_OR_CLIENT_FIELDS"]),
     summary("google-drive", "Google Drive", "BLOCKED", { connected: false, root_folder_configured: false }, ["GOOGLE_DRIVE_ROOT_FOLDER_ID"]),
     summary("elevenlabs", "ElevenLabs", "BLOCKED", { api_key_configured: false, budget_basis: "credits/characters" }, ["ELEVENLABS_API_KEY"]),
-    summary("luma_api", "Luma API", "WARNING", { model_id: "ray-2", duration_rules: "4,6,8; max 8s" }),
-    summary("creatomate_growth_10k", "Creatomate Growth 10K", "PASS", { api_key_configured: true, role: "final assembly + template/card/thumbnail/Shorts", final_assembly_renderer: true })
+    summary("luma_api", "Luma API", "WARNING", { model_id: "ray-2", duration_rules: "4,6,8; max 8s" })
   ],
   checks: [
     check("google-drive", "CREDENTIAL", "BLOCKED", "Google Drive cần OAuth client/token.", { oauth_client_configured: false, token_connected: false }),
-    check("creatomate_growth_10k", "CAPABILITY", "PASS", "Creatomate Growth 10K là final assembly renderer."),
     check("youtube-owner", "CREDENTIAL", "BLOCKED", "YouTube owner analytics cần OAuth token")
   ],
   blocking_items: [{ provider_key: "youtube-owner" }],
@@ -92,12 +90,8 @@ describe("IntegrationsReadinessView", () => {
     expect(screen.queryByRole("link", { name: /Kết nối Google Drive/ })).not.toBeInTheDocument();
     expect(screen.getByText("Google Drive chưa thể mở luồng cấp quyền. Hãy cấu hình client, secret, redirect URI và scope drive.file trước.")).toBeInTheDocument();
     expect(screen.getAllByText("Luma API").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Creatomate Growth 10K").length).toBeGreaterThan(0);
-    expect(screen.getByText("Final assembly, template, card, thumbnail và Shorts")).toBeInTheDocument();
     expect(screen.getAllByText("Loại kiểm tra: Thông tin kết nối").length).toBeGreaterThan(0);
-    expect(screen.getByText("Loại kiểm tra: Năng lực")).toBeInTheDocument();
     expect(screen.getAllByText("Đang bị chặn").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Creatomate Growth 10K").length).toBeGreaterThan(0);
     expect(screen.getByText("Ngân sách AI tháng này")).toBeInTheDocument();
     expect(screen.getAllByText("Đây là ngân sách cấu hình cứng từ biến môi trường, chưa phải chi phí thực tế đã tiêu.").length).toBeGreaterThan(0);
     expect(screen.getByText("$250 USD")).toBeInTheDocument();

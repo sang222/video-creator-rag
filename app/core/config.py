@@ -82,6 +82,10 @@ class Settings(BaseSettings):
         default="var/tmp/native_renderer",
         validation_alias=AliasChoices("VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "NATIVE_RENDER_WORKSPACE_ROOT"),
     )
+    local_project_workspace_root: str = Field(
+        default="var/tmp/vcos-project-workspaces",
+        validation_alias=AliasChoices("VCOS_LOCAL_PROJECT_WORKSPACE_ROOT", "LOCAL_PROJECT_WORKSPACE_ROOT"),
+    )
     native_ffmpeg_local_smoke_enabled: bool = Field(
         default=False,
         validation_alias="VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED",
@@ -141,54 +145,6 @@ class Settings(BaseSettings):
     elevenlabs_real_account_smoke: bool = Field(
         default=False,
         validation_alias=AliasChoices("VCOS_ELEVENLABS_REAL_ACCOUNT_SMOKE", "ELEVENLABS_REAL_ACCOUNT_SMOKE"),
-    )
-    creatomate_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CREATOMATE_API_KEY", "VCOS_CREATOMATE_API_KEY"),
-    )
-    creatomate_template_id: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CREATOMATE_TEMPLATE_ID", "VCOS_CREATOMATE_TEMPLATE_ID"),
-    )
-    creatomate_workspace_id: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CREATOMATE_WORKSPACE_ID", "VCOS_CREATOMATE_WORKSPACE_ID"),
-    )
-    render_provider: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_RENDER_PROVIDER", "RENDER_PROVIDER"),
-    )
-    cloud_final_assembly_renderer: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CLOUD_FINAL_ASSEMBLY_RENDERER", "VCOS_CLOUD_FINAL_ASSEMBLY_RENDERER"),
-    )
-    cloud_template_renderer: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CLOUD_TEMPLATE_RENDERER", "VCOS_CLOUD_TEMPLATE_RENDERER"),
-    )
-    cloud_final_renderer_provider: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CLOUD_FINAL_RENDERER_PROVIDER", "VCOS_CLOUD_FINAL_RENDERER_PROVIDER"),
-    )
-    creatomate_plan: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CREATOMATE_PLAN", "VCOS_CREATOMATE_PLAN"),
-    )
-    creatomate_monthly_credits: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CREATOMATE_MONTHLY_CREDITS", "VCOS_CREATOMATE_MONTHLY_CREDITS"),
-    )
-    creatomate_monthly_budget_usd: Decimal | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CREATOMATE_MONTHLY_BUDGET_USD", "VCOS_CREATOMATE_MONTHLY_BUDGET_USD"),
-    )
-    creatomate_real_account_smoke: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("VCOS_CREATOMATE_REAL_ACCOUNT_SMOKE", "CREATOMATE_REAL_ACCOUNT_SMOKE"),
-    )
-    cloud_final_renderer_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CLOUD_FINAL_RENDERER_API_KEY", "VCOS_CLOUD_FINAL_RENDERER_API_KEY"),
     )
     pexels_api_key: SecretStr | None = Field(
         default=None,
@@ -370,6 +326,22 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("PROVIDER_REAL_EXECUTION_ENABLED", "VCOS_PROVIDER_REAL_EXECUTION_ENABLED"),
     )
+    provider_production_execution_enabled: bool = Field(
+        default=False,
+        validation_alias="VCOS_PROVIDER_PRODUCTION_EXECUTION_ENABLED",
+    )
+    pexels_real_execution_enabled: bool = Field(
+        default=False,
+        validation_alias="PEXELS_REAL_EXECUTION_ENABLED",
+    )
+    luma_real_execution_enabled: bool = Field(
+        default=False,
+        validation_alias="LUMA_REAL_EXECUTION_ENABLED",
+    )
+    elevenlabs_real_execution_enabled: bool = Field(
+        default=False,
+        validation_alias="ELEVENLABS_REAL_EXECUTION_ENABLED",
+    )
     elevenlabs_real_generation_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("ELEVENLABS_REAL_GENERATION_ENABLED", "VCOS_ELEVENLABS_REAL_GENERATION_ENABLED"),
@@ -377,10 +349,6 @@ class Settings(BaseSettings):
     luma_real_generation_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("LUMA_REAL_GENERATION_ENABLED", "VCOS_LUMA_REAL_GENERATION_ENABLED"),
-    )
-    creatomate_real_render_enabled: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("CREATOMATE_REAL_RENDER_ENABLED", "VCOS_CREATOMATE_REAL_RENDER_ENABLED"),
     )
     pexels_real_search_enabled: bool = Field(
         default=False,
@@ -506,8 +474,6 @@ class Settings(BaseSettings):
     @field_validator(
         "elevenlabs_api_key",
         "luma_api_key",
-        "creatomate_api_key",
-        "cloud_final_renderer_api_key",
         "pexels_api_key",
         "pixabay_api_key",
         "youtube_data_api_key",
@@ -547,13 +513,6 @@ class Settings(BaseSettings):
         "elevenlabs_model_id",
         "elevenlabs_plan",
         "elevenlabs_budget_basis",
-        "render_provider",
-        "cloud_final_assembly_renderer",
-        "cloud_template_renderer",
-        "cloud_final_renderer_provider",
-        "creatomate_template_id",
-        "creatomate_workspace_id",
-        "creatomate_plan",
         "free_visual_fallback_provider",
         "budget_mode",
         "llm_budget_note",
@@ -573,8 +532,6 @@ class Settings(BaseSettings):
     @field_validator(
         "elevenlabs_monthly_cap_usd",
         "elevenlabs_monthly_credit_cap",
-        "creatomate_monthly_credits",
-        "creatomate_monthly_budget_usd",
         "veo_audio_enabled",
         "veo_default_duration_seconds",
         "veo_max_duration_seconds",

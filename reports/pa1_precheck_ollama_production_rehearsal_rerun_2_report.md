@@ -106,7 +106,6 @@ Runtime/result flags:
 Hard boundaries respected:
 - No ElevenLabs
 - No Luma
-- No Creatomate
 - No Pexels
 - No Drive upload
 - No YouTube upload/publish/reupload

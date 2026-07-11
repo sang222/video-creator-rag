@@ -105,8 +105,6 @@ Provider execution remains `NO-GO`.
 | `will_execute` | `false` |
 | `no_paid_provider_calls` | `true` |
 | `provider_stack_drift_guard.status` | `PASS` |
-| `expected_provider_keys` | `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api` |
-| `found_active_provider_keys` | `creatomate_growth_10k`, `elevenlabs`, `luma_api`, `pexels_api` |
 | `stale_provider_keys` | `[]` |
 | `no_provider_call_made` | `true` |
 | `provider_boundary_preflight_not_called` | `true` |
@@ -118,7 +116,6 @@ Provider readiness rows:
 | --- | --- | --- |
 | `elevenlabs` | `NOT_CONFIGURED` | `false` |
 | `luma_api` | `BLOCKED_PROVIDER_NOT_CONFIGURED` | `false` |
-| `creatomate_growth_10k` | `NOT_CONFIGURED` | `false` |
 | `pexels_api` | `NOT_CONFIGURED` | `false` |
 | `google_drive_archive` | `DISABLED` | `false` |
 | `youtube_readonly` | `READY_FOR_FUTURE_EXECUTION` | `false` |
@@ -156,7 +153,6 @@ No evidence of:
 
 - ElevenLabs execution.
 - Luma execution.
-- Creatomate execution.
 - Pexels execution.
 - Drive upload.
 - YouTube upload/publish/reupload.

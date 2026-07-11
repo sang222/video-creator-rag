@@ -65,15 +65,12 @@ npm run test
 
 - `elevenlabs`
 - `luma_api`
-- `creatomate_growth_10k`
 - `pexels_api`
 
 ## Stale Provider Keys That Must Remain Inactive/Rejected
 
 - `GOOGLE_VERTEX_VEO`
 - `google-vertex-veo`
-- `creatomate_essential_2k`
-- `cloud_final_assembly_renderer_tbd`
 - `pexels_pixabay_free_fallback`
 - `elevenlabs_flash_turbo`
 
@@ -116,7 +113,6 @@ npm run test
 | ProviderAttempt created | no | PASS by R3D10 verifier/default fixture |
 | MediaRenderJob created | no | PASS by R3D10/manual runtime boundary |
 | Provider job submitted | no | PASS; provider execution remains disabled |
-| External provider network call | no | PASS; no ElevenLabs/Luma/Creatomate/Pexels/Drive/YouTube calls |
 | Drive upload | no | PASS |
 | YouTube upload/publish/reupload | no | PASS; no YouTube upload API route |
 | Pexels download/search | no | PASS |

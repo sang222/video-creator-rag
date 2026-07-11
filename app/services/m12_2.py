@@ -69,9 +69,9 @@ M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION = "Bổ sung field còn thiếu và co
 NEEDS_RESEARCH_PACK_NEXT_ACTION = "Bổ sung research pack/source notes trước khi chạy video package production."
 HUMAN_APPROVAL_REQUIRED = "Human final approval required before any media generation, upload, publish, or reupload."
 MEDIA_PROVIDER_BOUNDARY_SUMMARY = (
-    "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
+    "Gói nội dung đã sẵn sàng tới bước tạo media; NativeFFmpeg là render authority và provider ngoài vẫn bị khóa."
 )
-MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = "Cấu hình ElevenLabs và Creatomate Growth 10K; Luma API chỉ là AI hero optional và không được gọi trong VCOS."
+MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = "Cấu hình ElevenLabs khi được phê duyệt; Luma/Pexels là asset provider giới hạn và NativeFFmpeg vẫn bị khóa production."
 FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + Real Ollama Rehearsal"
 
 VISUAL_SOURCE_ALLOWLIST = {
@@ -80,7 +80,6 @@ VISUAL_SOURCE_ALLOWLIST = {
     "SCREENSHOT",
     "EXISTING_ASSET",
     "LUMA_HERO_CANDIDATE_ONLY",
-    "CREATOMATE_CARD_CANDIDATE_ONLY",
 }
 
 
@@ -850,7 +849,7 @@ class FirstScriptedVideoPackageService:
                 if visual_block is not None:
                     artifacts["visual_plan_review"] = visual_block
                     status = "REVIEW_REQUIRED"
-                    next_action = "Sửa visual plan để chỉ dùng nguồn DIAGRAM/CARD/SCREENSHOT/EXISTING_ASSET/VEO hoặc Creatomate candidate-only."
+                    next_action = "Sửa visual plan để chỉ dùng nguồn native hoặc LUMA_HERO_CANDIDATE_ONLY."
                     break
             gate_stop = self._run_agent_deterministic_gates(
                 package_id=package_id,
@@ -991,7 +990,7 @@ class FirstScriptedVideoPackageService:
         pre_gatekeeper_batch = None
         limitations: list[str] = [
             "M12.2S chỉ chạy agent text/review bằng Ollama; không generate media, không TTS, không upload/publish.",
-            "ElevenLabs/Luma API/Creatomate Growth 10K/Pexels API chỉ xuất hiện trong readiness/boundary, không được gọi runtime.",
+            "ElevenLabs/Luma API/Pexels API chỉ xuất hiện trong readiness/boundary, không được gọi runtime.",
         ]
 
         for step in FULL_REHEARSAL_AGENT_CHAIN:
@@ -1632,7 +1631,7 @@ class FirstScriptedVideoPackageService:
             if not isinstance(summary, dict) or not summary.get("provider_key"):
                 continue
             provider_key = str(summary["provider_key"]).lower()
-            if provider_key not in {"elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"}:
+            if provider_key not in {"elevenlabs", "luma_api", "pexels_api"}:
                 continue
             providers[provider_key] = {
                 "readiness_state": summary.get("readiness_state"),
@@ -2201,7 +2200,6 @@ class FirstScriptedVideoPackageService:
             "no_elevenlabs_call": True,
             "no_luma_api_call": True,
             "no_luma_generation": True,
-            "no_creatomate_call": True,
             "no_google_drive_upload": True,
             "no_youtube_upload": True,
             "no_upload": True,
@@ -2299,7 +2297,6 @@ class FirstScriptedVideoPackageService:
                 "no_elevenlabs_call": True,
                 "no_luma_api_call": True,
                 "no_luma_generation": True,
-                "no_creatomate_call": True,
                 "no_google_drive_upload": True,
                 "no_youtube_upload": True,
                 "no_publish": True,
@@ -2310,7 +2307,7 @@ class FirstScriptedVideoPackageService:
                 "no_channel_config_mutation": True,
                 "script_rewrite_rule": "Run ScriptRewriteAgent only when gatekeeper/validation explicitly requires rewrite; do not add new claims.",
                 "missing_media_provider_rule": (
-                    "Do not return REVIEW_REQUIRED or BLOCK only because ElevenLabs, Luma API, or Creatomate Growth 10K are not configured. "
+                    "Do not return REVIEW_REQUIRED or BLOCK only because ElevenLabs, Luma API, or Pexels API are not configured. "
                     "For valid text/review artifacts, record provider gaps in limitations; VideoGenerationBoundary will block provider execution."
                 ),
                 "script_writer_artifact_contract": {
@@ -2625,7 +2622,7 @@ class FirstScriptedVideoPackageService:
             if visual_block is not None:
                 return {
                     **visual_block,
-                    "next_action": "Sửa visual plan để chỉ dùng nguồn DIAGRAM/CARD/SCREENSHOT/EXISTING_ASSET/VEO hoặc Creatomate candidate-only.",
+                    "next_action": "Sửa visual plan để chỉ dùng nguồn native hoặc LUMA_HERO_CANDIDATE_ONLY.",
                 }
         if agent_key == "ScriptWriterAgent" and not _has_sentence_ids(artifact):
             return {
@@ -2671,7 +2668,7 @@ class FirstScriptedVideoPackageService:
         provider_readiness = self._boundary_provider_readiness(readiness_snapshot)
         missing_required = [
             provider
-            for provider in ("elevenlabs", "creatomate_growth_10k")
+            for provider in ("elevenlabs",)
             if provider_readiness.get(provider, {}).get("status") != "CONFIGURED"
         ]
         required_inputs = {
@@ -2714,7 +2711,6 @@ class FirstScriptedVideoPackageService:
             required_inputs=required_inputs,
             required_providers=[
                 {"provider_key": "elevenlabs", "role": "ElevenLabs voice", "required": True},
-                {"provider_key": "creatomate_growth_10k", "role": "Creatomate Growth 10K final/template render", "required": True},
                 {"provider_key": "luma_api", "role": "optional Luma API AI hero", "required": False},
                 {"provider_key": "pexels_api", "role": "optional Pexels API visual fallback", "required": False},
             ],
@@ -2741,7 +2737,6 @@ class FirstScriptedVideoPackageService:
         }
         return {
             "elevenlabs": m2.get("elevenlabs") or self._provider_boundary_state(summaries.get("elevenlabs")),
-            "creatomate_growth_10k": m2.get("creatomate_growth_10k") or self._provider_boundary_state(summaries.get("creatomate_growth_10k")),
             "luma_api": {**m2.get("luma_api", {"status": "NOT_CONFIGURED"}), "required": False},
             "pexels_api": {**m2.get("pexels_api", {"status": "NOT_CONFIGURED"}), "required": False},
             "google_drive_archive": {**m2.get("google_drive_archive", {"status": "DISABLED"}), "required": False},
@@ -2789,7 +2784,7 @@ class FirstScriptedVideoPackageService:
             status = "NOT_CONFIGURED"
         return {
             "status": status,
-            "required": item.get("provider_key") in {"elevenlabs", "creatomate_growth_10k"},
+            "required": item.get("provider_key") in {"elevenlabs"},
             "readiness_state": readiness_state,
             "missing_env_keys": missing_env_keys,
             "reason_codes": reason_codes,
@@ -2834,7 +2829,7 @@ class FirstScriptedVideoPackageService:
             "learning_auto_promotion": False,
             "limitations": [
                 "Gatekeeper soft review không thay thế human approval.",
-                "Visual plan là brief/candidate-only, chưa tạo Luma/Creatomate output.",
+                "Visual plan là brief/candidate-only, chưa tạo Luma output.",
             ]
             if artifacts.get("visual_plan")
             else ["Package chưa có visual plan hoàn chỉnh."],
@@ -3091,8 +3086,6 @@ def _repair_visual_unknown_sentence_refs(
 def _visual_source_fallback(source: str, allowed_sources: set[str]) -> str | None:
     if source == "LUMA_HERO_CANDIDATE_ONLY" and "DIAGRAM" in allowed_sources:
         return "DIAGRAM"
-    if source == "CREATOMATE_CARD_CANDIDATE_ONLY" and "CARD" in allowed_sources:
-        return "CARD"
     if "CARD" in allowed_sources:
         return "CARD"
     if "DIAGRAM" in allowed_sources:
@@ -3231,7 +3224,7 @@ def _duration_model_from_context(
 
 def _provider_plan_dry_validation(artifact: Any) -> dict[str, Any]:
     providers = _dict(_dict(artifact).get("providers"))
-    canonical = ["elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"]
+    canonical = ["elevenlabs", "luma_api", "pexels_api"]
     observed = sorted(key for key in providers if key in canonical)
     return {
         "status": "REACHED",

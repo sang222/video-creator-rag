@@ -1,0 +1,24 @@
+{
+  "date": "2026-07-11",
+  "phase": "AS1",
+  "architecture": "PASS",
+  "local_fixture_rehearsal": "PASS",
+  "provider_execution": "DISABLED",
+  "archive_safety": "PASS",
+  "final": "PASS",
+  "proceed_to_pa1r": true,
+  "channel_id": "small-team-ai",
+  "strategy": "NR2_B_BALANCED",
+  "request_counts": {
+    "native": 3,
+    "pexels": 1,
+    "luma": 1
+  },
+  "provider_calls_made": false,
+  "drive_calls_made": false,
+  "transport": "LOCAL_FIXTURE_ONLY",
+  "production_eligible": false,
+  "archive_state": "VERIFIED",
+  "cleanup_idempotency": "PASS",
+  "migration_added": false
+}

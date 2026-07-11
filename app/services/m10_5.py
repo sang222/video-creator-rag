@@ -1335,7 +1335,6 @@ def _drive_media_subfolder(media_type: str) -> str:
         "THUMBNAIL": "thumbnails",
         "CAPTION": "captions",
         "AI_HERO": "ai_hero",
-        "CREATOMATE_ASSET": "creatomate_assets",
         "PUBLISH_PACKAGE": "publish_package",
         "QC_EXPORT": "qc",
     }.get(media_type, "misc")

@@ -424,7 +424,6 @@ def test_r3d6_source_guards_no_external_vector_db_embedding_provider_or_upload_c
         "httpx",
         "YouTubeUpload",
         "GoogleDriveUploadService",
-        "CreatomateRender",
         "GoogleVertexVeoProvider",
     ]
     assert [token for token in forbidden if token in service_source] == []

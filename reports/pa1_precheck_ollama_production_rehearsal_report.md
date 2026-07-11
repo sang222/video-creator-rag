@@ -24,7 +24,6 @@ This was a real Ollama text-path rehearsal through LLMRouter. It did not use moc
 |---|---:|---|
 | Docker API/frontend/ollama/postgres | PASS | all services healthy |
 | Runtime LTS live verifier | PASS | `GET /ops/runtime-lts-freeze-check`, `freeze_status=PASS`, `no_provider_media_upload_execution=true` |
-| ProviderStackDriftGuard | PASS | canonical stack: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`; stale keys `[]`; `no_provider_call_made=true` |
 | Provider/cost panel | PASS | `GET /provider-cost/81c48d7a-dfc3-4207-b585-744673491b59`, `will_execute=false`, `no_paid_provider_calls=true` |
 | Ollama reachable | PASS | local Ollama tag list returned available cloud models |
 | Real Ollama flags | PASS | `VCOS_LLM_PROVIDER=ollama`, `VCOS_LLM_REAL_EXECUTION_ENABLED=true`, `VCOS_LLM_ROUTER_REAL_SMOKE=true` |
@@ -166,7 +165,6 @@ Provider plan preview was not reached because the rehearsal stopped before visua
 
 Read-model validation still confirms:
 
-- canonical provider stack only: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`.
 - ProviderStackDriftGuard PASS.
 - provider/cost `will_execute=false`.
 - media providers remain NOT_CONFIGURED / inactive for execution.
@@ -198,7 +196,6 @@ PROVIDER_PLAN_DRY_VALIDATION=NOT_REACHED_DUE_TO_PRECHECK_BLOCKERS.
 | HumanUploadTask for project | 0 |
 | UploadedVideo for project | 0 |
 
-No ElevenLabs, Luma, Creatomate, Pexels, Drive upload, YouTube upload, media render, final media creation, or upload task creation occurred.
 
 ## P0/P1/P2/P3
 

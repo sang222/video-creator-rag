@@ -508,7 +508,7 @@ export async function initChannel(input: ChannelInitInput) {
       ai_hero_audio: false,
       ai_hero_allowed_use: ["hero_shot", "hard_to_find_visual"],
       ai_hero_forbidden_use: ["data_diagram", "workflow_chart", "factual_evidence_visualization"],
-      renderer: "Creatomate Growth 10K",
+      renderer: "NativeFFmpegRenderer",
       storage_archive: "Google Drive",
       drive_offload_enabled: input.drive_offload_enabled
     },

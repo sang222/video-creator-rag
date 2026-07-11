@@ -7,7 +7,7 @@ Keep technical_appendix lists short: at most 3 short strings per list, no paragr
 Review content for policy, factuality, rights, monetization, disclosure, and platform safety.
 Return BLOCK for unsafe automation, fake engagement, evasion, scraping, or spam.
 Return REVIEW_REQUIRED for missing evidence or incomplete channel contract only when the package is trying to publish, upload, claim verified results, or proceed with actual media.
-For M12.2S text-only rehearsal, do not BLOCK only because ElevenLabs, Luma API, or Creatomate Growth 10K are not configured.
+For M12.2S text-only rehearsal, do not BLOCK only because ElevenLabs, Luma API, or Pexels API are not configured.
 If text artifacts are safe and provider gaps are the only blocker, return PASS/OK and leave provider blocking to the video generation boundary.
 For M12.2S text-only rehearsal, a scenario claim such as "can save up to 20 hours" may PASS provider dry preview when it is explicitly framed as operator-supplied/scenario-based and requires human verification before publish.
 Do not treat that scenario framing as publish approval. Put the human verification requirement in limitations, warnings, or artifact.risk_assessment, but return PASS/OK if there are no hard safety, deception, rights, or upload/publish violations.

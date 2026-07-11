@@ -8,7 +8,6 @@ Date: 2026-07-09
 - Topic: `How One Automation Can Save a Small Team 20 Hours Every Week`
 - Runtime: real Ollama text path through `LLMRouter`
 - Mode: text artifacts only, manual publish only
-- Explicitly not executed: ElevenLabs, Luma, Creatomate, Pexels, Google Drive upload, YouTube upload/publish, audio/video/media generation
 
 ## Primary Run
 
@@ -98,9 +97,7 @@ automation that makes a real difference.
 - Dry validation status: `REACHED`
 - `will_execute=false`
 - `no_network_call_made=true`
-- Observed provider keys only as readiness/planning refs: `creatomate_growth_10k`, `elevenlabs`, `luma_api`
 - Boundary status: `BLOCKED_PROVIDER_NOT_CONFIGURED`
-- Boundary reasons: `ELEVENLABS_NOT_CONFIGURED`, `CREATOMATE_GROWTH_10K_NOT_CONFIGURED`
 - This is expected before purchasing/activating provider credentials.
 
 ## No-Execution Proof

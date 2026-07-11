@@ -43,14 +43,13 @@ from app.services.m2 import PAID_CAPABILITIES, ProviderReadinessM2Service, valid
 from app.services.provider_stack import normalize_provider_key, provider_key_rejection_reasons
 
 
-PAID_PROVIDER_KEYS = {"elevenlabs", "luma_api", "creatomate_growth_10k"}
+PAID_PROVIDER_KEYS = {"elevenlabs", "luma_api"}
 CHARACTER_DEPENDENT_STAGES = {"AI_HERO_VIDEO", "AI_HERO_GENERATION", "AI_METAPHOR_GENERATION", "LUMA_HERO_VIDEO"}
 VOICE_STAGES = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
 PEXELS_STAGES = {"FREE_VISUAL_FALLBACK", "PEXELS_SEARCH", "PEXELS_FALLBACK"}
 EXECUTION_FLAG_BY_PROVIDER = {
     "elevenlabs": "elevenlabs_real_generation_enabled",
     "luma_api": "luma_real_generation_enabled",
-    "creatomate_growth_10k": "creatomate_real_render_enabled",
     "pexels_api": "pexels_real_search_enabled",
     "google_drive_archive": "google_drive_real_archive_enabled",
 }
@@ -230,8 +229,6 @@ class CostEstimateService:
                 costs["voice"] = explicit_cost
             elif provider_key == "luma_api":
                 costs["ai_hero"] = explicit_cost
-            elif provider_key == "creatomate_growth_10k":
-                costs["final_render"] = explicit_cost
 
         if not provider_items:
             estimate_status = "ESTIMATE_PENDING_PROVIDER_CONFIG"

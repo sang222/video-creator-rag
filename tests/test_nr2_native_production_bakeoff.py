@@ -11,9 +11,8 @@ def test_nr1_final_is_approved_before_nr2():
     assert summary["human_review"] == "PASS" and summary["final"] == "PASS" and summary["proceed_to_nr2"] is True
 
 
-def test_creatomate_absent_and_provider_intent_is_data_only():
+def test_provider_intent_is_data_only():
     source = Path("app/services/nr2_bakeoff.py").read_text().lower()
-    assert "creatomate" not in source
     assert set(STRATEGIES) == {"NR2_A_NATIVE_EXPLANATORY", "NR2_B_BALANCED", "NR2_C_HERO_HEAVY_PLACEHOLDER"}
 
 

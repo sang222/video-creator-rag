@@ -69,7 +69,6 @@ Drive archive smoke after Docker sync:
 
 - No old Drive files/folders moved or deleted.
 - No DB migration added.
-- No ElevenLabs/Luma/Creatomate/Pexels execution added.
 - No YouTube upload/publish added.
 - No provider/media render job added.
 - Google Drive use remained archive/storage only.

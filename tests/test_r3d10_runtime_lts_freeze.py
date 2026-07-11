@@ -327,7 +327,7 @@ def test_r3d10_docs_api_and_dx_import_invariants(db_session) -> None:
     provider_doc = Path("docs/architecture/provider_stack_freeze.md").read_text(encoding="utf-8")
     assert "Luma API" in provider_doc
     assert "NativeFFmpegRenderer" in provider_doc
-    assert "historical/deferred" in provider_doc
+    assert "Canonical external media providers are only `elevenlabs`, `luma_api`, and `pexels_api`" in provider_doc
     assert "final assembly" in provider_doc
     assert "Veo: deferred compatibility only, not active" in provider_doc
 

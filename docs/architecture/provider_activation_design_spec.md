@@ -19,7 +19,6 @@ Provider stack in scope:
 
 - `elevenlabs`
 - `luma_api`
-- `creatomate_growth_10k`
 - `pexels_api`
 - `google_drive_archive` as archive/storage only
 
@@ -84,7 +83,7 @@ Rules:
 - Cache key/idempotency is required for each narration payload.
 - Draft TTS must not be treated as final unless explicitly approved.
 - VoiceQC is required before final assembly.
-- Failed VoiceQC cannot be bypassed by sending the same output to Creatomate.
+- Failed VoiceQC cannot enter the NativeFFmpeg compiled render boundary.
 
 Required evidence:
 
@@ -123,36 +122,6 @@ Required evidence:
 - ProviderJobSnapshot
 - PaidProviderCallLedger
 - MediaQC result
-
-### Creatomate Growth 10K
-
-Allowed role:
-
-- Final assembly/render only.
-
-Rules:
-
-- Template ID is required.
-- Render payload preview is required before execution.
-- No render without `FinalRenderApproval`.
-- All source inputs must reference approved script/voice/visual/metadata artifacts.
-- Output must be archived/durable before upload handoff.
-- Output must pass MediaQC before becoming a `FinalMediaRef`.
-
-Required evidence:
-
-- render revision
-- template ID
-- render payload preview hash
-- FinalRenderApproval
-- CostEstimateSnapshot
-- HumanPaidRenderApproval
-- ProviderIdempotencyKey
-- ProviderJobSnapshot
-- PaidProviderCallLedger
-- CloudMediaRef after archive verification
-- MediaQC result
-- FinalMediaRef only after QC pass and durable archive
 
 ### Pexels API
 
@@ -347,8 +316,8 @@ Smoke order:
 
 1. ElevenLabs tiny voice.
 2. Luma tiny `4`, `6`, or `8` second clip.
-3. Creatomate tiny render.
-4. Pexels one fallback search if enabled.
+3. Pexels one fallback search if enabled.
+4. NativeFFmpeg local assembly/QC proof.
 5. Google Drive archive proof.
 
 Every smoke must be:

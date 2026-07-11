@@ -21,6 +21,7 @@ from app.api.routes import (
     media_provider_workflow,
     originality_review,
     native_renderer,
+    asset_acquisition,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     _include_router_flat(application, media_provider_workflow.create_router())
     _include_router_flat(application, originality_review.create_router())
     _include_router_flat(application, native_renderer.create_router())
+    _include_router_flat(application, asset_acquisition.create_router())
     return application
 
 

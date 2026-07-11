@@ -37,7 +37,6 @@ VCOS/
         thumbnails/
         captions/
         ai_hero/
-        creatomate_assets/
         publish_package/
         qc/
         misc/

@@ -22,7 +22,6 @@ Met: 2 consecutive successful rehearsals on the same topic.
 | 5k | `8909856a-e81d-45c2-80a2-deea71076072` | WAITING_PROVIDER_CONFIG | REACHED | false |
 | 5l | `134ec5dc-e5d8-4010-8f5a-2d0b0a68f0af` | WAITING_PROVIDER_CONFIG | REACHED | false |
 
-`WAITING_PROVIDER_CONFIG` is expected: ElevenLabs/Creatomate are not configured and must not be called during PA1.
 
 ## Agent Sequence
 
@@ -123,7 +122,6 @@ Duration convergence result:
 
 Provider boundary fail codes:
 
-- `CREATOMATE_NOT_CONFIGURED`
 - `ELEVENLABS_NOT_CONFIGURED`
 
 These are expected after provider dry validation and do not imply provider execution.
@@ -137,7 +135,6 @@ These are expected after provider dry validation and do not imply provider execu
 | no_network_call_made | true | true |
 | no_final_media_ref | true | true |
 | no_human_upload_task | true | true |
-| canonical_provider_keys | elevenlabs, luma_api, creatomate_growth_10k, pexels_api | elevenlabs, luma_api, creatomate_growth_10k, pexels_api |
 
 ## Snowball Table
 

@@ -24,7 +24,6 @@ No Runway, Luma, generic cinematic AI fallback, web-app-only provider, or auto-r
 - Key metaphor: Veo.
 - Thumbnail background: still frame from Veo clip.
 - Shorts: reuse/crop long-form hero by default.
-- Workflow/data/diagram visuals: Creatomate/cards, not Veo.
 - Per-Short AI hero generation: off by default.
 
 ## Cost Policy
@@ -78,7 +77,3 @@ Service account JSON must never be committed, stored in DB, or printed. `GOOGLE_
 The deprecated preview model id and vague model name are blocked from final resolved config. Duration 10 is blocked; only 4, 6, and 8 seconds are allowed.
 
 The Google Vertex Veo adapter does not persist raw Google responses, tokens, credentials, or service account JSON.
-
-## Non-Scope
-
-M10.4 does not build dashboard UI, final long-form renderer, Creatomate real integration, ElevenLabs real integration, YouTube sync, upload/publish APIs, full long-form final video generation, channel config mutation, backup AI hero provider routing, Runway/Luma fallback, fake traffic, bot engagement, or platform evasion.

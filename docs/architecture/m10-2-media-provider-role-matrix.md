@@ -2,7 +2,6 @@
 
 M10.2 builds the VCOS Media Provider Role Matrix for Quality-First $250 mode. It adds backend contracts, provider classifications, routing decisions, capability gates, budget gates, license evidence gates, package states, and planning APIs.
 
-M10.2 is a routing and planning foundation only. M10.4 binds the AI hero role to Google Vertex Veo, but real execution remains guarded and disabled by default. It does not call ElevenLabs, Creatomate, Veo, or a cloud final renderer unless an explicit real smoke guard is enabled. It does not add dashboard UI, YouTube follow/sync, auto upload, auto publish, auto reupload, TikTok/Facebook analytics learning loops, Envato automation, scraping, vector/RAG, OPA/Cedar, fake traffic, bot engagement, or platform evasion.
 
 ## Production Mode
 
@@ -24,8 +23,7 @@ M10.2 is a routing and planning foundation only. M10.4 binds the AI hero role to
 | ElevenLabs Flash/Turbo | `API_NATIVE_TTS` | `CORE_QUALITY_LAYER` | Voice generation only. |
 | VCOS caption timeline service | `CAPTION_TIMELINE_ENGINE` | `CORE` | Caption timing and caption track planning. |
 | Google Vertex AI - Veo 3.1 Fast video-only 1080p | `AI_VIDEO_HERO_PROVIDER` | `CORE_QUALITY_LAYER` | Premium opening hook, key metaphor, and thumbnail still-frame source only. |
-| Creatomate Essential 2K | `CLOUD_TEMPLATE_RENDERER_LIGHT` | `CORE_LIGHT_RENDER` | Light template renderer for Shorts, cards, thumbnails, lower thirds, and hero composition. |
-| TBD cloud renderer | `CLOUD_FINAL_ASSEMBLY_RENDERER` | `REQUIRED_GAP` | Required gap for full long-form final MP4 assembly. |
+| NativeFFmpegRenderer | `LOCAL_RENDERER_CAPABILITY` | `CORE` | Local compiled final MP4 assembly authority. |
 | VCOS storage/object storage | `MEDIA_STORAGE` | `CORE` | Object refs and durable media storage references. |
 | VCOS MediaQC | `MEDIA_QC_ENGINE` | `CORE` | Correctness/QC gate, integrated with M6 MediaQC. |
 | VCOS publish handoff | `PUBLISH_PACKAGE_BUILDER` | `CORE` | Manual publish handoff package. |
@@ -36,9 +34,7 @@ M10.2 is a routing and planning foundation only. M10.4 binds the AI hero role to
 
 ## Hard Role Boundaries
 
-Creatomate Essential 2K may render thumbnails, thumbnail variants, Shorts final renders, title cards, intro/outro cards, section cards, workflow diagrams, statistic cards, lower thirds, caption burn-in, AI hero compositions, and 9:16/16:9/1:1 template exports.
 
-Creatomate Essential 2K must not generate AI hero footage, generate voice, buy/license stock, decide editorial content, run YouTube analytics, act as the long-form full render backbone, or act as permanent storage/archive.
 
 Google Vertex Veo may create opening hook visuals, key metaphor scenes, high-impact background clips, and still frames for thumbnails. It does not render full edited video, create accurate workflow/data/diagram cards, manage captions, guarantee final brand layout, handle final publish packages, or generate separate AI hero clips for every Short by default.
 
@@ -48,18 +44,14 @@ VCOS owns orchestration, artifact state, provider routing, budget checks, manife
 
 ## Critical Invariant
 
-`LONG_FORM_FINAL_RENDER` requires a configured `CLOUD_FINAL_ASSEMBLY_RENDERER`.
+`LONG_FORM_FINAL_RENDER` requires an approved NativeRenderPlan and the local NativeFFmpeg boundary.
 
-If only Creatomate Essential 2K is available, routing returns `BLOCKED_PROVIDER_CAPABILITY_REQUIRED` with `CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER` and `CLOUD_FINAL_RENDERER_REQUIRED`. VCOS must not claim a final long-form MP4 was generated.
 
-Creatomate may route `LONG_FORM_FINAL_RENDER` only when a Growth 10K-or-higher profile is explicitly configured as a final renderer and its capability entry is `SUPPORTED`.
 
 ## Job Routing
 
-- `THUMBNAIL_RENDER`, `SHORT_RENDER`, `TITLE_CARD_RENDER`, `DIAGRAM_CARD_RENDER`, `STAT_CARD_RENDER`, `LOWER_THIRD_RENDER`, `HERO_COMPOSITION_RENDER`, `PREVIEW_CLIP_RENDER` route to Creatomate Essential 2K.
 - `AI_HERO_GENERATION`, `AI_METAPHOR_GENERATION` route only to `GOOGLE_VERTEX_VEO`.
 - `VOICE_GENERATION`, `LONG_VOICE_GENERATION`, `SHORT_VOICE_GENERATION` route to ElevenLabs.
-- `LONG_FORM_FINAL_RENDER` routes only to a configured cloud final assembly renderer or explicit upgraded Creatomate final renderer.
 - Unknown jobs return `BLOCKED_UNKNOWN_PROVIDER`.
 
 ## Budget Assumptions
@@ -67,7 +59,6 @@ Creatomate may route `LONG_FORM_FINAL_RENDER` only when a Growth 10K-or-higher p
 Configured assumptions for Quality-First $250 mode:
 
 - ElevenLabs Creator is the baseline starting plan; track voice budget by credits/characters where possible.
-- Creatomate Essential 2K: $59/month assumption.
 - Google Vertex Veo: $0.10/second configured for Veo 3.1 Fast 1080p video-only.
 - Default 8s Veo attempt estimate: $0.80.
 - Monthly AI hero cap: $175 by default.
@@ -79,7 +70,6 @@ M10.2 does not invent provider usage prices when provider usage or price is unav
 
 ## Workload Allocation
 
-Creatomate Essential 2K allocation:
 
 - Shorts final renders: 30/month.
 - Thumbnail variants: 30-50/month.
@@ -96,11 +86,9 @@ AI Hero allocation:
 - Retry/variants: budget-dependent.
 - Shorts-specific hero: 0 default; reuse long-form hero.
 - Thumbnail background: still frame from the Veo clip.
-- Workflow/data/diagram sections: Creatomate/cards, not Veo.
 
 ## Gates
 
-- `ProviderCapabilityGate` blocks long-form final render without a capable final renderer, blocks Creatomate Essential 2K as final long-form renderer, and blocks unknown provider/job pairs.
 - `BudgetGate` uses configured media provider budget policies and supplied estimates only.
 - `LicenseEvidenceGate` blocks stock/free/manual assets without confirmed license evidence.
 - `ReusedContentRiskGate` flags template-only or weakly original reuse for review.
@@ -110,7 +98,6 @@ AI Hero allocation:
 
 ## Durable Runtime Tables
 
-M10.2 adds `media_provider_role_profiles`, `provider_capability_matrix_entries`, `media_render_routing_decisions`, `media_provider_budget_policies`, `media_provider_budget_snapshots`, `long_form_render_packages`, `short_render_packages`, `ai_hero_assets`, `creatomate_render_assets`, `thumbnail_variants`, `final_media_refs`, and `license_evidence_records`.
 
 ## Deferred
 

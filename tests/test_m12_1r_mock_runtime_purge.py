@@ -78,9 +78,8 @@ def test_readiness_excludes_mock_providers(db_session) -> None:
         "google-drive",
         "elevenlabs",
         "luma_api",
-        "creatomate_growth_10k",
     }
-    assert payload.provider_summaries[-1].provider_key == "creatomate_growth_10k"
+    assert payload.provider_summaries[-1].provider_key == "luma_api"
 
 
 def test_no_production_module_imports_runtime_mock_provider() -> None:

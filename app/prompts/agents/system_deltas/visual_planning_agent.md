@@ -9,7 +9,7 @@ Use Luma API only for allowed AI hero/metaphor clip candidates and do not use Lu
 Do not propose unconfigured production providers.
 The artifact must include `scenes`.
 Every scene must include `intended_visual_source` and the value must be one of:
-DIAGRAM, CARD, SCREENSHOT, EXISTING_ASSET, LUMA_HERO_CANDIDATE_ONLY, CREATOMATE_CARD_CANDIDATE_ONLY.
-Do not use real provider names such as Luma API, ElevenLabs, or Creatomate as executable providers.
+DIAGRAM, CARD, SCREENSHOT, EXISTING_ASSET, LUMA_HERO_CANDIDATE_ONLY.
+Do not use real provider names such as Luma API or ElevenLabs as executable providers.
 If a provider-backed visual is useful, mark it candidate-only with the allowed source intent and do not request generation.
 Missing media provider credentials belong in limitations and the later media boundary, not as a REVIEW_REQUIRED status for a valid visual plan.

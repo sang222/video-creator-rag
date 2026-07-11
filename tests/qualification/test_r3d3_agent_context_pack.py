@@ -334,7 +334,6 @@ def test_r3d3_source_guard_no_provider_vector_or_upload_paths() -> None:
         "requests.",
         "httpx",
         "GoogleVertexVeoProvider",
-        "CreatomateRender",
         "YouTubeUpload",
         "GoogleDriveUploadService",
         "embedding",

@@ -15,7 +15,6 @@ from app.contracts import (
     AIHeroAssetPlanRequest,
     AIHeroGenerationExecuteRequest,
     AIHeroGenerationJobRead,
-    CreatomateRenderAssetPlanRequest,
     FinalMediaRefCreate,
     LicenseEvidenceGateCheckRequest,
     LicenseEvidenceGateRead,
@@ -45,7 +44,6 @@ from app.core.config import (
 from app.core.time import utc_now
 from app.db.models import (
     AIHeroAsset,
-    CreatomateRenderAsset,
     FinalMediaRef,
     LicenseEvidenceRecord,
     LongFormRenderPackage,
@@ -67,8 +65,7 @@ LLM_SCRIPT_ENGINE = "LLM_SCRIPT_ENGINE"
 API_NATIVE_TTS = "API_NATIVE_TTS"
 CAPTION_TIMELINE_ENGINE = "CAPTION_TIMELINE_ENGINE"
 AI_VIDEO_HERO_PROVIDER = "AI_VIDEO_HERO_PROVIDER"
-CLOUD_TEMPLATE_RENDERER_LIGHT = "CLOUD_TEMPLATE_RENDERER_LIGHT"
-CLOUD_FINAL_ASSEMBLY_RENDERER = "CLOUD_FINAL_ASSEMBLY_RENDERER"
+LOCAL_RENDERER_CAPABILITY = "LOCAL_RENDERER_CAPABILITY"
 MEDIA_STORAGE = "MEDIA_STORAGE"
 MEDIA_QC_ENGINE = "MEDIA_QC_ENGINE"
 PUBLISH_PACKAGE_BUILDER = "PUBLISH_PACKAGE_BUILDER"
@@ -82,16 +79,6 @@ LUMA_API_PROVIDER_KEY = "luma_api"
 
 LONG_FORM_FINAL_RENDER = "LONG_FORM_FINAL_RENDER"
 VOICE_JOBS = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
-CREATOMATE_LIGHT_JOBS = {
-    "THUMBNAIL_RENDER",
-    "SHORT_RENDER",
-    "TITLE_CARD_RENDER",
-    "DIAGRAM_CARD_RENDER",
-    "STAT_CARD_RENDER",
-    "LOWER_THIRD_RENDER",
-    "HERO_COMPOSITION_RENDER",
-    "PREVIEW_CLIP_RENDER",
-}
 AI_HERO_JOBS = {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}
 MEDIA_JOB_TYPES = {
     "TOPIC_DECISION",
@@ -545,51 +532,13 @@ class MediaRenderJobRouterService:
         return decision
 
     def _decide_long_form_final(self, *, data: MediaRenderRoutingDecisionRequest, job_type: str) -> MediaRenderRoutingDecision:
-        cloud = _configured_final_renderer(self.session)
-        if cloud is not None:
-            role, entry = cloud
-            return self._record_decision(
-                data=data,
-                job_type=job_type,
-                selected_provider_type=role.provider_type,
-                selected_provider_key=role.provider_key,
-                routing_result="ROUTED",
-                capability_entry_id=entry.id,
-                technical_appendix={"reason_code": "CLOUD_FINAL_RENDERER_REQUIRED", "real_provider_execution": False, **data.technical_appendix},
-            )
-        creatomate_growth = _configured_creatomate_growth_final_renderer(self.session)
-        if creatomate_growth is not None:
-            role, entry = creatomate_growth
-            return self._record_decision(
-                data=data,
-                job_type=job_type,
-                selected_provider_type=role.provider_type,
-                selected_provider_key=role.provider_key,
-                routing_result="ROUTED",
-                capability_entry_id=entry.id,
-                technical_appendix={
-                    "reason_code": "CREATOMATE_AS_FINAL_RENDERER",
-                    "plan": role.monthly_budget_assumption.get("plan"),
-                    "real_provider_execution": False,
-                    **data.technical_appendix,
-                },
-            )
-        essential_entry = _blocked_light_renderer_entry(self.session, job_type=LONG_FORM_FINAL_RENDER)
         return self._record_decision(
             data=data,
             job_type=job_type,
-            routing_result="BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
-            blocker_reason="LONG_FORM_FINAL_RENDER requires a configured CLOUD_FINAL_ASSEMBLY_RENDERER. Creatomate Essential 2K is blocked from acting as the full long-form final render backbone.",
-            capability_entry_id=essential_entry.id if essential_entry else None,
-            technical_appendix={
-                "reason_codes": [
-                    "LONG_FORM_FINAL_RENDER_BLOCKED_PROVIDER_REQUIRED",
-                    "CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER",
-                    "CLOUD_FINAL_RENDERER_REQUIRED",
-                ],
-                "real_provider_execution": False,
-                **data.technical_appendix,
-            },
+            selected_provider_type=LOCAL_RENDERER_CAPABILITY,
+            selected_provider_key="native_ffmpeg_renderer",
+            routing_result="ROUTED",
+            technical_appendix={"reason_code": "NATIVE_FFMPEG_RENDER_AUTHORITY", "local_renderer": True, "real_provider_execution": False, **data.technical_appendix},
         )
 
     def _record_decision(
@@ -674,11 +623,7 @@ class ProviderCapabilityGateService:
             duration_block = _luma_duration_block(LumaHeroVideoConfigService(self.session).resolve(), data.target_duration_seconds)
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block or entry.capability != "SUPPORTED":
-            reason = (
-                "CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER"
-                if role.provider_type == CLOUD_TEMPLATE_RENDERER_LIGHT and job_type == LONG_FORM_FINAL_RENDER
-                else "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
-            )
+            reason = "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
             return ProviderCapabilityGateRead(
                 decision="BLOCK",
                 provider_key=role.provider_key,
@@ -1002,7 +947,6 @@ class LongFormRenderPackageService:
             caption_track_id=data.caption_track_id,
             visual_plan_id=data.visual_plan_id,
             ai_hero_asset_refs=data.ai_hero_asset_refs,
-            creatomate_asset_refs=data.creatomate_asset_refs,
             approved_asset_refs=data.approved_asset_refs,
             thumbnail_variant_refs=data.thumbnail_variant_refs,
             music_sfx_refs=data.music_sfx_refs,
@@ -1222,46 +1166,6 @@ class AIHeroGenerationService:
         )
 
 
-class CreatomateRenderAssetPlanningService:
-    def __init__(self, session: Session):
-        self.session = session
-
-    def plan(self, *, video_project_id: uuid.UUID, data: CreatomateRenderAssetPlanRequest) -> CreatomateRenderAsset:
-        project = _require_project(self.session, video_project_id)
-        decision = MediaRenderJobRouterService(self.session).decide(
-            data=MediaRenderRoutingDecisionRequest(
-                company_id=project.company_id,
-                channel_workspace_id=project.channel_workspace_id,
-                video_project_id=project.id,
-                job_type=data.job_type,
-            )
-        )
-        if decision.routing_result != "ROUTED":
-            raise ValidationFailureError(decision.blocker_reason or f"job cannot route to Creatomate: {data.job_type}")
-        asset = CreatomateRenderAsset(
-            company_id=project.company_id,
-            channel_workspace_id=project.channel_workspace_id,
-            video_project_id=project.id,
-            short_candidate_id=data.short_candidate_id,
-            job_type=data.job_type.upper(),
-            template_key=data.template_key,
-            input_payload=data.input_payload,
-            output_ref=None,
-            provider_type=decision.selected_provider_type or CLOUD_FINAL_ASSEMBLY_RENDERER,
-            provider_key=decision.selected_provider_key,
-            render_state="READY_FOR_PROVIDER",
-        )
-        self.session.add(asset)
-        self.session.flush()
-        return asset
-
-    def require(self, asset_id: uuid.UUID) -> CreatomateRenderAsset:
-        asset = self.session.get(CreatomateRenderAsset, asset_id)
-        if asset is None:
-            raise NotFoundError(f"Creatomate render asset not found: {asset_id}")
-        return asset
-
-
 class ThumbnailVariantPlanningService:
     def __init__(self, session: Session):
         self.session = session
@@ -1287,7 +1191,7 @@ class ThumbnailVariantPlanningService:
                 subtitle_text=item.subtitle_text,
                 hero_still_ref=item.hero_still_ref,
                 output_ref=None,
-                provider_type=decision.selected_provider_type or CLOUD_FINAL_ASSEMBLY_RENDERER,
+                provider_type=decision.selected_provider_type or LOCAL_RENDERER_CAPABILITY,
                 provider_key=decision.selected_provider_key,
                 state="READY_FOR_PROVIDER" if decision.routing_result == "ROUTED" else "DRAFT",
             )
@@ -1334,49 +1238,10 @@ def _provider_key_for_job(job_type: str) -> str | None:
 
 def _route_reason_code(provider_type: str) -> str:
     return {
-        CLOUD_TEMPLATE_RENDERER_LIGHT: "CREATOMATE_GROWTH_10K_RENDER_ROUTED",
-        CLOUD_FINAL_ASSEMBLY_RENDERER: "CREATOMATE_GROWTH_10K_RENDER_ROUTED",
+        LOCAL_RENDERER_CAPABILITY: "NATIVE_FFMPEG_RENDER_AUTHORITY",
         API_NATIVE_TTS: "ELEVENLABS_VOICE_ROUTED",
         AI_VIDEO_HERO_PROVIDER: "LUMA_AI_HERO_PROVIDER_ROUTED",
     }.get(provider_type, "ROUTING_DECISION_CREATED")
-
-
-def _configured_final_renderer(session: Session) -> tuple[MediaProviderRoleProfile, ProviderCapabilityMatrixEntry] | None:
-    rows = session.execute(
-        select(MediaProviderRoleProfile, ProviderCapabilityMatrixEntry)
-        .join(ProviderCapabilityMatrixEntry, ProviderCapabilityMatrixEntry.provider_key == MediaProviderRoleProfile.provider_key)
-        .where(MediaProviderRoleProfile.provider_type == CLOUD_FINAL_ASSEMBLY_RENDERER)
-        .where(MediaProviderRoleProfile.is_enabled.is_(True))
-        .where(MediaProviderRoleProfile.supports_real_execution.is_(True))
-        .where(ProviderCapabilityMatrixEntry.job_type == LONG_FORM_FINAL_RENDER)
-        .where(ProviderCapabilityMatrixEntry.capability == "SUPPORTED")
-    ).all()
-    return rows[0] if rows else None
-
-
-def _blocked_light_renderer_entry(session: Session, *, job_type: str) -> ProviderCapabilityMatrixEntry | None:
-    return session.scalars(
-        select(ProviderCapabilityMatrixEntry)
-        .where(ProviderCapabilityMatrixEntry.provider_type == CLOUD_TEMPLATE_RENDERER_LIGHT)
-        .where(ProviderCapabilityMatrixEntry.job_type == job_type)
-        .where(ProviderCapabilityMatrixEntry.capability == "BLOCKED_BY_PLAN")
-    ).first()
-
-
-def _configured_creatomate_growth_final_renderer(session: Session) -> tuple[MediaProviderRoleProfile, ProviderCapabilityMatrixEntry] | None:
-    rows = session.execute(
-        select(MediaProviderRoleProfile, ProviderCapabilityMatrixEntry)
-        .join(ProviderCapabilityMatrixEntry, ProviderCapabilityMatrixEntry.provider_key == MediaProviderRoleProfile.provider_key)
-        .where(MediaProviderRoleProfile.provider_type == CLOUD_TEMPLATE_RENDERER_LIGHT)
-        .where(MediaProviderRoleProfile.is_enabled.is_(True))
-        .where(ProviderCapabilityMatrixEntry.job_type == LONG_FORM_FINAL_RENDER)
-        .where(ProviderCapabilityMatrixEntry.capability == "SUPPORTED")
-    ).all()
-    for role, entry in rows:
-        budget = role.monthly_budget_assumption or {}
-        if budget.get("plan") == "GROWTH_10K" and budget.get("allow_long_form_final_renderer") is True:
-            return role, entry
-    return None
 
 
 def _duration_block(entry: ProviderCapabilityMatrixEntry, target_duration_seconds: Decimal | None) -> str | None:

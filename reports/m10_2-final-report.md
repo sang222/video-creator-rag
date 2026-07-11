@@ -51,7 +51,6 @@ PASS
 - Render routing decisions.
 - Capability, budget, license evidence, reused-content, MediaQC gates.
 - Long-form and Short render package planning.
-- AI hero, Creatomate asset, thumbnail variant planning.
 - Final media refs and license evidence records.
 - Read/planning/routing API endpoints only.
 - Provider API key settings are env-driven; real values belong in local `.env`, while M10.2 still makes no real provider calls.
@@ -66,15 +65,12 @@ PASS
 - `long_form_render_packages`
 - `short_render_packages`
 - `ai_hero_assets`
-- `creatomate_render_assets`
 - `thumbnail_variants`
 - `final_media_refs`
 - `license_evidence_records`
 
 ## Services/API added
 
-- Services: `MediaProviderRoleService`, `ProviderCapabilityMatrixService`, `MediaRenderJobRouterService`, `LongFormRenderPackageService`, `ShortRenderPackageService`, `AIHeroAssetPlanningService`, `CreatomateRenderAssetPlanningService`, `ThumbnailVariantPlanningService`, `MediaProviderBudgetService`, `ProviderCapabilityGateService`, `LicenseEvidenceGateService`, `ReusedContentRiskGateService`, `MediaQCGateService`, `MediaProviderReadService`.
-- API: `/media-provider-roles`, `/media-provider-capabilities`, `/media-render-routing/*`, `/long-form-render-packages/*`, `/short-render-packages/*`, `/ai-hero-assets/*`, `/creatomate-render-assets/*`, `/thumbnail-variants/*`, `/media-provider-budgets*`, `/media-provider-gates/*`.
 
 ## Provider role matrix
 
@@ -83,8 +79,7 @@ PASS
 - ElevenLabs Flash/Turbo -> `API_NATIVE_TTS`.
 - VCOS caption timeline -> `CAPTION_TIMELINE_ENGINE`.
 - Cinematic AI Hero -> `AI_VIDEO_HERO_PROVIDER`.
-- Creatomate Essential 2K -> `CLOUD_TEMPLATE_RENDERER_LIGHT`.
-- TBD cloud final renderer -> `CLOUD_FINAL_ASSEMBLY_RENDERER`, `REQUIRED_GAP`.
+- NativeFFmpegRenderer -> `LOCAL_RENDERER_CAPABILITY`, `CORE`.
 - VCOS storage -> `MEDIA_STORAGE`.
 - VCOS MediaQC -> `MEDIA_QC_ENGINE`.
 - VCOS publish handoff -> `PUBLISH_PACKAGE_BUILDER`.
@@ -95,7 +90,6 @@ PASS
 
 ## Render job routing
 
-- Shorts/cards/thumbnails/preview route to Creatomate Essential 2K.
 - Voice jobs route to ElevenLabs role.
 - AI hero/metaphor jobs route to Cinematic AI Hero role.
 - `LONG_FORM_FINAL_RENDER` blocks without configured final renderer.
@@ -103,7 +97,6 @@ PASS
 
 ## Gates
 
-- `ProviderCapabilityGate`: blocks Creatomate Essential 2K for long-form final render, passes light render jobs, enforces duration/aspect capability.
 - `BudgetGate`: uses configured caps/assumptions and supplied usage only.
 - `LicenseEvidenceGate`: blocks stock/free/manual assets without confirmed evidence.
 - `ReusedContentRiskGate`: flags template-only/weak originality.
@@ -112,12 +105,9 @@ PASS
 ## Package behavior
 
 - `LongFormRenderPackage`: can hold voice/caption/visual/hero/card/thumbnail/manifest refs; becomes `BLOCKED_PROVIDER_CAPABILITY_REQUIRED` when final renderer is absent.
-- `ShortRenderPackage`: creates 9:16 package under 59 seconds and routes to Creatomate light renderer.
-- AI hero, Creatomate, and thumbnail planning create provider-ready placeholders only, not generated/rendered assets.
 
 ## Invariants verified
 
-- Creatomate Essential 2K limitation verified.
 - Cloud final renderer gap verified.
 - YouTube-only analytics authority preserved.
 - No real media provider calls.
@@ -127,7 +117,6 @@ PASS
 ## Scope explicitly not built
 
 - No real ElevenLabs call.
-- No real Creatomate call.
 - No real AI Hero provider call.
 - No real cloud final renderer call.
 - No auto publish/upload/reupload.

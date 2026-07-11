@@ -9,7 +9,6 @@ Source notes:
 - Local VCOS reports state that the first scripted video package path exists and stops before media generation.
 - Local VCOS reports state that upload/publish is manual handoff only; VCOS must not upload or publish automatically.
 - Local channel contract for Small Team AI targets practical AI workflow explainers for small teams.
-- Local provider readiness shows ElevenLabs and Creatomate are not fully configured for paid media generation.
 
 Facts:
 
@@ -29,7 +28,6 @@ Assumptions:
 Open questions:
 
 - Which exact ElevenLabs voice should be selected after provider onboarding?
-- Which Creatomate template should be used after renderer onboarding?
 - Whether a Veo hero shot is worth the cost for this video.
 
 Conflicts:

@@ -96,7 +96,6 @@ Hard boundaries were preserved:
 
 - no ElevenLabs
 - no Luma
-- no Creatomate
 - no Pexels
 - no Drive upload
 - no YouTube upload/publish/reupload

@@ -457,7 +457,7 @@ function AdvancedManualChannelInitForm() {
           <ReadOnly label="AI hero audio" value="False" />
           <ReadOnly label="AI hero allowed use" value="Hero shot, hard-to-find visual" />
           <ReadOnly label="AI hero forbidden use" value="Data diagram, workflow chart, factual evidence visualization" />
-          <ReadOnly label="Renderer" value="Creatomate Growth 10K" />
+          <ReadOnly label="Renderer" value="NativeFFmpegRenderer" />
           <ReadOnly label="Storage archive" value="Google Drive" />
           <Checkbox label="Drive offload enabled" registration={form.register("drive_offload_enabled")} />
         </Section>

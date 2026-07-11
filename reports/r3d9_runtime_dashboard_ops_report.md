@@ -215,7 +215,6 @@ Không có execute button. Nếu DX2 drift guard fail, panel không được coi
 
 - R3D9 endpoints là GET-only.
 - R3D9 service chỉ query/serialize existing runtime records.
-- Không gọi ElevenLabs/Luma/Creatomate/Pexels/Drive/YouTube upload.
 - `ProviderCostOpsRead.will_execute=false`.
 - Test scan `app/services/r3d9.py` không thấy token execute/upload/scrape/Studio.
 - Frontend test assert không có button daily/NoView/vector/provider/render/upload/YouTube.

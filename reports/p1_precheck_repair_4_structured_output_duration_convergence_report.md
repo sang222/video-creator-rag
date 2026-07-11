@@ -137,7 +137,6 @@ For both 5k and 5l:
 | no_network_call_made | true | true |
 | no_final_media_ref | true | true |
 | no_human_upload_task | true | true |
-| observed_provider_keys | creatomate_growth_10k, elevenlabs, luma_api | creatomate_growth_10k, elevenlabs, luma_api |
 
 ### Snowball
 

@@ -65,36 +65,36 @@ items:
     reason_code: ROUTING_DECISION_CREATED
   - key: THUMBNAIL_RENDER
     job_type: THUMBNAIL_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: SHORT_RENDER
     job_type: SHORT_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: TITLE_CARD_RENDER
     job_type: TITLE_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: DIAGRAM_CARD_RENDER
     job_type: DIAGRAM_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: STAT_CARD_RENDER
     job_type: STAT_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: LOWER_THIRD_RENDER
     job_type: LOWER_THIRD_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: HERO_COMPOSITION_RENDER
     job_type: HERO_COMPOSITION_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: PREVIEW_CLIP_RENDER
     job_type: PREVIEW_CLIP_RENDER
-    provider_key: creatomate_growth_10k
-    reason_code: CREATOMATE_GROWTH_10K_RENDER_ROUTED
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_ROUTED
   - key: LONG_VOICE_GENERATION
     job_type: LONG_VOICE_GENERATION
     provider_key: elevenlabs

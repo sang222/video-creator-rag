@@ -123,7 +123,6 @@ Latest `risk_limitations_summary`:
 - `channel_config_mutated=false`
 - `learning_auto_promotion=false`
 
-No ElevenLabs, Luma, Creatomate, Pexels, Drive, YouTube, media generation, final media creation, HumanUploadTask, ProviderJobSnapshot SUBMITTED, or PaidProviderCallLedger EXECUTED occurred.
 
 ## P0/P1/P2/P3
 

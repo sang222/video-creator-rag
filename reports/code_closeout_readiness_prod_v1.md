@@ -38,7 +38,6 @@ The prior PPP1 report remains present:
 | Area | Current status | Evidence | Closeout decision |
 | --- | --- | --- | --- |
 | 1. Runtime LTS live verifier | `PASS` | `GET /ops/runtime-lts-freeze-check`: no blockers, `no_provider_media_upload_execution=true` | GO |
-| 2. ProviderStackDriftGuard | `PASS` | Canonical active keys: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`; stale keys `[]` | GO |
 | 3. INT1A Ollama real smoke | `PASS` | `reports/int1_post_freeze_integration_smoke_ollama_drive_snowball_report.md`; Ollama smoke passed, no media providers | GO |
 | 4. INT1B Drive archive/path | `PASS` | `reports/post_freeze_drive_archive_path_fix_report.md`; archive path normalized, Drive remains archive/storage boundary | GO |
 | 5. Package Repair | `PASS` | 9 human-approved patches applied; latest gate rerun `PASS`; queue closed | GO |
@@ -68,8 +67,6 @@ Provider stack evidence from the same verifier:
 | Field | Value |
 | --- | --- |
 | `status` | `PASS` |
-| `expected_provider_keys` | `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api` |
-| `found_active_provider_keys` | `creatomate_growth_10k`, `elevenlabs`, `luma_api`, `pexels_api` |
 | `stale_provider_keys` | `[]` |
 | `no_provider_call_made` | `true` |
 
@@ -93,7 +90,6 @@ Provider rows:
 | --- | --- | --- |
 | `elevenlabs` | `NOT_CONFIGURED` | `false` |
 | `luma_api` | `BLOCKED_PROVIDER_NOT_CONFIGURED` | `false` |
-| `creatomate_growth_10k` | `NOT_CONFIGURED` | `false` |
 | `pexels_api` | `NOT_CONFIGURED` | `false` |
 | `google_drive_archive` | `DISABLED` | `false` |
 | `youtube_readonly` | `READY_FOR_FUTURE_EXECUTION` | `false` |
@@ -183,7 +179,6 @@ No evidence of:
 
 - ElevenLabs execution.
 - Luma execution.
-- Creatomate execution.
 - Pexels execution.
 - Drive upload.
 - YouTube upload/publish/reupload.

@@ -137,7 +137,6 @@ Safety checks:
 - Manual next action: `REVIEW_PACKAGE`
 - Handoff flags: `manual_upload_only=true`, `no_upload_api_by_policy=true`, `no_upload_or_publish_calls_made=true`
 
-Conclusion: package is a handoff artifact only. No ElevenLabs/Luma/Creatomate/Pexels/Drive/YouTube action was attempted.
 
 ## R3D4 Gate Evidence
 
@@ -230,10 +229,8 @@ Frontend ops forbidden button scan: no hits.
 - Expected canonical providers:
   - `elevenlabs`
   - `luma_api`
-  - `creatomate_growth_10k`
   - `pexels_api`
 - Found active providers:
-  - `creatomate_growth_10k`
   - `elevenlabs`
   - `luma_api`
   - `pexels_api`
@@ -243,7 +240,6 @@ Frontend ops forbidden button scan: no hits.
 - Read model appendix: `read_only=true`, `provider_boundary_preflight_not_called=true`, `no_network_call_made_by_read_model=true`
 
 Provider blockers/readiness:
-- missing credentials/config for ElevenLabs, Luma, Creatomate, Pexels
 - `GOOGLE_DRIVE_ARCHIVE_DISABLED`
 - `PROVIDER_REAL_EXECUTION_DISABLED`
 - `HUMAN_PAID_APPROVAL_PENDING`

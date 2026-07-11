@@ -10,27 +10,21 @@
 
 ## Chuẩn hóa provider key
 
-- Provider active canonical: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`.
-- Stale key bị reject/detect: `GOOGLE_VERTEX_VEO`, `google-vertex-veo`, `creatomate_essential_2k`, `cloud_final_assembly_renderer_tbd`, `pexels_pixabay_free_fallback`, `elevenlabs_flash_turbo`.
 - Model/plan/tier là metadata; `provider_key` giữ canonical.
 
 ## Routing / capability
 
 - `AI_HERO_GENERATION`, `AI_METAPHOR_GENERATION` route tới `luma_api`.
-- `LONG_FORM_FINAL_RENDER`, `TEMPLATE_RENDER`, `CARD_RENDER`, `THUMBNAIL_COMPOSITION`, `SHORT_RENDER` được `creatomate_growth_10k` support.
 - `pexels_api` là key fallback visual miễn phí duy nhất.
 
 ## M12 readiness label
 
-- Hiển thị: ElevenLabs, Luma API, Creatomate Growth 10K, Pexels API fallback, YouTube read-only/manual, Drive archive optional.
-- Không còn wording active cho Veo / Cloud final renderer TBD / Creatomate Essential trong readiness UI.
 
 ## ProviderStackDriftGuard
 
 - Read model mới trả `PASS` hoặc `PROVIDER_STACK_DRIFT`.
 - Check active catalogs + M2 readiness.
 - Khi drift, R3D9 Provider/Cost read model set `snapshot_state=PROVIDER_STACK_DRIFT`, next action `PROVIDER_STACK_DRIFT`.
-- Kết quả hiện tại: `PASS`, found `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`.
 
 ## Fix PaidAttemptLimit
 
@@ -43,7 +37,6 @@
 - Thêm `docs/architecture/provider_stack_freeze.md`.
 - Cập nhật source-of-truth và prompt registry docs.
 - Luma duration lock: allowed `4/6/8`, max `8s`; không mở `10s`.
-- Creatomate granular template IDs ghi là yêu cầu future activation; `CREATOMATE_TEMPLATE_ID` vẫn là MVP default.
 
 ## Tests run
 
@@ -61,10 +54,8 @@
 ## Bằng chứng không có provider/media/upload thật
 
 - DX2 service chỉ read/validation.
-- M12 smoke mặc định vẫn `SKIPPED` cho Luma/Creatomate.
 - ProviderStackDriftGuard trả `no_provider_call_made=true`.
 - Test assert không có `ProviderAttempt`, không có `RealSmokeRun`, không có provider/media/upload execution trong DX2 paid-boundary path.
-- Không thêm YouTube upload, Drive upload, Pexels search/download, Luma generation, ElevenLabs generation, Creatomate render submission.
 
 ## R3D9 go/no-go
 

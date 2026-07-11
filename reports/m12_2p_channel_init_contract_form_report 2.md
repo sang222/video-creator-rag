@@ -99,7 +99,6 @@ Compliant. No old provider smoke tests were run.
 - Real video generation
 - TTS generation
 - Veo generation
-- Creatomate render
 - YouTube upload/publish/reupload
 - Analytics learning
 - Prompt mutation

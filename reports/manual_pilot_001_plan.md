@@ -9,7 +9,6 @@ Verify that the frozen VCOS Runtime LTS v1 can be operated through dashboard/man
 ## Non-Goals
 
 - Do not create real video/media.
-- Do not call ElevenLabs, Luma API, Creatomate Growth 10K, Pexels API, Drive, or YouTube.
 - Do not submit provider render jobs.
 - Do not search/download Pexels.
 - Do not upload to Drive.
@@ -47,7 +46,6 @@ Verify that the frozen VCOS Runtime LTS v1 can be operated through dashboard/man
 6. First scripted package
    - Review the existing first scripted package or package fixture.
    - Confirm the package summary is production-ready as a handoff artifact only.
-   - Confirm this does not mean Creatomate render, ElevenLabs voice, Luma hero video, Pexels fallback, Drive upload, or YouTube upload.
 
 7. R3D4 output validation/deterministic gates
    - Review `AgentOutputValidationRun`, `R3D4GateBatchRun`, and `R3D4GateRun` summaries.
@@ -66,7 +64,6 @@ Verify that the frozen VCOS Runtime LTS v1 can be operated through dashboard/man
 
 10. Provider/Cost panel read-only boundary
     - Review provider readiness/cost blocker summary.
-    - Confirm canonical keys are `elevenlabs`, `luma_api`, `creatomate_growth_10k`, and `pexels_api`.
     - Confirm stale provider keys remain inactive/rejected.
     - Confirm cost/firewall state is read-only and `will_execute=false`.
 

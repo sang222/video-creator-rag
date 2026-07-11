@@ -76,8 +76,6 @@ def _settings(**overrides) -> Settings:
         "llm_router_real_smoke": False,
         "elevenlabs_api_key": None,
         "elevenlabs_plan": None,
-        "creatomate_api_key": None,
-        "creatomate_plan": None,
         "ai_hero_provider": None,
         "veo_real_execution_enabled": False,
         "veo_real_smoke": False,
@@ -278,7 +276,6 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
         "ProviderReadinessSummaryAgent": {
             "providers": {
                 "elevenlabs": "NEEDS_CREDENTIAL",
-                "creatomate_growth_10k": "NEEDS_CREDENTIAL",
                 "luma_api": "NOT_CONFIGURED_OPTIONAL",
             }
         },
@@ -353,12 +350,11 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
     assert boundary.no_provider_calls_confirmed is True
     assert boundary.provider_readiness["elevenlabs"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
-    assert boundary.provider_readiness["creatomate_growth_10k"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
     assert boundary.provider_readiness["luma_api"]["required"] is False
     assert boundary.operator_summary_vi == (
         "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
     )
-    assert boundary.next_action == "Cấu hình ElevenLabs và Creatomate Growth 10K; Luma API chỉ là AI hero optional và không được gọi trong VCOS."
+    assert "ElevenLabs" in boundary.next_action and "NativeFFmpeg" in boundary.next_action
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
     assert db_session.query(RealSmokeRun).count() == 0
@@ -487,7 +483,7 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
     assert db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key == "OLLAMA").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert db_session.query(LLMRunSnapshot).filter(LLMRunSnapshot.provider == "ollama").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     forbidden_attempts = db_session.query(ProviderAttempt).filter(
-        ProviderAttempt.provider_key.in_(["ELEVENLABS", "CREATOMATE_GROWTH_10K", "LUMA_API", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"])
+        ProviderAttempt.provider_key.in_(["ELEVENLABS", "LUMA_API", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"])
     ).all()
     assert forbidden_attempts == []
 
@@ -516,7 +512,7 @@ def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qua
         if output["agent_key"] == "ProviderReadinessSummaryAgent":
             output["status"] = "BLOCK"
             output["artifact"] = {}
-            output["next_action"] = "Configure ElevenLabs and Creatomate before media generation."
+            output["next_action"] = "Configure ElevenLabs before media generation."
 
     package = FirstScriptedVideoPackageService(
         db_session,
@@ -802,7 +798,7 @@ def test_m12_2s_visual_repair_normalizes_covers_refs_and_candidate_source() -> N
     visual = {
         "scenes": [
             {"scene_id": "SCN01", "sentence_range": ["S1"], "intended_visual_source": "LUMA_HERO_CANDIDATE_ONLY"},
-            {"scene_id": "SCN02", "sentence_ids_covered": ["S2"], "intended_visual_source": "CREATOMATE_CARD_CANDIDATE_ONLY"},
+            {"scene_id": "SCN02", "sentence_ids_covered": ["S2"], "intended_visual_source": "CARD"},
             {"scene_id": "SCN03", "narration_sentence_ids": ["S3"], "intended_visual_source": "CARD"},
         ]
     }

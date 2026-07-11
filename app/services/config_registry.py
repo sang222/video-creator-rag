@@ -472,7 +472,6 @@ class ConfigRegistryService:
             "long_form_render_package_state_catalog": SimpleKeyCatalogItem,
             "short_render_package_state_catalog": SimpleKeyCatalogItem,
             "ai_hero_asset_state_catalog": SimpleKeyCatalogItem,
-            "creatomate_render_asset_state_catalog": SimpleKeyCatalogItem,
             "thumbnail_variant_state_catalog": SimpleKeyCatalogItem,
             "final_media_type_catalog": SimpleKeyCatalogItem,
             "license_status_catalog": SimpleKeyCatalogItem,

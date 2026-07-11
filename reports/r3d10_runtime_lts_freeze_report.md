@@ -32,7 +32,6 @@ Không thêm migration.
 - `runtime_lts_invariant_catalog.md`: invariant catalog dạng machine-readable table.
 - `post_freeze_protocol.md`: P0/P1/P2/P3, patch window, staging-first, regression gate.
 - `production_pain_log_policy.md`: rule cho P2/P3 ProductionPainLog.
-- `provider_stack_freeze.md`: cập nhật label Luma API / Creatomate Growth 10K / YouTube read-only/manual / Drive optional archive.
 - `source-of-truth.md`: thêm Runtime LTS v1 và sửa wording M12 renderer gap theo DX2/R3D10.
 
 ## Verifier behavior
@@ -82,15 +81,12 @@ Canonical active keys:
 
 - `elevenlabs`
 - `luma_api`
-- `creatomate_growth_10k`
 - `pexels_api`
 
 Verifier block nếu thấy active stale key:
 
 - `GOOGLE_VERTEX_VEO`
 - `google-vertex-veo`
-- `creatomate_essential_2k`
-- `cloud_final_assembly_renderer_tbd`
 - `pexels_pixabay_free_fallback`
 - `elevenlabs_flash_turbo`
 
@@ -116,7 +112,6 @@ Provider execution flags default false. Paid ledger default fixture không có `
 ## Provider execution/upload prohibition proof
 
 - R3D10 chỉ thêm read-only verifier + GET endpoint.
-- Không gọi ElevenLabs/Luma/Creatomate/Pexels/Drive/YouTube.
 - Không tạo ProviderAttempt/MediaRenderJob/upload job.
 - Không thêm YouTube upload API route.
 - Không thêm dashboard job-control button.

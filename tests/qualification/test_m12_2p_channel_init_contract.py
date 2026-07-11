@@ -99,7 +99,7 @@ def _contract(**overrides):
             "ai_hero_audio": False,
             "ai_hero_allowed_use": ["hero_shot", "hard_to_find_visual"],
             "ai_hero_forbidden_use": ["data_diagram", "workflow_chart", "factual_evidence_visualization"],
-            "renderer": "Creatomate Growth 10K",
+            "renderer": "NativeFFmpegRenderer",
             "storage_archive": "Google Drive",
             "drive_offload_enabled": True,
         },
@@ -202,7 +202,7 @@ def test_m12_2p_complete_contract_compiles_snapshot_and_activates(db_session) ->
     assert snapshot.compiled_payload["contract_status"] == "COMPLETE"
     assert contract["market_locale"]["primary_market"] == "VN"
     assert contract["platform_strategy"]["publish_mode"] == "human_handoff_only"
-    assert contract["media_policy"]["renderer"] == "Creatomate Growth 10K"
+    assert contract["media_policy"]["renderer"] == "NativeFFmpegRenderer"
     assert contract["learning_policy"]["authority"] == "youtube_analytics_only"
 
     activated = ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)

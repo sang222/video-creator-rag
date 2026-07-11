@@ -119,8 +119,6 @@ C8 common_media_constraints
 * AI hero: Luma API only.
 * Luma mode: video_only, audio=false.
 * Luma durations: 4, 6, 8 seconds only; max 8 seconds.
-* Renderer: Creatomate Growth 10K.
-* Creatomate is CLOUD_RENDER_ENGINE and final renderer when configured.
 * Google Drive access: CTA only.
 * Do not propose Runway/Luma/Envato as production default.
 * Do not use Luma for diagrams/data charts.

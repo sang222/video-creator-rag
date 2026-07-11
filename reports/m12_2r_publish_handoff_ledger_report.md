@@ -170,7 +170,6 @@ PASS.
 
 - Did not run old M12 real-smoke/provider-smoke tests.
 - Did not call media providers.
-- Did not enable Veo, ElevenLabs, Creatomate, Google Drive upload, or YouTube upload.
 - Did not add mock fallback.
 - Did not create dry-run success.
 

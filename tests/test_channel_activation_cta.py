@@ -190,7 +190,7 @@ def _complete_contract_payload() -> dict:
             "ai_hero_audio": False,
             "ai_hero_allowed_use": ["hero_shot"],
             "ai_hero_forbidden_use": ["data_diagram"],
-            "renderer": "Creatomate Growth 10K",
+            "renderer": "NativeFFmpegRenderer",
             "storage_archive": "Google Drive",
             "drive_offload_enabled": True,
         },

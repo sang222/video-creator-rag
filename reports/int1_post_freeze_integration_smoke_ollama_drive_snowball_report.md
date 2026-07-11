@@ -66,7 +66,6 @@ RuntimeLTSFreezeVerifier:
 
 ProviderStackDriftGuard:
 - `status=PASS`
-- canonical providers: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`
 - stale active providers: none
 - `no_provider_call_made=true`
 
@@ -116,7 +115,6 @@ Selected safe fixture evidence:
 - package_status: `WAITING_PROVIDER_CONFIG`
 - fake_router_call_count: 13
 - boundary_status: `BLOCKED_PROVIDER_NOT_CONFIGURED`
-- boundary_blocked_reasons: `ELEVENLABS_NOT_CONFIGURED`, `CREATOMATE_GROWTH_10K_NOT_CONFIGURED`
 
 This fixture creates only test DB evidence and package handoff artifacts. It does not create media, provider jobs, Drive upload, or YouTube upload.
 
@@ -231,7 +229,6 @@ Drive archive focused rerun exception:
 Hard boundaries confirmed:
 - no ElevenLabs generation
 - no Luma generation
-- no Creatomate render submit
 - no Pexels search/download
 - no YouTube upload/publish/reupload
 - no provider media job

@@ -49,7 +49,6 @@ vcos integrations smoke --provider youtube-owner
 vcos integrations smoke --provider google-drive
 vcos integrations smoke --provider google-vertex-veo
 vcos integrations smoke --provider elevenlabs
-vcos integrations smoke --provider creatomate
 ```
 
 ## Real Smoke Guard Policy
@@ -62,7 +61,6 @@ Default behavior is `SKIPPED`. Real calls require explicit env flags:
 - Google Drive upload: `VCOS_DRIVE_REAL_UPLOAD_SMOKE=true`.
 - Google Vertex Veo: `VCOS_VEO_REAL_EXECUTION_ENABLED=true` and `VCOS_VEO_REAL_SMOKE=true`.
 - ElevenLabs: no real TTS is added in M12.
-- Creatomate: no real render is added in M12.
 
 If a smoke flag is enabled but credential/config is missing, M12 records `BLOCKED`, not fake success.
 
@@ -106,21 +104,13 @@ VCOS_VEO_REAL_EXECUTION_ENABLED=false
 VCOS_VEO_REAL_SMOKE=false
 ```
 
-Creatomate:
 
 ```bash
-VCOS_RENDER_PROVIDER=creatomate
-CREATOMATE_PLAN=growth_10k
-CREATOMATE_MONTHLY_CREDITS=10000
-CREATOMATE_MONTHLY_BUDGET_USD=149
-CREATOMATE_API_KEY=
 ```
 
 Cloud Final Renderer gap:
 
 ```bash
-CLOUD_FINAL_RENDERER_PROVIDER=
-CLOUD_FINAL_RENDERER_API_KEY=
 ```
 
 These values remain empty until a later milestone selects/configures a capable long-form final renderer.
@@ -175,11 +165,8 @@ Real upload smoke uploads a tiny test file only when `VCOS_DRIVE_REAL_UPLOAD_SMO
 Cloud Final Renderer is `REQUIRED_GAP` in M12.
 
 ```bash
-CLOUD_FINAL_RENDERER_PROVIDER=
-CLOUD_FINAL_RENDERER_API_KEY=
 ```
 
-Creatomate budget/config can still be displayed for shorts/cards/thumbnails, but M12 does not promote Creatomate into the long-form final renderer. Long-form final render remains blocked until a later milestone selects/configures a capable `CLOUD_FINAL_ASSEMBLY_RENDERER`. M12 does not run Cloud Final Renderer smoke or real long-form rendering.
 
 ## Security
 

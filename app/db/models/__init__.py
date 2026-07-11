@@ -138,7 +138,6 @@ from app.db.models.m10_1 import (
 )
 from app.db.models.m10_2 import (
     AIHeroAsset,
-    CreatomateRenderAsset,
     FinalMediaRef,
     LicenseEvidenceRecord,
     LongFormRenderPackage,
@@ -373,7 +372,6 @@ __all__ = [
     "UploadCard",
     "UsageSavingsLedgerEntry",
     "AIHeroAsset",
-    "CreatomateRenderAsset",
     "FinalMediaRef",
     "LicenseEvidenceRecord",
     "LongFormRenderPackage",

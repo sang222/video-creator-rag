@@ -17,8 +17,7 @@ const providerOrder = [
   "youtube-owner",
   "google-drive",
   "elevenlabs",
-  "luma_api",
-  "creatomate_growth_10k"
+  "luma_api"
 ];
 
 export function IntegrationsReadinessView() {
@@ -338,8 +337,7 @@ function roleCopy(summary: ProviderSummary) {
     "youtube-owner": "Analytics chủ sở hữu qua OAuth, độ tin cậy học mạnh",
     "google-drive": "Offload media qua quyền drive.file",
     elevenlabs: "Nhà cung cấp giọng đọc theo gói Creator",
-    luma_api: "AI hero/metaphor, thời lượng 4/6/8 giây, không âm thanh",
-    creatomate_growth_10k: "Final assembly, template, card, thumbnail và Shorts"
+    luma_api: "AI hero/metaphor, thời lượng 4/6/8 giây, không âm thanh"
   };
   return role[summary.provider_key] ?? "Nhà cung cấp đã cấu hình";
 }
@@ -371,11 +369,6 @@ function safeFields(summary: ProviderSummary) {
     elevenlabs: [
       { label: "Khóa API", value: yesNo(config.api_key_configured) },
       { label: "Cơ sở ngân sách", value: String(config.budget_basis ?? "credits/characters") }
-    ],
-    creatomate_growth_10k: [
-      { label: "Khóa API", value: yesNo(config.api_key_configured) },
-      { label: "Vai trò", value: creatomateRoleLabel(config.role) },
-      { label: "Renderer video dài", value: config.final_assembly_renderer ? "Creatomate Growth 10K" : "Chưa cấu hình" }
     ]
   };
   return fields[summary.provider_key] ?? [{ label: "Loại nhà cung cấp", value: "Chưa có dữ liệu" }];
@@ -383,9 +376,4 @@ function safeFields(summary: ProviderSummary) {
 
 function durationRulesLabel(value: unknown) {
   return String(value ?? "4,6,8; tối đa 8 giây").replace("max 8s", "tối đa 8 giây");
-}
-
-function creatomateRoleLabel(value: unknown) {
-  const raw = String(value ?? "");
-  return raw ? raw.replaceAll("/", ", ") : "Shorts, card, thumbnail";
 }

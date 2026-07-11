@@ -3,126 +3,126 @@ catalog_version: "1.0.1"
 schema_version: catalog.v1
 status: active
 items:
-  - key: creatomate_growth_10k_DIAGRAM_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+  - key: native_ffmpeg_renderer_DIAGRAM_CARD_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: DIAGRAM_CARD_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K renders diagram/card template compositions.
-  - key: creatomate_growth_10k_HERO_COMPOSITION_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer renders diagram/card template compositions.
+  - key: native_ffmpeg_renderer_HERO_COMPOSITION_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: HERO_COMPOSITION_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K renders hero composition templates; Luma supplies optional AI hero clips.
-  - key: creatomate_growth_10k_LOWER_THIRD_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer renders hero composition templates; Luma supplies optional AI hero clips.
+  - key: native_ffmpeg_renderer_LOWER_THIRD_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: LOWER_THIRD_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K renders lower third template compositions.
-  - key: creatomate_growth_10k_PREVIEW_CLIP_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer renders lower third template compositions.
+  - key: native_ffmpeg_renderer_PREVIEW_CLIP_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: PREVIEW_CLIP_RENDER
     capability: SUPPORTED
     max_duration_seconds: 30
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K renders limited preview clips after human approval.
-  - key: creatomate_growth_10k_SHORT_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer renders limited preview clips after human approval.
+  - key: native_ffmpeg_renderer_SHORT_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: SHORT_RENDER
     capability: SUPPORTED
     max_duration_seconds: 59
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K supports Shorts composition under the 59s hard cap.
-  - key: creatomate_growth_10k_STAT_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer supports Shorts composition under the 59s hard cap.
+  - key: native_ffmpeg_renderer_STAT_CARD_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: STAT_CARD_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K renders stat/card template compositions.
-  - key: creatomate_growth_10k_THUMBNAIL_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer renders stat/card template compositions.
+  - key: native_ffmpeg_renderer_THUMBNAIL_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: THUMBNAIL_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K composes thumbnail layouts.
-  - key: creatomate_growth_10k_TITLE_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer composes thumbnail layouts.
+  - key: native_ffmpeg_renderer_TITLE_CARD_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: TITLE_CARD_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K renders title card templates.
-  - key: creatomate_growth_10k_LONG_FORM_FINAL_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer renders title card templates.
+  - key: native_ffmpeg_renderer_LONG_FORM_FINAL_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: LONG_FORM_FINAL_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["16:9"]
     supported_outputs: ["mp4"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K is the locked final assembly renderer.
-  - key: creatomate_growth_10k_TEMPLATE_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer is the locked final assembly renderer.
+  - key: native_ffmpeg_renderer_TEMPLATE_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: TEMPLATE_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K supports generic template rendering.
-  - key: creatomate_growth_10k_CARD_RENDER
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer supports generic template rendering.
+  - key: native_ffmpeg_renderer_CARD_RENDER
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: CARD_RENDER
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K supports card rendering.
-  - key: creatomate_growth_10k_THUMBNAIL_COMPOSITION
-    provider_key: creatomate_growth_10k
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer supports card rendering.
+  - key: native_ffmpeg_renderer_THUMBNAIL_COMPOSITION
+    provider_key: native_ffmpeg_renderer
+    provider_type: LOCAL_RENDERER_CAPABILITY
     job_type: THUMBNAIL_COMPOSITION
     capability: SUPPORTED
     max_duration_seconds: null
     supported_aspect_ratios: ["16:9", "1:1"]
     supported_outputs: ["png", "jpg"]
-    plan_requirement: GROWTH_10K
-    capability_reason: Creatomate Growth 10K supports thumbnail composition.
+    plan_requirement: null
+    capability_reason: NativeFFmpegRenderer supports thumbnail composition.
   - key: elevenlabs_LONG_VOICE_GENERATION
     provider_key: elevenlabs
     provider_type: API_NATIVE_TTS

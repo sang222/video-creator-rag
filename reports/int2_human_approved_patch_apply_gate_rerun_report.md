@@ -110,7 +110,6 @@ After queue rebuild:
 Explicitly not executed:
 - ElevenLabs
 - Luma
-- Creatomate
 - Pexels
 - Drive upload
 - YouTube upload/publish/reupload

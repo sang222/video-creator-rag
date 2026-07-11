@@ -13,7 +13,6 @@ M10.3 connects M7 `UploadedVideo` records to YouTube follow data for future M11 
 
 ## Non-Scope
 
-M10.3 does not build dashboard UI, OAuth connect/disconnect UI, YouTube upload/publish API, YouTube Studio scraping, browser automation, TikTok/Facebook analytics learning loops, ElevenLabs/Creatomate/Veo generation, channel config mutation, config upgrade suggestions, approved learning promotion, auto publish/upload/reupload, source scraping, vector/RAG, OPA/Cedar, fake traffic, bot engagement, or platform evasion.
 
 ## Config
 

@@ -170,7 +170,6 @@ SKIPPED.
 - No dashboard UI.
 - No YouTube upload/publish/reupload.
 - No TikTok/Facebook analytics loop.
-- No ElevenLabs/Creatomate/Veo generation.
 - No channel config mutation or config upgrade suggestion.
 - No approved playbook promotion.
 - No scraping/vector/RAG/OPA/Cedar.

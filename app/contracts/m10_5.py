@@ -10,7 +10,6 @@ CloudMediaType = Literal[
     "THUMBNAIL",
     "CAPTION",
     "AI_HERO",
-    "CREATOMATE_ASSET",
     "CHARACTER_REFERENCE",
     "CHARACTER_FACE_REF",
     "CHARACTER_BRANCH",

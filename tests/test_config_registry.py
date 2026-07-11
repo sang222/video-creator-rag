@@ -87,7 +87,6 @@ def test_config_yaml_validates(db_session) -> None:
         "long_form_render_package_state_catalog",
         "short_render_package_state_catalog",
         "ai_hero_asset_state_catalog",
-        "creatomate_render_asset_state_catalog",
         "thumbnail_variant_state_catalog",
         "final_media_type_catalog",
         "license_status_catalog",

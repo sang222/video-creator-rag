@@ -54,6 +54,5 @@ Long-form YouTube remains the canonical asset. Shorts are selected derivatives, 
 
 ## Deferred
 
-M10.2 owns Media Provider Role Matrix and real media provider routing, including ElevenLabs, Creatomate, AI Hero, and cloud final renderer integration.
 
 M11 owns dashboard/operator cockpit UI, approval actions, upload task dashboard, derivative graph dashboard, learning promotion UX, and human-owned channel config editing.

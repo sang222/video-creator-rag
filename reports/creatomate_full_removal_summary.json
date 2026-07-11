@@ -1,0 +1,41 @@
+{
+  "date": "2026-07-11",
+  "phase": "CR-REMOVE-FIX",
+  "inventory": "PASS",
+  "runtime_removal": "PASS",
+  "settings_removal": "PASS",
+  "api_removal": "PASS",
+  "schema_removal": "PASS",
+  "schema_objects_found": 4,
+  "schema_migration_added": true,
+  "migration_head": "0035_cr_remove",
+  "fresh_full_chain_upgrade": "PASS",
+  "test_removal": "PASS",
+  "doc_current_tree_removal": "PASS",
+  "previous_unapproved_tree_reference_count": 24,
+  "previous_failing_paths": [
+    "alembic/versions/0013_m10_2_media_provider_routing.py",
+    "alembic/versions/0015_m10_5_google_drive_media_offload.py",
+    "alembic/versions/0035_creatomate_full_removal.py"
+  ],
+  "unapproved_tree_reference_count": 0,
+  "content_scan_exit_code": 1,
+  "content_scan_stdout_empty": true,
+  "filename_scan_only_approved_reports": true,
+  "openapi_reference_count": 0,
+  "app_import": "PASS",
+  "focused_pytest": "56 passed",
+  "git_diff_check": "PASS",
+  "tracked_deleted_index_paths": [
+    "config/creatomate_render_asset_state_catalog.yaml"
+  ],
+  "tree_scan": "PASS",
+  "full_physical_removal": "PASS",
+  "blocker": null,
+  "provider_calls_made": false,
+  "drive_calls_made": false,
+  "youtube_actions_made": false,
+  "production_render_made": false,
+  "pa1r_run": false,
+  "proceed_to_pa1r": true
+}

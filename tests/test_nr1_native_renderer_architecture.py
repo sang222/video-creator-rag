@@ -9,7 +9,7 @@ from app.contracts.native_renderer import CanvasSpec, NativeRenderPlan, NativeRe
 from app.services.native_ffmpeg_renderer import FFmpegCommandBuilder, NativeFFmpegRenderer, _inside
 from app.services.native_motion_compiler import MOTION_PACK, NativeMotionCompiler
 from app.services.native_render_plan import NativeRenderPlanValidator, canonical_plan_hash
-from app.services.provider_stack import CANONICAL_PROVIDER_KEYS, LOCAL_CAPABILITY_KEYS, is_stale_provider_key
+from app.services.provider_stack import CANONICAL_PROVIDER_KEYS, LOCAL_CAPABILITY_KEYS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +30,6 @@ def plan(**changes):
 def test_stack_reconciliation_is_local_not_paid():
     assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "luma_api", "pexels_api")
     assert LOCAL_CAPABILITY_KEYS == ("native_ffmpeg_renderer",)
-    assert is_stale_provider_key("creatomate_growth_10k")
 
 
 def test_motion_pack_contract_and_deterministic_compile():

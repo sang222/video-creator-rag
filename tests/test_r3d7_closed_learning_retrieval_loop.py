@@ -540,7 +540,6 @@ def test_r3d7_source_guards_no_provider_upload_external_vector_or_prompt_mutatio
         "httpx",
         "YouTubeUpload",
         "GoogleDriveUploadService(",
-        "CreatomateRender",
         "GoogleVertexVeoProvider",
         "Pinecone",
         "qdrant",

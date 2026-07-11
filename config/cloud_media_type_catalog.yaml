@@ -13,8 +13,6 @@ items:
     description: Caption file such as SRT or VTT.
   - key: AI_HERO
     description: AI hero video asset.
-  - key: CREATOMATE_ASSET
-    description: Creatomate rendered or planned asset output.
   - key: CHARACTER_REFERENCE
     description: Character reference media archived in Drive by human workflow.
   - key: CHARACTER_FACE_REF

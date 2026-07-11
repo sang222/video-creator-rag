@@ -50,7 +50,7 @@ The dashboard runs at `http://localhost:3000` and calls the API at `http://local
 
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. The M10.1 router uses that local endpoint by default. `VCOS_LLM_MODEL_<LANE>_<ROLE>` values are env-driven. Ollama cloud auth is handled by your local/container Ollama sign-in state, not by a VCOS-tracked API key or image override. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
-Provider API keys are env-driven too. `.env.example` declares `ELEVENLABS_API_KEY`, `CREATOMATE_API_KEY`, `CLOUD_FINAL_RENDERER_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. M12 keeps Cloud Final Renderer as a required gap; Creatomate stays light-template only for shorts/cards/thumbnails and is not selected as the long-form final renderer. M10.4 removes the generic cinematic AI provider binding; AI hero jobs bind only to `GOOGLE_VERTEX_VEO`. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
+Provider API keys are env-driven. `.env.example` declares `ELEVENLABS_API_KEY`, `LUMA_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. NativeFFmpegRenderer is the local final assembly authority. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
 
 Google Vertex Veo config is split by type: `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `VCOS_VEO_REAL_EXECUTION_ENABLED`, and `VCOS_VEO_REAL_SMOKE` are env/secret-store concerns; Veo model, duration, resolution, cost, budget, route, and capability defaults live in config catalogs with env override support. Real Veo execution is disabled by default.
 
@@ -60,7 +60,7 @@ Google Drive media offload is env-driven. `.env.example` declares `GOOGLE_DRIVE_
 
 Dashboard auth is local/dev only in M11.1. `.env.example` declares `VCOS_DASHBOARD_AUTH_ENABLED`, `VCOS_AUTH_MODE`, `VCOS_BOOTSTRAP_ADMIN_EMAIL`, `VCOS_BOOTSTRAP_ADMIN_PASSWORD`, `VCOS_BOOTSTRAP_ADMIN_ROLE`, and `VCOS_AUTH_SESSION_TTL_HOURS` with a 24-hour local login session. Passwords and session tokens are stored hashed; frontend session state uses httpOnly cookies, not localStorage tokens.
 
-M12 readiness is env-driven and guard-first. `.env.example` declares hard budget display values such as `VCOS_BUDGET_MODE=hard_env`, `VCOS_MONTHLY_AI_BUDGET_USD=250`, ElevenLabs/Creatomate/Veo monthly caps, and disabled optional spend caps. These are configured monthly caps only; VCOS does not calculate actual spend or remaining budget in M12. Real smoke remains disabled by default and uses provider-specific flags before any external call.
+M12 readiness is env-driven and guard-first. `.env.example` declares hard budget display values such as `VCOS_BUDGET_MODE=hard_env`, `VCOS_MONTHLY_AI_BUDGET_USD=250`, external-provider caps, and disabled optional spend caps. These are configured monthly caps only; VCOS does not calculate actual spend or remaining budget in M12. Real smoke remains disabled by default and uses provider-specific flags before any external call.
 
 M12 dashboard routes are `/settings`, `/settings/integrations`, and `/providers/readiness`.
 
@@ -75,10 +75,9 @@ vcos integrations smoke --provider youtube-owner
 vcos integrations smoke --provider google-drive
 vcos integrations smoke --provider google-vertex-veo
 vcos integrations smoke --provider elevenlabs
-vcos integrations smoke --provider creatomate
 ```
 
-`vcos integrations smoke` records `SKIPPED` unless the matching real-smoke env guard is enabled. Cloud Final Renderer remains `REQUIRED_GAP`; M12 does not pick a long-form renderer or run real rendering. M12 does not add YouTube upload/publish, unguarded Veo generation, paid voice generation by default, or real Creatomate render by default.
+`vcos integrations smoke` records `SKIPPED` unless the matching real-smoke env guard is enabled. NativeFFmpeg production rendering remains disabled by default. M12 does not add YouTube upload/publish or paid media generation by default.
 
 ## M1 Commands
 
@@ -298,8 +297,6 @@ POST /short-candidates/{short_candidate_id}/short-render-package
 GET /short-render-packages/{package_id}
 POST /video-projects/{video_project_id}/ai-hero-assets/plan
 GET /ai-hero-assets/{asset_id}
-POST /video-projects/{video_project_id}/creatomate-assets/plan
-GET /creatomate-render-assets/{asset_id}
 POST /video-projects/{video_project_id}/thumbnail-variants/plan
 GET /thumbnail-variants/{variant_id}
 GET /media-provider-budgets
@@ -311,7 +308,7 @@ POST /media-provider-gates/reused-content/check
 POST /media-provider-gates/media-qc/check
 ```
 
-M10.2 adds the Quality-First $250 media provider role matrix, provider capability entries, deterministic render routing, provider/budget/license/reuse/QC gates, long-form and Short render package planning, AI hero planning, Creatomate template asset planning, thumbnail variant planning, final media refs, and license evidence records. M10.4 binds `AI_VIDEO_HERO_PROVIDER` to `GOOGLE_VERTEX_VEO` only. Creatomate Essential 2K routes only light template work and Shorts; it cannot route `LONG_FORM_FINAL_RENDER` by default. Full long-form final MP4 assembly requires a configured `CLOUD_FINAL_ASSEMBLY_RENDERER`.
+M10.2 adds provider role/capability metadata, provider/budget/license/reuse/QC gates, long-form and Short package planning, AI hero planning, thumbnail planning and license evidence records. Final MP4 assembly belongs exclusively to the NativeFFmpeg compiled local boundary.
 
 ## M10.3 API
 
@@ -343,7 +340,7 @@ POST /ai-hero-assets/{asset_id}/generate
 vcos media ai-hero-generate --asset-id <asset-id>
 ```
 
-M10.4 binds AI hero/metaphor generation to Google Vertex Veo (`GOOGLE_VERTEX_VEO`) with model id `veo-3.1-fast-generate-001`, `video_only` mode, 1080p, audio disabled, allowed durations `[4, 6, 8]`, default 8 seconds, max 8 seconds, configured video-only cost $0.10/second, and default monthly AI hero cap $175. Opening hooks and key metaphors route to Veo. Thumbnail backgrounds use still frames from Veo clips. Shorts reuse/crop long-form hero assets by default. Workflow/data/diagram visuals route to Creatomate/cards, not Veo. Runway, Luma, generic cinematic AI fallback, web-app-only providers, and backup AI hero auto-route are not configured.
+AI hero/metaphor planning uses Luma API only for approved 4/6/8-second video-only clips. Workflow, data, diagram, card and UI visuals remain native. NativeFFmpegRenderer performs local final assembly.
 
 ## M10.5 API/CLI
 
@@ -416,4 +413,4 @@ M12.1 stores canonical prompt assets in `app/prompts/`, syncs versioned prompt/p
 
 ## Boundaries
 
-M0-M12.1 do not implement auto upload, platform publish APIs, vector/RAG engines, source scraping, OPA/Cedar, real ElevenLabs/Creatomate/cloud final renderer execution, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. Real Veo execution and real Drive/provider smoke are guarded and off by default. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds media provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, or scrape YouTube Studio. M10.5 adds Drive archive/offload only; it does not add backend download/preview proxy. M11 adds dashboard UI/read models and human review decisions only; it does not auto mutate channel profiles or suggest config upgrades. M12.1 adds prompt contracts only; it does not call real providers or mutate channel config. CapCut pilot notes do not make CapCut a production dependency.
+M0-M12.1 do not implement auto upload, platform publish APIs, source scraping, unguarded paid media execution, Envato API/download/generation, auto-reupload, fake traffic, bot engagement, or platform evasion systems. Drive/provider smoke remains guarded and off by default. M8 adds analytics snapshots/read models only. M9 adds diagnostics and human-approved proposals only. M10 adds learning review preparation only. M10.1 adds router/derivative/funnel backend contracts only. M10.2 adds provider role/routing/capability/package planning only. M10.3 adds YouTube follow sync/read models only; it still does not upload, publish, or scrape YouTube Studio. M10.5 adds Drive archive/offload only. M11 adds dashboard UI/read models and human review decisions only. M12.1 adds prompt contracts only; it does not call real providers or mutate channel config.

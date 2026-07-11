@@ -139,15 +139,12 @@ Results:
 PASS.
 
 - Không chạy old M12 real-smoke/provider-smoke tests.
-- Không bật Veo/ElevenLabs/Creatomate/YouTube/Drive real smoke flags.
-- Không gọi Veo, ElevenLabs, Creatomate, Google Drive upload, YouTube upload/publish.
 
 ## Scope explicitly not built
 
 - No final video rendering.
 - No TTS generation.
 - No Veo generation.
-- No Creatomate render.
 - No Google Drive upload.
 - No YouTube upload/publish/reupload/scheduling.
 - No dashboard scraping/browser automation.

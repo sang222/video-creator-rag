@@ -1,7 +1,6 @@
 # M2 — Provider Wiring Without Paid Calls
 
 ## Kết quả
-- Đã thêm provider wiring/readiness validation-only cho ElevenLabs, Luma API, Creatomate Growth 10K, Pexels API, Google Drive archive và YouTube read-only.
 - Empty API keys không crash; trả blocker rõ ràng `NOT_CONFIGURED / NEEDS_CREDENTIAL`.
 - Không gọi network/provider, không tạo voice/video/render, không search/download Pexels, không upload Drive/YouTube.
 - Không cần migration: dùng read-model/schema/service và JSON snapshot hiện có.
@@ -15,27 +14,22 @@
 - Tests: `tests/test_m2_provider_wiring_without_paid_calls.py`.
 
 ## Env/config summary
-- Parsed env mới: `VOICE_PROVIDER`, `AI_VIDEO_HERO_PROVIDER`, `CLOUD_FINAL_ASSEMBLY_RENDERER`, `CLOUD_TEMPLATE_RENDERER`, `FREE_VISUAL_FALLBACK_PROVIDER`.
-- Parsed credentials/ids: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL_ID`, `LUMA_API_KEY`, `LUMA_HERO_MODEL`, `CREATOMATE_API_KEY`, `CREATOMATE_TEMPLATE_ID`, `CREATOMATE_WORKSPACE_ID`, `PEXELS_API_KEY`.
+- Parsed env mới: `VOICE_PROVIDER`, `AI_VIDEO_HERO_PROVIDER`, `FREE_VISUAL_FALLBACK_PROVIDER`; final assembly is local NativeFFmpeg.
 - Parsed limits/guards: `LUMA_*DURATION*`, `LUMA_VIDEO_ONLY`, `PEXELS_MAX_*`, `PEXELS_ATTRIBUTION_REQUIRED`, `GOOGLE_DRIVE_ARCHIVE_ENABLED`, `PROVIDER_REAL_READINESS_PROBE_ENABLED`.
 
 ## Capability matrix
 - ElevenLabs: `VOICE_GENERATION`, requires key/voice/model, future execution R3D8 only.
 - Luma API: `AI_HERO_VIDEO`, duration 4/6/8s, max 8, video-only, future execution R3D8 only.
-- Creatomate Growth 10K: `FINAL_ASSEMBLY_RENDER`, `TEMPLATE_RENDER`, `CARD_RENDER`, `THUMBNAIL_COMPOSITION`, requires key/template/workspace.
 - Pexels API: `FREE_VISUAL_FALLBACK`, role/limit/attribution policy enforced.
 - Google Drive: `ARCHIVE_STORAGE` only, not source of truth, no upload in M2.
 - YouTube: read-only verification/analytics only, no upload.
 
 ## Readiness states
-- Empty env result: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api` => `NOT_CONFIGURED` with `NEEDS_CREDENTIAL`.
 - Drive archive => `DISABLED` unless `GOOGLE_DRIVE_ARCHIVE_ENABLED=true`.
 - Partial env returns exact blockers: missing voice/model/template/workspace/model/key.
 - Real readiness probe flag is parsed but default false; no tests depend on network.
 
 ## Builders/adapters
-- Builders: `ElevenLabsVoiceRequestBuilder`, `LumaHeroVideoRequestBuilder`, `CreatomateRenderRequestBuilder`, `PexelsSearchRequestBuilder`, `DriveArchiveRequestBuilder`.
-- Adapters: `ElevenLabsVoiceAdapter`, `LumaHeroVideoAdapter`, `CreatomateFinalRendererAdapter`, `PexelsVisualFallbackAdapter`, `GoogleDriveArchiveAdapter`.
 - All builders return validation result only: idempotency key, package/project/context refs, capability, cost placeholder, human approval flag, `will_execute=false`.
 
 ## Pexels policy
@@ -46,7 +40,6 @@
 
 ## Boundary/preflight
 - `ProviderBoundaryPreflight` blocks real call by default in M2.
-- Blocks missing provider config, missing human paid approval, missing R3D8 ledger refs, Luma duration > 8, missing Creatomate template, missing ElevenLabs voice/model, Pexels role/limit violations.
 - R3D4 `ProviderBoundaryGate` can read embedded M2 readiness.
 - M12.2 boundary now includes M2 readiness keys and still blocks safely as `BLOCKED_PROVIDER_NOT_CONFIGURED / WAITING_PROVIDER_CONFIG` with empty keys.
 
@@ -76,4 +69,3 @@
 ## Follow-up R3D5/R3D8
 - R3D5: richer repair/review workflow around provider-bound artifacts.
 - R3D8: real paid execution ledger, RenderRevision, CostEstimate, PaidAttemptLimit, HumanPaidRenderApproval, and safe read-only readiness probes.
-- Still out of scope: real ElevenLabs/Luma/Creatomate/Pexels/Drive execution and YouTube upload.

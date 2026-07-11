@@ -85,7 +85,6 @@ PASS.
 - OLLAMA `ProviderAttempt` refs trong package: 13
 - `LLMRunSnapshot` refs trong package: 13
 - Forbidden provider attempts: `[]`
-- Không có ElevenLabs/Veo/Creatomate/Drive/YouTube provider attempt.
 
 ## Package result
 
@@ -107,7 +106,6 @@ PASS.
 - Boundary status: `BLOCKED_PROVIDER_NOT_CONFIGURED`
 - Blocked reasons:
   - `ELEVENLABS_NOT_CONFIGURED`
-  - `CREATOMATE_NOT_CONFIGURED`
 - Required inputs all present:
   - narration script
   - visual plan
@@ -121,10 +119,8 @@ PASS.
 Expected safe block.
 
 - ElevenLabs: `NEEDS_CREDENTIAL`, missing `ELEVENLABS_API_KEY`
-- Creatomate: `NEEDS_CREDENTIAL`, missing `CREATOMATE_API_KEY`
 - Veo: `NOT_CONFIGURED`, optional
 - Operator summary: “Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero.”
-- Next action: “Cấu hình Creatomate và ElevenLabs trước; Veo là optional cho hero shot.”
 
 ## Tests run
 
@@ -151,7 +147,6 @@ PASS.
 - Không chạy old provider smoke tests trong M12.2S.
 - Không gọi Veo.
 - Không gọi ElevenLabs.
-- Không gọi Creatomate.
 - Không gọi Google Drive upload.
 - Không gọi YouTube upload/publish.
 - Local DB có `RealSmokeRun` lịch sử từ milestone trước; M12.2S run không tạo smoke run mới.
@@ -161,7 +156,6 @@ PASS.
 - No media generation.
 - No TTS generation.
 - No Veo generation.
-- No Creatomate render.
 - No Google Drive upload.
 - No YouTube upload/publish/reupload.
 - No YouTube upload API.
@@ -180,6 +174,5 @@ PASS.
 
 ## Next suggested milestone
 
-- M12.3A Creatomate Renderer Onboarding
 - M12.3B ElevenLabs Voice Activation
 - M12.3C Veo Hero Shot Activation

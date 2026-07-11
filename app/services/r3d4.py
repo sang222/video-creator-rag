@@ -981,8 +981,6 @@ class ProviderBoundaryGate:
         attempts = [item for item in _list(artifacts.get("provider_attempts")) if isinstance(item, dict)]
         forbidden_media = {
             "ELEVENLABS",
-            "CREATOMATE",
-            "CREATOMATE_GROWTH_10K",
             "LUMA_API",
             "PEXELS_API",
             "GOOGLE_VERTEX_VEO",
@@ -999,7 +997,7 @@ class ProviderBoundaryGate:
         provider_state = _provider_readiness_map(provider_readiness_state or {})
         missing_required = [
             key
-            for key in ("elevenlabs", "creatomate")
+            for key in ("elevenlabs",)
             if provider_state.get(key, {}).get("status") not in {"CONFIGURED", "PASS"}
         ]
         if missing_required:
@@ -1733,8 +1731,6 @@ def _provider_readiness_map(provider_readiness_state: dict[str, Any]) -> dict[st
         else:
             status = "NOT_CONFIGURED"
         mapped[key] = {"status": status, "readiness_state": readiness_state, "reason_codes": reason_codes}
-        if key == "creatomate_growth_10k":
-            mapped["creatomate"] = mapped[key]
         if key == "luma_api":
             mapped["luma"] = mapped[key]
     return mapped

@@ -118,7 +118,6 @@ REQUIRED_TABLES = {
     "long_form_render_packages",
     "short_render_packages",
     "ai_hero_assets",
-    "creatomate_render_assets",
     "thumbnail_variants",
     "final_media_refs",
     "license_evidence_records",
@@ -205,7 +204,7 @@ REQUIRED_TABLES = {
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert revision == "0033_p1_pre_lts_disposition"
+        assert revision == "0035_cr_remove"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

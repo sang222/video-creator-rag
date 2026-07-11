@@ -144,7 +144,7 @@ def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None
             "ai_hero_audio": media_source.get("ai_hero_audio", False),
             "ai_hero_allowed_use": _string_list(media_source.get("ai_hero_allowed_use") or ["hero_shot", "hard_to_find_visual"]),
             "ai_hero_forbidden_use": _string_list(media_source.get("ai_hero_forbidden_use") or ["data_diagram", "workflow_chart", "factual_evidence_visualization"]),
-            "renderer": media_source.get("renderer") or "Creatomate Growth 10K",
+            "renderer": media_source.get("renderer") or "NativeFFmpegRenderer",
             "storage_archive": media_source.get("storage_archive") or "Google Drive",
             "drive_offload_enabled": media_source.get("drive_offload_enabled", True),
         },

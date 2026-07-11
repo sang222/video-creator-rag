@@ -71,27 +71,20 @@ M9 does not build analytics sync, dashboard/operator cockpit UI, memory promotio
 
 M10 adds LearningCandidateGenerationRun, LearningCandidate, LearningEvidenceBundle, LearningPromotionEligibilityRun, LearningReviewQueueItem, and PlaybookCandidateDraft.
 
-M10 does not build dashboard/operator cockpit UI, approval/reject CLI, human approval actions, approved playbook promotion, automatic ChannelProfileVersion or CompiledPolicySnapshot changes, automatic pipeline/config/title/thumbnail changes, derivative/reuse/shorts/cross-platform funnel entities, real Ollama/LLMRouter execution, media provider routing, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, analytics sync, no-view diagnostics, auto publish/upload/reupload, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
 M10.1 adds LLMRouterProfile, LLMRouterLane, LLMModelProfile, LLMRouteAttempt, ContentDerivativeGraphEdge, ShortCandidate, ShortCandidateScore, ShortRenderPlan, PromoteShortToLongCandidate, ReusableArtifact, AssetReuseIndexEntry, DerivativeOriginalityCheck, OriginalityBudget, DerivativeReleasePlan, CrossPlatformFunnelPackage, UploadCard, HumanUploadTask, and UsageSavingsLedgerEntry.
 
-M10.1 does not build dashboard/operator cockpit UI, M10.2 media provider routing, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, automatic publish/upload/reupload, external platform APIs, TikTok/Facebook analytics learning loops, Envato automated integration, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, or platform evasion.
 
-M10.2 adds MediaProviderRoleProfile, ProviderCapabilityMatrixEntry, MediaRenderRoutingDecision, MediaProviderBudgetPolicy, MediaProviderBudgetSnapshot, LongFormRenderPackage, ShortRenderPackage, AIHeroAsset, CreatomateRenderAsset, ThumbnailVariant, FinalMediaRef, and LicenseEvidenceRecord.
 
-M10.2 does not build dashboard/operator cockpit UI, approval/reject dashboard actions, real ElevenLabs/Creatomate/AI Hero/cloud final renderer calls, YouTube public/owner analytics sync, M10.3 YouTube follow implementation, automatic publish/upload/reupload, TikTok/Facebook analytics learning loops, Envato automated integration, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
 M10.3 adds YouTubeMonitoringCredential, YouTubeOAuthSession, YouTubePublicSyncRun, YouTubeOwnerAnalyticsSyncRun, UploadedVideoYouTubePublicMonitorSnapshot, and UploadedVideoYouTubeOwnerAnalyticsSnapshot. It follows existing YouTube `UploadedVideo` records, maps public stats as WEAK authority, maps OAuth owner analytics as STRONG authority, preserves zero/UNKNOWN/NOT_AVAILABLE, and feeds M8 analytics snapshots/summaries.
 
-M10.3 does not build dashboard/operator cockpit UI, OAuth connect/disconnect UI, YouTube upload/publish API, YouTube Studio scraping, browser automation, TikTok/Facebook analytics learning loops, real ElevenLabs/Creatomate/Veo generation, automatic publish/upload/reupload, channel config mutation, config upgrade suggestions, approved playbook promotion, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
 M10.4 binds `AI_HERO_GENERATION` and `AI_METAPHOR_GENERATION` to `GOOGLE_VERTEX_VEO`, externalizes media provider role/capability/routing/budget defaults into config catalogs, adds env support for Google Vertex/Veo real execution guards, and keeps real Veo smoke disabled by default.
 
-M10.4 does not build dashboard/operator cockpit UI, final long-form renderer, real Creatomate/ElevenLabs integration, YouTube sync/upload/publish APIs, channel config mutation, backup AI hero routing, Runway/Luma/generic cinematic fallback, automatic publish/upload/reupload, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tricks.
 
 M10.5 uploads generated heavy media to Google Drive only after OAuth/root config is present, verifies Drive file id, web view link, size, and checksum where available, stores `CloudMediaRef` in VCOS DB, and cleans local files only after verified upload and cleanup safety checks.
 
-M10.5 does not build dashboard/operator cockpit UI, backend download proxy, backend preview proxy, Drive streaming through VCOS, Google Drive as DB/source of truth, YouTube upload/publish/reupload, YouTube Studio scraping/browser automation, TikTok/Facebook analytics loops, Veo provider changes, real Creatomate/ElevenLabs/final renderer calls, channel config mutation, config upgrade suggestions, approved playbook promotion, vector/RAG, OPA/Cedar, Algorithm/Growth/View agents, fake traffic, bot engagement, or platform evasion.
 
 M11 adds dashboard aggregation endpoints, channel lifecycle decision endpoints, learning approval/rejection/request-more-evidence/suppress/expire endpoints, approved playbook entries, provider/ops dashboard reads, uploaded video dashboard reads, and a Next.js frontend under `frontend/`.
 
@@ -103,7 +96,6 @@ M11.1 does not build production SSO/2FA/password reset, auto translation publish
 
 M12 adds `provider_readiness_checks`, `provider_readiness_snapshots`, `real_smoke_runs`, `/integrations/readiness`, provider-scoped readiness/smoke endpoints, `vcos integrations readiness`, `vcos integrations smoke`, and Vietnamese integrations dashboard routes `/settings`, `/settings/integrations`, and `/providers/readiness`.
 
-M12 shows Cloud Final Renderer as `REQUIRED_GAP` and keeps long-form final render blocked until a later milestone selects/configures a provider. Creatomate remains `CLOUD_TEMPLATE_RENDERER_LIGHT` for shorts/cards/thumbnails, not the final long-form renderer. M12 does not build real final long-form rendering, YouTube upload/publish/reupload APIs, unguarded Veo generation, real paid ElevenLabs voice generation by default, real Creatomate rendering by default, dashboard scraping/browser automation, config upgrade suggestions, TikTok/Facebook analytics loops, fake traffic, bot engagement, or platform evasion.
 
 M12.1 adds repo-first prompt authoring under `app/prompts/`, DB-backed prompt template/profile/contract/schema records, prompt render runs, prompt audit snapshots, prompt evaluation cases/runs, frozen channel contract binding, common VCOS skills, agent-specific deltas for required production roles, BaseEnvelope JSON output validation, safe syntax-only JSON repair, and Ollama chat message support.
 

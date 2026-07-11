@@ -22,10 +22,8 @@ DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ ngu
 - DaVinci: manual/workbench only, not API core.
 - Envato: avoided.
 - Adobe/Shutterstock/paid stock: deferred.
-- `creatomate_growth_10k` and `creatomate_essential_2k`: historical/deferred; any new first-channel activation is stale provider drift.
 
 Canonical external media providers are only `elevenlabs`, `luma_api`, and `pexels_api`. `google_drive_archive` and `youtube_readonly` are external integrations outside media-provider execution. NativeFFmpeg creates no `PaidProviderCallLedger` entry.
-- `cloud_final_assembly_renderer_tbd`: inactive; not a required active gap.
 - `pexels_pixabay_free_fallback`: inactive; use `pexels_api`.
 
 ## Luma Duration Spec
@@ -36,7 +34,7 @@ Canonical external media providers are only `elevenlabs`, `luma_api`, and `pexel
 
 ## Renderer configuration
 
-The first channel uses `VCOS_NATIVE_RENDER_WORKSPACE_ROOT`, `VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED=false`, and `VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED=false`. Historical Creatomate environment names are not readiness requirements.
+The first channel uses `VCOS_NATIVE_RENDER_WORKSPACE_ROOT`, `VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED=false`, and `VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED=false`.
 
 ## Runtime Boundary
 

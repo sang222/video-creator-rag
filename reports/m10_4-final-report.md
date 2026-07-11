@@ -67,7 +67,6 @@ PASS.
 - Opening hook/key metaphor dùng Veo.
 - Thumbnail background dùng still frame từ Veo clip.
 - Shorts mặc định reuse/crop long-form hero asset.
-- Workflow/data/diagram visuals route Creatomate/cards, không dùng Veo.
 - `AIHeroGenerationService` chỉ attempt real provider khi cả `VCOS_VEO_REAL_EXECUTION_ENABLED=true` và `VCOS_VEO_REAL_SMOKE=true`.
 - Default real execution disabled trả `READY_FOR_PROVIDER` với reason `VEO_REAL_EXECUTION_DISABLED`.
 
@@ -121,7 +120,6 @@ SKIPPED.
 
 - No dashboard/operator cockpit UI.
 - No full long-form final renderer.
-- No real Creatomate/ElevenLabs integration.
 - No YouTube sync/upload/publish API changes.
 - No channel config mutation.
 - No backup AI hero routing.

@@ -9,7 +9,6 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | Checkpoint | Status | Notes |
 | --- | --- | --- |
 | Runtime LTS v1 | `PASS` | Live verifier is `PASS`; provider/media/upload execution remains disabled. |
-| ProviderStackDriftGuard | `PASS` | Canonical stack: `elevenlabs`, `luma_api`, `creatomate_growth_10k`, `pexels_api`; stale keys `[]`. |
 | INT1A Ollama smoke | `PASS` | Real Ollama smoke passed in INT1; not a media provider activation. |
 | INT1B Drive archive/path | `PASS` | Drive archive path fixed; Drive remains storage/archive-only and disabled for this package closeout. |
 | Package Repair | `PASS` | 9 approved patches applied; latest gate rerun `PASS`; queue closed. |
@@ -88,7 +87,6 @@ Allowed sequence:
 
 1. ElevenLabs tiny voice.
 2. Luma tiny 4/6/8s clip.
-3. Creatomate tiny render.
 4. Pexels one fallback search if enabled.
 5. Drive archive proof.
 
@@ -136,7 +134,6 @@ Target sequence:
 
 - ElevenLabs
 - Luma
-- Creatomate
 - Drive archive
 - MediaQC
 

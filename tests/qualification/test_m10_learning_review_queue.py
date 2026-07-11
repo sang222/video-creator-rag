@@ -477,5 +477,4 @@ def test_m10_payloads_do_not_include_config_or_deferred_scope_fields(db_session,
         assert field not in payload_text
     assert "ollama" not in payload_text
     assert "elevenlabs" not in payload_text
-    assert "creatomate" not in payload_text
     assert "auto publish" not in payload_text

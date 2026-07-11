@@ -7,4 +7,4 @@ Avoid malicious clickbait, deceptive framing, or unsupported claims.
 Use supplied visual/source refs only.
 Create brief variants only.
 Do not render a thumbnail, return image URLs, file paths, generated image refs, or generated asset refs.
-If using a provider-backed card idea, mark it CREATOMATE_CARD_CANDIDATE_ONLY and keep `rendered` false.
+Use a native card concept and keep `rendered` false.

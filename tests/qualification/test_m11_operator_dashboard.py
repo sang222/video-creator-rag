@@ -33,10 +33,7 @@ def test_m11_command_center_and_provider_status_empty_state() -> None:
 
     providers = client.get("/providers/status")
     assert providers.status_code == 200, providers.text
-    assert providers.json()["integrations"]["cloud_final_renderer"]["state"] in {
-        "MISSING_REQUIRED_GAP",
-        "CONFIGURED",
-    }
+    assert providers.json()["integrations"]["native_ffmpeg_renderer"]["state"] == "LOCAL_CAPABILITY"
 
 
 def test_m11_channel_lifecycle_is_human_decided(db_session, qualification_factory) -> None:

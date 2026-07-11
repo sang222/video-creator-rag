@@ -193,7 +193,7 @@ const fieldSourceMap = {
   "learning_policy.min_evidence_required": meta("2 source refs", "RESEARCH_INFERENCE", true),
   "media_policy.voice_provider": meta("ElevenLabs", "PROVIDER_POLICY", false),
   "media_policy.ai_hero_provider": meta("Luma API", "PROVIDER_POLICY", false),
-  "media_policy.renderer": meta("Creatomate Growth 10K", "PROVIDER_POLICY", false),
+  "media_policy.renderer": meta("NativeFFmpegRenderer", "PROVIDER_POLICY", false),
   "platform_strategy.auto_publish_allowed": meta(false, "GLOBAL_LOCKED_POLICY", false),
   "platform_strategy.studio_scraping_allowed": meta(false, "GLOBAL_LOCKED_POLICY", false),
   "learning_policy.config_mutation_by_agent_allowed": meta(false, "GLOBAL_LOCKED_POLICY", false),
@@ -209,7 +209,7 @@ const suggestedContract = {
   format_policy: { long_form: { enabled: true }, shorts: { enabled: true } },
   rights_policy: { source_manifest_required: true },
   learning_policy: { min_evidence_required: "2 source refs", config_mutation_by_agent_allowed: false },
-  media_policy: { voice_provider: "ElevenLabs", ai_hero_provider: "Luma API", renderer: "Creatomate Growth 10K" },
+  media_policy: { voice_provider: "ElevenLabs", ai_hero_provider: "Luma API", renderer: "NativeFFmpegRenderer" },
   platform_strategy: { auto_publish_allowed: false, studio_scraping_allowed: false, publish_mode: "human_handoff_only" },
   forbidden_behavior: ["fake_traffic", "bot_engagement", "platform_evasion"]
 };

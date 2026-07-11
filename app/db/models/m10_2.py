@@ -142,7 +142,6 @@ class LongFormRenderPackage(Base):
     caption_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("caption_track_snapshots.id"))
     visual_plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("visual_plan_snapshots.id"))
     ai_hero_asset_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    creatomate_asset_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     approved_asset_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     thumbnail_variant_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     music_sfx_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
@@ -217,32 +216,6 @@ class AIHeroAsset(Base):
     )
 
 
-class CreatomateRenderAsset(Base):
-    __tablename__ = "creatomate_render_assets"
-
-    id: Mapped[uuid.UUID] = uuid_pk()
-    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    channel_workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False)
-    video_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"))
-    short_candidate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("short_candidates.id"))
-    job_type: Mapped[str] = mapped_column(String(80), nullable=False)
-    template_key: Mapped[str | None] = mapped_column(String(160))
-    input_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    output_ref: Mapped[str | None] = mapped_column(Text)
-    provider_type: Mapped[str] = mapped_column(String(80), nullable=False, default="CLOUD_TEMPLATE_RENDERER_LIGHT")
-    provider_key: Mapped[str | None] = mapped_column(String(160))
-    render_state: Mapped[str] = mapped_column(String(40), nullable=False)
-    created_at: Mapped[datetime] = utc_created_at()
-    updated_at: Mapped[datetime] = utc_updated_at()
-
-    __table_args__ = (
-        Index("ix_creatomate_assets_company", "company_id"),
-        Index("ix_creatomate_assets_project", "video_project_id"),
-        Index("ix_creatomate_assets_job", "job_type"),
-        Index("ix_creatomate_assets_state", "render_state"),
-    )
-
-
 class ThumbnailVariant(Base):
     __tablename__ = "thumbnail_variants"
 
@@ -255,7 +228,7 @@ class ThumbnailVariant(Base):
     subtitle_text: Mapped[str | None] = mapped_column(Text)
     hero_still_ref: Mapped[str | None] = mapped_column(Text)
     output_ref: Mapped[str | None] = mapped_column(Text)
-    provider_type: Mapped[str] = mapped_column(String(80), nullable=False, default="CLOUD_TEMPLATE_RENDERER_LIGHT")
+    provider_type: Mapped[str] = mapped_column(String(80), nullable=False, default="LOCAL_RENDERER_CAPABILITY")
     provider_key: Mapped[str | None] = mapped_column(String(160))
     state: Mapped[str] = mapped_column(String(40), nullable=False)
     created_at: Mapped[datetime] = utc_created_at()

@@ -11,8 +11,7 @@ MediaProviderType = Literal[
     "API_NATIVE_TTS",
     "CAPTION_TIMELINE_ENGINE",
     "AI_VIDEO_HERO_PROVIDER",
-    "CLOUD_TEMPLATE_RENDERER_LIGHT",
-    "CLOUD_FINAL_ASSEMBLY_RENDERER",
+    "LOCAL_RENDERER_CAPABILITY",
     "MEDIA_STORAGE",
     "MEDIA_QC_ENGINE",
     "PUBLISH_PACKAGE_BUILDER",
@@ -89,7 +88,6 @@ LongFormRenderPackageState = Literal[
 ShortRenderPackageState = Literal["DRAFT", "READY_FOR_TEMPLATE_RENDER", "RENDERED", "QC_READY", "BLOCKED", "CANCELLED"]
 AIHeroIntendedUsage = Literal["OPENING_HOOK", "KEY_METAPHOR", "SHORT_HOOK", "THUMBNAIL_STILL", "OTHER"]
 AIHeroAssetState = Literal["PLANNED", "READY_FOR_PROVIDER", "GENERATED", "BLOCKED", "CANCELLED"]
-CreatomateRenderAssetState = Literal["PLANNED", "READY_FOR_PROVIDER", "RENDERED", "BLOCKED", "CANCELLED"]
 ThumbnailVariantState = Literal["DRAFT", "READY_FOR_PROVIDER", "RENDERED", "SELECTED", "REJECTED", "CANCELLED"]
 FinalMediaType = Literal["LONG_FORM_FINAL", "SHORT_FINAL", "THUMBNAIL", "CARD", "AI_HERO", "PREVIEW"]
 LicenseStatus = Literal["CONFIRMED", "NEEDS_REVIEW", "BLOCKED", "NOT_REQUIRED", "UNKNOWN"]
@@ -323,7 +321,6 @@ class LongFormRenderPackageCreate(BaseModel):
     caption_track_id: uuid.UUID | None = None
     visual_plan_id: uuid.UUID | None = None
     ai_hero_asset_refs: list[dict[str, Any]] = Field(default_factory=list)
-    creatomate_asset_refs: list[dict[str, Any]] = Field(default_factory=list)
     approved_asset_refs: list[dict[str, Any]] = Field(default_factory=list)
     thumbnail_variant_refs: list[dict[str, Any]] = Field(default_factory=list)
     music_sfx_refs: list[dict[str, Any]] = Field(default_factory=list)
@@ -342,7 +339,6 @@ class LongFormRenderPackageRead(_ReadModel):
     caption_track_id: uuid.UUID | None
     visual_plan_id: uuid.UUID | None
     ai_hero_asset_refs: list[dict[str, Any]]
-    creatomate_asset_refs: list[dict[str, Any]]
     approved_asset_refs: list[dict[str, Any]]
     thumbnail_variant_refs: list[dict[str, Any]]
     music_sfx_refs: list[dict[str, Any]]
@@ -443,32 +439,6 @@ class AIHeroGenerationJobRead(BaseModel):
     operator_summary: str
 
     model_config = ConfigDict(extra="forbid")
-
-
-class CreatomateRenderAssetPlanRequest(BaseModel):
-    job_type: str
-    short_candidate_id: uuid.UUID | None = None
-    template_key: str | None = None
-    input_payload: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class CreatomateRenderAssetRead(_ReadModel):
-    id: uuid.UUID
-    company_id: uuid.UUID
-    channel_workspace_id: uuid.UUID
-    video_project_id: uuid.UUID | None
-    short_candidate_id: uuid.UUID | None
-    job_type: str
-    template_key: str | None
-    input_payload: dict[str, Any]
-    output_ref: str | None
-    provider_type: MediaProviderType
-    provider_key: str | None
-    render_state: CreatomateRenderAssetState
-    created_at: AwareDatetime
-    updated_at: AwareDatetime
 
 
 class ThumbnailVariantInput(BaseModel):

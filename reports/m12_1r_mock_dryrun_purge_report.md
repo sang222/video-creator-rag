@@ -55,7 +55,6 @@ Runtime đã chuyển sang real-provider-or-blocked. Mock/local fixture không c
 
 - Mock LLM/local fixture production-success path removed from production execute.
 - Production execute now blocks on final renderer/provider readiness gaps.
-- Final renderer target is `Creatomate Growth 10K`.
 - Local FFmpeg remains only as internal read/QC utility; create/execute production local-smoke entrypoints are removed.
 
 ## M8 changes
@@ -75,7 +74,6 @@ Active runtime catalog is real-only:
 - `google-drive`
 - `google-vertex-veo`
 - `elevenlabs`
-- `creatomate`
 - `cloud-final-renderer`
 
 No `mock_*`, `MOCK_PROVIDER`, `LOCAL_FIXTURE`, or `LOCAL_FFMPEG` provider/catalog entries remain in runtime config.
@@ -83,8 +81,6 @@ No `mock_*`, `MOCK_PROVIDER`, `LOCAL_FIXTURE`, or `LOCAL_FFMPEG` provider/catalo
 ## Readiness/dashboard
 
 - Readiness excludes mock providers.
-- Cloud Final Renderer is `Cloud Final Renderer = Creatomate Growth 10K`.
-- If Creatomate plan/key missing: `NOT_CONFIGURED/BLOCKED`.
 - If configured: readiness may pass, smoke still `SKIPPED` with no render.
 - Dashboard/readiness must not offer mock fallback.
 
@@ -139,7 +135,6 @@ Old real/provider smoke tests were not run. No real provider calls were made.
 - No publish/reupload automation.
 - No channel config mutation.
 - No auto-promote learning.
-- No real Creatomate/ElevenLabs/Veo execution.
 - No commit/tag.
 
 ## Risks / limitations

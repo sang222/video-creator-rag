@@ -120,8 +120,6 @@ C8 common_media_constraints
 * Veo model: veo-3.1-fast-generate-001.
 * Veo mode: video_only, 1080p, audio=false.
 * Veo durations: 4, 6, 8 seconds only.
-* Renderer: Creatomate Growth 10K.
-* Creatomate is CLOUD_RENDER_ENGINE and final renderer when configured.
 * Google Drive access: CTA only.
 * Do not propose Runway/Luma/Envato as production default.
 * Do not use Veo for diagrams/data charts.

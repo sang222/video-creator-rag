@@ -114,7 +114,7 @@ class ProductionArtifactRunService:
                 raise ValidationFailureError("admission decision does not reference this video project")
         reason_codes = [
             "FINAL_RENDERER_NOT_CONFIGURED",
-            "CREATOMATE_GROWTH_10K_REQUIRED",
+            "NATIVE_FFMPEG_PRODUCTION_DISABLED",
             "HUMAN_ACTION_REQUIRED",
         ]
         status = "BLOCKED"
@@ -176,7 +176,7 @@ class ProductionArtifactRunService:
                 "FINAL_RENDERER_NOT_CONFIGURED",
                 "ELEVENLABS_NOT_CONFIGURED",
                 "GOOGLE_VERTEX_VEO_NOT_CONFIGURED",
-                "CREATOMATE_GROWTH_10K_REQUIRED",
+                "NATIVE_FFMPEG_PRODUCTION_DISABLED",
                 "HUMAN_ACTION_REQUIRED",
             ]
         )

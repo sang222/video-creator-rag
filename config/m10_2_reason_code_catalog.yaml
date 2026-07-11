@@ -11,16 +11,16 @@ items:
     description: Media routing decision was created.
   - code: LONG_FORM_FINAL_RENDER_BLOCKED_PROVIDER_REQUIRED
     description: Long-form final render is blocked because a capable final renderer is required.
-  - code: CREATOMATE_ESSENTIAL_NOT_FINAL_RENDERER
-    description: Creatomate Essential 2K is blocked from full long-form final render.
-  - code: CREATOMATE_LIGHT_RENDER_ROUTED
-    description: Light render job routed to Creatomate.
+  - code: NATIVE_FFMPEG_RENDER_AUTHORITY
+    description: Final assembly is routed to the local compiled renderer boundary.
+  - code: LOCAL_RENDER_ROUTED
+    description: Local render job is routed to NativeFFmpegRenderer.
   - code: ELEVENLABS_VOICE_ROUTED
     description: Voice job routed to ElevenLabs.
   - code: AI_HERO_PROVIDER_ROUTED
     description: AI hero job routed to cinematic AI provider.
-  - code: CLOUD_FINAL_RENDERER_REQUIRED
-    description: Cloud final assembly renderer is required.
+  - code: NATIVE_FFMPEG_RENDER_PLAN_REQUIRED
+    description: An approved compiled local render plan is required.
   - code: BUDGET_GATE_PASSED
     description: Media provider budget gate passed.
   - code: BUDGET_GATE_WARNING

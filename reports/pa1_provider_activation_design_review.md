@@ -25,7 +25,6 @@ The provider activation spec defines the future Production V1 activation contrac
 
 - `elevenlabs`
 - `luma_api`
-- `creatomate_growth_10k`
 - `pexels_api`
 - `google_drive_archive` as archive/storage only
 
@@ -49,7 +48,6 @@ Hard boundaries preserved:
 
 - no ElevenLabs call
 - no Luma call
-- no Creatomate call
 - no Pexels call
 - no Drive upload
 - no YouTube upload/publish/reupload
@@ -101,7 +99,6 @@ If any gate fails, operation is `NOT_EXECUTED`, and no paid attempt is consumed 
 | --- | --- | --- |
 | `elevenlabs` | voice/TTS only | tiny voice smoke first, idempotent cache key, no draft TTS as final without approval, VoiceQC required |
 | `luma_api` | AI hero/metaphor clip only | only `4/6/8s`, max `8s`, prompt safety and visual intent required, no recurring character unless policy allows |
-| `creatomate_growth_10k` | final assembly/render only | template required, render payload preview, `FinalRenderApproval`, archive before upload handoff, MediaQC before FinalMediaRef |
 | `pexels_api` | fallback only | no stock face as recurring host, no factual/testimonial use, source/rights manifest, runtime percentage limits |
 | `google_drive_archive` | archive/storage only | configured root is root, no nested `VCOS`, no unknown path segments, not source of truth |
 
@@ -184,7 +181,6 @@ Smoke order:
 
 1. ElevenLabs tiny voice.
 2. Luma tiny `4/6/8s` clip.
-3. Creatomate tiny render.
 4. Pexels one fallback search if enabled.
 5. Google Drive archive proof.
 

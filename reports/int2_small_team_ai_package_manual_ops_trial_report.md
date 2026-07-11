@@ -159,7 +159,6 @@ ProviderStackDriftGuard:
 - canonical active keys:
   - `elevenlabs`
   - `luma_api`
-  - `creatomate_growth_10k`
   - `pexels_api`
 - stale provider keys: none active
 - no_provider_call_made: true
@@ -194,7 +193,6 @@ Proof:
 
 - no ElevenLabs generation
 - no Luma generation
-- no Creatomate render submit
 - no Pexels search/download
 - no YouTube upload/publish/reupload
 - no MediaRenderJob for trial project: 0

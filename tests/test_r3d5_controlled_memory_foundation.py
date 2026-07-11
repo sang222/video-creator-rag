@@ -505,7 +505,6 @@ def test_r3d5_source_guards_no_vector_provider_upload_or_prompt_injection() -> N
         "requests.",
         "httpx",
         "GoogleVertexVeoProvider",
-        "CreatomateRender",
         "YouTubeUpload",
         "GoogleDriveUploadService",
     ]

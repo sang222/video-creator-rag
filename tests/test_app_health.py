@@ -36,8 +36,6 @@ def test_local_frontend_cors_preflight_allows_dashboard_api() -> None:
 def test_provider_api_keys_load_from_env(monkeypatch) -> None:
     get_settings.cache_clear()
     monkeypatch.setenv("ELEVENLABS_API_KEY", "eleven-test")
-    monkeypatch.setenv("CREATOMATE_API_KEY", "creatomate-test")
-    monkeypatch.setenv("CLOUD_FINAL_RENDERER_API_KEY", "cloud-final-test")
     monkeypatch.setenv("PEXELS_API_KEY", "pexels-test")
     monkeypatch.setenv("PIXABAY_API_KEY", "pixabay-test")
     monkeypatch.setenv("VCOS_AI_HERO_PROVIDER", "luma_api")
@@ -50,10 +48,6 @@ def test_provider_api_keys_load_from_env(monkeypatch) -> None:
     try:
         assert settings.elevenlabs_api_key is not None
         assert settings.elevenlabs_api_key.get_secret_value() == "eleven-test"
-        assert settings.creatomate_api_key is not None
-        assert settings.creatomate_api_key.get_secret_value() == "creatomate-test"
-        assert settings.cloud_final_renderer_api_key is not None
-        assert settings.cloud_final_renderer_api_key.get_secret_value() == "cloud-final-test"
         assert settings.pexels_api_key is not None
         assert settings.pexels_api_key.get_secret_value() == "pexels-test"
         assert settings.pixabay_api_key is not None

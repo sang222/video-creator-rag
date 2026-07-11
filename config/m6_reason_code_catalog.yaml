@@ -65,8 +65,8 @@ items:
     description: FFmpeg is unavailable.
   - code: FFPROBE_UNAVAILABLE
     description: FFprobe is unavailable.
-  - code: CREATOMATE_GROWTH_10K_REQUIRED
-    description: Creatomate Growth 10K is required before final render can complete.
+  - code: NATIVE_FFMPEG_PRODUCTION_DISABLED
+    description: NativeFFmpeg production execution remains disabled until an explicit guarded phase.
   - code: FINAL_VIDEO_NOT_PLAYABLE
     description: Final video is not playable.
   - code: MEDIA_QC_PASSED

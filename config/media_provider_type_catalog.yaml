@@ -13,10 +13,8 @@ items:
     description: Caption timeline planner.
   - key: AI_VIDEO_HERO_PROVIDER
     description: Premium AI hero and metaphor visual provider.
-  - key: CLOUD_TEMPLATE_RENDERER_LIGHT
-    description: Light cloud template renderer for Shorts, cards, thumbnails, and compositions.
-  - key: CLOUD_FINAL_ASSEMBLY_RENDERER
-    description: Cloud final assembly renderer for full long-form final MP4 output.
+  - key: LOCAL_RENDERER_CAPABILITY
+    description: NativeFFmpeg local assembly, motion, caption and compositing authority.
   - key: MEDIA_STORAGE
     description: Media/object storage role.
   - key: MEDIA_QC_ENGINE

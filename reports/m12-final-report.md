@@ -22,8 +22,6 @@ PASS.
 PASS.
 
 - M12 readiness schema/service/API/CLI đã có sẵn và được giữ.
-- Sửa Cloud Final Renderer về đúng `REQUIRED_GAP`; không chọn Creatomate làm renderer ráp video dài.
-- Creatomate chỉ còn role `CLOUD_TEMPLATE_RENDERER_LIGHT` cho shorts/cards/thumbnails.
 - Real smoke vẫn guard bằng env; không có provider call mặc định.
 
 ## Frontend status
@@ -51,7 +49,6 @@ PASS.
 
 ## Implemented scope
 
-- Credential readiness dashboard/read models cho Ollama, YouTube, Google Drive, Veo, ElevenLabs, Creatomate, Cloud Final Renderer gap.
 - Provider status aggregation, missing env checklist, next-action guidance tiếng Việt.
 - Guarded real-smoke orchestration.
 - Hard-env AI budget display; không tính actual spend/remaining budget.
@@ -66,7 +63,6 @@ PASS.
 ## Services/API added
 
 - Services: `ProviderReadinessService`, `CredentialReadinessService`, `RealSmokeOrchestratorService`, `EnvConfigAuditService`, `IntegrationDashboardReadService`, `ProviderNextActionService`, `SecurityRedactionService`.
-- Provider helpers: Ollama, YouTube Public, YouTube Owner, Google Drive, Google Vertex Veo, ElevenLabs, Creatomate, Cloud Final Renderer.
 - API: `/integrations/readiness`, `/integrations/readiness/run`, snapshot/provider/smoke endpoints.
 - CLI: `vcos integrations readiness`, `vcos integrations smoke --provider ...`.
 
@@ -85,8 +81,7 @@ PASS.
 ## Real smoke orchestration
 
 - Ollama/YouTube/Drive/Veo require explicit env flags.
-- ElevenLabs/Creatomate default `SKIPPED`; no paid generation/render.
-- Cloud Final Renderer smoke returns `BLOCKED` with `CLOUD_FINAL_RENDERER_REQUIRED_GAP`.
+- NativeFFmpeg production execution remains blocked by its local guard.
 
 ## Provider readiness
 
@@ -95,7 +90,6 @@ PASS.
 - Google Drive: OAuth/root folder/drive.file checked; upload smoke guarded.
 - Google Vertex Veo: GA model, duration 4/6/8, max 8, audio false, real smoke guarded.
 - ElevenLabs: API key + Creator/credits-character budget display; voice-only placeholder.
-- Creatomate: API key + Growth/credits budget display; shorts/cards/thumbnails only.
 - Cloud Final Renderer: `REQUIRED_GAP`; long-form final render blocked until provider selected later.
 
 ## Secret redaction/security
@@ -112,7 +106,6 @@ PASS.
 - No YouTube upload/publish/reupload API.
 - No auto publish/upload/reupload.
 - No unguarded Veo generation.
-- No paid ElevenLabs TTS or Creatomate render by default.
 - No dashboard scraping/browser automation.
 - No fake traffic/bot engagement/platform evasion.
 - No TikTok/Facebook analytics loop.

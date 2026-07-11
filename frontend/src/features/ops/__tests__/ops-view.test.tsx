@@ -289,12 +289,12 @@ const qualityDeltaPayload = {
 
 const providerCostPayload = {
   package_id: "package-1",
-  provider_readiness: { drift_guard_status: "PASS", providers: ["elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"] },
+  provider_readiness: { drift_guard_status: "PASS", providers: ["elevenlabs", "luma_api", "pexels_api"] },
   missing_config: [],
-  render_revisions: [{ id: "render-revision-1", provider_key: "creatomate_growth_10k" }],
-  cost_estimates: [{ id: "cost-1", provider_key: "creatomate_growth_10k" }],
+  render_revisions: [{ id: "render-revision-1", provider_key: "native_ffmpeg_renderer" }],
+  cost_estimates: [{ id: "cost-1", provider_key: "luma_api" }],
   human_paid_render_approvals: [{ id: "approval-1", status: "PENDING" }],
-  paid_attempt_limits: [{ provider_key: "creatomate_growth_10k", attempt_count: 0 }],
+  paid_attempt_limits: [{ provider_key: "luma_api", attempt_count: 0 }],
   provider_boundary_decisions: [{ decision: "ALLOWED_NOT_EXECUTED" }],
   paid_provider_call_ledger: [],
   proxy_preview_flags: [{ will_execute: false }],

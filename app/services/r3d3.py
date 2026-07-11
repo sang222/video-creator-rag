@@ -1728,7 +1728,7 @@ def _provider_readiness_summary(provider_readiness_state: dict[str, Any]) -> dic
         if not isinstance(item, dict) or not item.get("provider_key"):
             continue
         key = str(item["provider_key"])
-        if key not in {"ollama", "elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api", "google-drive", "youtube-owner", "youtube-public"}:
+        if key not in {"ollama", "elevenlabs", "luma_api", "pexels_api", "google-drive", "youtube-owner", "youtube-public"}:
             continue
         providers[key] = {
             "readiness_state": item.get("readiness_state"),

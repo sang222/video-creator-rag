@@ -55,7 +55,6 @@ LONG_PACKAGE_STATE_CHECK = (
 SHORT_PACKAGE_STATE_CHECK = "package_state in ('DRAFT','READY_FOR_TEMPLATE_RENDER','RENDERED','QC_READY','BLOCKED','CANCELLED')"
 AI_HERO_USAGE_CHECK = "intended_usage in ('OPENING_HOOK','KEY_METAPHOR','SHORT_HOOK','THUMBNAIL_STILL','OTHER')"
 AI_HERO_STATE_CHECK = "generation_state in ('PLANNED','READY_FOR_PROVIDER','GENERATED','BLOCKED','CANCELLED')"
-CREATOMATE_STATE_CHECK = "render_state in ('PLANNED','READY_FOR_PROVIDER','RENDERED','BLOCKED','CANCELLED')"
 THUMBNAIL_STATE_CHECK = "state in ('DRAFT','READY_FOR_PROVIDER','RENDERED','SELECTED','REJECTED','CANCELLED')"
 FINAL_MEDIA_TYPE_CHECK = "media_type in ('LONG_FORM_FINAL','SHORT_FINAL','THUMBNAIL','CARD','AI_HERO','PREVIEW')"
 LICENSE_STATUS_CHECK = "license_status in ('CONFIRMED','NEEDS_REVIEW','BLOCKED','NOT_REQUIRED','UNKNOWN')"
@@ -221,7 +220,6 @@ def upgrade() -> None:
         _uuid("caption_track_id"),
         _uuid("visual_plan_id"),
         sa.Column("ai_hero_asset_refs", JSONB, server_default=_jsonb_array(), nullable=False),
-        sa.Column("creatomate_asset_refs", JSONB, server_default=_jsonb_array(), nullable=False),
         sa.Column("approved_asset_refs", JSONB, server_default=_jsonb_array(), nullable=False),
         sa.Column("thumbnail_variant_refs", JSONB, server_default=_jsonb_array(), nullable=False),
         sa.Column("music_sfx_refs", JSONB, server_default=_jsonb_array(), nullable=False),
@@ -233,7 +231,6 @@ def upgrade() -> None:
         _updated_at(),
         sa.CheckConstraint(LONG_PACKAGE_STATE_CHECK, name="ck_long_form_render_packages_state"),
         sa.CheckConstraint("jsonb_typeof(ai_hero_asset_refs) = 'array'", name="ck_long_pkg_ai_refs_array"),
-        sa.CheckConstraint("jsonb_typeof(creatomate_asset_refs) = 'array'", name="ck_long_pkg_creatomate_refs_array"),
         sa.CheckConstraint("jsonb_typeof(approved_asset_refs) = 'array'", name="ck_long_pkg_approved_refs_array"),
         sa.CheckConstraint("jsonb_typeof(thumbnail_variant_refs) = 'array'", name="ck_long_pkg_thumbnail_refs_array"),
         sa.CheckConstraint("jsonb_typeof(music_sfx_refs) = 'array'", name="ck_long_pkg_music_refs_array"),
@@ -314,36 +311,6 @@ def upgrade() -> None:
     op.create_index("ix_ai_hero_assets_company", "ai_hero_assets", ["company_id"])
     op.create_index("ix_ai_hero_assets_project", "ai_hero_assets", ["video_project_id"])
     op.create_index("ix_ai_hero_assets_state", "ai_hero_assets", ["generation_state"])
-
-    op.create_table(
-        "creatomate_render_assets",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        _uuid("company_id", nullable=False),
-        _uuid("channel_workspace_id", nullable=False),
-        _uuid("video_project_id"),
-        _uuid("short_candidate_id"),
-        sa.Column("job_type", sa.String(length=80), nullable=False),
-        sa.Column("template_key", sa.String(length=160), nullable=True),
-        sa.Column("input_payload", JSONB, server_default=_jsonb_object(), nullable=False),
-        sa.Column("output_ref", sa.Text(), nullable=True),
-        sa.Column("provider_type", sa.String(length=80), server_default="CLOUD_TEMPLATE_RENDERER_LIGHT", nullable=False),
-        sa.Column("provider_key", sa.String(length=160), nullable=True),
-        sa.Column("render_state", sa.String(length=40), nullable=False),
-        _created_at(),
-        _updated_at(),
-        sa.CheckConstraint(PROVIDER_TYPE_CHECK, name="ck_creatomate_assets_provider_type"),
-        sa.CheckConstraint(CREATOMATE_STATE_CHECK, name="ck_creatomate_assets_state"),
-        sa.CheckConstraint("jsonb_typeof(input_payload) = 'object'", name="ck_creatomate_assets_payload_object"),
-        sa.ForeignKeyConstraint(["company_id"], ["companies.id"]),
-        sa.ForeignKeyConstraint(["channel_workspace_id"], ["channel_workspaces.id"]),
-        sa.ForeignKeyConstraint(["video_project_id"], ["video_projects.id"]),
-        sa.ForeignKeyConstraint(["short_candidate_id"], ["short_candidates.id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_creatomate_assets_company", "creatomate_render_assets", ["company_id"])
-    op.create_index("ix_creatomate_assets_project", "creatomate_render_assets", ["video_project_id"])
-    op.create_index("ix_creatomate_assets_job", "creatomate_render_assets", ["job_type"])
-    op.create_index("ix_creatomate_assets_state", "creatomate_render_assets", ["render_state"])
 
     op.create_table(
         "thumbnail_variants",
@@ -431,7 +398,6 @@ def downgrade() -> None:
     op.drop_table("license_evidence_records")
     op.drop_table("final_media_refs")
     op.drop_table("thumbnail_variants")
-    op.drop_table("creatomate_render_assets")
     op.drop_table("ai_hero_assets")
     op.drop_table("short_render_packages")
     op.drop_table("long_form_render_packages")

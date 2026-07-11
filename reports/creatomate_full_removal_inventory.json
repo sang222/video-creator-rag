@@ -1,0 +1,1247 @@
+{
+  "generated_at": "2026-07-11",
+  "phase": "CR-REMOVE",
+  "state": "PRE_REMOVAL_INVENTORY",
+  "search_terms": [
+    "creatomate",
+    "CREATOMATE",
+    "creatomate_",
+    "Creatomate",
+    "final_renderer_provider",
+    "template_render_provider",
+    "cloud_render_provider",
+    "renderer_provider_key",
+    "STALE_PROVIDER_KEYS",
+    "CANONICAL_PROVIDER_KEYS"
+  ],
+  "total_files": 134,
+  "category_counts": {
+    "MODELS_AND_SCHEMA": 4,
+    "API_ROUTES": 3,
+    "CONTRACTS": 4,
+    "SETTINGS_AND_SECRETS": 1,
+    "PROMPTS_AND_TEMPLATES": 8,
+    "SERVICES_AND_ROUTING": 15,
+    "PROVIDER_REGISTRY": 10,
+    "COST_AND_READINESS": 6,
+    "ADAPTERS_AND_BUILDERS": 1,
+    "DOCS": 13,
+    "REPORTS": 43,
+    "TESTS": 26
+  },
+  "schema_findings": {
+    "provider_specific_table": "creatomate_render_assets",
+    "shared_column": "long_form_render_packages.creatomate_asset_refs",
+    "shared_enum_or_check_value": "cloud_media_type=CREATOMATE_ASSET",
+    "forward_only_migration_required": true,
+    "previously_applied_migrations_must_remain_immutable": true
+  },
+  "entries": [
+    {
+      "path": "alembic/versions/0013_m10_2_media_provider_routing.py",
+      "symbol": "creatomate, CREATOMATE, final_renderer_provider, renderer_provider_key",
+      "category": "MODELS_AND_SCHEMA",
+      "runtime_reachable": false,
+      "schema_impact": true,
+      "removal_action": "REMOVE_MODEL_AND_DROP_FORWARD_ONLY_SCHEMA_OBJECTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "alembic/versions/0015_m10_5_google_drive_media_offload.py",
+      "symbol": "CREATOMATE",
+      "category": "MODELS_AND_SCHEMA",
+      "runtime_reachable": false,
+      "schema_impact": true,
+      "removal_action": "REMOVE_MODEL_AND_DROP_FORWARD_ONLY_SCHEMA_OBJECTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/api/routes/imports.py",
+      "symbol": "Creatomate",
+      "category": "API_ROUTES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/api/routes/media_provider_workflow.py",
+      "symbol": "creatomate, Creatomate",
+      "category": "API_ROUTES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/contracts/__init__.py",
+      "symbol": "Creatomate",
+      "category": "CONTRACTS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/contracts/dx2.py",
+      "symbol": "stale_provider_keys",
+      "category": "CONTRACTS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/contracts/m10_2.py",
+      "symbol": "creatomate, Creatomate, final_renderer_provider, renderer_provider_key",
+      "category": "CONTRACTS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "app/contracts/m10_5.py",
+      "symbol": "CREATOMATE",
+      "category": "CONTRACTS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/core/config.py",
+      "symbol": "creatomate, CREATOMATE, final_renderer_provider, FINAL_RENDERER_PROVIDER",
+      "category": "SETTINGS_AND_SECRETS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "app/db/models/__init__.py",
+      "symbol": "Creatomate",
+      "category": "MODELS_AND_SCHEMA",
+      "runtime_reachable": true,
+      "schema_impact": true,
+      "removal_action": "REMOVE_MODEL_AND_DROP_FORWARD_ONLY_SCHEMA_OBJECTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/db/models/m10_2.py",
+      "symbol": "creatomate, Creatomate, final_renderer_provider, renderer_provider_key",
+      "category": "MODELS_AND_SCHEMA",
+      "runtime_reachable": true,
+      "schema_impact": true,
+      "removal_action": "REMOVE_MODEL_AND_DROP_FORWARD_ONLY_SCHEMA_OBJECTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/gatekeeper_soft_review_agent.md",
+      "symbol": "Creatomate",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/provider_readiness_summary_agent.md",
+      "symbol": "Creatomate",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/thumbnail_brief_agent.md",
+      "symbol": "CREATOMATE",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/visual_planning_agent.md",
+      "symbol": "Creatomate, CREATOMATE",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/prompts/common/common_media_constraints.md",
+      "symbol": "Creatomate",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/__init__.py",
+      "symbol": "Creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/channel_contract.py",
+      "symbol": "Creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/config_registry.py",
+      "symbol": "creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/dx2.py",
+      "symbol": "CANONICAL_PROVIDER_KEYS, creatomate, Creatomate, stale_provider_keys, STALE_PROVIDER_KEYS",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/m10_2.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE, final_renderer_provider, renderer_provider_key",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "app/services/m10_5.py",
+      "symbol": "creatomate, CREATOMATE",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/m11.py",
+      "symbol": "creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/m12_2.py",
+      "symbol": "canonical_provider_keys, creatomate, Creatomate, CREATOMATE",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/m12_2p3.py",
+      "symbol": "Creatomate",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/m12.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE, FINAL_RENDERER_PROVIDER",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "app/services/m2.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE, final_renderer_provider",
+      "category": "ADAPTERS_AND_BUILDERS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "app/services/m6.py",
+      "symbol": "CREATOMATE",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/provider_stack.py",
+      "symbol": "CANONICAL_PROVIDER_KEYS, creatomate, STALE_PROVIDER_KEYS",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/r3d10.py",
+      "symbol": "canonical_provider_keys, CANONICAL_PROVIDER_KEYS, creatomate, Creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/r3d3.py",
+      "symbol": "creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/r3d4.py",
+      "symbol": "creatomate, CREATOMATE",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/r3d8.py",
+      "symbol": "creatomate",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "app/services/r3d9_ux2.py",
+      "symbol": "Creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/cloud_media_type_catalog.yaml",
+      "symbol": "Creatomate, CREATOMATE",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/creatomate_render_asset_state_catalog.yaml",
+      "symbol": "creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "config/m10_2_reason_code_catalog.yaml",
+      "symbol": "Creatomate, CREATOMATE",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/m6_reason_code_catalog.yaml",
+      "symbol": "Creatomate, CREATOMATE",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/media_provider_budget_policy_catalog.yaml",
+      "symbol": "creatomate",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/media_provider_capability_matrix_catalog.yaml",
+      "symbol": "creatomate, Creatomate",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/media_provider_role_profile_catalog.yaml",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/media_provider_routing_policy_catalog.yaml",
+      "symbol": "creatomate, CREATOMATE",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "config/provider_registry_catalog.yaml",
+      "symbol": "creatomate, Creatomate",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/architecture-ledger.md",
+      "symbol": "Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m10-1-llm-router-derivative-funnel.md",
+      "symbol": "Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m10-2-media-provider-role-matrix.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m10-3-youtube-follow.md",
+      "symbol": "Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m10-4-google-vertex-veo-binding.md",
+      "symbol": "Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m10-5-google-drive-media-offload.md",
+      "symbol": "creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m10-learning-review-queue.md",
+      "symbol": "Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/m12-production-credential-readiness.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE, FINAL_RENDERER_PROVIDER",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "docs/architecture/provider_activation_design_spec.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "docs/architecture/provider_stack_freeze.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/runtime_lts_v1.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/architecture/source-of-truth.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "docs/m12_1_prompt_registry.md",
+      "symbol": "Creatomate",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "frontend/src/features/channels/__tests__/channel-init-wizard.test.tsx",
+      "symbol": "Creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "frontend/src/features/channels/channel-init-wizard.tsx",
+      "symbol": "Creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "frontend/src/features/integrations/__tests__/integrations-readiness-view.test.tsx",
+      "symbol": "creatomate, Creatomate",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "frontend/src/features/integrations/integrations-readiness-view.tsx",
+      "symbol": "creatomate, Creatomate",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "frontend/src/features/ops/__tests__/ops-view.test.tsx",
+      "symbol": "creatomate",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "symbol": "Creatomate",
+      "category": "API_ROUTES",
+      "runtime_reachable": true,
+      "schema_impact": false,
+      "removal_action": "REMOVE_PROVIDER_SPECIFIC_REFERENCE_AND_DEAD_IMPORTS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "README.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "REWRITE_TO_NATIVE_FFMPEG_CANONICAL_ARCHITECTURE",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/code_closeout_readiness_prod_v1.md",
+      "symbol": "creatomate, Creatomate, stale_provider_keys",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/dx2_provider_stack_reconciliation_report.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/int1_post_freeze_integration_smoke_ollama_drive_snowball_report.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/int2_human_approved_patch_apply_gate_rerun_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/int2_resume_small_team_ai_full_manual_ops_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/int2_small_team_ai_package_manual_ops_trial_report.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m10_1-final-report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m10_2-final-report.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m10_3-final-report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m10_4-final-report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m10_5-final-report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_1_prompt_registry_source_spec.md",
+      "symbol": "Creatomate",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_1r_mock_dryrun_purge_report.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_2_first_scripted_video_package_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_2p_channel_init_contract_form_report 2.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_2p_channel_init_contract_form_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_2r_publish_handoff_ledger_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_2s_full_agent_ollama_rehearsal_report.md",
+      "symbol": "Creatomate, CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12_2s_operator_research_pack.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m12-final-report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/m2_provider_wiring_without_paid_calls_report.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/manual_pilot_001_evidence_report.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/manual_pilot_001_plan.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/nr1_native_renderer_architecture_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "reports/p1_precheck_repair_4_structured_output_duration_convergence_report.md",
+      "symbol": "creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/p1_precheck_repair_schema_timing_hook_style_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_report.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_rerun_2_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_rerun_3_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_rerun_4_report.md",
+      "symbol": "canonical_provider_keys, creatomate, Creatomate, CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_rerun_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_precheck_srt_ollama_rehearsal_report.md",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/pa1_provider_activation_design_review.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "reports/post_freeze_drive_archive_path_fix_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/ppr_apply_human_approved_patches_gate_rerun_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/prod_v1_launch_plan_after_package_repair.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/production_package_pilot_001_manual_only_closeout_report.md",
+      "symbol": "creatomate, Creatomate, stale_provider_keys",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/r3d10_runtime_lts_freeze_report.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/r3d7_closed_learning_retrieval_loop_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/r3d8_production_cost_firewall_provider_boundary_report.md",
+      "symbol": "CREATOMATE",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/r3d9_runtime_dashboard_ops_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/r3d9_ux3_patch_proposal_coverage_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/r3d9_ux4_safe_apply_approved_changes_report.md",
+      "symbol": "Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "reports/runtime_lts_v1_baseline.md",
+      "symbol": "creatomate, Creatomate",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_OR_REWRITE_CURRENT_TREE_HISTORICAL_REPORT",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/conftest.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m10_1_llm_router_derivatives.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m10_2_media_provider_routing.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE, final_renderer_provider, renderer_provider_key",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "tests/qualification/test_m10_learning_review_queue.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m12_1_prompt_registry.py",
+      "symbol": "CREATOMATE",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_INSTRUCTION_AND_REWRITE_SEMANTICS",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m12_2_first_scripted_video_package.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m12_2p_channel_init_contract.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m12_2s_full_agent_ollama_rehearsal.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_m12_provider_readiness.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_pre_m7_repo_preflight.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_r3d3_agent_context_pack.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/qualification/test_r3d4_agent_output_contract_gates.py",
+      "symbol": "creatomate, Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_app_health.py",
+      "symbol": "creatomate, CREATOMATE",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_channel_activation_cta.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_config_registry.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_dx2_provider_stack_reconciliation.py",
+      "symbol": "creatomate, stale_provider_keys",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_m12_1r_mock_runtime_purge.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_m2_provider_wiring_without_paid_calls.py",
+      "symbol": "creatomate, Creatomate, CREATOMATE",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_migration.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_nr1_native_renderer_architecture.py",
+      "symbol": "CANONICAL_PROVIDER_KEYS, creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "tests/test_nr2_native_production_bakeoff.py",
+      "symbol": "creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": "NativeFFmpegRenderer local compiler/render boundary"
+    },
+    {
+      "path": "tests/test_r3d10_runtime_lts_freeze.py",
+      "symbol": "stale_provider_keys",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_r3d5_controlled_memory_foundation.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_r3d6_vector_safe_retrieval_foundation.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_r3d7_closed_learning_retrieval_loop.py",
+      "symbol": "Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_r3d8_production_cost_firewall_provider_boundary.py",
+      "symbol": "creatomate, Creatomate",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    },
+    {
+      "path": "tests/test_r3d9_runtime_dashboard_ops.py",
+      "symbol": "creatomate, CREATOMATE",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": false,
+      "removal_action": "DELETE_PROVIDER_ONLY_TESTS_OR_REWRITE_AS_ABSENCE_ASSERTION",
+      "replacement_if_required": null
+    }
+  ]
+}

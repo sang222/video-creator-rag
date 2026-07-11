@@ -12,15 +12,6 @@ items:
     monthly_cap_renders: null
     current_mode: QUALITY_FIRST_250
     enforcement: REVIEW_REQUIRED
-  - key: creatomate_growth_10k_default
-    provider_type: CLOUD_FINAL_ASSEMBLY_RENDERER
-    provider_key: creatomate_growth_10k
-    monthly_cap_units: null
-    monthly_cap_usd: "149"
-    monthly_cap_seconds: null
-    monthly_cap_renders: 160
-    current_mode: QUALITY_FIRST_250
-    enforcement: REVIEW_REQUIRED
   - key: luma_api_default
     provider_type: AI_VIDEO_HERO_PROVIDER
     provider_key: luma_api

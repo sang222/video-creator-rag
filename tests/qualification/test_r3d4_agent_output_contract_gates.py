@@ -474,7 +474,7 @@ def test_provider_boundary_gate_blocks_provider_attempts_when_disabled() -> None
     readiness = {
         "provider_summaries": [
             {"provider_key": "elevenlabs", "readiness_state": "PASS"},
-            {"provider_key": "creatomate", "readiness_state": "PASS"},
+            {"provider_key": "elevenlabs", "readiness_state": "PASS"},
         ]
     }
 
@@ -491,7 +491,7 @@ def test_provider_boundary_gate_passes_without_upload_publish_or_media_attempts(
     readiness = {
         "provider_summaries": [
             {"provider_key": "elevenlabs", "readiness_state": "PASS"},
-            {"provider_key": "creatomate", "readiness_state": "PASS"},
+            {"provider_key": "elevenlabs", "readiness_state": "PASS"},
         ]
     }
 
@@ -561,7 +561,7 @@ def test_package_with_deterministic_block_cannot_be_media_ready() -> None:
 
 def test_r3d4_adds_no_provider_media_or_upload_calls() -> None:
     source = (Path("app/services/r3d4.py").read_text(encoding="utf-8") + Path("app/services/m12_2.py").read_text(encoding="utf-8"))
-    forbidden = ["GoogleDriveUploadService(", "YouTubeUpload", "ElevenLabsProvider(", "CreatomateProvider(", "VeoProvider("]
+    forbidden = ["GoogleDriveUploadService(", "YouTubeUpload", "ElevenLabsProvider(", "VeoProvider("]
 
     assert [token for token in forbidden if token in source] == []
 

@@ -65,7 +65,6 @@
 
 ## Proof no provider/media/upload calls
 - R3D7 không thêm provider/media/upload execution.
-- Test source guard chặn ElevenLabs/Luma/Creatomate/Pexels/Drive/YouTube upload path.
 - Default flags vẫn off cho vector/provider external execution.
 
 ## Tests run

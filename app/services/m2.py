@@ -23,8 +23,8 @@ from app.services.provider_stack import normalize_provider_key, provider_key_rej
 LOCKED_PROVIDERS = {
     "VOICE_PROVIDER": "elevenlabs",
     "AI_VIDEO_HERO_PROVIDER": "luma_api",
-    "CLOUD_FINAL_ASSEMBLY_RENDERER": "native_ffmpeg_renderer",
-    "CLOUD_TEMPLATE_RENDERER": "native_ffmpeg_renderer",
+    "FINAL_ASSEMBLY_RENDERER": "native_ffmpeg_renderer",
+    "TEMPLATE_RENDERER": "native_ffmpeg_renderer",
     "FREE_VISUAL_FALLBACK_PROVIDER": "pexels_api",
 }
 
@@ -69,10 +69,8 @@ class ProviderConfigRegistry:
             "AI_VIDEO_HERO_PROVIDER": _norm(self.settings.ai_video_hero_provider)
             or _norm(self.settings.ai_hero_provider)
             or LOCKED_PROVIDERS["AI_VIDEO_HERO_PROVIDER"],
-            "CLOUD_FINAL_ASSEMBLY_RENDERER": _norm(self.settings.cloud_final_assembly_renderer)
-            or _norm(self.settings.cloud_final_renderer_provider)
-            or LOCKED_PROVIDERS["CLOUD_FINAL_ASSEMBLY_RENDERER"],
-            "CLOUD_TEMPLATE_RENDERER": _norm(self.settings.cloud_template_renderer) or LOCKED_PROVIDERS["CLOUD_TEMPLATE_RENDERER"],
+            "FINAL_ASSEMBLY_RENDERER": LOCKED_PROVIDERS["FINAL_ASSEMBLY_RENDERER"],
+            "TEMPLATE_RENDERER": LOCKED_PROVIDERS["TEMPLATE_RENDERER"],
             "FREE_VISUAL_FALLBACK_PROVIDER": _norm(self.settings.free_visual_fallback_provider)
             or LOCKED_PROVIDERS["FREE_VISUAL_FALLBACK_PROVIDER"],
             "GOOGLE_DRIVE_ARCHIVE": "google_drive" if self.settings.google_drive_archive_enabled else None,
@@ -267,44 +265,6 @@ class ProviderEnvValidator:
                 "default_duration_seconds": self.settings.luma_default_duration_seconds,
                 "max_duration_seconds": self.settings.luma_max_duration_seconds,
                 "video_only": self.settings.luma_video_only,
-            },
-        )
-
-    def _creatomate(self, role: dict[str, str | None]) -> ProviderReadinessItemRead:
-        selected_final = role["CLOUD_FINAL_ASSEMBLY_RENDERER"]
-        selected_template = role["CLOUD_TEMPLATE_RENDERER"]
-        provider_mismatch = selected_final != "creatomate_growth_10k" or selected_template != "creatomate_growth_10k"
-        missing = _missing(
-            ("CREATOMATE_API_KEY", _secret_present(self.settings.creatomate_api_key)),
-            ("CREATOMATE_TEMPLATE_ID", _configured(self.settings.creatomate_template_id)),
-            ("CREATOMATE_WORKSPACE_ID", _configured(self.settings.creatomate_workspace_id)),
-        )
-        reason_codes = _missing_codes(missing, "CREATOMATE")
-        if provider_mismatch:
-            reason_codes.append("CREATOMATE_GROWTH_10K_NOT_SELECTED")
-        return self._item(
-            provider_key="creatomate_growth_10k",
-            configured_provider=selected_final,
-            selected_ok=not provider_mismatch,
-            credential_present=_secret_present(self.settings.creatomate_api_key),
-            missing_env_keys=missing,
-            reason_codes=reason_codes,
-            readiness_state=_readiness_from_missing(
-                missing,
-                all_missing_state="NOT_CONFIGURED",
-                priority=[
-                    ("CREATOMATE_API_KEY", "CREDENTIAL_MISSING"),
-                    ("CREATOMATE_TEMPLATE_ID", "NEEDS_TEMPLATE"),
-                    ("CREATOMATE_WORKSPACE_ID", "NEEDS_WORKSPACE"),
-                ],
-            ),
-            next_action="Cấu hình Creatomate Growth 10K key/template/workspace; M2 không submit render.",
-            safe_config={
-                "api_key_configured": _secret_present(self.settings.creatomate_api_key),
-                "template_id_configured": bool(self.settings.creatomate_template_id),
-                "workspace_id_configured": bool(self.settings.creatomate_workspace_id),
-                "final_assembly_renderer": selected_final,
-                "template_renderer": selected_template,
             },
         )
 
@@ -526,8 +486,6 @@ class ProviderBoundaryPreflight:
             codes.extend(validate_pexels_policy(payload.get("usage_role"), self.settings, usage_metrics))
         if provider_key == "luma_api" and _int(payload.get("duration_seconds")) > 8:
             codes.append("LUMA_DURATION_EXCEEDS_MAX")
-        if provider_key == "creatomate_growth_10k" and not payload.get("template_id"):
-            codes.append("CREATOMATE_TEMPLATE_ID_MISSING")
         if provider_key == "elevenlabs":
             if not payload.get("voice_id"):
                 codes.append("ELEVENLABS_VOICE_ID_MISSING")
@@ -621,24 +579,6 @@ class LumaHeroVideoRequestBuilder(_BaseRequestBuilder):
         return self._result(payload=payload, required_fields=["prompt", "model"], invalid_fields=invalid, reason_codes=reason_codes)
 
 
-class CreatomateRenderRequestBuilder(_BaseRequestBuilder):
-    provider_key = "creatomate_growth_10k"
-    capability: ProviderCapability = "FINAL_ASSEMBLY_RENDER"
-
-    def build(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
-        payload = {
-            "provider": self.provider_key,
-            "template_id": data.get("template_id") or self.settings.creatomate_template_id,
-            "workspace_id": data.get("workspace_id") or self.settings.creatomate_workspace_id,
-            "modifications": data.get("modifications") or {},
-            "effective_context_snapshot_id": data.get("effective_context_snapshot_id"),
-            "video_project_id": data.get("video_project_id"),
-            "package_id": data.get("package_id"),
-            "provider_capability": data.get("provider_capability") or self.capability,
-        }
-        return self._result(payload=payload, required_fields=["template_id"], human_paid_approval_required=True)
-
-
 class PexelsSearchRequestBuilder(_BaseRequestBuilder):
     provider_key = "pexels_api"
     capability: ProviderCapability = "FREE_VISUAL_FALLBACK"
@@ -687,14 +627,6 @@ class ElevenLabsVoiceAdapter:
 class LumaHeroVideoAdapter:
     def __init__(self, settings: Settings | None = None):
         self.builder = LumaHeroVideoRequestBuilder(settings)
-
-    def prepare(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
-        return self.builder.build(data)
-
-
-class CreatomateFinalRendererAdapter:
-    def __init__(self, settings: Settings | None = None):
-        self.builder = CreatomateRenderRequestBuilder(settings)
 
     def prepare(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
         return self.builder.build(data)
@@ -785,7 +717,6 @@ def _missing_codes(missing_env_keys: list[str], provider_prefix: str) -> list[st
 
 def _request_missing_code(provider_key: str, field: str) -> str:
     prefixes = {
-        "creatomate_growth_10k": "CREATOMATE",
         "luma_api": "LUMA",
         "pexels_api": "PEXELS",
         "google_drive_archive": "GOOGLE_DRIVE_ARCHIVE",

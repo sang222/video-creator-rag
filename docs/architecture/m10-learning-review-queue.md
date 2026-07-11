@@ -64,7 +64,6 @@ M11 approval and promotion are required before any draft can become reusable gui
 
 ## Explicit Non-Scope
 
-M10 does not build dashboard/operator cockpit UI, approval/reject CLI, human approval actions, approved playbook promotion, ChannelProfileVersion mutation, CompiledPolicySnapshot mutation, config review CTA, config upgrade suggestion, suggested config patch, derivative/reuse/shorts/cross-platform funnel backend, real Ollama/LLMRouter, ElevenLabs/Creatomate/AI Hero/cloud renderer integrations, media provider routing, auto publish/upload/reupload, analytics sync, no-view diagnostics, scraping, vector/RAG, OPA/Cedar, Algorithm/Growth/View agents, fake traffic, bot engagement, platform evasion, or IP/VPS tactics.
 
 ## M10.1 Follow-On
 

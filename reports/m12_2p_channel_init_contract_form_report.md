@@ -162,7 +162,6 @@ PASS.
 
 - Did not run old M12 real-smoke/provider-smoke tests.
 - Did not call media providers.
-- Did not enable Veo, ElevenLabs, Creatomate, Google Drive upload, or YouTube upload.
 - Did not add mock fallback.
 - Did not create dry-run success.
 
@@ -171,7 +170,6 @@ PASS.
 - No real video generation.
 - No TTS generation.
 - No Veo generation.
-- No Creatomate render.
 - No Google Drive upload.
 - No YouTube upload/publish/reupload.
 - No YouTube Studio scraping/browser automation.

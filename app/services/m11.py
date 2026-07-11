@@ -456,7 +456,7 @@ class M11DashboardService:
             integrations={
                 "ollama_router": {"state": _state_from_count(self._count_provider_key_like("ollama"), "DISABLED", "CONFIGURED")},
                 "luma_api": {"state": _state_from_count(self._count_provider_key_like("luma_api"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
-                "creatomate_growth_10k": {"state": _state_from_count(self._count_provider_key_like("creatomate_growth_10k"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
+                "native_ffmpeg_renderer": {"state": "LOCAL_CAPABILITY"},
                 "google_drive": {"state": "CONNECTED" if not self._drive_auth_needed() else "NEEDS_AUTH"},
                 "youtube_analytics": {"state": "CONNECTED" if not self._youtube_auth_needed() else "NEEDS_AUTH"},
             },
@@ -854,18 +854,6 @@ class M11DashboardService:
             )
             or 0
         )
-
-    def _cloud_final_renderer_state(self) -> str:
-        count = int(
-            self.session.scalar(
-                select(func.count())
-                .select_from(ProviderCapabilityMatrixEntry)
-                .where(ProviderCapabilityMatrixEntry.provider_type == "CLOUD_FINAL_ASSEMBLY_RENDERER")
-            )
-            or 0
-        )
-        return "CONFIGURED" if count else "MISSING_REQUIRED_GAP"
-
 
 class M11ChannelLifecycleService:
     def __init__(self, session: Session):

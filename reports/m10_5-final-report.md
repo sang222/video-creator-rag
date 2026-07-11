@@ -122,7 +122,6 @@ CLI:
 - No Studio scraping/browser automation.
 - No fake traffic/bot engagement/platform evasion.
 - No RAG/vector/OPA/Cedar.
-- No real Creatomate/ElevenLabs/final renderer calls.
 
 ## Risks / Limitations
 

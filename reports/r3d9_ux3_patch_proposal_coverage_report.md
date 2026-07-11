@@ -143,7 +143,6 @@ The 144 existing ProviderAttempt rows are historical INT2 Ollama LLM attempts. R
 Explicitly not executed:
 - ElevenLabs
 - Luma
-- Creatomate
 - Pexels
 - Drive upload
 - YouTube upload/publish/reupload

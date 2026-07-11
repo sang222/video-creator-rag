@@ -7,9 +7,6 @@ from app.api.routes.imports import (
     AIHeroGenerationExecuteRequest,
     AIHeroGenerationJobRead,
     AIHeroGenerationService,
-    CreatomateRenderAssetPlanRequest,
-    CreatomateRenderAssetPlanningService,
-    CreatomateRenderAssetRead,
     LicenseEvidenceGateCheckRequest,
     LicenseEvidenceGateRead,
     LicenseEvidenceGateService,
@@ -178,23 +175,6 @@ def create_router() -> APIRouter:
         try:
             with session_scope() as session:
                 return AIHeroGenerationService(session).execute(asset_id=asset_id, data=data)
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.post("/video-projects/{video_project_id}/creatomate-assets/plan", response_model=CreatomateRenderAssetRead)
-    def plan_creatomate_render_asset(video_project_id: uuid.UUID, data: CreatomateRenderAssetPlanRequest) -> CreatomateRenderAssetRead:
-        try:
-            with session_scope() as session:
-                asset = CreatomateRenderAssetPlanningService(session).plan(video_project_id=video_project_id, data=data)
-                return CreatomateRenderAssetRead.model_validate(asset)
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.get("/creatomate-render-assets/{asset_id}", response_model=CreatomateRenderAssetRead)
-    def get_creatomate_render_asset(asset_id: uuid.UUID) -> CreatomateRenderAssetRead:
-        try:
-            with session_scope() as session:
-                return CreatomateRenderAssetRead.model_validate(CreatomateRenderAssetPlanningService(session).require(asset_id))
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

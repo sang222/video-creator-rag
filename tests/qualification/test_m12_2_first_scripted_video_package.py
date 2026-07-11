@@ -391,7 +391,6 @@ def test_m12_2_api_routes_exist_and_no_forbidden_package_paths(db_session) -> No
         "app.providers.mock",
         "RealSmokeOrchestratorService",
         "GoogleVertexVeoProvider",
-        "CreatomateRender",
         "YouTubeUpload",
         "GoogleDriveUploadService",
     ]

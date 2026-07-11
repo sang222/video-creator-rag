@@ -664,7 +664,7 @@ class ChannelContractCompiler:
             "default_playbook": {"format_strategy": contract.get("format_policy", {}), "media_style": {"source": "research_assisted"}},
             "render_policy": {
                 "capcut_prototype_viewer_only": True,
-                "production_renderer_planned": "Creatomate Growth 10K",
+                "production_renderer_planned": "NativeFFmpegRenderer",
                 "transcription_pilot": "faster_whisper_local",
                 "ai_video_mode": "manual_external",
                 "visual_plan_required": True,
@@ -1016,7 +1016,7 @@ def _locked_media_policy() -> dict[str, Any]:
         "ai_hero_audio": False,
         "ai_hero_allowed_use": ["hero_shot", "hard_to_find_visual"],
         "ai_hero_forbidden_use": ["data_diagram", "workflow_chart", "factual_evidence_visualization"],
-        "renderer": "Creatomate Growth 10K",
+        "renderer": "NativeFFmpegRenderer",
         "storage_archive": "Google Drive",
         "drive_offload_enabled": True,
     }

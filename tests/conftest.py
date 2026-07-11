@@ -183,7 +183,6 @@ def clean_database(engine: Engine) -> None:
                     license_evidence_records,
                     final_media_refs,
                     thumbnail_variants,
-                    creatomate_render_assets,
                     ai_hero_assets,
                     short_render_packages,
                     long_form_render_packages,

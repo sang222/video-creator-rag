@@ -8,7 +8,6 @@ Scope: VCOS / Video Creator Operating System, text-only Ollama rehearsal path.
 PRE_PROVIDER_PURCHASE_CHECK=BLOCKED
 OK_TO_BUY_PROVIDER_CREDENTIALS=false
 
-Provider activation remains NO-GO. No ElevenLabs, Luma, Creatomate, Pexels, Drive upload, YouTube upload/publish, final media, HumanUploadTask, ProviderJobSnapshot SUBMITTED, or PaidProviderCallLedger EXECUTED was created.
 
 ## Files Changed
 

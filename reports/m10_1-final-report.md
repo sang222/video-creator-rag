@@ -161,7 +161,6 @@ SKIPPED
 
 - No dashboard UI.
 - No approval/reject dashboard actions.
-- No ElevenLabs/Creatomate/AI Hero/cloud final renderer integration.
 - No auto publish/upload/reupload.
 - No channel config mutation or config upgrade suggestion.
 - No approved playbook promotion.
@@ -171,7 +170,6 @@ SKIPPED
 
 ## Deferred
 
-- M10.2: Media Provider Role Matrix, media provider routing, ElevenLabs, Creatomate, AI Hero, cloud final renderer.
 - M11: dashboard/operator cockpit, approvals, upload task dashboard, derivative graph dashboard, learning promotion UX, channel config editing.
 
 ## Risks / limitations

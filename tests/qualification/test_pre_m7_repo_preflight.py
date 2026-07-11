@@ -126,7 +126,6 @@ ALLOWED_QUALIFICATION_DIRTY_PREFIXES = (
     "config/provider_capability_catalog.yaml",
     "config/long_form_render_package_state_catalog.yaml",
     "config/short_render_package_state_catalog.yaml",
-    "config/creatomate_render_asset_state_catalog.yaml",
     "config/thumbnail_variant_state_catalog.yaml",
     "config/final_media_type_catalog.yaml",
     "config/license_status_catalog.yaml",

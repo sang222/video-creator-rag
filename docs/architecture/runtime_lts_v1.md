@@ -41,12 +41,12 @@ R3D10 freeze VCOS backend/core ở trạng thái Runtime LTS v1. Đây là freez
 
 - `elevenlabs`: voice/TTS.
 - `luma_api`: AI hero/metaphor video, max 8s, allowed 4/6/8.
-- `creatomate_growth_10k`: final assembly + template/card/thumbnail/Shorts renderer.
+- `native_ffmpeg_renderer`: local final assembly + native motion + caption/compositing authority; not an external paid provider.
 - `pexels_api`: free visual fallback only.
 - YouTube: manual publish + read-only analytics/verification.
 - Drive/object storage: optional archive later.
 
-Deferred/inactive: Veo, Runway, Envato, Adobe, Shutterstock, DaVinci API core, Creatomate Essential 2K, TBD final renderer, Pexels+Pixabay combined fallback.
+Deferred/inactive: Veo, Runway, Envato, Adobe, Shutterstock, DaVinci API core, TBD final renderer, Pexels+Pixabay combined fallback.
 
 ## Manual publish boundary
 
@@ -72,7 +72,7 @@ Runtime LTS v1 keeps these disabled:
 - provider execution
 - ElevenLabs generation
 - Luma generation
-- Creatomate render submission
+- NativeFFmpeg production render execution
 - Pexels search/download
 - Drive upload
 - YouTube upload/publish

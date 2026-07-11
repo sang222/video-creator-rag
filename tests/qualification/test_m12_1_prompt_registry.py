@@ -87,7 +87,7 @@ def _complete_channel_contract() -> dict:
             "ai_hero_allowed_durations_seconds": [4, 6, 8],
             "ai_hero_default_duration_seconds": 8,
             "ai_hero_audio": False,
-            "renderer": "CREATOMATE_GROWTH_10K",
+            "renderer": "NATIVE_FFMPEG_RENDERER",
             "storage_archive": "GOOGLE_DRIVE",
         },
         "rights_policy": {"rights_evidence_required": True, "ai_disclosure_required_when_ai_media_used": True},
