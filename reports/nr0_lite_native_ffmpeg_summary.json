@@ -1,0 +1,58 @@
+{
+  "date": "2026-07-11",
+  "scope": "NR0-LITE local-only synthetic 1080p feasibility",
+  "ffmpeg": {
+    "existing": "/opt/homebrew/bin/ffmpeg",
+    "side_by_side": "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+    "version": "8.1.2_1",
+    "install_action": "reused_existing_ffmpeg_full"
+  },
+  "toolchain": "PASS",
+  "font": "/System/Library/Fonts/Supplemental/Arial.ttf",
+  "motion_smokes": {
+    "count": 6,
+    "passed": 6
+  },
+  "end_to_end": {
+    "path": "var/tmp/native_ffmpeg_nr0_lite/outputs/nr0l_1080p_end_to_end.mp4",
+    "duration_seconds": 45.0,
+    "wall_clock_seconds": 12.218,
+    "realtime_factor": 0.2715,
+    "peak_rss_kib": 1098896,
+    "peak_cpu_percent_sample": 468.6,
+    "size_bytes": 18133367,
+    "codec": "h264",
+    "pixel_format": "yuv420p",
+    "color": "bt709",
+    "audio": "aac/48000/stereo",
+    "av_drift_ms": 0.0,
+    "faststart": true,
+    "media_qc": "PASS"
+  },
+  "disk": {
+    "minimum_free_gib": 40,
+    "abort_free_gib": 20,
+    "free_after_bytes": 71328149504,
+    "retained_bytes": 52016381,
+    "partial_files_remaining": 0
+  },
+  "diagnostics": {
+    "blackdetect_events": 0,
+    "silencedetect_events": 0,
+    "freezedetect_events": 18,
+    "freezedetect_disposition": "reviewed_and_accepted_by_operator_for_intended_low_motion_synthetic_segments"
+  },
+  "no_execution": {
+    "provider_network_calls": false,
+    "db_writes": false,
+    "provider_media_upload_rows_created": false,
+    "channel_or_learning_mutations": false
+  },
+  "verdict": {
+    "NR0_LITE_TOOLCHAIN": "PASS",
+    "NR0_LITE_TECHNICAL": "PASS",
+    "NR0_LITE_HUMAN_REVIEW": "PASS",
+    "NR0_LITE_FINAL": "PASS",
+    "PROCEED_TO_OFV0_NR1": true
+  }
+}
