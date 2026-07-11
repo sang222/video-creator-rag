@@ -1058,6 +1058,23 @@ def test_channel_authority_schema_shape_repair_is_bounded_and_strict(db_session)
         }
     ]
 
+    ready_status = service.validate_output(
+        PromptOutputValidationRequest(
+            agent_key="UploadCardCopyAgent",
+            raw_output={**raw, "agent_key": "UploadCardCopyAgent", "status": "READY", "technical_appendix": {}},
+        )
+    )
+    assert ready_status.status == "OK"
+    assert ready_status.parsed_output["status"] == "OK"
+    assert ready_status.repair_attempts == [
+        {
+            "repair_type": "normalize_envelope_metadata_shape",
+            "semantic_change_allowed": False,
+            "fields": ["status"],
+            "reason_codes": ["STATUS_READY_TO_OK_REPAIRED"],
+        }
+    ]
+
 
 def test_channel_authority_prompt_forbids_bad_envelope_shape(db_session) -> None:
     service = PromptRegistryService(db_session)

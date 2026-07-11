@@ -137,12 +137,21 @@ def _envelope(agent_key: str, artifact: dict, *, status: str = "OK") -> dict:
 
 
 def _long_script_sentences(count: int = 32) -> list[dict]:
-    text = (
+    base_text = (
         "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
         "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
         "for deterministic duration validation without adding claims or media."
     )
-    return [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 15} for index in range(1, count + 1)]
+    hook_text = (
+        "M12.2 starts with a real channel contract. "
+        "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
+        "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
+        "for deterministic duration validation without adding claims or media."
+    )
+    return [
+        {"sentence_id": f"S{index}", "text": hook_text if index == 1 else base_text, "approx_seconds": 15}
+        for index in range(1, count + 1)
+    ]
 
 
 def _visual_scenes(count: int = 32) -> list[dict]:

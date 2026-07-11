@@ -322,6 +322,15 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert package.artifacts["provider_plan_dry_validation"]["status"] == "REACHED"
     assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
     assert package.artifacts["provider_plan_dry_validation"]["no_network_call_made"] is True
+    assert package.artifacts["srt"]["artifact_type"] == "SRT_CAPTION_FILE"
+    assert package.artifacts["srt"]["not_final_media"] is True
+    assert package.artifacts["srt"]["not_publishable"] is True
+    assert package.artifacts["srt"]["provider_calls_made"] is False
+    assert package.artifacts["srt"]["upload_publish_made"] is False
+    assert Path(package.artifacts["srt"]["local_path"]).exists()
+    assert package.artifacts["srt"]["srt"].startswith("1\n00:00:00,000 --> ")
+    assert package.artifacts["srt"]["caption_count"] == len(package.artifacts["srt"]["cues"])
+    assert package.artifacts["srt"]["checksum_sha256"]
     assert package.artifacts["duration_model"]["read_only"] is True
     assert package.artifacts["duration_model"]["target_duration_seconds"] == 540.0
     assert sum(item["word_target"] for item in package.artifacts["script_word_budget"]["section_word_budgets"]) == 1260

@@ -576,9 +576,19 @@ class SRTTimingGate:
         fail_codes: list[str] = []
         cue_measurements = _parse_srt(content)
         fail_codes.extend(cue_measurements["fail_codes"])
-        narration_total = _script_total_seconds(_dict(artifacts.get("narration_script")))
-        if cue_measurements["total_seconds"] and narration_total and abs(cue_measurements["total_seconds"] - narration_total) > max(2, narration_total * 0.05):
-            fail_codes.append("SRT_TOTAL_DURATION_MISMATCH")
+        duration_model = _dict(artifacts.get("duration_model"))
+        allowed_range = _dict(duration_model.get("allowed_duration_range_seconds"))
+        min_seconds = _first_number(allowed_range.get("min"), duration_model.get("min_seconds"))
+        max_seconds = _first_number(allowed_range.get("max"), duration_model.get("max_seconds"))
+        narration_total = _script_estimated_total_seconds(_dict(artifacts.get("narration_script")), duration_model)
+        if cue_measurements["total_seconds"] and narration_total and abs(cue_measurements["total_seconds"] - narration_total) > max(2, narration_total * 0.01):
+            fail_codes.append("PRECHECK_BLOCKED_SRT_DURATION_MISMATCH")
+        if min_seconds and cue_measurements["total_seconds"] and cue_measurements["total_seconds"] < min_seconds:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_DURATION_BELOW_RANGE")
+        if max_seconds and cue_measurements["total_seconds"] and cue_measurements["total_seconds"] > max_seconds:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_DURATION_ABOVE_RANGE")
+        if cue_measurements["large_gap_count"]:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_GAP_TOO_LARGE")
         if lifecycle == "DRAFT_SCRIPT_TIMING" and srt.get("final") is True:
             fail_codes.append("DRAFT_SRT_MARKED_FINAL")
         if lifecycle == "FINAL_APPROVED" and not (srt.get("voice_alignment_evidence_ref") and srt.get("human_approved_at")):
@@ -589,10 +599,245 @@ class SRTTimingGate:
             "cue_count": cue_measurements["cue_count"],
             "srt_total_seconds": cue_measurements["total_seconds"],
             "narration_total_seconds": narration_total,
+            "min_seconds": min_seconds,
+            "max_seconds": max_seconds,
+            "large_gap_count": cue_measurements["large_gap_count"],
         }
         if fail_codes:
             return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, fail_codes, ["srt"], ["subtitle_lifecycle"], "Sửa SRT timing/lifecycle trước khi final.")
         return _gate_result(self.gate_key, GATE_PASS, SEVERITY_LOW, measurements, [], ["srt"], ["subtitle_lifecycle"], None)
+
+
+class SRTFormatGate:
+    gate_key = "srt_format_gate"
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        if not srt:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, {"srt_present": False}, ["PRECHECK_BLOCKED_SRT_MISSING"], ["srt"], ["subtitle_lifecycle"], "Tạo SRT artifact trước provider boundary.")
+        content = str(srt.get("srt") or srt.get("content") or "")
+        parsed = _parse_srt(content)
+        fail_codes = list(parsed["fail_codes"])
+        if parsed["cue_count"] <= 0:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_EMPTY")
+        if parsed["cues"] and parsed["cues"][0]["start_seconds"] != 0:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_START_NOT_ZERO")
+        if not all(cue["text"].strip() for cue in parsed["cues"]):
+            fail_codes.append("PRECHECK_BLOCKED_SRT_EMPTY_TEXT")
+        try:
+            content.encode("utf-8").decode("utf-8")
+        except UnicodeError:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_UTF8_INVALID")
+        measurements = {
+            "cue_count": parsed["cue_count"],
+            "starts_at_zero": bool(parsed["cues"] and parsed["cues"][0]["start_seconds"] == 0),
+            "artifact_type": srt.get("artifact_type"),
+            "local_path": srt.get("local_path"),
+        }
+        if fail_codes:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["srt"], ["subtitle_lifecycle"], "Sửa format SRT deterministic.")
+        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["srt"], ["subtitle_lifecycle"], None)
+
+
+class CaptionCoverageGate:
+    gate_key = "caption_coverage_gate"
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        script = _dict(artifacts.get("narration_script"))
+        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+        sentence_ids = [str(item.get("sentence_id") or item.get("id") or index + 1) for index, item in enumerate(sentences)]
+        cues = [item for item in _list(srt.get("cues")) if isinstance(item, dict)]
+        covered_ids = sorted({str(ref) for cue in cues for ref in _strings(cue.get("sentence_ids") or cue.get("sentence_id"))})
+        missing = sorted(set(sentence_ids) - set(covered_ids))
+        script_tokens = _normalized_tokens(" ".join(str(item.get("text") or "") for item in sentences))
+        srt_text = str(srt.get("srt") or srt.get("content") or "")
+        srt_tokens = _normalized_tokens(_srt_text_only(srt_text))
+        coverage_percent = round((len(set(sentence_ids) - set(missing)) / len(sentence_ids)) * 100, 3) if sentence_ids else 0.0
+        fail_codes: list[str] = []
+        if missing:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_SENTENCE_COVERAGE_INCOMPLETE")
+        if coverage_percent < 100:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_COVERAGE_BELOW_THRESHOLD")
+        if script_tokens != srt_tokens:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_TEXT_COVERAGE_MISMATCH")
+        measurements = {
+            "script_sentence_count": len(sentence_ids),
+            "covered_sentence_count": len(covered_ids),
+            "coverage_percent": coverage_percent,
+            "missing_sentence_ids": missing[:20],
+        }
+        if fail_codes:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["narration_script", "srt"], ["script_contract", "subtitle_lifecycle"], "Đồng bộ coverage script -> SRT.")
+        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script", "srt"], ["script_contract", "subtitle_lifecycle"], None)
+
+
+class CaptionReadabilityGate:
+    gate_key = "caption_readability_gate"
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        parsed = _parse_srt(str(srt.get("srt") or srt.get("content") or ""))
+        too_long_lines: list[dict[str, Any]] = []
+        too_dense: list[int] = []
+        bad_duration: list[int] = []
+        too_many_lines: list[int] = []
+        for cue in parsed["cues"]:
+            duration = cue["end_seconds"] - cue["start_seconds"]
+            lines = cue["text_lines"]
+            if duration < 1.0 or duration > 7.0:
+                bad_duration.append(cue["index"])
+            if len(lines) > 2:
+                too_many_lines.append(cue["index"])
+            for line in lines:
+                if len(line) > 42:
+                    too_long_lines.append({"index": cue["index"], "line_length": len(line)})
+            if duration > 0 and _word_count(cue["text"]) / duration > 3.8:
+                too_dense.append(cue["index"])
+        fail_codes: list[str] = []
+        if bad_duration:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_CAPTION_DURATION_INVALID")
+        if too_many_lines:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_TOO_MANY_LINES")
+        if too_long_lines:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_LINE_TOO_LONG")
+        if too_dense:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_CAPTION_TOO_DENSE")
+        measurements = {
+            "bad_duration_caption_indexes": bad_duration[:20],
+            "too_many_line_caption_indexes": too_many_lines[:20],
+            "too_long_line_count": len(too_long_lines),
+            "too_dense_caption_indexes": too_dense[:20],
+        }
+        if fail_codes:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, sorted(set(fail_codes)), ["srt"], ["subtitle_readability"], "Sửa readability của caption.")
+        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["srt"], ["subtitle_readability"], None)
+
+
+class ScriptToSRTConsistencyGate:
+    gate_key = "script_to_srt_consistency_gate"
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        script = _dict(artifacts.get("narration_script"))
+        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        script_text = " ".join(str(item.get("text") or "") for item in _list(script.get("sentences")) if isinstance(item, dict))
+        srt_text = _srt_text_only(str(srt.get("srt") or srt.get("content") or ""))
+        script_tokens = _normalized_tokens(script_text)
+        srt_tokens = _normalized_tokens(srt_text)
+        fail_codes: list[str] = []
+        if script_tokens != srt_tokens:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_NOT_DERIVED_FROM_SCRIPT")
+        measurements = {
+            "script_word_count": len(script_tokens),
+            "srt_word_count": len(srt_tokens),
+            "token_delta": len(srt_tokens) - len(script_tokens),
+        }
+        if fail_codes:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["narration_script", "srt"], ["script_contract.hook_spec"], "SRT phải derive từ script, không thêm claims.")
+        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script", "srt"], ["script_contract.hook_spec"], None)
+
+
+class HookCaptionGate:
+    gate_key = "hook_caption_gate"
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        hook = _hook_spec(artifacts)
+        script = _dict(artifacts.get("narration_script"))
+        parsed = _parse_srt(str(srt.get("srt") or srt.get("content") or ""))
+        first_window = " ".join(cue["text"] for cue in parsed["cues"] if cue["start_seconds"] < 3.0)
+        hook_words = {token for token in _normalized_tokens(str(hook.get("first_3_seconds_script") or hook.get("promise_made") or "")) if len(token) > 3}
+        caption_words = set(_normalized_tokens(first_window))
+        overlap = sorted(hook_words & caption_words)
+        first_sentence = str(_dict(_first([item for item in _list(script.get("sentences")) if isinstance(item, dict)])).get("text") or "")
+        derived_from_opening = bool(first_window and _normalized_tokens(first_window) == _normalized_tokens(first_sentence)[: len(_normalized_tokens(first_window))])
+        overpromise_terms = ["actual result", "real result", "final video", "uploaded", "published", "guaranteed"]
+        overpromise_matches = [term for term in overpromise_terms if term in first_window.lower()]
+        fail_codes: list[str] = []
+        if not first_window.strip():
+            fail_codes.append("PRECHECK_BLOCKED_SRT_HOOK_CAPTION_MISSING")
+        if hook_words and not overlap and not derived_from_opening:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_HOOK_CAPTION_MISMATCH")
+        if overpromise_matches:
+            fail_codes.append("PRECHECK_BLOCKED_SRT_HOOK_CAPTION_OVERPROMISE")
+        measurements = {
+            "first_3_seconds_caption": first_window,
+            "hook_overlap_terms": overlap[:10],
+            "derived_from_opening_narration": derived_from_opening,
+            "overpromise_matches": overpromise_matches,
+        }
+        if fail_codes:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, sorted(set(fail_codes)), ["hook_spec", "srt"], ["script_contract.hook_spec"], "Caption 3 giây đầu phải hỗ trợ hook promise.")
+        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["hook_spec", "srt"], ["script_contract.hook_spec"], None)
+
+
+class VisualSRTTimelineGate:
+    gate_key = "visual_srt_timeline_gate"
+
+    def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
+        visual = _dict(artifacts.get("visual_plan"))
+        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        scenes = [item for item in _list(visual.get("scenes")) if isinstance(item, dict)]
+        cues = [item for item in _list(srt.get("cues")) if isinstance(item, dict)]
+        if not visual:
+            return _gate_result(self.gate_key, GATE_SKIPPED, SEVERITY_INFO, {"visual_plan_present": False}, [], [], ["visual_plan"], None)
+        srt_end = _first_number(srt.get("srt_total_seconds"), srt.get("estimated_total_seconds")) or 0.0
+        cue_sentence_ids = {str(ref) for cue in cues for ref in _strings(cue.get("sentence_ids") or cue.get("sentence_id"))}
+        covered_sentence_ids: set[str] = set()
+        timed_scene_total = 0.0
+        invalid_scene_ids: list[str] = []
+        scene_count_with_timing = 0
+        for index, scene in enumerate(scenes, start=1):
+            refs = _strings(
+                scene.get("sentence_ids")
+                or scene.get("covered_sentence_ids")
+                or scene.get("sentence_ids_covered")
+                or scene.get("covers_sentence_ids")
+                or scene.get("sentence_refs")
+                or scene.get("primary_sentence_ids")
+                or scene.get("narration_sentence_ids")
+                or scene.get("sentence_range")
+                or scene.get("sentence_id")
+            )
+            covered_sentence_ids.update(refs)
+            start = _first_number(scene.get("start_seconds"), scene.get("start_time"), scene.get("start"))
+            end = _first_number(scene.get("end_seconds"), scene.get("end_time"), scene.get("end"))
+            duration = _first_number(scene.get("duration_seconds"))
+            if start is not None or end is not None or duration is not None:
+                scene_count_with_timing += 1
+                if start is None and end is not None and duration is not None:
+                    start = end - duration
+                if end is None and start is not None and duration is not None:
+                    end = start + duration
+                if start is None or end is None or start < 0 or end <= start or (srt_end and end > srt_end + 1.0):
+                    invalid_scene_ids.append(str(scene.get("scene_id") or index))
+                elif duration is not None:
+                    timed_scene_total += duration
+                else:
+                    timed_scene_total += end - start
+        missing_caption_sentence_ids = sorted(cue_sentence_ids - covered_sentence_ids)
+        fail_codes: list[str] = []
+        if missing_caption_sentence_ids:
+            fail_codes.append("VISUAL_COVERAGE_INCOMPLETE")
+        if invalid_scene_ids:
+            fail_codes.append("VISUAL_SCENE_DURATION_INVALID")
+        if scene_count_with_timing and srt_end and abs(timed_scene_total - srt_end) > max(15, srt_end * 0.15):
+            fail_codes.append("VISUAL_TIMELINE_MISMATCH")
+        if scene_count_with_timing and scenes and cues and len(scenes) >= len(cues) * 0.95:
+            fail_codes.append("VISUAL_SCENE_DURATION_INVALID")
+        measurements = {
+            "scene_count": len(scenes),
+            "caption_count": len(cues),
+            "srt_total_seconds": srt_end,
+            "timed_scene_total_seconds": round(timed_scene_total, 3),
+            "scene_count_with_timing": scene_count_with_timing,
+            "missing_caption_sentence_ids": missing_caption_sentence_ids[:20],
+            "invalid_scene_ids": invalid_scene_ids[:20],
+            "timing_mode": "explicit" if scene_count_with_timing else "sentence_id_derived",
+        }
+        if fail_codes:
+            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["visual_plan", "srt"], ["visual_plan.scenes", "subtitle_lifecycle"], "Sửa visual/SRT timeline coverage.")
+        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["visual_plan", "srt"], ["visual_plan.scenes", "subtitle_lifecycle"], None)
 
 
 class VisualCoverageGate:
@@ -666,8 +911,9 @@ class ArtifactConsistencyGate:
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
         script = _dict(artifacts.get("narration_script"))
         metadata = _dict(artifacts.get("metadata_package"))
+        duration_model = _dict(artifacts.get("duration_model"))
         fail_codes: list[str] = []
-        script_total = _script_total_seconds(script)
+        script_total = _script_estimated_total_seconds(script, duration_model)
         metadata_duration = _first_number(metadata.get("duration_seconds"), metadata.get("total_approx_seconds"))
         if script_total and metadata_duration is not None and abs(script_total - metadata_duration) > max(10, script_total * 0.1):
             fail_codes.append("SCRIPT_METADATA_DURATION_MISMATCH")
@@ -1041,7 +1287,13 @@ class R3D4GateService:
         "character_runtime_compliance_gate": CharacterRuntimeComplianceGate(),
         "market_runtime_compliance_gate": MarketRuntimeComplianceGate(),
         "script_duration_gate": ScriptDurationGate(),
+        "srt_format_gate": SRTFormatGate(),
         "srt_timing_gate": SRTTimingGate(),
+        "caption_coverage_gate": CaptionCoverageGate(),
+        "caption_readability_gate": CaptionReadabilityGate(),
+        "script_to_srt_consistency_gate": ScriptToSRTConsistencyGate(),
+        "hook_caption_gate": HookCaptionGate(),
+        "visual_srt_timeline_gate": VisualSRTTimelineGate(),
         "visual_coverage_gate": VisualCoverageGate(),
         "artifact_consistency_gate": ArtifactConsistencyGate(),
         "disclosure_consistency_gate": DisclosureConsistencyGate(),
@@ -1101,7 +1353,17 @@ class R3D4GateService:
         provider_readiness_state: dict[str, Any] | None = None,
         include_provider_boundary: bool = False,
     ) -> GateBatchResult:
-        gate_keys = ["artifact_consistency_gate", "channel_runtime_contract_gate", "srt_timing_gate"]
+        gate_keys = [
+            "artifact_consistency_gate",
+            "channel_runtime_contract_gate",
+            "srt_format_gate",
+            "srt_timing_gate",
+            "caption_coverage_gate",
+            "caption_readability_gate",
+            "script_to_srt_consistency_gate",
+            "hook_caption_gate",
+            "visual_srt_timeline_gate",
+        ]
         if include_provider_boundary:
             gate_keys.extend(["provider_boundary_gate", "provider_character_input_gate"])
         return self.run_batch(
@@ -1322,6 +1584,15 @@ def _script_total_seconds(script: dict[str, Any]) -> float:
     return sum(_float(item.get("approx_seconds")) for item in sentences)
 
 
+def _script_estimated_total_seconds(script: dict[str, Any], duration_model: dict[str, Any] | None = None) -> float:
+    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    word_count = _word_count(" ".join(str(item.get("text") or "") for item in sentences))
+    wpm = _first_number(_dict(duration_model).get("words_per_minute_assumption")) or 140.0
+    if word_count and wpm:
+        return round((word_count / wpm) * 60, 3)
+    return _script_total_seconds(script)
+
+
 def _word_count(value: str) -> int:
     return len(re.findall(r"\b[\w'-]+\b", value))
 
@@ -1351,6 +1622,8 @@ def _parse_srt(content: str) -> dict[str, Any]:
     previous_end = 0.0
     total_seconds = 0.0
     expected_number = 1
+    cues: list[dict[str, Any]] = []
+    large_gap_count = 0
     for block in blocks:
         lines = [line.strip() for line in block.splitlines() if line.strip()]
         if len(lines) < 2:
@@ -1370,19 +1643,51 @@ def _parse_srt(content: str) -> dict[str, Any]:
             continue
         start = _srt_time(match.group(1))
         end = _srt_time(match.group(2))
+        if start < 0 or end < 0:
+            fail_codes.append("SRT_NEGATIVE_TIMESTAMP")
         if end <= start:
             fail_codes.append("SRT_END_NOT_AFTER_START")
         if start < previous_end:
             fail_codes.append("SRT_TIMING_OVERLAP")
+        if start - previous_end > 1.0:
+            large_gap_count += 1
+        text_lines = lines[2:]
+        if not text_lines:
+            fail_codes.append("SRT_TEXT_EMPTY")
+        cues.append(
+            {
+                "index": number,
+                "start_seconds": start,
+                "end_seconds": end,
+                "duration_seconds": round(end - start, 3),
+                "text_lines": text_lines,
+                "text": " ".join(text_lines),
+            }
+        )
         previous_end = max(previous_end, end)
         total_seconds = max(total_seconds, end)
-    return {"cue_count": len(blocks), "total_seconds": total_seconds, "fail_codes": sorted(set(fail_codes))}
+    return {
+        "cue_count": len(blocks),
+        "total_seconds": round(total_seconds, 3),
+        "large_gap_count": large_gap_count,
+        "cues": cues,
+        "fail_codes": sorted(set(fail_codes)),
+    }
 
 
 def _srt_time(value: str) -> float:
     hours, minutes, rest = value.split(":")
     seconds, millis = rest.split(",")
     return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(millis) / 1000
+
+
+def _srt_text_only(content: str) -> str:
+    parsed = _parse_srt(content)
+    return " ".join(cue["text"] for cue in parsed["cues"])
+
+
+def _normalized_tokens(value: str) -> list[str]:
+    return [token.lower() for token in re.findall(r"\b[\w'-]+\b", value)]
 
 
 def _text_contains_any(value: dict[str, Any], needles: list[str]) -> bool:

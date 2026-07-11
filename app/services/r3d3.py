@@ -272,6 +272,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
         ],
         optional=["package_status_digest"],
         forbidden=["full_visual_plan", "provider_internals", "full_research_pack"],
+        max_context_chars=12500,
     ),
     "VisualPlanningAgent": _contract(
         "VisualPlanningAgent",

@@ -1445,12 +1445,14 @@ def repair_envelope_shape(
         metadata_shape_fields.append("confidence_label")
         metadata_shape_reason_codes.append("CONFIDENCE_VERY_HIGH_TO_HIGH_REPAIRED")
 
-    if repaired.get("status") in {"SUCCESS", "PASS", "COMPLETE", "COMPLETED", "READY_FOR_HUMAN_REVIEW"}:
+    if repaired.get("status") in {"SUCCESS", "PASS", "COMPLETE", "COMPLETED", "READY", "READY_FOR_HUMAN_REVIEW"}:
         original_status = repaired.get("status")
         repaired["status"] = "OK"
         metadata_shape_fields.append("status")
         if original_status in {"COMPLETE", "COMPLETED"}:
             metadata_shape_reason_codes.append(f"STATUS_{original_status}_TO_OK_REPAIRED")
+        elif original_status == "READY":
+            metadata_shape_reason_codes.append("STATUS_READY_TO_OK_REPAIRED")
         elif original_status == "READY_FOR_HUMAN_REVIEW":
             metadata_shape_reason_codes.append("STATUS_READY_FOR_HUMAN_REVIEW_TO_OK_REPAIRED")
         else:

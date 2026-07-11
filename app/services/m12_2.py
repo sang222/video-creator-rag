@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # Compatibility note: semantic facades `video_package_generation`, `agent_rehearsal`, and `package_generation_rehearsal` re-export this implementation; phase-coded import kept for reports/tests/backward compatibility.
+import hashlib
 import re
 import subprocess
 import uuid
@@ -863,6 +864,48 @@ class FirstScriptedVideoPackageService:
                 status = gate_stop["stop_status"]
                 next_action = gate_stop["next_action"]
                 break
+            if step.agent_key == "ScriptWriterAgent":
+                artifacts["srt"] = _build_srt_caption_artifact(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    script=_dict(artifacts.get("narration_script")),
+                    duration_model=_dict(artifacts.get("duration_model")),
+                    repo_root=self.repo_root,
+                )
+                srt_gate_stop = self._run_custom_deterministic_gates(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                    gate_keys=[
+                        "srt_format_gate",
+                        "srt_timing_gate",
+                        "caption_coverage_gate",
+                        "caption_readability_gate",
+                        "script_to_srt_consistency_gate",
+                        "hook_caption_gate",
+                    ],
+                    trigger_agent_key="SRTCaptionArtifactGenerator",
+                )
+                if srt_gate_stop is not None:
+                    status = srt_gate_stop["stop_status"]
+                    next_action = srt_gate_stop["next_action"]
+                    break
+            if step.agent_key == "VisualPlanningAgent" and artifacts.get("srt"):
+                visual_srt_gate_stop = self._run_custom_deterministic_gates(
+                    package_id=package_id,
+                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    artifacts=artifacts,
+                    effective_context_snapshot=effective_context_snapshot,
+                    provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                    gate_keys=["visual_srt_timeline_gate"],
+                    trigger_agent_key="VisualSRTTimelineCrossCheck",
+                )
+                if visual_srt_gate_stop is not None:
+                    status = visual_srt_gate_stop["stop_status"]
+                    next_action = visual_srt_gate_stop["next_action"]
+                    break
             if step.agent_key == "GatekeeperSoftReviewAgent":
                 gatekeeper_result = self._gatekeeper_result(output)
                 reducer_decision = self.package_status_reducer.resolve(
@@ -953,6 +996,48 @@ class FirstScriptedVideoPackageService:
 
         for step in FULL_REHEARSAL_AGENT_CHAIN:
             if step.agent_key == "GatekeeperSoftReviewAgent" and pre_gatekeeper_batch is None:
+                if artifacts.get("narration_script") and not artifacts.get("srt"):
+                    artifacts["srt"] = _build_srt_caption_artifact(
+                        package_id=package_id,
+                        video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                        script=_dict(artifacts.get("narration_script")),
+                        duration_model=_dict(artifacts.get("duration_model")),
+                        repo_root=self.repo_root,
+                    )
+                    srt_gate_stop = self._run_custom_deterministic_gates(
+                        package_id=package_id,
+                        video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                        artifacts=artifacts,
+                        effective_context_snapshot=effective_context_snapshot,
+                        provider_readiness_state=provider_readiness_snapshot,
+                        gate_keys=[
+                            "srt_format_gate",
+                            "srt_timing_gate",
+                            "caption_coverage_gate",
+                            "caption_readability_gate",
+                            "script_to_srt_consistency_gate",
+                            "hook_caption_gate",
+                        ],
+                        trigger_agent_key="SRTCaptionArtifactGenerator",
+                    )
+                    if srt_gate_stop is not None:
+                        status = srt_gate_stop["stop_status"]
+                        next_action = srt_gate_stop["next_action"] or next_action
+                        break
+                if artifacts.get("visual_plan") and artifacts.get("srt"):
+                    visual_srt_gate_stop = self._run_custom_deterministic_gates(
+                        package_id=package_id,
+                        video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                        artifacts=artifacts,
+                        effective_context_snapshot=effective_context_snapshot,
+                        provider_readiness_state=provider_readiness_snapshot,
+                        gate_keys=["visual_srt_timeline_gate"],
+                        trigger_agent_key="VisualSRTTimelineCrossCheck",
+                    )
+                    if visual_srt_gate_stop is not None:
+                        status = visual_srt_gate_stop["stop_status"]
+                        next_action = visual_srt_gate_stop["next_action"] or next_action
+                        break
                 pre_gatekeeper_batch = self._run_package_deterministic_gates(
                     package_id=package_id,
                     video_project_id=video_project_id,
@@ -1367,6 +1452,54 @@ class FirstScriptedVideoPackageService:
                 "next_action": gate_stop["next_action"],
                 "parsed_output": output,
             }
+
+        if step.agent_key == "ScriptWriterAgent":
+            artifacts["srt"] = _build_srt_caption_artifact(
+                package_id=package_id,
+                video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                script=_dict(artifacts.get("narration_script")),
+                duration_model=_dict(artifacts.get("duration_model")),
+                repo_root=self.repo_root,
+            )
+            srt_gate_stop = self._run_custom_deterministic_gates(
+                package_id=package_id,
+                video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                artifacts=artifacts,
+                effective_context_snapshot=effective_context_snapshot,
+                provider_readiness_state=provider_readiness_snapshot,
+                gate_keys=[
+                    "srt_format_gate",
+                    "srt_timing_gate",
+                    "caption_coverage_gate",
+                    "caption_readability_gate",
+                    "script_to_srt_consistency_gate",
+                    "hook_caption_gate",
+                ],
+                trigger_agent_key="SRTCaptionArtifactGenerator",
+            )
+            if srt_gate_stop is not None:
+                return {
+                    "stop_status": srt_gate_stop["stop_status"],
+                    "next_action": srt_gate_stop["next_action"],
+                    "parsed_output": output,
+                }
+
+        if step.agent_key == "VisualPlanningAgent" and artifacts.get("srt"):
+            visual_srt_gate_stop = self._run_custom_deterministic_gates(
+                package_id=package_id,
+                video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                artifacts=artifacts,
+                effective_context_snapshot=effective_context_snapshot,
+                provider_readiness_state=provider_readiness_snapshot,
+                gate_keys=["visual_srt_timeline_gate"],
+                trigger_agent_key="VisualSRTTimelineCrossCheck",
+            )
+            if visual_srt_gate_stop is not None:
+                return {
+                    "stop_status": visual_srt_gate_stop["stop_status"],
+                    "next_action": visual_srt_gate_stop["next_action"],
+                    "parsed_output": output,
+                }
 
         if step.agent_key == "GatekeeperSoftReviewAgent":
             gatekeeper_result = self._gatekeeper_result(output)
@@ -2387,6 +2520,45 @@ class FirstScriptedVideoPackageService:
         )
         return batch
 
+    def _run_custom_deterministic_gates(
+        self,
+        *,
+        package_id: uuid.UUID,
+        video_project_id: uuid.UUID | None,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        provider_readiness_state: dict[str, Any] | None,
+        gate_keys: list[str],
+        trigger_agent_key: str,
+    ) -> dict[str, Any] | None:
+        if effective_context_snapshot is None:
+            return None
+        batch = self.deterministic_gates.run_batch(
+            package_id=package_id,
+            video_project_id=video_project_id,
+            effective_context=effective_context_snapshot,
+            artifacts=artifacts,
+            gate_keys=gate_keys,
+            trigger_agent_key=trigger_agent_key,
+            provider_readiness_state=provider_readiness_state,
+        )
+        artifacts["deterministic_gate_report"] = compact_gate_report(
+            artifacts.get("deterministic_gate_report"),
+            batch,
+        )
+        if batch.status in {GATE_BLOCK, GATE_REVIEW}:
+            decision = self.package_status_reducer.resolve(
+                current_status="READY_FOR_HUMAN_REVIEW",
+                deterministic_batch=batch,
+            )
+            artifacts["package_state_reducer"] = decision
+            return {
+                "stop_status": decision["package_status"],
+                "next_action": self._next_action_for_reducer_decision(decision),
+                "gate_batch": batch,
+            }
+        return None
+
     def _next_action_for_reducer_decision(self, decision: dict[str, Any]) -> str:
         source = decision.get("source")
         status = decision.get("package_status")
@@ -2877,6 +3049,41 @@ def _repair_visual_unknown_sentence_refs(
         if isinstance(source, str) and source not in allowed_sources:
             disallowed.add(source)
     if unknown or disallowed or valid_sentence_ids - covered:
+        missing_ids = [
+            str(item.get("sentence_id"))
+            for item in _list(narration_script.get("sentences"))
+            if isinstance(item, dict) and item.get("sentence_id") and str(item.get("sentence_id")) not in covered
+        ]
+        if unknown or disallowed or not missing_ids:
+            return visual_plan, []
+        fallback_source = "CARD" if "CARD" in allowed_sources else ("DIAGRAM" if "DIAGRAM" in allowed_sources else None)
+        if fallback_source is None:
+            return visual_plan, []
+        for index in range(0, len(missing_ids), 6):
+            group = missing_ids[index : index + 6]
+            repaired_scenes.append(
+                {
+                    "scene_id": f"AUTO_COVERAGE_{(index // 6) + 1:02d}",
+                    "sentence_ids": group,
+                    "intended_visual_source": fallback_source,
+                    "visual_description": f"Static operator visual covering narration range {group[0]}-{group[-1]}.",
+                    "overlay_text": "Workflow step summary",
+                    "deterministic_coverage_repair": True,
+                    "provider_dependencies": [],
+                    "provider_readiness": "NOT_APPLICABLE_STATIC_VISUAL_SOURCE_REPAIR",
+                }
+            )
+            patches.append(
+                {
+                    "scene_id": f"AUTO_COVERAGE_{(index // 6) + 1:02d}",
+                    "repair_action": "add_grouped_static_visual_coverage_scene",
+                    "covered_sentence_ids": group,
+                    "intended_visual_source": fallback_source,
+                }
+            )
+        repaired["scenes"] = repaired_scenes
+        covered.update(missing_ids)
+    if unknown or disallowed or valid_sentence_ids - covered:
         return visual_plan, []
     return repaired, patches
 
@@ -3035,6 +3242,189 @@ def _provider_plan_dry_validation(artifact: Any) -> dict[str, Any]:
         "no_final_media_ref": True,
         "no_human_upload_task": True,
     }
+
+
+def _build_srt_caption_artifact(
+    *,
+    package_id: uuid.UUID,
+    video_project_id: uuid.UUID | None,
+    script: dict[str, Any],
+    duration_model: dict[str, Any],
+    repo_root: Path,
+) -> dict[str, Any]:
+    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
+    cues: list[dict[str, Any]] = []
+    current = 0.0
+    for sentence_index, sentence in enumerate(sentences, start=1):
+        sentence_id = str(sentence.get("sentence_id") or sentence.get("id") or f"S{sentence_index}")
+        chunks = _caption_chunks(str(sentence.get("text") or ""), max_words=16)
+        sentence_word_count = sum(len(chunk.split()) for chunk in chunks)
+        sentence_duration = round((sentence_word_count / wpm) * 60, 3) if sentence_word_count else 0.0
+        chunk_durations = _caption_chunk_durations(chunks, sentence_duration, wpm=wpm)
+        for chunk, duration in zip(chunks, chunk_durations, strict=False):
+            words = chunk.split()
+            if not words:
+                continue
+            start = current
+            end = round(current + duration, 3)
+            lines = _wrap_caption_lines(chunk, max_chars=42)
+            cues.append(
+                {
+                    "index": len(cues) + 1,
+                    "start_seconds": round(start, 3),
+                    "end_seconds": end,
+                    "duration_seconds": round(end - start, 3),
+                    "text": chunk,
+                    "text_lines": lines,
+                    "sentence_ids": [sentence_id],
+                }
+            )
+            current = end
+    srt_total = round(current, 3)
+    estimated_total = _script_estimated_seconds_for_srt(script, duration_model)
+    if cues and abs(srt_total - estimated_total) > 0.001:
+        delta = round(estimated_total - srt_total, 3)
+        last = cues[-1]
+        adjusted_duration = round(last["duration_seconds"] + delta, 3)
+        if 1.0 <= adjusted_duration <= 7.0:
+            last["end_seconds"] = round(last["end_seconds"] + delta, 3)
+            last["duration_seconds"] = adjusted_duration
+            srt_total = round(last["end_seconds"], 3)
+    srt_text = _render_srt(cues)
+    artifact_dir = repo_root / "var" / "tmp" / "pa1-precheck-srt" / str(package_id)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    local_path = artifact_dir / "narration.en.srt"
+    local_path.write_text(srt_text, encoding="utf-8")
+    checksum = hashlib.sha256(local_path.read_bytes()).hexdigest()
+    return {
+        "artifact_type": "SRT_CAPTION_FILE",
+        "language": "en",
+        "package_id": str(package_id),
+        "video_project_id": str(video_project_id) if video_project_id else None,
+        "script_artifact_ref": f"first_scripted_video_package:{package_id}:artifacts.narration_script",
+        "estimated_total_seconds": estimated_total,
+        "srt_total_seconds": srt_total,
+        "caption_count": len(cues),
+        "checksum_sha256": checksum,
+        "local_path": str(local_path),
+        "lifecycle_state": "DRAFT_SCRIPT_TIMING",
+        "not_final_media": True,
+        "not_publishable": True,
+        "provider_calls_made": False,
+        "upload_publish_made": False,
+        "final": False,
+        "cloud_media_ref_created": False,
+        "final_media_ref_created": False,
+        "human_upload_task_created": False,
+        "srt": srt_text,
+        "content": srt_text,
+        "cues": cues,
+    }
+
+
+def _caption_chunks(text: str, *, max_words: int) -> list[str]:
+    words = text.split()
+    chunks: list[str] = []
+    current: list[str] = []
+    for word in words:
+        candidate = [*current, word]
+        if current and (len(candidate) > max_words or not _caption_chunk_fits(candidate)):
+            chunks.append(" ".join(current).strip())
+            current = [word]
+        else:
+            current = candidate
+    if current:
+        chunks.append(" ".join(current).strip())
+    return chunks
+
+
+def _caption_chunk_fits(words: list[str]) -> bool:
+    lines = _wrap_caption_lines(" ".join(words), max_chars=42)
+    return len(lines) <= 2 and all(len(line) <= 42 for line in lines)
+
+
+def _caption_chunk_durations(chunks: list[str], sentence_duration: float, *, wpm: float) -> list[float]:
+    if not chunks:
+        return []
+    word_counts = [len(chunk.split()) for chunk in chunks]
+    raw = [round((count / wpm) * 60, 3) if count else 0.0 for count in word_counts]
+    durations = [min(7.0, max(1.0, value)) for value in raw]
+    target = max(float(len(chunks)), sentence_duration)
+    delta = round(sum(durations) - target, 3)
+    if delta > 0:
+        for index in sorted(range(len(durations)), key=lambda item: durations[item], reverse=True):
+            removable = min(delta, max(0.0, durations[index] - 1.0))
+            if removable <= 0:
+                continue
+            durations[index] = round(durations[index] - removable, 3)
+            delta = round(delta - removable, 3)
+            if delta <= 0:
+                break
+    elif delta < 0:
+        delta = abs(delta)
+        for index in sorted(range(len(durations)), key=lambda item: durations[item]):
+            addable = min(delta, max(0.0, 7.0 - durations[index]))
+            if addable <= 0:
+                continue
+            durations[index] = round(durations[index] + addable, 3)
+            delta = round(delta - addable, 3)
+            if delta <= 0:
+                break
+    return [round(value, 3) for value in durations]
+
+
+def _wrap_caption_lines(text: str, *, max_chars: int) -> list[str]:
+    words = text.split()
+    if not words:
+        return []
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if len(lines) <= 2:
+        return lines
+    midpoint = max(1, len(words) // 2)
+    return [" ".join(words[:midpoint]), " ".join(words[midpoint:])]
+
+
+def _render_srt(cues: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
+    for cue in cues:
+        lines = cue.get("text_lines") or [cue.get("text") or ""]
+        blocks.append(
+            "\n".join(
+                [
+                    str(cue["index"]),
+                    f"{_format_srt_timestamp(float(cue['start_seconds']))} --> {_format_srt_timestamp(float(cue['end_seconds']))}",
+                    *[str(line) for line in lines],
+                ]
+            )
+        )
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    millis_total = int(round(seconds * 1000))
+    hours, remainder = divmod(millis_total, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _script_estimated_seconds_for_srt(script: dict[str, Any], duration_model: dict[str, Any]) -> float:
+    word_count = _script_word_count(script)
+    wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
+    if word_count and wpm:
+        return round((word_count / wpm) * 60, 3)
+    return round(sum(_first_number(item.get("approx_seconds")) or 0 for item in _list(script.get("sentences")) if isinstance(item, dict)), 3)
 
 
 def _script_duration_contract(duration_model: Any, *, script_outline: dict[str, Any] | None = None) -> dict[str, Any]:
