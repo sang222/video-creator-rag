@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
-CANONICAL_PROVIDER_KEYS = ("elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api")
+CANONICAL_PROVIDER_KEYS = ("elevenlabs", "luma_api", "pexels_api")
 OPTIONAL_STORAGE_PROVIDER_KEYS = ("youtube_readonly", "google_drive_archive")
+LOCAL_CAPABILITY_KEYS = ("native_ffmpeg_renderer",)
 
 STALE_PROVIDER_KEYS = {
     "elevenlabs_flash_turbo",
@@ -15,6 +16,7 @@ STALE_PROVIDER_KEYS = {
     "cloud_final_assembly_renderer_tbd",
     "cloud_final_renderer_tbd",
     "cloud_final_renderer",
+    "creatomate_growth_10k",
     "pexels_pixabay_free_fallback",
     "pixabay_free_fallback",
 }
@@ -51,6 +53,10 @@ def normalize_provider_key(value: Any) -> str | None:
 
 def is_canonical_provider_key(value: Any) -> bool:
     return normalize_provider_key(value) in set(CANONICAL_PROVIDER_KEYS)
+
+
+def is_local_capability_key(value: Any) -> bool:
+    return normalize_provider_key(value) in set(LOCAL_CAPABILITY_KEYS)
 
 
 def is_stale_provider_key(value: Any) -> bool:

@@ -39,11 +39,8 @@ def test_dx2_catalogs_are_canonical_and_no_active_stale_provider_keys() -> None:
         for item in capability_items
         if item["capability"] == "SUPPORTED"
     }
-    assert active_caps[("creatomate_growth_10k", "LONG_FORM_FINAL_RENDER")] == "SUPPORTED"
-    assert active_caps[("creatomate_growth_10k", "TEMPLATE_RENDER")] == "SUPPORTED"
-    assert active_caps[("creatomate_growth_10k", "CARD_RENDER")] == "SUPPORTED"
-    assert active_caps[("creatomate_growth_10k", "THUMBNAIL_COMPOSITION")] == "SUPPORTED"
-    assert active_caps[("creatomate_growth_10k", "SHORT_RENDER")] == "SUPPORTED"
+    # Historical capability rows remain readable, but NR1 excludes them from
+    # active canonical/readiness truth through the drift guard.
     stale = {"GOOGLE_VERTEX_VEO", "google-vertex-veo", "creatomate_essential_2k", "cloud_final_assembly_renderer_tbd", "pexels_pixabay_free_fallback"}
     assert stale.isdisjoint({item["provider_key"] for item in capability_items if item["capability"] == "SUPPORTED"})
 
@@ -52,18 +49,19 @@ def test_dx2_m2_readiness_and_m12_labels_are_canonical(db_session) -> None:
     settings = _configured_settings()
     readiness = ProviderReadinessM2Service(settings).snapshot()
     provider_keys = {item.provider_key for item in readiness.providers}
-    assert {"elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"} <= provider_keys
+    assert {"elevenlabs", "luma_api", "pexels_api"} <= provider_keys
+    assert "creatomate_growth_10k" not in provider_keys
     assert "google-vertex-veo" not in provider_keys
 
     matrix = {entry.provider_key: entry for entry in ProviderCapabilityMatrix(settings).entries()}
-    assert "SHORT_RENDER" in matrix["creatomate_growth_10k"].capabilities
+    assert "FINAL_ASSEMBLY_RENDER" in matrix["native_ffmpeg_renderer"].capabilities
 
     from app.services.m12 import ProviderReadinessService
 
     m12 = ProviderReadinessService(db_session, settings).readiness()
     labels = {item.provider_key: item.provider_name for item in m12.provider_summaries}
     assert labels["luma_api"] == "Luma API"
-    assert labels["creatomate_growth_10k"] == "Creatomate Growth 10K"
+    assert "creatomate_growth_10k" not in labels
     assert "google-vertex-veo" not in labels
     assert "cloud-final-renderer" not in labels
 
@@ -71,7 +69,7 @@ def test_dx2_m2_readiness_and_m12_labels_are_canonical(db_session) -> None:
 def test_dx2_provider_stack_drift_guard_pass_and_detects_stale_fixtures() -> None:
     passed = ProviderStackDriftGuard().check()
     assert passed.status == "PASS"
-    assert passed.expected_provider_keys == ["elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"]
+    assert passed.expected_provider_keys == ["elevenlabs", "luma_api", "pexels_api"]
     assert set(passed.found_active_provider_keys) >= set(passed.expected_provider_keys)
 
     stale_veo = ProviderStackDriftGuard(
@@ -121,7 +119,7 @@ def test_dx2_m2_boundary_accepts_canonical_and_rejects_stale_keys() -> None:
     assert "STALE_PROVIDER_KEY_NOT_ACTIVE" in stale.reason_codes
 
 
-def test_dx2_cost_estimate_accepts_canonical_luma_and_creatomate(db_session) -> None:
+def test_dx2_cost_estimate_rejects_stale_creatomate(db_session) -> None:
     scope = _scope(db_session)
     effective, _, _ = _effective(db_session, scope)
     revision = _revision(
@@ -136,9 +134,8 @@ def test_dx2_cost_estimate_accepts_canonical_luma_and_creatomate(db_session) -> 
         },
     )
     estimate = _estimate(db_session, revision, _configured_settings())
-    assert estimate.estimate_status == "ESTIMATED"
-    assert "luma_api:ai_hero_video" in estimate.provider_estimates_json
-    assert "creatomate_growth_10k:final_assembly_render" in estimate.provider_estimates_json
+    assert estimate.estimate_status == "BLOCKED"
+    assert "STALE_PROVIDER_KEY_NOT_ACTIVE" in estimate.blocker_reason_codes_json
 
 
 def test_dx2_provider_cost_read_model_refuses_ready_on_drift(db_session, monkeypatch) -> None:
@@ -151,7 +148,7 @@ def test_dx2_provider_cost_read_model_refuses_ready_on_drift(db_session, monkeyp
             return ProviderStackDriftGuardRead(
                 generated_at=effective.created_at,
                 status="PROVIDER_STACK_DRIFT",
-                expected_provider_keys=["elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"],
+                expected_provider_keys=["elevenlabs", "luma_api", "pexels_api"],
                 found_active_provider_keys=["elevenlabs"],
                 stale_provider_keys=["GOOGLE_VERTEX_VEO"],
                 affected_catalogs={"test": [{"provider_key": "GOOGLE_VERTEX_VEO"}]},
@@ -168,7 +165,7 @@ def test_dx2_provider_cost_read_model_refuses_ready_on_drift(db_session, monkeyp
     assert summary.will_execute is False
 
 
-def test_dx2_allowed_not_executed_does_not_increment_paid_attempt(db_session) -> None:
+def test_dx2_stale_creatomate_never_executes_or_increments_paid_attempt(db_session) -> None:
     scope = _scope(db_session)
     effective, _, _ = _effective(db_session, scope)
     revision = _revision(db_session, scope, effective, provider_plan={"provider_stages": [_stage("creatomate_growth_10k", "FINAL_ASSEMBLY_RENDER", "3.00")]})
@@ -190,10 +187,11 @@ def test_dx2_allowed_not_executed_does_not_increment_paid_attempt(db_session) ->
     )
 
     attempt = db_session.get(PaidAttemptLimitRecord, decision.attempt_limit_record_id)
-    assert decision.status == "ALLOWED_NOT_EXECUTED"
+    assert decision.status == "BLOCKED_COST_ESTIMATE"
     assert decision.will_execute is False
     assert attempt is not None
     assert attempt.attempt_count == 0
-    assert db_session.query(PaidProviderCallLedger).count() == 1
+    ledger = db_session.query(PaidProviderCallLedger).one()
+    assert ledger.call_status != "EXECUTED"
     assert db_session.query(ProviderAttempt).count() == 0
     assert db_session.query(RealSmokeRun).count() == 0

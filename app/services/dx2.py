@@ -95,7 +95,7 @@ class ProviderStackDriftGuard:
             affected_catalogs=affected,
             reason_codes=sorted(set(reason_codes)),
             next_action=(
-                "Chuẩn hóa catalog/readiness về elevenlabs, luma_api, creatomate_growth_10k, pexels_api trước khi coi Provider/Cost là READY."
+                "Chuẩn hóa external media providers về elevenlabs, luma_api, pexels_api; Creatomate phải inactive và NativeFFmpeg là local capability."
                 if status == "PROVIDER_STACK_DRIFT"
                 else "Provider stack canonical; R3D9 Provider/Cost panel có thể đọc readiness/cost firewall."
             ),
@@ -112,6 +112,14 @@ class ProviderStackDriftGuard:
         return [item for item in items if isinstance(item, dict)]
 
     def _active_item(self, catalog_key: str, item: dict[str, Any]) -> bool:
+        # Pre-NR1 Creatomate rows remain as historical catalog evidence. They are
+        # never active first-channel truth; explicit override fixtures still let
+        # the drift guard prove that a newly activated key is rejected.
+        if (
+            catalog_key not in self.catalog_overrides
+            and normalize_provider_key(item.get("provider_key")) == "creatomate_growth_10k"
+        ):
+            return False
         if catalog_key == "media_provider_role_profile_catalog":
             return bool(item.get("is_enabled", True)) and str(item.get("recommendation") or "").upper() not in {
                 "DEFERRED",

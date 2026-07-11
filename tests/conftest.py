@@ -95,6 +95,12 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    originality_gate_runs,
+                    platform_native_package_plans,
+                    synthetic_media_disclosure_receipts,
+                    claim_evidence_ledgers,
+                    episode_originality_manifests,
+                    format_identity_contracts,
                     package_runtime_dispositions,
                     packaging_gate_rerun_records,
                     packaging_patch_apply_runs,

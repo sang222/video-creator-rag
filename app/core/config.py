@@ -78,6 +78,18 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VCOS_DISABLE_OLD_PROVIDER_SMOKE", "DISABLE_OLD_PROVIDER_SMOKE"),
     )
+    native_render_workspace_root: str = Field(
+        default="var/tmp/native_renderer",
+        validation_alias=AliasChoices("VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "NATIVE_RENDER_WORKSPACE_ROOT"),
+    )
+    native_ffmpeg_local_smoke_enabled: bool = Field(
+        default=False,
+        validation_alias="VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED",
+    )
+    native_ffmpeg_production_enabled: bool = Field(
+        default=False,
+        validation_alias="VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED",
+    )
     controlled_memory_retrieval_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("CONTROLLED_MEMORY_RETRIEVAL_ENABLED", "VCOS_CONTROLLED_MEMORY_RETRIEVAL_ENABLED"),

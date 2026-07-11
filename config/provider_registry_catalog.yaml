@@ -96,7 +96,7 @@ items:
   - provider_key: creatomate_growth_10k
     provider_name: Creatomate Growth 10K
     provider_type: VIDEO
-    status: ACTIVE
+    status: DEFERRED_HISTORICAL
     capability_blob:
       long_form_final_render: true
       cloud_template_rendering: true
@@ -105,7 +105,8 @@ items:
       thumbnail_composition: true
       shorts_render: true
     policy_fit_blob:
-      production_enabled_when_configured: true
+      production_enabled_when_configured: false
+      stale_first_channel_activation: true
     cost_model_blob:
       plan: growth_10k
     quota_model_blob:

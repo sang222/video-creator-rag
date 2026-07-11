@@ -23,8 +23,8 @@ from app.services.provider_stack import normalize_provider_key, provider_key_rej
 LOCKED_PROVIDERS = {
     "VOICE_PROVIDER": "elevenlabs",
     "AI_VIDEO_HERO_PROVIDER": "luma_api",
-    "CLOUD_FINAL_ASSEMBLY_RENDERER": "creatomate_growth_10k",
-    "CLOUD_TEMPLATE_RENDERER": "creatomate_growth_10k",
+    "CLOUD_FINAL_ASSEMBLY_RENDERER": "native_ffmpeg_renderer",
+    "CLOUD_TEMPLATE_RENDERER": "native_ffmpeg_renderer",
     "FREE_VISUAL_FALLBACK_PROVIDER": "pexels_api",
 }
 
@@ -88,7 +88,7 @@ class ProviderConfigRegistry:
             env_keys={
                 "elevenlabs": ["VOICE_PROVIDER", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID"],
                 "luma_api": ["AI_VIDEO_HERO_PROVIDER", "LUMA_API_KEY", "LUMA_HERO_MODEL", "LUMA_DEFAULT_DURATION_SECONDS", "LUMA_MAX_DURATION_SECONDS", "LUMA_VIDEO_ONLY"],
-                "creatomate_growth_10k": ["CLOUD_FINAL_ASSEMBLY_RENDERER", "CLOUD_TEMPLATE_RENDERER", "CREATOMATE_API_KEY", "CREATOMATE_TEMPLATE_ID", "CREATOMATE_WORKSPACE_ID"],
+                "native_ffmpeg_renderer": ["VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED", "VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED"],
                 "pexels_api": ["FREE_VISUAL_FALLBACK_PROVIDER", "PEXELS_API_KEY", "PEXELS_ATTRIBUTION_REQUIRED", "PEXELS_MAX_CLIPS_PER_LONG", "PEXELS_MAX_RUNTIME_PCT_PER_LONG", "PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS"],
                 "google_drive_archive": ["GOOGLE_DRIVE_ARCHIVE_ENABLED", "GOOGLE_DRIVE_ROOT_FOLDER_ID"],
                 "youtube_readonly": ["YOUTUBE_PUBLIC_MONITOR_ENABLED", "YOUTUBE_OWNER_ANALYTICS_ENABLED"],
@@ -123,12 +123,12 @@ class ProviderCapabilityMatrix:
                 limits={"allowed_durations_seconds": [4, 6, 8], "max_duration_seconds": 8},
             ),
             ProviderCapabilityMatrixEntryRead(
-                provider_key="creatomate_growth_10k",
-                provider_name="Creatomate Growth 10K",
-                provider_type="CLOUD_FINAL_ASSEMBLY_RENDERER",
-                capabilities=["FINAL_ASSEMBLY_RENDER", "TEMPLATE_RENDER", "CARD_RENDER", "THUMBNAIL_COMPOSITION", "SHORT_RENDER"],
-                requires=["API key", "default MVP template id", "workspace id"],
-                future_execution="R3D8 only",
+                provider_key="native_ffmpeg_renderer",
+                provider_name="NativeFFmpegRenderer",
+                provider_type="LOCAL_RENDERER_CAPABILITY",
+                capabilities=["FINAL_ASSEMBLY_RENDER", "TEMPLATE_RENDER", "CARD_RENDER", "SHORT_RENDER"],
+                requires=["ffmpeg-full", "approved render plan", "local execution boundary"],
+                future_execution="local renderer; production disabled by default",
                 no_call_in_m2=True,
             ),
             ProviderCapabilityMatrixEntryRead(
@@ -194,7 +194,6 @@ class ProviderEnvValidator:
         return [
             self._elevenlabs(role),
             self._luma(role),
-            self._creatomate(role),
             self._pexels(role),
             self._drive_archive(role),
             self._youtube_readonly(),

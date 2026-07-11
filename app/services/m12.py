@@ -59,7 +59,6 @@ PROVIDER_ORDER = (
     "google-drive",
     "elevenlabs",
     "luma_api",
-    "creatomate_growth_10k",
 )
 SECRET_KEY_FRAGMENTS = ("secret", "token", "api_key", "apikey", "password", "private", "credential", "authorization")
 RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "ya29.", "ghp_", "xoxb-", "client_secret")
@@ -201,21 +200,6 @@ class EnvConfigAuditService:
                     "max_duration_seconds": settings.luma_max_duration_seconds,
                     "luma_max_duration_locked_at_8s": True,
                 },
-            ),
-            self._budget_card(
-                key="creatomate_growth_10k",
-                provider_name="Creatomate Growth 10K",
-                role="Final assembly + template/card/thumbnail/Shorts renderer",
-                configured_plan=settings.creatomate_plan,
-                configured_monthly_cap=self.money(settings.creatomate_monthly_budget_usd),
-                budget_basis="credits/renders",
-                readiness_state=readiness.get("creatomate_growth_10k", "UNKNOWN"),
-                missing_env_keys=_missing(
-                    ("CREATOMATE_PLAN", self.string_configured(settings.creatomate_plan)),
-                    ("CREATOMATE_MONTHLY_CREDITS", settings.creatomate_monthly_credits is not None),
-                    ("CREATOMATE_MONTHLY_BUDGET_USD", settings.creatomate_monthly_budget_usd is not None),
-                ),
-                appendix={"monthly_credits": settings.creatomate_monthly_credits},
             ),
             self._budget_card(
                 key="optional-spend-disabled",
@@ -954,7 +938,6 @@ class ProviderReadinessService:
             GoogleDriveReadinessCheck(self.session, self.settings, self.redactor),
             ElevenLabsReadinessCheck(self.session, self.settings, self.redactor),
             LumaApiReadinessCheck(self.session, self.settings, self.redactor),
-            CreatomateReadinessCheck(self.session, self.settings, self.redactor),
         ]
 
 
@@ -1019,7 +1002,6 @@ class RealSmokeOrchestratorService:
             "google-drive": self._google_drive,
             "elevenlabs": self._elevenlabs,
             "luma_api": self._luma_api,
-            "creatomate_growth_10k": self._creatomate,
         }[provider_key]()
 
     def _ollama(self) -> dict[str, Any]:

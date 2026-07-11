@@ -248,6 +248,14 @@ from app.db.models.r3d9_ux2 import (
     PackagingReviewQueueItem,
 )
 from app.db.models.r3d10 import PackageRuntimeDisposition
+from app.db.models.ofv0 import (
+    ClaimEvidenceLedger,
+    EpisodeOriginalityManifest,
+    FormatIdentityContract,
+    OriginalityGateRun,
+    PlatformNativePackagePlan,
+    SyntheticMediaDisclosureReceipt,
+)
 
 __all__ = [
     "AuditEvent",

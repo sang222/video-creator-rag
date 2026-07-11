@@ -471,11 +471,11 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_provider_docs(self) -> None:
         text = self._read("docs/architecture/provider_stack_freeze.md").lower()
-        docs_ok = all(token in text for token in ("luma api", "creatomate growth 10k", "max duration: 8", "`4`, `6`, `8`"))
+        docs_ok = all(token in text for token in ("luma api", "native_ffmpeg_renderer", "local renderer capability", "max duration: 8", "`4`, `6`, `8`", "creatomate_growth_10k", "historical/deferred"))
         stale_active = any(phrase in text for phrase in ("veo = active", "creatomate essential 2k = active", "cloud final renderer tbd = active"))
         self._record(
             "provider_stack_docs_frozen",
-            "Docs khoa Luma 8s, Creatomate Growth 10K, Pexels fallback; Veo/Essential/TBD inactive.",
+            "Docs khóa Luma 8s, NativeFFmpeg local renderer, Pexels fallback; Creatomate/Veo/Essential/TBD inactive.",
             "P1",
             "PASS" if docs_ok and not stale_active else "BLOCKED",
             [] if docs_ok and not stale_active else ["PROVIDER_STACK_FREEZE_DOC_DRIFT"],

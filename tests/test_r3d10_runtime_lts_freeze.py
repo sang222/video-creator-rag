@@ -116,7 +116,7 @@ def test_r3d10_blocks_provider_stack_drift_and_stale_veo_route(db_session) -> No
             return ProviderStackDriftGuardRead(
                 generated_at=utc_now(),
                 status="PROVIDER_STACK_DRIFT",
-                expected_provider_keys=["elevenlabs", "luma_api", "creatomate_growth_10k", "pexels_api"],
+                expected_provider_keys=["elevenlabs", "luma_api", "pexels_api"],
                 found_active_provider_keys=["elevenlabs"],
                 stale_provider_keys=["google-vertex-veo"],
                 affected_catalogs={"fixture": [{"provider_key": "google-vertex-veo"}]},
@@ -326,7 +326,8 @@ def test_r3d10_docs_api_and_dx_import_invariants(db_session) -> None:
 
     provider_doc = Path("docs/architecture/provider_stack_freeze.md").read_text(encoding="utf-8")
     assert "Luma API" in provider_doc
-    assert "Creatomate Growth 10K" in provider_doc
+    assert "NativeFFmpegRenderer" in provider_doc
+    assert "historical/deferred" in provider_doc
     assert "final assembly" in provider_doc
     assert "Veo: deferred compatibility only, not active" in provider_doc
 

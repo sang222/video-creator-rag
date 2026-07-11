@@ -6,7 +6,7 @@ DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ ngu
 
 - `elevenlabs` / ElevenLabs: voice/TTS only.
 - `luma_api` / Luma API: AI hero/metaphor video only.
-- `creatomate_growth_10k` / Creatomate Growth 10K: final assembly + template/card/thumbnail/Shorts renderer.
+- `native_ffmpeg_renderer` / NativeFFmpegRenderer: local renderer capability for final assembly, native motion, caption burn-in, compositing, output enforcement and render/QC evidence. It is not a paid external provider.
 - `pexels_api` / Pexels API: free visual fallback only.
 
 ## Manual / Storage Boundary
@@ -22,7 +22,9 @@ DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ ngu
 - DaVinci: manual/workbench only, not API core.
 - Envato: avoided.
 - Adobe/Shutterstock/paid stock: deferred.
-- `creatomate_essential_2k`: inactive; not final renderer.
+- `creatomate_growth_10k` and `creatomate_essential_2k`: historical/deferred; any new first-channel activation is stale provider drift.
+
+Canonical external media providers are only `elevenlabs`, `luma_api`, and `pexels_api`. `google_drive_archive` and `youtube_readonly` are external integrations outside media-provider execution. NativeFFmpeg creates no `PaidProviderCallLedger` entry.
 - `cloud_final_assembly_renderer_tbd`: inactive; not a required active gap.
 - `pexels_pixabay_free_fallback`: inactive; use `pexels_api`.
 
@@ -32,16 +34,9 @@ DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ ngu
 - Allowed durations: `4`, `6`, `8`.
 - Do not open 10 seconds unless a future budget/provider freeze confirms it.
 
-## Creatomate Templates
+## Renderer configuration
 
-- `CREATOMATE_TEMPLATE_ID` remains the MVP default template env.
-- Future activation may split granular IDs:
-  - `CREATOMATE_LONG_FORM_TEMPLATE_ID`
-  - `CREATOMATE_SHORTS_TEMPLATE_ID`
-  - `CREATOMATE_THUMBNAIL_TEMPLATE_ID`
-  - `CREATOMATE_TITLE_CARD_TEMPLATE_ID`
-  - `CREATOMATE_HERO_COMPOSITION_TEMPLATE_ID`
-- DX2 does not require all granular IDs before real provider activation unless later tests/config make them mandatory.
+The first channel uses `VCOS_NATIVE_RENDER_WORKSPACE_ROOT`, `VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED=false`, and `VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED=false`. Historical Creatomate environment names are not readiness requirements.
 
 ## Runtime Boundary
 
