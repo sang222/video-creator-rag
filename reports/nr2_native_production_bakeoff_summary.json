@@ -1,0 +1,32 @@
+{
+  "date": "2026-07-11",
+  "phase": "NR2",
+  "technical": "PASS",
+  "strategy_a": "PASS",
+  "strategy_b": "PASS",
+  "strategy_c": "REVIEW_REQUIRED",
+  "human_review": "PASS",
+  "selected_strategy": "B",
+  "final": "PASS",
+  "proceed_to_first_channel_pilot": true,
+  "human_decision_source": "explicit_operator_decision",
+  "human_decision": "SELECT_B",
+  "selection_rationale": [
+    "Strategy B preserves the native explanatory backbone.",
+    "Supporting visuals improve pacing without becoming the content backbone.",
+    "Limited hero moments add emphasis without overuse.",
+    "Cost, regeneration risk and operator burden are acceptable for the first channel.",
+    "Strategy A remains a fallback for mechanism/data-heavy scenes.",
+    "Strategy C is not selected because of HeroOveruseRiskGate and higher projected cost/review burden."
+  ],
+  "run_ref": "var/tmp/native_renderer/nr2/nr2-20260711-local-bakeoff/nr2_run_summary.json",
+  "projected_cost": {
+    "projected_only": true,
+    "strategies": {
+      "A": {"pexels_assets": 1, "luma_heroes": 0, "hero_seconds": 0, "external_cost_band": "LOW", "projected_retries": "LOW"},
+      "B": {"pexels_assets": 2, "luma_heroes": 1, "hero_seconds": 12, "external_cost_band": "MEDIUM", "projected_retries": "MEDIUM"},
+      "C": {"pexels_assets": 2, "luma_heroes": 3, "hero_seconds": 36, "external_cost_band": "HIGH", "projected_retries": "HIGH"}
+    }
+  },
+  "no_provider_execution": true
+}

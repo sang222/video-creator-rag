@@ -1,0 +1,19 @@
+{
+  "date": "2026-07-11",
+  "phase": "NR2.1",
+  "technical": "PASS",
+  "motion_showcase": "PASS",
+  "strategy_a": "PASS",
+  "strategy_b": "PASS",
+  "strategy_c": "REVIEW_REQUIRED",
+  "human_review": "PENDING",
+  "selected_strategy": "NONE",
+  "nr2_final": "WAITING_HUMAN_REVIEW",
+  "proceed_to_first_channel_pilot": false,
+  "same_content_gate": "PASS",
+  "motion_strategy_differentiation_gate": "PASS",
+  "showcase_preset_count": 23,
+  "all_outputs_media_qc": "PASS",
+  "run_ref": "var/tmp/native_renderer/nr2_1/nr2-1-20260711-motion-audit/nr2_1_run_summary.json",
+  "no_provider_network_calls": true
+}
