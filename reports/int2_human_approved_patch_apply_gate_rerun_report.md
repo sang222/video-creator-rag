@@ -109,7 +109,7 @@ After queue rebuild:
 
 Explicitly not executed:
 - ElevenLabs
-- Luma
+- Google Veo
 - Pexels
 - Drive upload
 - YouTube upload/publish/reupload

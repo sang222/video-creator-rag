@@ -18,7 +18,7 @@ WORKSPACE_DIRECTORIES = (
     "source/script",
     "source/audio",
     "source/pexels",
-    "source/luma",
+    "source/ai-hero",
     "normalized/stock",
     "normalized/hero",
     "normalized/audio",

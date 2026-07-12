@@ -24,7 +24,7 @@ No app/backend/frontend execution behavior was changed.
 The provider activation spec defines the future Production V1 activation contract for:
 
 - `elevenlabs`
-- `luma_api`
+- `google_veo`
 - `pexels_api`
 - `google_drive_archive` as archive/storage only
 
@@ -47,7 +47,7 @@ Provider activation remains `NO-GO` after this task.
 Hard boundaries preserved:
 
 - no ElevenLabs call
-- no Luma call
+- no Google Veo call
 - no Pexels call
 - no Drive upload
 - no YouTube upload/publish/reupload
@@ -98,7 +98,7 @@ If any gate fails, operation is `NOT_EXECUTED`, and no paid attempt is consumed 
 | Provider | Future role | Key constraints |
 | --- | --- | --- |
 | `elevenlabs` | voice/TTS only | tiny voice smoke first, idempotent cache key, no draft TTS as final without approval, VoiceQC required |
-| `luma_api` | AI hero/metaphor clip only | only `4/6/8s`, max `8s`, prompt safety and visual intent required, no recurring character unless policy allows |
+| `google_veo` | AI hero/metaphor clip only | only `8s`, max `8s`, prompt safety and visual intent required, no recurring character unless policy allows |
 | `pexels_api` | fallback only | no stock face as recurring host, no factual/testimonial use, source/rights manifest, runtime percentage limits |
 | `google_drive_archive` | archive/storage only | configured root is root, no nested `VCOS`, no unknown path segments, not source of truth |
 
@@ -180,7 +180,7 @@ Required controls:
 Smoke order:
 
 1. ElevenLabs tiny voice.
-2. Luma tiny `4/6/8s` clip.
+2. Google Veo tiny `8s` clip.
 4. Pexels one fallback search if enabled.
 5. Google Drive archive proof.
 

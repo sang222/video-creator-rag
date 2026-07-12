@@ -22,7 +22,7 @@ items:
     supported_aspect_ratios: ["9:16", "16:9", "1:1"]
     supported_outputs: ["mp4", "png", "jpg"]
     plan_requirement: null
-    capability_reason: NativeFFmpegRenderer renders hero composition templates; Luma supplies optional AI hero clips.
+    capability_reason: NativeFFmpegRenderer renders hero composition templates; Google Veo supplies optional AI hero clips.
   - key: native_ffmpeg_renderer_LOWER_THIRD_RENDER
     provider_key: native_ffmpeg_renderer
     provider_type: LOCAL_RENDERER_CAPABILITY
@@ -153,26 +153,26 @@ items:
     supported_outputs: ["audio", "voice_usage_metadata"]
     plan_requirement: null
     capability_reason: ElevenLabs is voice generation only.
-  - key: luma_api_AI_HERO_GENERATION
-    provider_key: luma_api
+  - key: google_veo_AI_HERO_GENERATION
+    provider_key: google_veo
     provider_type: AI_VIDEO_HERO_PROVIDER
     job_type: AI_HERO_GENERATION
     capability: SUPPORTED
     max_duration_seconds: 8
-    supported_aspect_ratios: ["16:9"]
-    supported_outputs: ["video_clip", "still_frame"]
-    plan_requirement: LUMA_API_VIDEO_ONLY_4_6_8S
-    capability_reason: Luma API is the locked AI hero provider for opening hooks and optional thumbnail still sources.
-  - key: luma_api_AI_METAPHOR_GENERATION
-    provider_key: luma_api
+    supported_aspect_ratios: ["16:9", "9:16"]
+    supported_outputs: ["video_clip"]
+    plan_requirement: GOOGLE_VEO_3_1_8S_OUTPUT_ONE_APPROVAL_BUDGET_IDEMPOTENCY
+    capability_reason: Google Veo is the sole external provider for approved selective AI hero clips.
+  - key: google_veo_AI_METAPHOR_GENERATION
+    provider_key: google_veo
     provider_type: AI_VIDEO_HERO_PROVIDER
     job_type: AI_METAPHOR_GENERATION
     capability: SUPPORTED
     max_duration_seconds: 8
-    supported_aspect_ratios: ["16:9"]
-    supported_outputs: ["video_clip", "still_frame"]
-    plan_requirement: LUMA_API_VIDEO_ONLY_4_6_8S
-    capability_reason: Luma API is the locked AI metaphor provider.
+    supported_aspect_ratios: ["16:9", "9:16"]
+    supported_outputs: ["video_clip"]
+    plan_requirement: GOOGLE_VEO_3_1_8S_OUTPUT_ONE_APPROVAL_BUDGET_IDEMPOTENCY
+    capability_reason: Google Veo is the sole external provider for approved AI metaphor clips.
   - key: llm_router_LONG_SCRIPT_GENERATION
     provider_key: llm_router
     provider_type: LLM_SCRIPT_ENGINE

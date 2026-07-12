@@ -105,7 +105,7 @@ Runtime/result flags:
 
 Hard boundaries respected:
 - No ElevenLabs
-- No Luma
+- No Google Veo
 - No Pexels
 - No Drive upload
 - No YouTube upload/publish/reupload

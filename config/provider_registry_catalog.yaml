@@ -61,23 +61,26 @@ items:
     retry_policy_blob: {}
     metadata:
       readiness_provider_key: google-drive
-  - provider_key: luma_api
-    provider_name: Luma API
+  - provider_key: google_veo
+    provider_name: Google Veo API
     provider_type: VIDEO
     status: ACTIVE
     capability_blob:
-      mode: video_only
-      allowed_duration_seconds: [4, 6, 8]
+      transport: GEMINI_API_NATIVE
+      allowed_duration_seconds: [8]
       max_duration_seconds: 8
-      audio_enabled: false
+      output_count: 1
+      provider_audio_expected: true
+      provider_audio_policy: DISCARD
     policy_fit_blob:
       production_enabled_when_configured: true
     cost_model_blob:
-      pricing_metadata_deferred: true
+      catalog_ref: config://google_veo_model_price_catalog/2026-07-12
+      actual_cost_nullable_until_execution: true
     quota_model_blob: {}
     retry_policy_blob: {}
     metadata:
-      readiness_provider_key: luma_api
+      readiness_provider_key: google_veo
   - provider_key: elevenlabs
     provider_name: ElevenLabs
     provider_type: TTS

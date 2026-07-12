@@ -228,7 +228,7 @@ Drive archive focused rerun exception:
 
 Hard boundaries confirmed:
 - no ElevenLabs generation
-- no Luma generation
+- no Google Veo generation
 - no Pexels search/download
 - no YouTube upload/publish/reupload
 - no provider media job

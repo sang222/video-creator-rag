@@ -1,0 +1,1032 @@
+{
+  "phase": "HPR1",
+  "inventory_state": "BEFORE_REMOVAL",
+  "generated_on": "2026-07-12",
+  "search_terms": [
+    "luma",
+    "LUMA",
+    "luma_api",
+    "Luma",
+    "LUMAAI",
+    "ray-2",
+    "ray-flash",
+    "Dream Machine"
+  ],
+  "grouped_categories": [
+    "SETTINGS_AND_SECRETS",
+    "PROVIDER_REGISTRY",
+    "CAPABILITY_MATRIX",
+    "ADAPTERS_AND_BUILDERS",
+    "SERVICES_AND_ROUTING",
+    "COST_AND_READINESS",
+    "CONTRACTS",
+    "MODELS_AND_SCHEMA",
+    "API_ROUTES",
+    "PROMPTS_AND_TEMPLATES",
+    "TESTS",
+    "DOCS",
+    "REPORTS",
+    "DEPENDENCIES",
+    "SCRIPTS_AND_FIXTURES",
+    "GENERATED_OPENAPI_OR_SNAPSHOTS",
+    "LOCAL_ENVIRONMENT"
+  ],
+  "match_line_count": 438,
+  "schema_inspection": {
+    "source_schema_provider_specific_objects": 0,
+    "generic_provider_tables_preserved": true,
+    "live_database_inspection": "246 obsolete provider-readiness rows and 82 snapshot payloads found after PostgreSQL startup; forward cleanup migration required"
+  },
+  "entries": [
+    {
+      "path": ".env.example",
+      "symbol": "provider-specific literals/symbols (9 matches)",
+      "category": "SETTINGS_AND_SECRETS",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "README.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/api/routes/asset_acquisition.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "API_ROUTES",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/contracts/asset_acquisition.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "CONTRACTS",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/core/config.py",
+      "symbol": "provider-specific literals/symbols (21 matches)",
+      "category": "SETTINGS_AND_SECRETS",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/gatekeeper_soft_review_agent.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/provider_readiness_summary_agent.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/prompts/agents/system_deltas/visual_planning_agent.md",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/prompts/common/common_cost_awareness.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/prompts/common/common_media_constraints.md",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "PROMPTS_AND_TEMPLATES",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/__init__.py",
+      "symbol": "provider-specific literals/symbols (8 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/as1_rehearsal.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/asset_request_compiler.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/channel_contract.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/config_registry.py",
+      "symbol": "provider-specific literals/symbols (13 matches)",
+      "category": "SETTINGS_AND_SECRETS",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/dx2.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/local_project_workspace.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/m10_2.py",
+      "symbol": "provider-specific literals/symbols (51 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/m11.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/m12.py",
+      "symbol": "provider-specific literals/symbols (45 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/m12_2.py",
+      "symbol": "provider-specific literals/symbols (16 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/m12_2p3.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/m2.py",
+      "symbol": "provider-specific literals/symbols (36 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/nr2_bakeoff.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/provider_asset_manifests.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/provider_stack.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/r3d10.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/r3d3.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/r3d4.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/r3d8.py",
+      "symbol": "provider-specific literals/symbols (10 matches)",
+      "category": "COST_AND_READINESS",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "app/services/r3d9_ux2.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "config/media_provider_budget_policy_catalog.yaml",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "CAPABILITY_MATRIX",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "config/media_provider_capability_matrix_catalog.yaml",
+      "symbol": "provider-specific literals/symbols (9 matches)",
+      "category": "CAPABILITY_MATRIX",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "config/media_provider_role_profile_catalog.yaml",
+      "symbol": "provider-specific literals/symbols (7 matches)",
+      "category": "CAPABILITY_MATRIX",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "config/media_provider_routing_policy_catalog.yaml",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "CAPABILITY_MATRIX",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "config/provider_registry_catalog.yaml",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/architecture/asset_acquisition_provenance.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/architecture/m10-4-google-vertex-veo-binding.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/architecture/provider_activation_design_spec.md",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/architecture/provider_stack_freeze.md",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/architecture/runtime_lts_v1.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/m12_1_prompt_registry.md",
+      "symbol": "provider-specific literals/symbols (6 matches)",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "docs/operations/local_workspace_archive_cleanup.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "DOCS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/package-lock.json",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/src/features/channels/__tests__/channel-init-wizard.test.tsx",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/src/features/channels/channel-init-wizard.tsx",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/src/features/integrations/__tests__/integrations-readiness-view.test.tsx",
+      "symbol": "provider-specific literals/symbols (5 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/src/features/integrations/integrations-readiness-view.tsx",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/src/features/ops/__tests__/ops-view.test.tsx",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "SERVICES_AND_ROUTING",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/as1_asset_acquisition_provenance_report.md",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/as1_summary.json",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/code_closeout_readiness_prod_v1.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/creatomate_full_removal_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/dx2_provider_stack_reconciliation_report.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/int1_post_freeze_integration_smoke_ollama_drive_snowball_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/int2_human_approved_patch_apply_gate_rerun_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/int2_resume_small_team_ai_full_manual_ops_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/int2_small_team_ai_package_manual_ops_trial_report.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/m10_4-final-report.md",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/m12_1_prompt_registry_source_spec.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/m2_provider_wiring_without_paid_calls_report.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/manual_pilot_001_evidence_report.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/nr0_lite_native_ffmpeg_feasibility_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/nr2_1_native_motion_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/nr2_native_production_bakeoff_report.md",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/nr2_native_production_bakeoff_summary.json",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/ofv0_originality_format_validation_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_rerun_2_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/pa1_precheck_ollama_production_rehearsal_rerun_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/pa1_provider_activation_design_review.md",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/ppr_apply_human_approved_patches_gate_rerun_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/prod_v1_launch_plan_after_package_repair.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/production_package_pilot_001_manual_only_closeout_report.md",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/r3d10_runtime_lts_freeze_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/r3d8_production_cost_firewall_provider_boundary_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/r3d9_ux3_patch_proposal_coverage_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/r3d9_ux4_safe_apply_approved_changes_report.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "reports/runtime_lts_v1_baseline.md",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "REPORTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/qualification/test_m10_4_google_vertex_veo.py",
+      "symbol": "provider-specific literals/symbols (21 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/qualification/test_m12_1_prompt_registry.py",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/qualification/test_m12_2p_channel_init_contract.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/qualification/test_m12_2s_full_agent_ollama_rehearsal.py",
+      "symbol": "provider-specific literals/symbols (4 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/qualification/test_m12_provider_readiness.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/qualification/test_r3d4_agent_output_contract_gates.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_app_health.py",
+      "symbol": "provider-specific literals/symbols (7 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_as1_asset_acquisition_provenance.py",
+      "symbol": "provider-specific literals/symbols (6 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_channel_activation_cta.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_dx2_provider_stack_reconciliation.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "PROVIDER_REGISTRY",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_m12_1r_mock_runtime_purge.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_m2_provider_wiring_without_paid_calls.py",
+      "symbol": "provider-specific literals/symbols (6 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_nr1_native_renderer_architecture.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_nr2_native_production_bakeoff.py",
+      "symbol": "provider-specific literals/symbols (2 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_provider_full_physical_removal.py",
+      "symbol": "provider-specific literals/symbols (1 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_r3d10_runtime_lts_freeze.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_r3d8_production_cost_firewall_provider_boundary.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tests/test_r3d9_runtime_dashboard_ops.py",
+      "symbol": "provider-specific literals/symbols (5 matches)",
+      "category": "TESTS",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": "tools/native_ffmpeg/nr2/run_nr2.py",
+      "symbol": "provider-specific literals/symbols (3 matches)",
+      "category": "SCRIPTS_AND_FIXTURES",
+      "runtime_reachable": false,
+      "schema_impact": "none",
+      "removal_action": "remove provider-specific literals; delete dedicated implementation where applicable",
+      "veo_replacement": "google_veo where provider behavior is required",
+      "provider_neutral_replacement": "AI_HERO / AIHeroAssetRequest / AIGenerationManifest for domain semantics"
+    },
+    {
+      "path": ".env",
+      "symbol": "provider-specific field names; secret values never read",
+      "category": "LOCAL_ENVIRONMENT",
+      "runtime_reachable": true,
+      "schema_impact": "none",
+      "removal_action": "remove matching lines secret-safely",
+      "veo_replacement": "GEMINI_API_KEY and guarded VEO_* settings",
+      "provider_neutral_replacement": "VCOS_AI_VIDEO_HERO_PROVIDER"
+    }
+  ]
+}

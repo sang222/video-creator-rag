@@ -36,7 +36,7 @@ M10.2 builds the VCOS Media Provider Role Matrix for Quality-First $250 mode. It
 
 
 
-Google Vertex Veo may create opening hook visuals, key metaphor scenes, high-impact background clips, and still frames for thumbnails. It does not render full edited video, create accurate workflow/data/diagram cards, manage captions, guarantee final brand layout, handle final publish packages, or generate separate AI hero clips for every Short by default.
+Google Veo may create opening hook visuals, key metaphor scenes, high-impact background clips, and still frames for thumbnails. It does not render full edited video, create accurate workflow/data/diagram cards, manage captions, guarantee final brand layout, handle final publish packages, or generate separate AI hero clips for every Short by default.
 
 ElevenLabs may create long narration voice, short narration voice, voice segments, and voice usage metadata. It does not write scripts, render video, manage captions, license stock/source material, or build publish packages.
 
@@ -50,7 +50,7 @@ VCOS owns orchestration, artifact state, provider routing, budget checks, manife
 
 ## Job Routing
 
-- `AI_HERO_GENERATION`, `AI_METAPHOR_GENERATION` route only to `GOOGLE_VERTEX_VEO`.
+- `AI_HERO_GENERATION`, `AI_METAPHOR_GENERATION` route only to `GOOGLE_VEO`.
 - `VOICE_GENERATION`, `LONG_VOICE_GENERATION`, `SHORT_VOICE_GENERATION` route to ElevenLabs.
 - Unknown jobs return `BLOCKED_UNKNOWN_PROVIDER`.
 
@@ -59,7 +59,7 @@ VCOS owns orchestration, artifact state, provider routing, budget checks, manife
 Configured assumptions for Quality-First $250 mode:
 
 - ElevenLabs Creator is the baseline starting plan; track voice budget by credits/characters where possible.
-- Google Vertex Veo: $0.10/second configured for Veo 3.1 Fast 1080p video-only.
+- Google Veo: $0.10/second configured for Veo 3.1 Fast 1080p video-only.
 - Default 8s Veo attempt estimate: $0.80.
 - Monthly AI hero cap: $175 by default.
 - ElevenLabs Pro is an upgrade path if Creator credits become tight.
@@ -102,5 +102,5 @@ AI Hero allocation:
 ## Deferred
 
 - M10.3: YouTube Public + Owner Analytics Follow Patch, now complete.
-- M10.4: Google Vertex Veo AI Hero Provider Binding and config externalization audit, now complete.
+- M10.4: Google Veo AI Hero Provider Binding and config externalization audit, now complete.
 - M11: dashboard/operator cockpit, approvals, upload task dashboard, derivative graph dashboard, learning promotion UX, and human-owned channel config editing.

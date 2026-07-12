@@ -128,7 +128,7 @@ The tooling is isolated; no `app/`, frontend, Alembic, runtime registration, DB 
 
 ## No-execution proof
 
-This run executed local FFmpeg/ffprobe/Homebrew inspection only. It made no network or media-provider call and made no DB write. No ElevenLabs, Luma, Pexels, Drive, or YouTube action occurred. No FinalMediaRef, CloudMediaRef, HumanUploadTask, production MediaRenderJob, submitted ProviderJobSnapshot, executed PaidProviderCallLedger, UploadedVideo, Channel Contract, ChannelProfileVersion, EffectiveChannelRuntimeContextSnapshot, learning promotion, or prompt mutation was created. Existing zero-count proof remains in `reports/code_closeout_readiness_prod_v1.md` and `reports/pa1_precheck_srt_ollama_rehearsal_report.md`.
+This run executed local FFmpeg/ffprobe/Homebrew inspection only. It made no network or media-provider call and made no DB write. No ElevenLabs, Google Veo, Pexels, Drive, or YouTube action occurred. No FinalMediaRef, CloudMediaRef, HumanUploadTask, production MediaRenderJob, submitted ProviderJobSnapshot, executed PaidProviderCallLedger, UploadedVideo, Channel Contract, ChannelProfileVersion, EffectiveChannelRuntimeContextSnapshot, learning promotion, or prompt mutation was created. Existing zero-count proof remains in `reports/code_closeout_readiness_prod_v1.md` and `reports/pa1_precheck_srt_ollama_rehearsal_report.md`.
 
 ## Classification and recommendation
 

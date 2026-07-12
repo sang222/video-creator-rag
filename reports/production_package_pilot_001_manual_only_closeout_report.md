@@ -115,7 +115,7 @@ Provider readiness rows:
 | Provider | Readiness | `will_execute` |
 | --- | --- | --- |
 | `elevenlabs` | `NOT_CONFIGURED` | `false` |
-| `luma_api` | `BLOCKED_PROVIDER_NOT_CONFIGURED` | `false` |
+| `google_veo` | `BLOCKED_PROVIDER_NOT_CONFIGURED` | `false` |
 | `pexels_api` | `NOT_CONFIGURED` | `false` |
 | `google_drive_archive` | `DISABLED` | `false` |
 | `youtube_readonly` | `READY_FOR_FUTURE_EXECUTION` | `false` |
@@ -152,7 +152,7 @@ Live DB counts for the package/project:
 No evidence of:
 
 - ElevenLabs execution.
-- Luma execution.
+- Google Veo execution.
 - Pexels execution.
 - Drive upload.
 - YouTube upload/publish/reupload.

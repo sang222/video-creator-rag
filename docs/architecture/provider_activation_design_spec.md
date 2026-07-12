@@ -18,7 +18,7 @@ This document is a design contract for a future provider activation phase. It do
 Provider stack in scope:
 
 - `elevenlabs`
-- `luma_api`
+- `google_veo`
 - `pexels_api`
 - `google_drive_archive` as archive/storage only
 
@@ -96,7 +96,7 @@ Required evidence:
 - PaidProviderCallLedger
 - VoiceQC result
 
-### Luma API
+### Google Veo
 
 Allowed role:
 
@@ -104,11 +104,12 @@ Allowed role:
 
 Rules:
 
-- Allowed durations: `4`, `6`, `8` seconds.
-- Max duration: `8` seconds.
+- Approved duration: exactly `8` seconds.
+- Default model/resolution/aspect/output: `veo-3.1-fast-generate-preview`, 720p, 16:9, one output.
 - Long-form hero clip is not the backbone of the final video.
 - Prompt safety and visual intent must be reviewed before execution.
-- No recurring character use unless character policy explicitly allows it.
+- First-channel smoke requires `NO_CHARACTER`; human likeness requests block.
+- Provider-generated audio is recorded in provenance and discarded during normalization.
 - Output must pass visual relevance/QC before final assembly.
 
 Required evidence:
@@ -122,6 +123,7 @@ Required evidence:
 - ProviderJobSnapshot
 - PaidProviderCallLedger
 - MediaQC result
+- provider-audio normalization receipt
 
 ### Pexels API
 
@@ -315,7 +317,7 @@ Rollback behavior:
 Smoke order:
 
 1. ElevenLabs tiny voice.
-2. Luma tiny `4`, `6`, or `8` second clip.
+2. Google Veo one 8-second Fast/720p/16:9 clip with provider audio discarded.
 3. Pexels one fallback search if enabled.
 4. NativeFFmpeg local assembly/QC proof.
 5. Google Drive archive proof.

@@ -25,6 +25,8 @@ class MediaNormalizer:
         trim_start_seconds: float = 0,
         trim_end_seconds: float | None = None,
         audio_policy: str = "REMOVE",
+        provider_audio_present: bool | None = None,
+        provider_audio_stream_metadata: dict | None = None,
     ) -> MediaNormalizationManifest:
         if width <= 0 or height <= 0 or fps not in {24, 25, 30}:
             raise ValueError("VIDEO_NORMALIZATION_PROFILE_INVALID")
@@ -43,6 +45,11 @@ class MediaNormalizer:
             "trim_start_seconds": trim_start_seconds,
             "trim_end_seconds": trim_end_seconds,
             "audio_policy": audio_policy,
+            "provider_audio_present": provider_audio_present,
+            "provider_audio_stream_metadata": provider_audio_stream_metadata or {},
+            "provider_audio_discarded": bool(provider_audio_present and audio_policy == "REMOVE"),
+            "narration_authority": "ELEVENLABS",
+            "final_mix_authority": "NATIVE_FFMPEG",
         }
         argv = [
             "ffmpeg",
@@ -73,7 +80,14 @@ class MediaNormalizer:
         if audio_policy == "PRESERVE":
             argv.append("aac")
         argv.append(str(output_path))
-        return self._manifest(input_asset_ref, input_asset_hash, profile, argv, output_path, {"width": width, "height": height, "fps": fps, "pixel_format": "yuv420p", "color": "BT.709"})
+        return self._manifest(
+            input_asset_ref,
+            input_asset_hash,
+            profile,
+            argv,
+            output_path,
+            {"width": width, "height": height, "fps": fps, "pixel_format": "yuv420p", "color": "BT.709", "contains_audio_stream": audio_policy == "PRESERVE"},
+        )
 
     def compile_audio_plan(
         self,

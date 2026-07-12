@@ -116,10 +116,10 @@ def test_r3d10_blocks_provider_stack_drift_and_stale_veo_route(db_session) -> No
             return ProviderStackDriftGuardRead(
                 generated_at=utc_now(),
                 status="PROVIDER_STACK_DRIFT",
-                expected_provider_keys=["elevenlabs", "luma_api", "pexels_api"],
+                expected_provider_keys=["elevenlabs", "google_veo", "pexels_api"],
                 found_active_provider_keys=["elevenlabs"],
-                stale_provider_keys=["google-vertex-veo"],
-                affected_catalogs={"fixture": [{"provider_key": "google-vertex-veo"}]},
+                stale_provider_keys=["pixabay_free_fallback"],
+                affected_catalogs={"fixture": [{"provider_key": "pixabay_free_fallback"}]},
                 reason_codes=["STALE_PROVIDER_KEY_ACTIVE"],
                 next_action="fix provider stack",
             )
@@ -129,7 +129,7 @@ def test_r3d10_blocks_provider_stack_drift_and_stale_veo_route(db_session) -> No
     assert "PROVIDER_STACK_DRIFT" in drift.blocker_reason_codes
 
     stale_route_guard = ProviderStackDriftGuard(
-        catalog_overrides={"media_provider_routing_policy_catalog": [{"job_type": "AI_HERO_GENERATION", "provider_key": "GOOGLE_VERTEX_VEO"}]}
+        catalog_overrides={"media_provider_routing_policy_catalog": [{"job_type": "AI_HERO_GENERATION", "provider_key": "pixabay_free_fallback"}]}
     )
     stale_route = _verifier(db_session, provider_stack_guard=stale_route_guard)
     assert stale_route.freeze_status == "BLOCKED"
@@ -325,11 +325,11 @@ def test_r3d10_docs_api_and_dx_import_invariants(db_session) -> None:
     assert response.json()["no_provider_media_upload_execution"] is True
 
     provider_doc = Path("docs/architecture/provider_stack_freeze.md").read_text(encoding="utf-8")
-    assert "Luma API" in provider_doc
+    assert "Google Veo" in provider_doc
     assert "NativeFFmpegRenderer" in provider_doc
-    assert "Canonical external media providers are only `elevenlabs`, `luma_api`, and `pexels_api`" in provider_doc
+    assert all(key in provider_doc for key in ("`elevenlabs`", "`google_veo`", "`pexels_api`"))
     assert "final assembly" in provider_doc
-    assert "Veo: deferred compatibility only, not active" in provider_doc
+    assert "Google Veo is the sole external AI video hero provider" in provider_doc
 
     post_freeze = Path("docs/operations/post_freeze_protocol.md").read_text(encoding="utf-8")
     for token in ("P0", "P1", "P2", "P3"):

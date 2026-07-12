@@ -275,7 +275,7 @@ For video_project_id `372a1e94-3d3a-45e0-bab0-55f1916bb662`:
 
 Explicitly not executed:
 - ElevenLabs generation: none
-- Luma generation: none
+- Google Veo generation: none
 - Pexels search/download: none
 - YouTube upload/publish/reupload: none
 - Provider/media render job: none

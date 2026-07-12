@@ -14,7 +14,7 @@ const readinessPayload = {
     summary("youtube-owner", "YouTube Owner Analytics", "BLOCKED", { connected: false, learning_authority: "STRONG" }, ["YOUTUBE_OAUTH_CLIENT_SECRETS_FILE_OR_CLIENT_FIELDS"]),
     summary("google-drive", "Google Drive", "BLOCKED", { connected: false, root_folder_configured: false }, ["GOOGLE_DRIVE_ROOT_FOLDER_ID"]),
     summary("elevenlabs", "ElevenLabs", "BLOCKED", { api_key_configured: false, budget_basis: "credits/characters" }, ["ELEVENLABS_API_KEY"]),
-    summary("luma_api", "Luma API", "WARNING", { model_id: "ray-2", duration_rules: "4,6,8; max 8s" })
+    summary("google_veo", "Google Veo API", "WARNING", { model_id: "veo-3.1-fast-generate-preview", duration_rules: "8 seconds exactly" })
   ],
   checks: [
     check("google-drive", "CREDENTIAL", "BLOCKED", "Google Drive cần OAuth client/token.", { oauth_client_configured: false, token_connected: false }),
@@ -37,10 +37,10 @@ const readinessPayload = {
       technical_appendix: { no_actual_spend_calculation: true }
     },
     {
-      key: "luma_api",
-      provider_name: "Luma API",
+      key: "google_veo",
+      provider_name: "Google Veo API",
       role: "AI hero video-only",
-      configured_plan: "ray-2",
+      configured_plan: "veo-3.1-fast-generate-preview",
       configured_monthly_cap: "$75 USD",
       budget_basis: "duration_policy",
       readiness_state: "WARNING",
@@ -89,7 +89,7 @@ describe("IntegrationsReadinessView", () => {
     expect(screen.getByRole("button", { name: /Cần cấu hình OAuth/ })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /Kết nối Google Drive/ })).not.toBeInTheDocument();
     expect(screen.getByText("Google Drive chưa thể mở luồng cấp quyền. Hãy cấu hình client, secret, redirect URI và scope drive.file trước.")).toBeInTheDocument();
-    expect(screen.getAllByText("Luma API").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Google Veo API").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Loại kiểm tra: Thông tin kết nối").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Đang bị chặn").length).toBeGreaterThan(0);
     expect(screen.getByText("Ngân sách AI tháng này")).toBeInTheDocument();

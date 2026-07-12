@@ -95,7 +95,7 @@ will_execute: false by boundary; no provider plan execution occurred.
 Hard boundaries were preserved:
 
 - no ElevenLabs
-- no Luma
+- no Google Veo
 - no Pexels
 - no Drive upload
 - no YouTube upload/publish/reupload

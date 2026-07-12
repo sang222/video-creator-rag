@@ -430,7 +430,7 @@ def test_visual_coverage_gate_rejects_disallowed_source_type() -> None:
     result = VisualCoverageGate().run(
         artifacts={
             "narration_script": _script([5]),
-            "visual_plan": {"scenes": [{"sentence_id": "S1", "intended_visual_source": "LUMA_HERO_CANDIDATE_ONLY"}]},
+            "visual_plan": {"scenes": [{"sentence_id": "S1", "intended_visual_source": "AI_HERO_CANDIDATE_ONLY"}]},
         },
         effective_context=_ctx(allowed_sources=["DIAGRAM", "CARD"]),
     )

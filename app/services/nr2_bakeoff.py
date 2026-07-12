@@ -14,7 +14,7 @@ STRATEGIES: dict[str, dict[str, Any]] = {
     "NR2_B_BALANCED": {"roles": ["NATIVE"] * 4 + ["SUPPORTING"] * 2 + ["HERO"], "cost": "MEDIUM"},
     "NR2_C_HERO_HEAVY_PLACEHOLDER": {"roles": ["NATIVE"] * 2 + ["SUPPORTING"] * 2 + ["HERO"] * 3, "cost": "HIGH"},
 }
-ROLE_SOURCE = {"NATIVE": "NATIVE", "SUPPORTING": "PEXELS", "HERO": "LUMA"}
+ROLE_SOURCE = {"NATIVE": "NATIVE", "SUPPORTING": "PEXELS", "HERO": "GOOGLE_VEO"}
 
 
 def sha256_file(path: Path) -> str:
@@ -46,9 +46,9 @@ def strategy_distribution_gate(strategy_key: str, roles: list[str]) -> str:
 def placeholder_truthfulness(asset: dict[str, Any]) -> str:
     future = asset["planned_future_source"]
     actual = asset["actual_NR2_source"]
-    if future in {"LUMA", "PEXELS"}:
+    if future in {"GOOGLE_VEO", "PEXELS"}:
         ok = actual == "LOCAL_PLACEHOLDER" and asset.get("provider_quality_not_evaluated") is True and asset.get("production_eligible") is False
-        if future == "LUMA":
+        if future == "GOOGLE_VEO":
             ok = ok and asset.get("asset_status") == "LOCAL_HERO_PLACEHOLDER" and asset.get("not_provider_generated") is True
         return "PASS" if ok else "BLOCK"
     return "PASS" if future == "NATIVE" and actual == "LOCAL_SYNTHETIC" else "BLOCK"

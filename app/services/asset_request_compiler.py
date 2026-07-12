@@ -25,7 +25,7 @@ NATIVE_TREATMENTS = {
     "TIMELINE",
     "STATIC_COMPOSITION",
 }
-PROVIDER_BY_ROLE = {"NATIVE_VISUAL": "NATIVE", "SUPPORTING_STOCK": "PEXELS", "AI_HERO": "LUMA"}
+PROVIDER_BY_ROLE = {"NATIVE_VISUAL": "NATIVE", "SUPPORTING_STOCK": "PEXELS", "AI_HERO": "GOOGLE_VEO"}
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,8 @@ class AssetRequestCompiler:
             "strategy_profile_hash": strategy_profile.profile_hash,
             "requests": [request.model_dump(mode="json") for request in requests],
             "native_request_count": counts["NATIVE_VISUAL"],
-            "pexels_request_count": counts["SUPPORTING_STOCK"],
-            "luma_request_count": counts["AI_HERO"],
+            "supporting_stock_request_count": counts["SUPPORTING_STOCK"],
+            "ai_hero_request_count": counts["AI_HERO"],
             "unresolved_request_count": 0,
             "provider_execution_allowed": False,
         }
@@ -140,7 +140,7 @@ class AssetRequestCompiler:
             "person_policy": "NO_RECURRING_HOST" if role == "SUPPORTING_STOCK" else format_identity.character_policy_mode,
             "logo_text_policy": "REJECT_VISIBLE_LOGO_OR_EMBEDDED_TEXT" if role != "NATIVE_VISUAL" else "NATIVE_TEXT_ONLY",
             "evidence_usage_policy": "NOT_FACTUAL_EVIDENCE" if role != "NATIVE_VISUAL" else "CLAIM_LEDGER_BOUND",
-            "fallback_order": list(ROLE_PRIORITY),
+            "fallback_order": [role, "NATIVE_VISUAL"] if role != "NATIVE_VISUAL" else ["NATIVE_VISUAL"],
             "projected_cost_class": "NONE" if role == "NATIVE_VISUAL" else "LOW" if role == "SUPPORTING_STOCK" else "MEDIUM",
             "human_review_required": role != "NATIVE_VISUAL",
         }

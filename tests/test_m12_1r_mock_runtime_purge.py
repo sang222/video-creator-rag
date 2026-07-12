@@ -77,9 +77,9 @@ def test_readiness_excludes_mock_providers(db_session) -> None:
         "youtube-owner",
         "google-drive",
         "elevenlabs",
-        "luma_api",
+        "google_veo",
     }
-    assert payload.provider_summaries[-1].provider_key == "luma_api"
+    assert payload.provider_summaries[-1].provider_key == "google_veo"
 
 
 def test_no_production_module_imports_runtime_mock_provider() -> None:

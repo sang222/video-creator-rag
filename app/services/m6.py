@@ -175,7 +175,7 @@ class ProductionArtifactRunService:
                 *run.reason_codes,
                 "FINAL_RENDERER_NOT_CONFIGURED",
                 "ELEVENLABS_NOT_CONFIGURED",
-                "GOOGLE_VERTEX_VEO_NOT_CONFIGURED",
+                "GOOGLE_VEO_NOT_CONFIGURED",
                 "NATIVE_FFMPEG_PRODUCTION_DISABLED",
                 "HUMAN_ACTION_REQUIRED",
             ]

@@ -43,13 +43,13 @@ from app.services.m2 import PAID_CAPABILITIES, ProviderReadinessM2Service, valid
 from app.services.provider_stack import normalize_provider_key, provider_key_rejection_reasons
 
 
-PAID_PROVIDER_KEYS = {"elevenlabs", "luma_api"}
-CHARACTER_DEPENDENT_STAGES = {"AI_HERO_VIDEO", "AI_HERO_GENERATION", "AI_METAPHOR_GENERATION", "LUMA_HERO_VIDEO"}
+PAID_PROVIDER_KEYS = {"elevenlabs", "google_veo"}
+CHARACTER_DEPENDENT_STAGES = {"AI_HERO_VIDEO", "AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}
 VOICE_STAGES = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
 PEXELS_STAGES = {"FREE_VISUAL_FALLBACK", "PEXELS_SEARCH", "PEXELS_FALLBACK"}
 EXECUTION_FLAG_BY_PROVIDER = {
     "elevenlabs": "elevenlabs_real_generation_enabled",
-    "luma_api": "luma_real_generation_enabled",
+    "google_veo": "veo_real_generation_enabled",
     "pexels_api": "pexels_real_search_enabled",
     "google_drive_archive": "google_drive_real_archive_enabled",
 }
@@ -227,7 +227,7 @@ class CostEstimateService:
                 blockers.append(f"{provider_key.upper()}_ESTIMATE_REQUIRES_REAL_PROVIDER")
             if provider_key == "elevenlabs":
                 costs["voice"] = explicit_cost
-            elif provider_key == "luma_api":
+            elif provider_key == "google_veo":
                 costs["ai_hero"] = explicit_cost
 
         if not provider_items:
@@ -473,7 +473,7 @@ class PaidRenderApprovalGate:
 class ProviderCharacterInputGate:
     def check(self, *, effective: EffectiveChannelRuntimeContextSnapshot, provider_key: str, provider_stage: str, request_payload: dict[str, Any]) -> GateCheck:
         stage = provider_stage.upper()
-        if provider_key != "luma_api" and stage not in CHARACTER_DEPENDENT_STAGES:
+        if provider_key != "google_veo" and stage not in CHARACTER_DEPENDENT_STAGES:
             return GateCheck(True, [], "PASS")
         reasons: list[str] = []
         requires_character = bool(request_payload.get("requires_character") or request_payload.get("character_ref_required"))
@@ -567,10 +567,10 @@ class VisualSourceMixGate:
         if str(plan.get("visual_backbone") or "").upper() == "PEXELS" or plan.get("pexels_core_backbone") is True:
             reasons.append("PEXELS_CANNOT_BE_CORE_VISUAL_BACKBONE")
         stage = (provider_stage or "").upper()
-        if provider_key == "luma_api" or stage in CHARACTER_DEPENDENT_STAGES:
-            luma_duration = _decimal_or_none(plan.get("luma_duration_seconds") or plan.get("duration_seconds"))
-            if luma_duration is not None and luma_duration > Decimal("8"):
-                reasons.append("LUMA_DURATION_EXCEEDS_8_SECONDS")
+        if provider_key == "google_veo" or stage in CHARACTER_DEPENDENT_STAGES:
+            veo_duration = _decimal_or_none(plan.get("ai_hero_duration_seconds") or plan.get("duration_seconds"))
+            if veo_duration is not None and veo_duration != Decimal("8"):
+                reasons.append("VEO_DURATION_MUST_EQUAL_8_SECONDS")
         return GateCheck(not reasons, sorted(set(reasons)), "PASS" if not reasons else "BLOCK")
 
 
@@ -736,7 +736,7 @@ class PaidProviderBoundaryService:
         )
         if not visual_check.passed:
             reasons.extend(visual_check.reason_codes)
-            status = "BLOCKED_CHARACTER_INPUT" if "LUMA" in " ".join(visual_check.reason_codes) else "BLOCKED_COST_ESTIMATE"
+            status = "BLOCKED_CHARACTER_INPUT" if "VEO" in " ".join(visual_check.reason_codes) else "BLOCKED_COST_ESTIMATE"
         proxy_check = ProxyPreviewGate(self.session).check_not_final_media(artifact_ref=data.request_payload_json.get("final_artifact_ref"))
         if not proxy_check.passed:
             reasons.extend(proxy_check.reason_codes)

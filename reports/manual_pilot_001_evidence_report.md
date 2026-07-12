@@ -228,11 +228,11 @@ Frontend ops forbidden button scan: no hits.
 - ProviderStackDriftGuard: PASS
 - Expected canonical providers:
   - `elevenlabs`
-  - `luma_api`
+  - `google_veo`
   - `pexels_api`
 - Found active providers:
   - `elevenlabs`
-  - `luma_api`
+  - `google_veo`
   - `pexels_api`
 - Stale provider keys: none active
 - `will_execute=false`

@@ -116,12 +116,12 @@ C7 common_market_locale_context
 C8 common_media_constraints
 
 * Voice: ElevenLabs.
-* AI hero: Google Vertex Veo only.
-* Veo model: veo-3.1-fast-generate-001.
+* AI hero: Google Veo only.
+* Veo model: veo-3.1-fast-generate-preview.
 * Veo mode: video_only, 1080p, audio=false.
-* Veo durations: 4, 6, 8 seconds only.
+* Veo durations: 8 seconds only.
 * Google Drive access: CTA only.
-* Do not propose Runway/Luma/Envato as production default.
+* Do not propose a secondary external AI video provider or AI-video failover chain.
 * Do not use Veo for diagrams/data charts.
 
 C9 common_cost_awareness

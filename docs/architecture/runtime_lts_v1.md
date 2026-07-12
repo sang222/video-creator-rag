@@ -40,13 +40,13 @@ R3D10 freeze VCOS backend/core ở trạng thái Runtime LTS v1. Đây là freez
 ## Provider stack freeze
 
 - `elevenlabs`: voice/TTS.
-- `luma_api`: AI hero/metaphor video, max 8s, allowed 4/6/8.
+- `google_veo`: AI hero/metaphor video, max 8s, allowed 8.
 - `native_ffmpeg_renderer`: local final assembly + native motion + caption/compositing authority; not an external paid provider.
 - `pexels_api`: free visual fallback only.
 - YouTube: manual publish + read-only analytics/verification.
 - Drive/object storage: optional archive later.
 
-Deferred/inactive: Veo, Runway, Envato, Adobe, Shutterstock, DaVinci API core, TBD final renderer, Pexels+Pixabay combined fallback.
+Deferred/inactive: paid stock, manual editing workbenches and non-canonical integrations. Google Veo is the sole active external AI video hero provider.
 
 ## Manual publish boundary
 
@@ -71,7 +71,7 @@ Runtime LTS v1 keeps these disabled:
 
 - provider execution
 - ElevenLabs generation
-- Luma generation
+- Google Veo generation
 - NativeFFmpeg production render execution
 - Pexels search/download
 - Drive upload

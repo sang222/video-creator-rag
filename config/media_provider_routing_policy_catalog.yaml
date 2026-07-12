@@ -109,9 +109,9 @@ items:
     reason_code: ELEVENLABS_VOICE_ROUTED
   - key: AI_HERO_GENERATION
     job_type: AI_HERO_GENERATION
-    provider_key: luma_api
-    reason_code: LUMA_AI_HERO_PROVIDER_ROUTED
+    provider_key: google_veo
+    reason_code: VEO_AI_HERO_PROVIDER_ROUTED
   - key: AI_METAPHOR_GENERATION
     job_type: AI_METAPHOR_GENERATION
-    provider_key: luma_api
-    reason_code: LUMA_AI_HERO_PROVIDER_ROUTED
+    provider_key: google_veo
+    reason_code: VEO_AI_HERO_PROVIDER_ROUTED

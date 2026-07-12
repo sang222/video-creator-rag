@@ -442,7 +442,7 @@ class RuntimeLTSFreezeVerifier:
         flags = [
             "provider_real_execution_enabled",
             "elevenlabs_real_generation_enabled",
-            "luma_real_generation_enabled",
+            "veo_real_generation_enabled",
             "pexels_real_search_enabled",
             "google_drive_real_archive_enabled",
         ]
@@ -470,11 +470,11 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_provider_docs(self) -> None:
         text = self._read("docs/architecture/provider_stack_freeze.md").lower()
-        docs_ok = all(token in text for token in ("luma api", "native_ffmpeg_renderer", "local renderer capability", "max duration: 8", "`4`, `6`, `8`"))
-        stale_active = any(phrase in text for phrase in ("veo = active", "cloud final renderer tbd = active"))
+        docs_ok = all(token in text for token in ("google veo is the sole", "`google_veo`", "nativeffmpegrenderer", "8 seconds"))
+        stale_active = "cloud final renderer tbd = active" in text
         self._record(
             "provider_stack_docs_frozen",
-            "Docs khóa Luma 8s, NativeFFmpeg local renderer, Pexels fallback; Veo/TBD inactive.",
+            "Docs khóa Google Veo 8s, NativeFFmpeg local renderer và Pexels supporting stock.",
             "P1",
             "PASS" if docs_ok and not stale_active else "BLOCKED",
             [] if docs_ok and not stale_active else ["PROVIDER_STACK_FREEZE_DOC_DRIFT"],

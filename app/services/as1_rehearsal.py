@@ -100,9 +100,17 @@ class AS1LocalFixtureRehearsal:
         hero_request = build_ai_hero_request(
             hero_asset_request,
             package_id=package_id,
+            project_id=project_id,
+            channel_id="small-team-ai",
             prompt_text="Abstract paper workflow transforming into a calm luminous operating system, no people, no logos, documentary lighting",
+            provider_resolution_policy_ref=provider_policy.policy_ref,
         )
-        ai_manifest = build_planned_ai_generation_manifest(hero_request)
+        ai_manifest = build_planned_ai_generation_manifest(
+            hero_request,
+            provider_key="google_veo",
+            provider_model_id="veo-3.1-fast-generate-preview",
+            synthetic_media_disclosure_ref=plan.synthetic_media_disclosure_receipt_ref or "",
+        )
         workspace.write_json(project_id, "manifests/ai_hero_asset_request.json", hero_request.model_dump(mode="json"))
         workspace.write_json(project_id, "manifests/ai_generation_manifest.json", ai_manifest.model_dump(mode="json"))
 
@@ -162,7 +170,7 @@ class AS1LocalFixtureRehearsal:
             "strategy": "NR2_B_BALANCED",
             "project_id": project_id,
             "package_id": package_id,
-            "request_counts": {"native": compiled.native_request_count, "pexels": compiled.pexels_request_count, "luma": compiled.luma_request_count},
+            "request_counts": {"native": compiled.native_request_count, "supporting_stock": compiled.supporting_stock_request_count, "ai_hero": compiled.ai_hero_request_count},
             "provider_calls_made": False,
             "drive_calls_made": False,
             "transport": "LOCAL_FIXTURE_ONLY",
@@ -213,7 +221,7 @@ def _native_plan(*, project_id: str, package_id: str) -> NativeRenderPlan:
         ("s2", "DIAGRAM", "EXPLANATION", "A native diagram explains the coordination bottleneck", None),
         ("s3", "UI_SIMULATION", "MECHANISM", "Native UI simulation shows one automation handoff", None),
         ("s4", "STOCK_VIDEO", "SUPPORT", "small team collaborating around laptop in a clean office", "PEXELS"),
-        ("s5", "AI_HERO_VIDEO", "METAPHOR", "paper workflow transforms into a calm luminous operating system", "LUMA"),
+        ("s5", "AI_HERO_VIDEO", "METAPHOR", "paper workflow transforms into a calm luminous operating system", "GOOGLE_VEO"),
     ]
     scenes = []
     for index, (scene_id, treatment, role, notes, provider) in enumerate(scene_specs):

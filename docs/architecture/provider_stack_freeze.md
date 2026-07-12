@@ -1,41 +1,36 @@
-# DX2 / R3D10 Provider Stack Freeze
+# HPR1 Provider Stack Freeze
 
-DX2 khóa provider truth cho R3D9 Provider/Cost/Readiness panel. R3D10 giữ nguyên stack này trong Runtime LTS v1.
+Google Veo is the sole external AI video hero provider. NativeFFmpegRenderer remains the only final assembly/render authority.
 
-## Active Provider Keys
+## Canonical external providers
 
-- `elevenlabs` / ElevenLabs: voice/TTS only.
-- `luma_api` / Luma API: AI hero/metaphor video only.
-- `native_ffmpeg_renderer` / NativeFFmpegRenderer: local renderer capability for final assembly, native motion, caption burn-in, compositing, output enforcement and render/QC evidence. It is not a paid external provider.
-- `pexels_api` / Pexels API: free visual fallback only.
+- `elevenlabs`: narration/TTS only.
+- `pexels_api`: supporting stock only; never the explanatory backbone or factual evidence.
+- `google_veo`: selective AI hero/metaphor clips through `GEMINI_API_NATIVE`.
 
-## Manual / Storage Boundary
+Local capability: `native_ffmpeg_renderer`. Archive infrastructure: `google_drive_archive`. YouTube remains manual publish plus read-only verification/analytics.
 
-- YouTube: manual publish + read-only analytics/verification. No YouTube upload API.
-- Drive/object storage: optional archive/later. No Drive upload in DX2/R3D9/R3D10.
-- Post-freeze Drive archive smoke, when explicitly enabled, treats `GOOGLE_DRIVE_ROOT_FOLDER_ID` as the archive root and writes relative folders below it only. New unscoped smoke writes use `smoke_tests/YYYY-MM-DD`; new project-scoped archive writes use `company_{company_id}/channel_{channel_workspace_id}/project_{video_project_id}/{media_type_or_subfolder}`. Historical `VCOS/company_unknown/channel_unknown/project_unknown` folders may be cleaned manually if desired; VCOS does not move/delete old Drive folders automatically.
+The system has no secondary external AI video provider and no provider failover chain:
 
-## Deferred / Inactive
+```text
+external_ai_video_provider_order=[google_veo]
+AI_HERO_UNAVAILABLE
+  -> NATIVE_VISUAL_REQUIRED when the frozen project policy permits
+  -> otherwise REVIEW_REQUIRED or BLOCK
+```
 
-- `GOOGLE_VERTEX_VEO` / `google-vertex-veo` / Veo: deferred compatibility only, not active.
-- Runway: deferred.
-- DaVinci: manual/workbench only, not API core.
-- Envato: avoided.
-- Adobe/Shutterstock/paid stock: deferred.
+The native visual downgrade is an explicit source-role decision with provenance and cost-avoided evidence; it is not provider fallback.
 
-Canonical external media providers are only `elevenlabs`, `luma_api`, and `pexels_api`. `google_drive_archive` and `youtube_readonly` are external integrations outside media-provider execution. NativeFFmpeg creates no `PaidProviderCallLedger` entry.
-- `pexels_pixabay_free_fallback`: inactive; use `pexels_api`.
+## Veo 3.1 baseline
 
-## Luma Duration Spec
+- approved models: `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`, `veo-3.1-lite-generate-preview`;
+- first PA1R default: `veo-3.1-fast-generate-preview`, 8 seconds, 720p, 16:9, one output;
+- versioned pricing: `config/google_veo_model_price_catalog.yaml`;
+- provider audio may exist, but current channel policy is `DISCARD`;
+- ElevenLabs owns narration and NativeFFmpeg owns the final mix.
 
-- Max duration: 8 seconds.
-- Allowed durations: `4`, `6`, `8`.
-- Do not open 10 seconds unless a future budget/provider freeze confirms it.
+`VCOS_VEO_REAL_GENERATION_ENABLED=false` and `VCOS_PA1R_VEO_SMOKE_ENABLED=false` are the defaults. Provider and dashboard action endpoints are absent.
 
-## Renderer configuration
+## Immutable/runtime boundary
 
-The first channel uses `VCOS_NATIVE_RENDER_WORKSPACE_ROOT`, `VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED=false`, and `VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED=false`.
-
-## Runtime Boundary
-
-M2 is readiness/wiring only. R3D8 is validation/firewall only by default. R3D9 is ops/read-model only. DX2 does not add provider execution, media generation, render submission, Pexels search/download, Drive upload, or YouTube upload.
+Provider execution cannot mutate Channel Contract, ChannelProfileVersion, EffectiveChannelRuntimeContextSnapshot or FormatIdentityContract. Drive is archive-only and never a renderer or publish trigger. NativeFFmpeg never enters `PaidProviderCallLedger`.

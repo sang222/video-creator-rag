@@ -88,7 +88,7 @@ PASS.
 - Ollama: base URL/provider/real flags/lanes/no GLM checked.
 - YouTube: public API key/test video + owner OAuth/scopes/token checked; no fake metrics.
 - Google Drive: OAuth/root folder/drive.file checked; upload smoke guarded.
-- Google Vertex Veo: GA model, duration 4/6/8, max 8, audio false, real smoke guarded.
+- Google Veo: GA model, duration 8, max 8, provider audio discarded, real smoke guarded.
 - ElevenLabs: API key + Creator/credits-character budget display; voice-only placeholder.
 - Cloud Final Renderer: `REQUIRED_GAP`; long-form final render blocked until provider selected later.
 

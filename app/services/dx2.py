@@ -95,7 +95,7 @@ class ProviderStackDriftGuard:
             affected_catalogs=affected,
             reason_codes=sorted(set(reason_codes)),
             next_action=(
-                "Chuẩn hóa external media providers về elevenlabs, luma_api, pexels_api; NativeFFmpeg phải là local capability."
+                "Chuẩn hóa external media providers về elevenlabs, google_veo, pexels_api; NativeFFmpeg phải là local capability."
                 if status == "PROVIDER_STACK_DRIFT"
                 else "Provider stack canonical; R3D9 Provider/Cost panel có thể đọc readiness/cost firewall."
             ),

@@ -158,7 +158,7 @@ ProviderStackDriftGuard:
 - status: `PASS`
 - canonical active keys:
   - `elevenlabs`
-  - `luma_api`
+  - `google_veo`
   - `pexels_api`
 - stale provider keys: none active
 - no_provider_call_made: true
@@ -192,7 +192,7 @@ Proof:
 ## No-execution proof
 
 - no ElevenLabs generation
-- no Luma generation
+- no Google Veo generation
 - no Pexels search/download
 - no YouTube upload/publish/reupload
 - no MediaRenderJob for trial project: 0

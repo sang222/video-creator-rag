@@ -455,7 +455,7 @@ class M11DashboardService:
             manual_actions=manual_actions,
             integrations={
                 "ollama_router": {"state": _state_from_count(self._count_provider_key_like("ollama"), "DISABLED", "CONFIGURED")},
-                "luma_api": {"state": _state_from_count(self._count_provider_key_like("luma_api"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
+                "google_veo": {"state": _state_from_count(self._count_provider_key_like("google_veo"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
                 "native_ffmpeg_renderer": {"state": "LOCAL_CAPABILITY"},
                 "google_drive": {"state": "CONNECTED" if not self._drive_auth_needed() else "NEEDS_AUTH"},
                 "youtube_analytics": {"state": "CONNECTED" if not self._youtube_auth_needed() else "NEEDS_AUTH"},

@@ -188,7 +188,7 @@ ALLOWED_QUALIFICATION_DIRTY_PREFIXES = (
     "docs/architecture/m10-1-llm-router-derivative-funnel.md",
     "docs/architecture/m10-2-media-provider-role-matrix.md",
     "docs/architecture/m10-3-youtube-follow.md",
-    "docs/architecture/m10-4-google-vertex-veo-binding.md",
+    "docs/architecture/google_veo_provider.md",
     "docs/architecture/m10-5-google-drive-media-offload.md",
     "docs/architecture/m11-operator-dashboard.md",
     "docs/architecture/m11-1-localization-auth-timing.md",

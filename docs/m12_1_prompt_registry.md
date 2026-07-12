@@ -116,17 +116,17 @@ C7 common_market_locale_context
 C8 common_media_constraints
 
 * Voice: ElevenLabs.
-* AI hero: Luma API only.
-* Luma mode: video_only, audio=false.
-* Luma durations: 4, 6, 8 seconds only; max 8 seconds.
+* AI hero: Google Veo API only.
+* Google Veo mode: GEMINI_API_NATIVE; provider audio expected and discarded.
+* Google Veo durations: 8 seconds only; max 8 seconds.
 * Google Drive access: CTA only.
-* Do not propose Runway/Luma/Envato as production default.
-* Do not use Luma for diagrams/data charts.
+* Do not propose a secondary external AI video provider or AI-video failover chain.
+* Do not use Google Veo for diagrams/data charts.
 
 C9 common_cost_awareness
 
 * Prefer safe reuse.
-* Do not overuse Luma API.
+* Do not overuse Google Veo API.
 * Do not claim exact spend if unavailable.
 * M12 budget display is hard-env cap only, not actual spend tracking.
 

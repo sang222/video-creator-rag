@@ -40,7 +40,7 @@ class ChannelVisualStrategyProfile(BaseModel):
 class ProviderUsagePolicy(BaseModel):
     policy_ref: str
     policy_hash: str
-    supported_providers: list[str] = Field(default_factory=lambda: ["NATIVE", "PEXELS", "LUMA"])
+    supported_providers: list[str] = Field(default_factory=lambda: ["NATIVE", "PEXELS", "GOOGLE_VEO"])
     stock_factual_evidence_forbidden: bool = True
     stock_recurring_host_forbidden: bool = True
     ai_hero_filler_forbidden: bool = True
@@ -107,8 +107,8 @@ class CompiledAssetRequestPlan(BaseModel):
     strategy_profile_hash: str
     requests: list[AssetRequest]
     native_request_count: int = Field(ge=0)
-    pexels_request_count: int = Field(ge=0)
-    luma_request_count: int = Field(ge=0)
+    supporting_stock_request_count: int = Field(ge=0)
+    ai_hero_request_count: int = Field(ge=0)
     unresolved_request_count: int = Field(ge=0)
     provider_execution_allowed: bool = False
     content_hash: str
@@ -236,37 +236,43 @@ class StockSourceManifest(BaseModel):
 class AIHeroAssetRequest(BaseModel):
     request_id: str
     package_id: str
+    project_id: str
+    channel_id: str
     scene_id: str
     source_segment_ids: list[str] = Field(min_length=1)
     visual_intent: str
     hero_reason: Literal["HOOK", "METAPHOR", "EMOTIONAL_PAYOFF", "VISUAL_SIGNATURE", "NATIVE_MOTION_INSUFFICIENT"]
     prompt_text: str
+    prompt_hash: str
     prompt_safety_status: Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
-    duration_seconds: Literal[4, 6, 8]
-    aspect_ratio: Literal["16:9", "9:16", "1:1"]
-    reference_image_ref: str | None = None
+    required_duration_seconds: float = Field(gt=0, le=120)
+    preferred_resolution: str
+    required_aspect_ratio: Literal["16:9", "9:16"]
     character_policy_mode: str
     projected_cost_class: ProjectedCostClass
     human_approval_required: bool
+    provider_resolution_policy_ref: str
     request_hash: str
     model_config = ConfigDict(extra="forbid")
 
 
 class AIGenerationManifest(BaseModel):
-    provider: Literal["LUMA"] = "LUMA"
+    provider_key: str
+    provider_model_id: str
     request_ref: str
     request_hash: str
-    generation_id: str | None = None
-    provider_status: Literal["PLANNED_NOT_SUBMITTED", "SUBMITTED", "PROCESSING", "COMPLETED", "FAILED"] = "PLANNED_NOT_SUBMITTED"
+    external_operation_id: str | None = None
+    provider_status: str = "PLANNED"
     prompt_hash: str
     submitted_at: datetime | None = None
     completed_at: datetime | None = None
-    asset_url_reference: str | None = None
+    output_url_reference: str | None = None
     downloaded_path: str | None = None
     downloaded_sha256: str | None = None
     cost_snapshot_ref: str | None = None
     attempt_record_ref: str | None = None
     media_qc_ref: str | None = None
+    synthetic_media_disclosure_ref: str | None = None
     production_eligible: bool = False
     manifest_hash: str
     model_config = ConfigDict(extra="forbid")

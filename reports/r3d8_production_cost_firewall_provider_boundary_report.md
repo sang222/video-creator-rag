@@ -64,7 +64,7 @@
 - Default flags:
   - `PROVIDER_REAL_EXECUTION_ENABLED=false`
   - `ELEVENLABS_REAL_GENERATION_ENABLED=false`
-  - `LUMA_REAL_GENERATION_ENABLED=false`
+  - `VEO_REAL_GENERATION_ENABLED=false`
   - `PEXELS_REAL_SEARCH_ENABLED=false`
   - `GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED=false`
 - R3D8 service không instantiate provider adapters, không tạo `ProviderAttempt`, `MediaRenderJob`, `HumanUploadTask`, không gọi YouTube upload.

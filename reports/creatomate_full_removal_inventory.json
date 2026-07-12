@@ -461,7 +461,7 @@
       "replacement_if_required": null
     },
     {
-      "path": "docs/architecture/m10-4-google-vertex-veo-binding.md",
+      "path": "docs/architecture/m10-4-google_veo-binding.md",
       "symbol": "Creatomate",
       "category": "DOCS",
       "runtime_reachable": false,

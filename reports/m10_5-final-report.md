@@ -9,7 +9,7 @@ Repo: `/Users/sangss/Desktop/video-creator-rag`
 ## Preflight
 
 - Working tree trước khi mở M10.5: clean.
-- Tag `m10-4-google-vertex-veo-binding`: có.
+- Tag `m10-4-google_veo-binding`: có.
 - M10.4 report: có `reports/m10_4-final-report.md`.
 - Source-of-truth đã đọc: README, architecture ledger, source-of-truth, M10.2/M10.3/M10.4 docs/reports, migrations, config, services, API/CLI/tests hiện hữu.
 

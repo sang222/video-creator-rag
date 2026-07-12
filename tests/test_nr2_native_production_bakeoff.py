@@ -21,10 +21,10 @@ def test_strategy_distributions_validate(key):
     assert strategy_distribution_gate(key, STRATEGIES[key]["roles"]) == "PASS"
 
 
-@pytest.mark.parametrize("future", ["LUMA", "PEXELS"])
+@pytest.mark.parametrize("future", ["GOOGLE_VEO", "PEXELS"])
 def test_local_placeholder_cannot_claim_provider_provenance(future):
     asset = {"planned_future_source": future, "actual_NR2_source": "LOCAL_PLACEHOLDER", "provider_quality_not_evaluated": True, "production_eligible": False}
-    if future == "LUMA": asset |= {"asset_status": "LOCAL_HERO_PLACEHOLDER", "not_provider_generated": True}
+    if future == "GOOGLE_VEO": asset |= {"asset_status": "LOCAL_HERO_PLACEHOLDER", "not_provider_generated": True}
     assert placeholder_truthfulness(asset) == "PASS"
     asset["actual_NR2_source"] = "PROVIDER_GENERATED"
     assert placeholder_truthfulness(asset) == "BLOCK"

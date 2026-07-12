@@ -15,11 +15,11 @@
 
 ## Env/config summary
 - Parsed env mới: `VOICE_PROVIDER`, `AI_VIDEO_HERO_PROVIDER`, `FREE_VISUAL_FALLBACK_PROVIDER`; final assembly is local NativeFFmpeg.
-- Parsed limits/guards: `LUMA_*DURATION*`, `LUMA_VIDEO_ONLY`, `PEXELS_MAX_*`, `PEXELS_ATTRIBUTION_REQUIRED`, `GOOGLE_DRIVE_ARCHIVE_ENABLED`, `PROVIDER_REAL_READINESS_PROBE_ENABLED`.
+- Parsed limits/guards: `VEO_*DURATION*`, `VEO_VIDEO_ONLY`, `PEXELS_MAX_*`, `PEXELS_ATTRIBUTION_REQUIRED`, `GOOGLE_DRIVE_ARCHIVE_ENABLED`, `PROVIDER_REAL_READINESS_PROBE_ENABLED`.
 
 ## Capability matrix
 - ElevenLabs: `VOICE_GENERATION`, requires key/voice/model, future execution R3D8 only.
-- Luma API: `AI_HERO_VIDEO`, duration 4/6/8s, max 8, video-only, future execution R3D8 only.
+- Google Veo API: `AI_HERO_VIDEO`, duration 8s, max 8, Gemini-native video, future execution R3D8 only.
 - Pexels API: `FREE_VISUAL_FALLBACK`, role/limit/attribution policy enforced.
 - Google Drive: `ARCHIVE_STORAGE` only, not source of truth, no upload in M2.
 - YouTube: read-only verification/analytics only, no upload.

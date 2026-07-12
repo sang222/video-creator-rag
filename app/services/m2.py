@@ -22,7 +22,7 @@ from app.services.provider_stack import normalize_provider_key, provider_key_rej
 
 LOCKED_PROVIDERS = {
     "VOICE_PROVIDER": "elevenlabs",
-    "AI_VIDEO_HERO_PROVIDER": "luma_api",
+    "AI_VIDEO_HERO_PROVIDER": "google_veo",
     "FINAL_ASSEMBLY_RENDERER": "native_ffmpeg_renderer",
     "TEMPLATE_RENDERER": "native_ffmpeg_renderer",
     "FREE_VISUAL_FALLBACK_PROVIDER": "pexels_api",
@@ -66,9 +66,7 @@ class ProviderConfigRegistry:
     def configured_provider_by_role(self) -> dict[str, str | None]:
         return {
             "VOICE_PROVIDER": _norm(self.settings.voice_provider) or LOCKED_PROVIDERS["VOICE_PROVIDER"],
-            "AI_VIDEO_HERO_PROVIDER": _norm(self.settings.ai_video_hero_provider)
-            or _norm(self.settings.ai_hero_provider)
-            or LOCKED_PROVIDERS["AI_VIDEO_HERO_PROVIDER"],
+            "AI_VIDEO_HERO_PROVIDER": _norm(self.settings.ai_video_hero_provider) or LOCKED_PROVIDERS["AI_VIDEO_HERO_PROVIDER"],
             "FINAL_ASSEMBLY_RENDERER": LOCKED_PROVIDERS["FINAL_ASSEMBLY_RENDERER"],
             "TEMPLATE_RENDERER": LOCKED_PROVIDERS["TEMPLATE_RENDERER"],
             "FREE_VISUAL_FALLBACK_PROVIDER": _norm(self.settings.free_visual_fallback_provider)
@@ -85,7 +83,7 @@ class ProviderConfigRegistry:
             no_provider_network_call_by_default=True,
             env_keys={
                 "elevenlabs": ["VOICE_PROVIDER", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID"],
-                "luma_api": ["AI_VIDEO_HERO_PROVIDER", "LUMA_API_KEY", "LUMA_HERO_MODEL", "LUMA_DEFAULT_DURATION_SECONDS", "LUMA_MAX_DURATION_SECONDS", "LUMA_VIDEO_ONLY"],
+                "google_veo": ["VCOS_AI_VIDEO_HERO_PROVIDER", "GEMINI_API_KEY", "VEO_MODEL_ID", "VEO_DEFAULT_DURATION_SECONDS", "VEO_DEFAULT_RESOLUTION", "VEO_DEFAULT_ASPECT_RATIO", "VEO_DEFAULT_OUTPUT_COUNT", "VCOS_VEO_REAL_GENERATION_ENABLED", "VCOS_PA1R_VEO_SMOKE_ENABLED"],
                 "native_ffmpeg_renderer": ["VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED", "VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED"],
                 "pexels_api": ["FREE_VISUAL_FALLBACK_PROVIDER", "PEXELS_API_KEY", "PEXELS_ATTRIBUTION_REQUIRED", "PEXELS_MAX_CLIPS_PER_LONG", "PEXELS_MAX_RUNTIME_PCT_PER_LONG", "PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS"],
                 "google_drive_archive": ["GOOGLE_DRIVE_ARCHIVE_ENABLED", "GOOGLE_DRIVE_ROOT_FOLDER_ID"],
@@ -111,14 +109,14 @@ class ProviderCapabilityMatrix:
                 no_call_in_m2=True,
             ),
             ProviderCapabilityMatrixEntryRead(
-                provider_key="luma_api",
-                provider_name="Luma API",
+                provider_key="google_veo",
+                provider_name="Google Veo API",
                 provider_type="AI_VIDEO_HERO_PROVIDER",
                 capabilities=["AI_HERO_VIDEO"],
-                requires=["API key", "hero model", "duration 4/6/8 seconds", "video only"],
+                requires=["Gemini API key", "approved Veo 3.1 model", "8 seconds", "one output"],
                 future_execution="R3D8 only",
                 no_call_in_m2=True,
-                limits={"allowed_durations_seconds": [4, 6, 8], "max_duration_seconds": 8},
+                limits={"allowed_durations_seconds": [8], "resolutions": ["720p", "1080p", "4k"], "aspect_ratios": ["16:9", "9:16"], "output_count": 1},
             ),
             ProviderCapabilityMatrixEntryRead(
                 provider_key="native_ffmpeg_renderer",
@@ -191,7 +189,7 @@ class ProviderEnvValidator:
         role = self.registry.configured_provider_by_role()
         return [
             self._elevenlabs(role),
-            self._luma(role),
+            self._google_veo(role),
             self._pexels(role),
             self._drive_archive(role),
             self._youtube_readonly(),
@@ -228,43 +226,42 @@ class ProviderEnvValidator:
             },
         )
 
-    def _luma(self, role: dict[str, str | None]) -> ProviderReadinessItemRead:
+    def _google_veo(self, role: dict[str, str | None]) -> ProviderReadinessItemRead:
         selected = role["AI_VIDEO_HERO_PROVIDER"]
-        provider_mismatch = selected != "luma_api"
+        provider_mismatch = selected != "google_veo"
         missing = _missing(
-            ("LUMA_API_KEY", _secret_present(self.settings.luma_api_key)),
-            ("LUMA_HERO_MODEL", _configured(self.settings.luma_hero_model)),
+            ("GEMINI_API_KEY", _secret_present(self.settings.gemini_api_key)),
+            ("VEO_MODEL_ID", _configured(self.settings.veo_model_id)),
         )
-        reason_codes = _missing_codes(missing, "LUMA")
+        reason_codes = _missing_codes(missing, "VEO")
         if provider_mismatch:
-            reason_codes.append("AI_VIDEO_HERO_PROVIDER_NOT_LUMA_API")
-        if self.settings.luma_max_duration_seconds > 8:
-            reason_codes.append("LUMA_MAX_DURATION_EXCEEDS_8")
-        if not self.settings.luma_video_only:
-            reason_codes.append("LUMA_VIDEO_ONLY_REQUIRED")
+            reason_codes.append("AI_VIDEO_HERO_PROVIDER_NOT_GOOGLE_VEO")
         readiness = _readiness_from_missing(
             missing,
             all_missing_state="NOT_CONFIGURED",
-            priority=[("LUMA_API_KEY", "CREDENTIAL_MISSING"), ("LUMA_HERO_MODEL", "NEEDS_MODEL")],
+            priority=[("GEMINI_API_KEY", "CREDENTIAL_MISSING"), ("VEO_MODEL_ID", "NEEDS_MODEL")],
         )
-        if "LUMA_MAX_DURATION_EXCEEDS_8" in reason_codes or "LUMA_VIDEO_ONLY_REQUIRED" in reason_codes:
-            readiness = "BLOCKED_PROVIDER_NOT_CONFIGURED"
         return self._item(
-            provider_key="luma_api",
+            provider_key="google_veo",
             configured_provider=selected,
             selected_ok=not provider_mismatch,
-            credential_present=_secret_present(self.settings.luma_api_key),
+            credential_present=_secret_present(self.settings.gemini_api_key),
             missing_env_keys=missing,
             reason_codes=reason_codes,
             readiness_state=readiness,
-            next_action="Cấu hình LUMA_API_KEY/LUMA_HERO_MODEL; duration chỉ 4/6/8s, max 8s, video-only.",
+            next_action="Cấu hình GEMINI_API_KEY; giữ execution/smoke disabled cho tới PA1R được phê duyệt.",
             safe_config={
-                "api_key_configured": _secret_present(self.settings.luma_api_key),
-                "model_configured": bool(self.settings.luma_hero_model),
-                "allowed_durations_seconds": [4, 6, 8],
-                "default_duration_seconds": self.settings.luma_default_duration_seconds,
-                "max_duration_seconds": self.settings.luma_max_duration_seconds,
-                "video_only": self.settings.luma_video_only,
+                "credential_configured": _secret_present(self.settings.gemini_api_key),
+                "credential_value_redacted": True,
+                "model_configured": bool(self.settings.veo_model_id),
+                "model_catalog_status": "APPROVED_VERSIONED_CATALOG",
+                "allowed_durations_seconds": [8],
+                "default_duration_seconds": self.settings.veo_default_duration_seconds,
+                "default_resolution": self.settings.veo_default_resolution,
+                "default_aspect_ratio": self.settings.veo_default_aspect_ratio,
+                "default_output_count": self.settings.veo_default_output_count,
+                "execution_enabled": self.settings.veo_real_generation_enabled,
+                "smoke_enabled": self.settings.pa1r_veo_smoke_enabled,
             },
         )
 
@@ -484,8 +481,8 @@ class ProviderBoundaryPreflight:
         codes: list[str] = []
         if provider_key == "pexels_api":
             codes.extend(validate_pexels_policy(payload.get("usage_role"), self.settings, usage_metrics))
-        if provider_key == "luma_api" and _int(payload.get("duration_seconds")) > 8:
-            codes.append("LUMA_DURATION_EXCEEDS_MAX")
+        if provider_key == "google_veo" and _int(payload.get("duration_seconds")) != 8:
+            codes.append("VEO_DURATION_NOT_ALLOWED")
         if provider_key == "elevenlabs":
             if not payload.get("voice_id"):
                 codes.append("ELEVENLABS_VOICE_ID_MISSING")
@@ -554,21 +551,21 @@ class ElevenLabsVoiceRequestBuilder(_BaseRequestBuilder):
         return self._result(payload=payload, required_fields=["text", "voice_id", "model_id"])
 
 
-class LumaHeroVideoRequestBuilder(_BaseRequestBuilder):
-    provider_key = "luma_api"
+class GoogleVeoRequestBuilder(_BaseRequestBuilder):
+    provider_key = "google_veo"
     capability: ProviderCapability = "AI_HERO_VIDEO"
 
     def build(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
-        duration = _int(data.get("duration_seconds") or self.settings.luma_default_duration_seconds)
+        duration = _int(data.get("duration_seconds") or self.settings.veo_default_duration_seconds)
         invalid = []
         reason_codes = []
-        if duration not in {4, 6, 8} or duration > 8 or duration > self.settings.luma_max_duration_seconds:
+        if duration != 8:
             invalid.append("duration_seconds")
-            reason_codes.append("LUMA_DURATION_EXCEEDS_MAX" if duration > 8 else "LUMA_DURATION_NOT_ALLOWED")
+            reason_codes.append("VEO_DURATION_NOT_ALLOWED")
         payload = {
             "provider": self.provider_key,
             "prompt": data.get("prompt"),
-            "model": data.get("model") or self.settings.luma_hero_model,
+            "model": data.get("model") or self.settings.veo_model_id,
             "duration_seconds": duration,
             "video_only": True,
             "effective_context_snapshot_id": data.get("effective_context_snapshot_id"),
@@ -624,9 +621,9 @@ class ElevenLabsVoiceAdapter:
         return self.builder.build(data)
 
 
-class LumaHeroVideoAdapter:
+class GoogleVeoHeroVideoAdapter:
     def __init__(self, settings: Settings | None = None):
-        self.builder = LumaHeroVideoRequestBuilder(settings)
+        self.builder = GoogleVeoRequestBuilder(settings)
 
     def prepare(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
         return self.builder.build(data)
@@ -717,7 +714,7 @@ def _missing_codes(missing_env_keys: list[str], provider_prefix: str) -> list[st
 
 def _request_missing_code(provider_key: str, field: str) -> str:
     prefixes = {
-        "luma_api": "LUMA",
+        "google_veo": "VEO",
         "pexels_api": "PEXELS",
         "google_drive_archive": "GOOGLE_DRIVE_ARCHIVE",
         "elevenlabs": "ELEVENLABS",

@@ -12,9 +12,9 @@ items:
     monthly_cap_renders: null
     current_mode: QUALITY_FIRST_250
     enforcement: REVIEW_REQUIRED
-  - key: luma_api_default
+  - key: google_veo_default
     provider_type: AI_VIDEO_HERO_PROVIDER
-    provider_key: luma_api
+    provider_key: google_veo
     monthly_cap_units: null
     monthly_cap_usd: null
     monthly_cap_seconds: null

@@ -11,7 +11,7 @@ def test_readiness_provider_order_contains_only_current_integrations():
         "youtube-owner",
         "google-drive",
         "elevenlabs",
-        "luma_api",
+        "google_veo",
     )
 
 
@@ -19,7 +19,7 @@ def test_readiness_read_does_not_call_providers(db_session):
     result = ProviderReadinessService(db_session, Settings()).readiness()
     assert result.technical_appendix["no_provider_calls_on_get"] is True
     keys = {item.provider_key for item in result.provider_summaries}
-    assert {"elevenlabs", "luma_api"} <= keys
+    assert {"elevenlabs", "google_veo"} <= keys
 
 
 def test_settings_have_no_generic_cloud_renderer_selection():

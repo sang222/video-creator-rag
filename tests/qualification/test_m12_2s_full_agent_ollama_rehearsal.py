@@ -276,7 +276,7 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
         "ProviderReadinessSummaryAgent": {
             "providers": {
                 "elevenlabs": "NEEDS_CREDENTIAL",
-                "luma_api": "NOT_CONFIGURED_OPTIONAL",
+                "google_veo": "NOT_CONFIGURED_OPTIONAL",
             }
         },
         "MediaQCExplanationAgent": {
@@ -350,7 +350,7 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
     assert boundary.no_provider_calls_confirmed is True
     assert boundary.provider_readiness["elevenlabs"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
-    assert boundary.provider_readiness["luma_api"]["required"] is False
+    assert boundary.provider_readiness["google_veo"]["required"] is False
     assert boundary.operator_summary_vi == (
         "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
     )
@@ -483,7 +483,7 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
     assert db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key == "OLLAMA").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert db_session.query(LLMRunSnapshot).filter(LLMRunSnapshot.provider == "ollama").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     forbidden_attempts = db_session.query(ProviderAttempt).filter(
-        ProviderAttempt.provider_key.in_(["ELEVENLABS", "LUMA_API", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"])
+        ProviderAttempt.provider_key.in_(["ELEVENLABS", "GOOGLE_VEO", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"])
     ).all()
     assert forbidden_attempts == []
 
@@ -797,7 +797,7 @@ def test_m12_2s_visual_repair_normalizes_covers_refs_and_candidate_source() -> N
     script = {"sentences": [{"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1} for index in range(1, 4)]}
     visual = {
         "scenes": [
-            {"scene_id": "SCN01", "sentence_range": ["S1"], "intended_visual_source": "LUMA_HERO_CANDIDATE_ONLY"},
+            {"scene_id": "SCN01", "sentence_range": ["S1"], "intended_visual_source": "AI_HERO_CANDIDATE_ONLY"},
             {"scene_id": "SCN02", "sentence_ids_covered": ["S2"], "intended_visual_source": "CARD"},
             {"scene_id": "SCN03", "narration_sentence_ids": ["S3"], "intended_visual_source": "CARD"},
         ]

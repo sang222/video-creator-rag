@@ -12,14 +12,10 @@ from sqlalchemy.orm import Session
 from app.contracts.config_catalog import CatalogDocument
 from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
 from app.core.config import (
-    LUMA_ALLOWED_DURATION_SECONDS,
-    LUMA_DEFAULT_DURATION_SECONDS,
-    LUMA_MAX_DURATION_SECONDS,
+    VEO_APPROVED_MODEL_IDS,
     VEO_ALLOWED_DURATION_SECONDS,
     VEO_DEFAULT_DURATION_SECONDS,
-    VEO_GA_MODEL_ID,
     VEO_MAX_DURATION_SECONDS,
-    VEO_VIDEO_ONLY_MODE,
 )
 from app.core.errors import ConfigVersionConflictError, ValidationFailureError
 from app.core.time import utc_now
@@ -219,6 +215,18 @@ class PexelsPolicyCatalogItem(BaseModel):
     blocked: list[str] = Field(default_factory=list)
     limits: dict[str, Any] = Field(default_factory=dict)
     required_manifest: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GoogleVeoModelPriceCatalogItem(BaseModel):
+    model_id: str
+    approved: bool
+    currency: str
+    transport: str
+    duration_seconds: list[int]
+    aspect_ratios: list[str]
+    resolutions: dict[str, dict[str, str]]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -465,6 +473,7 @@ class ConfigRegistryService:
             "media_provider_budget_policy_catalog": MediaProviderBudgetPolicyCatalogItem,
             "media_provider_routing_policy_catalog": MediaProviderRoutingPolicyCatalogItem,
             "pexels_policy_catalog": PexelsPolicyCatalogItem,
+            "google_veo_model_price_catalog": GoogleVeoModelPriceCatalogItem,
             "provider_capability_catalog": SimpleKeyCatalogItem,
             "media_routing_result_catalog": SimpleKeyCatalogItem,
             "media_budget_state_catalog": SimpleKeyCatalogItem,
@@ -536,48 +545,37 @@ class ConfigRegistryService:
             seen.add(key)
 
     def _validate_media_provider_catalog_item(self, catalog_key: str, parsed: BaseModel) -> None:
+        if catalog_key == "google_veo_model_price_catalog":
+            if getattr(parsed, "model_id", None) not in VEO_APPROVED_MODEL_IDS or not getattr(parsed, "approved", False):
+                raise ValidationFailureError("Veo price catalog contains an unapproved model")
+            if getattr(parsed, "currency", None) != "USD" or getattr(parsed, "transport", None) != "GEMINI_API_NATIVE":
+                raise ValidationFailureError("Veo price catalog currency/transport is invalid")
+            if getattr(parsed, "duration_seconds", None) != [8]:
+                raise ValidationFailureError("Veo price catalog duration must be [8]")
+            if not set(getattr(parsed, "aspect_ratios", [])) <= {"16:9", "9:16"}:
+                raise ValidationFailureError("Veo price catalog aspect ratio is invalid")
+            if not getattr(parsed, "resolutions", None):
+                raise ValidationFailureError("Veo price catalog resolution rows are required")
+            return
         if catalog_key == "media_provider_role_profile_catalog":
             provider_key = getattr(parsed, "provider_key", None)
-            if provider_key == "luma_api":
+            if provider_key == "google_veo":
                 assumption = getattr(parsed, "monthly_budget_assumption", {})
-                if assumption.get("allowed_duration_seconds") != list(LUMA_ALLOWED_DURATION_SECONDS):
-                    raise ValidationFailureError("luma_api allowed durations must be exactly [4, 6, 8]")
-                if assumption.get("default_duration_seconds") != LUMA_DEFAULT_DURATION_SECONDS:
-                    raise ValidationFailureError("luma_api default duration must be 8")
-                if assumption.get("max_duration_seconds") != LUMA_MAX_DURATION_SECONDS:
-                    raise ValidationFailureError("luma_api max duration must be 8")
+                if assumption.get("allowed_duration_seconds") != list(VEO_ALLOWED_DURATION_SECONDS):
+                    raise ValidationFailureError("google_veo allowed duration must be exactly [8]")
+                if assumption.get("default_duration_seconds") != VEO_DEFAULT_DURATION_SECONDS:
+                    raise ValidationFailureError("google_veo default duration must be 8")
+                if assumption.get("max_duration_seconds") != VEO_MAX_DURATION_SECONDS:
+                    raise ValidationFailureError("google_veo max duration must be 8")
+                if assumption.get("model_id") not in VEO_APPROVED_MODEL_IDS:
+                    raise ValidationFailureError("google_veo model must be approved")
                 return
-            if provider_key != "GOOGLE_VERTEX_VEO":
-                return
-            assumption = getattr(parsed, "monthly_budget_assumption", {})
-            if assumption.get("model_id") != VEO_GA_MODEL_ID:
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO model_id must use the GA Veo model id")
-            if "model" in assumption:
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO catalog must use model_id, not model")
-            if assumption.get("video_mode") != VEO_VIDEO_ONLY_MODE:
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO video_mode must be video_only")
-            if assumption.get("allowed_duration_seconds") != list(VEO_ALLOWED_DURATION_SECONDS):
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO allowed durations must be exactly [4, 6, 8]")
-            if assumption.get("default_duration_seconds") != VEO_DEFAULT_DURATION_SECONDS:
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO default duration must be 8")
-            if assumption.get("max_duration_seconds") != VEO_MAX_DURATION_SECONDS:
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO max duration must be 8")
-            if assumption.get("cost_per_second_1080p_video_only") != "0.10":
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO video-only cost must be 0.10")
-            if "cost_per_second_1080p" in assumption:
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO catalog must use cost_per_second_1080p_video_only")
-            if assumption.get("default_8s_attempt_estimate_usd") != "0.80":
-                raise ValidationFailureError("GOOGLE_VERTEX_VEO 8s attempt estimate must be 0.80")
-            return
         if catalog_key == "media_provider_capability_matrix_catalog":
             provider_key = getattr(parsed, "provider_key", None)
             job_type = getattr(parsed, "job_type", None)
-            if provider_key == "luma_api" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
-                if getattr(parsed, "max_duration_seconds", None) != LUMA_MAX_DURATION_SECONDS:
-                    raise ValidationFailureError("luma_api capability max duration must be 8")
-            if provider_key == "GOOGLE_VERTEX_VEO" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
+            if provider_key == "google_veo" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
                 if getattr(parsed, "max_duration_seconds", None) != VEO_MAX_DURATION_SECONDS:
-                    raise ValidationFailureError("GOOGLE_VERTEX_VEO capability max duration must be 8")
+                    raise ValidationFailureError("google_veo capability max duration must be 8")
 
     def _seed_metric_definitions(self, content: dict[str, Any]) -> None:
         from app.db.models import MetricDefinitionVersion

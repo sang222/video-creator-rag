@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.core.config import Settings
 from app.services.m2 import (
     ElevenLabsVoiceRequestBuilder,
-    LumaHeroVideoRequestBuilder,
+    GoogleVeoRequestBuilder,
     PexelsSearchRequestBuilder,
     ProviderCapabilityMatrix,
     ProviderConfigRegistry,
@@ -20,25 +20,25 @@ def test_provider_roles_bind_native_renderer_locally():
 
 def test_m2_readiness_is_validation_only():
     snapshot = ProviderReadinessM2Service(Settings()).snapshot()
-    assert snapshot.no_provider_network_call
-    assert all(not item.will_execute for item in snapshot.providers)
+    assert snapshot.no_network_calls_made
+    assert all(item.no_call_was_made and not item.real_network_probe_enabled for item in snapshot.providers)
 
 
 def test_capability_matrix_has_current_external_providers_and_local_renderer():
     keys = {item.provider_key for item in ProviderCapabilityMatrix(Settings()).entries()}
-    assert {"elevenlabs", "luma_api", "pexels_api", "native_ffmpeg_renderer"} <= keys
+    assert {"elevenlabs", "google_veo", "pexels_api", "native_ffmpeg_renderer"} <= keys
 
 
 def test_current_request_builders_never_execute():
     voice = ElevenLabsVoiceRequestBuilder(Settings()).build({"text": "hello"})
-    hero = LumaHeroVideoRequestBuilder(Settings()).build({"prompt": "abstract workflow", "duration_seconds": 4})
+    hero = GoogleVeoRequestBuilder(Settings()).build({"prompt": "abstract workflow", "duration_seconds": 4})
     stock = PexelsSearchRequestBuilder(Settings()).build({"query": "team office", "usage_role": "short_broll", "orientation": "landscape"})
     assert all(item.will_execute is False and item.no_network_call_made for item in (voice, hero, stock))
 
 
-def test_luma_duration_over_eight_is_rejected():
-    result = LumaHeroVideoRequestBuilder(Settings()).build({"prompt": "abstract workflow", "duration_seconds": 10})
-    assert "LUMA_DURATION_EXCEEDS_MAX" in result.reason_codes
+def test_google_veo_duration_over_eight_is_rejected():
+    result = GoogleVeoRequestBuilder(Settings()).build({"prompt": "abstract workflow", "duration_seconds": 10})
+    assert "VEO_DURATION_NOT_ALLOWED" in result.reason_codes
 
 
 def test_stock_policy_preserves_supporting_only_boundary():

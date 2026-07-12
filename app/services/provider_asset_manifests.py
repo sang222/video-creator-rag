@@ -170,51 +170,72 @@ def build_stock_source_manifest(
     return StockSourceManifest(**payload, manifest_hash=stable_hash(payload))
 
 
-def build_ai_hero_request(asset_request: AssetRequest, *, package_id: str, prompt_text: str) -> AIHeroAssetRequest:
+def build_ai_hero_request(
+    asset_request: AssetRequest,
+    *,
+    package_id: str,
+    project_id: str,
+    channel_id: str,
+    prompt_text: str,
+    provider_resolution_policy_ref: str,
+) -> AIHeroAssetRequest:
     if asset_request.requested_role != "AI_HERO":
         raise ValueError("AI_HERO_REQUEST_ROLE_INVALID")
     reason = asset_request.purpose.upper()
     allowed = {"HOOK", "METAPHOR", "EMOTIONAL_PAYOFF", "VISUAL_SIGNATURE", "NATIVE_MOTION_INSUFFICIENT"}
     if reason not in allowed:
         raise ValueError("AI_HERO_REASON_NOT_ALLOWED")
-    desired = max(4, min(8, int(asset_request.maximum_duration_seconds)))
-    duration = min((4, 6, 8), key=lambda value: (abs(value - desired), value))
-    aspect = {"landscape": "16:9", "portrait": "9:16", "square": "1:1"}[asset_request.required_orientation]
+    if asset_request.required_orientation == "square":
+        raise ValueError("AI_HERO_ASPECT_RATIO_UNSUPPORTED")
+    aspect = {"landscape": "16:9", "portrait": "9:16"}[asset_request.required_orientation]
+    prompt_hash = hashlib.sha256(prompt_text.encode()).hexdigest()
     payload = {
         "request_id": asset_request.request_id,
         "package_id": package_id,
+        "project_id": project_id,
+        "channel_id": channel_id,
         "scene_id": asset_request.scene_id,
         "source_segment_ids": asset_request.source_segment_ids,
         "visual_intent": asset_request.semantic_visual_intent,
         "hero_reason": reason,
         "prompt_text": prompt_text,
+        "prompt_hash": prompt_hash,
         "prompt_safety_status": "PASS",
-        "duration_seconds": duration,
-        "aspect_ratio": aspect,
-        "reference_image_ref": None,
+        "required_duration_seconds": 8,
+        "preferred_resolution": "720p",
+        "required_aspect_ratio": aspect,
         "character_policy_mode": "NO_CHARACTER",
         "projected_cost_class": asset_request.projected_cost_class,
         "human_approval_required": True,
+        "provider_resolution_policy_ref": provider_resolution_policy_ref,
     }
     return AIHeroAssetRequest(**payload, request_hash=stable_hash(payload))
 
 
-def build_planned_ai_generation_manifest(request: AIHeroAssetRequest) -> AIGenerationManifest:
+def build_planned_ai_generation_manifest(
+    request: AIHeroAssetRequest,
+    *,
+    provider_key: str,
+    provider_model_id: str,
+    synthetic_media_disclosure_ref: str,
+) -> AIGenerationManifest:
     payload = {
-        "provider": "LUMA",
+        "provider_key": provider_key,
+        "provider_model_id": provider_model_id,
         "request_ref": request.request_id,
         "request_hash": request.request_hash,
-        "generation_id": None,
-        "provider_status": "PLANNED_NOT_SUBMITTED",
-        "prompt_hash": hashlib.sha256(request.prompt_text.encode()).hexdigest(),
+        "external_operation_id": None,
+        "provider_status": "PLANNED",
+        "prompt_hash": request.prompt_hash,
         "submitted_at": None,
         "completed_at": None,
-        "asset_url_reference": None,
+        "output_url_reference": None,
         "downloaded_path": None,
         "downloaded_sha256": None,
         "cost_snapshot_ref": None,
         "attempt_record_ref": None,
         "media_qc_ref": None,
+        "synthetic_media_disclosure_ref": synthetic_media_disclosure_ref,
         "production_eligible": False,
     }
     return AIGenerationManifest(**payload, manifest_hash=stable_hash(payload))

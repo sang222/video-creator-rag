@@ -87,8 +87,8 @@ items:
     description: Manifest or checksum is missing.
   - code: ELEVENLABS_NOT_CONFIGURED
     description: ElevenLabs is not configured.
-  - code: GOOGLE_VERTEX_VEO_NOT_CONFIGURED
-    description: Google Vertex Veo is not configured.
+  - code: GOOGLE_VEO_NOT_CONFIGURED
+    description: Google Veo is not configured.
   - code: REAL_PROVIDER_BLOCKED
     description: Real provider execution was blocked.
   - code: EXTERNAL_NETWORK_BLOCKED

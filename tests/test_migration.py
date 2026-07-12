@@ -204,7 +204,7 @@ REQUIRED_TABLES = {
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert revision == "0035_cr_remove"
+        assert revision == "0036_hpr1_veo"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:

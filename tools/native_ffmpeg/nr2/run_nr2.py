@@ -56,7 +56,7 @@ def make_plan(key, roles, common):
     for (scene_id, start, end, unit), role in zip(SCENES, roles):
         future = ROLE_SOURCE[role]
         item = {"strategy_key": key, "scene_id": scene_id, "requested_asset_role": role, "planned_future_source": future, "actual_NR2_source": "LOCAL_SYNTHETIC" if role == "NATIVE" else "LOCAL_PLACEHOLDER", "local_asset_ref": f"local://nr2/{key}/{scene_id}", "checksum": stable_hash([key, scene_id, role]), "visual_intent": unit, "limitations": [] if role == "NATIVE" else ["Synthetic color-card proxy; provider quality and real footage continuity not evaluated."], "provider_quality_not_evaluated": role != "NATIVE", "projected_cost_class": "ZERO" if role == "NATIVE" else "LOW" if role == "SUPPORTING" else "HIGH", "production_eligible": False}
-        if role == "HERO": item |= {"provider_intent": "LUMA_FUTURE", "asset_status": "LOCAL_HERO_PLACEHOLDER", "not_provider_generated": True, "not_production_asset": True}
+        if role == "HERO": item |= {"provider_intent": "VEO_FUTURE", "asset_status": "LOCAL_HERO_PLACEHOLDER", "not_provider_generated": True, "not_production_asset": True}
         assert placeholder_truthfulness(item) == "PASS"; asset_map.append(item)
         visual.append({"scene_id": scene_id, "start_ms": start * 1000, "end_ms": end * 1000, "narrative_unit": unit, "role": role})
     body = common | {"strategy_key": key, "visual_treatment": visual, "asset_slot_mapping": asset_map, "animation_preset": "hold_static" if key.endswith("EXPLANATORY") else "kenburns_center_soft", "transition_preset": "fade_soft", "emphasis_targets": ["20 HOURS", "coordination loop"], "projected_provider_intent": [ROLE_SOURCE[r] for r in roles], "production_eligible": False}
@@ -66,7 +66,7 @@ def make_plan(key, roles, common):
 
 def filtergraph(key, roles, srt):
     escaped = str(srt).replace(":", "\\:").replace("'", "\\'")
-    labels = {"NATIVE": "NATIVE EXPLANATORY", "SUPPORTING": "LOCAL STOCK PLACEHOLDER", "HERO": "LOCAL HERO PLACEHOLDER - NOT LUMA"}
+    labels = {"NATIVE": "NATIVE EXPLANATORY", "SUPPORTING": "LOCAL STOCK PLACEHOLDER", "HERO": "LOCAL HERO PLACEHOLDER - NOT GOOGLE_VEO"}
     graph = []
     for i, ((scene_id, start, end, unit), role) in enumerate(zip(SCENES, roles)):
         graph.append(f"color=c={COLORS[role]}:s=1920x1080:r=30:d=12,drawbox=x=120:y=130:w=1680:h=760:color=0x0b1020@0.55:t=fill,drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text='{labels[role]}':fontcolor=0x6ee7ff:fontsize=34:x=160:y=175,drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text='{unit.replace('_', ' ')}':fontcolor=white:fontsize=64:x=160:y=290,drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text='Small Team AI  |  {scene_id}':fontcolor=0xb9d6f2:fontsize=30:x=160:y=410,drawbox=x=160:y=540:w='{280 + i * 150}':h=80:color=0x2563eb@0.9:t=fill,drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text='20 HOURS / WEEK IS A SCENARIO':fontcolor=white:fontsize=30:x=190:y=565[v{i}]")
@@ -110,7 +110,7 @@ def main():
     scorecards = []
     for p in plans:
         key = p["strategy_key"]; assert strategy_distribution_gate(key, STRATEGIES[key]["roles"]) == "PASS"; scorecards.append(render(key, STRATEGIES[key]["roles"], p, audio, srt))
-    summary = {"bakeoff_id": WORK.name, "excerpt": excerpt, "audio": audio_manifest, "plans": [{"strategy_key": p["strategy_key"], "plan_id": p["plan_id"], "plan_hash": p["plan_hash"]} for p in plans], "plan_diff_manifest": diff, "scorecards": scorecards, "same_content_gate": "PASS", "no_provider_proof": {"provider_calls": False, "elevenlabs": False, "luma": False, "pexels": False, "drive": False, "youtube": False, "network_media_calls": False, "final_media_ref": False, "cloud_media_ref": False, "human_upload_task": False, "provider_job_submitted": False, "paid_provider_ledger_executed": False}, "human_review": "PENDING", "selected_strategy": "NONE"}; write_json(WORK / "nr2_run_summary.json", summary)
+    summary = {"bakeoff_id": WORK.name, "excerpt": excerpt, "audio": audio_manifest, "plans": [{"strategy_key": p["strategy_key"], "plan_id": p["plan_id"], "plan_hash": p["plan_hash"]} for p in plans], "plan_diff_manifest": diff, "scorecards": scorecards, "same_content_gate": "PASS", "no_provider_proof": {"provider_calls": False, "elevenlabs": False, "google_veo": False, "pexels": False, "drive": False, "youtube": False, "network_media_calls": False, "final_media_ref": False, "cloud_media_ref": False, "human_upload_task": False, "provider_job_submitted": False, "paid_provider_ledger_executed": False}, "human_review": "PENDING", "selected_strategy": "NONE"}; write_json(WORK / "nr2_run_summary.json", summary)
 
 
 if __name__ == "__main__": main()

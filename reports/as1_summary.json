@@ -11,8 +11,8 @@
   "strategy": "NR2_B_BALANCED",
   "request_counts": {
     "native": 3,
-    "pexels": 1,
-    "luma": 1
+    "supporting_stock": 1,
+    "ai_hero": 1
   },
   "provider_calls_made": false,
   "drive_calls_made": false,

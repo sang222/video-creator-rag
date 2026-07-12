@@ -31,17 +31,17 @@ No migration was needed. AS1 evidence is filesystem-local and read-only; no Chan
 
 Evidence root: `var/tmp/vcos-project-workspaces/as1-small-team-ai-project/`.
 
-The rehearsal used the approved `small-team-ai` Strategy B boundary with three native explanatory requests, one Pexels supporting request and one Luma metaphor request. Pexels response/download and Drive metadata were local fixtures only.
+The rehearsal used the approved `small-team-ai` Strategy B boundary with three native explanatory requests, one supporting-stock request and one provider-neutral AI hero metaphor request. Pexels response/download and Drive metadata were local fixtures only.
 
 | Evidence | Result |
 | --- | --- |
-| Compiled requests | native 3 / Pexels 1 / Luma 1 |
+| Compiled requests | native 3 / supporting stock 1 / AI hero 1 |
 | Pexels transport | `LOCAL_FIXTURE_ONLY` |
 | Pexels provider call | false |
 | Download evidence | file exists + streaming SHA-256 |
-| Luma status | `PLANNED_NOT_SUBMITTED`, generation ID null |
+| AI generation status | `PLANNED`, external operation ID null |
 | Normalization | sanitized argv plan, execution disabled |
-| Required archive roles | complete, 17 |
+| Required archive roles | complete, 21 |
 | Default exclusions | rejected stock + normalized temp excluded |
 | Fixture archive | `VERIFIED` |
 | Drive call | false |
@@ -52,7 +52,7 @@ The archive fixture may reach `VERIFIED` only as local metadata-verifier evidenc
 
 ## Safety and no-execution proof
 
-All new execution flags default off: Pexels, Luma, ElevenLabs and global provider production execution. New AS1 services contain no HTTP/Drive client call. Secrets remain `SecretStr` Settings values and do not enter query strings, manifests, logs or archive paths. Raw tokenized rendition URLs are converted to `volatile://` hash references before durable plans.
+All new execution flags default off: Pexels, Google Veo, ElevenLabs and global provider production execution. New AS1 services contain no HTTP/Drive client call. Secrets remain `SecretStr` Settings values and do not enter query strings, manifests, logs or archive paths. Raw tokenized rendition URLs are converted to `volatile://` hash references before durable plans.
 
 No production render, provider submission, executed paid ledger, final/cloud media reference, human upload task, provider activation, Drive upload or YouTube action occurred.
 

@@ -134,7 +134,7 @@ The rehearsal only wrote OFV0 text/data artifacts and gate records. Before/after
 | ProviderJobSnapshot `SUBMITTED` | 0 | 0 |
 | PaidProviderCallLedger `EXECUTED` | 0 | 0 |
 
-No ElevenLabs, Luma, Pexels, Drive, YouTube, provider activation, media render, upload/publish, FinalMediaRef/CloudMediaRef creation, HumanUploadTask creation, Channel Contract/Profile/EffectiveContext mutation, learning promotion, prompt self-mutation, or dashboard execution control occurred.
+No ElevenLabs, Google Veo, Pexels, Drive, YouTube, provider activation, media render, upload/publish, FinalMediaRef/CloudMediaRef creation, HumanUploadTask creation, Channel Contract/Profile/EffectiveContext mutation, learning promotion, prompt self-mutation, or dashboard execution control occurred.
 
 ## P0/P1/P2/P3
 

@@ -48,4 +48,4 @@ items:
   - code: DASHBOARD_UI_DEFERRED_TO_M11
     description: Dashboard UI remains deferred to M11.
   - code: VEO_PROVIDER_BINDING_DEFERRED_TO_M10_4
-    description: Google Vertex Veo provider binding remains deferred to M10.4.
+    description: Google Veo provider binding remains deferred to M10.4.

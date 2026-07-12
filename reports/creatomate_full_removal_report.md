@@ -97,7 +97,7 @@ The required focused suite was first executed under its requested legacy filenam
 
 ## No-execution proof
 
-No Pexels, ElevenLabs, Luma, Drive or YouTube call occurred. No provider smoke, production render, FinalMediaRef, HumanUploadTask, channel/profile/effective-context/FormatIdentity mutation, learning promotion or runtime prompt mutation occurred. PA1R was not run.
+No Pexels, ElevenLabs, Google Veo, Drive or YouTube call occurred. No provider smoke, production render, FinalMediaRef, HumanUploadTask, channel/profile/effective-context/FormatIdentity mutation, learning promotion or runtime prompt mutation occurred. PA1R was not run.
 
 ## Unresolved blockers
 

@@ -22,7 +22,7 @@ items:
     recommendation: CORE
     is_enabled: true
     is_real_provider: false
-    supports_real_execution: false
+    supports_real_execution: true
     monthly_budget_assumption:
       mode: QUALITY_FIRST_250
       provider_cost_unknown: true
@@ -53,32 +53,35 @@ items:
       mode: QUALITY_FIRST_250
       cost_usd: 0
     notes: Caption planning only; not a real media provider call.
-  - provider_key: luma_api
-    provider_name: Luma API
+  - provider_key: google_veo
+    provider_name: Google Veo API
     provider_type: AI_VIDEO_HERO_PROVIDER
-    role_description: Luma API provider for opening hooks, key metaphors, and short AI hero clips only.
+    role_description: Google Veo API provider for opening hooks, key metaphors, and short AI hero clips only.
     recommendation: CORE_QUALITY_LAYER
     is_enabled: true
     is_real_provider: true
-    supports_real_execution: false
+    supports_real_execution: true
     monthly_budget_assumption:
       mode: QUALITY_FIRST_250
-      provider_key_alias: luma_api
-      provider_name: Luma API
-      video_mode: video_only
-      audio_enabled: false
-      allowed_duration_seconds: [4, 6, 8]
+      transport: GEMINI_API_NATIVE
+      model_id: veo-3.1-fast-generate-preview
+      audio_expected: true
+      provider_audio_policy: DISCARD
+      allowed_duration_seconds: [8]
       default_duration_seconds: 8
       max_duration_seconds: 8
-      backup_provider: null
+      default_resolution: 720p
+      default_aspect_ratio: "16:9"
+      default_output_count: 1
+      price_catalog_ref: config://google_veo_model_price_catalog/2026-07-12
       usage:
-        opening_hook: luma_api
-        key_metaphor: luma_api
+        opening_hook: google_veo
+        key_metaphor: google_veo
         thumbnail_background: human_approved_still_or_template_composition
         shorts_default: reuse_or_crop_long_form_hero
         workflow_data_diagram: native_ffmpeg_renderer
         per_short_ai_hero_default: false
-    notes: Active AI hero binding for DX2/R3D9-P0; no Veo, Runway, generic cinematic fallback, web-app-only provider, or auto-route backup.
+    notes: Sole external AI hero provider. Execution and PA1R smoke are disabled by default; no external provider fallback.
   - provider_key: native_ffmpeg_renderer
     provider_name: NativeFFmpegRenderer
     provider_type: LOCAL_RENDERER_CAPABILITY

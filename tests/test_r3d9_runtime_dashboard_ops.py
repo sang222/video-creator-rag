@@ -462,7 +462,7 @@ def _fixture(db_session, qualification_factory):
         source_artifact_refs_json=[{"package_id": str(package.id)}],
         gate_batch_refs_json=[{"gate_batch_run_id": str(batch.id), "status": "BLOCK"}],
         render_plan_hash="render-plan-hash",
-        provider_plan_json={"provider_stages": [{"provider_key": "luma_api", "provider_stage": "AI_HERO_VIDEO"}]},
+        provider_plan_json={"provider_stages": [{"provider_key": "google_veo", "provider_stage": "AI_HERO_VIDEO"}]},
         created_by="r3d9-test",
     )
     db_session.add(revision)
@@ -475,7 +475,7 @@ def _fixture(db_session, qualification_factory):
         currency="USD",
         estimated_pexels_cost=Decimal("0"),
         provider_estimates_json={},
-        blocker_reason_codes_json=["LUMA_PROVIDER_NOT_CONFIGURED"],
+        blocker_reason_codes_json=["VEO_PROVIDER_NOT_CONFIGURED"],
         content_hash="cost-hash",
     )
     approval = HumanPaidRenderApproval(
@@ -487,7 +487,7 @@ def _fixture(db_session, qualification_factory):
     )
     attempt = PaidAttemptLimitRecord(
         render_revision_id=revision.id,
-        provider_key="luma_api",
+        provider_key="google_veo",
         provider_stage="FINAL_ASSEMBLY_RENDER",
         attempt_count=1,
         max_attempts=1,
@@ -496,7 +496,7 @@ def _fixture(db_session, qualification_factory):
     )
     ledger = PaidProviderCallLedger(
         render_revision_id=revision.id,
-        provider_key="luma_api",
+        provider_key="google_veo",
         provider_stage="FINAL_ASSEMBLY_RENDER",
         call_type="VALIDATION_ONLY",
         call_status="BLOCKED",
@@ -587,7 +587,7 @@ def test_r3d9_runtime_dashboard_read_models_and_safe_boundaries(db_session, qual
     provider = ProviderCostOpsService(db_session).build(fx["package"].id)
     assert provider.will_execute is False
     assert provider.cost_estimates[0]["estimate_status"] == "ESTIMATE_PENDING_PROVIDER_CONFIG"
-    assert "LUMA_PROVIDER_NOT_CONFIGURED" in provider.next_action.blocking_reason_codes
+    assert "VEO_PROVIDER_NOT_CONFIGURED" in provider.next_action.blocking_reason_codes
 
 
 def test_r3d9_api_routes_are_get_only_and_do_not_add_job_controls(db_session, qualification_factory) -> None:

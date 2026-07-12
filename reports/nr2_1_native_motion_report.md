@@ -75,6 +75,6 @@ All six strategy outputs are 84 seconds, same script/audio/SRT/timing hashes as 
 
 A/B: completeness, visibility, fallback audit, overload and narrative alignment PASS. C: completeness/visibility/fallback PASS; `MotionOverloadGate=REVIEW_REQUIRED` and `MotionNarrativeAlignmentGate=REVIEW_REQUIRED` because all scenes move and quantified/mechanism scenes use cinematic pan rather than stable data treatment.
 
-No ElevenLabs, Luma, Pexels, Drive, YouTube, network media, production job, provider ledger, FinalMediaRef, HumanUploadTask, contract/context mutation, learning promotion, 4K or ProRes occurred. No commit/tag.
+No ElevenLabs, Google Veo, Pexels, Drive, YouTube, network media, production job, provider ledger, FinalMediaRef, HumanUploadTask, contract/context mutation, learning promotion, 4K or ProRes occurred. No commit/tag.
 
 Next checkpoint: human reviews showcase, clean outputs and proxies, then explicitly selects A/B/C/HYBRID/REJECT_ALL. First-channel pilot remains blocked while pending.

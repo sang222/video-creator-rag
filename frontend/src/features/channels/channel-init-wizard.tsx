@@ -450,11 +450,11 @@ function AdvancedManualChannelInitForm() {
 
         <Section title="Media/provider policy">
           <ReadOnly label="Voice provider" value="ElevenLabs" />
-          <ReadOnly label="AI hero provider" value="Luma API" />
-          <ReadOnly label="AI hero model ID" value="luma_api_video_only" />
-          <ReadOnly label="AI hero allowed durations" value="4, 6, 8 giây" />
+          <ReadOnly label="AI hero provider" value="Google Veo API" />
+          <ReadOnly label="AI hero model ID" value="veo-3.1-fast-generate-preview" />
+          <ReadOnly label="AI hero allowed durations" value="8 giây" />
           <ReadOnly label="AI hero default duration" value="8 giây" />
-          <ReadOnly label="AI hero audio" value="False" />
+          <ReadOnly label="AI hero provider audio" value="Có thể có; luôn loại bỏ khi chuẩn hóa" />
           <ReadOnly label="AI hero allowed use" value="Hero shot, hard-to-find visual" />
           <ReadOnly label="AI hero forbidden use" value="Data diagram, workflow chart, factual evidence visualization" />
           <ReadOnly label="Renderer" value="NativeFFmpegRenderer" />

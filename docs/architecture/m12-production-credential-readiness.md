@@ -47,7 +47,7 @@ vcos integrations smoke --provider ollama
 vcos integrations smoke --provider youtube-public
 vcos integrations smoke --provider youtube-owner
 vcos integrations smoke --provider google-drive
-vcos integrations smoke --provider google-vertex-veo
+vcos integrations smoke --provider google_veo
 vcos integrations smoke --provider elevenlabs
 ```
 
@@ -59,7 +59,7 @@ Default behavior is `SKIPPED`. Real calls require explicit env flags:
 - YouTube public: `VCOS_YOUTUBE_REAL_PUBLIC_SMOKE=true`.
 - YouTube owner analytics: `VCOS_YOUTUBE_REAL_OWNER_SMOKE=true`.
 - Google Drive upload: `VCOS_DRIVE_REAL_UPLOAD_SMOKE=true`.
-- Google Vertex Veo: `VCOS_VEO_REAL_EXECUTION_ENABLED=true` and `VCOS_VEO_REAL_SMOKE=true`.
+- Google Veo: `VCOS_VEO_REAL_GENERATION_ENABLED=true` plus `VCOS_PA1R_VEO_SMOKE_ENABLED=true` or an approved production scope.
 - ElevenLabs: no real TTS is added in M12.
 
 If a smoke flag is enabled but credential/config is missing, M12 records `BLOCKED`, not fake success.
@@ -88,20 +88,18 @@ VCOS_ELEVENLABS_BUDGET_BASIS=credits_characters
 ELEVENLABS_API_KEY=
 ```
 
-Google Vertex Veo:
+Google Veo:
 
 ```bash
-VCOS_AI_HERO_PROVIDER=google_vertex_veo
-GOOGLE_CLOUD_PROJECT_ID=
-GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service_account.json
-VCOS_VEO_MODEL_ID=veo-3.1-fast-generate-001
-VCOS_VEO_COST_PER_SECOND_1080P=0.10
-VCOS_VEO_MONTHLY_CAP_USD=75
-VCOS_VEO_DEFAULT_DURATION_SECONDS=8
-VCOS_VEO_MAX_DURATION_SECONDS=8
-VCOS_VEO_REAL_EXECUTION_ENABLED=false
-VCOS_VEO_REAL_SMOKE=false
+VCOS_AI_VIDEO_HERO_PROVIDER=google_veo
+GEMINI_API_KEY=
+VEO_MODEL_ID=veo-3.1-fast-generate-preview
+VEO_DEFAULT_DURATION_SECONDS=8
+VEO_DEFAULT_RESOLUTION=720p
+VEO_DEFAULT_ASPECT_RATIO=16:9
+VEO_DEFAULT_OUTPUT_COUNT=1
+VCOS_VEO_REAL_GENERATION_ENABLED=false
+VCOS_PA1R_VEO_SMOKE_ENABLED=false
 ```
 
 

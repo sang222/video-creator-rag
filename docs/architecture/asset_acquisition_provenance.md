@@ -22,7 +22,7 @@ Asset priority is frozen as `NATIVE_VISUAL`, then `SUPPORTING_STOCK`, then `AI_H
 
 `AssetRequestCompiler` blocks an unapproved or contradictory FormatIdentity snapshot, non-`NO_CHARACTER` policy, Strategy B outside its channel, unsupported provider intent, a role not allowed by FormatIdentity, or any AS1 provider-execution flag. Each request retains source segments, semantic visual intent, duration/resolution/crop/person/logo/evidence policy, deterministic fallback order and content hash.
 
-Stock cannot be factual evidence, a testimonial, an endorsement, or a recurring host. AI hero requests require `HOOK`, `METAPHOR`, `EMOTIONAL_PAYOFF`, `VISUAL_SIGNATURE`, or `NATIVE_MOTION_INSUFFICIENT`; allowed Luma durations are 4/6/8 seconds and never exceed 8 seconds.
+Stock cannot be factual evidence, a testimonial, an endorsement, or a recurring host. AI hero requests remain provider-neutral and require `HOOK`, `METAPHOR`, `EMOTIONAL_PAYOFF`, `VISUAL_SIGNATURE`, or `NATIVE_MOTION_INSUFFICIENT`.
 
 ## Provider adapter boundary
 
@@ -30,7 +30,7 @@ Pexels support consists only of a structured request builder, response parser, d
 
 Ranking uses semantic metadata plus composition, resolution, duration, crop safety, logo/text, person, brand, prior use, motion, channel-identity fit and source completeness. It is deterministic and always leaves final selection at a human-review boundary; no CV/vector claim is made.
 
-Luma is represented by `AIHeroAssetRequest` and `AIGenerationManifest`. AS1 status is only `PLANNED_NOT_SUBMITTED`, with null generation ID, submit/completion timestamps, URL, cost, attempt and QC refs. `production_eligible=false` is invariant.
+`AIHeroAssetRequest` and `AIGenerationManifest` contain no provider-specific visual-role semantics. Frozen policy resolves an approved `AI_HERO` request to a provider-specific `GoogleVeoGenerationRequest`. Planned manifests have null operation ID, submit/completion timestamps, output reference, actual cost, attempt and QC refs; `production_eligible=false` is invariant.
 
 ## Local and archive safety
 

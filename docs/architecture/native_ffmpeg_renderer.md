@@ -7,3 +7,5 @@ The renderer is a local capability, not an external or paid provider. It accepts
 Active output profiles are 1080p30 landscape and portrait H.264 VideoToolbox, yuv420p/BT.709, AAC 48 kHz stereo and MP4 fast-start. VideoToolbox is recorded as target/max VBR; strict CBR is not claimed. 4K and ProRes remain inactive.
 
 FormatIdentityContract and EpisodeOriginalityManifest refs/hashes are copied into the immutable plan and compiled evidence. The renderer cannot mutate them.
+
+For Google Veo hero input, `MediaNormalizer` compiles `-an` and records whether provider audio existed and was discarded. MediaQC must prove the normalized hero has no audio stream. ElevenLabs is the narration authority; NativeFFmpeg is the final audio-mix authority.

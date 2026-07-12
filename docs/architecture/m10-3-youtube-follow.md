@@ -88,5 +88,5 @@ The follow read model is service-computed rather than a separate table.
 
 ## Deferred
 
-- M10.4 Google Vertex Veo AI Hero Provider Binding and config externalization audit is complete in current repo state.
+- M10.4 Google Veo AI Hero Provider Binding and config externalization audit is complete in current repo state.
 - M11: dashboard/operator cockpit, Uploaded Video screen, OAuth connect/disconnect UI, approval UX/actions, channel config editing, and learning promotion UX.

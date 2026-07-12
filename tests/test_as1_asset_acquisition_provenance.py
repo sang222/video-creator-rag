@@ -91,9 +91,9 @@ def test_native_visual_is_backbone_and_first_fallback_priority():
     plan, identity, strategy, policy, evidence = _compiler_inputs()
     compiled = AssetRequestCompiler().compile(plan, format_identity=identity, strategy_profile=strategy, provider_policy=policy, evidence=evidence)
     assert compiled.native_request_count == 3
-    assert compiled.pexels_request_count == 1
-    assert compiled.luma_request_count == 1
-    assert all(request.fallback_order[0] == "NATIVE_VISUAL" for request in compiled.requests)
+    assert compiled.supporting_stock_request_count == 1
+    assert compiled.ai_hero_request_count == 1
+    assert all(request.fallback_order[-1] == "NATIVE_VISUAL" for request in compiled.requests)
     assert compiled.provider_execution_allowed is False
 
 
@@ -128,12 +128,19 @@ def test_stock_cannot_be_factual_evidence_or_recurring_host():
         _asset_request(person_policy="RECURRING_HOST")
 
 
-def test_luma_hero_requires_allowed_reason_and_filler_blocks():
+def test_google_veo_hero_requires_allowed_reason_and_filler_blocks():
     with pytest.raises(ValueError, match="AI_HERO_FILLER_FORBIDDEN"):
         _asset_request(requested_role="AI_HERO", purpose="FILLER", projected_cost_class="MEDIUM")
     invalid = _asset_request(requested_role="AI_HERO", purpose="DECORATION", projected_cost_class="MEDIUM")
     with pytest.raises(ValueError, match="AI_HERO_REASON_NOT_ALLOWED"):
-        build_ai_hero_request(invalid, package_id="pkg", prompt_text="abstract no-person metaphor")
+        build_ai_hero_request(
+            invalid,
+            package_id="pkg",
+            project_id="project",
+            channel_id="small-team-ai",
+            prompt_text="abstract no-person metaphor",
+            provider_resolution_policy_ref="policy://fixture",
+        )
 
 
 def test_pexels_query_plan_is_bounded_english_structured_and_secret_free():
@@ -229,17 +236,18 @@ def test_archive_purge_state_machine_blocks_unverified_purge():
 
 def test_rehearsal_covers_archive_exclusions_verified_cleanup_and_idempotency(tmp_path):
     result = AS1LocalFixtureRehearsal().run(workspace_root=tmp_path / "work", fixture_dir=FIXTURES)
-    assert result["request_counts"] == {"native": 3, "pexels": 1, "luma": 1}
+    assert result["request_counts"] == {"native": 3, "supporting_stock": 1, "ai_hero": 1}
     assert result["provider_calls_made"] is False and result["drive_calls_made"] is False
     assert result["transport"] == "LOCAL_FIXTURE_ONLY" and result["production_eligible"] is False
     assert result["archive_state"] == "VERIFIED"
     assert result["cleanup_status"] == "COMPLETED" and result["cleanup_idempotency_status"] == "NOOP_IDEMPOTENT"
     ai_manifest = json.loads((tmp_path / "work/as1-small-team-ai-project/manifests/ai_generation_manifest.json").read_text())
-    assert ai_manifest["generation_id"] is None and ai_manifest["provider_status"] == "PLANNED_NOT_SUBMITTED"
+    assert ai_manifest["external_operation_id"] is None and ai_manifest["provider_status"] == "PLANNED"
     hero_request = json.loads((tmp_path / "work/as1-small-team-ai-project/manifests/ai_hero_asset_request.json").read_text())
-    assert hero_request["duration_seconds"] in {4, 6, 8} and hero_request["duration_seconds"] <= 8
+    assert hero_request["required_duration_seconds"] == 8
     manifest = json.loads((tmp_path / "work/as1-small-team-ai-project/manifests/production_archive_manifest.json").read_text())
-    assert manifest["required_roles_complete"] and len(manifest["files"]) == 17
+    from app.services.production_archive import ROLE_ARCHIVE_PATHS
+    assert manifest["required_roles_complete"] and len(manifest["files"]) == len(ROLE_ARCHIVE_PATHS)
     assert len(manifest["excluded_paths"]) == 2
     assert all("rejected" not in entry["source_path"] and "/normalized/" not in entry["source_path"] for entry in manifest["files"])
 
@@ -260,15 +268,15 @@ def test_one_required_file_mismatch_blocks_all_cleanup(tmp_path):
 
 def test_provider_secret_flags_off_and_no_secret_serialization(monkeypatch):
     monkeypatch.setenv("PEXELS_API_KEY", "pexels-secret-value")
-    monkeypatch.setenv("LUMA_API_KEY", "luma-secret-value")
+    monkeypatch.setenv("GEMINI_API_KEY", "google_veo-secret-value")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "eleven-secret-value")
     settings = Settings()
     assert not settings.pexels_real_execution_enabled
-    assert not settings.luma_real_execution_enabled
+    assert not settings.veo_real_generation_enabled
     assert not settings.elevenlabs_real_execution_enabled
     assert not settings.provider_production_execution_enabled
     dumped = str(settings.model_dump())
-    assert "pexels-secret-value" not in dumped and "luma-secret-value" not in dumped and "eleven-secret-value" not in dumped
+    assert "pexels-secret-value" not in dumped and "google_veo-secret-value" not in dumped and "eleven-secret-value" not in dumped
 
 
 def test_no_provider_or_drive_execution_and_no_forbidden_entities_in_as1_services():

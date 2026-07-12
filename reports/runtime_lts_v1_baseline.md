@@ -64,13 +64,13 @@ npm run test
 ## Provider Stack Canonical Keys
 
 - `elevenlabs`
-- `luma_api`
+- `google_veo`
 - `pexels_api`
 
 ## Stale Provider Keys That Must Remain Inactive/Rejected
 
-- `GOOGLE_VERTEX_VEO`
-- `google-vertex-veo`
+- `GOOGLE_VEO`
+- `google_veo`
 - `pexels_pixabay_free_fallback`
 - `elevenlabs_flash_turbo`
 

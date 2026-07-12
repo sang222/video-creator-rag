@@ -92,9 +92,9 @@ def _contract(**overrides):
         },
         "media_policy": {
             "voice_provider": "ElevenLabs",
-            "ai_hero_provider": "Luma API",
-            "ai_hero_model_id": "luma_api_video_only",
-            "ai_hero_allowed_durations_seconds": [4, 6, 8],
+            "ai_hero_provider": "Google Veo API",
+            "ai_hero_model_id": "veo-3.1-fast-generate-preview",
+            "ai_hero_allowed_durations_seconds": [8],
             "ai_hero_default_duration_seconds": 8,
             "ai_hero_audio": False,
             "ai_hero_allowed_use": ["hero_shot", "hard_to_find_visual"],

@@ -82,9 +82,9 @@ def _complete_channel_contract() -> dict:
         },
         "media_policy": {
             "voice_provider": "ELEVENLABS",
-            "ai_hero_provider": "LUMA_API",
-            "ai_hero_model_id": "luma_api_video_only",
-            "ai_hero_allowed_durations_seconds": [4, 6, 8],
+            "ai_hero_provider": "GOOGLE_VEO",
+            "ai_hero_model_id": "veo-3.1-fast-generate-preview",
+            "ai_hero_allowed_durations_seconds": [8],
             "ai_hero_default_duration_seconds": 8,
             "ai_hero_audio": False,
             "renderer": "NATIVE_FFMPEG_RENDERER",
@@ -571,7 +571,7 @@ def test_visual_planning_repairs_generic_chained_string_properties(db_session) -
       "operator_summary_vi": "Visual plan hop le.",
       "technical_appendix": {
         "candidate_only_provider_options_considered": {
-          "LUMA_HERO_CANDIDATE_ONLY": {
+          "AI_HERO_CANDIDATE_ONLY": {
             "status":"not_selected_in_primary_plan_reason":"Allowed visual sources restrict this plan."
           }
         }
@@ -586,7 +586,7 @@ def test_visual_planning_repairs_generic_chained_string_properties(db_session) -
 
     assert repaired.status == "OK"
     assert repaired.parsed_output["technical_appendix"]["candidate_only_provider_options_considered"][
-        "LUMA_HERO_CANDIDATE_ONLY"
+        "AI_HERO_CANDIDATE_ONLY"
     ]["status_not_selected_in_primary_plan_reason"] == "Allowed visual sources restrict this plan."
     assert repaired.repair_attempts == [
         {"repair_type": "repair_chained_string_properties", "semantic_change_allowed": False}

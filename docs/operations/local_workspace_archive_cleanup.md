@@ -7,7 +7,7 @@ Default root: `var/tmp/vcos-project-workspaces`. Production may later set `VCOS_
 Each project owns:
 
 ```text
-source/{script,audio,pexels,luma}
+source/{script,audio,pexels,ai-hero}
 normalized/{stock,hero,audio}
 render/{scenes,proxy,final}
 manifests

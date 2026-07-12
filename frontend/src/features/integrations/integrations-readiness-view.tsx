@@ -17,7 +17,7 @@ const providerOrder = [
   "youtube-owner",
   "google-drive",
   "elevenlabs",
-  "luma_api"
+  "google_veo"
 ];
 
 export function IntegrationsReadinessView() {
@@ -337,7 +337,7 @@ function roleCopy(summary: ProviderSummary) {
     "youtube-owner": "Analytics chủ sở hữu qua OAuth, độ tin cậy học mạnh",
     "google-drive": "Offload media qua quyền drive.file",
     elevenlabs: "Nhà cung cấp giọng đọc theo gói Creator",
-    luma_api: "AI hero/metaphor, thời lượng 4/6/8 giây, không âm thanh"
+    google_veo: "AI hero chọn lọc, 8 giây; âm thanh provider được loại khi chuẩn hóa"
   };
   return role[summary.provider_key] ?? "Nhà cung cấp đã cấu hình";
 }
@@ -362,8 +362,8 @@ function safeFields(summary: ProviderSummary) {
       { label: "Kết nối", value: yesNo(config.connected) },
       { label: "Thư mục gốc", value: yesNo(config.root_folder_configured) }
     ],
-    luma_api: [
-      { label: "Model", value: String(config.model_id ?? "Luma API") },
+    google_veo: [
+      { label: "Model", value: String(config.model_id ?? "Google Veo API") },
       { label: "Quy tắc thời lượng", value: durationRulesLabel(config.duration_rules) }
     ],
     elevenlabs: [

@@ -23,9 +23,9 @@
   "projected_cost": {
     "projected_only": true,
     "strategies": {
-      "A": {"pexels_assets": 1, "luma_heroes": 0, "hero_seconds": 0, "external_cost_band": "LOW", "projected_retries": "LOW"},
-      "B": {"pexels_assets": 2, "luma_heroes": 1, "hero_seconds": 12, "external_cost_band": "MEDIUM", "projected_retries": "MEDIUM"},
-      "C": {"pexels_assets": 2, "luma_heroes": 3, "hero_seconds": 36, "external_cost_band": "HIGH", "projected_retries": "HIGH"}
+      "A": {"pexels_assets": 1, "ai_hero_clips": 0, "hero_seconds": 0, "external_cost_band": "LOW", "projected_retries": "LOW"},
+      "B": {"pexels_assets": 2, "ai_hero_clips": 1, "hero_seconds": 12, "external_cost_band": "MEDIUM", "projected_retries": "MEDIUM"},
+      "C": {"pexels_assets": 2, "ai_hero_clips": 3, "hero_seconds": 36, "external_cost_band": "HIGH", "projected_retries": "HIGH"}
     }
   },
   "no_provider_execution": true

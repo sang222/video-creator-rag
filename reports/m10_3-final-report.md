@@ -141,7 +141,7 @@ SKIPPED.
 
 ## Deferred M10.4 scope
 
-- Google Vertex Veo provider binding.
+- Google Veo provider binding.
 - Veo/media provider config externalization audit.
 - Real AI hero generation and Vertex service-account handling.
 
@@ -184,4 +184,4 @@ SKIPPED.
 
 ## Next suggested milestone
 
-M10.4 Google Vertex Veo Provider Binding + Config Externalization Audit, or run real YouTube public/owner smoke first if credentials are supplied.
+M10.4 Google Veo Provider Binding + Config Externalization Audit, or run real YouTube public/owner smoke first if credentials are supplied.

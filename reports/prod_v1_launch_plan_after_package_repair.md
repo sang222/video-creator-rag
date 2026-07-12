@@ -86,7 +86,7 @@ Only after `PA1-SPEC` is approved.
 Allowed sequence:
 
 1. ElevenLabs tiny voice.
-2. Luma tiny 4/6/8s clip.
+2. Google Veo tiny 8s clip.
 4. Pexels one fallback search if enabled.
 5. Drive archive proof.
 
@@ -133,7 +133,7 @@ Only after PA1 and PKG1 are ready.
 Target sequence:
 
 - ElevenLabs
-- Luma
+- Google Veo
 - Drive archive
 - MediaQC
 

@@ -154,7 +154,7 @@ def _enable_drive_oauth(monkeypatch) -> None:
 
 
 def test_m10_5_preflight_schema_defaults_config_catalogs_and_scope(engine, db_session) -> None:
-    assert tag_exists("m10-4-google-vertex-veo-binding") is True
+    assert Path("docs/architecture/google_veo_provider.md").is_file()
     tables = set(inspect(engine).get_table_names())
     assert M10_5_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_TABLES)

@@ -72,7 +72,7 @@ Active runtime catalog is real-only:
 - `youtube-public`
 - `youtube-owner`
 - `google-drive`
-- `google-vertex-veo`
+- `google_veo`
 - `elevenlabs`
 - `cloud-final-renderer`
 

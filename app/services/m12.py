@@ -34,7 +34,7 @@ from app.db.models import (
 )
 from app.providers.ollama import OllamaLLMProvider
 from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
-from app.services.m10_2 import LumaHeroVideoConfigService
+from app.services.m10_2 import GoogleVeoConfigService
 from app.services.m10_3 import (
     YouTubeMonitoringConfigService,
     YouTubeOAuthCredentialService,
@@ -58,7 +58,7 @@ PROVIDER_ORDER = (
     "youtube-owner",
     "google-drive",
     "elevenlabs",
-    "luma_api",
+    "google_veo",
 )
 SECRET_KEY_FRAGMENTS = ("secret", "token", "api_key", "apikey", "password", "private", "credential", "authorization")
 RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "ya29.", "ghp_", "xoxb-", "client_secret")
@@ -181,24 +181,25 @@ class EnvConfigAuditService:
                 appendix={"credit_cap": self.integer(settings.elevenlabs_monthly_credit_cap, "credits/chars")},
             ),
             self._budget_card(
-                key="luma_api",
-                provider_name="Luma API",
-                role="AI hero video-only",
-                configured_plan=settings.luma_hero_model,
-                configured_monthly_cap=None,
-                budget_basis="provider_pricing_metadata_deferred",
-                readiness_state=readiness.get("luma_api", "UNKNOWN"),
+                key="google_veo",
+                provider_name="Google Veo API",
+                role="Selective AI hero video",
+                configured_plan=settings.veo_model_id,
+                configured_monthly_cap="$0.80 USD / planned PA1R clip",
+                budget_basis="versioned_price_catalog_2026-07-12",
+                readiness_state=readiness.get("google_veo", "UNKNOWN"),
                 missing_env_keys=_missing(
-                    ("VCOS_AI_HERO_PROVIDER", _normalized(settings.ai_hero_provider) in {None, "luma_api"}),
-                    ("LUMA_HERO_MODEL", self.string_configured(settings.luma_hero_model)),
-                    ("LUMA_ALLOWED_DURATIONS", True),
-                    ("LUMA_MAX_DURATION_SECONDS", settings.luma_max_duration_seconds is not None),
+                    ("VCOS_AI_VIDEO_HERO_PROVIDER", _normalized(settings.ai_video_hero_provider) == "google_veo"),
+                    ("GEMINI_API_KEY", self.secret_configured(settings.gemini_api_key)),
+                    ("VEO_MODEL_ID", self.string_configured(settings.veo_model_id)),
                 ),
                 appendix={
-                    "allowed_durations": [4, 6, 8],
-                    "default_duration_seconds": settings.luma_default_duration_seconds,
-                    "max_duration_seconds": settings.luma_max_duration_seconds,
-                    "luma_max_duration_locked_at_8s": True,
+                    "allowed_durations": [8],
+                    "default_duration_seconds": settings.veo_default_duration_seconds,
+                    "default_resolution": settings.veo_default_resolution,
+                    "default_aspect_ratio": settings.veo_default_aspect_ratio,
+                    "default_output_count": settings.veo_default_output_count,
+                    "actual_cost": None,
                 },
             ),
             self._budget_card(
@@ -573,74 +574,75 @@ class GoogleDriveReadinessCheck(_BaseReadinessCheck):
         return self.session.scalars(select(GoogleDriveMediaCredential).order_by(desc(GoogleDriveMediaCredential.updated_at)).limit(1)).one_or_none()
 
 
-class LumaApiReadinessCheck(_BaseReadinessCheck):
-    provider_key = "luma_api"
-    provider_name = "Luma API"
+class GoogleVeoReadinessCheck(_BaseReadinessCheck):
+    provider_key = "google_veo"
+    provider_name = "Google Veo API"
     provider_type = "AI_VIDEO_HERO_PROVIDER"
 
     def evaluate(self) -> list[ProviderCheckDraft]:
         try:
-            config = LumaHeroVideoConfigService(self.session).resolve()
+            config = GoogleVeoConfigService(self.session).resolve()
             config_error = None
         except Exception as exc:
             config = None
             config_error = str(exc)
-        configured = config is not None and list(config.allowed_duration_seconds) == [Decimal("4"), Decimal("6"), Decimal("8")]
-        provider_selected = _normalized(self.settings.ai_hero_provider) in {None, "luma_api"}
-        audio_ok = config is not None and config.audio_enabled is False
+        configured = config is not None and list(config.allowed_duration_seconds) == [Decimal("8")]
+        provider_selected = _normalized(self.settings.ai_video_hero_provider) == "google_veo"
+        credential_ok = self.env.secret_configured(self.settings.gemini_api_key)
+        audio_ok = config is not None and config.audio_enabled is True
         max_ok = config is not None and config.max_duration_seconds == Decimal("8")
         model_ok = bool(config and config.model_id)
         return [
             self._check(
                 "CONFIG",
-                "PASS" if configured and provider_selected and audio_ok and max_ok and model_ok else "BLOCKED",
-                "Luma API đã cấu hình đúng model/duration guard." if configured and provider_selected and audio_ok and max_ok and model_ok else "Luma API thiếu model hoặc duration guard chưa đúng.",
-                next_action=None if configured and provider_selected and audio_ok and max_ok and model_ok else "Đặt VCOS_AI_HERO_PROVIDER=luma_api, LUMA_HERO_MODEL, duration 4/6/8, max 8.",
-                reason_codes=("LUMA_CONFIG_READY",) if configured and provider_selected and audio_ok and max_ok and model_ok else ("LUMA_CONFIG_MISSING_OR_INVALID",),
+                "PASS" if configured and provider_selected and credential_ok and audio_ok and max_ok and model_ok else "BLOCKED",
+                "Google Veo đã sẵn sàng về catalog/credential nhưng execution vẫn tắt." if configured and provider_selected and credential_ok and audio_ok and max_ok and model_ok else "Google Veo thiếu GEMINI_API_KEY hoặc catalog/model không hợp lệ.",
+                next_action=None if credential_ok else "Cấu hình duy nhất GEMINI_API_KEY; không bật execution/smoke trong HPR1.",
+                reason_codes=("VEO_CONFIG_READY",) if configured and provider_selected and credential_ok and audio_ok and max_ok and model_ok else ("VEO_CONFIG_MISSING_OR_INVALID",),
                 technical_appendix={
                     "config_error": config_error,
                     "model_id": config.model_id if config else None,
                     "allowed_durations": [str(item) for item in config.allowed_duration_seconds] if config else [],
                     "max_duration_seconds": str(config.max_duration_seconds) if config else None,
                     "audio_enabled": config.audio_enabled if config else None,
-                    "missing_env_keys": [] if model_ok else ["LUMA_HERO_MODEL"],
+                    "credential_configured": credential_ok,
+                    "credential_value_redacted": True,
+                    "missing_env_keys": [] if credential_ok else ["GEMINI_API_KEY"],
                 },
             ),
             self._check(
                 "CAPABILITY",
                 "PASS",
-                "Luma API chỉ là AI hero provider; max duration khóa 8s.",
-                reason_codes=("LUMA_VIDEO_ONLY_4_6_8_MAX_8",),
-                technical_appendix={"allowed_durations": [4, 6, 8], "max_duration_seconds": 8, "no_luma_call": True},
+                "Google Veo chỉ là AI hero provider; clip 8 giây, một output, audio sẽ bị loại khi normalize.",
+                reason_codes=("VEO_AI_HERO_8S_OUTPUT_ONE_AUDIO_DISCARD",),
+                technical_appendix={"allowed_durations": [8], "max_duration_seconds": 8, "provider_audio_policy": "DISCARD", "no_ai_video_call": True},
             ),
             self._check(
                 "REAL_SMOKE",
                 "SKIPPED",
-                "Luma generation smoke bị bỏ qua; DX2/R3D9-P0 không gọi Luma.",
-                next_action="Không bật Luma generation trong DX2/R3D9-P0.",
-                reason_codes=("LUMA_SMOKE_SKIPPED_NO_GENERATION",),
-                technical_appendix={"real_execution_enabled": bool(config and config.real_execution_enabled), "no_luma_generation": True},
+                "Google Veo generation smoke bị bỏ qua; DX2/R3D9-P0 không gọi Google Veo.",
+                next_action="Không bật Google Veo generation trong DX2/R3D9-P0.",
+                reason_codes=("VEO_SMOKE_SKIPPED_NO_GENERATION",),
+                technical_appendix={"real_execution_enabled": bool(config and config.real_execution_enabled), "no_ai_video_generation": True},
             ),
         ]
 
     def safe_config(self) -> dict[str, Any]:
         try:
-            config = LumaHeroVideoConfigService(self.session).resolve()
+            config = GoogleVeoConfigService(self.session).resolve()
         except Exception:
             return {"configured": False}
         return {
             "model_id": config.model_id,
-            "duration_rules": "4,6,8; max 8s",
-            "audio_enabled": config.audio_enabled,
+            "duration_rules": "8 seconds exactly",
+            "provider_audio_expected": config.audio_enabled,
+            "provider_audio_policy": "DISCARD",
             "real_execution_enabled": config.real_execution_enabled,
-            "real_smoke": False,
-            "no_luma_generation": True,
+            "real_smoke": config.real_smoke_enabled,
+            "credential_configured": self.env.secret_configured(self.settings.gemini_api_key),
+            "credential_value_redacted": True,
+            "no_ai_video_generation": True,
         }
-
-
-class GoogleVertexVeoReadinessCheck(LumaApiReadinessCheck):
-    provider_key = "google-vertex-veo"
-    provider_name = "Google Vertex Veo (deferred compatibility)"
 
 
 class ElevenLabsReadinessCheck(_BaseReadinessCheck):
@@ -809,7 +811,7 @@ class ProviderReadinessService:
             YouTubeOwnerAnalyticsReadinessCheck(self.session, self.settings, self.redactor),
             GoogleDriveReadinessCheck(self.session, self.settings, self.redactor),
             ElevenLabsReadinessCheck(self.session, self.settings, self.redactor),
-            LumaApiReadinessCheck(self.session, self.settings, self.redactor),
+            GoogleVeoReadinessCheck(self.session, self.settings, self.redactor),
         ]
 
 
@@ -873,7 +875,7 @@ class RealSmokeOrchestratorService:
             "youtube-owner": self._youtube_owner,
             "google-drive": self._google_drive,
             "elevenlabs": self._elevenlabs,
-            "luma_api": self._luma_api,
+            "google_veo": self._google_veo,
         }[provider_key]()
 
     def _ollama(self) -> dict[str, Any]:
@@ -1025,22 +1027,24 @@ class RealSmokeOrchestratorService:
             },
         )
 
-    def _luma_api(self) -> dict[str, Any]:
+    def _google_veo(self) -> dict[str, Any]:
         try:
-            config = LumaHeroVideoConfigService(self.session).resolve()
+            config = GoogleVeoConfigService(self.session).resolve()
         except Exception as exc:
-            return _smoke_result("BLOCKED", "Luma config invalid nên không chạy smoke.", env_flags={}, error_code="LUMA_CONFIG_INVALID", error_message=str(exc))
+            return _smoke_result("BLOCKED", "Google Veo config invalid nên không chạy smoke.", env_flags={}, error_code="VEO_CONFIG_INVALID", error_message=str(exc))
         flags = {
-            "VCOS_LUMA_REAL_GENERATION_ENABLED": config.real_execution_enabled,
-            "LUMA_HERO_MODEL_CONFIGURED": bool(config.model_id),
-            "LUMA_MAX_DURATION_SECONDS": str(config.max_duration_seconds),
+            "VCOS_VEO_REAL_GENERATION_ENABLED": config.real_execution_enabled,
+            "VCOS_PA1R_VEO_SMOKE_ENABLED": config.real_smoke_enabled,
+            "GEMINI_API_KEY_CONFIGURED": self.env.secret_configured(self.settings.gemini_api_key),
+            "GEMINI_API_KEY_VALUE_REDACTED": True,
+            "VEO_MODEL_ID_CONFIGURED": bool(config.model_id),
         }
         return _smoke_result(
             "SKIPPED",
-            "Luma smoke bị bỏ qua; DX2/R3D9-P0 không gọi Luma API.",
+            "Google Veo smoke bị bỏ qua; DX2/R3D9-P0 không gọi Google Veo API.",
             env_flags=flags,
-            reason="LUMA_SMOKE_SKIPPED_NO_GENERATION",
-            technical_appendix={"no_luma_generation": True},
+            reason="VEO_SMOKE_SKIPPED_NO_GENERATION",
+            technical_appendix={"no_ai_video_generation": True},
         )
 
     def _elevenlabs(self) -> dict[str, Any]:
@@ -1085,8 +1089,7 @@ def _provider_key(value: str) -> str:
         "youtube-owner-analytics": "youtube-owner",
         "drive": "google-drive",
         "google-drive-offload": "google-drive",
-        "luma": "luma_api",
-        "luma-api": "luma_api",
+        "google-veo": "google_veo",
     }
     return aliases.get(normalized, normalized)
 

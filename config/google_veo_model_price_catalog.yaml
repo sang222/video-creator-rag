@@ -1,0 +1,34 @@
+catalog_key: google_veo_model_price_catalog
+catalog_version: "2026-07-12"
+schema_version: catalog.v1
+status: active
+items:
+  - model_id: veo-3.1-generate-preview
+    approved: true
+    currency: USD
+    transport: GEMINI_API_NATIVE
+    duration_seconds: [8]
+    aspect_ratios: ["16:9", "9:16"]
+    resolutions:
+      720p: {price_per_second_usd: "0.40"}
+      1080p: {price_per_second_usd: "0.40"}
+      4k: {price_per_second_usd: "0.60"}
+  - model_id: veo-3.1-fast-generate-preview
+    approved: true
+    currency: USD
+    transport: GEMINI_API_NATIVE
+    duration_seconds: [8]
+    aspect_ratios: ["16:9", "9:16"]
+    resolutions:
+      720p: {price_per_second_usd: "0.10"}
+      1080p: {price_per_second_usd: "0.12"}
+      4k: {price_per_second_usd: "0.30"}
+  - model_id: veo-3.1-lite-generate-preview
+    approved: true
+    currency: USD
+    transport: GEMINI_API_NATIVE
+    duration_seconds: [8]
+    aspect_ratios: ["16:9", "9:16"]
+    resolutions:
+      720p: {price_per_second_usd: "0.05"}
+      1080p: {price_per_second_usd: "0.08"}

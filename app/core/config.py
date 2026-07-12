@@ -6,20 +6,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 OLLAMA_LOCAL_BASE_URL = "http://localhost:11434"
-VEO_GA_MODEL_ID = "veo-3.1-fast-generate-001"
+VEO_DEFAULT_MODEL_ID = "veo-3.1-fast-generate-preview"
+VEO_APPROVED_MODEL_IDS = (
+    "veo-3.1-generate-preview",
+    "veo-3.1-fast-generate-preview",
+    "veo-3.1-lite-generate-preview",
+)
 VEO_FORBIDDEN_MODEL_IDS = frozenset(
     {
-        "veo-3.1-fast",
-        "veo-3.1-fast-generate-preview",
+        "veo-3.0-generate-001",
+        "veo-3.0-fast-generate-001",
+        "veo-2.0-generate-001",
     }
 )
-VEO_VIDEO_ONLY_MODE = "video_only"
-VEO_ALLOWED_DURATION_SECONDS = (4, 6, 8)
+VEO_ALLOWED_DURATION_SECONDS = (8,)
 VEO_DEFAULT_DURATION_SECONDS = 8
 VEO_MAX_DURATION_SECONDS = 8
-LUMA_ALLOWED_DURATION_SECONDS = (4, 6, 8)
-LUMA_DEFAULT_DURATION_SECONDS = 8
-LUMA_MAX_DURATION_SECONDS = 8
+VEO_DEFAULT_RESOLUTION = "720p"
+VEO_DEFAULT_ASPECT_RATIO = "16:9"
+VEO_DEFAULT_OUTPUT_COUNT = 1
 
 
 class Settings(BaseSettings):
@@ -294,33 +299,33 @@ class Settings(BaseSettings):
         default=24,
         validation_alias=AliasChoices("VCOS_AUTH_SESSION_TTL_HOURS", "AUTH_SESSION_TTL_HOURS"),
     )
-    ai_hero_provider: str | None = Field(
+    ai_video_hero_provider: str = Field(
+        default="google_veo",
+        validation_alias="VCOS_AI_VIDEO_HERO_PROVIDER",
+    )
+    gemini_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_AI_HERO_PROVIDER", "AI_HERO_PROVIDER"),
+        validation_alias="GEMINI_API_KEY",
     )
-    ai_video_hero_provider: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("AI_VIDEO_HERO_PROVIDER", "VCOS_AI_VIDEO_HERO_PROVIDER"),
+    veo_model_id: str = Field(
+        default=VEO_DEFAULT_MODEL_ID,
+        validation_alias="VEO_MODEL_ID",
     )
-    luma_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("LUMA_API_KEY", "VCOS_LUMA_API_KEY"),
+    veo_default_duration_seconds: int = Field(
+        default=VEO_DEFAULT_DURATION_SECONDS,
+        validation_alias="VEO_DEFAULT_DURATION_SECONDS",
     )
-    luma_hero_model: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("LUMA_HERO_MODEL", "VCOS_LUMA_HERO_MODEL"),
+    veo_default_resolution: str = Field(
+        default=VEO_DEFAULT_RESOLUTION,
+        validation_alias="VEO_DEFAULT_RESOLUTION",
     )
-    luma_default_duration_seconds: int = Field(
-        default=8,
-        validation_alias=AliasChoices("LUMA_DEFAULT_DURATION_SECONDS", "VCOS_LUMA_DEFAULT_DURATION_SECONDS"),
+    veo_default_aspect_ratio: str = Field(
+        default=VEO_DEFAULT_ASPECT_RATIO,
+        validation_alias="VEO_DEFAULT_ASPECT_RATIO",
     )
-    luma_max_duration_seconds: int = Field(
-        default=8,
-        validation_alias=AliasChoices("LUMA_MAX_DURATION_SECONDS", "VCOS_LUMA_MAX_DURATION_SECONDS"),
-    )
-    luma_video_only: bool = Field(
-        default=True,
-        validation_alias=AliasChoices("LUMA_VIDEO_ONLY", "VCOS_LUMA_VIDEO_ONLY"),
+    veo_default_output_count: int = Field(
+        default=VEO_DEFAULT_OUTPUT_COUNT,
+        validation_alias="VEO_DEFAULT_OUTPUT_COUNT",
     )
     provider_real_execution_enabled: bool = Field(
         default=False,
@@ -334,10 +339,6 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="PEXELS_REAL_EXECUTION_ENABLED",
     )
-    luma_real_execution_enabled: bool = Field(
-        default=False,
-        validation_alias="LUMA_REAL_EXECUTION_ENABLED",
-    )
     elevenlabs_real_execution_enabled: bool = Field(
         default=False,
         validation_alias="ELEVENLABS_REAL_EXECUTION_ENABLED",
@@ -346,9 +347,13 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("ELEVENLABS_REAL_GENERATION_ENABLED", "VCOS_ELEVENLABS_REAL_GENERATION_ENABLED"),
     )
-    luma_real_generation_enabled: bool = Field(
+    veo_real_generation_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("LUMA_REAL_GENERATION_ENABLED", "VCOS_LUMA_REAL_GENERATION_ENABLED"),
+        validation_alias="VCOS_VEO_REAL_GENERATION_ENABLED",
+    )
+    pa1r_veo_smoke_enabled: bool = Field(
+        default=False,
+        validation_alias="VCOS_PA1R_VEO_SMOKE_ENABLED",
     )
     pexels_real_search_enabled: bool = Field(
         default=False,
@@ -361,68 +366,6 @@ class Settings(BaseSettings):
     provider_real_readiness_probe_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("PROVIDER_REAL_READINESS_PROBE_ENABLED", "VCOS_PROVIDER_REAL_READINESS_PROBE_ENABLED"),
-    )
-    google_cloud_project_id: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("GOOGLE_CLOUD_PROJECT_ID", "VCOS_GOOGLE_CLOUD_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
-    )
-    google_cloud_location: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("GOOGLE_CLOUD_LOCATION", "VCOS_GOOGLE_CLOUD_LOCATION"),
-    )
-    google_application_credentials: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS", "VCOS_GOOGLE_APPLICATION_CREDENTIALS"),
-    )
-    veo_model_id: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_VEO_MODEL_ID", "VEO_MODEL_ID", "VCOS_VEO_MODEL", "VEO_MODEL"),
-    )
-    veo_mode: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_VEO_MODE", "VEO_MODE"),
-    )
-    veo_resolution: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_VEO_RESOLUTION", "VEO_RESOLUTION"),
-    )
-    veo_audio_enabled: bool | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_VEO_AUDIO_ENABLED", "VEO_AUDIO_ENABLED"),
-    )
-    veo_default_duration_seconds: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_VEO_DEFAULT_DURATION_SECONDS", "VEO_DEFAULT_DURATION_SECONDS"),
-    )
-    veo_max_duration_seconds: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("VCOS_VEO_MAX_DURATION_SECONDS", "VEO_MAX_DURATION_SECONDS"),
-    )
-    veo_cost_per_second_1080p_video_only: Decimal | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "VCOS_VEO_COST_PER_SECOND_1080P_VIDEO_ONLY",
-            "VEO_COST_PER_SECOND_1080P_VIDEO_ONLY",
-            "VCOS_VEO_COST_PER_SECOND_1080P",
-            "VEO_COST_PER_SECOND_1080P",
-        ),
-    )
-    veo_monthly_budget_usd: Decimal | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "VCOS_VEO_MONTHLY_CAP_USD",
-            "VEO_MONTHLY_CAP_USD",
-            "VCOS_VEO_MONTHLY_BUDGET_USD",
-            "VEO_MONTHLY_BUDGET_USD",
-        ),
-    )
-    veo_real_execution_enabled: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("VCOS_VEO_REAL_EXECUTION_ENABLED", "VEO_REAL_EXECUTION_ENABLED"),
-    )
-    veo_real_smoke: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("VCOS_VEO_REAL_SMOKE", "VEO_REAL_SMOKE"),
     )
     budget_mode: str | None = Field(
         default=None,
@@ -473,7 +416,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "elevenlabs_api_key",
-        "luma_api_key",
+        "gemini_api_key",
         "pexels_api_key",
         "pixabay_api_key",
         "youtube_data_api_key",
@@ -489,10 +432,6 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "ai_hero_provider",
-        "google_cloud_project_id",
-        "google_cloud_location",
-        "google_application_credentials",
         "google_drive_oauth_client_secrets_file",
         "google_drive_oauth_client_id",
         "google_drive_oauth_redirect_uri",
@@ -517,10 +456,9 @@ class Settings(BaseSettings):
         "budget_mode",
         "llm_budget_note",
         "ai_video_hero_provider",
-        "luma_hero_model",
         "veo_model_id",
-        "veo_mode",
-        "veo_resolution",
+        "veo_default_resolution",
+        "veo_default_aspect_ratio",
         mode="before",
     )
     @classmethod
@@ -532,13 +470,8 @@ class Settings(BaseSettings):
     @field_validator(
         "elevenlabs_monthly_cap_usd",
         "elevenlabs_monthly_credit_cap",
-        "veo_audio_enabled",
         "veo_default_duration_seconds",
-        "veo_max_duration_seconds",
-        "veo_cost_per_second_1080p_video_only",
-        "veo_monthly_budget_usd",
-        "luma_default_duration_seconds",
-        "luma_max_duration_seconds",
+        "veo_default_output_count",
         "pexels_max_clips_per_long",
         "pexels_max_runtime_pct_per_long",
         "pexels_max_same_asset_reuse_per_30_days",
@@ -557,18 +490,10 @@ class Settings(BaseSettings):
 
     @field_validator("veo_model_id")
     @classmethod
-    def veo_model_id_must_be_ga(cls, value: str | None) -> str | None:
-        if value in VEO_FORBIDDEN_MODEL_IDS:
-            raise ValueError("VCOS_VEO_MODEL_ID must use the GA model id veo-3.1-fast-generate-001")
+    def veo_model_id_must_be_approved(cls, value: str) -> str:
+        if value not in VEO_APPROVED_MODEL_IDS or value in VEO_FORBIDDEN_MODEL_IDS:
+            raise ValueError("VEO_MODEL_ID must be present in the approved Veo 3.1 model catalog")
         return value
-
-    @property
-    def veo_model(self) -> str | None:
-        return self.veo_model_id
-
-    @property
-    def veo_cost_per_second_1080p(self) -> Decimal | None:
-        return self.veo_cost_per_second_1080p_video_only
 
 
 @lru_cache(maxsize=1)

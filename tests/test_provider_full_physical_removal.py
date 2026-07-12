@@ -25,7 +25,7 @@ def test_settings_contain_no_removed_provider_fields():
 
 
 def test_provider_registry_and_aliases_do_not_know_removed_provider():
-    assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "luma_api", "pexels_api")
+    assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "google_veo", "pexels_api")
     assert LOCAL_CAPABILITY_KEYS == ("native_ffmpeg_renderer",)
     assert provider_key_rejection_reasons(REMOVED) == ["UNKNOWN_PROVIDER_KEY"]
 

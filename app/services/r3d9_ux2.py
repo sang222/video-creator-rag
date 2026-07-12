@@ -1749,7 +1749,7 @@ def _no_execution_proof(*, status: str, extra: dict[str, Any] | None = None) -> 
         "no_real_video_or_media_generation": True,
         "no_provider_render_job": True,
         "no_paid_provider_execution": True,
-        "providers_not_called": ["ElevenLabs", "Luma", "Pexels", "Google Drive upload", "YouTube"],
+        "providers_not_called": ["ElevenLabs", "Google Veo", "Pexels", "Google Drive upload", "YouTube"],
         "does_not_mutate": [
             "Channel Contract",
             "ChannelProfileVersion",

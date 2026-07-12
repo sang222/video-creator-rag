@@ -23,7 +23,7 @@ Assumptions:
 
 - This run is a production-style rehearsal, not a publish workflow.
 - The operator wants a safe package for human review before buying or enabling media providers.
-- Google Vertex Veo is optional for hero shots.
+- Google Veo is optional for hero shots.
 
 Open questions:
 

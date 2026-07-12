@@ -2,7 +2,7 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Vertex Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, M11 Operator Dashboard foundation, M11.1 Vietnamese dashboard/auth/localization/publish timing foundation, and M12 production credential readiness/guarded smoke foundation.
+This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, M11 Operator Dashboard foundation, M11.1 Vietnamese dashboard/auth/localization/publish timing foundation, and M12 production credential readiness/guarded smoke foundation.
 
 ## Stack
 
@@ -50,9 +50,9 @@ The dashboard runs at `http://localhost:3000` and calls the API at `http://local
 
 The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. The M10.1 router uses that local endpoint by default. `VCOS_LLM_MODEL_<LANE>_<ROLE>` values are env-driven. Ollama cloud auth is handled by your local/container Ollama sign-in state, not by a VCOS-tracked API key or image override. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
 
-Provider API keys are env-driven. `.env.example` declares `ELEVENLABS_API_KEY`, `LUMA_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. NativeFFmpegRenderer is the local final assembly authority. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
+Provider API keys are env-driven. `.env.example` declares `ELEVENLABS_API_KEY`, `GEMINI_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. NativeFFmpegRenderer is the local final assembly authority. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
 
-Google Vertex Veo config is split by type: `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `VCOS_VEO_REAL_EXECUTION_ENABLED`, and `VCOS_VEO_REAL_SMOKE` are env/secret-store concerns; Veo model, duration, resolution, cost, budget, route, and capability defaults live in config catalogs with env override support. Real Veo execution is disabled by default.
+Google Veo uses the native Gemini API and exactly one credential, `GEMINI_API_KEY`. Model and pricing truth live in the versioned Veo catalog. `VCOS_VEO_REAL_GENERATION_ENABLED=false` and `VCOS_PA1R_VEO_SMOKE_ENABLED=false` keep execution disabled by default.
 
 YouTube follow configuration is env-driven. `.env.example` declares `YOUTUBE_PUBLIC_MONITOR_ENABLED`, `YOUTUBE_DATA_API_KEY`, `YOUTUBE_OWNER_ANALYTICS_ENABLED`, `YOUTUBE_OAUTH_CLIENT_SECRETS_FILE`, `YOUTUBE_OAUTH_CLIENT_ID`, `YOUTUBE_OAUTH_CLIENT_SECRET`, `YOUTUBE_OAUTH_REDIRECT_URI`, and `YOUTUBE_OAUTH_SCOPES`. M10.3 stores API keys and OAuth tokens only through safe references/local ignored dev token files, never as raw DB fields.
 
@@ -73,7 +73,7 @@ vcos integrations smoke --provider ollama
 vcos integrations smoke --provider youtube-public
 vcos integrations smoke --provider youtube-owner
 vcos integrations smoke --provider google-drive
-vcos integrations smoke --provider google-vertex-veo
+vcos integrations smoke --provider google_veo
 vcos integrations smoke --provider elevenlabs
 ```
 
@@ -340,7 +340,7 @@ POST /ai-hero-assets/{asset_id}/generate
 vcos media ai-hero-generate --asset-id <asset-id>
 ```
 
-AI hero/metaphor planning uses Luma API only for approved 4/6/8-second video-only clips. Workflow, data, diagram, card and UI visuals remain native. NativeFFmpegRenderer performs local final assembly.
+AI hero/metaphor planning uses Google Veo API only for approved 8-second 8-second clips. Workflow, data, diagram, card and UI visuals remain native. NativeFFmpegRenderer performs local final assembly.
 
 ## M10.5 API/CLI
 

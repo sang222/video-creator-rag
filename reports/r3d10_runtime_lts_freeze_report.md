@@ -80,13 +80,13 @@ DX2 `ProviderStackDriftGuard=PASS`.
 Canonical active keys:
 
 - `elevenlabs`
-- `luma_api`
+- `google_veo`
 - `pexels_api`
 
 Verifier block nếu thấy active stale key:
 
-- `GOOGLE_VERTEX_VEO`
-- `google-vertex-veo`
+- `GOOGLE_VEO`
+- `google_veo`
 - `pexels_pixabay_free_fallback`
 - `elevenlabs_flash_turbo`
 
