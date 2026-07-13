@@ -355,6 +355,7 @@ class ProductionArchiveManifest(BaseModel):
 
 class DriveArchiveFileReceipt(BaseModel):
     archive_path: str
+    drive_file_id: str | None = None
     local_size: int = Field(ge=0)
     drive_size: int | None = Field(default=None, ge=0)
     local_sha256: str

@@ -81,8 +81,8 @@ from app.services.provider_asset_manifests import build_ai_hero_request, build_s
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FFMPEG = "/opt/homebrew/bin/ffmpeg"
-FFPROBE = "/opt/homebrew/bin/ffprobe"
+FFMPEG = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
+FFPROBE = "/opt/homebrew/opt/ffmpeg-full/bin/ffprobe"
 RUN_ID = os.getenv("VCOS_PA1R_RUN_ID", "pa1r-20260712-guarded-smoke-001")
 PROJECT_ID = RUN_ID
 PACKAGE_ID = f"{RUN_ID}-package"
@@ -416,8 +416,8 @@ def build_render_plan(root: Path, stock: Path, hero: Path, audio: Path) -> Nativ
     scenes = [
         NativeRenderScene(scene_id="native-open", source_segment_ids=["seg-open"], narration_start_ms=0, narration_end_ms=7000, duration_ms=7000, visual_treatment="DIAGRAM", layout_type="GUARDED_WORKFLOW", animation_type="HOLD_STATIC", transition_out="FADE_SOFT", originality_role="EXPLANATION", scene_notes=PA1R_LABEL),
         NativeRenderScene(scene_id="pexels-support", source_segment_ids=["seg-stock"], narration_start_ms=7000, narration_end_ms=13000, duration_ms=6000, visual_treatment="STOCK_VIDEO", layout_type="FULL_BLEED_SUPPORT", asset_requirements=[AssetRequirement(key="stock", kind="LOCAL_FILE")], resolved_asset_refs=[stock_ref], animation_type="HOLD_STATIC", transition_out="FADE_SOFT", originality_role="SUPPORT", provider_intent="PEXELS_SUPPORTING_STOCK"),
-        NativeRenderScene(scene_id="veo-hero", source_segment_ids=["seg-hero"], narration_start_ms=13000, narration_end_ms=19000, duration_ms=6000, visual_treatment="AI_HERO_VIDEO", layout_type="FULL_BLEED_HERO", asset_requirements=[AssetRequirement(key="hero", kind="LOCAL_FILE")], resolved_asset_refs=[hero_ref], animation_type="HOLD_STATIC", transition_out="FADE_SOFT", originality_role="VISUAL_SIGNATURE", provider_intent="GOOGLE_VEO_AI_HERO"),
-        NativeRenderScene(scene_id="native-close", source_segment_ids=["seg-close"], narration_start_ms=19000, narration_end_ms=25000, duration_ms=6000, visual_treatment="NATIVE_SLIDE", layout_type="REVIEW_ONLY_CLOSE", animation_type="HOLD_STATIC", originality_role="EXPLANATION", scene_notes=PA1R_LABEL),
+        NativeRenderScene(scene_id="veo-hero", source_segment_ids=["seg-hero"], narration_start_ms=13000, narration_end_ms=21000, duration_ms=8000, visual_treatment="AI_HERO_VIDEO", layout_type="FULL_BLEED_HERO", asset_requirements=[AssetRequirement(key="hero", kind="LOCAL_FILE")], resolved_asset_refs=[hero_ref], animation_type="HOLD_STATIC", transition_out="FADE_SOFT", originality_role="VISUAL_SIGNATURE", provider_intent="GOOGLE_VEO_AI_HERO"),
+        NativeRenderScene(scene_id="native-close", source_segment_ids=["seg-close"], narration_start_ms=21000, narration_end_ms=25000, duration_ms=4000, visual_treatment="NATIVE_SLIDE", layout_type="REVIEW_ONLY_CLOSE", animation_type="HOLD_STATIC", originality_role="EXPLANATION", scene_notes=PA1R_LABEL),
     ]
     payload = dict(
         plan_id=f"{RUN_ID}-native-render-plan",
@@ -473,7 +473,7 @@ def build_ffmpeg_command(root: Path, compiled, stock: Path, hero: Path, audio: P
     graph = (
         f"[0:v]drawbox=x=120:y=120:w=1680:h=840:color=0x152238@1:t=fill,drawtext=fontfile={font}:text='GUARDED MEDIA WORKFLOW':fontcolor=white:fontsize=76:x=(w-text_w)/2:y=350,drawtext=fontfile={font}:text='LOCAL GATES  PROVIDERS  VERIFIED ARCHIVE':fontcolor=0x67e8f9:fontsize=38:x=(w-text_w)/2:y=500,format=yuv420p[open];"
         "[1:v]trim=duration=6,setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p[stock];"
-        "[2:v]trim=duration=6,setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p[hero];"
+        "[2:v]trim=duration=8,setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p[hero];"
         f"[3:v]drawbox=x=160:y=180:w=1600:h=720:color=0x172033@1:t=fill,drawtext=fontfile={font}:text='TECHNICAL REVIEW ONLY':fontcolor=white:fontsize=72:x=(w-text_w)/2:y=380,drawtext=fontfile={font}:text='NOT PUBLISHABLE  NOT PRODUCTION READY':fontcolor=0xfbbf24:fontsize=38:x=(w-text_w)/2:y=520,format=yuv420p[close];"
         "[open][stock][hero][close]concat=n=4:v=1:a=0[base];"
         f"[base]subtitles=filename='{captions}':force_style='FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=3,Alignment=2,MarginV=55',drawbox=x=0:y=0:w=iw:h=64:color=black@0.72:t=fill,drawtext=fontfile={font}:text='{PA1R_LABEL}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=16[v];"
@@ -484,7 +484,7 @@ def build_ffmpeg_command(root: Path, compiled, stock: Path, hero: Path, audio: P
         FFMPEG, "-hide_banner", "-nostdin", "-y",
         "-f", "lavfi", "-i", "color=c=0x0b1020:s=1920x1080:r=30:d=7",
         "-i", str(stock), "-i", str(hero),
-        "-f", "lavfi", "-i", "color=c=0x0b1020:s=1920x1080:r=30:d=6",
+        "-f", "lavfi", "-i", "color=c=0x0b1020:s=1920x1080:r=30:d=4",
         "-i", str(audio), "-filter_complex_script", str(filtergraph),
         "-map", "[v]", "-map", "[a]", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-maxrate", "10M",
         "-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",

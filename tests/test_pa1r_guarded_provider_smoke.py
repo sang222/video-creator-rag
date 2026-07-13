@@ -384,3 +384,29 @@ def test_drive_quota_probe_is_read_only_and_secret_free():
     assert result["quota_available"] is True and result["readiness_probe_only"] is True
     assert transport.calls[0]["method"] == "GET"
     assert "secret" not in json.dumps(result)
+
+
+def test_resume_runner_has_zero_new_pexels_or_elevenlabs_boundaries():
+    source = (ROOT / "tools/pa1r/run_pa1r_resume.py").read_text()
+    assert "PexelsPA1RClient" not in source
+    assert "ElevenLabsPA1RClient" not in source
+    assert ".search_select_once(" not in source
+    assert ".generate_once(" not in source
+    assert '"new_pexels_calls": 0' in source
+    assert '"new_elevenlabs_calls": 0' in source
+
+
+def test_resume_runner_binds_one_new_veo_attempt_and_fresh_approval():
+    source = (ROOT / "tools/pa1r/run_pa1r_resume.py").read_text()
+    assert 'EXPECTED_RUN_ID = "pa1r-20260713-guarded-smoke-005"' in source
+    assert 'SOURCE_RUN_ID = "pa1r-20260713-guarded-smoke-004"' in source
+    assert 'APPROVAL_REF = "operator-approval-pa1r-20260713-guarded-smoke-005"' in source
+    assert source.count('boundary.run("google_veo"') == 1
+    assert "person_generation_sent" in source and "generate_audio_parameter_sent" in source
+
+
+def test_pa1r_resume_timeline_uses_full_eight_second_hero():
+    source = (ROOT / "tools/pa1r/run_pa1r.py").read_text()
+    assert 'narration_start_ms=13000, narration_end_ms=21000, duration_ms=8000' in source
+    assert 'narration_start_ms=21000, narration_end_ms=25000, duration_ms=4000' in source
+    assert '"[2:v]trim=duration=8' in source

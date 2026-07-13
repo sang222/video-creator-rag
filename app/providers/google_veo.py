@@ -77,7 +77,10 @@ class GoogleVeoAdapter:
             "resolution": self.settings.veo_default_resolution,
             "aspect_ratio": generic_request.required_aspect_ratio,
             "output_count": self.settings.veo_default_output_count,
-            "negative_prompt": "people, faces, dialogue, logos, text overlays",
+            "negative_prompt": (
+                "people, person, face, human figure, presenter, speaker, human likeness, "
+                "text, letters, logo, watermark, interface screenshot, fake UI, testimonial"
+            ),
             "reference_image_refs": [],
             "first_frame_ref": None,
             "last_frame_ref": None,
@@ -329,9 +332,8 @@ class GoogleVeoAdapter:
         return stable_hash(receipt.request_hash)
 
     def _submit_with_official_sdk(self, request: GoogleVeoGenerationRequest) -> str:
-        from google.genai import types  # type: ignore[import-not-found]
-
         client = self._official_client()
+        config = self._build_sdk_config(request)
         # Gemini Developer API Veo 3.1 audio is always on. The SDK's
         # generate_audio field is an Enterprise Agent Platform-only control,
         # so setting it (even to True) makes the SDK reject the request before
@@ -339,21 +341,40 @@ class GoogleVeoAdapter:
         operation = client.models.generate_videos(
             model=request.model_id,
             prompt=request.prompt,
-            config=types.GenerateVideosConfig(
-                aspect_ratio=request.aspect_ratio,
-                duration_seconds=request.duration_seconds,
-                negative_prompt=request.negative_prompt,
-                number_of_videos=request.output_count,
-                # Veo 3.1 text-to-video accepts allow_all only. NO_CHARACTER is
-                # enforced by the approved prompt/negative prompt and output
-                # review boundary, not by this transport compatibility field.
-                person_generation="allow_all",
-                resolution=request.resolution,
-            ),
+            config=config,
         )
         operation_id = str(operation.name)
         self._sdk_operations_by_id[operation_id] = operation
         return operation_id
+
+    @staticmethod
+    def _build_sdk_config(request: GoogleVeoGenerationRequest):
+        from google.genai import types  # type: ignore[import-not-found]
+
+        return types.GenerateVideosConfig(
+            aspect_ratio=request.aspect_ratio,
+            duration_seconds=request.duration_seconds,
+            negative_prompt=request.negative_prompt,
+            number_of_videos=request.output_count,
+            # Veo 3.1 text-to-video accepts allow_all only. NO_CHARACTER is
+            # enforced by the approved prompt/negative prompt and output
+            # review boundary, not by this transport compatibility field.
+            person_generation="allow_all",
+            resolution=request.resolution,
+        )
+
+    def transport_config_evidence(self, request: GoogleVeoGenerationRequest) -> dict[str, Any]:
+        """Return the exact safe transport assertions used by real submit."""
+        config = self._build_sdk_config(request)
+        return {
+            "transport": self.transport,
+            "generate_audio_parameter_sent": config.generate_audio is not None,
+            "generate_audio_value": config.generate_audio,
+            "person_generation_sent": config.person_generation,
+            "domain_character_policy": request.character_policy_mode,
+            "provider_audio_usage_policy": request.provider_audio_usage_policy,
+            "automatic_retry": False,
+        }
 
     def _poll_with_official_sdk(self, provider_operation_id: str) -> dict[str, Any]:
         from google.genai import types  # type: ignore[import-not-found]

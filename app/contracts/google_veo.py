@@ -211,6 +211,7 @@ class GoogleVeoProvenanceManifest(BaseModel):
 
 class ProviderAudioNormalizationReceipt(BaseModel):
     provider_audio_present: bool
+    provider_audio_stream_count: int = Field(default=0, ge=0)
     provider_audio_stream_metadata: dict
     provider_audio_usage_policy: Literal["DISCARD"] = "DISCARD"
     provider_audio_discarded: bool

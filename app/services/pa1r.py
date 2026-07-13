@@ -600,6 +600,7 @@ class DrivePA1RArchive:
             receipts.append(
                 DriveArchiveFileReceipt(
                     archive_path=entry.expected_archive_path,
+                    drive_file_id=remote.drive_file_id,
                     local_size=entry.size_bytes,
                     drive_size=remote.size_bytes,
                     local_sha256=entry.sha256,

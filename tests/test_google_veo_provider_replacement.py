@@ -203,7 +203,15 @@ def test_gemini_developer_api_omits_enterprise_only_generate_audio_parameter(mon
     assert request(adapter).generate_audio_expected is True
     assert request(adapter).provider_audio_usage_policy == "DISCARD"
     assert request(adapter).character_policy_mode == "NO_CHARACTER"
-    assert "people" in request(adapter).negative_prompt
+    assert all(
+        token in request(adapter).negative_prompt
+        for token in ("people", "person", "face", "human figure", "presenter", "speaker", "human likeness")
+    )
+    transport = adapter.transport_config_evidence(request(adapter))
+    assert transport["generate_audio_parameter_sent"] is False
+    assert transport["generate_audio_value"] is None
+    assert transport["person_generation_sent"] == "allow_all"
+    assert transport["domain_character_policy"] == "NO_CHARACTER"
 
 
 def test_duplicate_submit_and_polling_do_not_consume_paid_attempt():

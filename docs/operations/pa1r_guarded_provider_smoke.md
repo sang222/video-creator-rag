@@ -58,3 +58,46 @@ Preflight, Pexels search/download và ElevenLabs narration PASS. Veo consume đ�
 Adapter đã bỏ field này khỏi Gemini Developer API config và thêm fake-client regression; provider audio vẫn được coi là expected/always-on và phải probe rồi remove bằng `-an` khi có output. Repair chỉ được test offline. Không reuse run `-003`; lần real-verify kế tiếp cần run ID, ledger, idempotency keys và explicit approval mới.
 
 Run `pa1r-20260713-guarded-smoke-004` real-verified việc bỏ `generate_audio`, nhưng Gemini API tiếp tục reject `personGeneration=dont_allow` bằng HTTP 400 vì Veo 3.1 text-to-video chỉ hỗ trợ `allow_all`. Run dừng không retry. Adapter đã chuyển sang giá trị transport hợp lệ `allow_all` trong khi giữ `NO_CHARACTER` ở prompt/negative-prompt/output-review boundary; patch này chưa được real-verified.
+
+## Resume run 2026-07-13 (`pa1r-20260713-guarded-smoke-005`)
+
+Run `-005` dùng mode `RESUME_FROM_VERIFIED_UPSTREAM_ARTIFACTS`. Runner riêng `tools/pa1r/run_pa1r_resume.py` validate checksum/provenance và copy Pexels/ElevenLabs từ run `-004`; nó không import hoặc gọi Pexels/ElevenLabs clients. Ledger mới chỉ plan một Veo generation và một Drive archive.
+
+Preflight:
+
+```bash
+VCOS_PA1R_RUN_ID=pa1r-20260713-guarded-smoke-005 \
+PYTHONPATH=. .venv/bin/python tools/pa1r/run_pa1r_resume.py preflight
+```
+
+One-shot execute:
+
+```bash
+VCOS_PA1R_RUN_ID=pa1r-20260713-guarded-smoke-005 \
+VCOS_DISABLE_MEDIA_PROVIDER_CALLS=false \
+VCOS_PROVIDER_REAL_EXECUTION_ENABLED=true \
+VCOS_VEO_REAL_GENERATION_ENABLED=true \
+VCOS_PA1R_VEO_SMOKE_ENABLED=true \
+GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED=true \
+VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED=true \
+PYTHONPATH=. .venv/bin/python tools/pa1r/run_pa1r_resume.py execute
+```
+
+Transport evidence phải lấy từ config thực mà adapter submit: `generate_audio=None`, `person_generation=allow_all`; domain request vẫn `NO_CHARACTER`. Nếu operation còn processing, chỉ dùng `resume-poll`; không chạy `execute` lần hai.
+
+Run này real-verified compatibility repair: đúng một submit được accepted, operation `models/veo-3.1-fast-generate-preview/operations/e7494wjnxdap` SUCCEEDED, một output được download. Provider output có một AAC stream; normalization `-an` loại bỏ stream và final narration chỉ lấy từ ElevenLabs.
+
+Local render đầu tiên phát hiện `/opt/homebrew/bin/ffmpeg` thiếu `drawtext`. Đây là local binary-selection issue sau provider success, không phải Veo failure. Repair chuyển PA1R sang `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`; mode `resume-downstream` xác thực operation/download receipt và checksum trước khi render lại, không poll/download/submit Veo.
+
+```bash
+# Chỉ dùng khi Veo output của cùng run đã SUCCEEDED và download receipt/checksum hợp lệ.
+<same one-shot flags> PYTHONPATH=. .venv/bin/python \
+  tools/pa1r/run_pa1r_resume.py resume-downstream
+
+VCOS_PA1R_RUN_ID=pa1r-20260713-guarded-smoke-005 \
+PYTHONPATH=. .venv/bin/python tools/pa1r/run_pa1r_resume.py duplicate-check
+```
+
+Kết quả kỹ thuật: NativeFFmpeg/MediaQC PASS; Drive path `smoke_tests/2026-07-13/pa1r/pa1r-20260713-guarded-smoke-005` VERIFIED 37/37 files; cleanup partial giữ final/proxy/contact sheet; duplicate-check zero new calls.
+
+Operator đã xem MP4 và explicit approve lúc `2026-07-13T23:21:15+07:00`: `PA1R_HUMAN_REVIEW=PASS`, `PA1R_FINAL=PASS`, `PROCEED_TO_CH1_FLEX=true`. Trạng thái này chỉ mở gate sang task CH1-FLEX riêng; không cấp quyền YouTube write/publish.

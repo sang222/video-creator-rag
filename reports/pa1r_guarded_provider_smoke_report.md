@@ -1,121 +1,111 @@
-# PA1R — Guarded Real Provider Smoke Report
+# PA1R — Guarded Provider Smoke Report
 
 Ngày: 2026-07-13
-Latest run: `pa1r-20260713-guarded-smoke-004`
-Kết quả: `FAIL` tại Google Veo submit; downstream dừng fail-closed.
 
-## Preflight
+Run: `pa1r-20260713-guarded-smoke-005`
 
-Entry conditions PASS trước media execution:
+Mode: `RESUME_FROM_VERIFIED_UPSTREAM_ARTIFACTS`
+Kết quả cuối: technical PASS và operator human review `PASS`; `PROCEED_TO_CH1_FLEX=true`.
 
-- AS1/HPR1, Runtime LTS và ProviderStackDriftGuard PASS;
-- Creatomate/Luma runtime absent;
-- Alembic head `0036_hpr1_veo`;
-- FFmpeg/ffprobe, workspace/disk/path guards PASS;
-- required entry regressions `121/121` PASS;
-- `compileall` và `git diff --check` PASS.
+## Preflight và reused upstream
 
-Sau compatibility repair, final required regressions `122/122` PASS; Alembic head, compileall và diff-check tiếp tục PASS.
+AS1/HPR1, Runtime LTS, ProviderStackDriftGuard, Creatomate/Luma absence, Alembic current/head `0036_hpr1_veo`, FFmpeg/ffprobe, workspace/disk/path đều PASS.
 
 Credential booleans only:
 
 ```text
-PEXELS_API_KEY_CONFIGURED=true
-ELEVENLABS_API_KEY_CONFIGURED=true
 GEMINI_API_KEY_CONFIGURED=true
 DRIVE_OAUTH_CONNECTED=true
 DRIVE_ARCHIVE_ROOT_CONFIGURED=true
 SECRET_VALUES_EXPOSED=false
 ```
 
-Readiness PASS: ElevenLabs còn 130.797 characters; Veo model `veo-3.1-fast-generate-preview` accessible với action `predictLongRunning`; Pexels credential ready; Drive còn 13.495.437.550 bytes. Estimate tổng `0.867091 USD` dưới hard cap `3.00 USD`.
-
-Approval được bind riêng vào run:
+Run `-004` không bị sửa. Hai input được copy vào workspace mới sau checksum và provenance validation:
 
 ```text
-approval_ref=operator-chat-pa1r-approval://pa1r-20260713-guarded-smoke-004
-max_pexels_search=1
-max_pexels_download=1
-max_elevenlabs_generation=1
-max_veo_generation=1
-automatic_retry=false
-production_eligible=false
-not_publishable=true
+Pexels sha256=dfe525c7c23666fc52827aea9d35e7bc1caaa8106818105057e9d1b72e443088
+Pexels new search/download calls=0/0
+ElevenLabs sha256=8fa1dce1d7b94bdd6a2385abff63bd7305068886275fc530050e80d9d9005ab5
+ElevenLabs new generation calls=0
+source_run_id=pa1r-20260713-guarded-smoke-004
+reuse_validation=CHECKSUM_AND_PROVENANCE
 ```
 
-Paid-attempt, provider-boundary, monthly-budget, idempotency, global/provider kill-switch và fresh planned-ledger gates đều PASS; tất cả attempt bằng 0 trước execute.
+Approval `operator-approval-pa1r-20260713-guarded-smoke-005`, fresh Veo idempotency key và planned ledger tồn tại trước submit. Veo estimate `0.80 USD`, hard cap `1.00 USD`; provider không trả actual billed amount.
 
-## Pexels
+## Google Veo real verification
 
-Một search flow `/v1/videos/search` và một MP4 download PASS:
-
-- asset/file ID `32150707` / `13707650`;
-- creator `Usman AbdulrasheedGambo`;
-- source `https://www.pexels.com/video/professional-video-editing-setup-overview-32150707/`;
-- MP4 1920x1080, 9 giây, 5.596.770 bytes;
-- HTTP 200, `video/mp4`, redirect count `0`;
-- SHA-256 `dfe525c7c23666fc52827aea9d35e7bc1caaa8106818105057e9d1b72e443088`;
-- media request headers chỉ gồm `Accept`, `User-Agent`;
-- `.part` được probe/fsync/atomic rename; raw media URL không persist.
-
-## ElevenLabs
-
-Đúng một narration PASS:
-
-- voice `Adam - Dominant, Firm`, ID `pNInz6obpgDQGcFmaJgB`;
-- model `eleven_multilingual_v2`;
-- 369 input characters; text hash `4320f9f22ece14f59ad0d87561a0382ad0b9ddebd583ed2547ac6ff69761a3ac`;
-- duration `24.102313s`, dưới giới hạn 25s;
-- 386.656 bytes; SHA-256 `8fa1dce1d7b94bdd6a2385abff63bd7305068886275fc530050e80d9d9005ab5`;
-- structural audio QC PASS; understandability/pronunciation human review PENDING;
-- provider response không cung cấp actual USD amount.
-
-## Google Veo blocker
-
-Đúng một submit attempt đã tới Gemini API và trả terminal HTTP 400 trước operation ID:
+Đúng một submit tới `veo-3.1-fast-generate-preview`; operation `models/veo-3.1-fast-generate-preview/operations/e7494wjnxdap` hoàn tất sau 6 bounded polls.
 
 ```text
-reason_code=VEO_PERSON_GENERATION_VALUE_UNSUPPORTED
-http_status=400
-provider_status=INVALID_ARGUMENT
-message=dont_allow for personGeneration is currently not supported
-generation_submit_attempt_count=1
-provider_operation_id=null
-output_count=0
+transport=GEMINI_API_NATIVE
+generate_audio_parameter_sent=false
+person_generation_sent=allow_all
+domain_character_policy=NO_CHARACTER
+prompt/negative-prompt safeguards=PASS
+generation_submit_count=1
 automatic_retry=false
-actual_cost_usd=null
-actual_cost_reason=INVALID_ARGUMENT_BEFORE_OPERATION_ID; provider billing evidence unavailable
+output_count=1
+output_size_bytes=6398633
+output_sha256=c437f6179ce4016037e123c749c452455fa1272b86775cdf0aa129ae470d342a
 ```
 
-Root cause: Veo 3.1 text-to-video chỉ hỗ trợ `personGeneration=allow_all`; `dont_allow` là lựa chọn của Veo 2. Đây là giới hạn được ghi trong [Google Veo 3.1 Gemini API documentation](https://ai.google.dev/gemini-api/docs/video).
+Provider output có một AAC stereo 48 kHz stream. Evidence ghi đúng `provider_audio_present=true`, `provider_audio_stream_count=1`, policy `DISCARD`; normalization `-an` tạo `normalized_veo_audio_stream_count=0`.
 
-Targeted offline repair đổi transport field thành `allow_all`. Domain request vẫn `character_policy_mode=NO_CHARACTER`, prompt và negative prompt vẫn cấm people/faces/presenter; output bắt buộc qua review/QC, nên transport compatibility không mở quyền tạo presenter. Fake-client regression xác nhận `generate_audio=None`, `person_generation=allow_all`, audio policy `DISCARD` và domain `NO_CHARACTER`. Focused tests `50/50` PASS, không provider call. Patch chưa được real-verified.
+## Normalization, render và QC
 
-## Downstream, idempotency và no-publish
+Pexels, Veo và ElevenLabs đều có MediaNormalizationManifest. Timeline: `0–7 / 7–13 / 13–21 / 21–25`.
 
-Không có Veo output nên normalization, provider-audio inspection/removal, NativeFFmpeg render, MediaQC và Drive archive không chạy. Không tạo final MP4/contact sheet/Drive receipt; cleanup stage BLOCKED, purge count `0`. Pexels và ElevenLabs outputs được giữ để audit; không có `.part` file.
+Render đầu tiên dừng local vì `/opt/homebrew/bin/ffmpeg` thiếu `drawtext`. Root cause được giữ tại `local_render_failure_evidence.json`; targeted repair chọn canonical `ffmpeg-full`. `resume-downstream` chỉ dùng Veo output đã verified, không poll/download/submit provider lần hai.
 
-Duplicate-check tạo zero new calls:
+NativeFFmpeg render PASS:
 
 ```text
-second_pexels_search=0
-second_pexels_download=0
-second_elevenlabs_generation=0
+final=/Users/sangss/Desktop/video-creator-rag/var/tmp/vcos-project-workspaces/pa1r-20260713-guarded-smoke-005/render/final/pa1r-provider-smoke.mp4
+size_bytes=14083544
+sha256=3d53771db9753423e1f0eb7ab7d9c66154ccb1ad606d0d5d608ae571db813d62
+duration_seconds=25.0
+```
+
+MediaQC PASS: complete decode, MP4/H.264/AAC, 1920x1080, 30 fps, yuv420p, BT.709, AAC 48 kHz stereo, Fast Start atom order, duration/A-V structural sync, narration completeness, compiled captions/label, Pexels/Veo scene refs và provider-audio removal đều PASS. Readability, pronunciation, unintended-freeze và visual-policy judgment vẫn thuộc human review.
+
+## Drive, cleanup, duplicate và no-publish
+
+Drive archive:
+
+```text
+path=smoke_tests/2026-07-13/pa1r/pa1r-20260713-guarded-smoke-005
+folder_id=1NwH5-lwkESp3-ZLDscmusxm4wjK5b5lr
+files=37
+local_bytes=40677315
+remote_bytes=40677315
+all_file_ids_present=true
+all_size_sha256_verified=true
+archive_state=VERIFIED
+```
+
+Cleanup: `LOCAL_CLEANUP_PARTIAL_REVIEW_OUTPUT_RETAINED`, reclaimed `19050558` bytes; final MP4, proxy, contact sheet, manifests/QC retained; `.part` count `0`; run `-004` untouched.
+
+Duplicate-check:
+
+```text
+new_pexels_search=0
+new_pexels_download=0
+new_elevenlabs_generation=0
 second_veo_generation_submit=0
 second_drive_archive=0
 ```
 
-DB invariants không đổi. FinalMediaRef, HumanUploadTask, UploadedVideo, ProviderJobSnapshot và LearningToMemoryPromotionRun đều `0`; YouTube call count `0`; frozen context không mutation. Mọi artifact `production_eligible=false`, `not_publishable=true`.
+YouTube calls, FinalMediaRef, HumanUploadTask, UploadedVideo và learning promotion đều `0`; frozen DB invariants unchanged. Persistent execution/production flags false, upload/publish kill switch enabled, `.env` unchanged.
 
-Persistent flags sau run: provider/Pexels/ElevenLabs/Veo/Drive/local-render flags false; production flags false; media calls và upload/publish disabled.
-
-## P0/P1/P2/P3
+## P0/P1/P2/P3 và next action
 
 - P0: none.
-- P1 resolved offline, not real-verified: Veo 3.1 text-to-video transport phải dùng `personGeneration=allow_all`.
-- P2: Veo output/audio, render, MediaQC và Drive chưa được đánh giá do fail-closed.
+- P1: none open.
+- P2 resolved: PA1R render binary thiếu `drawtext`; chuyển sang canonical `ffmpeg-full`, downstream resume không provider call.
+- P2 human-review items: operator reviewed and accepted.
 - P3: none.
 
-## Exact next action và CH1-FLEX
+Operator approval được ghi nhận lúc `2026-07-13T23:21:15+07:00`: `PA1R_HUMAN_REVIEW=PASS`, `PA1R_FINAL=PASS`, `PROCEED_TO_CH1_FLEX=true`.
 
-Không retry hoặc mutate `pa1r-20260713-guarded-smoke-004`. Real verification kế tiếp cần run ID mới (đề xuất `pa1r-20260713-guarded-smoke-005`), fresh approval/idempotency/planned ledger. `PROCEED_TO_CH1_FLEX=false` cho tới khi technical smoke hoàn tất và operator xem final MP4.
+Exact next action: CH1-FLEX có thể bắt đầu bằng một task riêng khi operator yêu cầu. Approval này không cấp quyền YouTube write/publish.
