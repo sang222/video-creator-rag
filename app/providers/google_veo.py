@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -33,6 +35,7 @@ class GoogleVeoAdapter:
         self.settings = settings or get_settings()
         self.fixture_client = fixture_client
         self._operations_by_fingerprint: dict[str, GoogleVeoOperationReceipt] = {}
+        self._sdk_operations_by_id: dict[str, Any] = {}
 
     def validate_configuration(self) -> dict[str, Any]:
         configured = self.settings.gemini_api_key is not None and bool(self.settings.gemini_api_key.get_secret_value().strip())
@@ -135,6 +138,7 @@ class GoogleVeoAdapter:
         *,
         max_polls: int = 3,
         fixture_only: bool = False,
+        poll_interval_seconds: float = 0,
     ) -> GoogleVeoOperationReceipt:
         if not receipt.provider_operation_id:
             return receipt
@@ -151,6 +155,8 @@ class GoogleVeoAdapter:
             latest = self.parse_operation(latest, payload)
             if latest.normalized_status in {"SUCCEEDED", "FAILED", "MODERATED", "CANCELLED", "OUTPUT_MISSING"}:
                 break
+            if poll_interval_seconds > 0:
+                time.sleep(poll_interval_seconds)
         return latest
 
     def parse_operation(self, receipt: GoogleVeoOperationReceipt, payload: dict[str, Any]) -> GoogleVeoOperationReceipt:
@@ -161,6 +167,7 @@ class GoogleVeoAdapter:
             "FAILED": "FAILED",
             "MODERATED": "MODERATED",
             "CANCELLED": "CANCELLED",
+            "OUTPUT_MISSING": "OUTPUT_MISSING",
         }.get(raw, "PROCESSING")
         output_ref = None
         raw_output = payload.get("output_url")
@@ -174,6 +181,8 @@ class GoogleVeoAdapter:
             last_polled_at=now,
             completed_at=now if normalized in {"SUCCEEDED", "FAILED", "MODERATED", "CANCELLED", "OUTPUT_MISSING"} else None,
             output_reference=output_ref,
+            provider_error_code=str(payload.get("error_code")) if payload.get("error_code") else None,
+            provider_error_message_redacted=("Provider operation failed; inspect provider console." if payload.get("error_code") else None),
         )
         values["state_hash"] = stable_hash({key: value for key, value in values.items() if key != "state_hash"})
         parsed = GoogleVeoOperationReceipt(**values)
@@ -211,6 +220,52 @@ class GoogleVeoAdapter:
             "downloaded_path": str(destination),
             "size_bytes": destination.stat().st_size,
             "sha256": digest,
+        }
+
+    def download_real_output(
+        self,
+        receipt: GoogleVeoOperationReceipt,
+        *,
+        destination_path: Path,
+    ) -> dict[str, Any]:
+        """Download one completed Veo output without creating another generation."""
+        if receipt.normalized_status != "SUCCEEDED" or not receipt.provider_operation_id:
+            raise RuntimeError("VEO_OUTPUT_NOT_READY")
+        if not (self.settings.veo_real_generation_enabled and self.settings.pa1r_veo_smoke_enabled):
+            raise PermissionError("VEO_REAL_DOWNLOAD_EXECUTION_DISABLED")
+        operation = self._sdk_operations_by_id.get(receipt.provider_operation_id)
+        client = self._official_client()
+        if operation is None:
+            from google.genai import types  # type: ignore[import-not-found]
+
+            operation = types.GenerateVideosOperation(name=receipt.provider_operation_id)
+        operation = client.operations.get(operation)
+        self._sdk_operations_by_id[receipt.provider_operation_id] = operation
+        generated = list(getattr(operation.response or operation.result, "generated_videos", None) or [])
+        if not generated or not getattr(generated[0], "video", None):
+            raise RuntimeError("VEO_OUTPUT_MISSING")
+        content = client.files.download(file=generated[0].video)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        part = destination_path.with_name(destination_path.name + ".part")
+        digest = hashlib.sha256()
+        try:
+            with part.open("xb") as stream:
+                for offset in range(0, len(content), 1024 * 1024):
+                    chunk = content[offset : offset + 1024 * 1024]
+                    stream.write(chunk)
+                    digest.update(chunk)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(part, destination_path)
+        finally:
+            part.unlink(missing_ok=True)
+        return {
+            "transport": self.transport,
+            "provider_call_made": True,
+            "downloaded_path": str(destination_path),
+            "size_bytes": destination_path.stat().st_size,
+            "sha256": digest.hexdigest(),
+            "raw_url_persisted": False,
         }
 
     @staticmethod
@@ -274,36 +329,62 @@ class GoogleVeoAdapter:
         return stable_hash(receipt.request_hash)
 
     def _submit_with_official_sdk(self, request: GoogleVeoGenerationRequest) -> str:
-        from google import genai  # type: ignore[import-not-found]
         from google.genai import types  # type: ignore[import-not-found]
 
-        client = genai.Client(api_key=self.settings.gemini_api_key.get_secret_value())
+        client = self._official_client()
+        # Gemini Developer API Veo 3.1 audio is always on. The SDK's
+        # generate_audio field is an Enterprise Agent Platform-only control,
+        # so setting it (even to True) makes the SDK reject the request before
+        # an operation is created.
         operation = client.models.generate_videos(
             model=request.model_id,
             prompt=request.prompt,
             config=types.GenerateVideosConfig(
                 aspect_ratio=request.aspect_ratio,
                 duration_seconds=request.duration_seconds,
-                generate_audio=request.generate_audio_expected,
                 negative_prompt=request.negative_prompt,
                 number_of_videos=request.output_count,
+                # Veo 3.1 text-to-video accepts allow_all only. NO_CHARACTER is
+                # enforced by the approved prompt/negative prompt and output
+                # review boundary, not by this transport compatibility field.
+                person_generation="allow_all",
                 resolution=request.resolution,
             ),
         )
-        return str(operation.name)
+        operation_id = str(operation.name)
+        self._sdk_operations_by_id[operation_id] = operation
+        return operation_id
 
     def _poll_with_official_sdk(self, provider_operation_id: str) -> dict[str, Any]:
-        from google import genai  # type: ignore[import-not-found]
+        from google.genai import types  # type: ignore[import-not-found]
 
-        client = genai.Client(api_key=self.settings.gemini_api_key.get_secret_value())
-        operation = client.operations.get(provider_operation_id)
+        client = self._official_client()
+        operation = self._sdk_operations_by_id.get(provider_operation_id) or types.GenerateVideosOperation(name=provider_operation_id)
+        operation = client.operations.get(operation)
+        self._sdk_operations_by_id[provider_operation_id] = operation
         if not operation.done:
             return {"status": "PROCESSING"}
-        generated = list(getattr(operation.response, "generated_videos", None) or [])
+        if operation.error:
+            return {"status": "FAILED", "error_code": str(operation.error.get("code") or "VEO_PROVIDER_ERROR")}
+        generated = list(getattr(operation.response or operation.result, "generated_videos", None) or [])
         if not generated:
             return {"status": "OUTPUT_MISSING"}
         video = generated[0].video
         return {"status": "SUCCEEDED", "output_url": str(getattr(video, "uri", ""))}
+
+    def _official_client(self):
+        from google import genai  # type: ignore[import-not-found]
+        from google.genai import types  # type: ignore[import-not-found]
+
+        if self.settings.gemini_api_key is None:
+            raise RuntimeError("GEMINI_API_KEY_MISSING")
+        return genai.Client(
+            api_key=self.settings.gemini_api_key.get_secret_value(),
+            http_options=types.HttpOptions(
+                timeout=120_000,
+                retry_options=types.HttpRetryOptions(attempts=1),
+            ),
+        )
 
 
 class GoogleVeoUnavailableRouter:

@@ -186,7 +186,10 @@ class PexelsDownloadPlan(BaseModel):
     source_page_url: str
     creator_name: str
     creator_url: str
-    selected_download_url_reference: str
+    volatile_download_reference: str
+    download_url_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_media_host: str
+    query_present: bool
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     duration: float = Field(gt=0)
@@ -198,9 +201,12 @@ class PexelsDownloadPlan(BaseModel):
 
     @model_validator(mode="after")
     def raw_url_not_durable(self):
-        ref = self.selected_download_url_reference.lower()
-        if ref.startswith(("http://", "https://")) or "?" in ref:
+        ref = self.volatile_download_reference.lower()
+        if not ref.startswith("volatile://pexels-download/") or "?" in ref:
             raise ValueError("RAW_DOWNLOAD_URL_REFERENCE_FORBIDDEN")
+        host = self.expected_media_host.lower()
+        if "://" in host or "/" in host or "?" in host or not host:
+            raise ValueError("PEXELS_EXPECTED_MEDIA_HOST_INVALID")
         return self
 
 
@@ -288,6 +294,8 @@ class AssetDownloadReceipt(BaseModel):
     local_path: str | None = None
     size_bytes: int | None = None
     sha256: str | None = None
+    http_evidence: dict[str, Any] | None = None
+    media_probe: dict[str, Any] | None = None
     completed_at: datetime | None = None
     receipt_hash: str
     model_config = ConfigDict(extra="forbid")
@@ -351,6 +359,9 @@ class DriveArchiveFileReceipt(BaseModel):
     drive_size: int | None = Field(default=None, ge=0)
     local_sha256: str
     drive_sha256: str | None = None
+    local_md5: str | None = None
+    drive_md5: str | None = None
+    verification_method: str = "SHA256_OR_DETERMINISTIC_ALTERNATIVE"
     verified: bool = False
     model_config = ConfigDict(extra="forbid")
 

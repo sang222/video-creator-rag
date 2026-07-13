@@ -181,7 +181,9 @@ def test_rendition_selector_chooses_compatible_mp4_and_redacts_download_url():
     rendition = PexelsRenditionSelector().select(candidate, _asset_request())
     assert rendition["id"] == 5001 and rendition["file_type"] == "video/mp4"
     plan = PexelsDownloadPlanBuilder().build(candidate, rendition, _asset_request())
-    assert plan.selected_download_url_reference.startswith("volatile://")
+    assert plan.volatile_download_reference.startswith("volatile://")
+    assert plan.download_url_hash and plan.expected_media_host
+    assert plan.query_present is True
     assert "token=" not in plan.model_dump_json()
 
 

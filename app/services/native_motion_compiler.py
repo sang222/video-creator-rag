@@ -36,11 +36,15 @@ class NativeMotionCompiler:
         self.ffmpeg_capability_digest = ffmpeg_capability_digest
         self.validator = NativeRenderPlanValidator()
 
-    def compile(self, plan: NativeRenderPlan) -> CompiledNativeRenderManifest:
+    def compile(self, plan: NativeRenderPlan, *, allow_resolved_provider_assets: bool = False) -> CompiledNativeRenderManifest:
         plan_hash = canonical_plan_hash(plan)
         if plan.content_hash and plan.content_hash != plan_hash:
             raise ValueError("PLAN_CONTENT_HASH_STALE")
-        gates = self.validator.validate(plan, execution=True)
+        gates = self.validator.validate(
+            plan,
+            execution=True,
+            allow_resolved_provider_assets=allow_resolved_provider_assets,
+        )
         reason_codes = [code for gate in gates if gate.verdict == "BLOCK" for code in gate.reason_codes]
         compiled_scenes, transitions, inputs = [], [], []
         for scene in plan.scenes:

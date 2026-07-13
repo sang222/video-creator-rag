@@ -75,7 +75,7 @@ class NativeFFmpegRenderer:
     def execute(self, manifest: CompiledNativeRenderManifest, command: FFmpegCommandManifest, *, purpose: str) -> tuple[NativeRenderExecutionReceipt, object]:
         if manifest.production_eligible and not self.production_enabled:
             raise PermissionError("PRODUCTION_RENDER_DISABLED")
-        if purpose != "NR1_LOCAL_SYNTHETIC_SMOKE" or manifest.production_eligible or not self.smoke_enabled:
+        if purpose not in {"NR1_LOCAL_SYNTHETIC_SMOKE", "PA1R_NON_PRODUCTION_SMOKE"} or manifest.production_eligible or not self.smoke_enabled:
             raise PermissionError("LOCAL_SMOKE_BOUNDARY_REJECTED")
         if command.compiled_manifest_hash != manifest.manifest_hash:
             raise ValueError("MANIFEST_HASH_MISMATCH")

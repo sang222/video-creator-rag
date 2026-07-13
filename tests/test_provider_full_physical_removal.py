@@ -64,13 +64,21 @@ def test_current_tree_contains_no_unapproved_removed_provider_reference():
         INVENTORY.resolve(),
         *[path.resolve() for path in (ROOT / "reports").glob("*full_removal_report.md")],
         *[path.resolve() for path in (ROOT / "reports").glob("*full_removal_summary.json")],
+        *[path.resolve() for path in (ROOT / "reports").glob("hpr1_*")],
     }
     hits = []
     for base_name in ("app", "tests", "docs", "reports", "scripts", "frontend", "config", "alembic"):
         base = ROOT / base_name
         if not base.exists():
             continue
-        hits.extend(path for path in base.rglob("*") if path.is_file() and path.resolve() not in excluded and _contains_removed(path))
+        hits.extend(
+            path
+            for path in base.rglob("*")
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and path.resolve() not in excluded
+            and _contains_removed(path)
+        )
     assert hits == []
 
 

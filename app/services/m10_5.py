@@ -621,7 +621,7 @@ class GoogleDriveMediaStorageProvider:
         )
 
     def get_file_metadata(self, *, access_token: str, drive_file_id: str) -> GoogleDriveUploadResult:
-        query = urllib.parse.urlencode({"fields": "id,name,size,mimeType,webViewLink,parents"})
+        query = urllib.parse.urlencode({"fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"})
         request = urlrequest.Request(
             f"{GOOGLE_DRIVE_FILES_URL}/{urllib.parse.quote(drive_file_id)}?{query}",
             method="GET",
@@ -681,7 +681,7 @@ class GoogleDriveMediaStorageProvider:
                 b"",
             ]
         )
-        query = urllib.parse.urlencode({"uploadType": "multipart", "fields": "id,name,size,mimeType,webViewLink,parents"})
+        query = urllib.parse.urlencode({"uploadType": "multipart", "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"})
         request = urlrequest.Request(
             f"{GOOGLE_DRIVE_UPLOAD_URL}?{query}",
             method="POST",
@@ -695,7 +695,7 @@ class GoogleDriveMediaStorageProvider:
     def _resumable_upload(self, *, access_token: str, local_path: Path, folder_id: str, mime_type: str | None) -> GoogleDriveUploadResult:
         media_type = mime_type or "application/octet-stream"
         metadata = json.dumps({"name": local_path.name, "parents": [folder_id]}).encode("utf-8")
-        query = urllib.parse.urlencode({"uploadType": "resumable", "fields": "id,name,size,mimeType,webViewLink,parents"})
+        query = urllib.parse.urlencode({"uploadType": "resumable", "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"})
         init = urlrequest.Request(
             f"{GOOGLE_DRIVE_UPLOAD_URL}?{query}",
             method="POST",
@@ -1308,7 +1308,10 @@ def _drive_result_from_payload(payload: dict[str, Any], *, upload_mode: str | No
         size_bytes=size_bytes,
         checksum_sha256=payload.get("sha256Checksum"),
         upload_mode=upload_mode,
-        technical_appendix={"upload_mode": upload_mode} if upload_mode else {},
+        technical_appendix={
+            **({"upload_mode": upload_mode} if upload_mode else {}),
+            "md5_checksum": payload.get("md5Checksum"),
+        },
     )
 
 

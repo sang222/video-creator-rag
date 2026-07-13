@@ -20,7 +20,14 @@ def canonical_plan_hash(plan: NativeRenderPlan) -> str:
 class NativeRenderPlanValidator:
     """Pure deterministic gates. No DB mutation, provider call, or narrative inference."""
 
-    def validate(self, plan: NativeRenderPlan, *, workspace_root: Path | None = None, execution: bool = False) -> list[GateResult]:
+    def validate(
+        self,
+        plan: NativeRenderPlan,
+        *,
+        workspace_root: Path | None = None,
+        execution: bool = False,
+        allow_resolved_provider_assets: bool = False,
+    ) -> list[GateResult]:
         results: list[GateResult] = []
         required = [plan.channel_profile_version_id, plan.effective_context_snapshot_id, plan.effective_context_hash, plan.script_hash, plan.srt_hash, plan.visual_plan_hash]
         results.append(self._gate("NativeRenderPlanCompletenessGate", all(required) and bool(plan.scenes), "PLAN_INCOMPLETE"))
@@ -40,7 +47,7 @@ class NativeRenderPlanValidator:
         for scene in plan.scenes:
             resolved = {item.key for item in scene.resolved_asset_refs}
             unresolved.extend(f"{scene.scene_id}:{req.key}" for req in scene.asset_requirements if req.required and req.key not in resolved)
-            if execution and scene.visual_treatment in {"STOCK_VIDEO", "AI_HERO_VIDEO"}:
+            if execution and not allow_resolved_provider_assets and scene.visual_treatment in {"STOCK_VIDEO", "AI_HERO_VIDEO"}:
                 unresolved.append(f"{scene.scene_id}:PROVIDER_INTENT_NOT_LOCAL")
         results.append(self._gate("AssetResolutionGate", not unresolved, "ASSET_UNRESOLVED", unresolved))
         results.append(self._gate("OutputProfileGate", bool(plan.output_profiles) and all(p in ACTIVE_OUTPUT_PROFILES for p in plan.output_profiles), "OUTPUT_PROFILE_UNSUPPORTED"))

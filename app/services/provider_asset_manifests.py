@@ -82,7 +82,19 @@ class PexelsRenditionSelector:
         for item in candidate.video_files:
             mime = str(item.get("file_type") or item.get("mime_type") or "").lower()
             width, height = int(item.get("width") or 0), int(item.get("height") or 0)
-            if mime != "video/mp4" or width < min_width or height < min_height:
+            raw_link = str(item.get("link") or "")
+            file_id = str(item.get("id") or "")
+            parsed_link = urlsplit(raw_link)
+            if (
+                mime != "video/mp4"
+                or not file_id
+                or not raw_link
+                or parsed_link.scheme.lower() != "https"
+                or not parsed_link.hostname
+                or parsed_link.path.lower().endswith(".m3u8")
+                or width < min_width
+                or height < min_height
+            ):
                 continue
             landscape = width >= height
             if request.required_orientation == "landscape" and not landscape:
@@ -101,14 +113,21 @@ class PexelsDownloadPlanBuilder:
         raw_link = str(rendition.get("link") or "")
         if not raw_link:
             raise ValueError("PEXELS_DOWNLOAD_LINK_MISSING")
-        safe_ref = f"volatile://pexels-download/{hashlib.sha256(raw_link.encode()).hexdigest()[:24]}"
+        parsed = urlsplit(raw_link)
+        if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.path.lower().endswith(".m3u8"):
+            raise ValueError("PEXELS_DOWNLOAD_LINK_INVALID")
+        download_url_hash = hashlib.sha256(raw_link.encode()).hexdigest()
+        safe_ref = f"volatile://pexels-download/{download_url_hash[:24]}"
         payload = {
             "provider_asset_id": candidate.provider_asset_id,
             "provider_file_id": str(rendition.get("id")),
             "source_page_url": candidate.source_page_url,
             "creator_name": candidate.creator_name,
             "creator_url": candidate.creator_url,
-            "selected_download_url_reference": safe_ref,
+            "volatile_download_reference": safe_ref,
+            "download_url_hash": download_url_hash,
+            "expected_media_host": parsed.hostname,
+            "query_present": bool(parsed.query),
             "width": int(rendition["width"]),
             "height": int(rendition["height"]),
             "duration": candidate.duration_seconds,

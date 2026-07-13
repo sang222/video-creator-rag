@@ -180,6 +180,32 @@ def test_execution_flags_default_false_and_secret_is_redacted():
     assert "fixture-secret" not in json.dumps(configured)
 
 
+def test_gemini_developer_api_omits_enterprise_only_generate_audio_parameter(monkeypatch):
+    class FakeModels:
+        def __init__(self):
+            self.calls = []
+
+        def generate_videos(self, **kwargs):
+            self.calls.append(kwargs)
+            assert kwargs["config"].generate_audio is None
+            assert kwargs["config"].person_generation == "allow_all"
+            return type("Operation", (), {"name": "operations/developer-api-fixture"})()
+
+    models = FakeModels()
+    fake_client = type("Client", (), {"models": models})()
+    adapter = GoogleVeoAdapter(settings())
+    monkeypatch.setattr(adapter, "_official_client", lambda: fake_client)
+
+    operation_id = adapter._submit_with_official_sdk(request(adapter))
+
+    assert operation_id == "operations/developer-api-fixture"
+    assert len(models.calls) == 1
+    assert request(adapter).generate_audio_expected is True
+    assert request(adapter).provider_audio_usage_policy == "DISCARD"
+    assert request(adapter).character_policy_mode == "NO_CHARACTER"
+    assert "people" in request(adapter).negative_prompt
+
+
 def test_duplicate_submit_and_polling_do_not_consume_paid_attempt():
     fake = FakeClient()
     adapter = GoogleVeoAdapter(settings(), fixture_client=fake)
