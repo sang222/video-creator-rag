@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.contracts.native_renderer import GateResult, NativeRenderPlan
+from app.contracts.temporal_authority import CanonicalMediaTimeline
 
 
 def stable_hash(value: Any) -> str:
@@ -27,6 +28,7 @@ class NativeRenderPlanValidator:
         workspace_root: Path | None = None,
         execution: bool = False,
         allow_resolved_provider_assets: bool = False,
+        canonical_timeline: CanonicalMediaTimeline | None = None,
     ) -> list[GateResult]:
         results: list[GateResult] = []
         required = [plan.channel_profile_version_id, plan.effective_context_snapshot_id, plan.effective_context_hash, plan.script_hash, plan.srt_hash, plan.visual_plan_hash]
@@ -43,6 +45,65 @@ class NativeRenderPlanValidator:
         results.append(self._gate("SegmentCoverageGate", bool(segments) and len(segments) == len(set(segments)), "SEGMENT_COVERAGE_INVALID"))
         srt_exists = Path(plan.srt_ref).is_file() if execution else bool(plan.srt_ref)
         results.append(self._gate("CaptionTimelineGate", srt_exists, "SRT_MISSING"))
+        if plan.temporal_authority_mode == "CANONICAL_STRICT":
+            refs_present = bool(
+                plan.canonical_media_timeline_ref
+                and plan.canonical_media_timeline_hash
+                and plan.canonical_audio_asset_ref
+            )
+            results.append(self._gate("CanonicalMediaTimelineReferenceGate", refs_present, "TEMPORAL_CANONICAL_TIMELINE_REQUIRED"))
+            results.append(self._gate("ParallelTimingInputGate", not plan.parallel_timing_inputs, "TEMPORAL_PARALLEL_TIMELINE_DETECTED", plan.parallel_timing_inputs))
+            results.append(
+                self._gate(
+                    "CanonicalSceneTimingSourceGate",
+                    plan.scene_timing_source == "CANONICAL_MEDIA_TIMELINE",
+                    "TEMPORAL_SCENE_ESTIMATE_USED",
+                )
+            )
+            results.append(
+                self._gate(
+                    "CanonicalCaptionTimingSourceGate",
+                    plan.caption_timing_source == "CANONICAL_MEDIA_TIMELINE",
+                    "TEMPORAL_PARALLEL_TIMELINE_DETECTED",
+                )
+            )
+            results.append(
+                self._gate(
+                    "CanonicalMediaTimelineEvidenceGate",
+                    canonical_timeline is not None,
+                    "TEMPORAL_CANONICAL_TIMELINE_EVIDENCE_MISSING",
+                )
+            )
+            if canonical_timeline is not None:
+                actual_hash = stable_hash(canonical_timeline.model_dump(mode="json", exclude={"timeline_hash"}))
+                hash_ok = (
+                    canonical_timeline.timeline_hash == actual_hash
+                    and plan.canonical_media_timeline_hash == actual_hash
+                )
+                results.append(self._gate("CanonicalMediaTimelineHashGate", hash_ok, "TEMPORAL_TIMELINE_HASH_MISMATCH"))
+                results.append(
+                    self._gate(
+                        "CanonicalAudioAssetGate",
+                        plan.canonical_audio_asset_ref == canonical_timeline.audio_asset_id,
+                        "TEMPORAL_AUDIO_ASSET_MISMATCH",
+                    )
+                )
+                timing_by_scene = {
+                    item.segment_id: (item.scene_start_ms, item.scene_end_ms, item.target_scene_duration_ms)
+                    for item in canonical_timeline.segments
+                }
+                scene_timing_ok = len(timing_by_scene) == len(plan.scenes) and all(
+                    timing_by_scene.get(scene.scene_id)
+                    == (scene.narration_start_ms, scene.narration_end_ms, scene.duration_ms)
+                    for scene in plan.scenes
+                )
+                results.append(
+                    self._gate(
+                        "CanonicalSceneTimingDerivationGate",
+                        scene_timing_ok,
+                        "TEMPORAL_SCENE_NOT_DERIVED_FROM_TIMELINE",
+                    )
+                )
         unresolved: list[str] = []
         for scene in plan.scenes:
             resolved = {item.key for item in scene.resolved_asset_refs}

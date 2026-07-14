@@ -22,6 +22,7 @@ from app.api.routes import (
     originality_review,
     native_renderer,
     asset_acquisition,
+    temporal_authority,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     _include_router_flat(application, originality_review.create_router())
     _include_router_flat(application, native_renderer.create_router())
     _include_router_flat(application, asset_acquisition.create_router())
+    _include_router_flat(application, temporal_authority.create_router())
     return application
 
 

@@ -58,7 +58,7 @@ class FFmpegCommandBuilder:
         part = str(output) + ".part.mp4"
         argv = [self.ffmpeg, "-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i", f"color=c=0x0b1020:s=1920x1080:r=30:d={duration_seconds}", "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000:duration={duration_seconds}", "-filter_complex_script", str(filtergraph), "-map", "[v]", "-map", "1:a", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-maxrate", "10M", "-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-t", str(duration_seconds), part]
         version = subprocess.run([self.ffmpeg, "-version"], capture_output=True, text=True, check=True).stdout.splitlines()[0]
-        core = {"run_key": run_key, "compiled_manifest_ref": manifest.compiled_manifest_id, "compiled_manifest_hash": manifest.manifest_hash, "ffmpeg_binary_path": self.ffmpeg, "ffprobe_binary_path": self.ffprobe, "ffmpeg_version": version, "command_builder_version": COMMAND_BUILDER_VERSION, "input_files": [], "generated_filtergraph_path": str(filtergraph), "generated_text_files": [], "generated_caption_path": manifest.normalized_caption.get("srt_ref"), "output_file": str(output), "output_profile": manifest.renderer_profile_refs[0], "sanitized_argv": argv, "working_directory": str(work), "expected_qc": manifest.output_specs[0]}
+        core = {"run_key": run_key, "compiled_manifest_ref": manifest.compiled_manifest_id, "compiled_manifest_hash": manifest.manifest_hash, "ffmpeg_binary_path": self.ffmpeg, "ffprobe_binary_path": self.ffprobe, "ffmpeg_version": version, "command_builder_version": COMMAND_BUILDER_VERSION, "input_files": [], "generated_filtergraph_path": str(filtergraph), "generated_text_files": [], "generated_caption_path": manifest.normalized_caption.get("srt_ref"), "output_file": str(output), "output_profile": manifest.renderer_profile_refs[0], "sanitized_argv": argv, "working_directory": str(work), "expected_qc": manifest.output_specs[0], "temporal_authority_mode": manifest.temporal_authority_mode, "canonical_media_timeline_ref": manifest.canonical_media_timeline_ref, "canonical_media_timeline_hash": manifest.canonical_media_timeline_hash, "canonical_audio_asset_ref": manifest.canonical_audio_asset_ref}
         command_hash = stable_hash(core | {"filtergraph_hash": hashlib.sha256(graph.encode()).hexdigest()})
         command = FFmpegCommandManifest(command_hash=command_hash, created_at=datetime.now(UTC), **core)
         (work / "command_manifest.json").write_text(command.model_dump_json(indent=2), encoding="utf-8")
@@ -79,6 +79,19 @@ class NativeFFmpegRenderer:
             raise PermissionError("LOCAL_SMOKE_BOUNDARY_REJECTED")
         if command.compiled_manifest_hash != manifest.manifest_hash:
             raise ValueError("MANIFEST_HASH_MISMATCH")
+        if manifest.temporal_authority_mode == "CANONICAL_STRICT":
+            if not (
+                manifest.canonical_media_timeline_ref
+                and manifest.canonical_media_timeline_hash
+                and manifest.canonical_audio_asset_ref
+            ):
+                raise ValueError("TEMPORAL_CANONICAL_TIMELINE_REQUIRED")
+            if (
+                command.canonical_media_timeline_ref != manifest.canonical_media_timeline_ref
+                or command.canonical_media_timeline_hash != manifest.canonical_media_timeline_hash
+                or command.canonical_audio_asset_ref != manifest.canonical_audio_asset_ref
+            ):
+                raise ValueError("TEMPORAL_RENDER_COMMAND_AUTHORITY_MISMATCH")
         output = _inside(self.root, Path(command.output_file))
         _inside(self.root, Path(command.working_directory))
         if shutil.disk_usage(self.root).free < 2 * 1024**3:

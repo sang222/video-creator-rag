@@ -9,3 +9,5 @@ The registry in `app/services/native_motion_compiler.py` stores typed metadata a
 - Audio: voice_only_basic, voice_music_duck_basic, fade_in_out_basic.
 
 Defaults and clamps are deterministic. Unsupported semantics or filter/control characters block compilation.
+
+For `CANONICAL_STRICT`, transition duration may be derived from a canonical scene duration, but motion compilation cannot change scene, caption, asset-in/out or audio timing. The compiler first verifies the `CanonicalMediaTimeline` ref/hash, final audio ref and exact scene anchors; missing or conflicting authority blocks before motion presets are resolved.

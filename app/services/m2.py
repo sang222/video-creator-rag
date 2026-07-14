@@ -543,6 +543,12 @@ class ElevenLabsVoiceRequestBuilder(_BaseRequestBuilder):
             "text": data.get("text"),
             "voice_id": data.get("voice_id") or self.settings.elevenlabs_voice_id,
             "model_id": data.get("model_id") or self.settings.elevenlabs_model_id,
+            "endpoint_semantics": "CONVERT_WITH_TIMESTAMPS",
+            "source_text_hash": data.get("source_text_hash"),
+            "spoken_text_hash": data.get("spoken_text_hash"),
+            "voice_settings": data.get("voice_settings") or {},
+            "seed": data.get("seed"),
+            "pronunciation_dictionary_refs": data.get("pronunciation_dictionary_refs") or [],
             "effective_context_snapshot_id": data.get("effective_context_snapshot_id"),
             "video_project_id": data.get("video_project_id"),
             "package_id": data.get("package_id"),
@@ -616,9 +622,16 @@ class DriveArchiveRequestBuilder(_BaseRequestBuilder):
 class ElevenLabsVoiceAdapter:
     def __init__(self, settings: Settings | None = None):
         self.builder = ElevenLabsVoiceRequestBuilder(settings)
+        # Imported lazily to keep the legacy M2 provider boundary dependency-light.
+        from app.services.temporal_authority import ElevenLabsTimingResponseParser
+
+        self.timing_parser = ElevenLabsTimingResponseParser()
 
     def prepare(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
         return self.builder.build(data)
+
+    def parse_timing_response(self, **kwargs: Any):
+        return self.timing_parser.parse(**kwargs)
 
 
 class GoogleVeoHeroVideoAdapter:

@@ -101,3 +101,9 @@ PYTHONPATH=. .venv/bin/python tools/pa1r/run_pa1r_resume.py duplicate-check
 Kết quả kỹ thuật: NativeFFmpeg/MediaQC PASS; Drive path `smoke_tests/2026-07-13/pa1r/pa1r-20260713-guarded-smoke-005` VERIFIED 37/37 files; cleanup partial giữ final/proxy/contact sheet; duplicate-check zero new calls.
 
 Operator đã xem MP4 và explicit approve lúc `2026-07-13T23:21:15+07:00`: `PA1R_HUMAN_REVIEW=PASS`, `PA1R_FINAL=PASS`, `PROCEED_TO_CH1_FLEX=true`. Trạng thái này chỉ mở gate sang task CH1-FLEX riêng; không cấp quyền YouTube write/publish.
+
+## Post-run creative-quality repair state
+
+Historical PA1R run evidence above remains immutable. A later creative review found subtitle scale, narration pace, visual continuity and narration/caption synchronization defects. Current repaired-program state therefore treats infrastructure as PASS but production readiness as NO_GO until CQR1-A/B/C/D complete.
+
+CQR1-A replaces the hard-coded `0–7 / 7–13 / 13–21 / 21–25` production pattern for new repaired paths with verified final-audio timing and `CanonicalMediaTimeline`. It does not rerun or relabel PA1R, call a provider, render, archive or authorize CH1-FLEX. See `docs/architecture/canonical_media_timeline.md` and `docs/operations/narration_timing_and_alignment.md`.

@@ -347,6 +347,13 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("ELEVENLABS_REAL_GENERATION_ENABLED", "VCOS_ELEVENLABS_REAL_GENERATION_ENABLED"),
     )
+    elevenlabs_forced_alignment_permission_confirmed: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ELEVENLABS_FORCED_ALIGNMENT_PERMISSION_CONFIRMED",
+            "VCOS_ELEVENLABS_FORCED_ALIGNMENT_PERMISSION_CONFIRMED",
+        ),
+    )
     veo_real_generation_enabled: bool = Field(
         default=False,
         validation_alias="VCOS_VEO_REAL_GENERATION_ENABLED",

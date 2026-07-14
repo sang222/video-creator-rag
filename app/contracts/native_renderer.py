@@ -83,6 +83,13 @@ class NativeRenderPlan(BaseModel):
     srt_ref: str
     srt_hash: str
     audio_timeline_ref: str | None = None
+    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = "LEGACY_HISTORICAL"
+    canonical_media_timeline_ref: str | None = None
+    canonical_media_timeline_hash: str | None = None
+    canonical_audio_asset_ref: str | None = None
+    scene_timing_source: str | None = None
+    caption_timing_source: str | None = None
+    parallel_timing_inputs: list[str] = Field(default_factory=list)
     visual_plan_ref: str
     visual_plan_hash: str
     canvas_spec: CanvasSpec
@@ -130,6 +137,10 @@ class CompiledNativeRenderManifest(BaseModel):
     compilation_warnings: list[str]
     compilation_reason_codes: list[str]
     production_eligible: bool
+    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = "LEGACY_HISTORICAL"
+    canonical_media_timeline_ref: str | None = None
+    canonical_media_timeline_hash: str | None = None
+    canonical_audio_asset_ref: str | None = None
     manifest_hash: str
     created_at: datetime
 
@@ -151,6 +162,10 @@ class FFmpegCommandManifest(BaseModel):
     sanitized_argv: list[str]
     working_directory: str
     expected_qc: dict[str, Any]
+    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = "LEGACY_HISTORICAL"
+    canonical_media_timeline_ref: str | None = None
+    canonical_media_timeline_hash: str | None = None
+    canonical_audio_asset_ref: str | None = None
     command_hash: str
     created_at: datetime
 

@@ -22,6 +22,8 @@ Asset priority is frozen as `NATIVE_VISUAL`, then `SUPPORTING_STOCK`, then `AI_H
 
 `AssetRequestCompiler` blocks an unapproved or contradictory FormatIdentity snapshot, non-`NO_CHARACTER` policy, Strategy B outside its channel, unsupported provider intent, a role not allowed by FormatIdentity, or any AS1 provider-execution flag. Each request retains source segments, semantic visual intent, duration/resolution/crop/person/logo/evidence policy, deterministic fallback order and content hash.
 
+For new repaired paths, request duration is a projection of `CanonicalMediaTimeline` scene anchors copied through a `CANONICAL_STRICT` `NativeRenderPlan`. Asset acquisition cannot introduce a fixed or word-count scene duration. Final asset binding, semantic ranking and continuity scoring remain CQR1-C scope.
+
 Stock cannot be factual evidence, a testimonial, an endorsement, or a recurring host. AI hero requests remain provider-neutral and require `HOOK`, `METAPHOR`, `EMOTIONAL_PAYOFF`, `VISUAL_SIGNATURE`, or `NATIVE_MOTION_INSUFFICIENT`.
 
 ## Provider adapter boundary

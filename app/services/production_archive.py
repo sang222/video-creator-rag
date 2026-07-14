@@ -41,6 +41,7 @@ ROLE_ARCHIVE_PATHS = {
     "SCRIPT_MARKDOWN": "01-script/script.md",
     "CAPTIONS_SRT": "01-script/captions.srt",
     "NARRATION_AUDIO_TIMELINE": "02-audio/narration-audio-timeline.json",
+    "CANONICAL_MEDIA_TIMELINE": "02-audio/canonical-media-timeline.json",
     "SELECTED_STOCK_ORIGINAL": "03-stock/selected-originals/stock-original.mp4",
     "SELECTED_AI_HERO_TAKE": "04-ai-hero/selected-takes/ai-hero-take.mp4",
     "FINAL_MASTER": "05-render/final-master.mp4",
@@ -49,6 +50,10 @@ ROLE_ARCHIVE_PATHS = {
     "FFPROBE": "06-qc/ffprobe.json",
     "MANUAL_PUBLISH_PACKAGE": "07-publish/manual-publish-package.json",
 }
+# Historical AS1/PA1R builders retain their frozen role set. New repaired runs pass
+# this extended set explicitly, so old archive evidence is never rewritten.
+LEGACY_REQUIRED_ARCHIVE_ROLES = frozenset(set(ROLE_ARCHIVE_PATHS) - {"CANONICAL_MEDIA_TIMELINE"})
+CQR1A_REQUIRED_ARCHIVE_ROLES = frozenset(ROLE_ARCHIVE_PATHS)
 EXCLUDED_MARKERS = {"rejected", "normalized", "scratch", "cache", "failed-generation", ".part"}
 
 
@@ -62,7 +67,15 @@ class ArchiveSource:
 
 
 class ProductionArchiveBuilder:
-    def build(self, *, manifest_id: str, project_id: str, package_id: str, sources: list[ArchiveSource]) -> ProductionArchiveManifest:
+    def build(
+        self,
+        *,
+        manifest_id: str,
+        project_id: str,
+        package_id: str,
+        sources: list[ArchiveSource],
+        required_roles: frozenset[str] = LEGACY_REQUIRED_ARCHIVE_ROLES,
+    ) -> ProductionArchiveManifest:
         entries: list[ProductionArchiveFileEntry] = []
         excluded: list[str] = []
         for source in sources:
@@ -88,7 +101,10 @@ class ProductionArchiveBuilder:
             }
             entries.append(ProductionArchiveFileEntry(**entry_payload, manifest_hash=stable_hash(entry_payload)))
         present_roles = {entry.logical_role for entry in entries}
-        missing = sorted(set(ROLE_ARCHIVE_PATHS) - present_roles)
+        unknown_required = sorted(set(required_roles) - set(ROLE_ARCHIVE_PATHS))
+        if unknown_required:
+            raise ValueError(f"ARCHIVE_REQUIRED_ROLE_UNKNOWN:{','.join(unknown_required)}")
+        missing = sorted(set(required_roles) - present_roles)
         if missing:
             raise ValueError(f"ARCHIVE_REQUIRED_ROLES_MISSING:{','.join(missing)}")
         payload = {

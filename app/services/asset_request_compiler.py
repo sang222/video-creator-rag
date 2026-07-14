@@ -10,7 +10,8 @@ from app.contracts.asset_acquisition import (
     ProviderUsagePolicy,
 )
 from app.contracts.native_renderer import NativeRenderPlan, NativeRenderScene
-from app.services.native_render_plan import canonical_plan_hash, stable_hash
+from app.contracts.temporal_authority import CanonicalMediaTimeline
+from app.services.native_render_plan import NativeRenderPlanValidator, canonical_plan_hash, stable_hash
 
 
 ROLE_PRIORITY = ("NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO")
@@ -47,8 +48,16 @@ class AssetRequestCompiler:
         strategy_profile: ChannelVisualStrategyProfile,
         provider_policy: ProviderUsagePolicy,
         evidence: CompilationEvidence,
+        canonical_timeline: CanonicalMediaTimeline | None = None,
     ) -> CompiledAssetRequestPlan:
-        self._validate_inputs(plan, format_identity, strategy_profile, provider_policy, evidence)
+        self._validate_inputs(
+            plan,
+            format_identity,
+            strategy_profile,
+            provider_policy,
+            evidence,
+            canonical_timeline=canonical_timeline,
+        )
         requests = [
             self._compile_scene(plan, scene, format_identity=format_identity, provider_policy=provider_policy)
             for scene in plan.scenes
@@ -80,7 +89,31 @@ class AssetRequestCompiler:
         strategy_profile: ChannelVisualStrategyProfile,
         provider_policy: ProviderUsagePolicy,
         evidence: CompilationEvidence,
+        canonical_timeline: CanonicalMediaTimeline | None,
     ) -> None:
+        if plan.temporal_authority_mode == "CANONICAL_STRICT":
+            temporal_gate_names = {
+                "CanonicalMediaTimelineReferenceGate",
+                "ParallelTimingInputGate",
+                "CanonicalSceneTimingSourceGate",
+                "CanonicalCaptionTimingSourceGate",
+                "CanonicalMediaTimelineEvidenceGate",
+                "CanonicalMediaTimelineHashGate",
+                "CanonicalAudioAssetGate",
+                "CanonicalSceneTimingDerivationGate",
+            }
+            temporal_results = NativeRenderPlanValidator().validate(
+                plan,
+                canonical_timeline=canonical_timeline,
+            )
+            temporal_reasons = [
+                reason
+                for gate in temporal_results
+                if gate.gate in temporal_gate_names and gate.verdict == "BLOCK"
+                for reason in gate.reason_codes
+            ]
+            if temporal_reasons:
+                raise ValueError(";".join(sorted(set(temporal_reasons))))
         if format_identity.status != "APPROVED":
             raise ValueError("FORMAT_IDENTITY_NOT_APPROVED")
         if plan.channel_id != format_identity.channel_id or plan.channel_id != strategy_profile.channel_id:
