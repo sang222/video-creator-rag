@@ -1,0 +1,176 @@
+{
+  "date": "2026-07-14",
+  "phase": "PA1R-CQR1-FINAL",
+  "run_id": "pa1r-cqr1-20260714-paid-canary-001",
+  "verdicts": {
+    "CQR1A_TEMPORAL_AUTHORITY": "PASS",
+    "CQR1B_NARRATION_PACING": "PASS",
+    "CQR1B_CAPTION_COMPILATION": "PASS",
+    "CQR1B_CAPTION_LAYOUT": "PASS",
+    "CQR1B_CAPTION_SAFE_AREA": "PASS",
+    "CQR1B_CAPTION_AUDIO_SYNC": "PASS",
+    "CQR1B_CAPTION_COVERAGE": "PASS",
+    "CQR1B_TIMELINE_DRIFT": "PASS",
+    "CQR1C_VISUAL_DIRECTION_CONTRACT": "PASS",
+    "CQR1C_PEXELS_RANKING": "PASS",
+    "CQR1C_VEO_PROMPT_COMPILATION": "PASS",
+    "CQR1C_SCENE_SEMANTIC_MATCH": "PASS",
+    "CQR1C_VISUAL_CONTINUITY": "PASS",
+    "CQR1C_ASSET_ADJACENCY": "PASS",
+    "CQR1D_OFFLINE_FIXTURES": "PASS",
+    "CQR1D_GOLDEN_MEDIA": "PASS",
+    "CQR1D_PAID_CANARY_PREFLIGHT": "BLOCKED",
+    "CQR1D_PAID_CANARY": "BLOCKED",
+    "CQR1D_TECHNICAL_MEDIA_QC": "PASS",
+    "CQR1D_CREATIVE_MEDIA_QC": "PASS",
+    "CQR1D_DRIVE_ARCHIVE": "BLOCKED",
+    "CQR1D_LOCAL_CLEANUP": "BLOCKED",
+    "CQR1_HUMAN_WATCHABILITY_REVIEW": "PENDING",
+    "CREATIVE_QUALITY_REPAIR": "BLOCKED",
+    "FINAL_PRODUCTION_READINESS": "NO_GO",
+    "PROCEED_TO_CH1_FLEX": false
+  },
+  "media_qc_scope": {
+    "technical": "LOCAL_GOLDEN_ONLY",
+    "creative": "OFFLINE_FIXTURE_ONLY",
+    "paid_output_qc": "NOT_CREATED",
+    "technical_pass_implies_creative_pass": false,
+    "codex_marked_human_pass": false
+  },
+  "offline_qualification": {
+    "cqr1b_c_offline_fixtures_passed": true,
+    "golden_media_tests_passed": true,
+    "negative_tests_passed": true,
+    "technical_media_qc_fixture_passed": true,
+    "creative_media_qc_fixture_passed": true,
+    "alembic_one_head_passed": true,
+    "compileall_passed": true,
+    "focused_regressions_passed": true,
+    "git_diff_check_passed": true,
+    "historical_evidence_immutable": true
+  },
+  "verification": {
+    "alembic_head": "0036_hpr1_veo",
+    "compileall": "PASS",
+    "required_regression_suite": {
+      "result": "PASS",
+      "passed": 227,
+      "warnings": 2,
+      "duration_seconds": 115.45
+    },
+    "focused_cqr1b": {
+      "result": "PASS",
+      "passed": 37,
+      "duration_seconds": 18.3
+    },
+    "typed_policy_config_compiler": {
+      "result": "PASS",
+      "passed": 24,
+      "duration_seconds": 12.63
+    },
+    "git_diff_check": "PASS",
+    "frontend_checks": "NOT_REQUIRED_NO_FRONTEND_CHANGES"
+  },
+  "offline_golden": {
+    "fixture_id": "cqr1-local-golden-001",
+    "purpose": "CQR1_LOCAL_GOLDEN_FIXTURE",
+    "synthetic_fixture": true,
+    "canonical_duration_ms": 7770,
+    "measured_mp4_duration_ms": 7770,
+    "av_drift_ms": 3,
+    "active_speech_wpm": 152.239,
+    "delivered_wpm": 131.274,
+    "hook_first_8s_active_wpm": 152.239,
+    "caption_average_cps": 14.201,
+    "caption_p95_cps": 14.474,
+    "maximum_caption_block_width_ratio": 0.411458,
+    "minimum_caption_bottom_margin_ratio": 0.081481,
+    "visual_direction_contract_ref": "visual-direction:48d8a2ddfe4bf8eb2091b1e8151d321162d694729bc4228ecf3309c3aaf80050",
+    "visual_direction_contract_hash": "48d8a2ddfe4bf8eb2091b1e8151d321162d694729bc4228ecf3309c3aaf80050",
+    "technical_media_qc": "PASS",
+    "creative_perceptual_media_qc": "PASS",
+    "provider_call_count": 0,
+    "production_eligible": false,
+    "not_publishable": true
+  },
+  "planned_canary": {
+    "locale": "en-US",
+    "planned_word_count": 90,
+    "planned_target_duration_seconds": 38.6,
+    "required_duration_range_seconds": [
+      28,
+      40
+    ],
+    "visual_direction_contract_compiled": true,
+    "pexels_query_plan_compiled": true,
+    "veo_prompt_compiled": true,
+    "veo_duration_fit": "USE_ONE_ASSET",
+    "duration_fit_provider_execution_allowed": true,
+    "global_provider_execution_allowed": false,
+    "execution_state": "PLANNED_PREFLIGHT_BLOCKED",
+    "provider_call_count": 0
+  },
+  "provider_readiness_safe": {
+    "pexels_api_key_configured": true,
+    "elevenlabs_api_key_configured": true,
+    "elevenlabs_voice_id_configured": false,
+    "elevenlabs_model_id_configured": false,
+    "elevenlabs_tts_access_confirmed": false,
+    "elevenlabs_voices_read_confirmed": false,
+    "elevenlabs_models_read_confirmed": false,
+    "elevenlabs_forced_alignment_permission_confirmed": "unknown",
+    "google_veo_api_key_configured": true,
+    "google_veo_model_accessible": true,
+    "drive_oauth_connected": true,
+    "drive_archive_root_configured": true,
+    "secret_values_exposed": false,
+    "provider_probe_count": 0
+  },
+  "preflight": {
+    "status": "BLOCKED",
+    "offline_gate_passed": true,
+    "provider_readiness_passed": false,
+    "ledger_fresh": true,
+    "provider_execution_allowed": false,
+    "provider_call_count": 0,
+    "blocker_reason_codes": [
+      "PROVIDER_READINESS_FAILED_ELEVENLABS_FORCED_ALIGNMENT_PERMISSION_CONFIRMED",
+      "PROVIDER_READINESS_FAILED_ELEVENLABS_MODELS_READ_CONFIRMED",
+      "PROVIDER_READINESS_FAILED_ELEVENLABS_MODEL_ID_CONFIGURED",
+      "PROVIDER_READINESS_FAILED_ELEVENLABS_TTS_ACCESS_CONFIRMED",
+      "PROVIDER_READINESS_FAILED_ELEVENLABS_VOICES_READ_CONFIRMED",
+      "PROVIDER_READINESS_FAILED_ELEVENLABS_VOICE_ID_CONFIGURED"
+    ]
+  },
+  "ledger_attempt_counts": {
+    "pexels_search": 0,
+    "pexels_download": 0,
+    "elevenlabs_tts": 0,
+    "elevenlabs_forced_alignment": 0,
+    "google_veo_submit": 0,
+    "google_veo_output": 0,
+    "drive_archive": 0
+  },
+  "provider_call_count": 0,
+  "provider_probe_count": 0,
+  "historical_evidence_immutable": true,
+  "historical_hash_check_count": 12,
+  "before_after_evidence": {
+    "status": "PARTIAL_BLOCKED_PRECANARY",
+    "acceptance_complete": false,
+    "comparison_kind": "NON_EQUIVALENT_DIAGNOSTIC_PA1R_VS_LOCAL_SYNTHETIC_GOLDEN",
+    "paid_canary_metrics": null
+  },
+  "archive": {
+    "required_drive_path": "smoke_tests/2026-07-14/cqr1/pa1r-cqr1-20260714-paid-canary-001/",
+    "state": "NOT_ATTEMPTED_PREFLIGHT_BLOCKED",
+    "attempt_count": 0,
+    "receipt_created": false,
+    "purge_count": 0,
+    "cleanup_eligible": false
+  },
+  "human_watchability_review": "PENDING",
+  "production_eligible": false,
+  "not_publishable": true,
+  "exact_next_action": "Grant ElevenLabs Text to Speech Access, Voices Read, Models Read, and Forced Alignment Access; configure ELEVENLABS_VOICE_ID/ELEVENLABS_MODEL_ID; then set ELEVENLABS_FORCED_ALIGNMENT_PERMISSION_CONFIRMED=true before any provider probe."
+}

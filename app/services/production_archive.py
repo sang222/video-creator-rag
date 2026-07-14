@@ -50,10 +50,57 @@ ROLE_ARCHIVE_PATHS = {
     "FFPROBE": "06-qc/ffprobe.json",
     "MANUAL_PUBLISH_PACKAGE": "07-publish/manual-publish-package.json",
 }
+CQR1_ROLE_ARCHIVE_PATHS = {
+    "SPOKEN_TEXT_NORMALIZED": "01-script/spoken-text-normalized.json",
+    "PROVIDER_TIMING_SEED": "02-audio/provider-timing-seed.json",
+    "FORCED_ALIGNMENT_EVIDENCE": "02-audio/forced-alignment-evidence.json",
+    "VERIFIED_NARRATION_ALIGNMENT": "02-audio/verified-narration-alignment.json",
+    "NARRATION_PACING_REPORT": "06-qc/narration-pacing.json",
+    "CAPTION_COMPILATION_REPORT": "01-script/caption-compilation.json",
+    "CAPTION_BBOX_SAFE_AREA_EVIDENCE": "06-qc/caption-bbox-safe-area.json",
+    "CAPTION_SYNC_COVERAGE_DRIFT_REPORT": "06-qc/caption-sync-coverage-drift.json",
+    "VISUAL_DIRECTION_CONTRACT": "00-manifests/visual-direction-contract.json",
+    "PEXELS_RANKING_PROVENANCE": "00-manifests/pexels-ranking-provenance.json",
+    "VEO_PROMPT_REQUEST_PROVENANCE": "00-manifests/veo-prompt-request-provenance.json",
+    "VISUAL_CONTINUITY_REPORT": "06-qc/visual-continuity.json",
+    "CONTACT_SHEET": "05-render/contact-sheet.jpg",
+    "TECHNICAL_MEDIA_QC": "06-qc/technical-media-qc.json",
+    "CREATIVE_PERCEPTUAL_MEDIA_QC": "06-qc/creative-perceptual-media-qc.json",
+    "HUMAN_REVIEW_PACKET": "06-qc/human-watchability-review.md",
+    "NOT_PUBLISHABLE_MANIFEST": "07-publish/not-publishable-manifest.json",
+}
+ALL_ROLE_ARCHIVE_PATHS = {**ROLE_ARCHIVE_PATHS, **CQR1_ROLE_ARCHIVE_PATHS}
 # Historical AS1/PA1R builders retain their frozen role set. New repaired runs pass
 # this extended set explicitly, so old archive evidence is never rewritten.
 LEGACY_REQUIRED_ARCHIVE_ROLES = frozenset(set(ROLE_ARCHIVE_PATHS) - {"CANONICAL_MEDIA_TIMELINE"})
 CQR1A_REQUIRED_ARCHIVE_ROLES = frozenset(ROLE_ARCHIVE_PATHS)
+CQR1_REQUIRED_ARCHIVE_ROLES = frozenset(
+    {
+        "CANONICAL_MEDIA_TIMELINE",
+        "SPOKEN_TEXT_NORMALIZED",
+        "PROVIDER_TIMING_SEED",
+        "FORCED_ALIGNMENT_EVIDENCE",
+        "VERIFIED_NARRATION_ALIGNMENT",
+        "NARRATION_PACING_REPORT",
+        "CAPTION_COMPILATION_REPORT",
+        "CAPTION_BBOX_SAFE_AREA_EVIDENCE",
+        "CAPTION_SYNC_COVERAGE_DRIFT_REPORT",
+        "VISUAL_DIRECTION_CONTRACT",
+        "PEXELS_RANKING_PROVENANCE",
+        "VEO_PROMPT_REQUEST_PROVENANCE",
+        "VISUAL_CONTINUITY_REPORT",
+        "NATIVE_RENDER_PLAN",
+        "COMPILED_NATIVE_RENDER_MANIFEST",
+        "FFMPEG_COMMAND_MANIFEST",
+        "FINAL_MASTER",
+        "CONTACT_SHEET",
+        "TECHNICAL_MEDIA_QC",
+        "CREATIVE_PERCEPTUAL_MEDIA_QC",
+        "HUMAN_REVIEW_PACKET",
+        "SYNTHETIC_MEDIA_DISCLOSURE",
+        "NOT_PUBLISHABLE_MANIFEST",
+    }
+)
 EXCLUDED_MARKERS = {"rejected", "normalized", "scratch", "cache", "failed-generation", ".part"}
 
 
@@ -85,7 +132,7 @@ class ProductionArchiveBuilder:
                 continue
             if not source.source_path.is_file() or source.source_path.is_symlink():
                 raise ValueError(f"ARCHIVE_SOURCE_INVALID:{source.logical_role}")
-            expected = source.expected_archive_path or ROLE_ARCHIVE_PATHS.get(source.logical_role)
+            expected = source.expected_archive_path or ALL_ROLE_ARCHIVE_PATHS.get(source.logical_role)
             if not expected or expected.startswith("/") or ".." in Path(expected).parts:
                 raise ValueError(f"ARCHIVE_PATH_INVALID:{source.logical_role}")
             sha256, md5 = _file_hashes(source.source_path)
@@ -101,7 +148,7 @@ class ProductionArchiveBuilder:
             }
             entries.append(ProductionArchiveFileEntry(**entry_payload, manifest_hash=stable_hash(entry_payload)))
         present_roles = {entry.logical_role for entry in entries}
-        unknown_required = sorted(set(required_roles) - set(ROLE_ARCHIVE_PATHS))
+        unknown_required = sorted(set(required_roles) - set(ALL_ROLE_ARCHIVE_PATHS))
         if unknown_required:
             raise ValueError(f"ARCHIVE_REQUIRED_ROLE_UNKNOWN:{','.join(unknown_required)}")
         missing = sorted(set(required_roles) - present_roles)
@@ -139,6 +186,26 @@ class ProductionArchivePathBuilder:
             raise ValueError("ARCHIVE_UNKNOWN_SCOPE_FORBIDDEN")
         if path.startswith("/") or ".." in parts:
             raise ValueError("ARCHIVE_RELATIVE_PATH_REQUIRED")
+
+
+class CQR1ArchivePathBuilder:
+    @staticmethod
+    def build(*, run_id: str, archive_date: str = "2026-07-14") -> str:
+        path = f"smoke_tests/{archive_date}/cqr1/{run_id}"
+        CQR1ArchivePathBuilder.validate(path)
+        return path
+
+    @staticmethod
+    def validate(path: str) -> None:
+        if path.startswith("/") or ".." in Path(path).parts:
+            raise ValueError("CQR1_ARCHIVE_RELATIVE_PATH_REQUIRED")
+        parts = Path(path).parts
+        if len(parts) != 4 or parts[0] != "smoke_tests" or parts[2] != "cqr1":
+            raise ValueError("CQR1_ARCHIVE_PATH_INVALID")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1]):
+            raise ValueError("CQR1_ARCHIVE_DATE_INVALID")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", parts[3]) or not parts[3].startswith("pa1r-cqr1-"):
+            raise ValueError("CQR1_ARCHIVE_RUN_ID_INVALID")
 
 
 class DriveArchiveFixtureVerifier:

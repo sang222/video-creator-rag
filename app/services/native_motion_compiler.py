@@ -7,7 +7,13 @@ from typing import Any
 
 from app.contracts.native_renderer import CompiledNativeRenderManifest, NativeRenderPlan
 from app.contracts.temporal_authority import CanonicalMediaTimeline
-from app.services.native_render_plan import OUTPUT_PROFILES, NativeRenderPlanValidator, canonical_plan_hash, stable_hash
+from app.services.native_render_plan import (
+    OUTPUT_PROFILES,
+    NativeRenderPlanValidator,
+    canonical_caption_cues,
+    canonical_plan_hash,
+    stable_hash,
+)
 
 
 MOTION_PACK_VERSION = "NativeMotionPack_v1"
@@ -71,6 +77,34 @@ class NativeMotionCompiler:
                 transitions.append({"scene_id": scene.scene_id, "preset": TRANSITION_MAP[scene.transition_out], "duration_ms": min(600, max(100, scene.duration_ms // 8))})
         if reason_codes:
             raise ValueError(";".join(sorted(set(reason_codes))))
-        base = {"source_plan_ref": plan.plan_id, "source_plan_hash": plan_hash, "compiler_version": COMPILER_VERSION, "motion_pack_version": MOTION_PACK_VERSION, "renderer_profile_refs": plan.output_profiles, "ffmpeg_capability_digest": self.ffmpeg_capability_digest, "normalized_canvas": plan.canvas_spec.model_dump(), "normalized_audio": plan.audio_policy, "normalized_caption": plan.caption_policy, "compiled_scenes": compiled_scenes, "transition_schedule": transitions, "overlay_schedule": [], "audio_mix_schedule": plan.audio_policy, "caption_schedule": {"srt_ref": plan.srt_ref, "timing_source": plan.caption_timing_source}, "output_specs": [OUTPUT_PROFILES[p] | {"profile": p} for p in plan.output_profiles], "expected_input_refs": sorted(set(inputs + [plan.srt_ref])), "unresolved_inputs": [], "compilation_warnings": [], "compilation_reason_codes": [], "production_eligible": plan.production_eligible, "temporal_authority_mode": plan.temporal_authority_mode, "canonical_media_timeline_ref": plan.canonical_media_timeline_ref, "canonical_media_timeline_hash": plan.canonical_media_timeline_hash, "canonical_audio_asset_ref": plan.canonical_audio_asset_ref}
+        canonical_cues = canonical_caption_cues(canonical_timeline)
+        if plan.temporal_authority_mode == "CANONICAL_STRICT":
+            if canonical_timeline is None or not canonical_cues:
+                raise ValueError("CAPTION_AUTHORITY_MISSING")
+            cue_payload = [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
+                for item in canonical_cues
+            ]
+            caption_schedule = {
+                "authority": "CANONICAL_MEDIA_TIMELINE",
+                "compilation_ref": plan.canonical_caption_compilation_ref,
+                "compilation_hash": plan.canonical_caption_compilation_hash,
+                "render_payload_hash": plan.canonical_caption_render_payload_hash,
+                "render_style": canonical_timeline.qc_metrics["caption_render_style"],
+                "cues": cue_payload,
+                "timing_source": "VERIFIED_NARRATION_ALIGNMENT",
+                "independent_srt_used": False,
+            }
+            caption_inputs: list[str] = []
+            normalized_caption = canonical_timeline.qc_metrics["caption_render_style"]
+        else:
+            caption_schedule = {
+                "srt_ref": plan.srt_ref,
+                "timing_source": plan.caption_timing_source,
+                "independent_srt_used": True,
+            }
+            caption_inputs = [plan.srt_ref]
+            normalized_caption = plan.caption_policy
+        base = {"source_plan_ref": plan.plan_id, "source_plan_hash": plan_hash, "compiler_version": COMPILER_VERSION, "motion_pack_version": MOTION_PACK_VERSION, "renderer_profile_refs": plan.output_profiles, "ffmpeg_capability_digest": self.ffmpeg_capability_digest, "normalized_canvas": plan.canvas_spec.model_dump(), "normalized_audio": plan.audio_policy, "normalized_caption": normalized_caption, "compiled_scenes": compiled_scenes, "transition_schedule": transitions, "overlay_schedule": [], "audio_mix_schedule": plan.audio_policy, "caption_schedule": caption_schedule, "output_specs": [OUTPUT_PROFILES[p] | {"profile": p} for p in plan.output_profiles], "expected_input_refs": sorted(set(inputs + caption_inputs)), "unresolved_inputs": [], "compilation_warnings": [], "compilation_reason_codes": [], "production_eligible": plan.production_eligible, "temporal_authority_mode": plan.temporal_authority_mode, "canonical_media_timeline_ref": plan.canonical_media_timeline_ref, "canonical_media_timeline_hash": plan.canonical_media_timeline_hash, "canonical_audio_asset_ref": plan.canonical_audio_asset_ref, "canonical_duration_ms": canonical_timeline.audio_duration_ms if canonical_timeline is not None and plan.temporal_authority_mode == "CANONICAL_STRICT" else None, "canonical_caption_compilation_ref": plan.canonical_caption_compilation_ref, "canonical_caption_compilation_hash": plan.canonical_caption_compilation_hash, "canonical_caption_render_payload_hash": plan.canonical_caption_render_payload_hash, "visual_direction_contract_ref": plan.visual_direction_contract_ref, "visual_direction_contract_hash": plan.visual_direction_contract_hash, "creative_gate_results": plan.creative_gate_results, "render_purpose": plan.purpose}
         manifest_hash = stable_hash(base)
         return CompiledNativeRenderManifest(compiled_manifest_id=str(uuid.uuid5(uuid.NAMESPACE_URL, manifest_hash)), ffmpeg_binary_requirement="ffmpeg-full>=8", manifest_hash=manifest_hash, created_at=datetime.now(UTC), **base)

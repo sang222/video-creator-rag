@@ -126,6 +126,16 @@ class PexelsQueryPlan(BaseModel):
     minimum_duration_seconds: float = Field(ge=0)
     forbidden_concepts: list[str]
     endpoint: Literal["/v1/videos/search"] = "/v1/videos/search"
+    planner_version: str = "pexels-query-planner/v1.0.0"
+    locale: str = "en-US"
+    visual_direction_ref: str | None = None
+    visual_direction_hash: str | None = None
+    target_duration_seconds: float | None = Field(default=None, gt=0)
+    aspect_ratio: Literal["16:9", "9:16", "1:1"] | None = None
+    crop_safety_required: bool = True
+    previous_scene_summary: str | None = None
+    next_scene_summary: str | None = None
+    asset_reuse_history: list[str] = Field(default_factory=list)
     plan_hash: str
     model_config = ConfigDict(extra="forbid")
 
@@ -148,6 +158,25 @@ class ParsedStockCandidate(BaseModel):
     motion_suitability: float = Field(default=0.5, ge=0, le=1)
     channel_identity_fit: float = Field(default=0.5, ge=0, le=1)
     prior_use_count: int = Field(default=0, ge=0)
+    environment_type: str | None = None
+    industry_context: str | None = None
+    lighting_direction: str | None = None
+    lighting_temperature: str | None = None
+    palette: list[str] = Field(default_factory=list)
+    shot_scale: str | None = None
+    camera_movement: str | None = None
+    motion_intensity: str | None = None
+    motion_energy: float | None = Field(default=None, ge=0, le=1)
+    semantic_relevance_score: float | None = Field(default=None, ge=0, le=1)
+    visual_direction_fit_score: float | None = Field(default=None, ge=0, le=1)
+    previous_scene_continuity_score: float | None = Field(default=None, ge=0, le=1)
+    next_scene_continuity_score: float | None = Field(default=None, ge=0, le=1)
+    crop_safety_score: float | None = Field(default=None, ge=0, le=1)
+    technical_quality_score: float | None = Field(default=None, ge=0, le=1)
+    originality_score: float | None = Field(default=None, ge=0, le=1)
+    explicit_risk_penalty: float = Field(default=0, ge=0, le=1)
+    hard_conflict_tags: list[str] = Field(default_factory=list)
+    representative_still_refs: list[str] = Field(default_factory=list)
     video_files: list[dict[str, Any]] = Field(default_factory=list)
     source_complete: bool = True
     model_config = ConfigDict(extra="forbid")
@@ -176,6 +205,16 @@ class StockCandidateRankingManifest(BaseModel):
     ranking_reason_codes: list[str]
     previous_asset_usage_refs: list[str]
     selection_requires_human_review: bool
+    ranking_verdict: Literal["PASS", "REVIEW_REQUIRED", "BLOCK"] = "REVIEW_REQUIRED"
+    visual_direction_ref: str | None = None
+    visual_direction_hash: str | None = None
+    previous_scene_summary: str | None = None
+    next_scene_summary: str | None = None
+    asset_reuse_history: list[str] = Field(default_factory=list)
+    selected_rationale: str | None = None
+    ranking_weights: dict[str, float] = Field(default_factory=dict)
+    ranking_risk_penalties: dict[str, float] = Field(default_factory=dict)
+    ranking_thresholds: dict[str, float] = Field(default_factory=dict)
     manifest_hash: str
     model_config = ConfigDict(extra="forbid")
 
@@ -258,6 +297,12 @@ class AIHeroAssetRequest(BaseModel):
     projected_cost_class: ProjectedCostClass
     human_approval_required: bool
     provider_resolution_policy_ref: str
+    visual_direction_ref: str | None = None
+    visual_direction_hash: str | None = None
+    prompt_compiler_version: str | None = None
+    negative_constraints: list[str] = Field(default_factory=list)
+    continuity_hints: list[str] = Field(default_factory=list)
+    duration_fit_decision: dict[str, Any] | None = None
     request_hash: str
     model_config = ConfigDict(extra="forbid")
 

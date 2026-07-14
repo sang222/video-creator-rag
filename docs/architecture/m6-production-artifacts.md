@@ -54,6 +54,14 @@ When available, FFmpeg generates a simple local dummy MP4 with silent audio and 
 
 `MediaQCService` checks file existence, nonzero size, checksum, duration tolerance, scene coverage, caption alignment metadata, explicit silent/mock audio, manifest presence, and render variant validity.
 
+CQR1 names the layers explicitly. `TechnicalMediaQC` owns decode, streams,
+container/codec, dimensions, frame rate, audio format, duration, Fast Start and
+checksum. `CreativePerceptualMediaQC` aggregates measured pacing, caption
+compilation/layout/safe-area/sync/coverage/drift, visual semantic/continuity/
+adjacency and final-duration gates. `HumanWatchabilityReview` remains PENDING
+until an operator completes a full watch. These results are independent;
+technical PASS never implies creative PASS.
+
 `AccessibilityQCService` checks caption presence, basic caption readability, safe-area placeholder metadata, flashing-risk placeholder metadata, disclosure placement placeholder metadata, and pronunciation placeholder metadata.
 
 QC checks correctness and contract integrity only. It does not judge voice quality, visual quality, thumbnail appeal, CTR, retention, reach, or monetization.

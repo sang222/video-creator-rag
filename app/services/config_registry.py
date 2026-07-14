@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.core.config import (
 from app.core.errors import ConfigVersionConflictError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import ConfigCatalogVersion, Role
+from app.services.creative_quality_policy import validate_creative_quality_policy_item
 
 
 class ReasonCodeItem(BaseModel):
@@ -229,6 +230,25 @@ class GoogleVeoModelPriceCatalogItem(BaseModel):
     resolutions: dict[str, dict[str, str]]
 
     model_config = ConfigDict(extra="forbid")
+
+
+class CreativeQualityPolicyCatalogItem(BaseModel):
+    channel_key: str = Field(min_length=1)
+    policy_version: str = Field(min_length=1)
+    narration_pacing_policy: dict[str, Any]
+    caption_style_policy: dict[str, Any]
+    caption_sync_policy: dict[str, Any]
+    visual_language_policy: dict[str, Any]
+    visual_continuity_policy: dict[str, Any]
+    creative_media_qc_policy: dict[str, Any]
+    human_watchability_policy: dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def typed_families(self) -> "CreativeQualityPolicyCatalogItem":
+        validate_creative_quality_policy_item(self.model_dump(mode="python"))
+        return self
 
 
 class RetryPolicyCatalogItem(BaseModel):
@@ -474,6 +494,7 @@ class ConfigRegistryService:
             "media_provider_routing_policy_catalog": MediaProviderRoutingPolicyCatalogItem,
             "pexels_policy_catalog": PexelsPolicyCatalogItem,
             "google_veo_model_price_catalog": GoogleVeoModelPriceCatalogItem,
+            "creative_quality_policy_catalog": CreativeQualityPolicyCatalogItem,
             "provider_capability_catalog": SimpleKeyCatalogItem,
             "media_routing_result_catalog": SimpleKeyCatalogItem,
             "media_budget_state_catalog": SimpleKeyCatalogItem,
@@ -535,6 +556,7 @@ class ConfigRegistryService:
                 or getattr(parsed, "model_id", None)
                 or getattr(parsed, "provider_key", None)
                 or getattr(parsed, "policy_key", None)
+                or getattr(parsed, "channel_key", None)
                 or getattr(parsed, "metric_key", None)
                 or getattr(parsed, "template_key", None)
                 or getattr(parsed, "matrix_key", None)

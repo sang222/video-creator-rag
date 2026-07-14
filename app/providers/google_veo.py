@@ -29,7 +29,9 @@ class GoogleVeoSDKClient(Protocol):
 
 class GoogleVeoAdapter:
     provider_key = "google_veo"
-    transport = "GEMINI_API_NATIVE"
+    # Public Gemini Developer API via the official google-genai SDK. Historical
+    # PA1R evidence retains the label captured at execution time.
+    transport = "GEMINI_DEVELOPER_API"
 
     def __init__(self, settings: Settings | None = None, *, fixture_client: GoogleVeoSDKClient | None = None):
         self.settings = settings or get_settings()
@@ -48,6 +50,7 @@ class GoogleVeoAdapter:
             "model_catalog_status": "APPROVED" if model_catalog_ok else "INVALID",
             "execution_enabled": self.settings.veo_real_generation_enabled,
             "smoke_enabled": self.settings.pa1r_veo_smoke_enabled,
+            "cqr1_paid_canary_enabled": self.settings.cqr1_paid_canary_enabled,
             "will_execute": False,
             "provider_call_made": False,
         }
@@ -125,7 +128,11 @@ class GoogleVeoAdapter:
             return receipt
         if not (
             self.settings.veo_real_generation_enabled
-            and (self.settings.pa1r_veo_smoke_enabled or gates.approved_production_execution_scope)
+            and (
+                self.settings.pa1r_veo_smoke_enabled
+                or self.settings.cqr1_paid_canary_enabled
+                or gates.approved_production_execution_scope
+            )
         ):
             return self._receipt(request, "APPROVED", "EXECUTION_DISABLED", None, attempts=0, provider_call_made=False)
         if not self.validate_configuration()["credential_configured"]:
@@ -234,7 +241,10 @@ class GoogleVeoAdapter:
         """Download one completed Veo output without creating another generation."""
         if receipt.normalized_status != "SUCCEEDED" or not receipt.provider_operation_id:
             raise RuntimeError("VEO_OUTPUT_NOT_READY")
-        if not (self.settings.veo_real_generation_enabled and self.settings.pa1r_veo_smoke_enabled):
+        if not (
+            self.settings.veo_real_generation_enabled
+            and (self.settings.pa1r_veo_smoke_enabled or self.settings.cqr1_paid_canary_enabled)
+        ):
             raise PermissionError("VEO_REAL_DOWNLOAD_EXECUTION_DISABLED")
         operation = self._sdk_operations_by_id.get(receipt.provider_operation_id)
         client = self._official_client()

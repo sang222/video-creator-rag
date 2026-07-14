@@ -39,6 +39,26 @@ Top-level lineage includes project/package/channel, editorial and spoken revisio
 
 Scene anchors are compiled only from verified word/phrase spans. The last scene may extend from its last verified word to the measured final-audio duration. It may not begin before its first spoken token, end before its final token, overlap another scene or use estimated timing.
 
+## CQR1 caption projection
+
+Readable cues are compiled back into each segment after alignment verification.
+They carry explicit lines, ordered spoken-token IDs, start/end values, reading
+metrics, measured libass bounds and gate results. Segment aggregate fields make
+cue IDs, caption spans, token coverage and geometry auditable without becoming
+a second timeline. The timeline `qc_metrics` records the caption compilation
+hash; changing a line break, cue boundary or layout evidence deterministically
+changes the timeline hash.
+
+`caption_render_payload_hash` separately binds the render-critical cue ID,
+start/end, explicit lines, spoken-token lineage and timing source. Bbox and gate
+evidence may enrich a cue without invalidating that render hash; changing any
+rendered text or timing cannot. `caption_render_style` freezes the exact
+versioned libass style shared by preflight and render.
+
+Strict rendering flattens these canonical segment cues into the compiled
+caption schedule. SRT remains a historical/export format only and cannot supply
+timing to a repaired render.
+
 ## Persistence and archive
 
 No dedicated table or duplicate artifact type is needed. The existing `narration_timeline` `Artifact`/`ArtifactVersion` lineage is extended with the versioned `CanonicalMediaTimeline` JSON. The same JSON is stored as `manifests/canonical_media_timeline.json`. New repaired archives use logical role `CANONICAL_MEDIA_TIMELINE` at `02-audio/canonical-media-timeline.json`; the legacy required-role set is unchanged so historical AS1/PA1R evidence is not rewritten.
@@ -54,9 +74,11 @@ canonical_audio_asset_ref
 scene_timing_source=CANONICAL_MEDIA_TIMELINE
 caption_timing_source=CANONICAL_MEDIA_TIMELINE
 parallel_timing_inputs=[]
+canonical_caption_compilation_ref/hash
+canonical_caption_render_payload_hash
 ```
 
-The compiler receives the referenced timeline evidence and validates its content hash, audio ref and every scene start/end/duration. The compiled manifest and command copy the same authority binding. Hash mismatch, audio mismatch, estimate use, absent evidence or conflicting timing input blocks before FFmpeg.
+The compiler receives the referenced timeline evidence and validates its content hash, audio ref, final audio endpoint, caption render payload and every scene start/end/duration. The compiled manifest and command copy the same authority binding. Hash mismatch, audio mismatch, estimate use, absent captions, independent SRT, absent evidence or conflicting timing input blocks before FFmpeg.
 
 Legacy plans remain readable as `LEGACY_HISTORICAL`. This is evidence compatibility only and does not authorize a new repaired production render.
 

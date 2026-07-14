@@ -25,6 +25,7 @@ from app.db.models import (
 from app.services.config_registry import LoadedCatalog, canonical_json, content_hash
 from app.services.config_registry import ConfigRegistryService
 from app.services.channel_contract import build_channel_contract, reject_legacy_provider_budget_fields
+from app.services.creative_quality_policy import CreativeQualityPolicyCatalog
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,7 @@ class ChannelProfileCompiler:
             "capability_status": self._capability_status(capability_matrix),
         }
         channel_contract = build_channel_contract(profile_input=profile_input.model_dump(mode="json"), channel=channel)
+        creative_quality_policies = self._creative_quality_policies(channel_key=channel.key if channel else None)
         compiled_policy_snapshot_json = {
             "schema_version": "m12.2p.channel_policy_snapshot.v1",
             "snapshot_source": "ChannelProfileCompiler",
@@ -215,11 +217,13 @@ class ChannelProfileCompiler:
             "contradiction_reasons": channel_contract["contradiction_reasons"],
             "market_locale": channel_contract["market_locale"],
             "legacy_policy_sections": legacy_payload,
+            "creative_quality_policies": creative_quality_policies,
         }
         payload = {
             **legacy_payload,
             "channel_contract_json": channel_contract,
             "compiled_policy_snapshot_json": compiled_policy_snapshot_json,
+            "creative_quality_policies": creative_quality_policies,
             "contract_status": channel_contract["contract_status"],
             "missing_fields": channel_contract["missing_fields"],
             "contradiction_reasons": channel_contract["contradiction_reasons"],
@@ -231,6 +235,29 @@ class ChannelProfileCompiler:
         parsed = CompiledChannelPolicyPayload.model_validate(payload)
         parsed_payload = parsed.model_dump(mode="json")
         return parsed_payload, content_hash(parsed_payload)
+
+    def _creative_quality_policies(self, *, channel_key: str | None) -> dict[str, Any] | None:
+        """Compile immutable channel-scoped creative policy without service constants."""
+        if not channel_key:
+            return None
+        loaded = ConfigRegistryService(self.session).validate_catalog(
+            self.config_dir / "creative_quality_policy_catalog.yaml"
+        )
+        selected = next(
+            (item for item in loaded.content["items"] if item.get("channel_key") == channel_key),
+            None,
+        )
+        if selected is None:
+            return None
+        policy = CreativeQualityPolicyCatalog(
+            self.config_dir / "creative_quality_policy_catalog.yaml"
+        ).approved_snapshot(channel_key)
+        if policy["catalog_hash"] != loaded.content_hash:
+            raise ValidationFailureError("creative quality catalog hash mismatch")
+        return {
+            **policy,
+            "channel_key": channel_key,
+        }
 
     def load_catalogs(self, template_key: str) -> LoadedM1Catalogs:
         registry = ConfigRegistryService(self.session)

@@ -25,6 +25,7 @@ def test_config_yaml_validates(db_session) -> None:
         "cloud_media_upload_status_catalog",
         "cloud_media_verification_status_catalog",
         "capability_matrix",
+        "creative_quality_policy_catalog",
         "context_pack_purpose_catalog",
         "daily_run_status_catalog",
         "decision_rights_policy",
@@ -47,6 +48,7 @@ def test_config_yaml_validates(db_session) -> None:
         "gate_definition_catalog",
             "google_drive_connection_state_catalog",
             "google_drive_oauth_session_status_catalog",
+            "google_veo_model_price_catalog",
             "dashboard_language_catalog",
             "operator_user_role_catalog",
             "operator_user_status_catalog",
@@ -80,6 +82,7 @@ def test_config_yaml_validates(db_session) -> None:
         "media_provider_capability_matrix_catalog",
         "media_provider_budget_policy_catalog",
         "media_provider_routing_policy_catalog",
+        "pexels_policy_catalog",
         "provider_capability_catalog",
         "media_routing_result_catalog",
         "media_budget_state_catalog",
@@ -186,7 +189,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 157
+    assert catalog_count == 159
     assert role_count == 13
     assert metric_definition_count == 16
 

@@ -4,6 +4,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.caption_voice_quality import (
+    CanonicalCaptionCue,
+    CaptionBBoxMetrics,
+    CaptionReadingMetrics,
+    CreativeQualityGateResult,
+)
+
 
 VerificationStatus = Literal["PASS", "BLOCK"]
 
@@ -267,6 +274,12 @@ class CanonicalTimelineSegment(BaseModel):
     caption_start_ms: int | None = Field(default=None, ge=0)
     caption_end_ms: int | None = Field(default=None, gt=0)
     caption_lines: list[str] = Field(default_factory=list)
+    caption_cues: list[CanonicalCaptionCue] = Field(default_factory=list)
+    caption_cue_ids: list[str] = Field(default_factory=list)
+    caption_spoken_token_ids: list[str] = Field(default_factory=list)
+    caption_reading_metrics: list[CaptionReadingMetrics] = Field(default_factory=list)
+    caption_bbox_metrics: list[CaptionBBoxMetrics] = Field(default_factory=list)
+    caption_gate_results: list[CreativeQualityGateResult] = Field(default_factory=list)
     scene_start_ms: int = Field(ge=0)
     scene_end_ms: int = Field(gt=0)
     target_scene_duration_ms: int = Field(gt=0)
@@ -291,6 +304,17 @@ class CanonicalTimelineSegment(BaseModel):
             raise ValueError("TEMPORAL_SCENE_SPAN_INVALID")
         if self.target_scene_duration_ms != self.scene_end_ms - self.scene_start_ms:
             raise ValueError("TEMPORAL_SCENE_DURATION_MISMATCH")
+        if self.caption_cues:
+            cue_ids = [cue.cue_id for cue in self.caption_cues]
+            if len(cue_ids) != len(set(cue_ids)):
+                raise ValueError("CAPTION_CUE_ID_DUPLICATE")
+            if self.caption_cue_ids and self.caption_cue_ids != cue_ids:
+                raise ValueError("CAPTION_CUE_INDEX_MISMATCH")
+            cue_tokens = [token_id for cue in self.caption_cues for token_id in cue.spoken_token_ids]
+            if self.caption_spoken_token_ids and self.caption_spoken_token_ids != cue_tokens:
+                raise ValueError("CAPTION_TOKEN_INDEX_MISMATCH")
+            if any(cue.source_segment_ids != [self.segment_id] for cue in self.caption_cues):
+                raise ValueError("CAPTION_CUE_SEGMENT_MISMATCH")
         return self
 
 

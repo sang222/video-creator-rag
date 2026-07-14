@@ -87,11 +87,17 @@ class NativeRenderPlan(BaseModel):
     canonical_media_timeline_ref: str | None = None
     canonical_media_timeline_hash: str | None = None
     canonical_audio_asset_ref: str | None = None
+    canonical_caption_compilation_ref: str | None = None
+    canonical_caption_compilation_hash: str | None = None
+    canonical_caption_render_payload_hash: str | None = None
     scene_timing_source: str | None = None
     caption_timing_source: str | None = None
     parallel_timing_inputs: list[str] = Field(default_factory=list)
     visual_plan_ref: str
     visual_plan_hash: str
+    visual_direction_contract_ref: str | None = None
+    visual_direction_contract_hash: str | None = None
+    creative_gate_results: dict[str, Any] = Field(default_factory=dict)
     canvas_spec: CanvasSpec
     scenes: list[NativeRenderScene]
     global_motion_policy: dict[str, Any] = Field(default_factory=dict)
@@ -141,6 +147,14 @@ class CompiledNativeRenderManifest(BaseModel):
     canonical_media_timeline_ref: str | None = None
     canonical_media_timeline_hash: str | None = None
     canonical_audio_asset_ref: str | None = None
+    canonical_duration_ms: int | None = Field(default=None, gt=0)
+    canonical_caption_compilation_ref: str | None = None
+    canonical_caption_compilation_hash: str | None = None
+    canonical_caption_render_payload_hash: str | None = None
+    visual_direction_contract_ref: str | None = None
+    visual_direction_contract_hash: str | None = None
+    creative_gate_results: dict[str, Any] = Field(default_factory=dict)
+    render_purpose: str = "PRODUCTION"
     manifest_hash: str
     created_at: datetime
 
@@ -157,6 +171,7 @@ class FFmpegCommandManifest(BaseModel):
     generated_filtergraph_path: str
     generated_text_files: list[str]
     generated_caption_path: str | None
+    generated_file_checksums: dict[str, str] = Field(default_factory=dict)
     output_file: str
     output_profile: str
     sanitized_argv: list[str]
@@ -166,6 +181,10 @@ class FFmpegCommandManifest(BaseModel):
     canonical_media_timeline_ref: str | None = None
     canonical_media_timeline_hash: str | None = None
     canonical_audio_asset_ref: str | None = None
+    canonical_duration_ms: int | None = Field(default=None, gt=0)
+    canonical_caption_compilation_ref: str | None = None
+    canonical_caption_compilation_hash: str | None = None
+    canonical_caption_render_payload_hash: str | None = None
     command_hash: str
     created_at: datetime
 

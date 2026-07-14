@@ -1,0 +1,168 @@
+catalog_key: creative_quality_policy_catalog
+catalog_version: "1.0.0"
+schema_version: cqr1.creative-quality-policy.v1
+status: active
+items:
+  - channel_key: small-team-ai
+    policy_version: small-team-ai.creative-quality.v1
+    narration_pacing_policy:
+      silence_gap_threshold_ms: 350
+      hook_window_ms: 8000
+      body_active_speech_wpm:
+        pass: [145, 170]
+        review: [135, 180]
+        block_above: 180
+        extreme_slow_block_below: 120
+      body_delivered_wpm:
+        pass: [130, 155]
+        review: [120, 165]
+        block_above: 165
+        extreme_slow_block_below: 105
+      hook_first_8s_active_wpm:
+        pass_max: 180
+        review_max: 188
+        block_above: 188
+      comma_pause_ms:
+        pass: [180, 320]
+        review: [140, 380]
+        block_below: 140
+      sentence_pause_ms:
+        pass: [320, 650]
+        review: [250, 800]
+        block_below: 250
+      section_pause_ms:
+        pass: [600, 1200]
+        review: [450, 1500]
+        block_below: 450
+      emergency_atempo:
+        max_abs_delta_percent_without_human: 2
+        human_approval_required_above_percent: 2
+        block_above_percent: 3
+    caption_style_policy:
+      font_family: Arial
+      outline_ratio: 0.055
+      shadow_ratio: 0.025
+      global:
+        max_lines_per_cue: 2
+        cue_duration_seconds:
+          pass: [1.0, 6.0]
+          review: [0.8, 7.0]
+          block_outside: [0.8, 7.0]
+        reading_speed_cps:
+          pass_average_max: 15
+          review_average_max: 17.5
+          block_average_above: 17.5
+          pass_p95_max: 17
+          review_p95_max: 20
+          block_any_above: 20
+      longform_16_9:
+        font_scale_pass: [0.044, 0.050]
+        font_scale_review: [0.040, 0.054]
+        block_outside: [0.040, 0.054]
+        max_chars_per_line_pass: 42
+        max_chars_per_line_review: 46
+        max_chars_per_line_block: 46
+        max_block_width_pass: 0.68
+        max_block_width_review: 0.74
+        max_block_width_block: 0.74
+        bottom_safe_margin_pass: 0.08
+        bottom_safe_margin_review_min: 0.05
+      shorts_9_16:
+        font_scale_pass: [0.046, 0.054]
+        font_scale_review: [0.042, 0.058]
+        block_outside: [0.042, 0.058]
+        max_chars_per_line_pass: 32
+        max_chars_per_line_review: 36
+        max_chars_per_line_block: 36
+        max_block_width_pass: 0.84
+        max_block_width_review: 0.88
+        max_block_width_block: 0.88
+        bottom_safe_margin_pass: 0.12
+        bottom_safe_margin_review_min: 0.08
+    caption_sync_policy:
+      median_abs_start_offset_ms: {pass_max: 80, review_max: 120, block_above: 120}
+      p95_abs_start_offset_ms: {pass_max: 150, review_max: 220, block_above: 220}
+      max_abs_start_offset_ms: {pass_max: 220, review_max: 300, block_above: 300}
+      median_abs_end_offset_ms: {pass_max: 100, review_max: 150, block_above: 150}
+      end_of_video_drift_ms: {pass_max: 150, review_max: 250, block_above: 250}
+      spoken_token_coverage_required: 1.0
+      unexpected_cue_overlap_block: true
+    visual_language_policy:
+      treatment_mode: grounded-modern-documentary
+      realism_level: photoreal
+      human_presence_policy: allowed_but_not_required
+      environment_type: modern-real-world-workspace
+      industry_context: media-production-operations
+      time_of_day: daylight-or-soft-interior
+      lighting_direction: natural_or_soft_motivated
+      lighting_temperature: neutral_warm
+      palette: [neutral_warm, charcoal, soft_blue_accent]
+      contrast: moderate
+      saturation: moderate_low
+      camera_distance: medium_and_detail
+      lens_feel: natural_35_to_50mm
+      camera_movement: restrained
+      motion_intensity: low_to_medium
+      framing_rule: subject_safe_with_negative_space
+      depth_of_field_style: natural_shallow_when_motivated
+      texture_grain: subtle
+      tone_mode: calm_operator_documentary
+      prohibited_cliches:
+        - random handshake stock
+        - abstract neon tech tunnel
+        - generic trading chart unless script-specific
+        - meaningless office laptop shot
+        - fake software interface
+      channel_identity_markers:
+        - native workflow graphics as explanatory backbone
+        - grounded real-world inserts
+        - restrained camera language
+    visual_continuity_policy:
+      semantic_match_score: {pass_min: 0.78, review_min: 0.68, block_below: 0.68}
+      adjacency_continuity_score: {pass_min: 0.70, review_min: 0.58, block_below: 0.58}
+      ranking_weights:
+        semantic_relevance: 0.36
+        visual_direction_fit: 0.18
+        previous_scene_continuity: 0.12
+        next_scene_continuity: 0.08
+        crop_safety: 0.08
+        motion_suitability: 0.07
+        technical_quality: 0.05
+        originality_bonus: 0.03
+      explicit_risk_penalties:
+        prior_use_per_count: 0.03
+        prior_use_cap: 0.12
+        exact_asset_reuse: 0.08
+        unknown_logo_or_text: 0.02
+        unknown_person_identity: 0.02
+        unknown_brand_or_trademark: 0.02
+        identifiable_person_present: 0.04
+        total_cap: 0.30
+      veo_duration_fit:
+        approved_output_duration_seconds: 8.0
+        exact_tolerance_seconds: 0.25
+        small_bridge_max_seconds: 2.0
+        minimum_useful_trim_seconds: 4.0
+        narration_timing_change_allowed: false
+        speed_change_allowed: false
+        loop_allowed: false
+      hard_conflicts_block: true
+      cross_provider_cut_requires_both_scores_pass: true
+      provider_source_rules:
+        NATIVE_VISUAL: mechanism_workflow_data_ui_text_comparison_timeline
+        PEXELS_SUPPORTING: grounded_documentary_context
+        GOOGLE_VEO: hero_metaphor_signature_or_transition
+    creative_media_qc_policy:
+      aggregate_order: [BLOCK, REVIEW_REQUIRED, PASS]
+      technical_pass_does_not_imply_creative_pass: true
+      final_duration_consistency_ms: {pass_max: 100, review_max: 250, block_above: 250}
+    human_watchability_policy:
+      uninterrupted_full_watch_required: true
+      playback_speed: 1.0
+      optional_flagged_spot_check_speed: 0.75
+      dimensions: 8
+      pass_total_min: 32
+      pass_dimension_min: 3
+      repair_total_range: [24, 31]
+      critical_issue_overrides_score: true
+      codex_may_mark_pass: false

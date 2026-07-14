@@ -362,6 +362,10 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="VCOS_PA1R_VEO_SMOKE_ENABLED",
     )
+    cqr1_paid_canary_enabled: bool = Field(
+        default=False,
+        validation_alias="VCOS_CQR1_PAID_CANARY_ENABLED",
+    )
     pexels_real_search_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("PEXELS_REAL_SEARCH_ENABLED", "VCOS_PEXELS_REAL_SEARCH_ENABLED"),

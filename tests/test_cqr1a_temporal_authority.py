@@ -416,10 +416,9 @@ def test_gate_rejects_missing_or_multiple_final_audio_authorities():
 
 def test_native_render_plan_strict_mode_requires_ref_hash_and_matching_timeline(tmp_path: Path):
     *_, timeline, _ = authority_components()
-    valid = strict_plan(tmp_path, timeline)
-    manifest = NativeMotionCompiler().compile(valid, canonical_timeline=timeline)
-    assert manifest.canonical_media_timeline_ref == valid.canonical_media_timeline_ref
-    assert manifest.canonical_media_timeline_hash == timeline.timeline_hash
+    pre_cqr1b = strict_plan(tmp_path, timeline)
+    with pytest.raises(ValueError, match="CAPTION_AUTHORITY_MISSING"):
+        NativeMotionCompiler().compile(pre_cqr1b, canonical_timeline=timeline)
     missing = strict_plan(tmp_path, timeline, canonical_media_timeline_ref=None)
     with pytest.raises(ValueError, match="TEMPORAL_CANONICAL_TIMELINE_REQUIRED"):
         NativeMotionCompiler().compile(missing, canonical_timeline=timeline)

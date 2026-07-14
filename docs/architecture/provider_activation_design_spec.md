@@ -4,6 +4,14 @@ Date: 2026-07-06
 
 Status: `DESIGN_ONLY`
 
+CQR1 adds one bounded exception, not general activation: run
+`pa1r-cqr1-20260714-paid-canary-001` may execute only after its offline and
+permission preflight passes, through a fresh one-attempt ledger, with total cap
+USD 3.00. The exception remains non-production/not-publishable and grants no
+YouTube, fallback, retry, profile mutation or dashboard execution authority.
+Unknown ElevenLabs Forced Alignment permission blocks before every provider
+probe and keeps provider call count at zero.
+
 Applies after:
 
 - `CODE_CLOSEOUT_PROD_V1=GO`

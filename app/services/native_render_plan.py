@@ -7,6 +7,7 @@ from typing import Any
 
 from app.contracts.native_renderer import GateResult, NativeRenderPlan
 from app.contracts.temporal_authority import CanonicalMediaTimeline
+from app.services.caption_ass import caption_render_payload
 
 
 def stable_hash(value: Any) -> str:
@@ -16,6 +17,30 @@ def stable_hash(value: Any) -> str:
 def canonical_plan_hash(plan: NativeRenderPlan) -> str:
     data = plan.model_dump(mode="json", exclude={"content_hash", "created_at", "status"})
     return stable_hash(data)
+
+
+def canonical_caption_cues(timeline: CanonicalMediaTimeline | None) -> list[Any]:
+    if timeline is None:
+        return []
+    top_level = list(getattr(timeline, "caption_cues", []) or [])
+    if top_level:
+        return top_level
+    return [cue for segment in timeline.segments for cue in list(getattr(segment, "caption_cues", []) or [])]
+
+
+def canonical_caption_compilation_hash(timeline: CanonicalMediaTimeline, cues: list[Any]) -> str:
+    direct = getattr(timeline, "caption_compilation_hash", None)
+    if direct:
+        return str(direct)
+    metrics = timeline.qc_metrics or {}
+    recorded = metrics.get("caption_compilation_hash")
+    if recorded:
+        return str(recorded)
+    return stable_hash([item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in cues])
+
+
+def canonical_caption_render_hash(cues: list[Any]) -> str:
+    return stable_hash(caption_render_payload(cues))
 
 
 class NativeRenderPlanValidator:
@@ -43,8 +68,15 @@ class NativeRenderPlanValidator:
         results.append(self._gate("SceneTimelineGate", not overlap, "SCENE_TIMELINE_OVERLAP"))
         segments = [seg for scene in plan.scenes for seg in scene.source_segment_ids]
         results.append(self._gate("SegmentCoverageGate", bool(segments) and len(segments) == len(set(segments)), "SEGMENT_COVERAGE_INVALID"))
-        srt_exists = Path(plan.srt_ref).is_file() if execution else bool(plan.srt_ref)
-        results.append(self._gate("CaptionTimelineGate", srt_exists, "SRT_MISSING"))
+        canonical_cues = canonical_caption_cues(canonical_timeline)
+        legacy_caption_exists = Path(plan.srt_ref).is_file() if execution else bool(plan.srt_ref)
+        results.append(
+            self._gate(
+                "CaptionTimelineGate",
+                bool(canonical_cues) if plan.temporal_authority_mode == "CANONICAL_STRICT" else legacy_caption_exists,
+                "CAPTION_AUTHORITY_MISSING",
+            )
+        )
         if plan.temporal_authority_mode == "CANONICAL_STRICT":
             refs_present = bool(
                 plan.canonical_media_timeline_ref
@@ -88,6 +120,77 @@ class NativeRenderPlanValidator:
                         "TEMPORAL_AUDIO_ASSET_MISMATCH",
                     )
                 )
+                timeline_endpoint_ok = bool(
+                    canonical_timeline.segments
+                    and max(item.scene_end_ms for item in canonical_timeline.segments)
+                    == canonical_timeline.audio_duration_ms
+                )
+                plan_endpoint_ok = bool(
+                    plan.scenes
+                    and max(item.narration_end_ms for item in plan.scenes)
+                    == canonical_timeline.audio_duration_ms
+                )
+                results.append(
+                    self._gate(
+                        "CanonicalTimelineDurationEndpointGate",
+                        timeline_endpoint_ok and plan_endpoint_ok,
+                        "TEMPORAL_AUDIO_ENDPOINT_MISMATCH",
+                    )
+                )
+                metrics = canonical_timeline.qc_metrics or {}
+                expected_caption_hash = metrics.get("caption_compilation_hash")
+                expected_caption_ref = metrics.get("caption_compilation_ref")
+                expected_render_hash = metrics.get("caption_render_payload_hash")
+                actual_render_hash = canonical_caption_render_hash(canonical_cues) if canonical_cues else None
+                caption_refs_ok = bool(
+                    canonical_cues
+                    and expected_caption_hash
+                    and expected_caption_ref == f"caption-compilation:{expected_caption_hash}"
+                    and plan.canonical_caption_compilation_ref == expected_caption_ref
+                    and plan.canonical_caption_compilation_hash == expected_caption_hash
+                )
+                results.append(
+                    self._gate(
+                        "CanonicalCaptionCompilationReferenceGate",
+                        caption_refs_ok,
+                        "CAPTION_CANONICAL_COMPILATION_REQUIRED",
+                    )
+                )
+                render_payload_ok = bool(
+                    expected_render_hash
+                    and actual_render_hash == expected_render_hash
+                    and plan.canonical_caption_render_payload_hash == expected_render_hash
+                )
+                results.append(
+                    self._gate(
+                        "CanonicalCaptionRenderPayloadGate",
+                        render_payload_ok,
+                        "CAPTION_RENDER_PAYLOAD_HASH_MISMATCH",
+                    )
+                )
+                render_style = metrics.get("caption_render_style")
+                results.append(
+                    self._gate(
+                        "CanonicalCaptionRenderStyleGate",
+                        isinstance(render_style, dict)
+                        and bool(render_style.get("policy_hash"))
+                        and bool(render_style.get("style_version")),
+                        "CAPTION_RENDER_STYLE_REQUIRED",
+                    )
+                )
+                no_independent_srt = bool(
+                    expected_caption_hash
+                    and plan.srt_ref == expected_caption_ref
+                    and plan.srt_hash == expected_caption_hash
+                    and not Path(plan.srt_ref).is_file()
+                )
+                results.append(
+                    self._gate(
+                        "CanonicalCaptionArtifactGate",
+                        no_independent_srt,
+                        "SYNC_PARALLEL_TIMELINE",
+                    )
+                )
                 timing_by_scene = {
                     item.segment_id: (item.scene_start_ms, item.scene_end_ms, item.target_scene_duration_ms)
                     for item in canonical_timeline.segments
@@ -104,7 +207,70 @@ class NativeRenderPlanValidator:
                         "TEMPORAL_SCENE_NOT_DERIVED_FROM_TIMELINE",
                     )
                 )
+                caption_gate_names = (
+                    "NarrationPacingGate",
+                    "CaptionCompilationGate",
+                    "CaptionLayoutGate",
+                    "CaptionSafeAreaGate",
+                    "CaptionAudioSyncGate",
+                    "CaptionCoverageGate",
+                    "TimelineDriftGate",
+                )
+                cqr1_render = plan.purpose in {
+                    "CQR1_LOCAL_GOLDEN_FIXTURE",
+                    "CQR1_CONTROLLED_PAID_CANARY",
+                }
+                caption_gate_missing: list[str] = []
+                caption_gate_blocked: list[str] = []
+                for gate_name in caption_gate_names:
+                    raw = plan.creative_gate_results.get(gate_name)
+                    verdict = (
+                        raw.get("result", raw.get("status"))
+                        if isinstance(raw, dict)
+                        else raw
+                    )
+                    if verdict == "BLOCK":
+                        caption_gate_blocked.append(gate_name)
+                    elif cqr1_render and verdict not in {"PASS", "REVIEW_REQUIRED"}:
+                        caption_gate_missing.append(gate_name)
+                results.append(
+                    self._gate(
+                        "CQR1CaptionCreativeGateEvidenceGate",
+                        not caption_gate_blocked and not caption_gate_missing,
+                        "CAPTION_CREATIVE_GATE_EVIDENCE_MISSING_OR_BLOCKED",
+                        [*caption_gate_blocked, *caption_gate_missing],
+                    )
+                )
         unresolved: list[str] = []
+        provider_scenes = [
+            scene for scene in plan.scenes if scene.visual_treatment in {"STOCK_VIDEO", "AI_HERO_VIDEO"}
+        ]
+        if plan.temporal_authority_mode == "CANONICAL_STRICT" and provider_scenes:
+            visual_refs_ok = bool(plan.visual_direction_contract_ref and plan.visual_direction_contract_hash)
+            results.append(
+                self._gate(
+                    "VisualDirectionContractReferenceGate",
+                    visual_refs_ok,
+                    "VISUAL_DIRECTION_CONTRACT_REQUIRED",
+                )
+            )
+            required_creative = ("SceneSemanticMatchGate", "VisualContinuityGate", "AssetAdjacencyGate")
+            creative_ok = True
+            details: list[str] = []
+            for gate_name in required_creative:
+                raw = plan.creative_gate_results.get(gate_name)
+                verdict = raw.get("result") if isinstance(raw, dict) else raw
+                if verdict not in {"PASS", "REVIEW_REQUIRED"}:
+                    creative_ok = False
+                    details.append(gate_name)
+            results.append(
+                self._gate(
+                    "CreativeVisualGateEvidenceGate",
+                    creative_ok,
+                    "CREATIVE_VISUAL_GATE_EVIDENCE_MISSING_OR_BLOCKED",
+                    details,
+                )
+            )
         for scene in plan.scenes:
             resolved = {item.key for item in scene.resolved_asset_refs}
             unresolved.extend(f"{scene.scene_id}:{req.key}" for req in scene.asset_requirements if req.required and req.key not in resolved)
