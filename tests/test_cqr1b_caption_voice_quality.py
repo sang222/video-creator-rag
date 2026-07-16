@@ -130,6 +130,15 @@ def sync_policy() -> dict:
     }
 
 
+def final_cue_trailing_hold_policy(*, maximum_hold_ms: int = 1_000) -> dict:
+    return {
+        "policy_ref": "policy://fixture/final-cue-trailing-hold/v1",
+        "policy_version": "fixture-final-cue-trailing-hold/v1",
+        "maximum_hold_ms": maximum_hold_ms,
+        "target_endpoint": "CANONICAL_AUDIO_END",
+    }
+
+
 def authority_components(
     source: str = "A calm media workflow turns one approved script into a synchronized final video.",
     *,
@@ -360,6 +369,129 @@ def test_caption_compiler_maps_all_tokens_adds_explicit_lines_and_rehashes_timel
     assert all(event.text for event in result.track.ass_events)
     assert "\n" in result.track.srt_text
     assert result.track.compilation_gate.status == "PASS"
+
+
+def test_caption_compiler_holds_only_final_cue_through_bounded_canonical_tail_silence():
+    normalized, alignment, timeline = authority_components(trailing_ms=546)
+    original_words = alignment.verified_words
+    result = ReadableCaptionCompiler().compile(
+        normalized=normalized,
+        alignment=alignment,
+        timeline=timeline,
+        policy=caption_policy(),
+        final_cue_trailing_hold_policy=final_cue_trailing_hold_policy(),
+        aspect_ratio="16:9",
+    )
+    evidence = result.track.final_cue_trailing_hold
+    assert evidence is not None
+    assert evidence.status == "APPLIED"
+    assert evidence.hold_duration_ms == 546
+    assert evidence.caption_end_before_ms == alignment.verified_words[-1].end_ms
+    assert evidence.caption_end_after_ms == alignment.audio_duration_ms
+    assert evidence.spoken_token_ids_unchanged is True
+    assert evidence.spoken_word_timing_unchanged is True
+    assert alignment.verified_words == original_words
+    assert result.track.cues[-1].caption_end_ms == alignment.audio_duration_ms
+    assert [
+        token_id for cue in result.track.cues for token_id in cue.spoken_token_ids
+    ] == [token.token_id for token in normalized.spoken_tokens]
+    assert result.timeline.qc_metrics["caption_final_cue_trailing_hold"] == evidence.model_dump(
+        mode="json"
+    )
+    sync = CaptionAudioSyncGate().evaluate(
+        timeline=result.timeline,
+        alignment=alignment,
+        policy=sync_policy(),
+    )
+    assert sync.status == "PASS"
+    assert sync.metrics["raw_final_cue_end_offset_ms"] == 546
+    assert sync.metrics["authorized_final_cue_trailing_hold_ms"] == 546
+    assert TimelineDriftGate().evaluate(
+        timeline=result.timeline,
+        final_audio_duration_ms=alignment.audio_duration_ms,
+        policy=sync_policy(),
+    ).status == "PASS"
+
+
+def test_caption_compiler_blocks_trailing_hold_above_explicit_maximum():
+    normalized, alignment, timeline = authority_components(trailing_ms=1_001)
+    with pytest.raises(ValueError, match="CAPTION_TRAILING_HOLD_EXCEEDS_POLICY"):
+        ReadableCaptionCompiler().compile(
+            normalized=normalized,
+            alignment=alignment,
+            timeline=timeline,
+            policy=caption_policy(),
+            final_cue_trailing_hold_policy=final_cue_trailing_hold_policy(),
+            aspect_ratio="16:9",
+        )
+
+
+def test_caption_compiler_blocks_trailing_hold_when_canonical_endpoint_is_inconsistent():
+    normalized, alignment, timeline = authority_components(trailing_ms=546)
+    final_segment = timeline.segments[-1]
+    invalid_scene_end = timeline.audio_duration_ms - 1
+    invalid_timeline = timeline.model_copy(
+        update={
+            "segments": [
+                *timeline.segments[:-1],
+                final_segment.model_copy(
+                    update={
+                        "scene_end_ms": invalid_scene_end,
+                        "target_scene_duration_ms": invalid_scene_end
+                        - final_segment.scene_start_ms,
+                    }
+                ),
+            ]
+        }
+    )
+    with pytest.raises(
+        ValueError,
+        match="CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID",
+    ):
+        ReadableCaptionCompiler().compile(
+            normalized=normalized,
+            alignment=alignment,
+            timeline=invalid_timeline,
+            policy=caption_policy(),
+            final_cue_trailing_hold_policy=final_cue_trailing_hold_policy(),
+            aspect_ratio="16:9",
+        )
+
+
+def test_caption_sync_blocks_final_cue_held_to_audio_end_without_compiler_evidence():
+    _, alignment, _, compiled = compiled_components()
+    segment = compiled.timeline.segments[-1]
+    final_cue = segment.caption_cues[-1]
+    audio_end = alignment.audio_duration_ms + 546
+    extended_cue = final_cue.model_copy(update={"caption_end_ms": audio_end})
+    extended_segment = segment.model_copy(
+        update={
+            "caption_end_ms": audio_end,
+            "caption_cues": [*segment.caption_cues[:-1], extended_cue],
+        }
+    )
+    unauthorized_timeline = compiled.timeline.model_copy(
+        update={
+            "audio_duration_ms": audio_end,
+            "segments": [
+                *compiled.timeline.segments[:-1],
+                extended_segment.model_copy(
+                    update={
+                        "scene_end_ms": audio_end,
+                        "target_scene_duration_ms": audio_end - extended_segment.scene_start_ms,
+                    }
+                ),
+            ],
+        }
+    )
+    unauthorized_alignment = alignment.model_copy(update={"audio_duration_ms": audio_end})
+    gate = CaptionAudioSyncGate().evaluate(
+        timeline=unauthorized_timeline,
+        alignment=unauthorized_alignment,
+        policy=sync_policy(),
+    )
+    assert gate.status == "BLOCK"
+    assert "SYNC_UNAUTHORIZED_FINAL_CUE_TRAILING_HOLD" in gate.reason_codes
 
 
 def test_display_caption_allows_acronym_and_number_recompaction_but_blocks_rewrite():

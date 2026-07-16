@@ -13,7 +13,7 @@ from app.contracts.visual_direction import (
 from app.services.native_render_plan import stable_hash
 
 
-VEO_PROMPT_COMPILER_VERSION = "veo-prompt-compiler/v1.0.0"
+VEO_PROMPT_COMPILER_VERSION = "veo-prompt-compiler/v1.1.0"
 
 _BASE_NEGATIVE_CONSTRAINTS = (
     "text",
@@ -31,6 +31,23 @@ _NO_CHARACTER_CONSTRAINTS = (
     "presenter",
     "speaker",
     "human likeness",
+)
+_ANALOG_FILM_STRIP_NEGATIVE_CONSTRAINTS = (
+    "machine",
+    "robotics",
+    "screen",
+    "display",
+    "panel",
+    "button",
+    "interface",
+    "fake UI",
+    "diagram",
+    "text",
+    "letter",
+    "number",
+    "label",
+    "logo",
+    "person",
 )
 
 
@@ -80,6 +97,10 @@ class VeoPromptCompiler:
         constraints = [*_BASE_NEGATIVE_CONSTRAINTS, *visual_direction.prohibited_cliches]
         if mode == "NO_CHARACTER":
             constraints.extend(_NO_CHARACTER_CONSTRAINTS)
+        if _is_analog_film_strip_table_scene(intent):
+            # Keep this material metaphor from drifting into a literal editing
+            # machine, control surface, fake interface, or annotated diagram.
+            constraints.extend(_ANALOG_FILM_STRIP_NEGATIVE_CONSTRAINTS)
         constraints.extend(provider_policy.get("negative_constraints") or [])
         constraints.extend(provider_policy.get("forbidden_prompt_terms") or [])
         negative_constraints = _dedupe(constraints)
@@ -241,3 +262,13 @@ FixedVeoDurationPolicy = VeoFixedDurationPlanner
 
 def _dedupe(values: Iterable[Any]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+
+
+def _is_analog_film_strip_table_scene(intent: SceneVisualIntent) -> bool:
+    description = " ".join(
+        value for value in (intent.semantic_intent, intent.subject_action) if value
+    ).casefold()
+    film_strip = any(token in description for token in ("film strip", "celluloid strip"))
+    analog_material = any(token in description for token in ("analog", "analogue", "celluloid"))
+    tabletop = any(token in description for token in ("table", "tabletop", "matte surface"))
+    return film_strip and analog_material and tabletop

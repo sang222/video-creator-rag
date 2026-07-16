@@ -187,6 +187,9 @@ class AlignedWord(BaseModel):
 class ForcedAlignmentEvidence(BaseModel):
     provider_key: str = Field(min_length=1)
     provider_request_id: str | None = None
+    provider_request_id_availability: Literal[
+        "PRESENT", "NOT_EXPOSED_BY_ENDPOINT"
+    ]
     audio_asset_ref: str = Field(min_length=1)
     audio_duration_ms: int = Field(gt=0)
     spoken_text_hash: str = Field(min_length=1)
@@ -201,6 +204,15 @@ class ForcedAlignmentEvidence(BaseModel):
     content_hash: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def request_id_availability_is_truthful(self) -> "ForcedAlignmentEvidence":
+        if self.provider_request_id:
+            if self.provider_request_id_availability != "PRESENT":
+                raise ValueError("FORCED_ALIGNMENT_REQUEST_ID_AVAILABILITY_INVALID")
+        elif self.provider_request_id_availability != "NOT_EXPOSED_BY_ENDPOINT":
+            raise ValueError("FORCED_ALIGNMENT_REQUEST_ID_AVAILABILITY_INVALID")
+        return self
 
 
 class VerifiedNarrationWord(BaseModel):

@@ -235,6 +235,62 @@ def test_provider_timestamp_contract_parses_normalized_alignment_but_is_not_fina
     assert timeline.verified_alignment_ref.endswith(verified.content_hash)
 
 
+def test_provider_timestamp_parser_whitelists_only_boundary_whitespace():
+    normalized = SpokenTextNormalizer().normalize(
+        script_revision_id="boundary-whitespace",
+        source_text="Clear words stay aligned.",
+    )
+
+    def alignment(text: str) -> dict:
+        characters = list(text)
+        starts = [round(index * 0.08, 6) for index in range(len(characters))]
+        ends = [round(start + 0.05, 6) for start in starts]
+        return {
+            "characters": characters,
+            "character_start_times_seconds": starts,
+            "character_end_times_seconds": ends,
+        }
+
+    provider_text = f" {normalized.spoken_text} "
+    seed = ElevenLabsTimingResponseParser().parse(
+        response={
+            "alignment": alignment(provider_text),
+            "normalized_alignment": alignment(provider_text),
+            "request_id": "boundary-safe",
+        },
+        normalized=normalized,
+        audio_asset_ref="fixture://boundary-safe.mp3",
+        audio_duration_ms=5_000,
+        model_id="fixture-model",
+        voice_id="fixture-voice",
+    )
+    assert seed.timing_available is True
+    assert seed.timing_parse_warnings == [
+        "WHITELISTED_PROVIDER_BOUNDARY_WHITESPACE"
+    ]
+    assert "".join(
+        item.character for item in seed.normalized_character_alignment
+    ) == normalized.spoken_text
+    assert [
+        item.character_index for item in seed.normalized_character_alignment
+    ] == list(range(len(normalized.spoken_text)))
+
+    interior_text = normalized.spoken_text.replace("words", "words ", 1)
+    blocked = ElevenLabsTimingResponseParser().parse(
+        response={
+            "alignment": alignment(interior_text),
+            "normalized_alignment": alignment(interior_text),
+        },
+        normalized=normalized,
+        audio_asset_ref="fixture://interior-mismatch.mp3",
+        audio_duration_ms=5_000,
+        model_id="fixture-model",
+        voice_id="fixture-voice",
+    )
+    assert blocked.timing_available is False
+    assert "NORMALIZED_ALIGNMENT_TEXT_MISMATCH" in blocked.timing_parse_warnings
+
+
 def test_forced_alignment_request_fixture_transport_and_response_parser():
     normalized, _, forced_raw, seed, *_ = authority_components()
     request = ElevenLabsForcedAlignmentRequestBuilder().build(audio_asset_ref=seed.audio_asset_ref, normalized=normalized)
@@ -256,6 +312,110 @@ def test_forced_alignment_request_fixture_transport_and_response_parser():
     assert all(item.source_spoken_token_ids for item in evidence.words)
     assert evidence.characters[0].character == "A" and evidence.alignment_loss == 0.01
     assert transport.provider_call_made is False and transport.network_call_made is False
+
+
+def test_forced_alignment_parser_whitelists_empty_word_entry_without_weakening_coverage():
+    normalized = SpokenTextNormalizer().normalize(
+        script_revision_id="forced-empty-word",
+        source_text="Clear words stay aligned.",
+    )
+    _, forced_raw = fixture_alignment_response(normalized, duration_ms=5_000)
+    forced_raw["words"].insert(
+        0,
+        {"text": "", "start": 0.0, "end": 0.01, "type": "word"},
+    )
+    evidence = ElevenLabsForcedAlignmentResponseParser().parse(
+        response=forced_raw,
+        normalized=normalized,
+        audio_asset_ref="fixture://forced-empty-word.mp3",
+        audio_duration_ms=5_000,
+    )
+    assert evidence.verification_status == "PASS"
+    assert evidence.missing_tokens == [] and evidence.extra_words == []
+    assert "WHITELISTED_FORCED_ALIGNMENT_EMPTY_WORD_ENTRY" in evidence.warnings
+    assert len(evidence.words) == len(normalized.spoken_tokens)
+
+    invalid = json.loads(json.dumps(forced_raw))
+    invalid["words"][0].update(start=5.1, end=5.2)
+    with pytest.raises(ValueError, match="AUDIO_BOUNDS"):
+        ElevenLabsForcedAlignmentResponseParser().parse(
+            response=invalid,
+            normalized=normalized,
+            audio_asset_ref="fixture://forced-empty-word-invalid.mp3",
+            audio_duration_ms=5_000,
+        )
+
+
+def test_forced_alignment_parser_whitelists_zero_duration_characters_only():
+    normalized = SpokenTextNormalizer().normalize(
+        script_revision_id="forced-zero-duration-character",
+        source_text="Clear words stay aligned.",
+    )
+    _, forced_raw = fixture_alignment_response(normalized, duration_ms=5_000)
+    forced_raw["characters"] = [
+        {"text": "C", "start": 0.0, "end": 0.04},
+        {"text": "l", "start": 0.04, "end": 0.04},
+        {"text": ".", "start": 4.8, "end": 4.8},
+    ]
+    evidence = ElevenLabsForcedAlignmentResponseParser().parse(
+        response=forced_raw,
+        normalized=normalized,
+        audio_asset_ref="fixture://forced-zero-duration-character.mp3",
+        audio_duration_ms=5_000,
+    )
+    assert evidence.verification_status == "PASS"
+    assert evidence.missing_tokens == [] and evidence.extra_words == []
+    assert len(evidence.characters) == 1
+    assert evidence.characters[0].character == "C"
+    assert (
+        "WHITELISTED_FORCED_ALIGNMENT_ZERO_DURATION_CHARACTER_ENTRY"
+        in evidence.warnings
+    )
+
+    reversed_timing = json.loads(json.dumps(forced_raw))
+    reversed_timing["characters"][1].update(start=0.05, end=0.04)
+    with pytest.raises(ValueError, match="AUDIO_BOUNDS"):
+        ElevenLabsForcedAlignmentResponseParser().parse(
+            response=reversed_timing,
+            normalized=normalized,
+            audio_asset_ref="fixture://forced-character-reversed.mp3",
+            audio_duration_ms=5_000,
+        )
+
+    outside_audio = json.loads(json.dumps(forced_raw))
+    outside_audio["characters"][2].update(start=5.1, end=5.1)
+    with pytest.raises(ValueError, match="AUDIO_BOUNDS"):
+        ElevenLabsForcedAlignmentResponseParser().parse(
+            response=outside_audio,
+            normalized=normalized,
+            audio_asset_ref="fixture://forced-character-outside.mp3",
+            audio_duration_ms=5_000,
+        )
+
+
+def test_forced_alignment_parser_records_request_id_unavailable_without_fabrication():
+    normalized = SpokenTextNormalizer().normalize(
+        script_revision_id="forced-request-id-unavailable",
+        source_text="Clear words stay aligned.",
+    )
+    _, forced_raw = fixture_alignment_response(normalized, duration_ms=5_000)
+    forced_raw.pop("request_id")
+    evidence = ElevenLabsForcedAlignmentResponseParser().parse(
+        response=forced_raw,
+        response_headers={},
+        normalized=normalized,
+        audio_asset_ref="file-sha256:forced-request-id-unavailable",
+        audio_duration_ms=5_000,
+    )
+
+    assert evidence.provider_request_id is None
+    assert (
+        evidence.provider_request_id_availability
+        == "NOT_EXPOSED_BY_ENDPOINT"
+    )
+    assert "FORCED_ALIGNMENT_REQUEST_ID_NOT_EXPOSED_BY_ENDPOINT" in evidence.warnings
+    assert evidence.verification_status == "PASS"
+    assert evidence.missing_tokens == [] and evidence.extra_words == []
 
 
 def test_missing_provider_or_forced_alignment_blocks_strict_reconciliation():

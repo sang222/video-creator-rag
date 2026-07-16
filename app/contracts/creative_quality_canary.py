@@ -7,6 +7,50 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 CQR1_RUN_ID = "pa1r-cqr1-20260714-paid-canary-001"
+CQR1_PAID_CANARY_002_RUN_ID = "pa1r-cqr1-20260715-paid-canary-002"
+CQR1_PAID_CANARY_003_RUN_ID = "pa1r-cqr1-20260716-paid-canary-003"
+CQR1_PAID_CANARY_004_RUN_ID = "pa1r-cqr1-20260716-paid-canary-004"
+CQR1_PAID_CANARY_005_RUN_ID = "pa1r-cqr1-20260716-paid-canary-005"
+CQR1_PAID_CANARY_006_RUN_ID = "pa1r-cqr1-20260716-paid-canary-006"
+CQR1_PAID_CANARY_007_RUN_ID = "pa1r-cqr1-20260716-paid-canary-007"
+CQR1_PAID_CANARY_008_RUN_ID = "pa1r-cqr1-20260716-paid-canary-008"
+CQR1_PAID_CANARY_009_RUN_ID = "pa1r-cqr1-20260716-paid-canary-009"
+CQR1_TTS_REUSE_RUN_IDS = frozenset(
+    {
+        CQR1_PAID_CANARY_003_RUN_ID,
+        CQR1_PAID_CANARY_004_RUN_ID,
+        CQR1_PAID_CANARY_005_RUN_ID,
+        CQR1_PAID_CANARY_006_RUN_ID,
+        CQR1_PAID_CANARY_007_RUN_ID,
+        CQR1_PAID_CANARY_008_RUN_ID,
+        CQR1_PAID_CANARY_009_RUN_ID,
+    }
+)
+CQR1_ALIGNMENT_REUSE_RUN_IDS = frozenset(
+    {
+        CQR1_PAID_CANARY_005_RUN_ID,
+        CQR1_PAID_CANARY_006_RUN_ID,
+        CQR1_PAID_CANARY_007_RUN_ID,
+        CQR1_PAID_CANARY_008_RUN_ID,
+        CQR1_PAID_CANARY_009_RUN_ID,
+    }
+)
+CQR1_VISUAL_PROVIDER_REUSE_RUN_IDS = frozenset(
+    {CQR1_PAID_CANARY_008_RUN_ID, CQR1_PAID_CANARY_009_RUN_ID}
+)
+CQR1_APPROVED_RUN_IDS = frozenset(
+    {
+        CQR1_RUN_ID,
+        CQR1_PAID_CANARY_002_RUN_ID,
+        CQR1_PAID_CANARY_003_RUN_ID,
+        CQR1_PAID_CANARY_004_RUN_ID,
+        CQR1_PAID_CANARY_005_RUN_ID,
+        CQR1_PAID_CANARY_006_RUN_ID,
+        CQR1_PAID_CANARY_007_RUN_ID,
+        CQR1_PAID_CANARY_008_RUN_ID,
+        CQR1_PAID_CANARY_009_RUN_ID,
+    }
+)
 CQR1_PURPOSE = "CQR1_CONTROLLED_PAID_CANARY"
 
 CreativeGateDecision = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
@@ -207,18 +251,25 @@ class CQR1CanaryApprovalScope(BaseModel):
 
     @model_validator(mode="after")
     def exact_scope(self) -> "CQR1CanaryApprovalScope":
-        if self.run_id != CQR1_RUN_ID or self.purpose != CQR1_PURPOSE:
+        if self.run_id not in CQR1_APPROVED_RUN_IDS or self.purpose != CQR1_PURPOSE:
             raise ValueError("CQR1_APPROVAL_SCOPE_MISMATCH")
-        limits = (
-            self.maximum_pexels_search_flows,
-            self.maximum_pexels_downloads,
-            self.maximum_elevenlabs_tts_generations,
-            self.maximum_elevenlabs_forced_alignment_calls,
-            self.maximum_google_veo_submits,
-            self.maximum_google_veo_outputs,
-            self.maximum_drive_archive_attempts,
+        expected_visual_provider_attempts = (
+            0 if self.run_id in CQR1_VISUAL_PROVIDER_REUSE_RUN_IDS else 1
         )
-        if any(value != 1 for value in limits):
+        expected_tts_generations = 0 if self.run_id in CQR1_TTS_REUSE_RUN_IDS else 1
+        expected_forced_alignment_calls = (
+            0 if self.run_id in CQR1_ALIGNMENT_REUSE_RUN_IDS else 1
+        )
+        if (
+            self.maximum_pexels_search_flows != expected_visual_provider_attempts
+            or self.maximum_pexels_downloads != expected_visual_provider_attempts
+            or self.maximum_google_veo_submits != expected_visual_provider_attempts
+            or self.maximum_google_veo_outputs != expected_visual_provider_attempts
+            or self.maximum_drive_archive_attempts != 1
+            or self.maximum_elevenlabs_tts_generations != expected_tts_generations
+            or self.maximum_elevenlabs_forced_alignment_calls
+            != expected_forced_alignment_calls
+        ):
             raise ValueError("CQR1_APPROVAL_ONE_SHOT_LIMIT_MISMATCH")
         return self
 
@@ -228,9 +279,9 @@ class CQR1ProviderCallLedgerEntry(BaseModel):
     provider: str = Field(min_length=1)
     operation: str = Field(min_length=1)
     paid: bool
-    status: Literal["PLANNED", "EXECUTING", "SUCCEEDED", "FAILED"] = "PLANNED"
+    status: Literal["PLANNED", "EXECUTING", "REUSED", "SUCCEEDED", "FAILED"] = "PLANNED"
     attempt_count: int = Field(default=0, ge=0, le=1)
-    max_attempts: Literal[1] = 1
+    max_attempts: int = Field(default=1, ge=0, le=1)
     output_count: int = Field(default=0, ge=0, le=1)
     idempotency_key_hash: str = Field(min_length=1)
     provider_call_made: bool = False
@@ -239,6 +290,31 @@ class CQR1ProviderCallLedgerEntry(BaseModel):
     not_publishable: Literal[True] = True
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def reused_evidence_is_non_attempted(self) -> "CQR1ProviderCallLedgerEntry":
+        if self.status == "REUSED":
+            expected_evidence_modes = {
+                "elevenlabs_tts": "IMMUTABLE_IMPORTED_TTS",
+                "elevenlabs_forced_alignment": "IMMUTABLE_IMPORTED_ALIGNMENT",
+                "pexels_search": "IMMUTABLE_IMPORTED_PEXELS_SEARCH",
+                "pexels_download": "IMMUTABLE_IMPORTED_PEXELS_ASSET",
+                "google_veo_submit": "IMMUTABLE_IMPORTED_VEO_OPERATION",
+                "google_veo_output": "IMMUTABLE_IMPORTED_VEO_OUTPUT",
+            }
+            if (
+                self.operation_key not in expected_evidence_modes
+                or self.max_attempts != 0
+                or self.attempt_count != 0
+                or self.provider_call_made
+                or self.output_count != 0
+                or self.safe_evidence.get("evidence_mode")
+                != expected_evidence_modes.get(self.operation_key)
+            ):
+                raise ValueError("CQR1_REUSED_LEDGER_ENTRY_INVALID")
+        elif self.max_attempts == 0 and self.status != "PLANNED":
+            raise ValueError("CQR1_ZERO_ATTEMPT_LEDGER_ENTRY_INVALID")
+        return self
 
 
 class CQR1PaidCanaryPreflightResult(BaseModel):

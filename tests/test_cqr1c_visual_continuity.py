@@ -457,6 +457,63 @@ def test_veo_prompt_compiler_has_stable_anatomy_contract_negatives_and_no_provid
     assert set(visual_direction.prohibited_cliches) <= set(first.negative_constraints)
 
 
+def test_veo_prompt_compiler_hardens_analog_film_table_metaphor_against_ui_and_machine_drift(
+    visual_direction,
+):
+    intent = SceneVisualIntent(
+        scene_id="scene-analog-film-hero",
+        semantic_intent=(
+            "loose analog film strips resting naturally on a plain matte charcoal table"
+        ),
+        subject_action=(
+            "two loose celluloid film strips form a restrained overlapping curve on the "
+            "matte tabletop while soft side light reveals their physical texture"
+        ),
+        target_duration_seconds=8,
+        previous_scene_summary="grounded documentary view of an editor at work",
+        next_scene_summary="restrained native synchronized timeline bridge",
+        camera_angle="slightly elevated",
+        shot_size="close-up",
+    )
+
+    compiled = VeoPromptCompiler().compile(intent, visual_direction)
+
+    required = {
+        "machine",
+        "robotics",
+        "screen",
+        "display",
+        "panel",
+        "button",
+        "interface",
+        "fake UI",
+        "diagram",
+        "text",
+        "letter",
+        "number",
+        "label",
+        "logo",
+        "person",
+    }
+    assert compiled.compiler_version == "veo-prompt-compiler/v1.1.0"
+    assert required <= set(compiled.negative_constraints)
+    assert required <= set(compiled.negative_prompt.split(", "))
+    assert compiled.provider_call_made is False
+
+
+def test_veo_prompt_compiler_keeps_analog_film_machine_negatives_scene_scoped(visual_direction):
+    intent = SceneVisualIntent(
+        scene_id="scene-grounded-editor",
+        semantic_intent="an editor reviews a synchronized media workflow at a workstation",
+        target_duration_seconds=8,
+    )
+
+    compiled = VeoPromptCompiler().compile(intent, visual_direction)
+
+    assert "machine" not in compiled.negative_constraints
+    assert "robotics" not in compiled.negative_constraints
+
+
 @pytest.mark.parametrize(
     ("target", "decision", "head", "tail", "bridge", "execution_allowed"),
     [

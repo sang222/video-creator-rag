@@ -452,18 +452,31 @@ class ElevenLabsTimingResponseParser:
         warnings: list[str] = []
         original = self._characters(response.get("alignment"), audio_duration_ms, "PROVIDER_ALIGNMENT")
         normalized_chars = self._characters(response.get("normalized_alignment"), audio_duration_ms, "PROVIDER_NORMALIZED_ALIGNMENT")
+        normalized_chars, boundary_whitespace_trimmed = self._trim_boundary_whitespace(
+            normalized_chars,
+            expected_text=normalized.spoken_text,
+        )
+        if boundary_whitespace_trimmed:
+            warnings.append("WHITELISTED_PROVIDER_BOUNDARY_WHITESPACE")
         reconstructed = "".join(item.character for item in sorted(normalized_chars, key=lambda item: item.character_index))
         if normalized_chars and reconstructed != normalized.spoken_text:
             warnings.append("NORMALIZED_ALIGNMENT_TEXT_MISMATCH")
         if not normalized_chars:
             warnings.append("PROVIDER_NORMALIZED_TIMING_MISSING")
-        timing_available = bool(normalized_chars) and not warnings
+        fatal_warnings = {
+            "NORMALIZED_ALIGNMENT_TEXT_MISMATCH",
+            "PROVIDER_NORMALIZED_TIMING_MISSING",
+        }
+        timing_available = bool(normalized_chars) and not any(
+            warning in fatal_warnings for warning in warnings
+        )
         headers = {key.casefold(): value for key, value in (response_headers or {}).items()}
         provider_request_id = str(response.get("request_id") or headers.get("request-id") or headers.get("x-request-id") or "") or None
         response_metadata = {
             "audio_payload_present": bool(response.get("audio_base64") or response.get("audio")),
             "alignment_present": bool(response.get("alignment")),
             "normalized_alignment_present": bool(response.get("normalized_alignment")),
+            "normalized_alignment_boundary_whitespace_trimmed": boundary_whitespace_trimmed,
         }
         payload = {
             "provider_key": "elevenlabs",
@@ -484,6 +497,36 @@ class ElevenLabsTimingResponseParser:
             "timing_parse_warnings": warnings,
         }
         return NarrationTimingSeed(**payload, content_hash=stable_hash(payload))
+
+    @staticmethod
+    def _trim_boundary_whitespace(
+        characters: list[CharacterAlignment],
+        *,
+        expected_text: str,
+    ) -> tuple[list[CharacterAlignment], bool]:
+        if not characters or expected_text != expected_text.strip():
+            return characters, False
+        reconstructed = "".join(item.character for item in characters)
+        if reconstructed == expected_text or reconstructed.strip() != expected_text:
+            return characters, False
+        leading = len(reconstructed) - len(reconstructed.lstrip())
+        trailing = len(reconstructed) - len(reconstructed.rstrip())
+        end = len(characters) - trailing if trailing else len(characters)
+        retained = characters[leading:end]
+        if "".join(item.character for item in retained) != expected_text:
+            return characters, False
+        return (
+            [
+                CharacterAlignment(
+                    character_index=index,
+                    character=item.character,
+                    start_ms=item.start_ms,
+                    end_ms=item.end_ms,
+                )
+                for index, item in enumerate(retained)
+            ],
+            True,
+        )
 
     @staticmethod
     def _characters(raw: Any, duration_ms: int, label: str) -> list[CharacterAlignment]:
@@ -566,38 +609,64 @@ class ElevenLabsForcedAlignmentResponseParser:
         raw_words = [item for item in (response.get("words") or []) if isinstance(item, dict) and item.get("type", "word") == "word"]
         words: list[AlignedWord] = []
         last_start = -1
-        for index, item in enumerate(raw_words, start=1):
+        skipped_empty_word_count = 0
+        for item in raw_words:
             start_ms = self._time_ms(item, "start")
             end_ms = self._time_ms(item, "end")
             if start_ms < last_start:
                 raise ValueError("TEMPORAL_ALIGNMENT_NON_MONOTONIC")
             if start_ms < 0 or end_ms <= start_ms or end_ms > audio_duration_ms:
                 raise ValueError("TEMPORAL_ALIGNMENT_AUDIO_BOUNDS_INVALID")
+            text = str(item.get("text") or item.get("word") or "").strip()
+            last_start = start_ms
+            if not text:
+                skipped_empty_word_count += 1
+                continue
             words.append(
                 AlignedWord(
-                    word_id=f"forced-{index:04d}",
-                    text=str(item.get("text") or item.get("word") or "").strip(),
+                    word_id=f"forced-{len(words) + 1:04d}",
+                    text=text,
                     start_ms=start_ms,
                     end_ms=end_ms,
                     loss=float(item["loss"]) if item.get("loss") is not None else None,
                     source_spoken_token_ids=[],
                 )
             )
-            if not words[-1].text:
-                raise ValueError("FORCED_ALIGNMENT_EMPTY_WORD")
-            last_start = start_ms
         mapping, missing, extra, differences = _map_words_to_tokens(normalized.spoken_tokens, words)
         mapped_words = [word.model_copy(update={"source_spoken_token_ids": mapping.get(word.word_id, [])}) for word in words]
         warnings = [item["reason_code"] for item in differences]
+        if skipped_empty_word_count:
+            warnings.append("WHITELISTED_FORCED_ALIGNMENT_EMPTY_WORD_ENTRY")
         if missing:
             warnings.append("FORCED_ALIGNMENT_MISSING_SPOKEN_TOKEN")
         if extra:
             warnings.append("FORCED_ALIGNMENT_EXTRA_WORD")
-        characters = self._forced_characters(response.get("characters"), audio_duration_ms)
+        characters, skipped_zero_duration_character_count = self._forced_characters(
+            response.get("characters"), audio_duration_ms
+        )
+        if skipped_zero_duration_character_count:
+            warnings.append(
+                "WHITELISTED_FORCED_ALIGNMENT_ZERO_DURATION_CHARACTER_ENTRY"
+            )
         headers = {key.casefold(): value for key, value in (response_headers or {}).items()}
+        provider_request_id = (
+            str(
+                response.get("request_id")
+                or headers.get("request-id")
+                or headers.get("x-request-id")
+                or ""
+            ).strip()
+            or None
+        )
+        provider_request_id_availability = (
+            "PRESENT" if provider_request_id else "NOT_EXPOSED_BY_ENDPOINT"
+        )
+        if provider_request_id is None:
+            warnings.append("FORCED_ALIGNMENT_REQUEST_ID_NOT_EXPOSED_BY_ENDPOINT")
         payload = {
             "provider_key": "elevenlabs_forced_alignment",
-            "provider_request_id": str(response.get("request_id") or headers.get("request-id") or headers.get("x-request-id") or "") or None,
+            "provider_request_id": provider_request_id,
+            "provider_request_id_availability": provider_request_id_availability,
             "audio_asset_ref": audio_asset_ref,
             "audio_duration_ms": audio_duration_ms,
             "spoken_text_hash": normalized.spoken_text_hash,
@@ -621,17 +690,42 @@ class ElevenLabsForcedAlignmentResponseParser:
         return round(float(item[key]) * 1000)
 
     @classmethod
-    def _forced_characters(cls, raw: Any, audio_duration_ms: int) -> list[CharacterAlignment]:
+    def _forced_characters(
+        cls, raw: Any, audio_duration_ms: int
+    ) -> tuple[list[CharacterAlignment], int]:
         if raw is None:
-            return []
+            return [], 0
         if isinstance(raw, dict):
-            return ElevenLabsTimingResponseParser._characters(
-                raw, audio_duration_ms, "FORCED_ALIGNMENT_CHARACTERS"
+            characters = raw.get("characters") or []
+            starts = (
+                raw.get("character_start_times_seconds")
+                or raw.get("character_start_times")
+                or []
             )
+            ends = (
+                raw.get("character_end_times_seconds")
+                or raw.get("character_end_times")
+                or []
+            )
+            if not (
+                isinstance(characters, list)
+                and isinstance(starts, list)
+                and isinstance(ends, list)
+            ):
+                raise ValueError("FORCED_ALIGNMENT_CHARACTERS_SHAPE_INVALID")
+            if len(characters) != len(starts) or len(characters) != len(ends):
+                raise ValueError("FORCED_ALIGNMENT_CHARACTERS_LENGTH_MISMATCH")
+            raw = [
+                {"text": character, "start": start, "end": end}
+                for character, start, end in zip(
+                    characters, starts, ends, strict=True
+                )
+            ]
         if not isinstance(raw, list):
             raise ValueError("FORCED_ALIGNMENT_CHARACTERS_SHAPE_INVALID")
         result: list[CharacterAlignment] = []
         last_start = -1
+        skipped_zero_duration = 0
         for index, item in enumerate(raw):
             if not isinstance(item, dict):
                 raise ValueError("FORCED_ALIGNMENT_CHARACTERS_SHAPE_INVALID")
@@ -639,8 +733,12 @@ class ElevenLabsForcedAlignmentResponseParser:
             end_ms = cls._time_ms(item, "end")
             if start_ms < last_start:
                 raise ValueError("TEMPORAL_ALIGNMENT_NON_MONOTONIC")
-            if start_ms < 0 or end_ms <= start_ms or end_ms > audio_duration_ms:
+            if start_ms < 0 or end_ms < start_ms or end_ms > audio_duration_ms:
                 raise ValueError("TEMPORAL_ALIGNMENT_AUDIO_BOUNDS_INVALID")
+            last_start = start_ms
+            if end_ms == start_ms:
+                skipped_zero_duration += 1
+                continue
             result.append(
                 CharacterAlignment(
                     character_index=index,
@@ -649,8 +747,7 @@ class ElevenLabsForcedAlignmentResponseParser:
                     end_ms=end_ms,
                 )
             )
-            last_start = start_ms
-        return result
+        return result, skipped_zero_duration
 
 
 def _map_words_to_tokens(

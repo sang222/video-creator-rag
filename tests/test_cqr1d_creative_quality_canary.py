@@ -11,6 +11,14 @@ from types import SimpleNamespace
 import pytest
 
 from app.contracts.creative_quality_canary import (
+    CQR1_PAID_CANARY_002_RUN_ID,
+    CQR1_PAID_CANARY_003_RUN_ID,
+    CQR1_PAID_CANARY_004_RUN_ID,
+    CQR1_PAID_CANARY_005_RUN_ID,
+    CQR1_PAID_CANARY_006_RUN_ID,
+    CQR1_PAID_CANARY_007_RUN_ID,
+    CQR1_PAID_CANARY_008_RUN_ID,
+    CQR1_PAID_CANARY_009_RUN_ID,
     CQR1_RUN_ID,
     CQR1CanaryApprovalScope,
     CQR1OfflineQualificationEvidence,
@@ -22,6 +30,7 @@ from app.contracts.native_renderer import MediaQCReport as NativeMediaQCReport
 from app.core.config import Settings
 from app.services.cqr1_canary import (
     CQR1_CANARY_SCRIPT,
+    CQR1_RUN007_VISUAL_REUSE_PINS,
     CQR1_VISIBLE_LABEL,
     CQR1CanaryCallLedger,
     CQR1CanaryExecutionGuard,
@@ -87,6 +96,493 @@ def approval() -> CQR1CanaryApprovalScope:
         approval_ref=f"operator-prompt://{CQR1_RUN_ID}",
         total_hard_cost_cap_usd=Decimal("3.00"),
     )
+
+
+def run008_approval() -> CQR1CanaryApprovalScope:
+    return CQR1CanaryApprovalScope(
+        run_id=CQR1_PAID_CANARY_008_RUN_ID,
+        maximum_pexels_search_flows=0,
+        maximum_pexels_downloads=0,
+        maximum_elevenlabs_tts_generations=0,
+        maximum_elevenlabs_forced_alignment_calls=0,
+        maximum_google_veo_submits=0,
+        maximum_google_veo_outputs=0,
+        maximum_drive_archive_attempts=1,
+        approval_ref=f"operator-approval://{CQR1_PAID_CANARY_008_RUN_ID}",
+    )
+
+
+def bind_run008_narration(ledger: CQR1CanaryCallLedger) -> None:
+    ledger.bind_imported_tts(
+        safe_evidence={
+            "evidence_mode": "IMMUTABLE_IMPORTED_TTS",
+            "source_run_id": CQR1_PAID_CANARY_002_RUN_ID,
+            "audio_sha256": "a" * 64,
+            "audio_duration_ms": 38_220,
+            "import_evidence_hash": "b" * 64,
+            "provider_call_made_by_current_run": False,
+        }
+    )
+    ledger.bind_imported_alignment(
+        safe_evidence={
+            "evidence_mode": "IMMUTABLE_IMPORTED_ALIGNMENT",
+            "source_run_id": CQR1_PAID_CANARY_004_RUN_ID,
+            "source_tts_run_id": CQR1_PAID_CANARY_002_RUN_ID,
+            "audio_sha256": "a" * 64,
+            "audio_duration_ms": 38_220,
+            "spoken_text_hash": "c" * 64,
+            "forced_alignment_content_hash": "d" * 64,
+            "verified_alignment_content_hash": "e" * 64,
+            "safe_provider_response_capture_hash": "f" * 64,
+            "import_evidence_hash": "1" * 64,
+            "spoken_coverage": 1.0,
+            "missing_non_whitelisted_count": 0,
+            "extra_non_whitelisted_count": 0,
+            "verification_status": "PASS",
+            "request_response_binding_valid": True,
+            "provider_call_made_by_current_run": False,
+        }
+    )
+
+
+def run008_visual_evidence() -> dict[str, dict[str, object]]:
+    source_run_id = CQR1_PAID_CANARY_007_RUN_ID
+    source_ledger_hash = CQR1_RUN007_VISUAL_REUSE_PINS["source_ledger_hash"]
+    query_plan_hash = CQR1_RUN007_VISUAL_REUSE_PINS["query_plan_hash"]
+    visual_direction_hash = CQR1_RUN007_VISUAL_REUSE_PINS["visual_direction_hash"]
+    visual_review_content_hash = CQR1_RUN007_VISUAL_REUSE_PINS[
+        "visual_review_content_hash"
+    ]
+    request_hash = CQR1_RUN007_VISUAL_REUSE_PINS["veo_request_hash"]
+    prompt_hash = CQR1_RUN007_VISUAL_REUSE_PINS["veo_prompt_hash"]
+    operation_id = CQR1_RUN007_VISUAL_REUSE_PINS["veo_operation_id"]
+    common = {
+        "source_run_id": source_run_id,
+        "source_ledger_hash": source_ledger_hash,
+        "provider_call_made_by_current_run": False,
+    }
+    return {
+        "pexels_search": {
+            **common,
+            "evidence_mode": "IMMUTABLE_IMPORTED_PEXELS_SEARCH",
+            "query_plan_hash": query_plan_hash,
+            "search_provenance_hash": next(
+                iter(CQR1_RUN007_VISUAL_REUSE_PINS["search_provenance_hashes"])
+            ),
+            "visual_direction_hash": visual_direction_hash,
+            "selected_provider_asset_id": "12991847",
+            "selection_verdict": "REVIEW_REQUIRED",
+            "semantic_score": 0.744,
+            "import_evidence_hash": "9" * 64,
+        },
+        "pexels_download": {
+            **common,
+            "evidence_mode": "IMMUTABLE_IMPORTED_PEXELS_ASSET",
+            "query_plan_hash": query_plan_hash,
+            "selected_provider_asset_id": "12991847",
+            "asset_sha256": CQR1_RUN007_VISUAL_REUSE_PINS["pexels_asset_sha256"],
+            "asset_size_bytes": 3_372_120,
+            "download_receipt_hash": next(
+                iter(
+                    CQR1_RUN007_VISUAL_REUSE_PINS[
+                        "pexels_download_receipt_hashes"
+                    ]
+                )
+            ),
+            "representative_still_sha256": CQR1_RUN007_VISUAL_REUSE_PINS[
+                "pexels_representative_still_sha256"
+            ],
+            "visual_review_content_hash": visual_review_content_hash,
+            "import_evidence_hash": "d" * 64,
+        },
+        "google_veo_submit": {
+            **common,
+            "evidence_mode": "IMMUTABLE_IMPORTED_VEO_OPERATION",
+            "provider_operation_id": operation_id,
+            "model_id": "veo-3.1-fast-generate-preview",
+            "request_hash": request_hash,
+            "prompt_hash": prompt_hash,
+            "operation_receipt_hash": next(
+                iter(CQR1_RUN007_VISUAL_REUSE_PINS["veo_operation_receipt_hashes"])
+            ),
+            "visual_direction_hash": visual_direction_hash,
+            "import_evidence_hash": "f" * 64,
+        },
+        "google_veo_output": {
+            **common,
+            "evidence_mode": "IMMUTABLE_IMPORTED_VEO_OUTPUT",
+            "provider_operation_id": operation_id,
+            "request_hash": request_hash,
+            "prompt_hash": prompt_hash,
+            "output_sha256": CQR1_RUN007_VISUAL_REUSE_PINS["veo_output_sha256"],
+            "output_size_bytes": 1_622_954,
+            "output_provenance_hash": next(
+                iter(CQR1_RUN007_VISUAL_REUSE_PINS["veo_output_provenance_hashes"])
+            ),
+            "representative_still_sha256": CQR1_RUN007_VISUAL_REUSE_PINS[
+                "veo_representative_still_sha256"
+            ],
+            "visual_review_content_hash": visual_review_content_hash,
+            "provider_audio_policy": "DISCARD",
+            "import_evidence_hash": "c" * 64,
+        },
+    }
+
+
+def test_paid_canary_002_gets_fresh_scope_and_idempotency_hashes(tmp_path: Path):
+    first = approval()
+    second = CQR1CanaryApprovalScope(
+        run_id=CQR1_PAID_CANARY_002_RUN_ID,
+        approval_ref=f"operator-approval://{CQR1_PAID_CANARY_002_RUN_ID}",
+        total_hard_cost_cap_usd=Decimal("3.00"),
+    )
+    first_ledger = CQR1CanaryCallLedger.create(tmp_path / "first.json", approval=first)
+    second_ledger = CQR1CanaryCallLedger.create(tmp_path / "second.json", approval=second)
+    assert second_ledger.run_id == CQR1_PAID_CANARY_002_RUN_ID
+    assert second_ledger.fresh and second_ledger.provider_call_count == 0
+    assert all(
+        second_ledger.entries[key].idempotency_key_hash
+        != first_ledger.entries[key].idempotency_key_hash
+        for key in second_ledger.entries
+    )
+    loaded = CQR1CanaryCallLedger.load(second_ledger.path)
+    assert loaded.run_id == CQR1_PAID_CANARY_002_RUN_ID
+    preflight = CQR1PaidCanaryEntryGate().evaluate(
+        offline=passing_offline(),
+        readiness=passing_readiness(),
+        approval=second,
+        ledger=loaded,
+    )
+    assert preflight.run_id == CQR1_PAID_CANARY_002_RUN_ID
+    assert preflight.status == "PASS"
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    (CQR1_PAID_CANARY_003_RUN_ID, CQR1_PAID_CANARY_004_RUN_ID),
+)
+def test_tts_reuse_run_allows_only_zero_new_tts_and_one_shot_downstream(
+    tmp_path: Path, run_id: str,
+):
+    approval_scope = CQR1CanaryApprovalScope(
+        run_id=run_id,
+        maximum_elevenlabs_tts_generations=0,
+        approval_ref=f"operator-approval://{run_id}",
+    )
+    with pytest.raises(ValueError, match="ONE_SHOT_LIMIT_MISMATCH"):
+        CQR1CanaryApprovalScope(
+            run_id=run_id,
+            maximum_elevenlabs_tts_generations=1,
+            approval_ref=f"operator-approval://{run_id}",
+        )
+    with pytest.raises(ValueError, match="ONE_SHOT_LIMIT_MISMATCH"):
+        CQR1CanaryApprovalScope(
+            run_id=run_id,
+            maximum_elevenlabs_tts_generations=0,
+            maximum_elevenlabs_forced_alignment_calls=0,
+            approval_ref=f"operator-approval://{run_id}",
+        )
+    ledger = CQR1CanaryCallLedger.create(tmp_path / f"{run_id}.json", approval=approval_scope)
+    assert ledger.provider_call_count == 0 and not ledger.fresh
+    assert ledger.entries["elevenlabs_tts"].max_attempts == 0
+    assert all(
+        entry.max_attempts == 1
+        for key, entry in ledger.entries.items()
+        if key != "elevenlabs_tts"
+    )
+    blocked = CQR1PaidCanaryEntryGate().evaluate(
+        offline=passing_offline(),
+        readiness=passing_readiness(),
+        approval=approval_scope,
+        ledger=ledger,
+    )
+    assert blocked.status == "BLOCKED"
+    assert "CQR1_LEDGER_NOT_FRESH" in blocked.blocker_reason_codes
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    (CQR1_PAID_CANARY_003_RUN_ID, CQR1_PAID_CANARY_004_RUN_ID),
+)
+def test_tts_reuse_run_imported_tts_is_ready_but_never_callable(
+    tmp_path: Path, run_id: str,
+):
+    approval_scope = CQR1CanaryApprovalScope(
+        run_id=run_id,
+        maximum_elevenlabs_tts_generations=0,
+        approval_ref=f"operator-approval://{run_id}",
+    )
+    ledger = CQR1CanaryCallLedger.create(tmp_path / f"{run_id}.json", approval=approval_scope)
+    ledger.bind_imported_tts(
+        safe_evidence={
+            "evidence_mode": "IMMUTABLE_IMPORTED_TTS",
+            "source_run_id": CQR1_PAID_CANARY_002_RUN_ID,
+            "audio_sha256": "2c6a9382",
+            "audio_duration_ms": 38_220,
+            "import_evidence_hash": "verified-import-hash",
+            "imported_artifact_count": 1,
+        }
+    )
+    assert ledger.preflight_ready(approval_scope)
+    assert ledger.entries["elevenlabs_tts"].status == "REUSED"
+    assert ledger.entries["elevenlabs_tts"].attempt_count == 0
+    assert ledger.entries["elevenlabs_tts"].output_count == 0
+    preflight = CQR1PaidCanaryEntryGate().evaluate(
+        offline=passing_offline(),
+        readiness=passing_readiness(),
+        approval=approval_scope,
+        ledger=ledger,
+    )
+    assert preflight.status == "PASS" and preflight.ledger_fresh
+    callbacks: list[str] = []
+    result = CQR1CanaryExecutionGuard(ledger).run_once(
+        "elevenlabs_tts",
+        preflight=preflight,
+        operation=lambda: callbacks.append("called") or {},
+    )
+    assert result["status"] == "BLOCKED"
+    assert result["reason_codes"] == ["CQR1_PROVIDER_ATTEMPT_LIMIT_EXCEEDED"]
+    assert callbacks == [] and ledger.provider_call_count == 0
+    assert CQR1CanaryCallLedger.load(ledger.path).preflight_ready(approval_scope)
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    (
+        CQR1_PAID_CANARY_005_RUN_ID,
+        CQR1_PAID_CANARY_006_RUN_ID,
+        CQR1_PAID_CANARY_007_RUN_ID,
+    ),
+)
+def test_alignment_reuse_run_requires_zero_tts_and_alignment_with_one_shot_downstream(
+    tmp_path: Path, run_id: str,
+):
+    scope = CQR1CanaryApprovalScope(
+        run_id=run_id,
+        maximum_elevenlabs_tts_generations=0,
+        maximum_elevenlabs_forced_alignment_calls=0,
+        approval_ref=f"operator-approval://{run_id}",
+    )
+    for unsafe_changes in (
+        {"maximum_elevenlabs_tts_generations": 1},
+        {"maximum_elevenlabs_forced_alignment_calls": 1},
+        {"maximum_pexels_search_flows": 0},
+    ):
+        unsafe_payload = {
+            "run_id": run_id,
+            "maximum_elevenlabs_tts_generations": 0,
+            "maximum_elevenlabs_forced_alignment_calls": 0,
+            "approval_ref": f"operator-approval://{run_id}",
+        }
+        unsafe_payload.update(unsafe_changes)
+        with pytest.raises(ValueError, match="ONE_SHOT_LIMIT_MISMATCH"):
+            CQR1CanaryApprovalScope(**unsafe_payload)
+    ledger = CQR1CanaryCallLedger.create(tmp_path / f"{run_id}-ledger.json", approval=scope)
+    assert ledger.entries["elevenlabs_tts"].max_attempts == 0
+    assert ledger.entries["elevenlabs_forced_alignment"].max_attempts == 0
+    assert all(
+        entry.max_attempts == 1
+        for key, entry in ledger.entries.items()
+        if key not in {"elevenlabs_tts", "elevenlabs_forced_alignment"}
+    )
+    assert ledger.provider_call_count == 0 and not ledger.preflight_ready(scope)
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    (
+        CQR1_PAID_CANARY_005_RUN_ID,
+        CQR1_PAID_CANARY_006_RUN_ID,
+        CQR1_PAID_CANARY_007_RUN_ID,
+    ),
+)
+def test_alignment_reuse_run_requires_exact_imports_and_never_calls_elevenlabs(
+    tmp_path: Path, run_id: str,
+):
+    scope = CQR1CanaryApprovalScope(
+        run_id=run_id,
+        maximum_elevenlabs_tts_generations=0,
+        maximum_elevenlabs_forced_alignment_calls=0,
+        approval_ref=f"operator-approval://{run_id}",
+    )
+    ledger = CQR1CanaryCallLedger.create(tmp_path / f"{run_id}-ledger.json", approval=scope)
+    alignment_evidence = {
+        "evidence_mode": "IMMUTABLE_IMPORTED_ALIGNMENT",
+        "source_run_id": CQR1_PAID_CANARY_004_RUN_ID,
+        "source_tts_run_id": CQR1_PAID_CANARY_002_RUN_ID,
+        "audio_sha256": "a" * 64,
+        "audio_duration_ms": 38_220,
+        "spoken_text_hash": "b" * 64,
+        "forced_alignment_content_hash": "c" * 64,
+        "verified_alignment_content_hash": "d" * 64,
+        "safe_provider_response_capture_hash": "e" * 64,
+        "import_evidence_hash": "f" * 64,
+        "spoken_coverage": 1.0,
+        "missing_non_whitelisted_count": 0,
+        "extra_non_whitelisted_count": 0,
+        "verification_status": "PASS",
+        "request_response_binding_valid": True,
+    }
+    with pytest.raises(RuntimeError, match="TTS_LINEAGE_NOT_BOUND"):
+        ledger.bind_imported_alignment(safe_evidence=alignment_evidence)
+    ledger.bind_imported_tts(
+        safe_evidence={
+            "evidence_mode": "IMMUTABLE_IMPORTED_TTS",
+            "source_run_id": CQR1_PAID_CANARY_002_RUN_ID,
+            "audio_sha256": "a" * 64,
+            "audio_duration_ms": 38_220,
+            "import_evidence_hash": "1" * 64,
+        }
+    )
+    assert not ledger.preflight_ready(scope)
+    for invalid_changes in (
+        {"verified_alignment_content_hash": "short"},
+        {"audio_sha256": "9" * 64},
+        {"audio_duration_ms": 38_221},
+    ):
+        with pytest.raises(ValueError, match="IMPORTED_ALIGNMENT_EVIDENCE_INVALID"):
+            ledger.bind_imported_alignment(
+                safe_evidence={**alignment_evidence, **invalid_changes}
+            )
+    ledger.bind_imported_alignment(safe_evidence=alignment_evidence)
+    assert ledger.preflight_ready(scope) and ledger.provider_call_count == 0
+    for key in ("elevenlabs_tts", "elevenlabs_forced_alignment"):
+        entry = ledger.entries[key]
+        assert entry.status == "REUSED"
+        assert entry.max_attempts == entry.attempt_count == entry.output_count == 0
+        assert entry.provider_call_made is False
+    preflight = CQR1PaidCanaryEntryGate().evaluate(
+        offline=passing_offline(),
+        readiness=passing_readiness(),
+        approval=scope,
+        ledger=ledger,
+    )
+    assert preflight.status == "PASS"
+    callbacks: list[str] = []
+    guard = CQR1CanaryExecutionGuard(ledger)
+    for key in ("elevenlabs_tts", "elevenlabs_forced_alignment"):
+        blocked = guard.run_once(
+            key,
+            preflight=preflight,
+            operation=lambda key=key: callbacks.append(key) or {},
+        )
+        assert blocked["status"] == "BLOCKED"
+        assert blocked["reason_codes"] == ["CQR1_PROVIDER_ATTEMPT_LIMIT_EXCEEDED"]
+    assert callbacks == [] and ledger.provider_call_count == 0
+    assert CQR1CanaryCallLedger.load(ledger.path).preflight_ready(scope)
+
+
+def test_run008_approval_allows_only_immutable_provider_reuse_and_one_drive_archive(
+    tmp_path: Path,
+):
+    scope = run008_approval()
+    provider_limit_fields = (
+        "maximum_pexels_search_flows",
+        "maximum_pexels_downloads",
+        "maximum_elevenlabs_tts_generations",
+        "maximum_elevenlabs_forced_alignment_calls",
+        "maximum_google_veo_submits",
+        "maximum_google_veo_outputs",
+    )
+    for field in provider_limit_fields:
+        with pytest.raises(ValueError, match="ONE_SHOT_LIMIT_MISMATCH"):
+            CQR1CanaryApprovalScope.model_validate(
+                {**scope.model_dump(mode="python"), field: 1}
+            )
+    with pytest.raises(ValueError, match="ONE_SHOT_LIMIT_MISMATCH"):
+        CQR1CanaryApprovalScope.model_validate(
+            {**scope.model_dump(mode="python"), "maximum_drive_archive_attempts": 0}
+        )
+
+    ledger = CQR1CanaryCallLedger.create(tmp_path / "run008-ledger.json", approval=scope)
+    assert ledger.provider_call_count == 0
+    assert ledger.entries["drive_archive"].max_attempts == 1
+    assert all(
+        entry.max_attempts == 0
+        for key, entry in ledger.entries.items()
+        if key != "drive_archive"
+    )
+    assert not ledger.preflight_ready(scope)
+
+
+def test_run008_exact_visual_imports_pass_preflight_but_are_never_callable(
+    tmp_path: Path,
+):
+    scope = run008_approval()
+    ledger = CQR1CanaryCallLedger.create(tmp_path / "run008-ledger.json", approval=scope)
+    bind_run008_narration(ledger)
+    evidence = run008_visual_evidence()
+    ledger.bind_imported_pexels_search(safe_evidence=evidence["pexels_search"])
+    ledger.bind_imported_pexels_download(safe_evidence=evidence["pexels_download"])
+    ledger.bind_imported_veo_submit(safe_evidence=evidence["google_veo_submit"])
+    ledger.bind_imported_veo_output(safe_evidence=evidence["google_veo_output"])
+
+    assert ledger.preflight_ready(scope) and ledger.provider_call_count == 0
+    preflight = CQR1PaidCanaryEntryGate().evaluate(
+        offline=passing_offline(),
+        readiness=passing_readiness(),
+        approval=scope,
+        ledger=ledger,
+    )
+    assert preflight.status == "PASS"
+    callbacks: list[str] = []
+    guard = CQR1CanaryExecutionGuard(ledger)
+    for key in (
+        "elevenlabs_tts",
+        "elevenlabs_forced_alignment",
+        "pexels_search",
+        "pexels_download",
+        "google_veo_submit",
+        "google_veo_output",
+    ):
+        blocked = guard.run_once(
+            key,
+            preflight=preflight,
+            operation=lambda key=key: callbacks.append(key) or {},
+        )
+        assert blocked["status"] == "BLOCKED"
+        assert blocked["reason_codes"] == ["CQR1_PROVIDER_ATTEMPT_LIMIT_EXCEEDED"]
+    assert callbacks == [] and ledger.provider_call_count == 0
+    assert CQR1CanaryCallLedger.load(ledger.path).preflight_ready(scope)
+
+
+def test_run008_visual_import_lineage_mismatch_stays_fail_closed(tmp_path: Path):
+    scope = run008_approval()
+    ledger = CQR1CanaryCallLedger.create(tmp_path / "run008-ledger.json", approval=scope)
+    bind_run008_narration(ledger)
+    evidence = run008_visual_evidence()
+    ledger.bind_imported_pexels_search(safe_evidence=evidence["pexels_search"])
+    with pytest.raises(ValueError, match="PEXELS_ASSET_EVIDENCE_INVALID"):
+        ledger.bind_imported_pexels_download(
+            safe_evidence={
+                **evidence["pexels_download"],
+                "selected_provider_asset_id": "different-asset",
+            }
+        )
+    assert ledger.entries["pexels_download"].status == "PLANNED"
+    assert not ledger.preflight_ready(scope)
+
+    ledger.bind_imported_pexels_download(safe_evidence=evidence["pexels_download"])
+    ledger.bind_imported_veo_submit(safe_evidence=evidence["google_veo_submit"])
+    with pytest.raises(ValueError, match="VEO_OUTPUT_EVIDENCE_INVALID"):
+        ledger.bind_imported_veo_output(
+            safe_evidence={
+                **evidence["google_veo_output"],
+                "provider_operation_id": (
+                    "models/veo-3.1-fast-generate-preview/operations/different"
+                ),
+            }
+        )
+    assert ledger.entries["google_veo_output"].status == "PLANNED"
+    assert not ledger.preflight_ready(scope)
+
+    ledger.bind_imported_veo_output(safe_evidence=evidence["google_veo_output"])
+    assert ledger.preflight_ready(scope)
+    ledger.entries["google_veo_output"].safe_evidence["visual_review_content_hash"] = (
+        "0" * 64
+    )
+    ledger.persist()
+    assert not CQR1CanaryCallLedger.load(ledger.path).preflight_ready(scope)
 
 
 def planned_gate(tmp_path: Path):
@@ -506,3 +1002,45 @@ def test_cqr1_canary_boundary_does_not_reference_publish_or_domain_mutation_mode
         "LearningToMemoryPromotionRun",
     )
     assert all(name not in source for name in forbidden)
+
+
+def test_run008_videotoolbox_outputs_force_complete_bt709_vui():
+    import inspect
+
+    from tools.cqr1.run_cqr1_final import (
+        _execute_normalization,
+        _ffmpeg_command_manifest,
+        bt709_h264_metadata_args,
+    )
+
+    assert bt709_h264_metadata_args() == [
+        "-bsf:v",
+        (
+            "h264_metadata=colour_primaries=1:transfer_characteristics=1:"
+            "matrix_coefficients=1"
+        ),
+    ]
+    assert "bt709_h264_metadata_args" in inspect.getsource(_execute_normalization)
+    assert "bt709_h264_metadata_args" in inspect.getsource(_ffmpeg_command_manifest)
+
+
+def test_run009_successor_keeps_media_provider_attempts_at_zero(tmp_path: Path):
+    scope = CQR1CanaryApprovalScope(
+        run_id=CQR1_PAID_CANARY_009_RUN_ID,
+        maximum_pexels_search_flows=0,
+        maximum_pexels_downloads=0,
+        maximum_elevenlabs_tts_generations=0,
+        maximum_elevenlabs_forced_alignment_calls=0,
+        maximum_google_veo_submits=0,
+        maximum_google_veo_outputs=0,
+        maximum_drive_archive_attempts=1,
+        approval_ref=f"operator-approval://{CQR1_PAID_CANARY_009_RUN_ID}",
+    )
+    ledger = CQR1CanaryCallLedger.create(tmp_path / "run009-ledger.json", approval=scope)
+    assert ledger.provider_call_count == 0
+    assert ledger.entries["drive_archive"].max_attempts == 1
+    assert all(
+        entry.max_attempts == 0
+        for key, entry in ledger.entries.items()
+        if key != "drive_archive"
+    )

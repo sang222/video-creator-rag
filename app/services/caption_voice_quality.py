@@ -23,6 +23,8 @@ from app.contracts.caption_voice_quality import (
     CaptionTextSpan,
     CompiledCaptionTrack,
     CreativeQualityGateResult,
+    FinalCueTrailingHoldEvidence,
+    FinalCueTrailingHoldPolicy,
     MaximumThreshold,
     NarrationAudioAnalysis,
     NarrationPacingCorrectionPlan,
@@ -35,6 +37,7 @@ from app.contracts.caption_voice_quality import (
 )
 from app.contracts.temporal_authority import (
     CanonicalMediaTimeline,
+    CanonicalTimelineSegment,
     DisplayCaptionText,
     SpokenTextNormalized,
     TextSpan,
@@ -48,7 +51,7 @@ from app.services.caption_ass import (
 from app.services.native_render_plan import stable_hash
 
 
-CAPTION_COMPILATION_VERSION = "readable-caption-compiler/v1.0.0"
+CAPTION_COMPILATION_VERSION = "readable-caption-compiler/v1.1.0"
 FFMPEG_FULL_DEFAULT = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
 ALLOWED_DISPLAY_TRANSFORMS = {
     "APPROVED_CASING",
@@ -104,6 +107,20 @@ def _caption_style_policy(policy: Any) -> CaptionStylePolicy:
 
 def _caption_sync_policy(policy: Any) -> CaptionSyncPolicy:
     return _coerce_policy(policy, family="caption_sync_policy", model=CaptionSyncPolicy)
+
+
+def _final_cue_trailing_hold_policy(
+    policy: FinalCueTrailingHoldPolicy | dict[str, Any],
+) -> FinalCueTrailingHoldPolicy:
+    parsed = (
+        policy
+        if isinstance(policy, FinalCueTrailingHoldPolicy)
+        else FinalCueTrailingHoldPolicy.model_validate(policy)
+    )
+    calculated_hash = _policy_hash(parsed)
+    if parsed.policy_hash is not None and parsed.policy_hash != calculated_hash:
+        raise ValueError("CAPTION_TRAILING_HOLD_POLICY_HASH_INVALID")
+    return parsed.model_copy(update={"policy_hash": calculated_hash})
 
 
 def _resolved_policy_hash(policy: Any) -> str:
@@ -596,7 +613,7 @@ class CaptionCompilationOutput:
 
 
 class ReadableCaptionCompiler:
-    """Compiles display cues from verified spoken tokens; it never authors timing."""
+    """Compiles display cues without authoring or changing spoken-word timing."""
 
     def compile(
         self,
@@ -605,10 +622,16 @@ class ReadableCaptionCompiler:
         alignment: VerifiedNarrationAlignment,
         timeline: CanonicalMediaTimeline,
         policy: CaptionStylePolicy | dict[str, Any],
+        final_cue_trailing_hold_policy: FinalCueTrailingHoldPolicy | dict[str, Any] | None = None,
         display_caption_text: DisplayCaptionText | None = None,
         aspect_ratio: str = "16:9",
     ) -> CaptionCompilationOutput:
         policy = _caption_style_policy(policy)
+        trailing_hold_policy = (
+            _final_cue_trailing_hold_policy(final_cue_trailing_hold_policy)
+            if final_cue_trailing_hold_policy is not None
+            else None
+        )
         if alignment.verification_status != "PASS" or alignment.token_coverage != 1.0:
             raise ValueError("CAPTION_VERIFIED_ALIGNMENT_REQUIRED")
         if alignment.spoken_text_hash != normalized.spoken_text_hash:
@@ -717,6 +740,16 @@ class ReadableCaptionCompiler:
                     }
                 )
             )
+        trailing_hold_evidence: FinalCueTrailingHoldEvidence | None = None
+        if trailing_hold_policy is not None:
+            cues, updated_segments, trailing_hold_evidence = self._apply_final_cue_trailing_hold(
+                cues=cues,
+                updated_segments=updated_segments,
+                normalized=normalized,
+                alignment=alignment,
+                source_timeline=timeline,
+                policy=trailing_hold_policy,
+            )
         compilation_gate = CaptionCompilationGate().evaluate(
             cues=cues,
             normalized=normalized,
@@ -730,6 +763,11 @@ class ReadableCaptionCompiler:
             "source_timeline_hash": timeline.timeline_hash,
             "spoken_text_hash": normalized.spoken_text_hash,
             "policy_hash": _resolved_policy_hash(policy),
+            "final_cue_trailing_hold": (
+                trailing_hold_evidence.model_dump(mode="json")
+                if trailing_hold_evidence is not None
+                else None
+            ),
             "cues": [cue.model_dump(mode="json") for cue in cues],
         }
         compilation_hash = stable_hash(caption_compilation_payload)
@@ -749,7 +787,16 @@ class ReadableCaptionCompiler:
             "caption_compilation_gate": compilation_gate.status,
             "caption_spoken_token_coverage": 1.0,
             "caption_timing_source": "CANONICAL_MEDIA_TIMELINE",
+            "caption_final_cue_trailing_hold": (
+                trailing_hold_evidence.model_dump(mode="json")
+                if trailing_hold_evidence is not None
+                else None
+            ),
         }
+        compilation_warnings = list(timeline_payload["compilation_warnings"])
+        if trailing_hold_evidence is not None and trailing_hold_evidence.status == "APPLIED":
+            compilation_warnings.append(trailing_hold_evidence.reason_code)
+        timeline_payload["compilation_warnings"] = sorted(set(compilation_warnings))
         compiled_timeline = CanonicalMediaTimeline(
             **timeline_payload,
             timeline_hash=stable_hash(timeline_payload),
@@ -776,12 +823,121 @@ class ReadableCaptionCompiler:
             "missing_spoken_token_ids": [],
             "extra_spoken_token_ids": [],
             "compilation_gate": compilation_gate.model_dump(mode="json"),
+            "final_cue_trailing_hold": (
+                trailing_hold_evidence.model_dump(mode="json")
+                if trailing_hold_evidence is not None
+                else None
+            ),
             "policy_ref": policy.policy_ref,
             "policy_version": policy.policy_version,
             "policy_hash": _resolved_policy_hash(policy),
         }
         track = CompiledCaptionTrack(**track_payload, content_hash=compilation_hash)
         return CaptionCompilationOutput(timeline=compiled_timeline, track=track)
+
+    @staticmethod
+    def _apply_final_cue_trailing_hold(
+        *,
+        cues: list[CanonicalCaptionCue],
+        updated_segments: list[CanonicalTimelineSegment],
+        normalized: SpokenTextNormalized,
+        alignment: VerifiedNarrationAlignment,
+        source_timeline: CanonicalMediaTimeline,
+        policy: FinalCueTrailingHoldPolicy,
+    ) -> tuple[
+        list[CanonicalCaptionCue],
+        list[CanonicalTimelineSegment],
+        FinalCueTrailingHoldEvidence,
+    ]:
+        if not cues or not updated_segments or not normalized.spoken_tokens or not alignment.verified_words:
+            raise ValueError("CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID")
+        final_segment = updated_segments[-1]
+        final_source_segment = source_timeline.segments[-1]
+        final_cue = cues[-1]
+        final_word = alignment.verified_words[-1]
+        final_token_id = normalized.spoken_tokens[-1].token_id
+        target_ms = source_timeline.audio_duration_ms
+        if (
+            alignment.audio_duration_ms != target_ms
+            or final_source_segment.scene_end_ms != target_ms
+            or final_segment.scene_end_ms != target_ms
+            or final_source_segment.audio_end_ms != final_word.end_ms
+            or final_cue.source_segment_ids != [final_segment.segment_id]
+            or final_cue.spoken_token_ids[-1] != final_token_id
+            or final_word.source_spoken_token_ids != [final_token_id]
+            or final_cue.caption_end_ms != final_word.end_ms
+        ):
+            raise ValueError("CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID")
+        if final_cue.caption_end_ms > target_ms:
+            raise ValueError("CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID")
+        hold_ms = target_ms - final_cue.caption_end_ms
+        if hold_ms > policy.maximum_hold_ms:
+            raise ValueError("CAPTION_TRAILING_HOLD_EXCEEDS_POLICY")
+
+        before_ms = final_cue.caption_end_ms
+        status = "NOT_REQUIRED"
+        reason_code = "CAPTION_FINAL_CUE_ALREADY_REACHES_CANONICAL_AUDIO_END"
+        if hold_ms:
+            duration_seconds = (target_ms - final_cue.caption_start_ms) / 1000
+            reading = final_cue.reading_metrics.model_copy(
+                update={
+                    "duration_seconds": duration_seconds,
+                    "characters_per_second": round(
+                        final_cue.reading_metrics.character_count / duration_seconds,
+                        3,
+                    ),
+                }
+            )
+            cue_payload = final_cue.model_dump(mode="json", exclude={"content_hash"})
+            cue_payload.update(
+                {
+                    "caption_end_ms": target_ms,
+                    "reading_metrics": reading.model_dump(mode="json"),
+                }
+            )
+            final_cue = CanonicalCaptionCue(
+                **cue_payload,
+                content_hash=stable_hash(cue_payload),
+            )
+            cues = [*cues[:-1], final_cue]
+            segment_cues = [*final_segment.caption_cues[:-1], final_cue]
+            updated_segments = [
+                *updated_segments[:-1],
+                final_segment.model_copy(
+                    update={
+                        "caption_end_ms": target_ms,
+                        "caption_cues": segment_cues,
+                        "caption_reading_metrics": [cue.reading_metrics for cue in segment_cues],
+                    }
+                ),
+            ]
+            status = "APPLIED"
+            reason_code = "CAPTION_FINAL_CUE_HELD_THROUGH_CANONICAL_TRAILING_SILENCE"
+
+        policy_hash = _resolved_policy_hash(policy)
+        evidence_payload = {
+            "status": status,
+            "reason_code": reason_code,
+            "target_endpoint": policy.target_endpoint,
+            "final_segment_id": final_segment.segment_id,
+            "final_spoken_token_id": final_token_id,
+            "aligned_word_end_ms": final_word.end_ms,
+            "caption_end_before_ms": before_ms,
+            "caption_end_after_ms": target_ms,
+            "canonical_audio_end_ms": target_ms,
+            "hold_duration_ms": hold_ms,
+            "maximum_hold_ms": policy.maximum_hold_ms,
+            "spoken_token_ids_unchanged": True,
+            "spoken_word_timing_unchanged": True,
+            "policy_ref": policy.policy_ref,
+            "policy_version": policy.policy_version,
+            "policy_hash": policy_hash,
+        }
+        evidence = FinalCueTrailingHoldEvidence(
+            **evidence_payload,
+            content_hash=stable_hash(evidence_payload),
+        )
+        return cues, updated_segments, evidence
 
     @staticmethod
     def _format_policy(policy: CaptionStylePolicy, aspect_ratio: str) -> CaptionFormatPolicy:
@@ -1382,6 +1538,44 @@ def _timeline_cues(timeline: CanonicalMediaTimeline) -> list[CanonicalCaptionCue
     return [cue for segment in timeline.segments for cue in segment.caption_cues]
 
 
+def _timeline_final_cue_trailing_hold(
+    timeline: CanonicalMediaTimeline,
+    cues: Sequence[CanonicalCaptionCue],
+) -> tuple[FinalCueTrailingHoldEvidence | None, str | None]:
+    raw = timeline.qc_metrics.get("caption_final_cue_trailing_hold")
+    if raw is None:
+        return None, None
+    try:
+        evidence = FinalCueTrailingHoldEvidence.model_validate(raw)
+    except (TypeError, ValueError):
+        return None, "SYNC_TRAILING_HOLD_EVIDENCE_INVALID"
+    payload = evidence.model_dump(mode="json", exclude={"content_hash"})
+    if stable_hash(payload) != evidence.content_hash:
+        return None, "SYNC_TRAILING_HOLD_EVIDENCE_INVALID"
+    evidence_policy = FinalCueTrailingHoldPolicy(
+        policy_ref=evidence.policy_ref,
+        policy_version=evidence.policy_version,
+        maximum_hold_ms=evidence.maximum_hold_ms,
+        target_endpoint=evidence.target_endpoint,
+    )
+    if _policy_hash(evidence_policy) != evidence.policy_hash:
+        return None, "SYNC_TRAILING_HOLD_EVIDENCE_INVALID"
+    if not cues or not timeline.segments:
+        return None, "SYNC_TRAILING_HOLD_EVIDENCE_INVALID"
+    final_cue = cues[-1]
+    final_segment = timeline.segments[-1]
+    if (
+        evidence.final_segment_id != final_segment.segment_id
+        or final_cue.source_segment_ids != [final_segment.segment_id]
+        or final_cue.spoken_token_ids[-1] != evidence.final_spoken_token_id
+        or final_cue.caption_end_ms != evidence.caption_end_after_ms
+        or evidence.canonical_audio_end_ms != timeline.audio_duration_ms
+        or final_segment.scene_end_ms != timeline.audio_duration_ms
+    ):
+        return None, "SYNC_TRAILING_HOLD_EVIDENCE_INVALID"
+    return evidence, None
+
+
 class CaptionCoverageGate:
     def evaluate(
         self,
@@ -1448,12 +1642,17 @@ class CaptionAudioSyncGate:
         start_offsets: list[int] = []
         end_offsets: list[int] = []
         reasons: list[str] = []
+        trailing_hold, trailing_hold_error = _timeline_final_cue_trailing_hold(timeline, cues)
+        if trailing_hold_error:
+            reasons.append(trailing_hold_error)
+        authorized_trailing_hold_ms = 0
+        raw_final_end_offset_ms = 0
         overlap_count = 0
         non_monotonic_count = 0
         outside_count = 0
         previous_start = -1
         previous_end = -1
-        for cue in cues:
+        for cue_index, cue in enumerate(cues):
             words = [word_by_token.get(token_id) for token_id in cue.spoken_token_ids]
             if any(word is None for word in words):
                 reasons.append("SYNC_COVERAGE_GAP")
@@ -1461,7 +1660,31 @@ class CaptionAudioSyncGate:
             expected_start = words[0].start_ms
             expected_end = words[-1].end_ms
             start_offsets.append(abs(cue.caption_start_ms - expected_start))
-            end_offsets.append(abs(cue.caption_end_ms - expected_end))
+            raw_end_offset = abs(cue.caption_end_ms - expected_end)
+            is_final_cue = cue_index == len(cues) - 1
+            authorized_final_hold = bool(
+                is_final_cue
+                and trailing_hold is not None
+                and trailing_hold.status == "APPLIED"
+                and trailing_hold.aligned_word_end_ms == expected_end
+                and trailing_hold.caption_end_before_ms == expected_end
+                and trailing_hold.caption_end_after_ms == cue.caption_end_ms
+                and trailing_hold.hold_duration_ms == raw_end_offset
+                and cue.caption_end_ms == alignment.audio_duration_ms
+            )
+            if is_final_cue:
+                raw_final_end_offset_ms = raw_end_offset
+                if (
+                    cue.caption_end_ms == alignment.audio_duration_ms
+                    and expected_end < alignment.audio_duration_ms
+                    and not authorized_final_hold
+                ):
+                    reasons.append("SYNC_UNAUTHORIZED_FINAL_CUE_TRAILING_HOLD")
+            if authorized_final_hold:
+                authorized_trailing_hold_ms = trailing_hold.hold_duration_ms
+                end_offsets.append(0)
+            else:
+                end_offsets.append(raw_end_offset)
             if cue.caption_start_ms < previous_start or cue.caption_end_ms <= cue.caption_start_ms:
                 non_monotonic_count += 1
             if cue.caption_start_ms < previous_end:
@@ -1511,11 +1734,21 @@ class CaptionAudioSyncGate:
             statuses.append(status)
             if status != "PASS":
                 reasons.append(reason)
+        sync_metric_payload = sync_metrics.model_dump(mode="json")
+        sync_metric_payload.update(
+            {
+                "raw_final_cue_end_offset_ms": raw_final_end_offset_ms,
+                "authorized_final_cue_trailing_hold_ms": authorized_trailing_hold_ms,
+                "final_cue_trailing_hold_evidence_hash": (
+                    trailing_hold.content_hash if trailing_hold is not None else None
+                ),
+            }
+        )
         return _gate(
             "CaptionAudioSyncGate",
             _worst_status(statuses),
             reasons,
-            sync_metrics.model_dump(mode="json"),
+            sync_metric_payload,
             policy,
         )
 

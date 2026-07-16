@@ -205,6 +205,66 @@ class CaptionSyncPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FinalCueTrailingHoldPolicy(BaseModel):
+    """Narrow policy for displaying the final cue through bounded tail silence."""
+
+    policy_ref: str = Field(min_length=1)
+    policy_version: str = Field(min_length=1)
+    policy_hash: str | None = None
+    maximum_hold_ms: int = Field(gt=0, le=2_000)
+    target_endpoint: Literal["CANONICAL_AUDIO_END"] = "CANONICAL_AUDIO_END"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FinalCueTrailingHoldEvidence(BaseModel):
+    status: Literal["NOT_REQUIRED", "APPLIED"]
+    reason_code: Literal[
+        "CAPTION_FINAL_CUE_ALREADY_REACHES_CANONICAL_AUDIO_END",
+        "CAPTION_FINAL_CUE_HELD_THROUGH_CANONICAL_TRAILING_SILENCE",
+    ]
+    target_endpoint: Literal["CANONICAL_AUDIO_END"]
+    final_segment_id: str = Field(min_length=1)
+    final_spoken_token_id: str = Field(min_length=1)
+    aligned_word_end_ms: int = Field(ge=0)
+    caption_end_before_ms: int = Field(ge=0)
+    caption_end_after_ms: int = Field(ge=0)
+    canonical_audio_end_ms: int = Field(gt=0)
+    hold_duration_ms: int = Field(ge=0)
+    maximum_hold_ms: int = Field(gt=0, le=2_000)
+    spoken_token_ids_unchanged: Literal[True] = True
+    spoken_word_timing_unchanged: Literal[True] = True
+    policy_ref: str = Field(min_length=1)
+    policy_version: str = Field(min_length=1)
+    policy_hash: str = Field(min_length=1)
+    content_hash: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def bounded_canonical_hold(self) -> "FinalCueTrailingHoldEvidence":
+        expected_reason = (
+            "CAPTION_FINAL_CUE_HELD_THROUGH_CANONICAL_TRAILING_SILENCE"
+            if self.status == "APPLIED"
+            else "CAPTION_FINAL_CUE_ALREADY_REACHES_CANONICAL_AUDIO_END"
+        )
+        if self.reason_code != expected_reason:
+            raise ValueError("CAPTION_TRAILING_HOLD_STATUS_INVALID")
+        if self.caption_end_before_ms != self.aligned_word_end_ms:
+            raise ValueError("CAPTION_TRAILING_HOLD_ALIGNMENT_ENDPOINT_INVALID")
+        if self.caption_end_after_ms != self.canonical_audio_end_ms:
+            raise ValueError("CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID")
+        if self.hold_duration_ms != self.caption_end_after_ms - self.caption_end_before_ms:
+            raise ValueError("CAPTION_TRAILING_HOLD_DURATION_INVALID")
+        if self.hold_duration_ms > self.maximum_hold_ms:
+            raise ValueError("CAPTION_TRAILING_HOLD_EXCEEDS_POLICY")
+        if self.status == "APPLIED" and self.hold_duration_ms <= 0:
+            raise ValueError("CAPTION_TRAILING_HOLD_DURATION_INVALID")
+        if self.status == "NOT_REQUIRED" and self.hold_duration_ms != 0:
+            raise ValueError("CAPTION_TRAILING_HOLD_DURATION_INVALID")
+        return self
+
+
 class PauseSpan(BaseModel):
     pause_id: str = Field(min_length=1)
     start_ms: int = Field(ge=0)
@@ -440,6 +500,7 @@ class CompiledCaptionTrack(BaseModel):
     missing_spoken_token_ids: list[str] = Field(default_factory=list)
     extra_spoken_token_ids: list[str] = Field(default_factory=list)
     compilation_gate: CreativeQualityGateResult
+    final_cue_trailing_hold: FinalCueTrailingHoldEvidence | None = None
     policy_ref: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
     policy_hash: str = Field(min_length=1)

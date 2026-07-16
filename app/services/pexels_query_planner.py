@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 
 from app.contracts.asset_acquisition import AssetRequest, PexelsQueryPlan
@@ -18,6 +19,68 @@ UNSAFE_QUERY_CONCEPTS = {
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "with",
 }
+MEDIA_PRODUCTION_QUERY_SIGNALS = {
+    "editing workflow",
+    "media operator",
+    "media production",
+    "media workflow",
+    "post production",
+    "production workflow",
+    "video editing",
+    "video production",
+    "video workflow",
+}
+MEDIA_PRODUCTION_QUERY_CORE = "video editing workstation post production"
+PHYSICAL_PRODUCTION_QUERY_SIGNALS = {
+    "behind the scenes",
+    "camera crew",
+    "cinematography",
+    "film crew",
+    "film set",
+    "physical production",
+    "production crew",
+    "production set",
+    "studio lighting",
+}
+PHYSICAL_PRODUCTION_QUERY_CORE = "film crew studio lighting production"
+PHYSICAL_PRODUCTION_FORBIDDEN_CONCEPTS = {
+    "apple",
+    "computer",
+    "imac",
+    "interface",
+    "laptop",
+    "logo",
+    "monitor",
+    "phone",
+    "screen",
+    "software",
+    "television",
+    "tv",
+    "ui",
+}
+
+
+def bind_minimum_duration_to_canonical_scene(
+    request: AssetRequest,
+    *,
+    scene_duration_ms: int,
+) -> AssetRequest:
+    """Raise a stock request floor to the whole-second canonical scene need.
+
+    Pexels reports clip durations in seconds. Rounding the canonical duration
+    up prevents a one-shot search from selecting a clip that satisfies a
+    coarse request floor but is still shorter than the real scene window.
+    """
+
+    if scene_duration_ms <= 0:
+        raise ValueError("PEXELS_CANONICAL_SCENE_DURATION_INVALID")
+    required_seconds = float(math.ceil(scene_duration_ms / 1000))
+    minimum_seconds = max(float(request.minimum_duration_seconds), required_seconds)
+    if minimum_seconds > float(request.maximum_duration_seconds):
+        raise ValueError("PEXELS_CANONICAL_SCENE_EXCEEDS_REQUEST_MAXIMUM")
+    payload = request.model_dump(mode="python", exclude={"request_hash"})
+    payload["minimum_duration_seconds"] = minimum_seconds
+    return AssetRequest(**payload, request_hash=stable_hash(payload))
 
 
 class PexelsQueryPlanner:
@@ -51,8 +114,10 @@ class PexelsQueryPlanner:
         words = [word for word in normalized.split() if word not in STOP_WORDS and len(word) > 2][:7]
         if not words:
             raise ValueError("PEXELS_QUERY_INTENT_EMPTY")
-        core = " ".join(words[:4])
+        core = _semantic_query_core(normalized, words)
         prohibited = set(UNSAFE_QUERY_CONCEPTS)
+        if _is_physical_production_intent(normalized):
+            prohibited.update(PHYSICAL_PRODUCTION_FORBIDDEN_CONCEPTS)
         if visual_direction is None:
             queries = [
                 f"{core} workplace b roll",
@@ -125,6 +190,25 @@ def _compact_terms(value: str, *, limit: int) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9\s-]", " ", value).replace("_", " ").replace("-", " ").lower()
     words = [word for word in normalized.split() if word not in STOP_WORDS and len(word) > 2]
     return " ".join(words[:limit])
+
+
+def _semantic_query_core(normalized_intent: str, words: list[str]) -> str:
+    corpus = " ".join(re.findall(r"[a-z0-9]+", normalized_intent.lower()))
+    padded = f" {corpus} "
+    if any(f" {signal} " in padded for signal in PHYSICAL_PRODUCTION_QUERY_SIGNALS):
+        return PHYSICAL_PRODUCTION_QUERY_CORE
+    if any(f" {signal} " in padded for signal in MEDIA_PRODUCTION_QUERY_SIGNALS):
+        return MEDIA_PRODUCTION_QUERY_CORE
+    return " ".join(words[:4])
+
+
+def _is_physical_production_intent(normalized_intent: str) -> bool:
+    corpus = " ".join(re.findall(r"[a-z0-9]+", normalized_intent.lower()))
+    padded = f" {corpus} "
+    return any(
+        f" {signal} " in padded
+        for signal in PHYSICAL_PRODUCTION_QUERY_SIGNALS
+    )
 
 
 def _normalized_phrase(value: str) -> str:
