@@ -1,6 +1,6 @@
 # Prod V1 Launch Plan After Package Repair
 
-Date: 2026-07-06
+Updated: 2026-07-17
 
 Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 
@@ -14,6 +14,11 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | Package Repair | `PASS` | 9 approved patches applied; latest gate rerun `PASS`; queue closed. |
 | PPP1 manual-only pilot | `PASS` | Waiting for final media asset is expected; no upload task. |
 | Code Closeout Prod V1 | `GO` | Core/backend architecture closed for Production V1; P0/P1 only after this point. |
+| CH1 first production channel | `PASS` | Frozen ChannelProfileVersion v1 and CompiledChannelPolicySnapshot remain active and immutable. |
+| PKG1 first production package | `PASS` | Technical and explicit human review passed; all six review areas approved. |
+| Visual impact review | `PASS` | Repository-grounded mapping complete; VSR1 may proceed without a DB migration. |
+| VSR1 niche-aware visual routing | `PASS` | Provider-neutral taxonomy, gates, deterministic router, routing evidence and offline fixtures complete; provider execution remains disabled. |
+| MR1 first real media render | `ON_HOLD / NOT_STARTED` | Historical approval does not cover the new visual-source decision set or Gemini Image route; provider call count and render count remain 0. |
 
 ## Current Package State
 
@@ -51,6 +56,31 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | `PPL-INT1-001` | P2 | qualification tests | Some stale M10.1/M10.5 qualification expectations remain from INT1. | Batch-review maintenance. |
 
 No P0/P1 is open.
+
+## Major Visual Architecture Hold
+
+The 2026-07-17 `VISUAL-IMPACT-REVIEW` supersedes the prior permission to start MR1, while preserving CH1-FLEX v1 and PKG1 v1 as immutable historical passes.
+
+```text
+MR1_EXECUTION=ON_HOLD
+PROCEED_TO_MR1=false
+PROCEED_TO_VSR1=true
+```
+
+Required sequence before MR1:
+
+1. VSR1 provider-neutral routing foundation — `PASS` on 2026-07-17.
+2. IMG1 Gemini Image provider route.
+3. VQC1 generated-image/native-overlay QC.
+4. Offline routing/image/overlay fixtures.
+5. One controlled paid image canary.
+6. Human full-watch and Drive verification.
+7. CH1-FLEX v2 approval/activation for future projects.
+8. PKG1 visual/provider/cost/disclosure revision.
+9. New exact-target MR1 approval.
+10. MR1.
+
+The old PKG1/MR1 approval remains historical evidence; it is not rewritten or treated as authority for the new route.
 
 ## Next Roadmap
 
@@ -107,6 +137,8 @@ Expected output:
 
 ### 3. CH1 - First Production Channel Finalization
 
+Status: `PASS`.
+
 Finalize the first real production channel contract/context for a real production run.
 
 Rules:
@@ -118,6 +150,8 @@ Rules:
 
 ### 4. PKG1 - First Real Production Package
 
+Status: `PASS`. Package-manifest v2 is approved under `operator-approval://pkg1/small-team-ai/final-package-and-mr1`; prior `REVIEW_REQUIRED` evidence is retained as resolved history.
+
 Create the first real production package using the frozen runtime path.
 
 Rules:
@@ -128,7 +162,9 @@ Rules:
 
 ### 5. MR1 - First Real Media Render
 
-Only after PA1 and PKG1 are ready.
+Status: `ON_HOLD`; execution is `NOT_STARTED`. Historical readiness remains frozen in `artifact-version://cd1d93f7-29b0-4af3-9fa3-b877ddc0457b`, but it does not cover the new visual-source policy or Gemini Image route.
+
+Do not run MR1 until the major visual architecture sequence above is complete and a new exact-target approval exists. This checkpoint update did not call a provider, consume an attempt, render, archive, upload or publish.
 
 Target sequence:
 
@@ -181,8 +217,14 @@ Rules:
 
 ## Current Launch Decision
 
-`PROD_V1_LAUNCH_PLAN_READY_FOR_PA1_SPEC=true`
+`MR1_EXECUTION=ON_HOLD`
+
+`PROCEED_TO_MR1=false`
+
+`VSR1_FINAL=PASS`
+
+`PROCEED_TO_IMG1=true`
 
 Next checkpoint:
 
-`PA1-SPEC Provider Activation Design Spec`
+`IMG1 Google Image Provider Foundation`

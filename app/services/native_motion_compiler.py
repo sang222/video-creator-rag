@@ -60,7 +60,7 @@ class NativeMotionCompiler:
             canonical_timeline=canonical_timeline,
         )
         reason_codes = [code for gate in gates if gate.verdict == "BLOCK" for code in gate.reason_codes]
-        compiled_scenes, transitions, inputs = [], [], []
+        compiled_scenes, transitions, overlays, inputs = [], [], [], []
         for scene in plan.scenes:
             values = [scene.animation_type, scene.transition_in, scene.transition_out]
             if any(v and RAW_FILTER_PATTERN.search(v) for v in values):
@@ -71,7 +71,25 @@ class NativeMotionCompiler:
             for transition in (scene.transition_in, scene.transition_out):
                 if transition and transition not in TRANSITION_MAP:
                     reason_codes.append("TRANSITION_PRESET_UNSUPPORTED")
-            compiled_scenes.append({"scene_id": scene.scene_id, "start_ms": scene.narration_start_ms, "end_ms": scene.narration_end_ms, "duration_ms": scene.duration_ms, "visual_treatment": scene.visual_treatment, "motion_preset": motion, "layout_type": scene.layout_type, "asset_refs": [a.model_dump() for a in scene.resolved_asset_refs]})
+            compiled_scene = {"scene_id": scene.scene_id, "start_ms": scene.narration_start_ms, "end_ms": scene.narration_end_ms, "duration_ms": scene.duration_ms, "visual_treatment": scene.visual_treatment, "motion_preset": motion, "layout_type": scene.layout_type, "asset_refs": [a.model_dump() for a in scene.resolved_asset_refs]}
+            if scene.visual_routing_mode == "VSR1_STRICT":
+                compiled_scene["visual_routing"] = {
+                    "mode": scene.visual_routing_mode,
+                    "source_decision_ref": scene.source_decision_ref,
+                    "source_decision_hash": scene.source_decision_hash,
+                    "preferred_source_route": scene.preferred_source_route.value,
+                    "eligibility_gate_refs": scene.eligibility_gate_refs,
+                    "exact_text_required": scene.exact_text_required,
+                    "exact_number_required": scene.exact_number_required,
+                    "native_overlay_required": scene.native_overlay_required,
+                    "text_safe_regions": [region.model_dump(mode="json") for region in scene.text_safe_regions],
+                    "reserved_overlay_regions": [
+                        region.model_dump(mode="json") for region in scene.reserved_overlay_regions
+                    ],
+                }
+                if scene.native_overlay_plan is not None:
+                    overlays.append(scene.native_overlay_plan.model_dump(mode="json"))
+            compiled_scenes.append(compiled_scene)
             inputs.extend(a.path for a in scene.resolved_asset_refs)
             if scene.transition_out:
                 transitions.append({"scene_id": scene.scene_id, "preset": TRANSITION_MAP[scene.transition_out], "duration_ms": min(600, max(100, scene.duration_ms // 8))})
@@ -105,6 +123,6 @@ class NativeMotionCompiler:
             }
             caption_inputs = [plan.srt_ref]
             normalized_caption = plan.caption_policy
-        base = {"source_plan_ref": plan.plan_id, "source_plan_hash": plan_hash, "compiler_version": COMPILER_VERSION, "motion_pack_version": MOTION_PACK_VERSION, "renderer_profile_refs": plan.output_profiles, "ffmpeg_capability_digest": self.ffmpeg_capability_digest, "normalized_canvas": plan.canvas_spec.model_dump(), "normalized_audio": plan.audio_policy, "normalized_caption": normalized_caption, "compiled_scenes": compiled_scenes, "transition_schedule": transitions, "overlay_schedule": [], "audio_mix_schedule": plan.audio_policy, "caption_schedule": caption_schedule, "output_specs": [OUTPUT_PROFILES[p] | {"profile": p} for p in plan.output_profiles], "expected_input_refs": sorted(set(inputs + caption_inputs)), "unresolved_inputs": [], "compilation_warnings": [], "compilation_reason_codes": [], "production_eligible": plan.production_eligible, "temporal_authority_mode": plan.temporal_authority_mode, "canonical_media_timeline_ref": plan.canonical_media_timeline_ref, "canonical_media_timeline_hash": plan.canonical_media_timeline_hash, "canonical_audio_asset_ref": plan.canonical_audio_asset_ref, "canonical_duration_ms": canonical_timeline.audio_duration_ms if canonical_timeline is not None and plan.temporal_authority_mode == "CANONICAL_STRICT" else None, "canonical_caption_compilation_ref": plan.canonical_caption_compilation_ref, "canonical_caption_compilation_hash": plan.canonical_caption_compilation_hash, "canonical_caption_render_payload_hash": plan.canonical_caption_render_payload_hash, "visual_direction_contract_ref": plan.visual_direction_contract_ref, "visual_direction_contract_hash": plan.visual_direction_contract_hash, "creative_gate_results": plan.creative_gate_results, "render_purpose": plan.purpose}
+        base = {"source_plan_ref": plan.plan_id, "source_plan_hash": plan_hash, "compiler_version": COMPILER_VERSION, "motion_pack_version": MOTION_PACK_VERSION, "renderer_profile_refs": plan.output_profiles, "ffmpeg_capability_digest": self.ffmpeg_capability_digest, "normalized_canvas": plan.canvas_spec.model_dump(), "normalized_audio": plan.audio_policy, "normalized_caption": normalized_caption, "compiled_scenes": compiled_scenes, "transition_schedule": transitions, "overlay_schedule": overlays, "audio_mix_schedule": plan.audio_policy, "caption_schedule": caption_schedule, "output_specs": [OUTPUT_PROFILES[p] | {"profile": p} for p in plan.output_profiles], "expected_input_refs": sorted(set(inputs + caption_inputs)), "unresolved_inputs": [], "compilation_warnings": [], "compilation_reason_codes": [], "production_eligible": plan.production_eligible, "temporal_authority_mode": plan.temporal_authority_mode, "canonical_media_timeline_ref": plan.canonical_media_timeline_ref, "canonical_media_timeline_hash": plan.canonical_media_timeline_hash, "canonical_audio_asset_ref": plan.canonical_audio_asset_ref, "canonical_duration_ms": canonical_timeline.audio_duration_ms if canonical_timeline is not None and plan.temporal_authority_mode == "CANONICAL_STRICT" else None, "canonical_caption_compilation_ref": plan.canonical_caption_compilation_ref, "canonical_caption_compilation_hash": plan.canonical_caption_compilation_hash, "canonical_caption_render_payload_hash": plan.canonical_caption_render_payload_hash, "visual_direction_contract_ref": plan.visual_direction_contract_ref, "visual_direction_contract_hash": plan.visual_direction_contract_hash, "creative_gate_results": plan.creative_gate_results, "render_purpose": plan.purpose}
         manifest_hash = stable_hash(base)
         return CompiledNativeRenderManifest(compiled_manifest_id=str(uuid.uuid5(uuid.NAMESPACE_URL, manifest_hash)), ffmpeg_binary_requirement="ffmpeg-full>=8", manifest_hash=manifest_hash, created_at=datetime.now(UTC), **base)

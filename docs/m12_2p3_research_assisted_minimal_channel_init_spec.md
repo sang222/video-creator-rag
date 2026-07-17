@@ -1,5 +1,7 @@
 # M12.2P3 Research-Assisted Minimal Channel Init Spec
 
+After initialization, normal channel changes follow `docs/operations/channel_profile_versioning.md`: draft a new typed profile from the active effective policy, validate/preview/diff, approve, compile and activate. Templates remain initialization evidence; they do not propagate silently into active profiles or existing projects.
+
 Source of truth: Deep Research PDF `Đặc tả production-safe cho Minimal Channel Init với Research Agent trong VCOS.pdf`, dated 2026-06-28.
 
 ## Verdict

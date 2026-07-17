@@ -34,3 +34,5 @@ The native visual downgrade is an explicit source-role decision with provenance 
 ## Immutable/runtime boundary
 
 Provider execution cannot mutate Channel Contract, ChannelProfileVersion, EffectiveChannelRuntimeContextSnapshot or FormatIdentityContract. Drive is archive-only and never a renderer or publish trigger. NativeFFmpeg never enters `PaidProviderCallLedger`.
+
+CH1-FLEX compiles provider availability separately from channel use. `small-team-ai` permits Pexels only as optional supporting context and Google Veo only as an optional hero role, both with zero minimum quota. ElevenLabs is the narration authority; one controlled retry needs a new approval. The channel-scoped provider policy is frozen per project and does not add provider controls to the dashboard.

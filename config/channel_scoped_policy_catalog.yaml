@@ -1,0 +1,195 @@
+catalog_key: channel_scoped_policy_catalog
+catalog_version: "1.0.0"
+schema_version: ch1-flex.channel-scoped-policy.v1
+status: active
+items:
+  - channel_key: small-team-ai
+    policy_version: small-team-ai.channel-policy.v1
+    policy_status: APPROVED
+    approval_ref: operator-approval://ch1-flex/small-team-ai/profile-v1
+    channel_identity_policy:
+      channel_key: small-team-ai
+      primary_market: US
+      locale: en-US
+      content_language: en
+      operator_language: vi
+      primary_platform: YouTube
+      primary_format: long-form documentary/explainer
+    audience_pacing_profile:
+      audience: small professional teams seeking practical automation leverage
+      target_runtime_minutes: {minimum: 6, maximum: 12}
+      tone: calm professional documentary explainer
+      sentence_style: short natural evidence-aware sentences
+      pre_tts_estimate_advisory_only: true
+    format_identity_contract:
+      ref: channel-policy://small-team-ai/format-identity/v1
+      version: "1"
+      content_hash: 8522fb38cdfe3ff6ae615d39b7d1c8ff2a6fb34a33363276bd3ebea98a320cbc
+      status: APPROVED
+    channel_visual_strategy_profile:
+      strategy_label: native-explanatory-backbone-with-optional-support-and-hero
+      native_explanatory_target_range: {minimum: 0.50, maximum: 0.70}
+      supporting_visual_target_range: {minimum: 0.20, maximum: 0.35}
+      ai_hero_target_range: {minimum: 0.05, maximum: 0.18}
+      ranges_are_planning_guidance_only: true
+      minimum_pexels_quota: 0
+      minimum_veo_quota: 0
+      asset_selected_only_to_satisfy_ratio: false
+      native_preferred_scene_kinds: [mechanism, data, text, workflow, UI]
+      pexels_allowed_scene_kinds: [grounded real-world context]
+      veo_allowed_scene_kinds: [hero, metaphor, signature beat]
+      forced_provider_alternation: false
+    media_production_profile:
+      native_visual_backbone: true
+      final_render_authority: native_ffmpeg_renderer
+      final_narration_authority: elevenlabs
+      canonical_media_timeline_required: true
+      drive_verified_archive_only: true
+      youtube_manual_upload_only: true
+    voice_policy:
+      provider: elevenlabs
+      voice_id: pNInz6obpgDQGcFmaJgB
+      voice_name: Adam - Dominant, Firm
+      model_id: eleven_multilingual_v2
+      commercial_use_state: APPROVED_PLAN_REQUIRED
+      pronunciation_dictionary_refs: [pronunciation-dictionary://small-team-ai/en-US/v1]
+      settings:
+        speed: 0.90
+        stability: 0.55
+        similarity_boost: 0.75
+        style: 0.0
+        use_speaker_boost: true
+      one_complete_narration_preferred: true
+      forced_alignment_required: true
+      canonical_media_timeline_required: true
+      unavailable_behavior: BLOCK_FOR_REVIEW
+      paid_retry_cap: 1
+      retry_requires_new_approval: true
+    creative_quality_binding:
+      policy_ref: creative-policy://small-team-ai/small-team-ai.creative-quality.v1
+      policy_version: small-team-ai.creative-quality.v1
+      source_run_id: pa1r-cqr1-20260716-paid-canary-009
+      required_families:
+        - narration_pacing_policy
+        - caption_style_policy
+        - caption_sync_policy
+        - visual_language_policy
+        - visual_continuity_policy
+        - creative_media_qc_policy
+        - human_watchability_policy
+    character_policy:
+      mode: NO_CHARACTER
+      recurring_host_allowed: false
+      real_person_likeness_allowed: false
+    provider_usage_policy:
+      pexels:
+        enabled: true
+        optional: true
+        role: SUPPORTING_ONLY
+        semantic_fit_threshold: 0.78
+        max_searches_per_video: 4
+        max_downloads_per_video: 3
+        factual_evidence_allowed: false
+        recurring_host_allowed: false
+        rights_provenance_required: true
+        minimum_quota: 0
+      google_veo:
+        enabled: true
+        optional: true
+        role: AI_HERO_ONLY
+        allowed_hero_reasons: [HOOK, METAPHOR, EMOTIONAL_PAYOFF, VISUAL_SIGNATURE, NATIVE_MOTION_INSUFFICIENT]
+        approved_model_catalog_ref: config://google_veo_model_price_catalog/2026-07-12
+        max_hero_clips_per_video: 1
+        max_hero_seconds_per_video: 8
+        max_hero_cost_usd_per_video: 1.0
+        provider_audio_policy: DISCARD
+        unavailable_behavior: NATIVE_VISUAL_OR_REVIEW
+        external_provider_fallback_allowed: false
+        minimum_quota: 0
+      elevenlabs:
+        enabled: true
+        final_narration_authority: true
+        forced_alignment_required: true
+        initial_tts_attempts: 1
+        controlled_retry_requires_new_approval: true
+      native_ffmpeg_final_render_authority: true
+      drive_archive_required_before_cleanup: true
+      youtube_manual_publish_only: true
+    budget_policy:
+      channel_stage: NEW_UNPROVEN
+      tier: TIER_1_LOW_COST_PRODUCTION
+      currency: USD
+      max_estimated_cost_per_video: 1.0
+      max_actual_cost_per_video: 1.0
+      max_paid_attempts_per_provider_per_video: 1
+      max_veo_clips_per_video: 1
+      max_veo_seconds_per_video: 8
+      max_veo_cost_per_video: 1.0
+      monthly_channel_budget: 20.0
+      cost_overrun_review_required: true
+      premium_experiment_permission: false
+      resolution_state: APPROVED_DETERMINISTIC
+      derivation_refs:
+        - report://pa1r_guarded_provider_smoke_report/veo-hard-cap-1-usd
+        - config://media_provider_budget_policy_catalog/google_veo_default/max-20-renders
+        - operator-approval://ch1-flex/small-team-ai/profile-v1
+    evidence_policy:
+      material_claim_ledger_required: true
+      scenario_assumptions_required: true
+      stock_is_not_factual_evidence: true
+      source_rights_required: true
+      human_full_watch_required: true
+    originality_policy:
+      format_identity_contract_ref: channel-policy://small-team-ai/format-identity/v1
+      fixed_identity_elements:
+        - professional documentary/explainer tone
+        - native explanatory backbone
+        - evidence-aware claims
+        - manual-publish packaging
+      must_vary_elements:
+        - hook family
+        - primary angle
+        - section order
+        - native visual grammar
+        - thumbnail composition
+        - title and metadata pattern
+        - hero concept
+        - stock sequence
+      hook_repetition_budget: 3
+      thumbnail_grammar_repetition_budget: 3
+      asset_reuse_checks_required: true
+      hero_concept_reuse_checks_required: true
+      rolling_same_channel_comparison_scope: 10
+      cross_channel_duplication_awareness: true
+    publish_policy:
+      primary_destination: YouTube
+      manual_upload_only: true
+      synthetic_media_disclosure_required: true
+      rights_license_complete_required: true
+      metadata_thumbnail_truthfulness_required: true
+      human_final_approval_required: true
+      drive_archive_required: true
+      local_purge_after_archive_state: ARCHIVE_VERIFIED
+    analytics_maturity_policy:
+      maturity: NEW_UNPROVEN
+      learning_promotion_allowed: false
+      minimum_published_episode_count_before_promotion: 10
+    gate_policy:
+      hard_policy_cannot_be_weakened: true
+      technical_media_qc_required: true
+      creative_perceptual_media_qc_required: true
+      human_full_watch_required: true
+      no_gate_weakening: true
+    capability_requirements:
+      required:
+        - profile_compiler
+        - policy_snapshot
+        - native_ffmpeg_renderer
+        - canonical_media_timeline
+        - elevenlabs
+        - forced_alignment
+        - pexels_optional
+        - google_veo_optional
+        - drive_archive
+        - manual_youtube_publish
+      launch_requires_all: true

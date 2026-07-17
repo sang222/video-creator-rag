@@ -72,3 +72,19 @@ the source, selects another asset, inserts a native bridge or requests review.
 Full evidence stays in visual/asset artifacts and only binding, scores and gate
 refs project into the canonical timeline. The renderer propagates this evidence
 but never re-ranks or infers creative quality.
+
+## VSR1 route-aware projection
+
+VSR1 leaves historical `VisualDirectionContract` and PKG1 scene intents
+immutable. New strict planning projects a scene intent into
+`SceneVisualRealizationRequirements`, then records one deterministic
+`VisualSourceDecision` before any acquisition or generation planner is
+reachable. The projection carries the niche profile, meaning, truth and
+specificity features, exact-text/number dependencies, diagram and motion value,
+output shape, policy ref/hash and a content hash.
+
+The niche profile supplies defaults only; scene gates remain authoritative.
+Pexels is optional context, not a global default. Evidence, actual UI, product
+and document truth require an authorized source; relationship and label scenes
+prefer native diagrams; exact text and numbers remain native authority.
+AI-image routes are non-executable plans until IMG1 approves a provider route.

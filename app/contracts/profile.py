@@ -3,8 +3,10 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from app.contracts.channel_policy import ChannelScopedPolicy
 
-ProfileStatus = Literal["draft", "compiled", "approved", "active", "archived", "rejected"]
+
+ProfileStatus = Literal["draft", "compiled", "pending_approval", "approved", "active", "archived", "rejected"]
 CompileStatus = Literal["started", "succeeded", "failed"]
 
 
@@ -26,6 +28,7 @@ class ChannelProfileInput(BaseModel):
     series_plan: list[dict[str, Any]] = Field(min_length=1)
     initial_content_runway: list[dict[str, Any]] = Field(min_length=1)
     policies: dict[str, Any]
+    channel_policy: ChannelScopedPolicy | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -58,6 +61,27 @@ class ChannelProfileVersionRead(BaseModel):
 
 class ChannelProfileCompileRequest(BaseModel):
     correlation_id: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChannelProfileDraftUpdate(BaseModel):
+    profile_input: ChannelProfileInput
+    expected_profile_input_hash: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChannelProfileApprovalRequest(BaseModel):
+    approved_by: uuid.UUID | None = None
+    approval_ref: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChannelProfileRejectionRequest(BaseModel):
+    rejected_by: uuid.UUID | None = None
+    reason: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
 

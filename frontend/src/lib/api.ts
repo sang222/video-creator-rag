@@ -32,6 +32,7 @@ import type {
   RetrievalManifestOps,
   RuntimeOpsCommandCenter,
   ChannelRuntimeTrace,
+  ChannelProfileManagement,
   VideoPackageReview,
   UploadedVideoOpsSummary,
   UploadedVideoLedgerList
@@ -60,6 +61,7 @@ export const queryKeys = {
   queues: (queueType?: string) => ["queues", queueType ?? "all"],
   channels: ["channels"],
   channelWorkspace: (channelId: string) => ["channel-workspace", channelId],
+  channelProfileManagement: (channelId: string) => ["channel-profile-management", channelId],
   channelPublishLedger: (channelId: string) => ["channel-publish-ledger", channelId],
   channelUploadTasks: (channelId: string) => ["channel-upload-tasks", channelId],
   channelUploadedVideos: (channelId: string) => ["channel-uploaded-videos", channelId],
@@ -170,6 +172,58 @@ export function compileChannelInitDraft(draftId: string) {
 
 export function getChannelWorkspace(channelId: string) {
   return request<ChannelWorkspace>(`/channels/${channelId}/workspace`);
+}
+
+export function getChannelProfileManagement(channelId: string) {
+  return request<ChannelProfileManagement>(`/channels/${channelId}/profile-management`);
+}
+
+export function createChannelProfileDraft(channelId: string) {
+  return request<Record<string, unknown>>(`/channels/${channelId}/profile-versions/draft-from-active`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function updateChannelProfileDraft(profileVersionId: string, profileInput: Record<string, unknown>, expectedHash: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/draft`, {
+    method: "PUT",
+    body: JSON.stringify({ profile_input: profileInput, expected_profile_input_hash: expectedHash })
+  });
+}
+
+export function validateChannelProfileDraft(profileVersionId: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/validate`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export function previewChannelProfileCompile(profileVersionId: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/preview-compile`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export function compileChannelProfile(profileVersionId: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/compile`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export function submitChannelProfile(profileVersionId: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/submit-for-approval`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export function approveChannelProfile(profileVersionId: string, approvalRef: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ approval_ref: approvalRef, approved_by: null })
+  });
+}
+
+export function rejectChannelProfile(profileVersionId: string, reason: string) {
+  return request<Record<string, unknown>>(`/profile-versions/${profileVersionId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason, rejected_by: null })
+  });
+}
+
+export function activatePolicySnapshot(snapshotId: string) {
+  return request<Record<string, unknown>>(`/policy-snapshots/${snapshotId}/activate`, { method: "POST", body: JSON.stringify({}) });
 }
 
 export function getChannelPublishLedger(channelId: string) {

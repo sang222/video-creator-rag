@@ -3,6 +3,15 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from app.contracts.channel_policy import (
+    CapabilityEvaluation,
+    ChannelScopedPolicy,
+    CompilerInputManifest,
+    LaunchRestrictions,
+    NativeRenderPolicySnapshot,
+    PolicySnapshotRefs,
+)
+
 
 SnapshotStatus = Literal["compiled", "approved", "active", "archived"]
 
@@ -65,6 +74,16 @@ class CompiledChannelPolicyPayload(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     contradiction_reasons: list[str] = Field(default_factory=list)
     activation_required: bool = False
+    channel_scoped_policy: ChannelScopedPolicy | None = None
+    native_render_policy_snapshot: NativeRenderPolicySnapshot | None = None
+    provider_usage_policy_snapshot: dict[str, Any] | None = None
+    creative_quality_policy_snapshot: dict[str, Any] | None = None
+    publish_policy_snapshot: dict[str, Any] | None = None
+    capability_evaluation: CapabilityEvaluation | None = None
+    launch_restrictions: LaunchRestrictions | None = None
+    compiler_input_manifest: CompilerInputManifest | None = None
+    compiler_decision_log: list[dict[str, Any]] = Field(default_factory=list)
+    snapshot_refs: PolicySnapshotRefs | None = None
 
     model_config = ConfigDict(extra="forbid")
 

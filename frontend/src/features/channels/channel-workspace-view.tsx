@@ -24,6 +24,7 @@ import {
   verifyUploadedVideo
 } from "@/lib/api";
 import type { BackfillUploadedVideoInput, HumanUploadTask } from "@/lib/types";
+import { ChannelProfileManager } from "@/features/channels/channel-profile-manager";
 
 export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
@@ -346,6 +347,7 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
           <EmptyStateCard title="Bài học chờ duyệt" description="Bài học cần người duyệt bằng chứng trước khi trở thành mục playbook. VCOS không tự đổi cấu hình kênh." actions={[{ label: "Xem bài học", href: "/learning" }]} />
         </Tabs.Content>
         <Tabs.Content value="profile-policy" className="mt-5">
+          <div className="space-y-4">
           <Panel>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -420,6 +422,8 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
               </div>
             ) : null}
           </Panel>
+          <ChannelProfileManager channelId={channelId} />
+          </div>
         </Tabs.Content>
         <Tabs.Content value="provider-health" className="mt-5">
           <Panel>

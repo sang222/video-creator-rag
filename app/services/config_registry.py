@@ -10,7 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.config_catalog import CatalogDocument
+from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
+from app.contracts.visual_routing import VisualSourceRoutingPolicyCatalogItem
 from app.core.config import (
     VEO_APPROVED_MODEL_IDS,
     VEO_ALLOWED_DURATION_SECONDS,
@@ -495,6 +497,8 @@ class ConfigRegistryService:
             "pexels_policy_catalog": PexelsPolicyCatalogItem,
             "google_veo_model_price_catalog": GoogleVeoModelPriceCatalogItem,
             "creative_quality_policy_catalog": CreativeQualityPolicyCatalogItem,
+            "channel_scoped_policy_catalog": ChannelScopedPolicy,
+            "visual_source_routing_policy_catalog": VisualSourceRoutingPolicyCatalogItem,
             "provider_capability_catalog": SimpleKeyCatalogItem,
             "media_routing_result_catalog": SimpleKeyCatalogItem,
             "media_budget_state_catalog": SimpleKeyCatalogItem,

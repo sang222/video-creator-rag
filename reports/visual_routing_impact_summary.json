@@ -1,0 +1,151 @@
+{
+  "date": "2026-07-17",
+  "phase": "VISUAL-IMPACT-REVIEW",
+  "repository": {
+    "path": "/Users/sangss/Desktop/video-creator-rag",
+    "branch": "main",
+    "head_commit_sha": "3b157f9dc4d1c303eb90f7d0eeddac007c2ac81e",
+    "default_branch": "main",
+    "initial_worktree": "DIRTY_PREEXISTING_41_ENTRIES"
+  },
+  "research_input": {
+    "title": "VCOS Niche-Aware Visual Source Routing and AI Cloud Image Provider Selection",
+    "pages": 43,
+    "status": "PASS",
+    "authority": "TARGET_DESIGN"
+  },
+  "current_truth": {
+    "pexels_global_compatibility_default_present": true,
+    "pexels_channel_role": "OPTIONAL_SUPPORTING_ONLY",
+    "auto_pexels_to_paid_ai_failover_present": false,
+    "pexels_photo_route_present": false,
+    "mechanism_scene_risk": true,
+    "evidence_scene_risk": true,
+    "quota_driven_selection_risk": false,
+    "exact_text_authority": "NATIVE_INTENDED_CAPTIONS_FULLY_IMPLEMENTED_OTHER_OVERLAYS_INCOMPLETE",
+    "gemini_image_runtime_route_present": false,
+    "gemini_image_settings_present": false,
+    "image_cost_catalog_present": false,
+    "generic_image_attempt_ledger_foundation_present": true,
+    "generic_ai_provenance_foundation_present": true
+  },
+  "decisions": {
+    "architecture_rewrite_required": false,
+    "database_migration": "NOT_REQUIRED",
+    "ch1_flex_v1": "VALID_HISTORICAL_BUT_SUPERSEDED_FOR_FUTURE_PRODUCTION",
+    "pkg1_v1": "HISTORICAL_PASS_VISUAL_PROVIDER_COST_DISCLOSURE_REVISION_REQUIRED",
+    "old_mr1_approval": "HISTORICAL_EXACT_BINDING_NEW_APPROVAL_REQUIRED",
+    "mr1_execution": "ON_HOLD",
+    "proceed_to_mr1": false,
+    "proceed_to_vsr1": true
+  },
+  "concept_mapping": {
+    "NicheVisualSourceProfile": "EXTEND_EXISTING_CHANNEL_VISUAL_STRATEGY_PROFILE",
+    "VisualSourceDecision": "EXTEND_EXISTING_SCENE_SOURCE_DECISION_CONTRACT",
+    "PexelsEligibilityAssessment": "ADD_NEW",
+    "AIImageEligibilityAssessment": "ADD_NEW",
+    "EvidenceTruthClassification": "EXTEND_EXISTING",
+    "DiagramSuitabilityDecision": "EXTEND_EXISTING_WITH_TYPED_GATE",
+    "SourceFallbackClass": "EXTEND_EXISTING_WITH_TYPED_CLASS",
+    "VisualRealization": "DO_NOT_BUILD_STANDALONE",
+    "AIImageGenerationManifest": "DO_NOT_BUILD_EXTEND_AI_GENERATION_MANIFEST",
+    "ImageCostEstimate": "DO_NOT_BUILD_REUSE_COST_ESTIMATE_SNAPSHOT",
+    "ImageProviderAttemptLedger": "DO_NOT_BUILD_REUSE_GENERIC_R3D8_LEDGER"
+  },
+  "pkg1_artifact_impact": {
+    "reusable_unchanged": [
+      "idea_admission_lineage",
+      "research_pack",
+      "source_pack_editorial_evidence",
+      "claim_evidence_ledger",
+      "script",
+      "spoken_text_normalized",
+      "format_identity_contract",
+      "narration_pacing_preflight_estimate"
+    ],
+    "revision_required": [
+      "creative_brief_policy_binding",
+      "episode_originality_manifest_visual_concepts",
+      "visual_direction_contract",
+      "scene_visual_intents",
+      "visual_plan",
+      "compiled_asset_request_plan",
+      "caption_plan_if_overlay_regions_change",
+      "cost_estimate_snapshot",
+      "provider_execution_plan",
+      "paid_attempt_plan",
+      "rights_disclosure_completeness_report",
+      "synthetic_media_disclosure_receipt_draft",
+      "package_manifest",
+      "mr1_readiness_state"
+    ],
+    "rebuild_required": [
+      "exact_target_package_approvals_for_revised_artifacts",
+      "mr1_paid_execution_approval"
+    ]
+  },
+  "future_reapproval_inputs": [
+    "approved_ChannelProfileVersion_v2",
+    "new_CompiledChannelPolicySnapshot",
+    "revised_VisualDirectionContract",
+    "revised_VisualPlan",
+    "complete_VisualSourceDecision_set",
+    "revised_CompiledAssetRequestPlan",
+    "Gemini_Image_route_model_capability_and_kill_switch",
+    "new_CostEstimateSnapshot",
+    "new_provenance_and_disclosure_plan",
+    "disabled_revised_ProviderExecutionPlan",
+    "revised_package_manifest_and_mr1_readiness",
+    "new_exact_target_human_approvals"
+  ],
+  "implementation_order": [
+    "VSR1",
+    "IMG1",
+    "VQC1",
+    "offline_fixtures",
+    "one_controlled_paid_image_canary",
+    "human_full_watch_and_drive_verification",
+    "CH1_FLEX_v2",
+    "PKG1_visual_revision",
+    "new_MR1_approval",
+    "MR1"
+  ],
+  "verification": {
+    "alembic_heads": "0037_ch1_flex (head)",
+    "compileall_app": "PASS",
+    "git_diff_check": "PASS",
+    "focused_pytest": "NOT_RUN_POSTGRES_LOCAL_PORT_55432_UNAVAILABLE",
+    "self_repair_cycles": 0
+  },
+  "no_execution_proof": {
+    "provider_calls": 0,
+    "provider_attempts_consumed": 0,
+    "renders": 0,
+    "drive_uploads": 0,
+    "youtube_actions": 0,
+    "database_mutations": 0,
+    "profile_or_artifact_mutations": 0
+  },
+  "verdicts": {
+    "REPOSITORY_IDENTITY": "PASS",
+    "VISUAL_RESEARCH_INPUT": "PASS",
+    "CURRENT_VISUAL_PIPELINE_MAPPING": "PASS",
+    "PEXELS_GLOBAL_DEFAULT_AUDIT": "PASS",
+    "CURRENT_SOURCE_ROUTING_AUTHORITY": "PASS",
+    "EXACT_TEXT_AUTHORITY_AUDIT": "PASS",
+    "GOOGLE_IMAGE_ROUTE_AUDIT": "PASS",
+    "TARGET_DESIGN_REPO_MAPPING": "PASS",
+    "DUPLICATE_CONCEPT_RISK_REVIEW": "PASS",
+    "DATABASE_MIGRATION_DECISION": "NOT_REQUIRED",
+    "CH1_FLEX_IMPACT_REVIEW": "PASS",
+    "PKG1_IMPACT_REVIEW": "PASS",
+    "MR1_APPROVAL_IMPACT_REVIEW": "PASS",
+    "IMPLEMENTATION_CHANGE_SPEC": "PASS",
+    "VISUAL_IMPACT_REVIEW_SELF_REPAIR_CYCLES": 0,
+    "VISUAL_IMPACT_REVIEW_FINAL": "PASS",
+    "MR1_EXECUTION": "ON_HOLD",
+    "PROCEED_TO_MR1": false,
+    "PROCEED_TO_VSR1": true
+  },
+  "exact_next_action": "Implement VSR1 provider-neutral routing only; do not add Gemini Image provider code or execute any provider."
+}

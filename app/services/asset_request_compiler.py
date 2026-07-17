@@ -118,8 +118,6 @@ class AssetRequestCompiler:
             raise ValueError("FORMAT_IDENTITY_NOT_APPROVED")
         if plan.channel_id != format_identity.channel_id or plan.channel_id != strategy_profile.channel_id:
             raise ValueError("CHANNEL_SCOPE_MISMATCH")
-        if strategy_profile.strategy_key == "NR2_B_BALANCED" and plan.channel_id != "small-team-ai":
-            raise ValueError("STRATEGY_B_CHANNEL_SCOPE_VIOLATION")
         if not strategy_profile.native_is_backbone or not format_identity.native_explanatory_backbone_required:
             raise ValueError("NATIVE_BACKBONE_REQUIRED")
         if plan.character_policy_mode != format_identity.character_policy_mode or plan.character_policy_mode != strategy_profile.character_policy_mode:

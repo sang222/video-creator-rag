@@ -209,6 +209,28 @@ export type ChannelWorkspace = {
   technical_appendix: Record<string, unknown>;
 };
 
+export type ChannelProfileVersion = {
+  id: string;
+  version: number;
+  status: string;
+  profile_input_hash: string;
+  profile_input: Record<string, unknown>;
+  latest_snapshot_id?: string | null;
+  latest_snapshot_hash?: string | null;
+  snapshot_status?: string | null;
+  is_active: boolean;
+  capability_status: string;
+  capability_blockers: string[];
+};
+
+export type ChannelProfileManagement = {
+  channel_id: string;
+  active_policy_snapshot_id?: string | null;
+  versions: ChannelProfileVersion[];
+  provider_execution_available: false;
+  exact_next_action: string;
+};
+
 export type UploadedVideoListItem = {
   id: string;
   title: string;

@@ -310,6 +310,17 @@ from app.services.r3d9_ux2 import (
     PackagingReviewQueueService,
 )
 from app.services.r3d10 import PackageRuntimeDispositionService, RuntimeLTSFreezeVerifier
+from app.services.pkg1 import PKG1PackageService
+from app.services.visual_source_routing import (
+    AIImageEligibilityGate,
+    DiagramSuitabilityGate,
+    EvidenceTruthSourceGate,
+    PexelsEligibilityGate,
+    VisualRealizationCompletenessGate,
+    VisualSourceRouter,
+    VisualSourceRoutingPolicyCatalog,
+    VisualSourceRoutingPreviewService,
+)
 
 __all__ = [
     "AuditService",
@@ -565,6 +576,15 @@ __all__ = [
     "PackageRuntimeDispositionService",
     "ProviderStackDriftGuard",
     "RuntimeLTSFreezeVerifier",
+    "PKG1PackageService",
+    "AIImageEligibilityGate",
+    "DiagramSuitabilityGate",
+    "EvidenceTruthSourceGate",
+    "PexelsEligibilityGate",
+    "VisualRealizationCompletenessGate",
+    "VisualSourceRouter",
+    "VisualSourceRoutingPolicyCatalog",
+    "VisualSourceRoutingPreviewService",
     "OllamaReadinessCheck",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",

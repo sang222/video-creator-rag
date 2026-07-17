@@ -14,6 +14,15 @@ from app.contracts import (
     NicheProfileTemplate,
     ProfileCompilerPolicy,
 )
+from app.contracts.channel_policy import (
+    CapabilityEvaluation,
+    ChannelScopedPolicy,
+    CompilerInputManifest,
+    LaunchRestrictions,
+    NativeRenderPolicySnapshot,
+    PolicyRef,
+    PolicySnapshotRefs,
+)
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -21,6 +30,7 @@ from app.db.models import (
     ChannelProfileVersion,
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
+    FormatIdentityContract,
 )
 from app.services.config_registry import LoadedCatalog, canonical_json, content_hash
 from app.services.config_registry import ConfigRegistryService
@@ -98,7 +108,21 @@ class ChannelProfileCompiler:
                 capability_matrix=catalogs.capability_matrix,
                 compiler_policy=catalogs.compiler_policy,
                 channel=channel,
+                profile_input_hash_override=profile_version.profile_input_hash,
             )
+            if profile_version.status == "active" and channel is not None and channel.active_policy_snapshot_id:
+                active_snapshot = self.session.get(
+                    CompiledChannelPolicySnapshot,
+                    channel.active_policy_snapshot_id,
+                )
+                if (
+                    active_snapshot is not None
+                    and (active_snapshot.compiled_payload or {}).get("channel_scoped_policy") is not None
+                    and active_snapshot.content_hash != output_hash
+                ):
+                    raise ValidationFailureError(
+                        "active channel profile is immutable; create a new draft version"
+                    )
             snapshot = self._get_or_create_snapshot(
                 profile_version=profile_version,
                 run=run,
@@ -140,6 +164,7 @@ class ChannelProfileCompiler:
         capability_matrix: CapabilityMatrix,
         compiler_policy: ProfileCompilerPolicy,
         channel: ChannelWorkspace | None = None,
+        profile_input_hash_override: str | None = None,
     ) -> tuple[dict[str, Any], str]:
         reject_legacy_provider_budget_fields(profile_input.model_dump(mode="json"))
         if not capability_matrix.profile_compiler_available:
@@ -209,6 +234,12 @@ class ChannelProfileCompiler:
         }
         channel_contract = build_channel_contract(profile_input=profile_input.model_dump(mode="json"), channel=channel)
         creative_quality_policies = self._creative_quality_policies(channel_key=channel.key if channel else None)
+        channel_policy_payload = self._channel_scoped_policy_payload(
+            channel=channel,
+            policy_override=profile_input.channel_policy,
+            profile_input_hash=profile_input_hash_override or content_hash(profile_input.model_dump(mode="json")),
+            creative_quality_policies=creative_quality_policies,
+        )
         compiled_policy_snapshot_json = {
             "schema_version": "m12.2p.channel_policy_snapshot.v1",
             "snapshot_source": "ChannelProfileCompiler",
@@ -229,12 +260,230 @@ class ChannelProfileCompiler:
             "contradiction_reasons": channel_contract["contradiction_reasons"],
             "activation_required": channel_contract["contract_status"] != "COMPLETE",
         }
+        if channel_policy_payload is not None:
+            payload.update(channel_policy_payload)
+            payload["activation_required"] = bool(
+                payload["activation_required"]
+                or channel_policy_payload["capability_evaluation"]["status"] != "PASS"
+                or channel_policy_payload["channel_scoped_policy"]["policy_status"] != "APPROVED"
+            )
         missing = sorted(set(compiler_policy.required_output_sections) - set(payload))
         if missing:
             raise ValidationFailureError(f"compiled payload missing sections: {missing}")
         parsed = CompiledChannelPolicyPayload.model_validate(payload)
         parsed_payload = parsed.model_dump(mode="json")
         return parsed_payload, content_hash(parsed_payload)
+
+    def _channel_scoped_policy_payload(
+        self,
+        *,
+        channel: ChannelWorkspace | None,
+        policy_override: ChannelScopedPolicy | None,
+        profile_input_hash: str,
+        creative_quality_policies: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if channel is None:
+            return None
+        if policy_override is not None:
+            policy = policy_override
+            if policy.channel_key != channel.key:
+                raise ValidationFailureError("channel policy override scope mismatch")
+            catalog_ref = f"profile-input://{channel.key}/{policy.policy_version}"
+            catalog_hash = content_hash(policy.model_dump(mode="json"))
+        else:
+            loaded = ConfigRegistryService(self.session).validate_catalog(
+                self.config_dir / "channel_scoped_policy_catalog.yaml"
+            )
+            selected = next(
+                (item for item in loaded.content["items"] if item.get("channel_key") == channel.key),
+                None,
+            )
+            if selected is None:
+                return None
+            policy = ChannelScopedPolicy.model_validate(selected)
+            catalog_ref = f"config://channel_scoped_policy_catalog/{loaded.catalog_version}#{policy.channel_key}"
+            catalog_hash = loaded.content_hash
+        return self.compile_channel_policy_blocks(
+            policy=policy,
+            creative_quality_policies=creative_quality_policies,
+            profile_input_hash=profile_input_hash,
+            channel_policy_catalog_ref=catalog_ref,
+            channel_policy_catalog_hash=catalog_hash,
+            format_contract_evidence=self._format_contract_evidence(channel=channel, policy=policy),
+        )
+
+    def compile_channel_policy_blocks(
+        self,
+        *,
+        policy: ChannelScopedPolicy,
+        creative_quality_policies: dict[str, Any] | None,
+        profile_input_hash: str,
+        channel_policy_catalog_ref: str,
+        channel_policy_catalog_hash: str,
+        format_contract_evidence: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Compile any typed channel policy through one branch-free deterministic path."""
+        blockers: list[str] = []
+        if creative_quality_policies is None:
+            blockers.append("CREATIVE_QUALITY_POLICY_MISSING")
+            creative_quality_policies = {
+                "policy_ref": policy.creative_quality_binding.policy_ref,
+                "policy_version": policy.creative_quality_binding.policy_version,
+                "catalog_hash": "0" * 64,
+            }
+        if creative_quality_policies.get("policy_ref") != policy.creative_quality_binding.policy_ref:
+            blockers.append("CREATIVE_QUALITY_POLICY_REF_MISMATCH")
+        if creative_quality_policies.get("policy_version") != policy.creative_quality_binding.policy_version:
+            blockers.append("CREATIVE_QUALITY_POLICY_VERSION_MISMATCH")
+        creative_hash = str(creative_quality_policies.get("catalog_hash") or "")
+        if len(creative_hash) != 64:
+            blockers.append("CREATIVE_QUALITY_POLICY_HASH_MISSING")
+            creative_hash = "0" * 64
+
+        if format_contract_evidence is None:
+            blockers.append("FORMAT_IDENTITY_CONTRACT_MISSING")
+        elif format_contract_evidence.get("content_hash") != policy.format_identity_contract.content_hash:
+            blockers.append("FORMAT_IDENTITY_CONTRACT_HASH_MISMATCH")
+        elif format_contract_evidence.get("status") != "APPROVED":
+            blockers.append("FORMAT_IDENTITY_CONTRACT_NOT_APPROVED")
+
+        provider_dump = policy.provider_usage_policy.model_dump(mode="json")
+        budget_dump = policy.budget_policy.model_dump(mode="json")
+        publish_dump = policy.publish_policy.model_dump(mode="json")
+        caption_hash = content_hash(
+            {
+                "caption_style_policy": creative_quality_policies.get("caption_style_policy"),
+                "caption_sync_policy": creative_quality_policies.get("caption_sync_policy"),
+            }
+        )
+        native_core = {
+            "final_render_authority": "native_ffmpeg_renderer",
+            "temporal_authority": "CanonicalMediaTimeline",
+            "strict_plan_requires_final_audio": True,
+            "caption_policy_ref": f"{policy.creative_quality_binding.policy_ref}#caption",
+            "caption_policy_hash": caption_hash,
+        }
+        native_hash = content_hash(native_core)
+        native_snapshot = NativeRenderPolicySnapshot(
+            policy_ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/native-render",
+            policy_hash=native_hash,
+            **native_core,
+        )
+        provider_hash = content_hash(provider_dump)
+        budget_hash = content_hash(budget_dump)
+        publish_hash = content_hash(publish_dump)
+        capability = CapabilityEvaluation(
+            status="BLOCKED" if blockers else "PASS",
+            required=policy.capability_requirements.required,
+            available=[
+                item for item in policy.capability_requirements.required
+                if item not in ({"format_identity_contract", "creative_quality_policy"} if blockers else set())
+            ],
+            blockers=sorted(set(blockers)),
+        )
+        input_manifest = CompilerInputManifest(
+            precedence=[
+                "hard_global_company_policy",
+                "approved_channel_contract",
+                "approved_channel_profile_version",
+                "category_policy",
+                "series_policy",
+                "episode_project_brief",
+                "approved_operator_overrides",
+            ],
+            profile_input_hash=profile_input_hash,
+            channel_policy_catalog_ref=channel_policy_catalog_ref,
+            channel_policy_catalog_hash=channel_policy_catalog_hash,
+            creative_quality_policy_ref=policy.creative_quality_binding.policy_ref,
+            creative_quality_policy_hash=creative_hash,
+            format_identity_contract_ref=policy.format_identity_contract.ref,
+            format_identity_contract_hash=policy.format_identity_contract.content_hash,
+        )
+        refs = PolicySnapshotRefs(
+            native_render_policy=PolicyRef(
+                ref=native_snapshot.policy_ref,
+                version=policy.policy_version,
+                content_hash=native_hash,
+            ),
+            creative_quality_policy=PolicyRef(
+                ref=policy.creative_quality_binding.policy_ref,
+                version=policy.creative_quality_binding.policy_version,
+                content_hash=creative_hash,
+            ),
+            provider_usage_policy=PolicyRef(
+                ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/provider-usage",
+                version=policy.policy_version,
+                content_hash=provider_hash,
+            ),
+            budget_policy=PolicyRef(
+                ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/budget",
+                version=policy.policy_version,
+                content_hash=budget_hash,
+            ),
+            publish_policy=PolicyRef(
+                ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/publish",
+                version=policy.policy_version,
+                content_hash=publish_hash,
+            ),
+            format_identity_contract=PolicyRef(
+                ref=policy.format_identity_contract.ref,
+                version=policy.format_identity_contract.version,
+                content_hash=policy.format_identity_contract.content_hash,
+            ),
+        )
+        return {
+            "channel_scoped_policy": policy.model_dump(mode="json"),
+            "native_render_policy_snapshot": native_snapshot.model_dump(mode="json"),
+            "provider_usage_policy_snapshot": {
+                "policy": provider_dump,
+                "content_hash": provider_hash,
+                "scope": policy.channel_key,
+            },
+            "creative_quality_policy_snapshot": {
+                **creative_quality_policies,
+                "content_hash": creative_hash,
+                "source_run_id": policy.creative_quality_binding.source_run_id,
+            },
+            "publish_policy_snapshot": {
+                "policy": publish_dump,
+                "content_hash": publish_hash,
+                "scope": policy.channel_key,
+            },
+            "capability_evaluation": capability.model_dump(mode="json"),
+            "launch_restrictions": LaunchRestrictions().model_dump(mode="json"),
+            "compiler_input_manifest": input_manifest.model_dump(mode="json"),
+            "compiler_decision_log": [
+                {"decision": "HARD_POLICY_PRECEDENCE_LOCKED", "result": "PASS"},
+                {"decision": "CHANNEL_POLICY_SCOPE", "result": policy.channel_key},
+                {"decision": "STRATEGY_RANGES_PLANNING_ONLY", "result": "PASS"},
+                {"decision": "NO_MINIMUM_PROVIDER_QUOTAS", "result": "PASS"},
+                {"decision": "CAPABILITY_EVALUATION", "result": capability.status},
+            ],
+            "snapshot_refs": refs.model_dump(mode="json"),
+        }
+
+    def _format_contract_evidence(
+        self,
+        *,
+        channel: ChannelWorkspace,
+        policy: ChannelScopedPolicy,
+    ) -> dict[str, Any] | None:
+        contract = self.session.scalars(
+            select(FormatIdentityContract)
+            .where(
+                FormatIdentityContract.channel_id == channel.id,
+                FormatIdentityContract.status == "APPROVED",
+            )
+            .order_by(FormatIdentityContract.contract_version.desc())
+        ).first()
+        if contract is None:
+            return None
+        return {
+            "id": str(contract.id),
+            "status": contract.status,
+            "content_hash": contract.content_hash,
+            "expected_ref": policy.format_identity_contract.ref,
+        }
 
     def _creative_quality_policies(self, *, channel_key: str | None) -> dict[str, Any] | None:
         """Compile immutable channel-scoped creative policy without service constants."""

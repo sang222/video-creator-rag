@@ -127,6 +127,7 @@ M12.1 does not build real provider calls, provider strategy changes, YouTube upl
 - M11.1 complete means dashboard has Vietnamese UI, login/local auth shell, localization/subtitle package support, localized metadata package support, localization readiness, and configured publish timing by channel location/timezone.
 - M12 complete means VCOS can validate credentials/provider readiness, display hard-env AI budget caps, show the Cloud Final Renderer required gap, and run guarded real smoke tests before production. Next milestones can focus on production dry-run, first real video package, or final renderer selection.
 - M12.1 complete means VCOS can render deterministic, versioned, channel-contract-bound chat prompts for production agents, persist prompt audit snapshots, validate BaseEnvelope JSON outputs, and run prompt eval cases without real provider calls.
+- CH1-FLEX complete means `small-team-ai` has an approved active v1 channel-scoped policy, compiled child snapshot refs/hashes, zero-code draft/diff/approval/activation management, and per-project immutable policy binding. Strategy B is channel data; NativeFFmpeg remains generic; provider execution and manual YouTube publishing boundaries are unchanged.
 
 ## Pilot Notes
 

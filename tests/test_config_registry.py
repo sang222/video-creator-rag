@@ -26,6 +26,7 @@ def test_config_yaml_validates(db_session) -> None:
         "cloud_media_verification_status_catalog",
         "capability_matrix",
         "creative_quality_policy_catalog",
+        "channel_scoped_policy_catalog",
         "context_pack_purpose_catalog",
         "daily_run_status_catalog",
         "decision_rights_policy",
@@ -172,6 +173,7 @@ def test_config_yaml_validates(db_session) -> None:
         "youtube_metric_availability_catalog",
         "youtube_sync_run_state_catalog",
         "youtube_sync_source_catalog",
+        "visual_source_routing_policy_catalog",
     }
 
 
@@ -189,7 +191,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 159
+    assert catalog_count == 161
     assert role_count == 13
     assert metric_definition_count == 16
 

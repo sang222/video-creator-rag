@@ -57,3 +57,17 @@ Nested `VCOS` and unknown scope segments block. One required mismatch sets archi
 - `GET /video-projects/{project_id}/archive-readiness`
 
 These routes expose evidence, counts, readiness and the exact next action. They add no search, download, generation, archive, purge, render or upload action.
+
+## VSR1 routing evidence
+
+For a new strict visual plan, acquisition is downstream of a deterministic
+`VisualSourceDecision`; it cannot choose a source by trying providers. Planning
+evidence may carry `preferred_source_route`, nullable `actual_source_route`,
+routing reason codes, fallback class, source-decision ref/hash, eligibility-gate
+refs, evidence-truth classification and `native_overlay_required`.
+
+`actual_source_route` stays null in VSR1 because no asset is acquired or
+generated. Pexels result quality is not a routing input and a failed search does
+not open an AI-image route. AI-image and Veo routes express future acquisition
+requirements only; provider execution, response URLs, attempts, cost events and
+output receipts are absent until a separately approved milestone.

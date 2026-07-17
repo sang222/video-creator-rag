@@ -153,7 +153,9 @@ class VideoProjectService:
             company_id=data.company_id,
             action="video_project.create",
         )
-        project = VideoProject(**data.model_dump())
+        project_values = data.model_dump()
+        project_values.update(self._freeze_policy_refs(data=data, snapshot=snapshot))
+        project = VideoProject(**project_values)
         self.session.add(project)
         self.session.flush()
         _record_workflow_event(
@@ -172,6 +174,34 @@ class VideoProjectService:
             },
         )
         return project
+
+    @staticmethod
+    def _freeze_policy_refs(
+        *,
+        data: VideoProjectCreate,
+        snapshot: CompiledChannelPolicySnapshot,
+    ) -> dict[str, Any]:
+        refs = (snapshot.compiled_payload or {}).get("snapshot_refs")
+        if not isinstance(refs, dict):
+            return {}
+        expected = {
+            "channel_profile_version_id": snapshot.channel_profile_version_id,
+            "native_render_policy_snapshot_ref": refs["native_render_policy"]["ref"],
+            "native_render_policy_snapshot_hash": refs["native_render_policy"]["content_hash"],
+            "creative_quality_policy_ref": refs["creative_quality_policy"]["ref"],
+            "creative_quality_policy_hash": refs["creative_quality_policy"]["content_hash"],
+            "provider_usage_policy_ref": refs["provider_usage_policy"]["ref"],
+            "provider_usage_policy_hash": refs["provider_usage_policy"]["content_hash"],
+            "budget_policy_ref": refs["budget_policy"]["ref"],
+            "budget_policy_hash": refs["budget_policy"]["content_hash"],
+            "format_identity_contract_ref": refs["format_identity_contract"]["ref"],
+            "format_identity_contract_hash": refs["format_identity_contract"]["content_hash"],
+        }
+        for field_name, expected_value in expected.items():
+            provided = getattr(data, field_name)
+            if provided is not None and provided != expected_value:
+                raise ValidationFailureError(f"project policy freeze mismatch: {field_name}")
+        return expected
 
     def get_project(self, project_id: uuid.UUID) -> VideoProject | None:
         return self.session.get(VideoProject, project_id)
@@ -456,6 +486,64 @@ class ReviewService:
         )
         return finding
 
+    def complete_review_task(
+        self,
+        *,
+        review_task_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        resolution_ref: str,
+        approval_decision_ids: list[uuid.UUID],
+        correlation_id: str = "m2-review-task-complete",
+    ) -> ReviewTask:
+        review_task = self.session.get(ReviewTask, review_task_id)
+        if review_task is None:
+            raise NotFoundError(f"review task not found: {review_task_id}")
+        project = self.session.get(VideoProject, review_task.video_project_id)
+        if project is None:
+            raise NotFoundError(f"project not found: {review_task.video_project_id}")
+        _require_user(self.session, actor_user_id, "actor_user_id")
+        if review_task.assigned_to_user_id is not None and review_task.assigned_to_user_id != actor_user_id:
+            raise ForbiddenError("only the assigned reviewer may complete the review task")
+        DecisionRightsService(self.session).require_capability(
+            user_id=actor_user_id,
+            company_id=project.company_id,
+            action="review_finding.create",
+        )
+        if review_task.status == "cancelled":
+            raise ValidationFailureError("cancelled review task cannot be completed")
+        evidence = {
+            "type": "explicit_human_approval_resolution",
+            "resolution_ref": resolution_ref,
+            "approval_decision_ids": [str(item) for item in approval_decision_ids],
+            "prior_review_reason_codes_retained": list(review_task.review_reason_codes or []),
+        }
+        existing_refs = list(review_task.evidence_refs or [])
+        if evidence not in existing_refs:
+            review_task.evidence_refs = [*existing_refs, evidence]
+        review_task.status = "completed"
+        self.session.flush()
+        _record_workflow_event(
+            self.session,
+            event_type="review_task.completed",
+            aggregate_type="review_task",
+            aggregate_id=review_task.id,
+            actor_id=actor_user_id,
+            target_type="review_task",
+            target_id=review_task.id,
+            company_id=project.company_id,
+            correlation_id=correlation_id,
+            payload={
+                "target_artifact_version_id": (
+                    str(review_task.target_artifact_version_id)
+                    if review_task.target_artifact_version_id
+                    else None
+                ),
+                "resolution_ref": resolution_ref,
+                "approval_decision_ids": [str(item) for item in approval_decision_ids],
+            },
+        )
+        return review_task
+
     def create_revision_request(
         self,
         *,
@@ -581,11 +669,25 @@ class ApprovalService:
         self,
         *,
         data: ApprovalDecisionCreate,
+        assigned_final_review_task_id: uuid.UUID | None = None,
         correlation_id: str = "m2-approval-decision-create",
     ) -> ApprovalDecision:
         project, version = self._validate_exact_approval_target(data)
+        assigned_final_review = None
+        if assigned_final_review_task_id is not None:
+            assigned_final_review = self._validate_assigned_final_review_authority(
+                data=data,
+                project=project,
+                version=version,
+                review_task_id=assigned_final_review_task_id,
+            )
         _require_user(self.session, data.decided_by_user_id, "decided_by_user_id")
-        if data.decision == "approved" and version is not None and version.created_by_user_id == data.decided_by_user_id:
+        if (
+            data.decision == "approved"
+            and version is not None
+            and version.created_by_user_id == data.decided_by_user_id
+            and assigned_final_review is None
+        ):
             _record_workflow_event(
                 self.session,
                 event_type="approval_decision.rejected_or_blocked",
@@ -603,7 +705,11 @@ class ApprovalService:
             DecisionRightsService(self.session).require_capability(
                 user_id=data.decided_by_user_id,
                 company_id=project.company_id,
-                action="approval_decision.create",
+                action=(
+                    "review_finding.create"
+                    if assigned_final_review is not None
+                    else "approval_decision.create"
+                ),
             )
         except ForbiddenError:
             _record_workflow_event(
@@ -659,6 +765,55 @@ class ApprovalService:
                 payload={"decision": decision.decision},
             )
         return decision
+
+    def _validate_assigned_final_review_authority(
+        self,
+        *,
+        data: ApprovalDecisionCreate,
+        project: VideoProject,
+        version: ArtifactVersion | None,
+        review_task_id: uuid.UUID,
+    ) -> ReviewTask:
+        if data.decision != "approved" or data.target_type != "artifact_version" or version is None:
+            raise ValidationFailureError("assigned final reviewer authority only supports exact artifact approval")
+        if project.project_type != "PKG1_FIRST_PRODUCTION_PACKAGE":
+            raise ValidationFailureError("assigned final reviewer authority is limited to PKG1")
+        approval_ref = data.metadata.get("approval_ref")
+        if not isinstance(approval_ref, str) or not approval_ref.startswith("operator-approval://pkg1/"):
+            raise ValidationFailureError("assigned final reviewer approval requires an explicit PKG1 operator ref")
+        review_task = self.session.get(ReviewTask, review_task_id)
+        if review_task is None:
+            raise NotFoundError(f"review task not found: {review_task_id}")
+        if (
+            review_task.video_project_id != project.id
+            or review_task.review_type != "final_human"
+            or review_task.status not in {"open", "in_progress", "completed"}
+            or review_task.assigned_to_user_id != data.decided_by_user_id
+            or review_task.target_artifact_version_id is None
+        ):
+            raise ForbiddenError("actor is not the assigned PKG1 final reviewer")
+        package_version = self.session.get(ArtifactVersion, review_task.target_artifact_version_id)
+        package_artifact = self.session.get(Artifact, package_version.artifact_id) if package_version else None
+        if (
+            package_version is None
+            or package_artifact is None
+            or package_artifact.video_project_id != project.id
+            or package_artifact.artifact_type != "package_manifest"
+            or package_artifact.current_version_id != package_version.id
+            or review_task.target_id != package_version.id
+        ):
+            raise ValidationFailureError("final review is not bound to the current PKG1 package manifest")
+        target_artifact = self.session.get(Artifact, version.artifact_id)
+        if target_artifact is None or target_artifact.video_project_id != project.id:
+            raise ValidationFailureError("approval target does not belong to the reviewed PKG1 project")
+        manifest_version_ids = {
+            item.get("artifact_version_id")
+            for item in ((package_version.content or {}).get("artifacts") or {}).values()
+            if isinstance(item, dict)
+        }
+        if version.id != package_version.id and str(version.id) not in manifest_version_ids:
+            raise ValidationFailureError("approval target is not an exact component of the reviewed PKG1 manifest")
+        return review_task
 
     def is_decision_stale_for_current_version(self, decision_id: uuid.UUID) -> bool:
         decision = self.session.get(ApprovalDecision, decision_id)

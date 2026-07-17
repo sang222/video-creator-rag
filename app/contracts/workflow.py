@@ -17,6 +17,17 @@ class VideoProjectCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
+    channel_profile_version_id: uuid.UUID | None = None
+    native_render_policy_snapshot_ref: str | None = None
+    native_render_policy_snapshot_hash: str | None = None
+    creative_quality_policy_ref: str | None = None
+    creative_quality_policy_hash: str | None = None
+    provider_usage_policy_ref: str | None = None
+    provider_usage_policy_hash: str | None = None
+    budget_policy_ref: str | None = None
+    budget_policy_hash: str | None = None
+    format_identity_contract_ref: str | None = None
+    format_identity_contract_hash: str | None = None
     category_id: uuid.UUID | None = None
     character_binding_id: uuid.UUID | None = None
     channel_contract_content_hash: str | None = None

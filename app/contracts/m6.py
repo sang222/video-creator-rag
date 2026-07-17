@@ -42,6 +42,35 @@ ProviderSourceClass = Literal[
 RequiredMediaType = Literal["IMAGE", "VIDEO", "AUDIO", "DIAGRAM", "SCREENSHOT", "GENERATED_PLACEHOLDER"]
 LicenseRequirement = Literal["COMMERCIAL_SAFE", "INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "UNKNOWN"]
 RequirementStatus = Literal["SATISFIED", "FALLBACK_USED", "WAITING_FOR_ASSET", "BLOCKED", "NOT_REQUIRED"]
+VisualSourceRouteValue = Literal[
+    "ARCHIVED_ASSET_REUSE",
+    "PEXELS_VIDEO",
+    "PEXELS_PHOTO",
+    "AI_GENERATED_IMAGE",
+    "AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY",
+    "NATIVE_DIAGRAM",
+    "NATIVE_MOTION_GRAPHIC",
+    "EDITORIAL_TEXT_GRAPHIC",
+    "AUTHORIZED_UI_OR_PRODUCT_ASSET",
+    "HUMAN_SUPPLIED_ASSET",
+    "VEO_TEXT_TO_VIDEO",
+    "VEO_IMAGE_TO_VIDEO",
+    "UNRESOLVED_BLOCK",
+]
+SourceFallbackClassValue = Literal[
+    "PEXELS_ONLY",
+    "PEXELS_PRIMARY_WITH_AI_ALLOWED",
+    "AI_IMAGE_PRIMARY",
+    "NATIVE_ONLY",
+    "AUTHORIZED_ASSET_ONLY",
+    "NO_FALLBACK",
+]
+EvidenceTruthClassificationValue = Literal[
+    "NOT_REQUIRED",
+    "AUTHORIZED_SOURCE_REQUIRED",
+    "AUTHORIZED_SOURCE_AVAILABLE",
+    "BLOCKED",
+]
 AssetCandidateSourceType = Literal["MANUAL_PLACEHOLDER", "MANUAL_ENVATO_PLACEHOLDER", "EXTERNAL_DISABLED"]
 LicenseState = Literal["INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "LICENSE_VERIFIED", "UNKNOWN"]
 Platform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
@@ -275,8 +304,51 @@ class AssetRequirementContract(BaseModel):
     fallback_allowed: bool
     procurement_required: bool
     requirement_status: RequirementStatus
+    preferred_source_route: VisualSourceRouteValue | None = None
+    actual_source_route: VisualSourceRouteValue | None = None
+    routing_reason_codes: list[str] = Field(default_factory=list)
+    fallback_class: SourceFallbackClassValue | None = None
+    source_decision_ref: str | None = Field(default=None, min_length=1)
+    source_decision_hash: str | None = Field(default=None, min_length=1)
+    eligibility_gate_refs: list[str] = Field(default_factory=list)
+    evidence_truth_classification: EvidenceTruthClassificationValue | None = None
+    native_overlay_required: bool = False
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_visual_routing_evidence(self) -> "AssetRequirementContract":
+        route_evidence = (
+            self.actual_source_route,
+            self.routing_reason_codes,
+            self.fallback_class,
+            self.source_decision_ref,
+            self.source_decision_hash,
+            self.eligibility_gate_refs,
+            self.evidence_truth_classification,
+            self.native_overlay_required,
+        )
+        if self.preferred_source_route is None:
+            if any(bool(value) for value in route_evidence):
+                raise ValueError("VSR1_ASSET_ROUTING_EVIDENCE_WITHOUT_PREFERRED_ROUTE")
+            return self
+        if not all(
+            (
+                self.routing_reason_codes,
+                self.fallback_class,
+                self.source_decision_ref,
+                self.source_decision_hash,
+                self.eligibility_gate_refs,
+                self.evidence_truth_classification,
+            )
+        ):
+            raise ValueError("VSR1_ASSET_ROUTING_EVIDENCE_INCOMPLETE")
+        evidence_lists = (self.routing_reason_codes, self.eligibility_gate_refs)
+        if any(len(values) != len(set(values)) for values in evidence_lists):
+            raise ValueError("VSR1_ASSET_ROUTING_EVIDENCE_DUPLICATE")
+        if any(not value.strip() for values in evidence_lists for value in values):
+            raise ValueError("VSR1_ASSET_ROUTING_EVIDENCE_EMPTY")
+        return self
 
 
 class AssetCandidateContract(BaseModel):
@@ -291,8 +363,16 @@ class AssetCandidateContract(BaseModel):
     height: int | None = Field(default=None, ge=1)
     rights_envelope: RightsEnvelopeContract
     provenance_blob: dict[str, Any] = Field(default_factory=dict)
+    actual_source_route: VisualSourceRouteValue | None = None
+    source_decision_hash: str | None = Field(default=None, min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_visual_routing_binding(self) -> "AssetCandidateContract":
+        if (self.actual_source_route is None) != (self.source_decision_hash is None):
+            raise ValueError("VSR1_ASSET_CANDIDATE_ROUTING_BINDING_INCOMPLETE")
+        return self
 
 
 class AssetManifestContract(BaseModel):

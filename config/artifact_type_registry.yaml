@@ -1,5 +1,5 @@
 catalog_key: artifact_type_registry
-catalog_version: "1.0.1"
+catalog_version: "1.2.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -39,3 +39,37 @@ items:
     description: Thumbnail package artifact allowance.
   - key: packaging_variant_set
     description: Packaging variant set artifact allowance.
+  - key: idea_admission_lineage
+    description: PKG1 editorial slot, idea-gate, and project-admission lineage.
+  - key: spoken_text_normalized
+    description: Deterministic provider-free spoken-text normalization output.
+  - key: claim_evidence_ledger
+    description: Versioned material claim and scenario evidence ledger.
+  - key: episode_originality_manifest
+    description: Same-channel episode originality comparison manifest.
+  - key: visual_direction_contract
+    description: Episode-scoped visual source and direction contract.
+  - key: compiled_asset_request_plan
+    description: Provider request drafts without execution or selected assets.
+  - key: caption_plan
+    description: Caption policy binding without cues, timestamps, or SRT.
+  - key: narration_pacing_preflight_estimate
+    description: Advisory pre-TTS narration density and duration estimate.
+  - key: cost_estimate_snapshot
+    description: Versioned planning cost with null actual cost.
+  - key: provider_execution_plan
+    description: Bounded provider execution plan with execution disabled.
+  - key: paid_attempt_plan
+    description: Human-approval-gated paid-attempt plan without a ledger execution.
+  - key: rights_disclosure_completeness_report
+    description: Pre-render provenance, rights, and disclosure completeness plan.
+  - key: synthetic_media_disclosure_receipt_draft
+    description: Pre-render synthetic-media disclosure receipt draft.
+  - key: manual_publish_checklist_draft
+    description: Manual publish checklist draft without an upload task.
+  - key: gate_results
+    description: Deterministic PKG1 pre-render and explicit post-media NOT_RUN results.
+  - key: package_manifest
+    description: Immutable PKG1 artifact, gate, and review manifest.
+  - key: mr1_readiness_state
+    description: Provider-free MR1 entry state bound to the approved immutable PKG1 package.

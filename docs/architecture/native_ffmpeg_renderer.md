@@ -43,3 +43,21 @@ decode, A/V drift, checksum, Fast Start atom order and duration instead of
 assuming them. Its CQR1 adapter emits a non-publishable `TechnicalMediaQC`
 artifact. Creative and human watchability results remain separate artifacts; a
 technical PASS cannot create a creative or human PASS.
+
+## CH1-FLEX project binding
+
+For new channel-scoped projects the plan must use the frozen `native_render_policy_snapshot_ref/hash`, `creative_quality_policy_ref/hash`, provider-use ref/hash and format-identity ref/hash copied from the project. A strict plan is not valid before final narration and `CanonicalMediaTimeline`. NativeFFmpeg remains a generic final renderer and never branches on channel or Strategy B.
+
+## VSR1 exact-text boundary
+
+New `VSR1_STRICT` scenes bind the preferred visual route and source-decision
+ref/hash into `NativeRenderScene`. Exact text, numbers, logos and real UI are
+never delegated to generated pixels. Normalized `TextSafeRegion` values and a
+route-bound `NativeOverlayPlan` preserve authoritative content refs and reserve
+space outside caption-safe regions. Missing route evidence or a required
+overlay plan fails validation before compilation.
+
+VSR1 defines this typed admission boundary only. It does not render media and
+does not change the renderer's final-composition authority. Legacy plans remain
+readable without route-aware fields; new strict plans cannot silently inherit a
+historical Pexels choice.

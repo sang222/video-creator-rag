@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.visual_routing import ExactTextNativeOverlayContract, VisualSourceRoute
+
 
 PlanStatus = Literal["DRAFT", "VALIDATED", "REVIEW_REQUIRED", "BLOCKED", "APPROVED", "COMPILED", "SUPERSEDED"]
 GateVerdict = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
@@ -31,6 +33,70 @@ class ResolvedAssetRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TextSafeRegion(BaseModel):
+    id: str = Field(min_length=1)
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    width: float = Field(gt=0.0, le=1.0)
+    height: float = Field(gt=0.0, le=1.0)
+    coordinate_space: Literal["normalized"] = "normalized"
+    purpose: str = Field(min_length=1)
+    minimum_contrast_requirement: float = Field(ge=1.0, le=21.0)
+    alignment: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_normalized_bounds(self) -> "TextSafeRegion":
+        if self.x + self.width > 1.0 or self.y + self.height > 1.0:
+            raise ValueError("VSR1_TEXT_SAFE_REGION_OUT_OF_BOUNDS")
+        if not self.purpose.strip() or not self.alignment.strip():
+            raise ValueError("VSR1_TEXT_SAFE_REGION_METADATA_MISSING")
+        return self
+
+
+class NativeOverlayPlan(BaseModel):
+    plan_id: str = Field(min_length=1)
+    scene_id: str = Field(min_length=1)
+    source_decision_ref: str = Field(min_length=1)
+    source_decision_hash: str = Field(min_length=1)
+    preferred_source_route: VisualSourceRoute
+    exact_text_contract: ExactTextNativeOverlayContract
+    text_safe_regions: list[TextSafeRegion]
+    reserved_overlay_regions: list[TextSafeRegion]
+    overlay_content_refs: list[str] = Field(min_length=1)
+    native_overlay_required: Literal[True]
+    content_hash: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_route_aware_overlay(self) -> "NativeOverlayPlan":
+        region_ids = [region.id for region in self.text_safe_regions + self.reserved_overlay_regions]
+        if len(region_ids) != len(set(region_ids)):
+            raise ValueError("VSR1_DUPLICATE_OVERLAY_REGION_ID")
+        if len(self.overlay_content_refs) != len(set(self.overlay_content_refs)) or any(
+            not ref.strip() for ref in self.overlay_content_refs
+        ):
+            raise ValueError("VSR1_OVERLAY_CONTENT_REF_INVALID")
+        exact = self.exact_text_contract
+        if exact.scene_id != self.scene_id:
+            raise ValueError("VSR1_OVERLAY_SCENE_MISMATCH")
+        if exact.source_decision_ref != self.source_decision_ref:
+            raise ValueError("VSR1_OVERLAY_DECISION_REF_MISMATCH")
+        if exact.source_decision_hash != self.source_decision_hash:
+            raise ValueError("VSR1_OVERLAY_DECISION_HASH_MISMATCH")
+        if exact.preferred_source_route != self.preferred_source_route:
+            raise ValueError("VSR1_OVERLAY_ROUTE_MISMATCH")
+        if self.overlay_content_refs != exact.authoritative_content_refs:
+            raise ValueError("VSR1_OVERLAY_AUTHORITATIVE_CONTENT_BINDING_MISMATCH")
+        if not exact.native_overlay_required:
+            raise ValueError("VSR1_NATIVE_OVERLAY_PLAN_WITHOUT_NATIVE_AUTHORITY")
+        if (exact.exact_text_required or exact.exact_number_required) and not self.text_safe_regions:
+            raise ValueError("VSR1_EXACT_CONTENT_TEXT_SAFE_REGION_REQUIRED")
+        return self
+
+
 class NativeRenderScene(BaseModel):
     scene_id: str
     source_segment_ids: list[str]
@@ -51,12 +117,93 @@ class NativeRenderScene(BaseModel):
     provider_intent: str | None = None
     scene_notes: str = ""
     scene_hash: str = ""
+    visual_routing_mode: Literal["VSR1_STRICT"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    source_decision_ref: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
+    source_decision_hash: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
+    preferred_source_route: VisualSourceRoute | None = Field(default=None, exclude_if=lambda value: value is None)
+    exact_text_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    exact_number_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    forbidden_generated_text: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    forbidden_generated_logo: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    forbidden_generated_fake_ui: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    text_safe_regions: list[TextSafeRegion] | None = Field(default=None, exclude_if=lambda value: value is None)
+    reserved_overlay_regions: list[TextSafeRegion] | None = Field(default=None, exclude_if=lambda value: value is None)
+    eligibility_gate_refs: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+    )
+    native_overlay_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    native_overlay_plan: NativeOverlayPlan | None = Field(default=None, exclude_if=lambda value: value is None)
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def timing_matches(self):
         if self.narration_end_ms - self.narration_start_ms != self.duration_ms:
             raise ValueError("SCENE_DURATION_MISMATCH")
+        route_aware_values = (
+            self.source_decision_ref,
+            self.source_decision_hash,
+            self.preferred_source_route,
+            self.exact_text_required,
+            self.exact_number_required,
+            self.forbidden_generated_text,
+            self.forbidden_generated_logo,
+            self.forbidden_generated_fake_ui,
+            self.text_safe_regions,
+            self.reserved_overlay_regions,
+            self.eligibility_gate_refs,
+            self.native_overlay_required,
+            self.native_overlay_plan,
+        )
+        if self.visual_routing_mode is None and all(value is None for value in route_aware_values):
+            return self
+        if self.visual_routing_mode != "VSR1_STRICT":
+            raise ValueError("VSR1_STRICT_ROUTING_MODE_REQUIRED")
+        if any(value is None for value in route_aware_values[:-1]):
+            raise ValueError("VSR1_ROUTE_AWARE_NATIVE_FIELDS_INCOMPLETE")
+        if not self.source_decision_ref.strip() or not self.source_decision_hash.strip():
+            raise ValueError("VSR1_SOURCE_DECISION_BINDING_EMPTY")
+        if len(self.eligibility_gate_refs) != len(set(self.eligibility_gate_refs)) or any(
+            not ref.strip() for ref in self.eligibility_gate_refs
+        ):
+            raise ValueError("VSR1_ELIGIBILITY_GATE_REF_INVALID")
+        if not all(
+            (
+                self.forbidden_generated_text,
+                self.forbidden_generated_logo,
+                self.forbidden_generated_fake_ui,
+            )
+        ):
+            raise ValueError("VSR1_GENERATED_TEXT_LOGO_FAKE_UI_MUST_BE_FORBIDDEN")
+        if (self.exact_text_required or self.exact_number_required) and not self.native_overlay_required:
+            raise ValueError("VSR1_EXACT_CONTENT_REQUIRES_NATIVE_OVERLAY")
+        if self.native_overlay_required and self.native_overlay_plan is None:
+            raise ValueError("VSR1_NATIVE_OVERLAY_PLAN_REQUIRED")
+        if not self.native_overlay_required and self.native_overlay_plan is not None:
+            raise ValueError("VSR1_UNEXPECTED_NATIVE_OVERLAY_PLAN")
+        if self.native_overlay_plan is not None:
+            overlay = self.native_overlay_plan
+            exact = overlay.exact_text_contract
+            if overlay.scene_id != self.scene_id:
+                raise ValueError("VSR1_RENDER_SCENE_OVERLAY_SCENE_MISMATCH")
+            if overlay.source_decision_ref != self.source_decision_ref:
+                raise ValueError("VSR1_RENDER_SCENE_OVERLAY_DECISION_REF_MISMATCH")
+            if overlay.source_decision_hash != self.source_decision_hash:
+                raise ValueError("VSR1_RENDER_SCENE_OVERLAY_DECISION_HASH_MISMATCH")
+            if overlay.preferred_source_route != self.preferred_source_route:
+                raise ValueError("VSR1_RENDER_SCENE_OVERLAY_ROUTE_MISMATCH")
+            if exact.exact_text_required != self.exact_text_required:
+                raise ValueError("VSR1_RENDER_SCENE_EXACT_TEXT_MISMATCH")
+            if exact.exact_number_required != self.exact_number_required:
+                raise ValueError("VSR1_RENDER_SCENE_EXACT_NUMBER_MISMATCH")
+            if overlay.text_safe_regions != self.text_safe_regions:
+                raise ValueError("VSR1_RENDER_SCENE_TEXT_SAFE_REGION_MISMATCH")
+            if overlay.reserved_overlay_regions != self.reserved_overlay_regions:
+                raise ValueError("VSR1_RENDER_SCENE_RESERVED_REGION_MISMATCH")
         return self
 
 
@@ -112,6 +259,17 @@ class NativeRenderPlan(BaseModel):
     created_at: datetime
     created_by: str
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_vsr1_scene_set(self) -> "NativeRenderPlan":
+        strict_scenes = [scene for scene in self.scenes if scene.visual_routing_mode == "VSR1_STRICT"]
+        if not strict_scenes:
+            return self
+        if len(strict_scenes) != len(self.scenes):
+            raise ValueError("VSR1_STRICT_AND_LEGACY_SCENE_MIX_PROHIBITED")
+        if min(self.canvas_spec.width, self.canvas_spec.height) < 1080:
+            raise ValueError("VSR1_OUTPUT_RESOLUTION_BELOW_1080P")
+        return self
 
 
 class GateResult(BaseModel):

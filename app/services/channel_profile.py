@@ -1,9 +1,15 @@
 import uuid
+from copy import deepcopy
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.contracts import AuditEnvelope, ChannelProfileInput, ChannelProfileVersionCreate
+from app.contracts import (
+    AuditEnvelope,
+    ChannelProfileDraftUpdate,
+    ChannelProfileInput,
+    ChannelProfileVersionCreate,
+)
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -90,11 +96,221 @@ class ChannelProfileService:
         )
         return list(self.session.scalars(statement).all())
 
+    def get_active_profile_version(self, channel_id: uuid.UUID) -> ChannelProfileVersion | None:
+        channel = self.session.get(ChannelWorkspace, channel_id)
+        if channel is None or channel.active_policy_snapshot_id is None:
+            return None
+        snapshot = self.session.get(CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id)
+        return self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id) if snapshot else None
+
+    def management_read_model(self, channel_id: uuid.UUID) -> dict:
+        channel = self.session.get(ChannelWorkspace, channel_id)
+        if channel is None:
+            raise NotFoundError(f"channel not found: {channel_id}")
+        versions = []
+        for profile in self.list_profile_versions(channel_id):
+            snapshot = self.session.scalars(
+                select(CompiledChannelPolicySnapshot)
+                .where(CompiledChannelPolicySnapshot.channel_profile_version_id == profile.id)
+                .order_by(CompiledChannelPolicySnapshot.snapshot_version.desc())
+            ).first()
+            capability = (snapshot.compiled_payload or {}).get("capability_evaluation") if snapshot else None
+            versions.append(
+                {
+                    "id": str(profile.id),
+                    "version": profile.version,
+                    "status": profile.status,
+                    "profile_input_hash": profile.profile_input_hash,
+                    "profile_input": self._effective_profile_input(profile),
+                    "latest_snapshot_id": str(snapshot.id) if snapshot else None,
+                    "latest_snapshot_hash": snapshot.content_hash if snapshot else None,
+                    "snapshot_status": snapshot.status if snapshot else None,
+                    "is_active": channel.active_policy_snapshot_id == (snapshot.id if snapshot else None),
+                    "capability_status": capability.get("status") if capability else "NOT_COMPILED",
+                    "capability_blockers": capability.get("blockers", []) if capability else [],
+                }
+            )
+        return {
+            "channel_id": str(channel.id),
+            "active_policy_snapshot_id": str(channel.active_policy_snapshot_id) if channel.active_policy_snapshot_id else None,
+            "versions": versions,
+            "provider_execution_available": False,
+            "exact_next_action": "Tạo draft mới để thay đổi; compile, duyệt rồi mới kích hoạt cho dự án tương lai.",
+        }
+
+    def create_draft_from_active(
+        self,
+        *,
+        channel_id: uuid.UUID,
+        created_by: uuid.UUID | None = None,
+        correlation_id: str = "ch1-flex-draft-from-active",
+    ) -> ChannelProfileVersion:
+        channel = self.session.get(ChannelWorkspace, channel_id)
+        active = self.get_active_profile_version(channel_id)
+        if channel is None or active is None or channel.active_policy_snapshot_id is None:
+            raise ValidationFailureError("active profile and snapshot are required")
+        profile_input = ChannelProfileInput.model_validate(active.profile_input)
+        if profile_input.channel_policy is None:
+            snapshot = self.session.get(CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id)
+            policy = (snapshot.compiled_payload or {}).get("channel_scoped_policy") if snapshot else None
+            if not isinstance(policy, dict):
+                raise ValidationFailureError("active channel-scoped policy is required")
+            profile_payload = profile_input.model_dump(mode="json")
+            profile_payload["channel_policy"] = policy
+            profile_input = ChannelProfileInput.model_validate(profile_payload)
+        return self.create_profile_version(
+            channel_id=channel_id,
+            data=ChannelProfileVersionCreate(profile_input=profile_input, created_by=created_by),
+            correlation_id=correlation_id,
+        )
+
+    def update_draft(
+        self,
+        *,
+        profile_version_id: uuid.UUID,
+        data: ChannelProfileDraftUpdate,
+        correlation_id: str = "ch1-flex-draft-update",
+    ) -> ChannelProfileVersion:
+        profile = self.get_profile_version(profile_version_id)
+        if profile is None:
+            raise NotFoundError(f"profile version not found: {profile_version_id}")
+        if profile.status != "draft":
+            raise ValidationFailureError("only a draft profile version can be edited")
+        if data.expected_profile_input_hash and data.expected_profile_input_hash != profile.profile_input_hash:
+            raise ValidationFailureError("draft profile hash conflict")
+        if data.profile_input.channel_policy and data.profile_input.channel_policy.channel_key != self.session.get(
+            ChannelWorkspace, profile.channel_workspace_id
+        ).key:
+            raise ValidationFailureError("draft channel policy scope mismatch")
+        payload = data.profile_input.model_dump(mode="json")
+        profile.profile_input = payload
+        profile.profile_input_hash = content_hash(payload)
+        self.session.flush()
+        self._audit(
+            action="channel_profile.draft_updated",
+            target_id=profile.id,
+            company_id=self.session.get(ChannelWorkspace, profile.channel_workspace_id).company_id,
+            correlation_id=correlation_id,
+            payload={"profile_input_hash": profile.profile_input_hash},
+        )
+        return profile
+
+    def validate_draft(self, profile_version_id: uuid.UUID) -> dict:
+        profile = self.get_profile_version(profile_version_id)
+        if profile is None:
+            raise NotFoundError(f"profile version not found: {profile_version_id}")
+        parsed = ChannelProfileInput.model_validate(profile.profile_input)
+        blockers = []
+        if parsed.channel_policy is None:
+            blockers.append("CHANNEL_SCOPED_POLICY_MISSING")
+        elif parsed.channel_policy.policy_status != "APPROVED":
+            blockers.append("CHANNEL_POLICY_NOT_APPROVED")
+        return {
+            "profile_version_id": str(profile.id),
+            "status": "PASS" if not blockers else "BLOCKED",
+            "profile_input_hash": profile.profile_input_hash,
+            "blockers": blockers,
+        }
+
+    def preview_compile(self, profile_version_id: uuid.UUID) -> dict:
+        profile = self.get_profile_version(profile_version_id)
+        if profile is None:
+            raise NotFoundError(f"profile version not found: {profile_version_id}")
+        compiler = ChannelProfileCompiler(self.session)
+        profile_input = ChannelProfileInput.model_validate(profile.profile_input)
+        catalogs = compiler.load_catalogs(profile_input.template_key)
+        payload, output_hash = compiler.compile_from_input(
+            profile_input=profile_input,
+            template=catalogs.template,
+            capability_matrix=catalogs.capability_matrix,
+            compiler_policy=catalogs.compiler_policy,
+            channel=self.session.get(ChannelWorkspace, profile.channel_workspace_id),
+            profile_input_hash_override=profile.profile_input_hash,
+        )
+        return {
+            "profile_version_id": str(profile.id),
+            "content_hash": output_hash,
+            "capability_evaluation": payload.get("capability_evaluation"),
+            "launch_restrictions": payload.get("launch_restrictions"),
+            "snapshot_refs": payload.get("snapshot_refs"),
+            "compiler_decision_log": payload.get("compiler_decision_log", []),
+            "persisted": False,
+        }
+
+    def semantic_diff(self, profile_version_id: uuid.UUID, other_profile_version_id: uuid.UUID) -> dict:
+        profile = self.get_profile_version(profile_version_id)
+        other = self.get_profile_version(other_profile_version_id)
+        if profile is None or other is None:
+            raise NotFoundError("profile version not found")
+        if profile.channel_workspace_id != other.channel_workspace_id:
+            raise ValidationFailureError("profile versions must belong to the same channel")
+        changes = _semantic_changes(
+            self._effective_profile_input(profile),
+            self._effective_profile_input(other),
+        )
+        return {
+            "from_profile_version_id": str(other.id),
+            "to_profile_version_id": str(profile.id),
+            "changed_paths": changes,
+            "different": bool(changes),
+        }
+
+    def _effective_profile_input(self, profile: ChannelProfileVersion) -> dict:
+        payload = deepcopy(profile.profile_input)
+        if payload.get("channel_policy") is not None:
+            return payload
+        snapshot = self.session.scalars(
+            select(CompiledChannelPolicySnapshot)
+            .where(CompiledChannelPolicySnapshot.channel_profile_version_id == profile.id)
+            .order_by(CompiledChannelPolicySnapshot.snapshot_version.desc())
+        ).first()
+        scoped = (snapshot.compiled_payload or {}).get("channel_scoped_policy") if snapshot else None
+        if isinstance(scoped, dict):
+            payload["channel_policy"] = deepcopy(scoped)
+        return payload
+
+    def submit_for_approval(self, profile_version_id: uuid.UUID) -> ChannelProfileVersion:
+        profile = self.get_profile_version(profile_version_id)
+        if profile is None:
+            raise NotFoundError(f"profile version not found: {profile_version_id}")
+        if profile.status not in {"draft", "compiled"}:
+            raise ValidationFailureError("only draft or compiled profile can be submitted")
+        if profile.status == "draft":
+            raise ValidationFailureError("compile is required before approval submission")
+        profile.status = "pending_approval"
+        self.session.flush()
+        return profile
+
+    def reject_profile_version(
+        self,
+        *,
+        profile_version_id: uuid.UUID,
+        reason: str,
+        correlation_id: str = "ch1-flex-profile-reject",
+    ) -> ChannelProfileVersion:
+        profile = self.get_profile_version(profile_version_id)
+        if profile is None:
+            raise NotFoundError(f"profile version not found: {profile_version_id}")
+        if profile.status not in {"compiled", "pending_approval"}:
+            raise ValidationFailureError("profile is not awaiting approval")
+        profile.status = "rejected"
+        self.session.flush()
+        channel = self.session.get(ChannelWorkspace, profile.channel_workspace_id)
+        self._audit(
+            action="channel_profile.rejected",
+            target_id=profile.id,
+            company_id=channel.company_id if channel else None,
+            correlation_id=correlation_id,
+            payload={"reason": reason},
+        )
+        return profile
+
     def approve_profile_version(
         self,
         *,
         profile_version_id: uuid.UUID,
         approved_by: uuid.UUID | None = None,
+        approval_ref: str | None = None,
         correlation_id: str = "m1-profile-approve",
     ) -> ChannelProfileVersion:
         profile_version = self.get_profile_version(profile_version_id)
@@ -105,7 +321,7 @@ class ChannelProfileService:
         snapshot = self.session.scalars(
             select(CompiledChannelPolicySnapshot).where(
                 CompiledChannelPolicySnapshot.channel_profile_version_id == profile_version_id
-            )
+            ).order_by(CompiledChannelPolicySnapshot.snapshot_version.desc())
         ).first()
         if snapshot is None:
             raise ValidationFailureError("compiled snapshot is required before approval")
@@ -120,7 +336,7 @@ class ChannelProfileService:
             target_id=profile_version.id,
             company_id=channel.company_id if channel else None,
             correlation_id=correlation_id,
-            payload={"snapshot_id": str(snapshot.id)},
+            payload={"snapshot_id": str(snapshot.id), "approval_ref": approval_ref},
         )
         return profile_version
 
@@ -170,11 +386,28 @@ class ChannelProfileService:
                 f"channel contract is not COMPLETE (got {contract_status}); activation blocked. "
                 f"missing_fields={missing_fields}, contradiction_reasons={contradiction_reasons}"
             )
+        scoped_policy = (snapshot.compiled_payload or {}).get("channel_scoped_policy")
+        if scoped_policy is not None:
+            capability = (snapshot.compiled_payload or {}).get("capability_evaluation") or {}
+            if snapshot.status not in {"approved", "active"}:
+                raise ValidationFailureError("approved channel profile snapshot is required before activation")
+            if capability.get("status") != "PASS":
+                raise ValidationFailureError(f"channel capability blockers prevent activation: {capability.get('blockers', [])}")
         channel = self.session.get(ChannelWorkspace, snapshot.channel_workspace_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {snapshot.channel_workspace_id}")
         profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
         previous_status = channel.status
+        previous_snapshot = (
+            self.session.get(CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id)
+            if channel.active_policy_snapshot_id and channel.active_policy_snapshot_id != snapshot.id
+            else None
+        )
+        if previous_snapshot is not None and previous_snapshot.status == "active":
+            previous_snapshot.status = "approved"
+            previous_profile = self.session.get(ChannelProfileVersion, previous_snapshot.channel_profile_version_id)
+            if previous_profile is not None and previous_profile.id != snapshot.channel_profile_version_id:
+                previous_profile.status = "approved"
         channel.active_policy_snapshot_id = snapshot.id
         channel.status = "active"
         snapshot.status = "active"
@@ -244,3 +477,20 @@ class ChannelProfileService:
             ),
             company_id=company_id,
         )
+
+
+def _semantic_changes(current: object, previous: object, path: str = "$") -> list[dict[str, object]]:
+    if isinstance(current, dict) and isinstance(previous, dict):
+        changes: list[dict[str, object]] = []
+        for key in sorted(set(current) | set(previous)):
+            child_path = f"{path}.{key}"
+            if key not in current:
+                changes.append({"path": child_path, "change": "removed", "before": previous[key], "after": None})
+            elif key not in previous:
+                changes.append({"path": child_path, "change": "added", "before": None, "after": current[key]})
+            else:
+                changes.extend(_semantic_changes(current[key], previous[key], child_path))
+        return changes
+    if isinstance(current, list) and isinstance(previous, list):
+        return [] if current == previous else [{"path": path, "change": "changed", "before": previous, "after": current}]
+    return [] if current == previous else [{"path": path, "change": "changed", "before": previous, "after": current}]

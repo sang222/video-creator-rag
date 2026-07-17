@@ -1,0 +1,326 @@
+catalog_key: visual_source_routing_policy_catalog
+catalog_version: "1.0.0"
+schema_version: vsr1.visual-source-routing-policy.v1
+status: draft
+items:
+  - key: vsr1_niche_aware_visual_source_routing
+    policy_version: vsr1.visual-source-routing.v1
+    lifecycle:
+      state: INACTIVE
+      fixture_only: true
+      channel_profile_binding_allowed: false
+      provider_execution_allowed: false
+      activation_milestone: CH1-FLEX_v2
+
+    visual_source_policy:
+      minimum_output_resolution: 1080p
+      allow_resolution_downgrade: false
+      final_composition_authority: native_ffmpeg
+      exact_text_authority: native_only
+      exact_number_authority: native_only
+      generated_evidence_authority: false
+      one_source_decision_per_scene: true
+      auto_pexels_to_ai_failover: false
+      new_vendor_requires_operator_approval: true
+      existing_vendor_new_provider_route_requires_operator_approval: true
+      maximum_automated_attempts_per_scene: 1
+
+    niche_visual_source_profiles:
+      - key: STOCK_NATIVE
+        semantics:
+          observable_reality_density: high
+          custom_composition_density: low
+          exact_text_density: low
+          diagram_density: low
+          product_ui_specificity: low
+        default_source_families:
+          - ARCHIVED_ASSET_REUSE
+          - PEXELS_VIDEO
+          - PEXELS_PHOTO
+
+      - key: STOCK_ASSISTED
+        semantics:
+          stock_use: context_only
+          stock_authoritative_for_mechanism_or_meaning: false
+          diagram_density: medium_high
+          exact_text_dependency: medium_high
+        default_source_families:
+          - NATIVE_DIAGRAM
+          - NATIVE_MOTION_GRAPHIC
+          - EDITORIAL_TEXT_GRAPHIC
+          - PEXELS_VIDEO
+          - PEXELS_PHOTO
+          - AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+
+      - key: GENERATED_EDITORIAL_FIRST
+        semantics:
+          custom_composition_density: high
+          conceptual_metaphor_density: high
+          observable_stock_searchability: low
+        default_source_families:
+          - AI_GENERATED_IMAGE
+          - AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+          - NATIVE_MOTION_GRAPHIC
+
+      - key: AUTHORITY_ASSET_FIRST
+        semantics:
+          evidence_truth_requirement: high
+          product_ui_document_specificity: high
+          generated_imagery_may_act_as_truth: false
+        default_source_families:
+          - AUTHORIZED_UI_OR_PRODUCT_ASSET
+          - HUMAN_SUPPLIED_ASSET
+          - NATIVE_DIAGRAM
+          - UNRESOLVED_BLOCK
+
+    source_routes:
+      - key: ARCHIVED_ASSET_REUSE
+        fallback_class: NO_FALLBACK
+        route_state: PLANNING_ONLY
+      - key: PEXELS_VIDEO
+        fallback_class: PEXELS_ONLY
+        route_state: PLANNING_ONLY
+      - key: PEXELS_PHOTO
+        fallback_class: PEXELS_ONLY
+        route_state: PLANNING_ONLY
+      - key: AI_GENERATED_IMAGE
+        fallback_class: AI_IMAGE_PRIMARY
+        route_state: PLANNING_ONLY_PROVIDER_INACTIVE
+      - key: AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        fallback_class: AI_IMAGE_PRIMARY
+        route_state: PLANNING_ONLY_PROVIDER_INACTIVE
+      - key: NATIVE_DIAGRAM
+        fallback_class: NATIVE_ONLY
+        route_state: PLANNING_ONLY
+      - key: NATIVE_MOTION_GRAPHIC
+        fallback_class: NATIVE_ONLY
+        route_state: PLANNING_ONLY
+      - key: EDITORIAL_TEXT_GRAPHIC
+        fallback_class: NATIVE_ONLY
+        route_state: PLANNING_ONLY
+      - key: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        fallback_class: AUTHORIZED_ASSET_ONLY
+        route_state: PLANNING_ONLY
+      - key: HUMAN_SUPPLIED_ASSET
+        fallback_class: AUTHORIZED_ASSET_ONLY
+        route_state: PLANNING_ONLY
+      - key: VEO_TEXT_TO_VIDEO
+        fallback_class: NO_FALLBACK
+        route_state: PROVIDER_NEUTRAL_PLANNING_ONLY
+      - key: VEO_IMAGE_TO_VIDEO
+        fallback_class: NO_FALLBACK
+        route_state: PROVIDER_NEUTRAL_PLANNING_ONLY
+      - key: UNRESOLVED_BLOCK
+        fallback_class: NO_FALLBACK
+        route_state: BLOCKING
+
+    routing_thresholds:
+      score_range:
+        minimum: 0.0
+        maximum: 1.0
+
+      pexels_eligible_if:
+        filmability_score_min: 0.70
+        stock_searchability_score_min: 0.70
+        custom_composition_score_max: 0.30
+        exact_text_dependency_max: 0.20
+        exact_number_dependency_max: 0.20
+        evidence_truth_requirement_max: 0.20
+        identity_consistency_requirement_max: 0.20
+
+      pexels_supporting_only_if:
+        filmability_score_min: 0.50
+        stock_searchability_score_min: 0.50
+
+      pexels_prohibited_if:
+        exact_text_dependency_min: 0.50
+        exact_number_dependency_min: 0.50
+        evidence_truth_requirement_min: 0.50
+        custom_composition_score_min: 0.70
+        product_specificity_min: 0.50
+        recurring_identity_required: true
+        named_workflow_nodes_required: true
+
+      evidence_truth_source_gate:
+        evidence_truth_requirement_min: 0.50
+        authorized_asset_required_at_or_above_threshold: true
+        unresolved_without_authorized_asset: true
+
+      diagram_suitability_gate:
+        diagram_clarity_advantage_min: 0.60
+        native_motion_graphic_motion_semantic_value_min: 0.70
+
+      ai_image_eligibility_gate:
+        custom_composition_score_min: 0.70
+        evidence_truth_requirement_must_be_below: 0.50
+        actual_ui_product_document_truth_allowed: false
+        rights_policy_must_allow_generation: true
+        planning_allowed: true
+        provider_execution_enabled: false
+        activation_milestone: IMG1
+
+      veo_routing_boundary:
+        motion_semantic_value_min: 0.70
+        allowed_scene_classes:
+          - hero
+          - metaphor
+          - transition
+        still_plus_native_motion_must_be_insufficient: true
+        evidence_truth_requirement_must_be_below: 0.50
+        future_cost_class_must_allow_veo: true
+        reject_when:
+          motion_semantic_value_below: 0.70
+          still_or_native_motion_sufficient: true
+          evidence_source_required: true
+          diagram_clearer: true
+
+    fallback_classes:
+      PEXELS_ONLY:
+        scene_semantics: observable_reality_only
+        allowed_route_family: PEXELS
+        pexels_failure_opens_ai: false
+
+      PEXELS_PRIMARY_WITH_AI_ALLOWED:
+        required_preconditions:
+          scene_preclassified_as_ai_authorable: true
+          ai_image_route_approved_before_pexels_search: true
+          future_paid_approval_required: true
+        automatic_paid_call_allowed: false
+
+      AI_IMAGE_PRIMARY:
+        scene_semantics: custom_authored_composition
+        allowed_fallback_route_family: NATIVE_ONLY
+        may_impersonate_evidence: false
+        provider_execution_enabled: false
+
+      NATIVE_ONLY:
+        scene_semantics:
+          - mechanism
+          - labels
+          - numbers
+          - timeline
+          - comparison
+        allowed_route_family: NATIVE_ONLY
+
+      AUTHORIZED_ASSET_ONLY:
+        scene_semantics:
+          - actual_ui
+          - actual_product
+          - document
+          - evidence
+        authorization_and_provenance_required: true
+
+      NO_FALLBACK:
+        block_or_human_escalation_only: true
+        allowed_fallback_routes: []
+
+    forbidden_fallback_pairs:
+      - from_route: PEXELS_VIDEO
+        to_route: AI_GENERATED_IMAGE
+        scope: AUTOMATIC_AFTER_SEARCH_FAILURE
+        reason_code: AUTO_PEXELS_TO_AI_FAILOVER_FORBIDDEN
+      - from_route: PEXELS_VIDEO
+        to_route: AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        scope: AUTOMATIC_AFTER_SEARCH_FAILURE
+        reason_code: AUTO_PEXELS_TO_AI_FAILOVER_FORBIDDEN
+      - from_route: PEXELS_PHOTO
+        to_route: AI_GENERATED_IMAGE
+        scope: AUTOMATIC_AFTER_SEARCH_FAILURE
+        reason_code: AUTO_PEXELS_TO_AI_FAILOVER_FORBIDDEN
+      - from_route: PEXELS_PHOTO
+        to_route: AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        scope: AUTOMATIC_AFTER_SEARCH_FAILURE
+        reason_code: AUTO_PEXELS_TO_AI_FAILOVER_FORBIDDEN
+      - from_route: NATIVE_DIAGRAM
+        to_route: PEXELS_VIDEO
+        scope: ALWAYS
+        reason_code: DIAGRAM_ROUTE_CANNOT_DEGRADE_TO_GENERIC_STOCK
+      - from_route: NATIVE_DIAGRAM
+        to_route: PEXELS_PHOTO
+        scope: ALWAYS
+        reason_code: DIAGRAM_ROUTE_CANNOT_DEGRADE_TO_GENERIC_STOCK
+      - from_route: NATIVE_DIAGRAM
+        to_route: AI_GENERATED_IMAGE
+        scope: ALWAYS
+        reason_code: DIAGRAM_ROUTE_CANNOT_DEGRADE_TO_GENERIC_ARTWORK
+      - from_route: NATIVE_DIAGRAM
+        to_route: AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        scope: ALWAYS
+        reason_code: DIAGRAM_ROUTE_CANNOT_DEGRADE_TO_GENERIC_ARTWORK
+      - from_route: EDITORIAL_TEXT_GRAPHIC
+        to_route: AI_GENERATED_IMAGE
+        scope: ALWAYS
+        reason_code: EXACT_TEXT_REQUIRES_NATIVE_AUTHORITY
+      - from_route: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        to_route: PEXELS_VIDEO
+        scope: ALWAYS
+        reason_code: AUTHORITY_ASSET_CANNOT_FALLBACK_TO_STOCK
+      - from_route: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        to_route: PEXELS_PHOTO
+        scope: ALWAYS
+        reason_code: AUTHORITY_ASSET_CANNOT_FALLBACK_TO_STOCK
+      - from_route: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        to_route: AI_GENERATED_IMAGE
+        scope: ALWAYS
+        reason_code: AUTHORITY_ASSET_CANNOT_FALLBACK_TO_GENERATED_PIXELS
+      - from_route: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        to_route: AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        scope: ALWAYS
+        reason_code: AUTHORITY_ASSET_CANNOT_FALLBACK_TO_GENERATED_PIXELS
+      - from_route: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        to_route: VEO_TEXT_TO_VIDEO
+        scope: ALWAYS
+        reason_code: AUTHORITY_ASSET_CANNOT_FALLBACK_TO_GENERATED_VIDEO
+      - from_route: AUTHORIZED_UI_OR_PRODUCT_ASSET
+        to_route: VEO_IMAGE_TO_VIDEO
+        scope: ALWAYS
+        reason_code: AUTHORITY_ASSET_CANNOT_FALLBACK_TO_GENERATED_VIDEO
+      - from_route: HUMAN_SUPPLIED_ASSET
+        to_route: PEXELS_VIDEO
+        scope: ALWAYS
+        reason_code: HUMAN_ASSET_CANNOT_FALLBACK_WITHOUT_AUTHORITY
+      - from_route: HUMAN_SUPPLIED_ASSET
+        to_route: PEXELS_PHOTO
+        scope: ALWAYS
+        reason_code: HUMAN_ASSET_CANNOT_FALLBACK_WITHOUT_AUTHORITY
+      - from_route: HUMAN_SUPPLIED_ASSET
+        to_route: AI_GENERATED_IMAGE
+        scope: ALWAYS
+        reason_code: HUMAN_ASSET_CANNOT_FALLBACK_WITHOUT_AUTHORITY
+      - from_route: HUMAN_SUPPLIED_ASSET
+        to_route: AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        scope: ALWAYS
+        reason_code: HUMAN_ASSET_CANNOT_FALLBACK_WITHOUT_AUTHORITY
+
+    archive_reuse_policy:
+      route: ARCHIVED_ASSET_REUSE
+      may_win_only_when:
+        semantic_fit_passes: true
+        rights_scope_permits_reuse: true
+        reuse_cooldown_permits: true
+        originality_repetition_policy_passes: true
+        asset_truth_is_not_stale: true
+      required_reason_evidence:
+        - archive_match
+        - rights_state
+        - reuse_count
+        - cooldown_state
+        - originality_repetition_result
+        - asset_truth_state
+      binary_fetch_required_for_routing_fixture: false
+
+    exact_text_and_native_overlay_policy:
+      generated_text_authority_allowed: false
+      generated_number_authority_allowed: false
+      generated_logo_allowed: false
+      generated_fake_ui_allowed: false
+      native_overlay_required_for_exact_text_or_number: true
+
+    fixtures:
+      - key: small_team_ai_stock_assisted_preview
+        channel_key: small-team-ai
+        niche_visual_source_profile: STOCK_ASSISTED
+        fixture_only: true
+        active: false
+        channel_profile_version_binding: null
+        provider_execution_allowed: false

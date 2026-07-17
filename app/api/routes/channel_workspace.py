@@ -22,9 +22,12 @@ from app.api.routes.imports import (
     ChannelLocalizationConfigUpdate,
     ChannelMembershipCreate,
     ChannelMembershipRead,
+    ChannelProfileApprovalRequest,
     ChannelProfileCompileRequest,
     ChannelProfileCompileResult,
+    ChannelProfileDraftUpdate,
     ChannelProfileCompiler,
+    ChannelProfileRejectionRequest,
     ChannelProfileService,
     ChannelProfileVersionCreate,
     ChannelProfileVersionRead,
@@ -394,6 +397,71 @@ def create_router() -> APIRouter:
             profiles = ChannelProfileService(session).list_profile_versions(channel_id)
             return [ChannelProfileVersionRead.model_validate(_profile(profile)) for profile in profiles]
 
+    @router.get("/channels/{channel_id}/profile-versions/active", response_model=ChannelProfileVersionRead | None)
+    def get_active_profile_version(channel_id: uuid.UUID) -> ChannelProfileVersionRead | None:
+        with session_scope() as session:
+            profile = ChannelProfileService(session).get_active_profile_version(channel_id)
+            return ChannelProfileVersionRead.model_validate(_profile(profile)) if profile else None
+
+    @router.get("/channels/{channel_id}/profile-management")
+    def get_profile_management(channel_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return ChannelProfileService(session).management_read_model(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post("/channels/{channel_id}/profile-versions/draft-from-active", response_model=ChannelProfileVersionRead)
+    def create_profile_draft_from_active(channel_id: uuid.UUID) -> ChannelProfileVersionRead:
+        try:
+            with session_scope() as session:
+                profile = ChannelProfileService(session).create_draft_from_active(channel_id=channel_id)
+                return ChannelProfileVersionRead.model_validate(_profile(profile))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.put("/profile-versions/{profile_version_id}/draft", response_model=ChannelProfileVersionRead)
+    def update_profile_draft(
+        profile_version_id: uuid.UUID,
+        data: ChannelProfileDraftUpdate,
+    ) -> ChannelProfileVersionRead:
+        try:
+            with session_scope() as session:
+                profile = ChannelProfileService(session).update_draft(
+                    profile_version_id=profile_version_id,
+                    data=data,
+                )
+                return ChannelProfileVersionRead.model_validate(_profile(profile))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post("/profile-versions/{profile_version_id}/validate")
+    def validate_profile_draft(profile_version_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return ChannelProfileService(session).validate_draft(profile_version_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post("/profile-versions/{profile_version_id}/preview-compile")
+    def preview_profile_compile(profile_version_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return ChannelProfileService(session).preview_compile(profile_version_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get("/profile-versions/{profile_version_id}/diff/{other_profile_version_id}")
+    def diff_profile_versions(
+        profile_version_id: uuid.UUID,
+        other_profile_version_id: uuid.UUID,
+    ) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return ChannelProfileService(session).semantic_diff(profile_version_id, other_profile_version_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @router.post("/profile-versions/{profile_version_id}/compile", response_model=ChannelProfileCompileResult)
     def compile_profile_version(
         profile_version_id: uuid.UUID,
@@ -429,16 +497,41 @@ def create_router() -> APIRouter:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
+    @router.post("/profile-versions/{profile_version_id}/submit-for-approval", response_model=ChannelProfileVersionRead)
+    def submit_profile_for_approval(profile_version_id: uuid.UUID) -> ChannelProfileVersionRead:
+        try:
+            with session_scope() as session:
+                profile = ChannelProfileService(session).submit_for_approval(profile_version_id)
+                return ChannelProfileVersionRead.model_validate(_profile(profile))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
     @router.post("/profile-versions/{profile_version_id}/approve", response_model=ChannelProfileVersionRead)
     def approve_profile_version(
         profile_version_id: uuid.UUID,
-        approved_by: uuid.UUID | None = None,
+        data: ChannelProfileApprovalRequest,
     ) -> ChannelProfileVersionRead:
         try:
             with session_scope() as session:
                 profile = ChannelProfileService(session).approve_profile_version(
                     profile_version_id=profile_version_id,
-                    approved_by=approved_by,
+                    approved_by=data.approved_by,
+                    approval_ref=data.approval_ref,
+                )
+                return ChannelProfileVersionRead.model_validate(_profile(profile))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post("/profile-versions/{profile_version_id}/reject", response_model=ChannelProfileVersionRead)
+    def reject_profile_version(
+        profile_version_id: uuid.UUID,
+        data: ChannelProfileRejectionRequest,
+    ) -> ChannelProfileVersionRead:
+        try:
+            with session_scope() as session:
+                profile = ChannelProfileService(session).reject_profile_version(
+                    profile_version_id=profile_version_id,
+                    reason=data.reason,
                 )
                 return ChannelProfileVersionRead.model_validate(_profile(profile))
         except Exception as exc:
