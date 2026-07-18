@@ -1,0 +1,91 @@
+{
+  "schema_version": "img-canary-v3-repair-cycles/v1",
+  "task": "IMG-CANARY-v3",
+  "provider_attempts_at_start": 0,
+  "provider_attempts_at_end": 1,
+  "additional_generation_submissions": 1,
+  "retry_generation_submissions": 0,
+  "repair_cycle_count": 5,
+  "cycles": [
+    {
+      "cycle": 1,
+      "phase": "V2_TERMINAL_ROOT_CAUSE_REPAIR",
+      "failure": "The immutable V2 request reached Google once and returned HTTP 400 with no image.",
+      "root_cause": "The V2 serialized image response_format included delivery=inline, while the current official Gemini 3.1 Flash Image Interactions examples omit delivery for inline image bytes.",
+      "repair": "Created a fresh V3 approval and authority whose official-SDK serialized response_format contains only type, mime_type, aspect_ratio and image_size; V1 and V2 artifacts remain unchanged.",
+      "checks_rerun": [
+        "official SDK MockTransport serialization",
+        "V1/V2 serialized-body preservation",
+        "V3 one-shot provider contract"
+      ],
+      "result": "PASS_OFFLINE",
+      "provider_attempts_before": 0,
+      "provider_attempts_after": 0
+    },
+    {
+      "cycle": 2,
+      "phase": "FRESH_V3_SECURITY_AUTHORITY",
+      "failure": "The consumed V1 and V2 task authorities cannot authorize another paid request.",
+      "root_cause": "Terminal one-shot authorities are intentionally non-reopenable.",
+      "repair": "Bound the new operator message digest to a distinct V3 task key, authorization path, run prefix, request hash, prompt hash and serialized body hash with exact-one terminal submit semantics.",
+      "checks_rerun": [
+        "V3 authority claim/consume/replay tests",
+        "V1/V2 authority hash preservation",
+        "combined terminal-run immutability capture"
+      ],
+      "result": "PASS_OFFLINE",
+      "provider_attempts_before": 0,
+      "provider_attempts_after": 0
+    },
+    {
+      "cycle": 3,
+      "phase": "HISTORICAL_PREFLIGHT_HASH_COMPATIBILITY",
+      "failure": "Adding optional V3 preflight fields initially changed how current models reloaded historical V1/V2 hash payloads.",
+      "root_cause": "Persisted artifacts and current Pydantic dumps represent later optional null fields differently.",
+      "repair": "Selected only the representation-compatible payload variant already committed by each immutable content hash; semantic values remain strict and tampered hashes still fail closed.",
+      "checks_rerun": [
+        "persisted V1/V2 planning and runtime preflight reload",
+        "V1-V3 runner/security regression: 79 PASS"
+      ],
+      "result": "PASS_OFFLINE",
+      "provider_attempts_before": 0,
+      "provider_attempts_after": 0
+    },
+    {
+      "cycle": 4,
+      "phase": "V3_LOCAL_REVIEW_ARCHIVE",
+      "failure": "The first V3 integration draft selected the V1 archive role set and had no V3 repair-history source.",
+      "root_cause": "Archive roles previously distinguished only V1 and V2.",
+      "repair": "Added a distinct 44-role V3 package, preserved frozen V1/V2 role sets, bound V3 authority/serialization/combined immutability/runtime evidence, and created this repair history before any paid submit.",
+      "checks_rerun": [
+        "fake V3 paid response through JPEG, VQC, native render and 44-role archive",
+        "PostgreSQL acceptance suite: 200 PASS",
+        "Alembic head: 0037_ch1_flex"
+      ],
+      "result": "PASS_OFFLINE",
+      "provider_attempts_before": 0,
+      "provider_attempts_after": 0
+    },
+    {
+      "cycle": 5,
+      "phase": "REAL_PROVIDER_SUCCESS_AND_LOCAL_VQC_LINEAGE",
+      "failure": "The one paid V3 request completed with one valid JPEG, but Google's successful Interactions response exposed no provider request or operation ID and the strict local VQC lineage builder stopped before review render.",
+      "root_cause": "The previous VQC contract assumed every successful provider response supplied an interaction identifier; this successful SDK response supplied hash-bound image bytes and usage but no identifier.",
+      "repair": "Kept the paid attempt, authority, budget, provider receipt and image immutable. For V3 success only, derive a truthful evidence URI from the immutable provider-response content hash and use it consistently through materialization, normalization, rights and evaluator checks. V1/V2 still require their explicit IDs.",
+      "checks_rerun": [
+        "missing-ID V3 response-hash lineage positive test",
+        "explicit provider-ID preservation test",
+        "typed rights/VQC gate regression",
+        "attempt audit: exactly one provider call and no retry",
+        "real-byte technical VQC: PASS",
+        "native review render: PASS",
+        "local archive: 44 roles complete",
+        "post-repair PostgreSQL acceptance: 204 PASS"
+      ],
+      "result": "PASS_LOCAL_PIPELINE_COMPLETE",
+      "provider_attempts_before": 1,
+      "provider_attempts_after": 1,
+      "additional_generation_submissions_after_failure": 0
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": "img-canary-v3-drive-closeout-summary/v1",
+  "run_id": "img-canary-v3-20260718T162027Z-a90959ed",
+  "generated_on": "2026-07-18",
+  "entry_state": "PASS",
+  "human_review": {
+    "decision": "PASS",
+    "authority": "OPERATOR",
+    "content_hash": "140e57b7759676b168f420c5a865f9b516d7ca5898e119448ff2cf1e2011da89"
+  },
+  "reviewed_hashes": {
+    "original_image_sha256": "3ab066bdb556be8161f1736959346c6decbdba61d3f12c3348e249445b1f7293",
+    "normalized_image_sha256": "af752598e540ee83e88f960c71bb4255877753cf4efb799e97dcabb4a604e4b4",
+    "review_mp4_sha256": "8e5a4dd39fa7da4321fc8e0efb93076cc1637805f5300d0ed54861c5cfcacab4"
+  },
+  "local_archive": {
+    "original_role_count": 44,
+    "integrity": "PASS",
+    "original_manifest_declared_hash": "45140e3e6f2a0291935bf241d5776ecabd78d5e76ecb07715723b366fc77e268",
+    "original_manifest_bytes_sha256": "0e8539788154623f48af179c3743801a79d35b5b96e8c55a80fb0f97a29bbf98",
+    "closeout_manifest_hash": "25e59e6c2672d843e2f4d772d5e135e6f4581c83b286ddf17b4cf03f5c3da3c6"
+  },
+  "drive": {
+    "destination": "smoke_tests/2026-07-18/img_canary/img-canary-v3-20260718T162027Z-a90959ed",
+    "drive_folder_id": "1qqlcy3m7Ry36xFRpBJEKng94yTpYFS10",
+    "expected_item_count": 47,
+    "verified_item_count": 47,
+    "remote_set_verification": "PASS",
+    "size_verification": "PASS",
+    "checksum_verification": "PASS",
+    "duplicate_check": "PASS",
+    "archive_verified": true,
+    "receipt_hash": "c60c1f25307f21a25192dc8a2b192373996da0ee3971bb5c59803134a27046c5",
+    "total_local_size": 11656900,
+    "total_drive_size": 11656900
+  },
+  "closeout_repair_cycles": 2,
+  "gemini_calls_during_closeout": 0,
+  "provider_attempts_total": 1,
+  "external_fallback_used": false,
+  "production_eligible": false,
+  "not_publishable": true,
+  "verdicts": {
+    "IMG_CANARY_V3_FINAL": "PASS",
+    "PROCEED_TO_CH1_FLEX_V2": true,
+    "MR1_EXECUTION": "ON_HOLD",
+    "PROCEED_TO_MR1": false
+  },
+  "verification_note": "Automated test suite skipped by the operator's latest instruction; controlled runner local validation and real Drive exact-set verification passed."
+}

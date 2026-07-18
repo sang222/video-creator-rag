@@ -40,6 +40,8 @@ MANDATORY_GEMINI_IMAGE_NEGATIVE_CONSTRAINTS = {
     "no interface text",
     "no fake software UI",
 }
+IMG_CANARY_V2_APPROVAL_SCOPE_PREFIX = "IMG_CANARY_ONE_SHOT:img-canary-v2-"
+IMG_CANARY_V3_APPROVAL_SCOPE_PREFIX = "IMG_CANARY_ONE_SHOT:img-canary-v3-"
 
 
 class GeminiImageGenerationRequest(BaseModel):
@@ -119,12 +121,54 @@ class GeminiImageGenerationRequest(BaseModel):
         expected_hashes = [item.asset_hash for item in self.reference_images]
         if self.reference_types != expected_types or self.reference_asset_hashes != expected_hashes:
             raise ValueError("GEMINI_IMAGE_REFERENCE_BINDING_MISMATCH")
+        if self.uses_img_canary_v2_response_contract and (
+            self.model_id != "gemini-3.1-flash-image"
+            or self.image_size != "2K"
+            or self.aspect_ratio != "16:9"
+            or self.output_count != 1
+            or bool(self.reference_images)
+            or self.grounding_enabled
+            or self.search_grounding_enabled
+        ):
+            raise ValueError("GEMINI_IMAGE_V2_REQUEST_CONTRACT_MISMATCH")
+        if self.uses_img_canary_v3_response_contract and (
+            self.model_id != "gemini-3.1-flash-image"
+            or self.image_size != "2K"
+            or self.aspect_ratio != "16:9"
+            or self.output_count != 1
+            or bool(self.reference_images)
+            or self.grounding_enabled
+            or self.search_grounding_enabled
+        ):
+            raise ValueError("GEMINI_IMAGE_V3_REQUEST_CONTRACT_MISMATCH")
         expected = ai_image_stable_hash(
             self.model_dump(mode="json", exclude={"content_hash"})
         )
         if self.content_hash != expected:
             raise ValueError("GEMINI_IMAGE_REQUEST_HASH_MISMATCH")
         return self
+
+    @property
+    def uses_img_canary_v2_response_contract(self) -> bool:
+        """Select the strict one-shot response contract without changing v1 hashes."""
+
+        return self.approval_scope.startswith(IMG_CANARY_V2_APPROVAL_SCOPE_PREFIX)
+
+    @property
+    def uses_img_canary_v3_response_contract(self) -> bool:
+        return self.approval_scope.startswith(IMG_CANARY_V3_APPROVAL_SCOPE_PREFIX)
+
+    @property
+    def strict_img_canary_contract_version(self) -> Literal["V2", "V3"] | None:
+        if self.uses_img_canary_v2_response_contract:
+            return "V2"
+        if self.uses_img_canary_v3_response_contract:
+            return "V3"
+        return None
+
+    @property
+    def uses_strict_inline_jpeg_response_contract(self) -> bool:
+        return self.strict_img_canary_contract_version is not None
 
 
 class GeminiImageExecutionGates(BaseModel):
@@ -295,21 +339,71 @@ class GeminiImageCostEstimateSnapshot(BaseModel):
     source_note: str = Field(min_length=1)
     snapshot_hash: str = Field(min_length=1)
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     @model_validator(mode="after")
     def validate_cost_snapshot(self) -> "GeminiImageCostEstimateSnapshot":
-        expected_amount = self.estimated_unit_cost * self.output_count * self.attempt_count
-        if self.estimated_amount != expected_amount:
-            raise ValueError("GEMINI_IMAGE_COST_ESTIMATE_MISMATCH")
-        if self.estimated_amount > self.hard_cap or self.estimated_amount > self.approval_amount:
-            raise ValueError("GEMINI_IMAGE_COST_CAP_EXCEEDED")
-        expected = ai_image_stable_hash(
-            self.model_dump(mode="json", exclude={"snapshot_hash"})
-        )
-        if self.snapshot_hash != expected:
-            raise ValueError("GEMINI_IMAGE_COST_SNAPSHOT_HASH_MISMATCH")
+        _validate_gemini_image_cost_snapshot_self_integrity(self)
         return self
+
+
+def _validate_gemini_image_cost_snapshot_self_integrity(
+    snapshot: GeminiImageCostEstimateSnapshot,
+) -> None:
+    """Revalidate invariants even for snapshots made with unvalidated copy APIs."""
+
+    expected_amount = (
+        snapshot.estimated_unit_cost * snapshot.output_count * snapshot.attempt_count
+    )
+    if snapshot.estimated_amount != expected_amount:
+        raise ValueError("GEMINI_IMAGE_COST_ESTIMATE_MISMATCH")
+    if (
+        snapshot.estimated_amount > snapshot.hard_cap
+        or snapshot.estimated_amount > snapshot.approval_amount
+    ):
+        raise ValueError("GEMINI_IMAGE_COST_CAP_EXCEEDED")
+    expected_hash = ai_image_stable_hash(
+        snapshot.model_dump(mode="json", exclude={"snapshot_hash"})
+    )
+    if snapshot.snapshot_hash != expected_hash:
+        raise ValueError("GEMINI_IMAGE_COST_SNAPSHOT_HASH_MISMATCH")
+
+
+def validate_gemini_image_cost_snapshot_integrity(
+    snapshot: GeminiImageCostEstimateSnapshot,
+    *,
+    provider_key: str,
+    model_id: str,
+    image_size: AIImageSize,
+    aspect_ratio: AIImageAspectRatio,
+    output_count: int,
+    attempt_count: int,
+    catalog_estimate: GeminiImageCostEstimateSnapshot,
+) -> GeminiImageCostEstimateSnapshot:
+    """Fail closed unless a cost snapshot exactly matches request and catalog truth.
+
+    Pydantic's ``model_copy(update=...)`` intentionally skips validation.  Paid-call
+    preflights therefore call this helper at the point of use instead of treating a
+    previously constructed model instance as sufficient integrity evidence.
+    """
+
+    _validate_gemini_image_cost_snapshot_self_integrity(snapshot)
+    _validate_gemini_image_cost_snapshot_self_integrity(catalog_estimate)
+    if snapshot.provider_key != provider_key:
+        raise ValueError("GEMINI_IMAGE_COST_PROVIDER_BINDING_MISMATCH")
+    if snapshot.model_id != model_id:
+        raise ValueError("GEMINI_IMAGE_COST_MODEL_BINDING_MISMATCH")
+    if (
+        snapshot.image_size != image_size
+        or snapshot.aspect_ratio != aspect_ratio
+        or snapshot.output_count != output_count
+    ):
+        raise ValueError("GEMINI_IMAGE_COST_OUTPUT_BINDING_MISMATCH")
+    if snapshot.attempt_count != attempt_count:
+        raise ValueError("GEMINI_IMAGE_COST_ATTEMPT_BINDING_MISMATCH")
+    if snapshot.model_dump(mode="json") != catalog_estimate.model_dump(mode="json"):
+        raise ValueError("GEMINI_IMAGE_COST_CATALOG_ESTIMATE_MISMATCH")
+    return snapshot
 
 
 class GeminiImageReadiness(BaseModel):
@@ -322,6 +416,7 @@ class GeminiImageReadiness(BaseModel):
     credential_value_redacted: Literal[True] = True
     model_configured: bool
     model_catalog_present: bool
+    raster_decoder_ready: bool | None = None
     route_approval_state: bool
     execution_enabled: bool
     fixture_only: bool
@@ -336,10 +431,13 @@ class GeminiImageReadiness(BaseModel):
 
 
 __all__ = [
+    "IMG_CANARY_V2_APPROVAL_SCOPE_PREFIX",
+    "IMG_CANARY_V3_APPROVAL_SCOPE_PREFIX",
     "GeminiImageCostEstimateSnapshot",
     "GeminiImageExecutionGates",
     "GeminiImageGenerationRequest",
     "GeminiImageOperationReceipt",
     "GeminiImageOutputMaterializationPlan",
     "GeminiImageReadiness",
+    "validate_gemini_image_cost_snapshot_integrity",
 ]

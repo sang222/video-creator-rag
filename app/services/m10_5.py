@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import secrets
+import ssl
 import urllib.error
 import urllib.parse
 import uuid
@@ -13,6 +14,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 from urllib import request as urlrequest
+
+import certifi
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -43,6 +46,7 @@ LOCAL_DRIVE_CREDENTIAL_DIR = ROOT / "var" / "credentials" / "google-drive"
 GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+GOOGLE_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 GOOGLE_DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 GOOGLE_DRIVE_PROVIDER_KEY = "google_drive"
 GOOGLE_DRIVE_CREDENTIAL_KEY = "media_offload_default"
@@ -627,7 +631,7 @@ class GoogleDriveMediaStorageProvider:
             method="GET",
             headers={"Authorization": f"Bearer {access_token}"},
         )
-        with urlrequest.urlopen(request, timeout=20) as response:
+        with urlrequest.urlopen(request, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode=None)
 
@@ -645,7 +649,7 @@ class GoogleDriveMediaStorageProvider:
             method="GET",
             headers={"Authorization": f"Bearer {access_token}"},
         )
-        with urlrequest.urlopen(request, timeout=20) as response:
+        with urlrequest.urlopen(request, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
             payload = json.loads(response.read().decode("utf-8"))
         files = payload.get("files") if isinstance(payload.get("files"), list) else []
         if files:
@@ -659,7 +663,7 @@ class GoogleDriveMediaStorageProvider:
             data=body,
             headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8"},
         )
-        with urlrequest.urlopen(create, timeout=20) as response:
+        with urlrequest.urlopen(create, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
             created = json.loads(response.read().decode("utf-8"))
         return str(created["id"])
 
@@ -688,7 +692,7 @@ class GoogleDriveMediaStorageProvider:
             data=body,
             headers={"Authorization": f"Bearer {access_token}", "Content-Type": f"multipart/related; boundary={boundary}"},
         )
-        with urlrequest.urlopen(request, timeout=60) as response:
+        with urlrequest.urlopen(request, timeout=60, context=GOOGLE_SSL_CONTEXT) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode="multipart")
 
@@ -707,7 +711,7 @@ class GoogleDriveMediaStorageProvider:
                 "X-Upload-Content-Length": str(local_path.stat().st_size),
             },
         )
-        with urlrequest.urlopen(init, timeout=20) as response:
+        with urlrequest.urlopen(init, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
             location = response.headers.get("Location")
         if not location:
             raise ValidationFailureError("Google Drive resumable upload session did not return a location")
@@ -718,7 +722,7 @@ class GoogleDriveMediaStorageProvider:
             data=data,
             headers={"Content-Type": media_type, "Content-Length": str(len(data))},
         )
-        with urlrequest.urlopen(upload, timeout=120) as response:
+        with urlrequest.urlopen(upload, timeout=120, context=GOOGLE_SSL_CONTEXT) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode="resumable")
 
@@ -1221,7 +1225,7 @@ def _post_google_token(payload: dict[str, str]) -> dict[str, Any]:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
-        with urlrequest.urlopen(request, timeout=20) as response:
+        with urlrequest.urlopen(request, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ValidationFailureError(f"Google OAuth token exchange failed: HTTP {exc.code}") from exc

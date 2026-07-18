@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
+import stat
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -21,9 +23,11 @@ from app.contracts.ai_image import (
 )
 from app.contracts.asset_acquisition import AIGenerationManifest
 from app.contracts.google_gemini_image import (
+    GeminiImageCostEstimateSnapshot,
     GeminiImageExecutionGates,
     GeminiImageGenerationRequest,
     GeminiImageOperationReceipt,
+    validate_gemini_image_cost_snapshot_integrity,
 )
 from app.contracts.native_renderer import NativeOverlayPlan, TextSafeRegion
 from app.contracts.visual_direction import VisualDirectionContract
@@ -604,6 +608,101 @@ def test_versioned_cost_and_approval_idempotency_attempt_guards(
     assert estimate.price_catalog_ref == catalog.ref
     assert estimate.estimated_amount == Decimal("0.101")
     assert estimate.actual_amount is None
+    canonical_estimate = catalog.estimate(
+        model_id="gemini-3.1-flash-image",
+        image_size="2K",
+        aspect_ratio="16:9",
+        output_count=1,
+        attempt_count=1,
+        hard_cap=Decimal("1.00"),
+        approval_amount=Decimal("1.00"),
+    )
+    assert validate_gemini_image_cost_snapshot_integrity(
+        estimate,
+        provider_key="google_gemini_image",
+        model_id="gemini-3.1-flash-image",
+        image_size="2K",
+        aspect_ratio="16:9",
+        output_count=1,
+        attempt_count=1,
+        catalog_estimate=canonical_estimate,
+    ) is estimate
+    with pytest.raises(ValidationError, match="frozen"):
+        estimate.estimated_amount = Decimal("0.001")
+
+    tampered_hash = estimate.model_copy(update={"snapshot_hash": "0" * 64})
+    with pytest.raises(ValueError, match="GEMINI_IMAGE_COST_SNAPSHOT_HASH_MISMATCH"):
+        validate_gemini_image_cost_snapshot_integrity(
+            tampered_hash,
+            provider_key="google_gemini_image",
+            model_id="gemini-3.1-flash-image",
+            image_size="2K",
+            aspect_ratio="16:9",
+            output_count=1,
+            attempt_count=1,
+            catalog_estimate=canonical_estimate,
+        )
+
+    tampered_payload = estimate.model_dump(mode="python", exclude={"snapshot_hash"})
+    tampered_payload["estimated_unit_cost"] = Decimal("0.050")
+    tampered_payload["estimated_amount"] = Decimal("0.050")
+    tampered_cost = GeminiImageCostEstimateSnapshot.model_construct(
+        **tampered_payload,
+        snapshot_hash=ai_image_stable_hash(tampered_payload),
+    )
+    with pytest.raises(ValueError, match="GEMINI_IMAGE_COST_CATALOG_ESTIMATE_MISMATCH"):
+        validate_gemini_image_cost_snapshot_integrity(
+            tampered_cost,
+            provider_key="google_gemini_image",
+            model_id="gemini-3.1-flash-image",
+            image_size="2K",
+            aspect_ratio="16:9",
+            output_count=1,
+            attempt_count=1,
+            catalog_estimate=canonical_estimate,
+        )
+    coherent_binding_tampers = (
+        (
+            {"provider_key": "unapproved-image-provider"},
+            "GEMINI_IMAGE_COST_PROVIDER_BINDING_MISMATCH",
+        ),
+        (
+            {"model_id": "unapproved-image-model"},
+            "GEMINI_IMAGE_COST_MODEL_BINDING_MISMATCH",
+        ),
+        (
+            {"aspect_ratio": "9:16"},
+            "GEMINI_IMAGE_COST_OUTPUT_BINDING_MISMATCH",
+        ),
+        (
+            {"output_count": 2, "estimated_amount": Decimal("0.202")},
+            "GEMINI_IMAGE_COST_OUTPUT_BINDING_MISMATCH",
+        ),
+        (
+            {"attempt_count": 2, "estimated_amount": Decimal("0.202")},
+            "GEMINI_IMAGE_COST_ATTEMPT_BINDING_MISMATCH",
+        ),
+    )
+    for updates, reason_code in coherent_binding_tampers:
+        tampered = estimate.model_copy(update=updates)
+        tampered = tampered.model_copy(
+            update={
+                "snapshot_hash": ai_image_stable_hash(
+                    tampered.model_dump(mode="json", exclude={"snapshot_hash"})
+                )
+            }
+        )
+        with pytest.raises(ValueError, match=reason_code):
+            validate_gemini_image_cost_snapshot_integrity(
+                tampered,
+                provider_key="google_gemini_image",
+                model_id="gemini-3.1-flash-image",
+                image_size="2K",
+                aspect_ratio="16:9",
+                output_count=1,
+                attempt_count=1,
+                catalog_estimate=canonical_estimate,
+            )
     with pytest.raises(ValueError, match="GEMINI_IMAGE_EFFECTIVE_RESOLUTION_BELOW_1080P"):
         catalog.estimate(
             model_id="gemini-3.1-flash-image",
@@ -782,15 +881,25 @@ def test_fixture_is_zero_network_idempotent_transient_and_atomically_materialize
         destination_path=destination,
     )
     replacements: list[tuple[Path, Path]] = []
+    fsync_targets: list[str] = []
     real_replace = gemini_image_provider_module.os.replace
+    real_fsync = gemini_image_provider_module.os.fsync
 
     def recording_replace(source: str | Path, target: str | Path) -> None:
         replacements.append((Path(source), Path(target)))
         real_replace(source, target)
 
+    def recording_fsync(file_descriptor: int) -> None:
+        fsync_targets.append(
+            "directory" if stat.S_ISDIR(os.fstat(file_descriptor).st_mode) else "file"
+        )
+        real_fsync(file_descriptor)
+
     monkeypatch.setattr(gemini_image_provider_module.os, "replace", recording_replace)
+    monkeypatch.setattr(gemini_image_provider_module.os, "fsync", recording_fsync)
     materialized = adapter.materialize_output(plan, transient=transient)
     assert replacements == [(destination.with_name(destination.name + ".part"), destination)]
+    assert fsync_targets == ["file", "directory"]
     assert destination.read_bytes() == fixture_png
     assert materialized["sha256"] == hashlib.sha256(fixture_png).hexdigest()
     assert materialized["image_width"] == 2752

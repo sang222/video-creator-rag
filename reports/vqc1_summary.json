@@ -1,0 +1,90 @@
+{
+  "task": "VQC1",
+  "title": "Production Image and Visual Quality Control Hardening",
+  "generated_on": "2026-07-18",
+  "repository": "/Users/sangss/Desktop/video-creator-rag",
+  "entry": {
+    "VSR1_FINAL": "PASS",
+    "IMG1_FINAL": "PASS",
+    "PROCEED_TO_VQC1": true,
+    "MR1_EXECUTION": "ON_HOLD",
+    "PROCEED_TO_MR1": false,
+    "alembic_head": "0037_ch1_flex"
+  },
+  "implementation": {
+    "schema_version": "vqc1.image-visual-quality-control.v1",
+    "typed_gate_count": 14,
+    "actual_byte_probe": "STDLIB_PNG_CRC_ZLIB",
+    "minimum_effective_resolution": "1920x1080",
+    "technical_media_qc_reused": true,
+    "creative_semantic_auto_pass_forbidden": true,
+    "human_final_auto_pass_forbidden": true,
+    "real_provider_lineage": "provider response -> materialized original -> normalized PNG -> VQC probe",
+    "external_vlm_or_ocr_added": false,
+    "provider_calls": 0,
+    "paid_attempts": 0
+  },
+  "gate_results": {
+    "GeneratedTextArtifactGate": "PASS",
+    "GeneratedNumberArtifactGate": "PASS",
+    "FakeUILogoGate": "PASS",
+    "WatermarkArtifactGate": "PASS",
+    "CompositionComplianceGate": "PASS",
+    "SemanticMatchGate": "REVIEW_REQUIRED",
+    "VisualLanguageMatchGate": "REVIEW_REQUIRED",
+    "TechnicalImageFitnessGate": "PASS",
+    "CropSafetyGate": "PASS",
+    "ReuseSimilarityGate": "PASS",
+    "VisualContinuityGate": "REVIEW_REQUIRED",
+    "RightsDisclosureCompletenessGate": "PASS",
+    "NativeOverlayComplianceGate": "PASS",
+    "HumanVisualApprovalGate": "REVIEW_REQUIRED"
+  },
+  "verification": {
+    "focused_vqc1": {
+      "status": "PASS",
+      "passed": 34,
+      "failed": 0
+    },
+    "expanded_offline_canary_and_vqc": {
+      "status": "PASS",
+      "passed": 164,
+      "failed": 0,
+      "elapsed_seconds": 8.97
+    },
+    "required_four_file_offline_acceptance": {
+      "status": "PASS",
+      "passed": 120,
+      "failed": 0,
+      "elapsed_seconds": 4.11
+    },
+    "latest_postgresql_acceptance_before_final_hardening": {
+      "status": "PASS",
+      "passed": 117,
+      "failed": 0,
+      "elapsed_seconds": 56.99
+    },
+    "historical_artifacts_modified": false,
+    "production_database_mutated": false
+  },
+  "repair_cycles": 1,
+  "verdicts": {
+    "VQC1_ENTRY": "PASS",
+    "VQC1_GENERATED_TEXT_NUMBER_QC": "PASS",
+    "VQC1_FAKE_UI_LOGO_WATERMARK_QC": "PASS",
+    "VQC1_COMPOSITION_COMPLIANCE": "PASS",
+    "VQC1_TECHNICAL_IMAGE_FITNESS": "PASS",
+    "VQC1_CROP_SAFETY": "PASS",
+    "VQC1_NATIVE_OVERLAY_COMPLIANCE": "PASS",
+    "VQC1_SEMANTIC_REVIEW_CONTRACT": "PASS",
+    "VQC1_VISUAL_LANGUAGE_REVIEW_CONTRACT": "PASS",
+    "VQC1_REUSE_SIMILARITY": "PASS",
+    "VQC1_VISUAL_CONTINUITY": "PASS",
+    "VQC1_RIGHTS_PROVENANCE_DISCLOSURE": "PASS",
+    "VQC1_HUMAN_REVIEW_BOUNDARY": "PASS",
+    "VQC1_OFFLINE_GOLDEN": "PASS",
+    "VQC1_REPAIR_CYCLES": 1,
+    "VQC1_FINAL": "PASS",
+    "PROCEED_TO_IMG_CANARY": true
+  }
+}

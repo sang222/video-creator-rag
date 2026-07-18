@@ -19,6 +19,7 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | Visual impact review | `PASS` | Repository-grounded mapping complete; VSR1 may proceed without a DB migration. |
 | VSR1 niche-aware visual routing | `PASS` | Provider-neutral taxonomy, gates, deterministic router, routing evidence and offline fixtures complete; provider execution remains disabled. |
 | IMG1 Google Gemini Image foundation | `PASS / EXECUTION DISABLED` | Distinct `google_gemini_image` IMAGE route, versioned `gemini-3.1-flash-image` catalog, native exact-content authority and fixture-only acceptance are complete; no provider call or paid canary ran. |
+| IMG-CANARY-v3 | `PASS / ARCHIVE VERIFIED` | One provider attempt succeeded; operator human review passed; immutable 47-item Drive closeout verified. CH1-FLEX v2 may proceed in a separate task. |
 | MR1 first real media render | `ON_HOLD / NOT_STARTED` | Historical approval does not cover the new visual-source decision set or Gemini Image route; provider call count and render count remain 0. |
 
 ## Current Package State
@@ -76,8 +77,9 @@ Required sequence before MR1:
 3. VQC1 generated-image/native-overlay QC.
 4. Offline routing/image/overlay fixtures.
 5. One controlled paid image canary.
-6. Human full-watch and Drive verification.
-7. CH1-FLEX v2 approval/activation for future projects.
+6. Human full-watch and Drive verification — `PASS` on 2026-07-18 for
+   `img-canary-v3-20260718T162027Z-a90959ed` (47/47 Drive items verified).
+7. CH1-FLEX v2 approval/activation for future projects — eligible, not started.
 8. PKG1 visual/provider/cost/disclosure revision.
 9. New exact-target MR1 approval.
 10. MR1.
@@ -231,12 +233,21 @@ Rules:
 
 `PROCEED_TO_VQC1=true`
 
+`VQC1_FINAL=PASS`
+
+`IMG_CANARY_V3_FINAL=PASS`
+
+`ARCHIVE_VERIFIED=true`
+
+`PROCEED_TO_CH1_FLEX_V2=true`
+
 Next checkpoint:
 
-`VQC1 generated-image/native-overlay QC hardening`
+`CH1-FLEX v2 planning under separate scope`
 
 The registered route is `google_gemini_image`, separate from
 `google_veo`. Its default model is `gemini-3.1-flash-image`; generated
 pixels are only a visual foundation, while exact text/numbers remain native
-overlay authority. No migration, paid canary, CH1-FLEX v2 activation, PKG1
-revision or MR1 execution occurred.
+overlay authority. The V3 paid canary and its Drive closeout passed; no
+CH1-FLEX v2 implementation, PKG1 revision or MR1 execution occurred in that
+closeout.

@@ -69,7 +69,64 @@ CQR1_ROLE_ARCHIVE_PATHS = {
     "HUMAN_REVIEW_PACKET": "06-qc/human-watchability-review.md",
     "NOT_PUBLISHABLE_MANIFEST": "07-publish/not-publishable-manifest.json",
 }
-ALL_ROLE_ARCHIVE_PATHS = {**ROLE_ARCHIVE_PATHS, **CQR1_ROLE_ARCHIVE_PATHS}
+IMG_CANARY_ROLE_ARCHIVE_PATHS = {
+    "IMG_CANARY_RUN_IDENTITY": "00-manifests/img-canary-run-identity.json",
+    "IMG_CANARY_OPERATOR_APPROVAL": "00-manifests/img-canary-operator-approval.json",
+    "IMG_CANARY_VISUAL_SOURCE_DECISION": "00-manifests/img-canary-visual-source-decision.json",
+    "IMG_CANARY_AI_IMAGE_REQUEST": "00-manifests/img-canary-ai-image-request.json",
+    "IMG_CANARY_COMPILED_PROMPT": "00-manifests/img-canary-compiled-prompt.json",
+    "IMG_CANARY_GEMINI_REQUEST": "00-manifests/img-canary-gemini-request.json",
+    "IMG_CANARY_PREFLIGHT": "00-manifests/img-canary-preflight.json",
+    "IMG_CANARY_ATTEMPT_LEDGER": "00-manifests/img-canary-attempt-ledger.json",
+    "IMG_CANARY_PROVIDER_OPERATION_RECEIPT": "00-manifests/img-canary-provider-operation-receipt.json",
+    "IMG_CANARY_PROVIDER_RESPONSE_SUMMARY": "00-manifests/img-canary-provider-response-summary.json",
+    "IMG_CANARY_COST_ATTEMPT_EVIDENCE": "00-manifests/img-canary-cost-attempt-evidence.json",
+    "IMG_CANARY_MATERIALIZATION_RECEIPT": "00-manifests/img-canary-materialization-receipt.json",
+    "IMG_CANARY_NORMALIZATION_RECEIPT": "00-manifests/img-canary-normalization-receipt.json",
+    "IMG_CANARY_NATIVE_OVERLAY_PLAN": "00-manifests/img-canary-native-overlay-plan.json",
+    "IMG_CANARY_NATIVE_OVERLAY_BINDING": "00-manifests/img-canary-native-overlay-binding.json",
+    "IMG_CANARY_NATIVE_RENDER_PLAN": "00-manifests/img-canary-native-render-plan.json",
+    "IMG_CANARY_COMPILED_RENDER_MANIFEST": "00-manifests/img-canary-compiled-render-manifest.json",
+    "IMG_CANARY_FFMPEG_COMMAND_MANIFEST": "00-manifests/img-canary-ffmpeg-command-manifest.json",
+    "IMG_CANARY_PROVENANCE": "00-manifests/img-canary-provenance.json",
+    "IMG_CANARY_SYNTHETIC_DISCLOSURE": "00-manifests/img-canary-synthetic-disclosure.json",
+    "IMG_CANARY_PACKAGE_INDEX": "00-manifests/img-canary-package-index.json",
+    "IMG_CANARY_ORIGINAL_IMAGE": "05-render/source-images/original-generated.jpg",
+    "IMG_CANARY_NORMALIZED_IMAGE": "05-render/source-images/normalized-1920x1080.png",
+    "IMG_CANARY_REVIEW_MP4": "05-render/img-canary-review.mp4",
+    "IMG_CANARY_QC_CROPS": "06-qc/img-canary-qc-crops.json",
+    "IMG_CANARY_QC_CROP_FULL_FRAME": "06-qc/crops/full-frame.png",
+    "IMG_CANARY_QC_CROP_OVERLAY_SAFE": "06-qc/crops/overlay-safe.png",
+    "IMG_CANARY_QC_CROP_SUBJECT_FOCAL": "06-qc/crops/subject-focal.png",
+    "IMG_CANARY_VQC1_EVIDENCE": "06-qc/img-canary-vqc1-evidence.json",
+    "IMG_CANARY_VQC1_REPORT_JSON": "06-qc/img-canary-vqc1-report.json",
+    "IMG_CANARY_RENDER_QC": "06-qc/img-canary-render-qc.json",
+    "IMG_CANARY_RENDER_EXECUTION_RECEIPT": "06-qc/img-canary-render-execution-receipt.json",
+    "IMG_CANARY_VQC1_REPORT": "06-qc/vqc1-image-visual-quality-control-report.md",
+    "IMG_CANARY_VQC1_SUMMARY": "06-qc/vqc1-summary.json",
+    "IMG_CANARY_REPORT": "06-qc/img-canary-google-gemini-image-report.md",
+    "IMG_CANARY_SUMMARY": "06-qc/img-canary-summary.json",
+    "IMG_CANARY_REPAIR_CYCLES": "06-qc/img-canary-repair-cycles.json",
+    "IMG_CANARY_HUMAN_REVIEW_PACKET": "06-qc/img-canary-human-review.md",
+    "IMG_CANARY_NOT_PUBLISHABLE": "07-publish/img-canary-not-publishable.json",
+    "IMG_CANARY_V2_PREVIOUS_RUN_IMMUTABILITY": "00-manifests/img-canary-v2-previous-run-immutability.json",
+    "IMG_CANARY_V2_SERIALIZED_REQUEST_EVIDENCE": "00-manifests/img-canary-v2-serialized-request-evidence.json",
+    "IMG_CANARY_V2_OPERATOR_APPROVAL_BINDING": "00-manifests/img-canary-v2-operator-approval-binding.json",
+    "IMG_CANARY_V2_DRIVE_READINESS_EVIDENCE": "00-manifests/img-canary-v2-drive-readiness-evidence.json",
+    "IMG_CANARY_V2_RUNTIME_PREFLIGHT": "00-manifests/img-canary-v2-runtime-preflight.json",
+    "IMG_CANARY_V2_RUNTIME_EXECUTION_GATES": "00-manifests/img-canary-v2-runtime-execution-gates.json",
+    "IMG_CANARY_V3_PREVIOUS_RUNS_IMMUTABILITY": "00-manifests/img-canary-v3-previous-runs-immutability.json",
+    "IMG_CANARY_V3_SERIALIZED_REQUEST_EVIDENCE": "00-manifests/img-canary-v3-serialized-request-evidence.json",
+    "IMG_CANARY_V3_OPERATOR_APPROVAL_BINDING": "00-manifests/img-canary-v3-operator-approval-binding.json",
+    "IMG_CANARY_V3_DRIVE_READINESS_EVIDENCE": "00-manifests/img-canary-v3-drive-readiness-evidence.json",
+    "IMG_CANARY_V3_RUNTIME_PREFLIGHT": "00-manifests/img-canary-v3-runtime-preflight.json",
+    "IMG_CANARY_V3_RUNTIME_EXECUTION_GATES": "00-manifests/img-canary-v3-runtime-execution-gates.json",
+}
+ALL_ROLE_ARCHIVE_PATHS = {
+    **ROLE_ARCHIVE_PATHS,
+    **CQR1_ROLE_ARCHIVE_PATHS,
+    **IMG_CANARY_ROLE_ARCHIVE_PATHS,
+}
 # Historical AS1/PA1R builders retain their frozen role set. New repaired runs pass
 # this extended set explicitly, so old archive evidence is never rewritten.
 LEGACY_REQUIRED_ARCHIVE_ROLES = frozenset(set(ROLE_ARCHIVE_PATHS) - {"CANONICAL_MEDIA_TIMELINE"})
@@ -101,6 +158,60 @@ CQR1_REQUIRED_ARCHIVE_ROLES = frozenset(
         "NOT_PUBLISHABLE_MANIFEST",
     }
 )
+# The pending human-review packet is created only after the initial archive has
+# been verified, because it binds that real receipt. It is an optional mapped
+# supplement, not part of the pre-review archive's non-cyclic required set.
+_IMG_CANARY_V2_ONLY_ARCHIVE_ROLES = frozenset(
+    {
+        "IMG_CANARY_QC_CROP_FULL_FRAME",
+        "IMG_CANARY_QC_CROP_OVERLAY_SAFE",
+        "IMG_CANARY_QC_CROP_SUBJECT_FOCAL",
+        "IMG_CANARY_VQC1_REPORT_JSON",
+        "IMG_CANARY_RENDER_EXECUTION_RECEIPT",
+        "IMG_CANARY_V2_PREVIOUS_RUN_IMMUTABILITY",
+        "IMG_CANARY_V2_SERIALIZED_REQUEST_EVIDENCE",
+        "IMG_CANARY_V2_OPERATOR_APPROVAL_BINDING",
+        "IMG_CANARY_V2_DRIVE_READINESS_EVIDENCE",
+        "IMG_CANARY_V2_RUNTIME_PREFLIGHT",
+        "IMG_CANARY_V2_RUNTIME_EXECUTION_GATES",
+    }
+)
+_IMG_CANARY_V3_ONLY_ARCHIVE_ROLES = frozenset(
+    {
+        "IMG_CANARY_V3_PREVIOUS_RUNS_IMMUTABILITY",
+        "IMG_CANARY_V3_SERIALIZED_REQUEST_EVIDENCE",
+        "IMG_CANARY_V3_OPERATOR_APPROVAL_BINDING",
+        "IMG_CANARY_V3_DRIVE_READINESS_EVIDENCE",
+        "IMG_CANARY_V3_RUNTIME_PREFLIGHT",
+        "IMG_CANARY_V3_RUNTIME_EXECUTION_GATES",
+    }
+)
+IMG_CANARY_V1_REQUIRED_ARCHIVE_ROLES = frozenset(
+    set(IMG_CANARY_ROLE_ARCHIVE_PATHS)
+    - {"IMG_CANARY_HUMAN_REVIEW_PACKET"}
+    - set(_IMG_CANARY_V2_ONLY_ARCHIVE_ROLES)
+    - set(_IMG_CANARY_V3_ONLY_ARCHIVE_ROLES)
+)
+IMG_CANARY_V2_REQUIRED_ARCHIVE_ROLES = frozenset(
+    set(IMG_CANARY_V1_REQUIRED_ARCHIVE_ROLES)
+    | set(_IMG_CANARY_V2_ONLY_ARCHIVE_ROLES)
+)
+_IMG_CANARY_V3_VERSIONED_ARCHIVE_ROLES = frozenset(
+    {
+        "IMG_CANARY_QC_CROP_FULL_FRAME",
+        "IMG_CANARY_QC_CROP_OVERLAY_SAFE",
+        "IMG_CANARY_QC_CROP_SUBJECT_FOCAL",
+        "IMG_CANARY_VQC1_REPORT_JSON",
+        "IMG_CANARY_RENDER_EXECUTION_RECEIPT",
+        *_IMG_CANARY_V3_ONLY_ARCHIVE_ROLES,
+    }
+)
+IMG_CANARY_V3_REQUIRED_ARCHIVE_ROLES = frozenset(
+    set(IMG_CANARY_V1_REQUIRED_ARCHIVE_ROLES)
+    | set(_IMG_CANARY_V3_VERSIONED_ARCHIVE_ROLES)
+)
+# Backward-compatible alias for the already-frozen v1 canary package.
+IMG_CANARY_REQUIRED_ARCHIVE_ROLES = IMG_CANARY_V1_REQUIRED_ARCHIVE_ROLES
 EXCLUDED_MARKERS = {"rejected", "normalized", "scratch", "cache", "failed-generation", ".part"}
 
 
@@ -127,7 +238,12 @@ class ProductionArchiveBuilder:
         excluded: list[str] = []
         for source in sources:
             lowered = {part.lower() for part in source.source_path.parts}
-            if lowered & EXCLUDED_MARKERS or source.source_path.name.endswith(".part"):
+            marker_excluded = bool(lowered & EXCLUDED_MARKERS)
+            # IMG canary intentionally archives both the immutable provider
+            # original and its checksum-bound normalized review derivative.
+            if source.logical_role in IMG_CANARY_ROLE_ARCHIVE_PATHS:
+                marker_excluded = False
+            if marker_excluded or source.source_path.name.endswith(".part"):
                 excluded.append(str(source.source_path))
                 continue
             if not source.source_path.is_file() or source.source_path.is_symlink():
@@ -148,12 +264,27 @@ class ProductionArchiveBuilder:
             }
             entries.append(ProductionArchiveFileEntry(**entry_payload, manifest_hash=stable_hash(entry_payload)))
         present_roles = {entry.logical_role for entry in entries}
+        role_list = [entry.logical_role for entry in entries]
+        archive_paths = [entry.expected_archive_path for entry in entries]
+        if len(role_list) != len(present_roles):
+            raise ValueError("ARCHIVE_DUPLICATE_LOGICAL_ROLE")
+        if len(archive_paths) != len(set(archive_paths)):
+            raise ValueError("ARCHIVE_DUPLICATE_EXPECTED_PATH")
         unknown_required = sorted(set(required_roles) - set(ALL_ROLE_ARCHIVE_PATHS))
         if unknown_required:
             raise ValueError(f"ARCHIVE_REQUIRED_ROLE_UNKNOWN:{','.join(unknown_required)}")
         missing = sorted(set(required_roles) - present_roles)
         if missing:
             raise ValueError(f"ARCHIVE_REQUIRED_ROLES_MISSING:{','.join(missing)}")
+        if required_roles in {
+            IMG_CANARY_V1_REQUIRED_ARCHIVE_ROLES,
+            IMG_CANARY_V2_REQUIRED_ARCHIVE_ROLES,
+            IMG_CANARY_V3_REQUIRED_ARCHIVE_ROLES,
+        } and present_roles != set(required_roles):
+            extras = sorted(present_roles - set(required_roles))
+            raise ValueError(
+                f"IMG_CANARY_ARCHIVE_UNEXPECTED_ROLES:{','.join(extras)}"
+            )
         payload = {
             "manifest_id": manifest_id,
             "project_id": project_id,
@@ -206,6 +337,39 @@ class CQR1ArchivePathBuilder:
             raise ValueError("CQR1_ARCHIVE_DATE_INVALID")
         if not re.fullmatch(r"[A-Za-z0-9_-]+", parts[3]) or not parts[3].startswith("pa1r-cqr1-"):
             raise ValueError("CQR1_ARCHIVE_RUN_ID_INVALID")
+
+
+class IMGCanaryArchivePathBuilder:
+    @staticmethod
+    def build(*, run_id: str, archive_date: str) -> str:
+        path = f"smoke_tests/{archive_date}/img_canary/{run_id}"
+        IMGCanaryArchivePathBuilder.validate(path)
+        return path
+
+    @staticmethod
+    def validate(path: str) -> None:
+        if path.startswith("/") or ".." in Path(path).parts:
+            raise ValueError("IMG_CANARY_ARCHIVE_RELATIVE_PATH_REQUIRED")
+        parts = Path(path).parts
+        if len(parts) != 4 or parts[0] != "smoke_tests" or parts[2] != "img_canary":
+            raise ValueError("IMG_CANARY_ARCHIVE_PATH_INVALID")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1]):
+            raise ValueError("IMG_CANARY_ARCHIVE_DATE_INVALID")
+        try:
+            datetime.strptime(parts[1], "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("IMG_CANARY_ARCHIVE_DATE_INVALID") from exc
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", parts[3]) or not parts[3].startswith("img-canary-"):
+            raise ValueError("IMG_CANARY_ARCHIVE_RUN_ID_INVALID")
+        match = re.fullmatch(
+            r"img-canary-(?:v[23]-)?(\d{8})T\d{6}Z-[0-9a-f]{8}",
+            parts[3],
+        )
+        if match is None:
+            raise ValueError("IMG_CANARY_ARCHIVE_RUN_ID_INVALID")
+        run_date = datetime.strptime(match.group(1), "%Y%m%d").strftime("%Y-%m-%d")
+        if parts[1] != run_date:
+            raise ValueError("IMG_CANARY_ARCHIVE_RUN_DATE_MISMATCH")
 
 
 class DriveArchiveFixtureVerifier:
