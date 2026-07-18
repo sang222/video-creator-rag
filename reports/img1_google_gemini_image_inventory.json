@@ -1,0 +1,442 @@
+{
+  "inventory_version": "img1-google-gemini-image/1.0.0",
+  "generated_on": "2026-07-18",
+  "task": "IMG1",
+  "scope": "Google Gemini Image provider foundation; execution disabled",
+  "provider_decision": {
+    "provider_key": "google_gemini_image",
+    "vendor": "google",
+    "capability": "AI_IMAGE_GENERATION",
+    "transport": "GEMINI_API_NATIVE",
+    "default_model": "gemini-3.1-flash-image",
+    "distinct_from_provider_key": "google_veo",
+    "final_composition_authority": "native_ffmpeg",
+    "fixture_only": true,
+    "provider_execution": "DISABLED"
+  },
+  "mappings": [
+    {
+      "target_concept": "VisualSourceDecision",
+      "actual_repo_component": "Provider-neutral niche-aware source decision and image eligibility gate",
+      "path": "app/contracts/visual_routing.py",
+      "symbol": "VisualSourceDecision / VisualSourceRoute / AIImageEligibilityAssessment",
+      "decision": "REUSE",
+      "persistence": "ArtifactVersion JSON through VSR1 evidence",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AIImageEligibilityGate",
+      "actual_repo_component": "VSR1 deterministic pre-provider image eligibility",
+      "path": "app/services/visual_source_routing.py",
+      "symbol": "AIImageEligibilityGate / EvidenceTruthSourceGate / DiagramSuitabilityGate / VisualRealizationCompletenessGate",
+      "decision": "REUSE",
+      "persistence": "Gate evidence in route-aware ArtifactVersion JSON",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AIGenerationManifest",
+      "actual_repo_component": "Generic video/still AI generation manifest",
+      "path": "app/contracts/asset_acquisition.py",
+      "symbol": "AIGenerationManifest",
+      "decision": "EXTEND",
+      "persistence": "ArtifactVersion/workspace JSON; STILL_IMAGE fields remain provider-neutral",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AIImageGenerationManifest",
+      "actual_repo_component": "AIGenerationManifest with media_kind=STILL_IMAGE",
+      "path": "app/contracts/asset_acquisition.py",
+      "symbol": "AIGenerationManifest.validate_still_image_manifest",
+      "decision": "EXTEND",
+      "persistence": "ArtifactVersion JSON; no second generic generation manifest",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AIHeroAssetRequest",
+      "actual_repo_component": "Existing Veo-specific video request kept separate from still images",
+      "path": "app/contracts/asset_acquisition.py",
+      "symbol": "AIHeroAssetRequest",
+      "decision": "REUSE",
+      "persistence": "Existing video artifact JSON remains unchanged/readable",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ProviderAttempt",
+      "actual_repo_component": "Generic provider attempt record",
+      "path": "app/db/models/ops.py",
+      "symbol": "ProviderAttempt",
+      "decision": "REUSE",
+      "persistence": "provider_attempts table keyed by generic provider_key/operation_key",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "PaidProviderCallLedger",
+      "actual_repo_component": "Append-only generic paid provider call ledger",
+      "path": "app/db/models/r3d8.py",
+      "symbol": "PaidProviderCallLedger",
+      "decision": "REUSE",
+      "persistence": "paid_provider_call_ledger table with generic provider_key/provider_stage",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "CostEstimateSnapshot",
+      "actual_repo_component": "Generic provider estimate snapshot with provider_estimates_json",
+      "path": "app/db/models/r3d8.py",
+      "symbol": "CostEstimateSnapshot",
+      "decision": "REUSE",
+      "persistence": "cost_estimate_snapshots table",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ProviderBoundaryGate",
+      "actual_repo_component": "Generic paid-provider preflight and audit boundary",
+      "path": "app/services/r3d8.py",
+      "symbol": "PaidProviderBoundaryService.preflight / ProviderBoundaryAuditService",
+      "decision": "REUSE",
+      "persistence": "Generic R3D8 ledger rows only for a future authorized execution",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "PaidAttemptLimitGate",
+      "actual_repo_component": "Generic attempt gate with Gemini Image hard cap of one",
+      "path": "app/services/r3d8.py",
+      "symbol": "PaidAttemptLimitGate / MAX_PAID_ATTEMPTS_BY_PROVIDER",
+      "decision": "EXTEND",
+      "persistence": "paid_attempt_limit_records table",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ChannelMonthlyBudgetGate",
+      "actual_repo_component": "Existing generic media-provider budget gate; IMG1 binds typed evidence but does not seed the legacy M10.2 matrix",
+      "path": "app/services/m10_2.py",
+      "symbol": "MediaProviderBudgetService.check",
+      "decision": "REUSE",
+      "persistence": "Existing media provider budget policy/snapshot tables only for a future separately approved execution; no IMG1 row",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ProviderIdempotencyKey",
+      "actual_repo_component": "Generic provider-stage fingerprint uniqueness record",
+      "path": "app/db/models/r3d8.py",
+      "symbol": "ProviderIdempotencyKey",
+      "decision": "REUSE",
+      "persistence": "provider_idempotency_keys table",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ProviderReadinessSnapshot",
+      "actual_repo_component": "Existing aggregate readiness plus image-specific configuration-only read model",
+      "path": "app/services/m2.py",
+      "symbol": "ProviderEnvValidator._google_gemini_image / ProviderReadinessSnapshotM2Read",
+      "decision": "EXTEND",
+      "persistence": "Read model/snapshot metadata only; secret value is never persisted",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ProviderCapabilityMatrix",
+      "actual_repo_component": "M2 capability read model and versioned media capability catalog",
+      "path": "app/services/m2.py",
+      "symbol": "ProviderCapabilityMatrix.build",
+      "decision": "EXTEND",
+      "persistence": "Versioned YAML plus read-only capability response",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Gemini API key settings",
+      "actual_repo_component": "Shared typed Google credential and image-specific non-secret settings",
+      "path": "app/core/config.py",
+      "symbol": "Settings.gemini_api_key / Settings.gemini_image_* / Settings.img1_fixture_only",
+      "decision": "EXTEND",
+      "persistence": "Environment/runtime settings only; GEMINI_API_KEY value is never persisted",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Google Veo adapter separation",
+      "actual_repo_component": "Independent GoogleGeminiImageAdapter; GoogleVeoAdapter remains unchanged",
+      "path": "app/providers/google_gemini_image.py",
+      "symbol": "GoogleGeminiImageAdapter",
+      "decision": "ADD",
+      "persistence": "Provider-neutral manifests and generic ledgers; no shared Veo operation state",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Canonical image provider route",
+      "actual_repo_component": "Canonical provider key/alias and provider registry entry",
+      "path": "app/services/provider_stack.py",
+      "symbol": "CANONICAL_PROVIDER_KEYS / normalize_provider_key",
+      "decision": "EXTEND",
+      "persistence": "Repository configuration/read model",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Provider role, capability and budget metadata",
+      "actual_repo_component": "Versioned IMAGE route catalogs",
+      "path": "config/provider_registry_catalog.yaml",
+      "symbol": "google_gemini_image",
+      "decision": "EXTEND",
+      "persistence": "Versioned repository YAML",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Image model and price catalog",
+      "actual_repo_component": "Versioned 1K/2K/4K by 16:9/9:16/1:1 matrix",
+      "path": "config/google_gemini_image_model_price_catalog.yaml",
+      "symbol": "google_gemini_image_model_price_catalog@2026-07-17",
+      "decision": "ADD",
+      "persistence": "Versioned repository YAML; actual_billed_amount remains null",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Typed image price catalog validation",
+      "actual_repo_component": "Config registry schema and complete-matrix validation",
+      "path": "app/services/config_registry.py",
+      "symbol": "GoogleGeminiImageModelPriceCatalogItem / ConfigRegistryService",
+      "decision": "EXTEND",
+      "persistence": "Configuration validation only",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AIImageRequest",
+      "actual_repo_component": "Provider-neutral VSR1-bound still-image request",
+      "path": "app/contracts/ai_image.py",
+      "symbol": "AIImageRequest / AIImageReferenceAsset",
+      "decision": "ADD",
+      "persistence": "ArtifactVersion JSON with deterministic request_hash",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AIImageRequest compilation",
+      "actual_repo_component": "Builder from requirements, VSR1 decision, direction contract and overlay plan",
+      "path": "app/services/ai_image.py",
+      "symbol": "AIImageRequestBuilder",
+      "decision": "ADD",
+      "persistence": "Typed artifact payload; no database-specific storage",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "GeminiImageGenerationRequest",
+      "actual_repo_component": "Provider-specific still-image request contract",
+      "path": "app/contracts/google_gemini_image.py",
+      "symbol": "GeminiImageGenerationRequest",
+      "decision": "ADD",
+      "persistence": "Artifact/workspace JSON with content_hash; no secret/raw bytes",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ImagePromptCompiler",
+      "actual_repo_component": "Stable prompt anatomy and mandatory negative constraints",
+      "path": "app/services/ai_image.py",
+      "symbol": "ImagePromptCompiler / MANDATORY_IMAGE_NEGATIVE_CONSTRAINTS",
+      "decision": "ADD",
+      "persistence": "Compiled prompt contract/hash as artifact evidence",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Reference image policy",
+      "actual_repo_component": "Authorized reference contract; style uploads rejected",
+      "path": "app/contracts/ai_image.py",
+      "symbol": "AIImageReferenceAsset.enforce_reference_rights",
+      "decision": "ADD",
+      "persistence": "Reference refs, hashes, rights state and authorization refs in artifact JSON",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "GoogleGeminiImageAdapter",
+      "actual_repo_component": "Guarded fixture-only adapter boundary",
+      "path": "app/providers/google_gemini_image.py",
+      "symbol": "GoogleGeminiImageAdapter / GeminiImageFixtureClient",
+      "decision": "ADD",
+      "persistence": "Operation receipts and redacted output refs; in-memory transient fixture bytes",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Approval and execution gate bundle",
+      "actual_repo_component": "Typed aggregate of provider, cost, budget, attempt, idempotency and kill-switch gates",
+      "path": "app/contracts/google_gemini_image.py",
+      "symbol": "GeminiImageExecutionGates",
+      "decision": "ADD",
+      "persistence": "Gate refs bind existing generic ledgers; no new table",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Image idempotency fingerprint",
+      "actual_repo_component": "Provider/model/prompt/reference/shape/project/scene/decision/overlay/approval fingerprint",
+      "path": "app/providers/google_gemini_image.py",
+      "symbol": "GoogleGeminiImageAdapter.idempotency_fingerprint",
+      "decision": "ADD",
+      "persistence": "Existing ProviderIdempotencyKey table for future execution; in-memory fixture duplicate suppression",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Image cost estimation",
+      "actual_repo_component": "Catalog reader and typed planning snapshot",
+      "path": "app/services/google_gemini_image_catalog.py",
+      "symbol": "GoogleGeminiImageModelPriceCatalog.estimate / GeminiImageCostEstimateSnapshot",
+      "decision": "ADD",
+      "persistence": "Artifact evidence plus existing CostEstimateSnapshot.provider_estimates_json when promoted to execution",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Provider operation response",
+      "actual_repo_component": "Non-publishable operation receipt with nullable provider IDs and actual cost",
+      "path": "app/contracts/google_gemini_image.py",
+      "symbol": "GeminiImageOperationReceipt",
+      "decision": "ADD",
+      "persistence": "Artifact/workspace JSON; actual_cost remains null in IMG1",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Transient image output handling",
+      "actual_repo_component": "Non-serializable transient bytes/URL plus volatile durable reference",
+      "path": "app/providers/google_gemini_image.py",
+      "symbol": "GeminiImageTransientOutput / GeminiImageOutputMaterializationPlan",
+      "decision": "ADD",
+      "persistence": "Bytes and raw URL are execution-only; durable evidence stores volatile ref and hashes",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Asset workspace and safe download/materialization handling",
+      "actual_repo_component": "Part-file, SHA-256, raster probe and atomic rename implementation",
+      "path": "app/providers/google_gemini_image.py",
+      "symbol": "GoogleGeminiImageAdapter.materialize_output / probe_image",
+      "decision": "EXTEND",
+      "persistence": "Local fixture workspace file plus checksum/dimension/format evidence",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Image normalization",
+      "actual_repo_component": "No-upscale crop and color-profile planning service",
+      "path": "app/services/ai_image.py",
+      "symbol": "ImageNormalizationPlanner",
+      "decision": "ADD",
+      "persistence": "ImageNormalizationManifest artifact JSON",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ImageNormalizationManifest",
+      "actual_repo_component": "Typed source/target/crop/effective-resolution/format/checksum contract",
+      "path": "app/contracts/ai_image.py",
+      "symbol": "ImageNormalizationManifest",
+      "decision": "ADD",
+      "persistence": "ArtifactVersion JSON",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "NativeRenderPlan overlay fields",
+      "actual_repo_component": "VSR1 native exact-content overlay contract and safe regions",
+      "path": "app/contracts/native_renderer.py",
+      "symbol": "NativeOverlayPlan / NativeRenderScene / TextSafeRegion",
+      "decision": "REUSE",
+      "persistence": "NativeRenderPlan/ArtifactVersion JSON",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Native overlay binding",
+      "actual_repo_component": "Generated image to decision/overlay/hash binding",
+      "path": "app/services/ai_image.py",
+      "symbol": "NativeOverlayImageBindingBuilder / NativeOverlayImageBinding",
+      "decision": "ADD",
+      "persistence": "ArtifactVersion JSON; exact content remains native-owned",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "AssetUsageManifest",
+      "actual_repo_component": "Scene usage refs inside image provenance; no duplicate generic asset-usage ledger",
+      "path": "app/contracts/ai_image.py",
+      "symbol": "AIImageProvenanceManifest.scene_usage_refs",
+      "decision": "EXTEND",
+      "persistence": "ArtifactVersion provenance JSON",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "ProductionArchiveManifest",
+      "actual_repo_component": "Existing generic archive file manifest",
+      "path": "app/contracts/asset_acquisition.py",
+      "symbol": "ProductionArchiveManifest / ProductionArchiveFileEntry",
+      "decision": "REUSE",
+      "persistence": "Archive artifact JSON; no Drive upload in IMG1",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "SyntheticMediaDisclosureReceipt",
+      "actual_repo_component": "Existing synthetic disclosure receipt builder/model",
+      "path": "app/services/ofv0.py",
+      "symbol": "SyntheticMediaDisclosureReceiptBuilder",
+      "decision": "REUSE",
+      "persistence": "Existing synthetic_media_disclosure_receipts table when a future artifact is promoted",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Image provenance",
+      "actual_repo_component": "Provider/model/prompt/reference/output/cost/approval/usage/QC/disclosure contract",
+      "path": "app/contracts/ai_image.py",
+      "symbol": "AIImageProvenanceManifest",
+      "decision": "ADD",
+      "persistence": "ArtifactVersion JSON; generated_evidence_authority=false",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Post-generation image QC",
+      "actual_repo_component": "Nine deterministic fixture gate results and aggregate verdict",
+      "path": "app/services/ai_image.py",
+      "symbol": "PostGenerationImageQC / PostGenerationImageQCManifest",
+      "decision": "ADD",
+      "persistence": "ArtifactVersion JSON with crop refs, boxes, reasons and repairability",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Read-only Gemini Image readiness API",
+      "actual_repo_component": "Configuration-only readiness endpoint",
+      "path": "app/api/routes/google_gemini_image.py",
+      "symbol": "GoogleGeminiImageReadinessService / GET /providers/google-gemini-image/readiness",
+      "decision": "ADD",
+      "persistence": "Read-only response; no generation probe or secret persistence",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Offline fixture rehearsal",
+      "actual_repo_component": "Fixture client protocol, deterministic PNG and fixture materialization/QC primitives",
+      "path": "app/providers/google_gemini_image.py",
+      "symbol": "GeminiImageFixtureClient / build_fixture_png / GoogleGeminiImageAdapter.submit_generation",
+      "decision": "ADD",
+      "persistence": "Temporary local workspace plus non-publishable artifact evidence; zero provider attempts",
+      "migration_impact": "NONE"
+    },
+    {
+      "target_concept": "Backward-compatible image-aware persistence",
+      "actual_repo_component": "Generic ArtifactVersion JSON and still-image aliases on AIGenerationManifest",
+      "path": "app/db/models/workflow.py",
+      "symbol": "Artifact / ArtifactVersion",
+      "decision": "REUSE",
+      "persistence": "Existing JSONB artifact versions and generic R3D8 provider tables",
+      "migration_impact": "NONE"
+    }
+  ],
+  "database_impact": {
+    "decision": "NOT_REQUIRED",
+    "verified_current_head": "0037_ch1_flex",
+    "storage_reused": [
+      "ArtifactVersion.content JSONB",
+      "CostEstimateSnapshot.provider_estimates_json",
+      "ProviderIdempotencyKey",
+      "PaidAttemptLimitRecord",
+      "PaidProviderCallLedger",
+      "ProviderAttempt",
+      "versioned repository YAML catalogs"
+    ],
+    "reason": "Provider and stage keys are generic strings, while IMG1 contracts and manifests fit versioned JSON artifacts."
+  },
+  "execution_boundaries": {
+    "paid_canary_run": false,
+    "gemini_image_network_call": false,
+    "provider_attempts_consumed": 0,
+    "actual_cost": null,
+    "database_rows_mutated": 0,
+    "production_render": false,
+    "drive_upload": false,
+    "youtube_action": false,
+    "ch1_flex_v2_activated": false,
+    "pkg1_revised": false,
+    "mr1_execution": "ON_HOLD"
+  }
+}

@@ -29,6 +29,7 @@ ProviderReadinessState = Literal[
 ProviderCapability = Literal[
     "VOICE_GENERATION",
     "AI_HERO_VIDEO",
+    "AI_IMAGE_GENERATION",
     "FINAL_ASSEMBLY_RENDER",
     "TEMPLATE_RENDER",
     "CARD_RENDER",

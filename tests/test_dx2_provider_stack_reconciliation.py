@@ -12,7 +12,12 @@ from app.services.provider_stack import (
 
 
 def test_canonical_external_provider_stack_is_exact():
-    assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "google_veo", "pexels_api")
+    assert CANONICAL_PROVIDER_KEYS == (
+        "elevenlabs",
+        "google_veo",
+        "google_gemini_image",
+        "pexels_api",
+    )
 
 
 def test_native_renderer_is_local_not_external_provider():

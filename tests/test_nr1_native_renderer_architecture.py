@@ -28,7 +28,12 @@ def plan(**changes):
 
 
 def test_stack_reconciliation_is_local_not_paid():
-    assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "google_veo", "pexels_api")
+    assert CANONICAL_PROVIDER_KEYS == (
+        "elevenlabs",
+        "google_veo",
+        "google_gemini_image",
+        "pexels_api",
+    )
     assert LOCAL_CAPABILITY_KEYS == ("native_ffmpeg_renderer",)
 
 

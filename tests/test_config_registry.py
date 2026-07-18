@@ -49,6 +49,7 @@ def test_config_yaml_validates(db_session) -> None:
         "gate_definition_catalog",
             "google_drive_connection_state_catalog",
             "google_drive_oauth_session_status_catalog",
+            "google_gemini_image_model_price_catalog",
             "google_veo_model_price_catalog",
             "dashboard_language_catalog",
             "operator_user_role_catalog",
@@ -191,7 +192,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 161
+    assert catalog_count == 162
     assert role_count == 13
     assert metric_definition_count == 16
 

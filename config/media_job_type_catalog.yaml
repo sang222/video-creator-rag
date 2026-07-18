@@ -1,5 +1,5 @@
 catalog_key: media_job_type_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -17,6 +17,8 @@ items:
     description: Premium AI hero visual generation.
   - key: AI_METAPHOR_GENERATION
     description: Premium AI metaphor visual generation.
+  - key: AI_IMAGE_GENERATION
+    description: Provider-generated editorial still foundation for a VSR1-approved scene; execution remains separately guarded.
   - key: TITLE_CARD_RENDER
     description: Title card template render.
   - key: DIAGRAM_CARD_RENDER

@@ -298,7 +298,12 @@ def test_no_external_ai_video_fallback_and_provider_audio_is_removed(tmp_path):
         trim_end_seconds=6,
         provider_audio_present=True,
     )
-    assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "google_veo", "pexels_api")
+    assert CANONICAL_PROVIDER_KEYS == (
+        "elevenlabs",
+        "google_veo",
+        "google_gemini_image",
+        "pexels_api",
+    )
     assert "-an" in manifest.sanitized_ffmpeg_argv_plan
     assert manifest.normalization_profile["provider_audio_discarded"] is True
     assert manifest.normalization_profile["narration_authority"] == "ELEVENLABS"

@@ -1,5 +1,5 @@
 catalog_key: media_provider_type_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -13,6 +13,8 @@ items:
     description: Caption timeline planner.
   - key: AI_VIDEO_HERO_PROVIDER
     description: Premium AI hero and metaphor visual provider.
+  - key: AI_IMAGE_GENERATION_PROVIDER
+    description: Guarded still-image generation provider; native rendering retains final composition and exact-content authority.
   - key: LOCAL_RENDERER_CAPABILITY
     description: NativeFFmpeg local assembly, motion, caption and compositing authority.
   - key: MEDIA_STORAGE

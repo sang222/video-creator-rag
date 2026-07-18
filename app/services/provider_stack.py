@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 
-CANONICAL_PROVIDER_KEYS = ("elevenlabs", "google_veo", "pexels_api")
+CANONICAL_PROVIDER_KEYS = (
+    "elevenlabs",
+    "google_veo",
+    "google_gemini_image",
+    "pexels_api",
+)
 OPTIONAL_STORAGE_PROVIDER_KEYS = ("youtube_readonly", "google_drive_archive")
 LOCAL_CAPABILITY_KEYS = ("native_ffmpeg_renderer",)
 
@@ -17,6 +22,8 @@ _CANONICAL_ALIASES = {
     "elevenlabs": "elevenlabs",
     "eleven_labs": "elevenlabs",
     "google_veo": "google_veo",
+    "google_gemini_image": "google_gemini_image",
+    "gemini_image": "google_gemini_image",
     "pexels": "pexels_api",
     "pexels_api": "pexels_api",
     "youtube_readonly": "youtube_readonly",

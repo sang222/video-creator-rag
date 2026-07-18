@@ -1,6 +1,8 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -14,6 +16,9 @@ from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
 from app.contracts.visual_routing import VisualSourceRoutingPolicyCatalogItem
 from app.core.config import (
+    GEMINI_IMAGE_APPROVED_MODEL_IDS,
+    GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS,
+    GEMINI_IMAGE_SUPPORTED_SIZES,
     VEO_APPROVED_MODEL_IDS,
     VEO_ALLOWED_DURATION_SECONDS,
     VEO_DEFAULT_DURATION_SECONDS,
@@ -230,6 +235,25 @@ class GoogleVeoModelPriceCatalogItem(BaseModel):
     duration_seconds: list[int]
     aspect_ratios: list[str]
     resolutions: dict[str, dict[str, str]]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GoogleGeminiImageModelPriceCatalogItem(BaseModel):
+    key: str = Field(min_length=1)
+    provider_key: str
+    model_id: str
+    status: str
+    capability: str
+    size: str
+    aspect_ratio: str
+    estimated_unit_cost_usd: Decimal = Field(gt=0)
+    currency: str
+    effective_date: date
+    source_note: str = Field(min_length=1)
+    policy_state: str
+    is_default_route: bool = False
+    actual_billed_amount: Decimal | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -496,6 +520,7 @@ class ConfigRegistryService:
             "media_provider_routing_policy_catalog": MediaProviderRoutingPolicyCatalogItem,
             "pexels_policy_catalog": PexelsPolicyCatalogItem,
             "google_veo_model_price_catalog": GoogleVeoModelPriceCatalogItem,
+            "google_gemini_image_model_price_catalog": GoogleGeminiImageModelPriceCatalogItem,
             "creative_quality_policy_catalog": CreativeQualityPolicyCatalogItem,
             "channel_scoped_policy_catalog": ChannelScopedPolicy,
             "visual_source_routing_policy_catalog": VisualSourceRoutingPolicyCatalogItem,
@@ -569,8 +594,85 @@ class ConfigRegistryService:
             if key in seen:
                 raise ValidationFailureError(f"duplicate catalog item: {key}")
             seen.add(key)
+        if document.catalog_key == "google_gemini_image_model_price_catalog":
+            expected_combinations = {
+                (size, aspect_ratio)
+                for size in GEMINI_IMAGE_SUPPORTED_SIZES
+                for aspect_ratio in GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS
+            }
+            actual_combinations = {
+                (str(item.get("size")), str(item.get("aspect_ratio")))
+                for item in document.items
+            }
+            if actual_combinations != expected_combinations:
+                raise ValidationFailureError(
+                    "Gemini Image price catalog must contain exactly one row per supported size/aspect"
+                )
+            default_rows = [item for item in document.items if item.get("is_default_route") is True]
+            if len(default_rows) != 1 or (
+                default_rows[0].get("size"),
+                default_rows[0].get("aspect_ratio"),
+            ) != ("2K", "16:9"):
+                raise ValidationFailureError(
+                    "Gemini Image price catalog default route must be exactly 2K 16:9"
+                )
 
     def _validate_media_provider_catalog_item(self, catalog_key: str, parsed: BaseModel) -> None:
+        if catalog_key == "provider_registry_catalog":
+            if getattr(parsed, "provider_key", None) != "google_gemini_image":
+                return
+            capability = getattr(parsed, "capability_blob", {})
+            policy = getattr(parsed, "policy_fit_blob", {})
+            cost = getattr(parsed, "cost_model_blob", {})
+            metadata = getattr(parsed, "metadata", {})
+            if getattr(parsed, "provider_type", None) != "IMAGE":
+                raise ValidationFailureError("google_gemini_image registry type must be IMAGE")
+            if capability.get("vendor") != "google" or capability.get("capability") != "AI_IMAGE_GENERATION":
+                raise ValidationFailureError("google_gemini_image registry vendor/capability is invalid")
+            if capability.get("transport") != "GEMINI_API_NATIVE":
+                raise ValidationFailureError("google_gemini_image transport must be GEMINI_API_NATIVE")
+            if capability.get("supported_sizes") != list(GEMINI_IMAGE_SUPPORTED_SIZES):
+                raise ValidationFailureError("google_gemini_image registry sizes are invalid")
+            if capability.get("supported_aspect_ratios") != list(GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS):
+                raise ValidationFailureError("google_gemini_image registry aspect ratios are invalid")
+            if policy.get("production_enabled_when_configured") is not False:
+                raise ValidationFailureError("google_gemini_image production execution must default false")
+            if policy.get("distinct_from_google_veo") is not True:
+                raise ValidationFailureError("google_gemini_image must remain distinct from google_veo")
+            if cost.get("catalog_ref") != "config://google_gemini_image_model_price_catalog/2026-07-17":
+                raise ValidationFailureError("google_gemini_image registry price catalog ref is invalid")
+            if metadata.get("shared_credential_env_key") != "GEMINI_API_KEY":
+                raise ValidationFailureError("google_gemini_image must reuse GEMINI_API_KEY")
+            return
+        if catalog_key == "google_gemini_image_model_price_catalog":
+            policy_by_size = {
+                "1K": "BLOCK",
+                "2K": "ALLOWED",
+                "4K": "REVIEW_REQUIRED",
+            }
+            size = getattr(parsed, "size", None)
+            aspect_ratio = getattr(parsed, "aspect_ratio", None)
+            if getattr(parsed, "provider_key", None) != "google_gemini_image":
+                raise ValidationFailureError("Gemini Image price row provider key is invalid")
+            if getattr(parsed, "model_id", None) not in GEMINI_IMAGE_APPROVED_MODEL_IDS:
+                raise ValidationFailureError("Gemini Image price row model is not approved")
+            if getattr(parsed, "status", None) != "GA_OR_STABLE":
+                raise ValidationFailureError("Gemini Image model status must be GA_OR_STABLE")
+            if getattr(parsed, "capability", None) != "TEXT_AND_IMAGE_TO_IMAGE_STILL":
+                raise ValidationFailureError("Gemini Image price row capability is invalid")
+            if size not in GEMINI_IMAGE_SUPPORTED_SIZES:
+                raise ValidationFailureError("Gemini Image price row size is invalid")
+            if aspect_ratio not in GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS:
+                raise ValidationFailureError("Gemini Image price row aspect ratio is invalid")
+            if getattr(parsed, "currency", None) != "USD":
+                raise ValidationFailureError("Gemini Image price row currency must be USD")
+            if getattr(parsed, "effective_date", None) != date(2026, 7, 17):
+                raise ValidationFailureError("Gemini Image price row effective date is invalid")
+            if getattr(parsed, "policy_state", None) != policy_by_size[size]:
+                raise ValidationFailureError("Gemini Image size policy is invalid")
+            if getattr(parsed, "actual_billed_amount", None) is not None:
+                raise ValidationFailureError("Gemini Image actual billed amount must remain null")
+            return
         if catalog_key == "google_veo_model_price_catalog":
             if getattr(parsed, "model_id", None) not in VEO_APPROVED_MODEL_IDS or not getattr(parsed, "approved", False):
                 raise ValidationFailureError("Veo price catalog contains an unapproved model")

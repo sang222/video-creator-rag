@@ -1,5 +1,5 @@
 catalog_key: provider_registry_catalog
-catalog_version: "1.1.0"
+catalog_version: "1.2.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -81,6 +81,43 @@ items:
     retry_policy_blob: {}
     metadata:
       readiness_provider_key: google_veo
+  - provider_key: google_gemini_image
+    provider_name: Google Gemini Image
+    provider_type: IMAGE
+    status: ACTIVE
+    capability_blob:
+      vendor: google
+      capability: AI_IMAGE_GENERATION
+      transport: GEMINI_API_NATIVE
+      text_to_image_still_generation: true
+      image_to_image_editing_requires_explicit_approval: true
+      editorial_visual_foundation_only: true
+      authoritative_text_or_numbers: false
+      final_composition_authority: false
+      supported_sizes: ["1K", "2K", "4K"]
+      supported_aspect_ratios: ["16:9", "9:16", "1:1"]
+      output_count: 1
+    policy_fit_blob:
+      production_enabled_when_configured: false
+      execution_disabled_by_default: true
+      fixture_only_by_default: true
+      explicit_provider_route_approval_required: true
+      provider_fallback_allowed: false
+      distinct_from_google_veo: true
+      native_overlay_authority: native_ffmpeg
+    cost_model_blob:
+      catalog_ref: config://google_gemini_image_model_price_catalog/2026-07-17
+      actual_cost_nullable_until_execution: true
+    quota_model_blob:
+      maximum_outputs_per_request: 1
+      maximum_automated_attempts_per_scene: 1
+    retry_policy_blob:
+      generation_retry_automatic: false
+      materialization_retry_does_not_regenerate: true
+    metadata:
+      readiness_provider_key: google_gemini_image
+      shared_credential_env_key: GEMINI_API_KEY
+      credential_value_never_exposed: true
   - provider_key: elevenlabs
     provider_name: ElevenLabs
     provider_type: TTS

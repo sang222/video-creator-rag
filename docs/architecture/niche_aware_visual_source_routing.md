@@ -77,8 +77,9 @@ fallbacks, and a typed fallback class.
 | Motion generation | `VEO_TEXT_TO_VIDEO`, `VEO_IMAGE_TO_VIDEO` |
 | Fail closed | `UNRESOLVED_BLOCK` |
 
-There is no `AUTO` route. An AI-image route is a non-executable plan until IMG1
-adds and approves an image-provider boundary.
+There is no `AUTO` route. IMG1 registers `google_gemini_image` as the
+approved, distinct IMAGE planning boundary, but the route remains
+non-executable and fixture-only.
 
 ## Deterministic decision order
 
@@ -112,8 +113,9 @@ low-confidence and prohibited outcomes without an API call.
 substitutes where source truth is required. A human-supplied asset is not
 authorized until its rights and authorization evidence pass.
 `DiagramSuitabilityGate` makes diagram clarity authoritative over generic
-imagery. `AIImageEligibilityGate` can plan an image route but records the image
-provider as inactive and execution as disabled.
+imagery. `AIImageEligibilityGate` can plan an image route. Historical VSR1
+evidence retains its inactive-provider reason; IMG1 adds route registration
+without rewriting that evidence, and execution remains disabled.
 
 The route-aware decision records policy ref/version/hash, the feature snapshot,
 gate refs, confidence, reason and block codes, cost class, approval requirement,
@@ -147,10 +149,17 @@ evidence truth is low and future cost policy permits it. Diagram-clearer,
 low-motion and truth-authoritative scenes cannot use Veo. VSR1 does not modify
 or invoke the adapter.
 
-AI-image routes do not imply Gemini settings, capability, approval or network
-execution. IMG1 must add that separate provider route and reuse the existing
-generic cost, approval, idempotency and attempt ledgers plus
-`AIGenerationManifest`.
+AI-image eligibility never implies network permission. IMG1 adds the separate
+`google_gemini_image` route, `gemini-3.1-flash-image` catalog and
+provider-neutral request/manifest boundary while reusing generic cost,
+approval, idempotency and attempt ledgers plus `AIGenerationManifest`.
+`GEMINI_API_KEY` is shared as credential ownership only; Veo and Gemini Image
+retain separate provider keys, capabilities, costs, attempts and approvals.
+
+The generated raster is an editorial foundation. `AIImageRequest` and
+`NativeOverlayImageBinding` preserve the VSR1 decision/hash and require native
+safe-region bindings for exact text or numbers. IMG1 permits only local fixture
+transport; a future paid canary remains a separate authorization.
 
 ## Compatibility and persistence
 

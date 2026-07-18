@@ -443,6 +443,7 @@ class RuntimeLTSFreezeVerifier:
             "provider_real_execution_enabled",
             "elevenlabs_real_generation_enabled",
             "veo_real_generation_enabled",
+            "gemini_image_real_generation_enabled",
             "pexels_real_search_enabled",
             "google_drive_real_archive_enabled",
         ]

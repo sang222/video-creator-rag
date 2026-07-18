@@ -87,4 +87,6 @@ The niche profile supplies defaults only; scene gates remain authoritative.
 Pexels is optional context, not a global default. Evidence, actual UI, product
 and document truth require an authorized source; relationship and label scenes
 prefer native diagrams; exact text and numbers remain native authority.
-AI-image routes are non-executable plans until IMG1 approves a provider route.
+IMG1 registers `google_gemini_image` as the distinct approved planning route,
+but AI-image routes remain non-executable and fixture-only. Generated pixels
+remain a visual foundation; exact text and numbers stay native authority.

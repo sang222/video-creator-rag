@@ -5,6 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.native_renderer import TextSafeRegion
+from app.contracts.ai_image import ai_image_stable_hash
+
 
 AssetRole = Literal["NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO"]
 Orientation = Literal["landscape", "portrait", "square"]
@@ -308,25 +311,174 @@ class AIHeroAssetRequest(BaseModel):
 
 
 class AIGenerationManifest(BaseModel):
+    media_kind: Literal["VIDEO", "STILL_IMAGE"] = "VIDEO"
     provider_key: str
     provider_model_id: str
     request_ref: str
     request_hash: str
+    generic_request_ref: str | None = None
+    generic_request_hash: str | None = None
+    provider_request_id: str | None = None
+    provider_operation_id: str | None = None
     external_operation_id: str | None = None
     provider_status: str = "PLANNED"
     prompt_hash: str
     submitted_at: datetime | None = None
     completed_at: datetime | None = None
+    output_reference: str | None = None
     output_url_reference: str | None = None
+    local_path: str | None = None
     downloaded_path: str | None = None
+    size_bytes: int | None = Field(default=None, gt=0)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     downloaded_sha256: str | None = None
+    image_width: int | None = Field(default=None, gt=0)
+    image_height: int | None = Field(default=None, gt=0)
+    image_format: Literal["PNG", "JPEG", "WEBP"] | None = None
     cost_snapshot_ref: str | None = None
     attempt_record_ref: str | None = None
+    approval_ref: str | None = None
+    idempotency_key: str | None = None
+    visual_source_decision_ref: str | None = None
+    visual_source_decision_hash: str | None = None
+    visual_direction_contract_ref: str | None = None
+    visual_direction_contract_hash: str | None = None
+    native_overlay_required: bool = False
+    native_overlay_plan_ref: str | None = None
+    native_overlay_plan_hash: str | None = None
+    text_safe_regions: list[TextSafeRegion] = Field(default_factory=list)
+    post_generation_qc_refs: list[str] = Field(default_factory=list)
     media_qc_ref: str | None = None
     synthetic_media_disclosure_ref: str | None = None
     production_eligible: bool = False
+    not_publishable: bool = True
     manifest_hash: str
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def bind_still_image_legacy_aliases(cls, value: Any) -> Any:
+        """Expose neutral names without breaking historical video payloads."""
+
+        if not isinstance(value, dict) or value.get("media_kind", "VIDEO") != "STILL_IMAGE":
+            return value
+        payload = dict(value)
+        alias_pairs = (
+            ("generic_request_ref", "request_ref"),
+            ("generic_request_hash", "request_hash"),
+            ("provider_operation_id", "external_operation_id"),
+            ("output_reference", "output_url_reference"),
+            ("local_path", "downloaded_path"),
+            ("sha256", "downloaded_sha256"),
+        )
+        for neutral_name, legacy_name in alias_pairs:
+            neutral_value = payload.get(neutral_name)
+            legacy_value = payload.get(legacy_name)
+            if neutral_value is None and legacy_value is not None:
+                payload[neutral_name] = legacy_value
+            elif legacy_value is None and neutral_value is not None:
+                payload[legacy_name] = neutral_value
+        if not payload.get("post_generation_qc_refs") and payload.get("media_qc_ref"):
+            payload["post_generation_qc_refs"] = [payload["media_qc_ref"]]
+        if payload.get("media_qc_ref") is None and payload.get("post_generation_qc_refs"):
+            payload["media_qc_ref"] = payload["post_generation_qc_refs"][0]
+        return payload
+
+    @model_validator(mode="after")
+    def validate_still_image_manifest(self) -> "AIGenerationManifest":
+        if self.media_kind != "STILL_IMAGE":
+            return self
+
+        required_bindings = (
+            self.generic_request_ref,
+            self.generic_request_hash,
+            self.cost_snapshot_ref,
+            self.attempt_record_ref,
+            self.approval_ref,
+            self.idempotency_key,
+            self.visual_source_decision_ref,
+            self.visual_source_decision_hash,
+            self.visual_direction_contract_ref,
+            self.visual_direction_contract_hash,
+            self.synthetic_media_disclosure_ref,
+        )
+        if any(not value for value in required_bindings):
+            raise ValueError("AI_STILL_IMAGE_MANIFEST_REQUIRED_BINDING_MISSING")
+
+        alias_bindings = (
+            (self.generic_request_ref, self.request_ref),
+            (self.generic_request_hash, self.request_hash),
+            (self.provider_operation_id, self.external_operation_id),
+            (self.output_reference, self.output_url_reference),
+            (self.local_path, self.downloaded_path),
+            (self.sha256, self.downloaded_sha256),
+        )
+        if any(left is not None and right is not None and left != right for left, right in alias_bindings):
+            raise ValueError("AI_STILL_IMAGE_MANIFEST_ALIAS_BINDING_MISMATCH")
+
+        for reference in (self.output_reference, self.output_url_reference):
+            if reference and self._is_raw_or_signed_reference(reference):
+                raise ValueError("AI_STILL_IMAGE_RAW_OR_SIGNED_OUTPUT_URL_FORBIDDEN")
+        for path in (self.local_path, self.downloaded_path):
+            if path and ("://" in path or "?" in path or "#" in path):
+                raise ValueError("AI_STILL_IMAGE_LOCAL_PATH_MUST_NOT_BE_URL")
+
+        local_metadata = (self.local_path, self.size_bytes, self.sha256)
+        if any(value is not None for value in local_metadata) and not all(value is not None for value in local_metadata):
+            raise ValueError("AI_STILL_IMAGE_LOCAL_METADATA_INCOMPLETE")
+        image_metadata = (self.image_width, self.image_height, self.image_format)
+        if any(value is not None for value in image_metadata) and not all(value is not None for value in image_metadata):
+            raise ValueError("AI_STILL_IMAGE_DIMENSION_FORMAT_METADATA_INCOMPLETE")
+        if any(value is not None for value in (*local_metadata, *image_metadata)):
+            if not all(value is not None for value in (*local_metadata, *image_metadata)):
+                raise ValueError("AI_STILL_IMAGE_MATERIALIZATION_METADATA_INCOMPLETE")
+            if not self.output_reference or not self.completed_at or not self.post_generation_qc_refs:
+                raise ValueError("AI_STILL_IMAGE_MATERIALIZATION_EVIDENCE_INCOMPLETE")
+        normalized_status = self.provider_status.strip().upper()
+        submitted_statuses = {"SUBMITTED", "IN_PROGRESS", "PROCESSING"}
+        completed_output_statuses = {
+            "SUCCEEDED",
+            "COMPLETED",
+            "MATERIALIZED",
+            "FIXTURE_SUCCEEDED",
+            "LOCAL_FIXTURE_SUCCEEDED",
+            "LOCAL_FIXTURE_MATERIALIZED",
+        }
+        if normalized_status in submitted_statuses and self.submitted_at is None:
+            raise ValueError("AI_STILL_IMAGE_SUBMITTED_TIMESTAMP_REQUIRED")
+        if normalized_status in completed_output_statuses:
+            completed_evidence = (
+                self.completed_at,
+                self.output_reference,
+                *local_metadata,
+                *image_metadata,
+            )
+            if any(value is None for value in completed_evidence) or not self.post_generation_qc_refs:
+                raise ValueError("AI_STILL_IMAGE_COMPLETED_EVIDENCE_INCOMPLETE")
+
+        if self.native_overlay_required:
+            if not self.native_overlay_plan_ref or not self.native_overlay_plan_hash or not self.text_safe_regions:
+                raise ValueError("AI_STILL_IMAGE_NATIVE_OVERLAY_BINDING_INCOMPLETE")
+        elif self.native_overlay_plan_ref or self.native_overlay_plan_hash or self.text_safe_regions:
+            raise ValueError("AI_STILL_IMAGE_NATIVE_OVERLAY_BINDING_UNEXPECTED")
+
+        if len(self.post_generation_qc_refs) != len(set(self.post_generation_qc_refs)) or any(
+            not ref.strip() for ref in self.post_generation_qc_refs
+        ):
+            raise ValueError("AI_STILL_IMAGE_QC_REFERENCE_INVALID")
+        if self.production_eligible or not self.not_publishable:
+            raise ValueError("AI_STILL_IMAGE_IMG1_NOT_PUBLISHABLE_REQUIRED")
+        expected_hash = ai_image_stable_hash(
+            self.model_dump(mode="json", exclude={"manifest_hash"})
+        )
+        if self.manifest_hash != expected_hash:
+            raise ValueError("AI_STILL_IMAGE_MANIFEST_HASH_MISMATCH")
+        return self
+
+    @staticmethod
+    def _is_raw_or_signed_reference(value: str) -> bool:
+        normalized = value.strip().lower()
+        return normalized.startswith(("http://", "https://", "data:")) or "?" in value or "#" in value
 
 
 class AssetDownloadReceipt(BaseModel):

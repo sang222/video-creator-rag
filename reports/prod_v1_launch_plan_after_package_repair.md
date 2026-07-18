@@ -1,6 +1,6 @@
 # Prod V1 Launch Plan After Package Repair
 
-Updated: 2026-07-17
+Updated: 2026-07-18
 
 Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 
@@ -18,6 +18,7 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | PKG1 first production package | `PASS` | Technical and explicit human review passed; all six review areas approved. |
 | Visual impact review | `PASS` | Repository-grounded mapping complete; VSR1 may proceed without a DB migration. |
 | VSR1 niche-aware visual routing | `PASS` | Provider-neutral taxonomy, gates, deterministic router, routing evidence and offline fixtures complete; provider execution remains disabled. |
+| IMG1 Google Gemini Image foundation | `PASS / EXECUTION DISABLED` | Distinct `google_gemini_image` IMAGE route, versioned `gemini-3.1-flash-image` catalog, native exact-content authority and fixture-only acceptance are complete; no provider call or paid canary ran. |
 | MR1 first real media render | `ON_HOLD / NOT_STARTED` | Historical approval does not cover the new visual-source decision set or Gemini Image route; provider call count and render count remain 0. |
 
 ## Current Package State
@@ -70,7 +71,8 @@ PROCEED_TO_VSR1=true
 Required sequence before MR1:
 
 1. VSR1 provider-neutral routing foundation — `PASS` on 2026-07-17.
-2. IMG1 Gemini Image provider route.
+2. IMG1 Gemini Image provider route — `PASS` on 2026-07-18; fixture-only
+   acceptance complete, execution disabled.
 3. VQC1 generated-image/native-overlay QC.
 4. Offline routing/image/overlay fixtures.
 5. One controlled paid image canary.
@@ -225,6 +227,16 @@ Rules:
 
 `PROCEED_TO_IMG1=true`
 
+`IMG1_FINAL=PASS`
+
+`PROCEED_TO_VQC1=true`
+
 Next checkpoint:
 
-`IMG1 Google Image Provider Foundation`
+`VQC1 generated-image/native-overlay QC hardening`
+
+The registered route is `google_gemini_image`, separate from
+`google_veo`. Its default model is `gemini-3.1-flash-image`; generated
+pixels are only a visual foundation, while exact text/numbers remain native
+overlay authority. No migration, paid canary, CH1-FLEX v2 activation, PKG1
+revision or MR1 execution occurred.

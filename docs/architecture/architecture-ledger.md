@@ -30,6 +30,13 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M11 builds the human-operated Operator Dashboard cockpit, dashboard read models, channel lifecycle decisions, learning review decisions, approved playbook entries, and Next.js frontend only.
 - M11.1 builds Vietnamese-only dashboard language, local/dev password auth shell, localization/subtitle/metadata package support, localization readiness gate, and configured publish timing by channel timezone only.
 - M12 builds production credential readiness, provider status aggregation, guarded real-smoke orchestration, hard-env AI budget display, and Settings / Integrations dashboard only.
+- VSR1 builds provider-neutral, niche-aware visual-source decisions, truth and
+  eligibility gates, exact-content native-overlay contracts and offline routing
+  evidence only.
+- IMG1 registers `google_gemini_image` as a distinct still-image provider,
+  binds `gemini-3.1-flash-image` in a versioned model/cost catalog and adds
+  fixture-only request, adapter, QC, normalization, provenance and readiness
+  boundaries only.
 
 ## Scope Guardrails
 
@@ -101,6 +108,13 @@ M12.1 adds repo-first prompt authoring under `app/prompts/`, DB-backed prompt te
 
 M12.1 does not build real provider calls, provider strategy changes, YouTube upload/publish/reupload APIs, channel config mutation, prompt self-mutation, DB-only canonical prompt blobs, dashboard scraping/browser automation, fake traffic, bot engagement, platform evasion, auto learning promotion, or TikTok/Facebook analytics learning loops.
 
+VSR1 and IMG1 do not mutate the approved CH1-FLEX v1 profile, PKG1 v1
+artifacts or MR1 approval. IMG1 reuses generic provider cost, approval,
+idempotency, attempt and call-ledger persistence; it adds no migration and
+performs no Gemini Image network call, paid canary, production render, Drive
+upload or YouTube action. NativeFFmpeg remains final composition and exact
+text/number authority.
+
 ## Roadmap Mapping
 
 - AI policy/provenance maps to M3 policy/gate foundation, M6 media provenance/QC, M7 publish handoff, M8 measurement, M9 recovery, and M10 governance.
@@ -128,6 +142,14 @@ M12.1 does not build real provider calls, provider strategy changes, YouTube upl
 - M12 complete means VCOS can validate credentials/provider readiness, display hard-env AI budget caps, show the Cloud Final Renderer required gap, and run guarded real smoke tests before production. Next milestones can focus on production dry-run, first real video package, or final renderer selection.
 - M12.1 complete means VCOS can render deterministic, versioned, channel-contract-bound chat prompts for production agents, persist prompt audit snapshots, validate BaseEnvelope JSON outputs, and run prompt eval cases without real provider calls.
 - CH1-FLEX complete means `small-team-ai` has an approved active v1 channel-scoped policy, compiled child snapshot refs/hashes, zero-code draft/diff/approval/activation management, and per-project immutable policy binding. Strategy B is channel data; NativeFFmpeg remains generic; provider execution and manual YouTube publishing boundaries are unchanged.
+- VSR1 complete means each strict scene can produce one auditable,
+  provider-neutral preferred source decision without a provider call or
+  automatic Pexels-to-paid fallback.
+- IMG1 complete means the separate `google_gemini_image` route can rehearse
+  one non-publishable local fixture through typed requests, cost/guard
+  evidence, safe materialization, QC, normalization, native-overlay binding and
+  provenance while real generation remains disabled. It does not imply a paid
+  canary or permission to proceed to MR1.
 
 ## Pilot Notes
 

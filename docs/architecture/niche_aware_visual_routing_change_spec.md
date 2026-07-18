@@ -115,9 +115,13 @@ Historical M6/CH1/PKG1 payloads remain valid legacy inputs. Strict route-aware e
 
 - Existing component: no image route; AI-hero video is not reusable as image eligibility.
 - Change: `ADD_NEW`, provider-neutral and non-executable in VSR1.
-- Outputs: allowed, native-overlay-required, low-confidence or prohibited; execution remains false with `IMAGE_PROVIDER_ROUTE_NOT_YET_ACTIVE` until IMG1.
+- Outputs: allowed, native-overlay-required, low-confidence or prohibited;
+  historical VSR1 evidence retains `IMAGE_PROVIDER_ROUTE_NOT_YET_ACTIVE`.
+  IMG1 registers the route without rewriting that evidence, and execution
+  remains false.
 - Producer: strict scene requirements and global policy.
-- Consumer: router only in VSR1; IMG1 later consumes approved route decisions.
+- Consumer: router plus IMG1 fixture-only request compilation from an approved
+  route decision.
 - Persistence: assessment evidence in decision JSON.
 - Migration/API impact: none.
 - Tests: evidence/UI/product/quote/likeness blocks; custom composition plans an image route without network execution.
@@ -159,10 +163,11 @@ Historical M6/CH1/PKG1 payloads remain valid legacy inputs. Strict route-aware e
 ### 11. Provider-neutral AI image request (IMG1)
 
 - Existing component: `AssetRequest`, `CompiledAssetRequestPlan`, provider-neutral `AIGenerationManifest`; `AIHeroAssetRequest` is video-specific.
-- Change: `ADD_NEW` `AIImageAssetRequest` value object and extend existing plan/manifest. Do not overload `AIHeroAssetRequest`.
+- Change: `ADD_NEW` `AIImageRequest` value object and extend existing
+  `AIGenerationManifest`. Do not overload `AIHeroAssetRequest`.
 - Typed fields: route decision ref/hash, scene/prompt/negative constraints, image size/aspect, authorized reference hashes, safe regions/overlay requirement, cost/approval/idempotency refs and execution disabled state.
-- Producer: future image prompt compiler.
-- Consumer: future Gemini Image adapter.
+- Producer: `AIImageRequestBuilder` and `ImagePromptCompiler`.
+- Consumer: `GoogleGeminiImageAdapter` fixture boundary.
 - Persistence: ArtifactVersion/workspace JSON plus existing AIGenerationManifest.
 - Migration/API impact: none.
 - Tests: provider neutrality, reference authorization, no exact text authority, default non-executable.
@@ -171,11 +176,15 @@ Historical M6/CH1/PKG1 payloads remain valid legacy inputs. Strict route-aware e
 
 - Existing component: `GoogleVeoAdapter` must remain isolated; M2/R3D8 generic provider infrastructure is reusable.
 - Change: `ADD_NEW` `google_gemini_image` provider contract/adapter; do not restore or clone Veo code blindly.
-- Settings: explicit provider/model/size/aspect/real-generation/canary flags, all default off; reuse only the credential secret.
+- Settings: explicit provider/model/size/aspect/real-generation/fixture flags;
+  real generation defaults false and fixture-only defaults true; reuse only
+  `GEMINI_API_KEY`.
 - Registry/capability/readiness: add provider type IMAGE and `AI_IMAGE_GENERATION` route under current M2/provider-registry conventions.
-- Persistence: existing generic provider job/ledger plus AIGenerationManifest.
-- Migration/API impact: none under the current M2/R3D8 route; do not seed legacy M10.2 AI-image role.
-- Tests: route isolation, no Veo flag/approval inheritance, fake transport by default.
+- Persistence: existing generic provider job/ledger plus
+  `AIGenerationManifest(media_kind=STILL_IMAGE)`.
+- Migration/API impact: none under the current M2/R3D8 route; do not seed the legacy M10.2 AI-image role.
+- Tests: route isolation, no Veo flag/approval inheritance, fake transport by
+  default and no network call.
 
 ### 13. Image cost, approval and idempotency (IMG1)
 

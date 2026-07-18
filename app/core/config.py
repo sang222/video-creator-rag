@@ -26,6 +26,16 @@ VEO_DEFAULT_RESOLUTION = "720p"
 VEO_DEFAULT_ASPECT_RATIO = "16:9"
 VEO_DEFAULT_OUTPUT_COUNT = 1
 
+GEMINI_IMAGE_DEFAULT_MODEL_ID = "gemini-3.1-flash-image"
+GEMINI_IMAGE_APPROVED_MODEL_IDS = (GEMINI_IMAGE_DEFAULT_MODEL_ID,)
+GEMINI_IMAGE_SUPPORTED_SIZES = ("1K", "2K", "4K")
+GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS = ("16:9", "9:16", "1:1")
+GEMINI_IMAGE_DEFAULT_SIZE = "2K"
+GEMINI_IMAGE_DEFAULT_ASPECT_RATIO = "16:9"
+GEMINI_IMAGE_MAX_OUTPUTS = 1
+GEMINI_IMAGE_MAX_ATTEMPTS_PER_SCENE = 1
+GEMINI_IMAGE_MINIMUM_EFFECTIVE_RESOLUTION = "1080p"
+
 
 class Settings(BaseSettings):
     app_name: str = "VCOS"
@@ -307,6 +317,42 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="GEMINI_API_KEY",
     )
+    gemini_image_real_generation_enabled: bool = Field(
+        default=False,
+        validation_alias="VCOS_GEMINI_IMAGE_REAL_GENERATION_ENABLED",
+    )
+    img1_fixture_only: bool = Field(
+        default=True,
+        validation_alias="VCOS_IMG1_FIXTURE_ONLY",
+    )
+    gemini_image_provider_route_approved: bool = Field(
+        default=True,
+        validation_alias="VCOS_GEMINI_IMAGE_PROVIDER_ROUTE_APPROVED",
+    )
+    gemini_image_model_id: str = Field(
+        default=GEMINI_IMAGE_DEFAULT_MODEL_ID,
+        validation_alias="GEMINI_IMAGE_MODEL_ID",
+    )
+    gemini_image_default_size: str = Field(
+        default=GEMINI_IMAGE_DEFAULT_SIZE,
+        validation_alias="GEMINI_IMAGE_DEFAULT_SIZE",
+    )
+    gemini_image_default_aspect_ratio: str = Field(
+        default=GEMINI_IMAGE_DEFAULT_ASPECT_RATIO,
+        validation_alias="GEMINI_IMAGE_DEFAULT_ASPECT_RATIO",
+    )
+    gemini_image_max_outputs: int = Field(
+        default=GEMINI_IMAGE_MAX_OUTPUTS,
+        ge=1,
+        le=GEMINI_IMAGE_MAX_OUTPUTS,
+        validation_alias="GEMINI_IMAGE_MAX_OUTPUTS",
+    )
+    gemini_image_max_attempts_per_scene: int = Field(
+        default=GEMINI_IMAGE_MAX_ATTEMPTS_PER_SCENE,
+        ge=1,
+        le=GEMINI_IMAGE_MAX_ATTEMPTS_PER_SCENE,
+        validation_alias="GEMINI_IMAGE_MAX_ATTEMPTS_PER_SCENE",
+    )
     veo_model_id: str = Field(
         default=VEO_DEFAULT_MODEL_ID,
         validation_alias="VEO_MODEL_ID",
@@ -467,6 +513,9 @@ class Settings(BaseSettings):
         "budget_mode",
         "llm_budget_note",
         "ai_video_hero_provider",
+        "gemini_image_model_id",
+        "gemini_image_default_size",
+        "gemini_image_default_aspect_ratio",
         "veo_model_id",
         "veo_default_resolution",
         "veo_default_aspect_ratio",
@@ -504,6 +553,27 @@ class Settings(BaseSettings):
     def veo_model_id_must_be_approved(cls, value: str) -> str:
         if value not in VEO_APPROVED_MODEL_IDS or value in VEO_FORBIDDEN_MODEL_IDS:
             raise ValueError("VEO_MODEL_ID must be present in the approved Veo 3.1 model catalog")
+        return value
+
+    @field_validator("gemini_image_model_id")
+    @classmethod
+    def gemini_image_model_id_must_be_approved(cls, value: str) -> str:
+        if value not in GEMINI_IMAGE_APPROVED_MODEL_IDS:
+            raise ValueError("GEMINI_IMAGE_MODEL_ID must be present in the approved image model catalog")
+        return value
+
+    @field_validator("gemini_image_default_size")
+    @classmethod
+    def gemini_image_size_must_be_supported(cls, value: str) -> str:
+        if value not in GEMINI_IMAGE_SUPPORTED_SIZES:
+            raise ValueError("GEMINI_IMAGE_DEFAULT_SIZE is unsupported")
+        return value
+
+    @field_validator("gemini_image_default_aspect_ratio")
+    @classmethod
+    def gemini_image_aspect_ratio_must_be_supported(cls, value: str) -> str:
+        if value not in GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS:
+            raise ValueError("GEMINI_IMAGE_DEFAULT_ASPECT_RATIO is unsupported")
         return value
 
 

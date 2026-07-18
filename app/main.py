@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import (
     core_auth,
     dashboard_ops,
+    google_gemini_image,
     integration_readiness,
     channel_workspace,
     project_foundation,
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
 
     _include_router_flat(application, core_auth.create_router(settings))
     _include_router_flat(application, dashboard_ops.create_router(application))
+    _include_router_flat(application, google_gemini_image.create_router())
     _include_router_flat(application, integration_readiness.create_router())
     _include_router_flat(application, channel_workspace.create_router())
     _include_router_flat(application, project_foundation.create_router())

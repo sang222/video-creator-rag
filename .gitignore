@@ -21,6 +21,7 @@ client_secret*.json
 *.mp4
 *.mov
 *.wav
+tmp/*
 
 # Frontend build/test artifacts
 frontend/.next/

@@ -3,9 +3,10 @@ from __future__ import annotations
 # Compatibility note: semantic facade `cost_firewall` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import desc, func, select
@@ -40,16 +41,22 @@ from app.db.models import (
     VoiceProfile,
 )
 from app.services.m2 import PAID_CAPABILITIES, ProviderReadinessM2Service, validate_pexels_policy
+from app.services.google_gemini_image_catalog import GoogleGeminiImageModelPriceCatalog
 from app.services.provider_stack import normalize_provider_key, provider_key_rejection_reasons
 
 
-PAID_PROVIDER_KEYS = {"elevenlabs", "google_veo"}
+GOOGLE_GEMINI_IMAGE_PROVIDER_KEY = "google_gemini_image"
+GOOGLE_GEMINI_IMAGE_PROVIDER_STAGES = {"AI_IMAGE_GENERATION"}
+PAID_PROVIDER_KEYS = {"elevenlabs", "google_veo", GOOGLE_GEMINI_IMAGE_PROVIDER_KEY}
+PAID_PROVIDER_STAGES = PAID_CAPABILITIES | GOOGLE_GEMINI_IMAGE_PROVIDER_STAGES
+MAX_PAID_ATTEMPTS_BY_PROVIDER = {GOOGLE_GEMINI_IMAGE_PROVIDER_KEY: 1}
 CHARACTER_DEPENDENT_STAGES = {"AI_HERO_VIDEO", "AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}
 VOICE_STAGES = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
 PEXELS_STAGES = {"FREE_VISUAL_FALLBACK", "PEXELS_SEARCH", "PEXELS_FALLBACK"}
 EXECUTION_FLAG_BY_PROVIDER = {
     "elevenlabs": "elevenlabs_real_generation_enabled",
     "google_veo": "veo_real_generation_enabled",
+    GOOGLE_GEMINI_IMAGE_PROVIDER_KEY: "gemini_image_real_generation_enabled",
     "pexels_api": "pexels_real_search_enabled",
     "google_drive_archive": "google_drive_real_archive_enabled",
 }
@@ -61,6 +68,206 @@ class GateCheck:
     reason_codes: list[str]
     status: str = "PASS"
     details: dict[str, Any] | None = None
+
+
+def derive_google_gemini_image_catalog_cost(
+    item: dict[str, Any],
+    *,
+    currency: str,
+    catalog: GoogleGeminiImageModelPriceCatalog | None = None,
+) -> GateCheck:
+    """Derive an IMG1 estimate exclusively from the versioned local catalog.
+
+    Provider-plan cost fields are evidence to validate, never the authority for
+    the amount persisted by R3D8.  The returned details are safe to persist in
+    the existing generic ``provider_estimates_json`` column.
+    """
+
+    catalog = catalog or GoogleGeminiImageModelPriceCatalog()
+    reasons: list[str] = []
+    provider_stage = str(item.get("provider_stage") or item.get("stage") or "").strip().upper()
+    model_id = str(item.get("model_id") or "").strip()
+    image_size = str(item.get("image_size") or item.get("size") or "").strip().upper()
+    aspect_ratio = str(item.get("aspect_ratio") or "").strip()
+    catalog_version = str(
+        item.get("price_catalog_version") or item.get("catalog_version") or ""
+    ).strip()
+    catalog_ref = str(
+        item.get("price_catalog_ref") or item.get("cost_catalog_ref") or ""
+    ).strip()
+    declared_route = normalize_provider_key(
+        item.get("provider_route") or item.get("provider_key")
+    )
+
+    if declared_route != GOOGLE_GEMINI_IMAGE_PROVIDER_KEY:
+        reasons.append("GEMINI_IMAGE_PROVIDER_ROUTE_MISMATCH")
+    if provider_stage not in GOOGLE_GEMINI_IMAGE_PROVIDER_STAGES:
+        reasons.append("GEMINI_IMAGE_PROVIDER_STAGE_MISMATCH")
+    if not model_id:
+        reasons.append("GEMINI_IMAGE_MODEL_ID_REQUIRED")
+    if not image_size:
+        reasons.append("GEMINI_IMAGE_SIZE_REQUIRED")
+    if not aspect_ratio:
+        reasons.append("GEMINI_IMAGE_ASPECT_RATIO_REQUIRED")
+    if not catalog_version:
+        reasons.append("GEMINI_IMAGE_PRICE_CATALOG_VERSION_REQUIRED")
+    elif catalog_version != catalog.version:
+        reasons.append("GEMINI_IMAGE_PRICE_CATALOG_VERSION_MISMATCH")
+    if not catalog_ref:
+        reasons.append("GEMINI_IMAGE_PRICE_CATALOG_REF_REQUIRED")
+    elif catalog_ref != catalog.ref:
+        reasons.append("GEMINI_IMAGE_PRICE_CATALOG_REF_MISMATCH")
+    if str(currency).upper() != "USD" or str(item.get("currency") or "USD").upper() != "USD":
+        reasons.append("GEMINI_IMAGE_PRICE_CATALOG_CURRENCY_MISMATCH")
+    if any(
+        item.get(key) is not None
+        for key in ("actual_amount", "actual_cost", "actual_billed_amount")
+    ):
+        reasons.append("GEMINI_IMAGE_ACTUAL_COST_MUST_BE_NULL")
+
+    output_count = _strict_positive_int(
+        item.get("output_count"),
+        missing_code="GEMINI_IMAGE_OUTPUT_COUNT_REQUIRED",
+        invalid_code="GEMINI_IMAGE_OUTPUT_COUNT_INVALID",
+        reasons=reasons,
+    )
+    attempt_count = _strict_positive_int(
+        item.get("attempt_count"),
+        missing_code="GEMINI_IMAGE_ATTEMPT_COUNT_REQUIRED",
+        invalid_code="GEMINI_IMAGE_ATTEMPT_COUNT_INVALID",
+        reasons=reasons,
+    )
+    hard_cap = _strict_positive_decimal(
+        item.get("hard_cap"),
+        missing_code="GEMINI_IMAGE_HARD_CAP_REQUIRED",
+        invalid_code="GEMINI_IMAGE_HARD_CAP_INVALID",
+        reasons=reasons,
+    )
+    approval_amount = _strict_positive_decimal(
+        item.get("approval_amount"),
+        missing_code="GEMINI_IMAGE_APPROVAL_AMOUNT_REQUIRED",
+        invalid_code="GEMINI_IMAGE_APPROVAL_AMOUNT_INVALID",
+        reasons=reasons,
+    )
+
+    base_details: dict[str, Any] = {
+        "cost_authority": "VERSIONED_MODEL_PRICE_CATALOG",
+        "price_catalog_version": catalog.version,
+        "price_catalog_ref": catalog.ref,
+        "model_id": model_id or None,
+        "image_size": image_size or None,
+        "aspect_ratio": aspect_ratio or None,
+        "output_count": output_count,
+        "attempt_count": attempt_count,
+        "hard_cap": str(hard_cap) if hard_cap is not None else None,
+        "approval_amount": str(approval_amount) if approval_amount is not None else None,
+        "actual_amount": None,
+        "currency": "USD",
+    }
+    if reasons:
+        return GateCheck(
+            False,
+            sorted(set(reasons)),
+            "BLOCKED_COST_ESTIMATE",
+            base_details,
+        )
+
+    try:
+        estimate = catalog.estimate(
+            model_id=model_id,
+            image_size=image_size,
+            aspect_ratio=aspect_ratio,
+            output_count=output_count,
+            attempt_count=attempt_count,
+            hard_cap=hard_cap,
+            approval_amount=approval_amount,
+            four_k_approval_ref=item.get("four_k_approval_ref"),
+        )
+    except ValueError as exc:
+        return GateCheck(
+            False,
+            [_gemini_image_catalog_error_code(exc)],
+            "BLOCKED_COST_ESTIMATE",
+            base_details,
+        )
+
+    details = estimate.model_dump(mode="json")
+    details.update(
+        {
+            "cost_authority": "VERSIONED_MODEL_PRICE_CATALOG",
+            "estimated_cost": str(estimate.estimated_amount),
+            "submitted_estimated_cost": (
+                str(item["estimated_cost"])
+                if item.get("estimated_cost") is not None
+                and item.get("estimated_cost") != ""
+                else None
+            ),
+        }
+    )
+    try:
+        submitted_estimate = _decimal_or_none(item.get("estimated_cost"))
+    except InvalidOperation:
+        return GateCheck(
+            False,
+            ["GEMINI_IMAGE_FREEFORM_ESTIMATE_INVALID"],
+            "BLOCKED_COST_ESTIMATE",
+            details,
+        )
+    if submitted_estimate is not None and submitted_estimate != estimate.estimated_amount:
+        return GateCheck(
+            False,
+            ["GEMINI_IMAGE_FREEFORM_ESTIMATE_MISMATCH_CATALOG"],
+            "BLOCKED_COST_ESTIMATE",
+            details,
+        )
+    return GateCheck(True, [], "PASS", details)
+
+
+def _gemini_image_catalog_error_code(exc: ValueError) -> str:
+    matches = re.findall(r"\bGEMINI_IMAGE_[A-Z0-9_]+\b", str(exc))
+    return matches[0] if matches else "GEMINI_IMAGE_COST_CATALOG_VALIDATION_FAILED"
+
+
+def _strict_positive_int(
+    value: Any,
+    *,
+    missing_code: str,
+    invalid_code: str,
+    reasons: list[str],
+) -> int:
+    if value is None or value == "":
+        reasons.append(missing_code)
+        return 0
+    try:
+        decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        reasons.append(invalid_code)
+        return 0
+    if not decimal.is_finite() or decimal <= 0 or decimal != decimal.to_integral_value():
+        reasons.append(invalid_code)
+        return 0
+    return int(decimal)
+
+
+def _strict_positive_decimal(
+    value: Any,
+    *,
+    missing_code: str,
+    invalid_code: str,
+    reasons: list[str],
+) -> Decimal:
+    if value is None or value == "":
+        reasons.append(missing_code)
+        return Decimal("0")
+    try:
+        decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        reasons.append(invalid_code)
+        return Decimal("0")
+    if not decimal.is_finite() or decimal <= 0:
+        reasons.append(invalid_code)
+        return Decimal("0")
+    return decimal
 
 
 def canonical_json(value: Any) -> str:
@@ -100,7 +307,21 @@ def _stage_key(provider_key: str, provider_stage: str) -> str:
 
 
 def _is_paid_provider(provider_key: str, provider_stage: str) -> bool:
-    return provider_key in PAID_PROVIDER_KEYS or provider_stage in PAID_CAPABILITIES
+    return provider_key in PAID_PROVIDER_KEYS or provider_stage in PAID_PROVIDER_STAGES
+
+
+def _gemini_image_cost_route_configured(provider: Any) -> bool:
+    """Cost-catalog readiness does not require a provider credential or execution."""
+
+    if provider is None:
+        return False
+    safe_config = _dict(provider.safe_config)
+    return bool(
+        safe_config.get("provider_route_registered")
+        and safe_config.get("model_configured")
+        and safe_config.get("cost_catalog_state") == "PRESENT"
+        and safe_config.get("provider_route_approved")
+    )
 
 
 class RenderRevisionService:
@@ -192,6 +413,7 @@ class CostEstimateService:
         blockers: list[str] = []
         provider_estimates: dict[str, Any] = {}
         costs = {"voice": None, "ai_hero": None, "final_render": None, "pexels": Decimal("0")}
+        supplemental_paid_cost = Decimal("0")
 
         if not provider_items:
             blockers.extend(["PROVIDER_PLAN_EMPTY", "ESTIMATE_PENDING_PROVIDER_CONFIG"])
@@ -200,15 +422,29 @@ class CostEstimateService:
             provider_key = normalize_provider_key(item.get("provider_key")) or str(item.get("provider_key") or "").strip().lower()
             provider_stage = str(item.get("provider_stage") or item.get("stage") or "").strip().upper()
             provider = provider_map.get(provider_key)
-            configured = bool(provider and provider.readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"})
+            execution_configured = bool(
+                provider
+                and provider.readiness_state
+                in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
+            )
+            configured = (
+                _gemini_image_cost_route_configured(provider)
+                if provider_key == GOOGLE_GEMINI_IMAGE_PROVIDER_KEY
+                else execution_configured
+            )
             stale_reasons = provider_key_rejection_reasons(provider_key)
             key = _stage_key(provider_key, provider_stage)
             provider_estimates[key] = {
                 "provider_key": provider_key,
                 "provider_stage": provider_stage,
                 "configured": configured,
+                "execution_configured": execution_configured,
                 "readiness_state": "STALE_PROVIDER_KEY" if stale_reasons else provider.readiness_state if provider else "UNKNOWN",
-                "estimated_cost": _decimal_string(item.get("estimated_cost")),
+                "estimated_cost": (
+                    None
+                    if provider_key == GOOGLE_GEMINI_IMAGE_PROVIDER_KEY
+                    else _decimal_string(item.get("estimated_cost"))
+                ),
                 "currency": data.currency,
             }
             if stale_reasons:
@@ -221,6 +457,19 @@ class CostEstimateService:
                 continue
             if provider_key in PAID_PROVIDER_KEYS and not configured:
                 blockers.append(f"{provider_key.upper()}_PROVIDER_NOT_CONFIGURED")
+                continue
+            if provider_key == GOOGLE_GEMINI_IMAGE_PROVIDER_KEY:
+                image_cost = derive_google_gemini_image_catalog_cost(
+                    item,
+                    currency=data.currency,
+                )
+                provider_estimates[key].update(image_cost.details or {})
+                if not image_cost.passed:
+                    blockers.extend(image_cost.reason_codes)
+                    continue
+                supplemental_paid_cost += Decimal(
+                    str(provider_estimates[key]["estimated_cost"])
+                )
                 continue
             explicit_cost = _decimal_or_none(item.get("estimated_cost"))
             if provider_key in PAID_PROVIDER_KEYS and explicit_cost is None:
@@ -243,13 +492,14 @@ class CostEstimateService:
 
         estimated_total = None
         if estimate_status == "ESTIMATED":
-            estimated_total = sum((value or Decimal("0")) for value in costs.values())
+            estimated_total = sum((value or Decimal("0")) for value in costs.values()) + supplemental_paid_cost
         snapshot_payload = {
             "render_revision_id": revision.id,
             "provider_estimates": provider_estimates,
             "estimate_status": estimate_status,
             "blockers": sorted(set(blockers)),
             "costs": costs,
+            "supplemental_paid_cost": supplemental_paid_cost,
         }
         snapshot = CostEstimateSnapshot(
             render_revision_id=revision.id,
@@ -416,6 +666,9 @@ class PaidAttemptLimitGate:
 
     def _record(self, *, render_revision_id: uuid.UUID, provider_key: str, provider_stage: str, max_attempts: int) -> PaidAttemptLimitRecord:
         RenderRevisionService(self.session).get(render_revision_id)
+        hard_cap = MAX_PAID_ATTEMPTS_BY_PROVIDER.get(provider_key)
+        if hard_cap is not None:
+            max_attempts = min(max_attempts, hard_cap)
         record = self.session.scalars(
             select(PaidAttemptLimitRecord)
             .where(
@@ -436,6 +689,9 @@ class PaidAttemptLimitGate:
                 reason_codes_json=["PAID_ATTEMPT_AVAILABLE"],
             )
             self.session.add(record)
+            self.session.flush()
+        elif hard_cap is not None and record.max_attempts > hard_cap:
+            record.max_attempts = hard_cap
             self.session.flush()
         return record
 
@@ -889,7 +1145,7 @@ def _planned_provider_items(provider_plan: dict[str, Any]) -> list[dict[str, Any
     if isinstance(provider_plan.get("provider_stages"), list):
         return [item for item in provider_plan["provider_stages"] if isinstance(item, dict)]
     items: list[dict[str, Any]] = []
-    for key in ("voice", "ai_hero", "final_render", "pexels"):
+    for key in ("voice", "ai_hero", "ai_image", "final_render", "pexels"):
         value = provider_plan.get(key)
         if isinstance(value, dict):
             items.append(value)

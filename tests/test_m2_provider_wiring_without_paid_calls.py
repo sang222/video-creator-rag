@@ -26,7 +26,13 @@ def test_m2_readiness_is_validation_only():
 
 def test_capability_matrix_has_current_external_providers_and_local_renderer():
     keys = {item.provider_key for item in ProviderCapabilityMatrix(Settings()).entries()}
-    assert {"elevenlabs", "google_veo", "pexels_api", "native_ffmpeg_renderer"} <= keys
+    assert {
+        "elevenlabs",
+        "google_veo",
+        "google_gemini_image",
+        "pexels_api",
+        "native_ffmpeg_renderer",
+    } <= keys
 
 
 def test_current_request_builders_never_execute():

@@ -105,7 +105,12 @@ def gates(**changes) -> GoogleVeoExecutionGates:
 
 
 def test_canonical_stack_and_native_render_authority_are_frozen():
-    assert CANONICAL_PROVIDER_KEYS == ("elevenlabs", "google_veo", "pexels_api")
+    assert CANONICAL_PROVIDER_KEYS == (
+        "elevenlabs",
+        "google_veo",
+        "google_gemini_image",
+        "pexels_api",
+    )
     assert "native_ffmpeg_renderer" not in CANONICAL_PROVIDER_KEYS
     assert Path("app/services/native_ffmpeg_renderer.py").is_file()
 

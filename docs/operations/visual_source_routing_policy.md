@@ -8,6 +8,9 @@ There is no route mutation or provider-execution endpoint.
 
 ```text
 VSR1_PROVIDER_EXECUTION=DISABLED
+IMG1_PROVIDER_ROUTE=google_gemini_image
+IMG1_PROVIDER_EXECUTION=DISABLED
+IMG1_FIXTURE_ONLY=true
 MR1_EXECUTION=ON_HOLD
 PROCEED_TO_MR1=false
 ```
@@ -34,8 +37,8 @@ PROCEED_TO_MR1=false
    authorization outside the routing service.
 4. Treat `provider_execution_required=true` as a future prerequisite, not as
    permission to execute.
-5. Approve IMG1, VQC1 and a bounded paid canary separately before proposing a
-   new channel profile.
+5. Treat the IMG1 provider foundation as fixture-only; validate IMG1, VQC1 and
+   a bounded paid canary separately before proposing a new channel profile.
 6. Compile, review and activate CH1-FLEX v2 only in its later approved task.
 7. Revise PKG1 visual/provider/cost/disclosure artifacts and obtain new exact
    MR1 approvals before execution.
@@ -67,8 +70,11 @@ select `NATIVE_MOTION_GRAPHIC`.
 
 AI-image assessment is provider-neutral. Evidence, actual UI/product/document,
 unapproved likeness and exact generated text are prohibited. Exact text on a
-valid custom composition requires `AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY` and
-the inactive-provider reason `IMAGE_PROVIDER_ROUTE_NOT_YET_ACTIVE` until IMG1.
+valid custom composition requires `AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY`.
+Historical VSR1 fixtures preserve
+`IMAGE_PROVIDER_ROUTE_NOT_YET_ACTIVE`; IMG1 does not rewrite them. New IMG1
+fixture requests may bind the registered `google_gemini_image` route, but
+provider execution remains disabled.
 
 Veo requires high semantic motion, a hero/metaphor/transition function, low
 truth risk and evidence that a still or native motion treatment is insufficient.
@@ -130,7 +136,9 @@ fixture, but it cannot create an asset, update a route or call a provider.
 For VSR1, `actual_source_route` remains null and provider URLs, responses,
 attempts, actual cost events and output receipts do not exist. Route evidence
 records only the feature snapshot, policy ref/hash, gate refs, fallback policy,
-estimated cost class and planning decision.
+estimated cost class and planning decision. IMG1 readiness is a separate
+configuration-only read: it can report route/model/catalog/flag state but
+cannot generate content.
 
 ## Legacy and fail-closed handling
 
@@ -146,7 +154,7 @@ this policy.
 The next authorized sequence is:
 
 ```text
-VSR1 PASS -> IMG1 -> VQC1 -> offline image/overlay fixtures
+VSR1 PASS -> IMG1 fixture-only foundation -> VQC1 -> offline image/overlay fixtures
 -> one operator-approved paid image canary -> human review + Drive verification
 -> CH1-FLEX v2 -> PKG1 visual revision -> new MR1 approval -> MR1
 ```
