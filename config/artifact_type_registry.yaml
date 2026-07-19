@@ -1,5 +1,5 @@
 catalog_key: artifact_type_registry
-catalog_version: "1.4.0"
+catalog_version: "1.6.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -85,3 +85,35 @@ items:
     description: Exact manual-publish destination binding kept separate from target market.
   - key: market_bound_publish_package
     description: Exact destination and market package frozen for manual publishing.
+  - key: pkg1_market_revision_inventory
+    description: Immutable PKG1 v1 to market-revision reuse/rebuild classification.
+  - key: niche_contract_digest
+    description: Exact NICH1 digest compiled for a revision editorial slot and active policy.
+  - key: niche_alignment_dossier
+    description: Package-level niche-alignment evidence bound to the revision inputs.
+  - key: voice_policy
+    description: Exact narration identity, locale, pronunciation, and pacing plan without TTS execution.
+  - key: scene_visual_intent
+    description: Market-aware scene intent set without canonical media timestamps.
+  - key: visual_source_decision_set
+    description: One policy-bound planned source route per scene without provider execution.
+  - key: thumbnail_brief
+    description: Market- and claim-bound thumbnail planning brief without provider output.
+  - key: publishing_metadata_package
+    description: Locale-bound title, description, chapters, keywords, CTA, and upload copy.
+  - key: market_gate_results
+    description: Exact IdeaMarketPreflight and mandatory market-gate evidence set.
+  - key: target_market_consistency_check
+    description: Cross-artifact target-market, locale, currency, unit, and destination consistency check.
+  - key: asset_provenance_plan
+    description: Planned provider, authorized-asset, and native-authorship provenance without fake outputs.
+  - key: publish_risk_dossier
+    description: Package content, rights, market, destination, integrity, and manual-publish risk evidence.
+  - key: publish_handoff_package
+    description: Pre-media market-bound publish handoff plan that cannot claim upload readiness.
+  - key: upload_card
+    description: Non-actionable manual upload copy bound to a pending destination and absent final media.
+  - key: pkg1_market_revision_human_review_receipt
+    description: Immutable exact-target operator PASS receipt for the reviewed PKG1 market revision package.
+  - key: pkg1_market_revision_read_model
+    description: Operator-facing approved-package state that preserves pending destination and publish boundaries.

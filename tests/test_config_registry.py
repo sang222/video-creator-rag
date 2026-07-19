@@ -163,6 +163,7 @@ def test_config_yaml_validates(db_session) -> None:
         "short_visual_source_catalog",
         "slot_type_catalog",
         "source_decision_catalog",
+        "target_market_profile_catalog",
         "uploaded_video_monitoring_state_catalog",
         "uploaded_video_publish_status_catalog",
         "upload_card_state_catalog",
@@ -192,7 +193,7 @@ def test_config_seed_idempotent(db_session) -> None:
     catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
     role_count = db_session.scalar(select(func.count()).select_from(Role))
     metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
-    assert catalog_count == 162
+    assert catalog_count == 163
     assert role_count == 13
     assert metric_definition_count == 16
 

@@ -1,0 +1,26 @@
+{
+  "schema_version": "pkg1-market-revision-human-closeout-repair-cycles/v1",
+  "date": "2026-07-19",
+  "cycle_count": 1,
+  "cycles": [
+    {
+      "cycle": 1,
+      "phase": "pre-production requirements audit",
+      "trigger": "Two non-destructive coverage gaps were found before the production write.",
+      "findings": [
+        "The operator read model did not expose the explicit revision_status=APPROVED field required by Prompt 2 section 9.",
+        "The closeout test did not directly assert every exact profile, snapshot, market dossier, and destination binding requested by Prompt 2 section 10."
+      ],
+      "repairs": [
+        "Added revision_status=APPROVED to the closeout result and immutable operator read model.",
+        "Extended exact-binding assertions for ChannelProfileVersion, compiled snapshot, TargetMarketProfile, TargetMarketDigest, MarketAlignmentDossier, and DestinationBinding."
+      ],
+      "verification": "Focused closeout/revision suite passed 8 tests after the repair; production closeout then passed on its first write attempt."
+    }
+  ],
+  "excluded_from_cycle_count": [
+    "A sandbox localhost restriction interrupted one diagnostic test invocation; rerunning with approved local PostgreSQL access passed without a code or data repair.",
+    "The production closeout and its idempotent rerun both passed without repair."
+  ],
+  "final_status": "PASS"
+}

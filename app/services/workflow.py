@@ -802,10 +802,20 @@ class ApprovalService:
     ) -> ReviewTask:
         if data.decision != "approved" or data.target_type != "artifact_version" or version is None:
             raise ValidationFailureError("assigned final reviewer authority only supports exact artifact approval")
-        if project.project_type != "PKG1_FIRST_PRODUCTION_PACKAGE":
+        if project.project_type not in {
+            "PKG1_FIRST_PRODUCTION_PACKAGE",
+            "PKG1_MARKET_REVISION",
+        }:
             raise ValidationFailureError("assigned final reviewer authority is limited to PKG1")
         approval_ref = data.metadata.get("approval_ref")
-        if not isinstance(approval_ref, str) or not approval_ref.startswith("operator-approval://pkg1/"):
+        required_prefix = (
+            "operator-approval://pkg1-market-revision/"
+            if project.project_type == "PKG1_MARKET_REVISION"
+            else "operator-approval://pkg1/"
+        )
+        if not isinstance(approval_ref, str) or not approval_ref.startswith(
+            required_prefix
+        ):
             raise ValidationFailureError("assigned final reviewer approval requires an explicit PKG1 operator ref")
         review_task = self.session.get(ReviewTask, review_task_id)
         if review_task is None:
@@ -832,6 +842,12 @@ class ApprovalService:
         target_artifact = self.session.get(Artifact, version.artifact_id)
         if target_artifact is None or target_artifact.video_project_id != project.id:
             raise ValidationFailureError("approval target does not belong to the reviewed PKG1 project")
+        if project.project_type == "PKG1_MARKET_REVISION":
+            if version.id != package_version.id:
+                raise ValidationFailureError(
+                    "market revision final review may approve only the exact package manifest"
+                )
+            return review_task
         manifest_version_ids = {
             item.get("artifact_version_id")
             for item in ((package_version.content or {}).get("artifacts") or {}).values()

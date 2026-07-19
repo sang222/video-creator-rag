@@ -341,6 +341,10 @@ from app.services.r3d9_ux2 import (
 )
 from app.services.r3d10 import PackageRuntimeDispositionService, RuntimeLTSFreezeVerifier
 from app.services.pkg1 import PKG1PackageService
+from app.services.pkg1_market_revision import PKG1MarketRevisionService
+from app.services.pkg1_market_revision_closeout import (
+    PKG1MarketRevisionCloseoutService,
+)
 from app.services.visual_source_routing import (
     AIImageEligibilityGate,
     DiagramSuitabilityGate,
@@ -633,6 +637,8 @@ __all__ = [
     "ProviderStackDriftGuard",
     "RuntimeLTSFreezeVerifier",
     "PKG1PackageService",
+    "PKG1MarketRevisionService",
+    "PKG1MarketRevisionCloseoutService",
     "AIImageEligibilityGate",
     "DiagramSuitabilityGate",
     "EvidenceTruthSourceGate",

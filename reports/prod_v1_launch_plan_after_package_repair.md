@@ -19,11 +19,12 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | D2P1 daily-to-package bridge | `PASS / NO MEDIA` | Immutable DailyIdeaDecision admission receipt, Effective Context, idempotent research resume, M12.2 package, read-only status, and zero-execution guards passed. |
 | LPRO1 | `PASS / OFFLINE REVIEW CANDIDATE` | Strict reviewed-package handoff, canonical timeline, asset normalization, native plan/compiler, real local FFmpeg render, actual-byte TechnicalMediaQC, review-only candidate and FinalMediaRef closeout boundary passed with zero provider/Drive/YouTube calls. |
 | PKG1 first production package | `PASS` | Technical and explicit human review passed; all six review areas approved. |
+| PKG1 market-aware revision | `PASS / PRODUCTION PACKAGE APPROVED` | Exact operator PASS closed review `a99f2ad4-9b1d-4bc6-bafc-024ecd7e9c56` for revision `a90e2786-f6e0-5480-94a4-fb28fd000edf` v2 and package `7de25ac8-46e4-46da-b112-f805f16ebaaa`. Approval is package-planning authority only; destination remains pending and no execution authority exists. |
 | Visual impact review | `PASS` | Repository-grounded mapping complete; VSR1 may proceed without a DB migration. |
 | VSR1 niche-aware visual routing | `PASS` | Provider-neutral taxonomy, gates, deterministic router, routing evidence and offline fixtures complete; provider execution remains disabled. |
 | IMG1 Google Gemini Image foundation | `PASS / EXECUTION DISABLED` | Distinct `google_gemini_image` IMAGE route, versioned `gemini-3.1-flash-image` catalog, native exact-content authority and fixture-only acceptance are complete; no provider call or paid canary ran. |
 | IMG-CANARY-v3 | `PASS / ARCHIVE VERIFIED` | One provider attempt succeeded; operator human review passed; immutable 47-item Drive closeout verified. CH1-FLEX v2 may proceed in a separate task. |
-| MR1 first real media render | `ON_HOLD / NOT_STARTED` | Historical approval does not cover the new visual-source decision set or Gemini Image route; provider call count and render count remain 0. |
+| MR1 first real media render | `RE-APPROVAL ENTRY READY / NOT STARTED` | Approved market revision and exact bindings are available for a separate MR1 human re-approval checkpoint. MR1 is not approved or running; provider call count and render count remain 0. |
 
 ## Current Package State
 
@@ -40,6 +41,25 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | provider/media/upload/YouTube execution | `0` |
 
 `WAITING_FINAL_MEDIA_ASSET` is expected. The package is repaired but no final video asset exists yet.
+
+## PKG1 Market Revision Checkpoint
+
+| Field | Value |
+|---|---|
+| revision | `a90e2786-f6e0-5480-94a4-fb28fd000edf` · v2 · `b50ff5d3bcbf07de4b709ae0d9017a9df04fec49481fb14c224a709c85b0875b` |
+| package | ArtifactVersion `7de25ac8-46e4-46da-b112-f805f16ebaaa` · hash `200b3be30b92ccff3b0efb26881d5654ab4b53162afe73d4e7f34bed3b0454bd` |
+| technical lineage/niche/market/consistency | `PASS` |
+| human review | `PASS`; task `a99f2ad4-9b1d-4bc6-bafc-024ecd7e9c56` is `completed` |
+| approval | `ef766b1d-c1a5-43b8-be98-0751bd055653`; scope `PKG1_MARKET_REVISION_PACKAGE_PLANNING` |
+| immutable receipt | ArtifactVersion `a35c55b8-6887-4e60-a19c-22928205c572` · hash `24a2d4c7b0dec7394a8b78ab646f66750fbca35282700d50dcde77bd304c2231` |
+| destination | `PENDING_PLATFORM_ID` |
+| publish risk | content `REVIEW_REQUIRED`; execution `BLOCK` |
+| upload / publish execution | `false` / `false` |
+| production package approved | `true` |
+| MR1 re-approval / execution | `READY` / `NOT_STARTED` |
+| provider/render/Drive/YouTube calls | `0 / 0 / 0 / 0` |
+
+Operator PASS approves the exact production package/planning snapshot but does not authorize MR1 or publishing. The next allowable checkpoint is a separate exact-target MR1 re-approval review; `PROCEED_TO_MR1_REAPPROVAL=true` and `PROCEED_TO_MR1=false`.
 
 ## Production V1 Rules After Code Closeout
 
@@ -67,7 +87,9 @@ No P0/P1 is open.
 The 2026-07-17 `VISUAL-IMPACT-REVIEW` supersedes the prior permission to start MR1, while preserving CH1-FLEX v1 and PKG1 v1 as immutable historical passes.
 
 ```text
-MR1_EXECUTION=ON_HOLD
+MR1_REAPPROVAL_ENTRY=READY
+MR1_EXECUTION=NOT_STARTED
+PROCEED_TO_MR1_REAPPROVAL=true
 PROCEED_TO_MR1=false
 PROCEED_TO_VSR1=true
 ```
@@ -85,8 +107,8 @@ Required sequence before MR1:
 7. CH1-FLEX v2 approval/activation for future projects — `PASS` on 2026-07-19 with provider/media/Drive/YouTube deltas all zero.
 8. NICH1 and D2P1 governance/bridge — `PASS` on 2026-07-19; scripted package remains no-media and human-review-only.
 9. LPRO1 — `PASS` on 2026-07-19; the offline MP4 is a non-publishable review candidate and not a production FinalMediaRef.
-10. PKG1 visual/provider/cost/disclosure revision — authorized as the next separate task and not performed by LPRO1.
-11. New exact-target MR1 approval.
+10. PKG1 visual/provider/cost/disclosure revision — technical and exact human review `PASS`; production package approved while destination/publish remain not ready.
+11. Separate new exact-target MR1 human re-approval — entry `READY`, execution `NOT_STARTED`.
 12. MR1.
 
 The old PKG1/MR1 approval remains historical evidence; it is not rewritten or treated as authority for the new route.
@@ -159,7 +181,9 @@ Rules:
 
 ### 4. PKG1 - First Real Production Package
 
-Status: `PASS`. Package-manifest v2 is approved under `operator-approval://pkg1/small-team-ai/final-package-and-mr1`; prior `REVIEW_REQUIRED` evidence is retained as resolved history.
+Historical status: `PASS`. Package-manifest v2 remains approved under `operator-approval://pkg1/small-team-ai/final-package-and-mr1`; prior `REVIEW_REQUIRED` evidence is retained as resolved history.
+
+Market revision status: `PASS / PRODUCTION PACKAGE APPROVED`. Revision v2 is a superseding project under exact Market v3 authority; it does not reuse the historical package/MR1 approval. Approval `ef766b1d-c1a5-43b8-be98-0751bd055653` covers only exact package planning and preparation for a separate MR1 re-approval.
 
 Create the first real production package using the frozen runtime path.
 
@@ -171,9 +195,9 @@ Rules:
 
 ### 5. MR1 - First Real Media Render
 
-Status: `ON_HOLD`; execution is `NOT_STARTED`. Historical readiness remains frozen in `artifact-version://cd1d93f7-29b0-4af3-9fa3-b877ddc0457b`, but it does not cover the new visual-source policy or Gemini Image route.
+Status: `RE-APPROVAL ENTRY READY`; execution is `NOT_STARTED`. New readiness is frozen in `artifact-version://185f1b3d-bbba-44d3-845f-543ad940c91e` and binds revision `a90e2786-f6e0-5480-94a4-fb28fd000edf` plus package `7de25ac8-46e4-46da-b112-f805f16ebaaa`. It is a readiness artifact, not an execution approval.
 
-Do not run MR1 until the major visual architecture sequence above is complete and a new exact-target approval exists. This checkpoint update did not call a provider, consume an attempt, render, archive, upload or publish.
+Do not run MR1 until a separate exact-target human MR1 approval exists. This closeout did not call a provider, consume an attempt, render, archive, upload or publish.
 
 Target sequence:
 
@@ -226,7 +250,11 @@ Rules:
 
 ## Current Launch Decision
 
-`MR1_EXECUTION=ON_HOLD`
+`MR1_REAPPROVAL_ENTRY=READY`
+
+`MR1_EXECUTION=NOT_STARTED`
+
+`PROCEED_TO_MR1_REAPPROVAL=true`
 
 `PROCEED_TO_MR1=false`
 
@@ -248,15 +276,28 @@ Rules:
 
 `LPRO1_FINAL=PASS`
 
-Next checkpoint:
+`PKG1_MARKET_REVISION_TECHNICAL=PASS`
 
-`PROCEED_TO_PKG1_VISUAL_REVISION=true`
+`PKG1_MARKET_REVISION_HUMAN_REVIEW=PASS`
+
+`PKG1_MARKET_REVISION_FINAL=PASS`
+
+`PRODUCTION_PACKAGE_APPROVED=true`
+
+`MR1_REAPPROVAL_ENTRY=READY`
+
+`MR1_EXECUTION=NOT_STARTED`
+
+`PROCEED_TO_MR1_REAPPROVAL=true`
+
+`PROCEED_TO_MR1=false`
+
+Next checkpoint: a separate exact-target MR1 human re-approval. Readiness is `READY`; execution remains `NOT_STARTED`.
 
 The registered route is `google_gemini_image`, separate from
 `google_veo`. Its default model is `gemini-3.1-flash-image`; generated
 pixels are only a visual foundation, while exact text/numbers remain native
-overlay authority. The V3 paid canary and its Drive closeout passed; no
-CH1-FLEX v2 was subsequently activated by the 2026-07-19 master task with
-NICH1 and D2P1 PASS. LPRO1 then produced only a local, non-production review
-candidate and passed its foundation acceptance. No PKG1 visual revision or
-MR1 execution occurred.
+overlay authority. The V3 paid canary and its Drive closeout passed; CH1
+Market v3, NICH1, D2P1 and LPRO1 are PASS. PKG1 Market Revision and its
+exact human closeout are PASS. No MR1 execution, provider, render, Drive or
+YouTube call occurred during this closeout.
