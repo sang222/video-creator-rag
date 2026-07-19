@@ -231,6 +231,11 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "scenes": _visual_scenes(),
             "media_provider_calls": "NONE",
         },
+        "ThumbnailBriefAgent": {
+            "title": "VCOS M12.2",
+            "visual_language": "clean contract-to-package diagram",
+            "thumbnail_promise": "VCOS M12.2 production prompt activation",
+        },
         "UploadCardCopyAgent": {"title": "VCOS M12.2", "description": "Paste-ready copy.", "not_uploaded": True},
         "GatekeeperSoftReviewAgent": {"result": gatekeeper_result, "findings": []},
     }

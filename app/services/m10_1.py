@@ -65,7 +65,13 @@ FINAL_LANES: list[dict[str, Any]] = [
     {
         "lane_name": "cheap_structured",
         "lane_description": "Low-cost structured JSON, metadata, small classification, repair and validation text.",
-        "allowed_task_types": ["json_schema_output", "metadata_generation", "small_classification", "repair_validation"],
+        "allowed_task_types": [
+            "json_schema_output",
+            "metadata_generation",
+            "small_classification",
+            "repair_validation",
+            "daily_idea",
+        ],
         "primary_model": _model_from_env("VCOS_LLM_MODEL_CHEAP_STRUCTURED_PRIMARY", "gpt-oss:20b-cloud"),
         "fallback_models": [_model_from_env("VCOS_LLM_MODEL_CHEAP_STRUCTURED_FALLBACK", "qwen3.5:cloud")],
         "cost_tier": "LOW",
@@ -131,6 +137,7 @@ FINAL_LANES: list[dict[str, Any]] = [
 
 AGENT_ROUTER_MAPPING: dict[str, list[str]] = {
     "ChannelAuthorityAgent": ["cheap_structured", "long_context_text"],
+    "DailyIdeaAgent": ["cheap_structured"],
     "TopicIdeaScoringAgent": ["cheap_structured"],
     "ResearchPackSummarizer": ["long_context_text"],
     "ScriptPlanningAgent": ["long_context_text"],

@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.visual_routing import NicheVisualSourceProfile, VisualSourceRoute
+
 
 class PolicyRef(BaseModel):
     ref: str = Field(min_length=1)
@@ -11,6 +13,45 @@ class PolicyRef(BaseModel):
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ChannelVisualSourcePolicyBinding(BaseModel):
+    """CH1-FLEX v2 activation overlay over immutable VSR/IMG/VQC evidence."""
+
+    schema_version: Literal["ch1-flex.visual-source-policy-binding.v2"] = (
+        "ch1-flex.visual-source-policy-binding.v2"
+    )
+    niche_visual_source_profile: Literal[NicheVisualSourceProfile.STOCK_ASSISTED]
+    visual_source_routing_policy: PolicyRef
+    visual_source_routing_catalog: PolicyRef
+    gemini_image_provider_registry: PolicyRef
+    gemini_image_model_catalog: PolicyRef
+    image_visual_quality_control: PolicyRef
+    image_canary_v3_qualification: PolicyRef
+    drive_verified_canary_receipt: PolicyRef
+    allowed_source_routes: list[VisualSourceRoute] = Field(min_length=1)
+    one_source_decision_per_scene: Literal[True] = True
+    auto_pexels_to_ai_failover: Literal[False] = False
+    final_composition_authority: Literal["NativeFFmpegRenderer"] = (
+        "NativeFFmpegRenderer"
+    )
+    exact_text_authority: Literal["native_only"] = "native_only"
+    exact_number_authority: Literal["native_only"] = "native_only"
+    generated_evidence_authority: Literal[False] = False
+    minimum_effective_output_resolution: Literal["1080p"] = "1080p"
+    resolution_downgrade_below_1080p: Literal["BLOCK"] = "BLOCK"
+    human_final_visual_approval_required: Literal[True] = True
+    archive_verification_required: Literal[True] = True
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def complete_route_taxonomy(self) -> "ChannelVisualSourcePolicyBinding":
+        if len(self.allowed_source_routes) != len(set(self.allowed_source_routes)):
+            raise ValueError("CH1_FLEX_V2_VISUAL_ROUTE_DUPLICATE")
+        if set(self.allowed_source_routes) != set(VisualSourceRoute):
+            raise ValueError("CH1_FLEX_V2_VISUAL_ROUTE_TAXONOMY_INCOMPLETE")
+        return self
 
 
 class RatioBand(BaseModel):
@@ -185,10 +226,42 @@ class ElevenLabsUsagePolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class GeminiImageUsagePolicy(BaseModel):
+    provider_key: Literal["google_gemini_image"] = "google_gemini_image"
+    capability: Literal["AI_IMAGE_GENERATION"] = "AI_IMAGE_GENERATION"
+    role: Literal["AUTHORED_EDITORIAL_STILL_ONLY"] = "AUTHORED_EDITORIAL_STILL_ONLY"
+    planning_enabled: Literal[True] = True
+    provider_execution_enabled_by_default: Literal[False] = False
+    model_id: Literal["gemini-3.1-flash-image"] = "gemini-3.1-flash-image"
+    default_size: Literal["2K"] = "2K"
+    default_aspect_ratio: Literal["16:9"] = "16:9"
+    maximum_outputs_per_request: Literal[1] = 1
+    maximum_automated_attempts_per_scene: Literal[1] = 1
+    provider_fallback_allowed: Literal[False] = False
+    provider_call_requires_explicit_scoped_approval: Literal[True] = True
+    provider_cost_estimate_required: Literal[True] = True
+    monthly_budget_gate_required: Literal[True] = True
+    idempotency_required: Literal[True] = True
+    exact_text_authority: Literal[False] = False
+    exact_number_authority: Literal[False] = False
+    evidence_authority: Literal[False] = False
+    actual_ui_product_document_truth_allowed: Literal[False] = False
+    fake_ui_prohibited: Literal[True] = True
+    generated_logo_prohibited: Literal[True] = True
+    generated_watermark_prohibited: Literal[True] = True
+    native_overlay_required_when_exact_content_exists: Literal[True] = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ProviderUsagePolicy(BaseModel):
     pexels: PexelsUsagePolicy
     google_veo: VeoUsagePolicy
     elevenlabs: ElevenLabsUsagePolicy
+    google_gemini_image: GeminiImageUsagePolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     native_ffmpeg_final_render_authority: Literal[True] = True
     drive_archive_required_before_cleanup: Literal[True] = True
     youtube_manual_publish_only: Literal[True] = True
@@ -266,6 +339,12 @@ class GatePolicy(BaseModel):
     creative_perceptual_media_qc_required: Literal[True] = True
     human_full_watch_required: Literal[True] = True
     no_gate_weakening: Literal[True] = True
+    channel_fit_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        exclude_if=lambda value: value is None,
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -298,6 +377,10 @@ class ChannelScopedPolicy(BaseModel):
     analytics_maturity_policy: AnalyticsMaturityPolicy
     gate_policy: GatePolicy
     capability_requirements: CapabilityRequirements
+    visual_source_policy_binding: ChannelVisualSourcePolicyBinding | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -314,6 +397,25 @@ class ChannelScopedPolicy(BaseModel):
             raise ValueError("Veo seconds cap mismatch")
         if veo.max_hero_cost_usd_per_video != self.budget_policy.max_veo_cost_per_video:
             raise ValueError("Veo cost cap mismatch")
+        visual = self.visual_source_policy_binding
+        image = self.provider_usage_policy.google_gemini_image
+        if visual is not None and image is None:
+            raise ValueError("CH1_FLEX_V2_GEMINI_IMAGE_POLICY_REQUIRED")
+        if image is not None and visual is None:
+            raise ValueError("CH1_FLEX_V2_VISUAL_SOURCE_POLICY_BINDING_REQUIRED")
+        if visual is not None:
+            if self.provider_usage_policy.pexels.role != "SUPPORTING_ONLY":
+                raise ValueError("CH1_FLEX_V2_PEXELS_SUPPORTING_ONLY_REQUIRED")
+            if self.provider_usage_policy.pexels.factual_evidence_allowed:
+                raise ValueError("CH1_FLEX_V2_PEXELS_EVIDENCE_AUTHORITY_FORBIDDEN")
+            if not self.provider_usage_policy.native_ffmpeg_final_render_authority:
+                raise ValueError("CH1_FLEX_V2_NATIVE_COMPOSITION_AUTHORITY_REQUIRED")
+            if not self.publish_policy.human_final_approval_required:
+                raise ValueError("CH1_FLEX_V2_HUMAN_FINAL_APPROVAL_REQUIRED")
+            if not self.publish_policy.drive_archive_required:
+                raise ValueError("CH1_FLEX_V2_DRIVE_ARCHIVE_REQUIRED")
+            if self.publish_policy.local_purge_after_archive_state != "ARCHIVE_VERIFIED":
+                raise ValueError("CH1_FLEX_V2_ARCHIVE_VERIFICATION_REQUIRED")
         return self
 
 
@@ -369,5 +471,33 @@ class PolicySnapshotRefs(BaseModel):
     budget_policy: PolicyRef
     publish_policy: PolicyRef
     format_identity_contract: PolicyRef
+    visual_source_routing_policy: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    visual_source_routing_catalog: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    gemini_image_provider_registry: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    gemini_image_model_catalog: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    image_visual_quality_control: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    image_canary_v3_qualification: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    drive_verified_canary_receipt: PolicyRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     model_config = ConfigDict(extra="forbid")

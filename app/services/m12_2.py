@@ -21,6 +21,24 @@ from app.contracts.m12_2 import (
     VideoGenerationBoundaryRead,
 )
 from app.contracts.m12_1 import PromptOutputValidationRequest, PromptRenderRequest
+from app.contracts.nich1 import (
+    ChannelFitEvaluation,
+    MetadataNicheAlignmentInput,
+    NicheContractDigest,
+    NicheCriterion,
+    NicheCriterionEvidence,
+    NicheAlignmentDossier,
+    NicheDossierScope,
+    NicheEvidenceRef,
+    NicheGateKey,
+    NicheGateResult,
+    NicheGateVerdict,
+    NicheReasonCode,
+    ScriptNicheAlignmentInput,
+    ThumbnailNicheAlignmentInput,
+    VisualNicheAlignmentInput,
+    nich1_stable_hash,
+)
 from app.core.config import Settings, get_settings
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models import (
@@ -40,7 +58,12 @@ from app.services.m1 import PackagingHandoffReadService
 from app.services.m2 import ProviderReadinessM2Service
 from app.services.m12 import ProviderReadinessService
 from app.services.m12_1 import PromptRegistryService
-from app.services.r3d3 import AgentContextPackBuilder
+from app.services.nich1 import NicheAlignmentDossierBuilder, NicheAlignmentGateRegistry
+from app.services.r3d3 import (
+    AgentContextPackBuilder,
+    resolve_frozen_niche_authority,
+    stable_hash,
+)
 from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler, build_effective_channel_runtime_digest
 from app.services.r3d4 import (
     AgentOutputValidationService,
@@ -97,8 +120,9 @@ PACKAGE_AGENT_CHAIN: tuple[PackageAgentStep, ...] = (
     PackageAgentStep("ResearchPackSummarizer", "long_context_text", "research_notes", "long_context_synthesis"),
     PackageAgentStep("ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"),
     PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
-    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
     PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
+    PackageAgentStep("ThumbnailBriefAgent", "visual_creative_review", "thumbnail_brief", "thumbnail_direction_review"),
+    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
     PackageAgentStep("UploadCardCopyAgent", "cheap_structured", "upload_card_copy", "metadata_generation"),
     PackageAgentStep("GatekeeperSoftReviewAgent", "gatekeeper_soft_review", "gatekeeper_review", "policy_soft_review"),
 )
@@ -109,9 +133,9 @@ FULL_REHEARSAL_AGENT_CHAIN: tuple[PackageAgentStep, ...] = (
     PackageAgentStep("ResearchPackSummarizer", "long_context_text", "research_notes", "long_context_synthesis"),
     PackageAgentStep("ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"),
     PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
-    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
     PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
     PackageAgentStep("ThumbnailBriefAgent", "visual_creative_review", "thumbnail_brief", "thumbnail_direction_review"),
+    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
     PackageAgentStep("RightsDisclosureReviewer", "gatekeeper_soft_review", "rights_disclosure_review", "policy_soft_review"),
     PackageAgentStep("GatekeeperSoftReviewAgent", "gatekeeper_soft_review", "gatekeeper_review", "policy_soft_review"),
     PackageAgentStep("UploadCardCopyAgent", "cheap_structured", "upload_card_copy", "metadata_generation"),
@@ -134,6 +158,545 @@ FULL_REHEARSAL_REQUIRED_AGENT_KEYS = {
     "ProviderReadinessSummaryAgent",
     "MediaQCExplanationAgent",
 }
+
+
+class M122NicheGateEvaluator:
+    """Build typed NICH1 evidence from frozen authority and canonical artifacts.
+
+    Agent-authored PASS/status fields are deliberately ignored. The only PASS
+    decision comes from deterministic facts extracted from the canonical
+    artifact and the typed NICH1 gate implementations.
+    """
+
+    STEP_GATE_KEYS = {
+        "ScriptWriterAgent": NicheGateKey.SCRIPT,
+        "ScriptRewriteAgent": NicheGateKey.SCRIPT,
+        "VisualPlanningAgent": NicheGateKey.VISUAL,
+        "ThumbnailBriefAgent": NicheGateKey.THUMBNAIL,
+        "PublishingMetadataAgent": NicheGateKey.METADATA,
+    }
+    ARTIFACT_KEYS = {
+        NicheGateKey.SCRIPT: "narration_script",
+        NicheGateKey.VISUAL: "visual_plan",
+        NicheGateKey.THUMBNAIL: "thumbnail_brief",
+        NicheGateKey.METADATA: "metadata_package",
+    }
+
+    def __init__(self, registry: NicheAlignmentGateRegistry | None = None):
+        self.registry = registry or NicheAlignmentGateRegistry()
+
+    def evaluate_after_agent(
+        self,
+        *,
+        package_id: uuid.UUID,
+        step: PackageAgentStep,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot | None,
+    ) -> NicheGateResult | None:
+        gate_key = self.STEP_GATE_KEYS.get(step.agent_key)
+        if gate_key is None or effective_context is None:
+            return None
+        authority = resolve_frozen_niche_authority(
+            effective_context,
+            artifacts=artifacts,
+        )
+        if not authority.strict:
+            return None
+        if not authority.valid or authority.digest is None or authority.digest_ref is None:
+            raise ValidationFailureError(
+                "NICH1_FROZEN_AUTHORITY_INVALID:"
+                + ",".join(authority.reason_codes or ["NICHE_CONTRACT_DIGEST_MISSING"])
+            )
+        digest = NicheContractDigest.model_validate(authority.digest)
+        digest_ref = str(authority.digest_ref["ref"])
+        artifact_key = self.ARTIFACT_KEYS[gate_key]
+        artifact = _dict(artifacts.get(artifact_key))
+        subject_ref = f"first-scripted-video-package://{package_id}#artifacts/{artifact_key}"
+        subject_hash = _niche_subject_hash(artifact_key, artifact)
+        evidence_ref = NicheEvidenceRef(
+            type="m12_2_canonical_agent_artifact",
+            ref=subject_ref,
+            content_hash=subject_hash,
+        )
+        common = {
+            "niche_contract_digest": digest,
+            "niche_contract_digest_ref": digest_ref,
+            "niche_contract_digest_hash": digest.content_hash,
+            "active_policy_snapshot_ref": digest.compiled_policy_snapshot_ref,
+            "active_policy_snapshot_hash": digest.compiled_policy_snapshot_hash,
+            "subject_ref": subject_ref,
+            "subject_hash": subject_hash,
+            "evidence_refs": [evidence_ref],
+        }
+        approved_topic = str(
+            _dict(artifacts.get("approved_daily_idea")).get("topic") or ""
+        ).strip()
+        topic_result = self._topic_result(artifacts)
+        if gate_key == NicheGateKey.SCRIPT:
+            data = self._script_input(
+                common=common,
+                artifact=artifact,
+                digest=digest,
+                approved_topic=approved_topic,
+                topic_result=topic_result,
+                evidence_ref=evidence_ref,
+            )
+        elif gate_key == NicheGateKey.VISUAL:
+            data = self._visual_input(
+                common=common,
+                artifact=artifact,
+                digest=digest,
+                evidence_ref=evidence_ref,
+            )
+        elif gate_key == NicheGateKey.THUMBNAIL:
+            data = self._thumbnail_input(
+                common=common,
+                artifact=artifact,
+                digest=digest,
+                approved_topic=approved_topic,
+                evidence_ref=evidence_ref,
+            )
+        else:
+            data = self._metadata_input(
+                common=common,
+                artifact=artifact,
+                digest=digest,
+                approved_topic=approved_topic,
+                evidence_ref=evidence_ref,
+            )
+        result = self.registry.resolve(gate_key).evaluate(data)
+        gate_results = dict(_dict(artifacts.get("niche_gate_results")))
+        gate_results[gate_key.value] = result.model_dump(mode="json")
+        artifacts["niche_gate_results"] = gate_results
+        self._refresh_dossier(
+            artifacts=artifacts,
+            digest=digest,
+            digest_ref=digest_ref,
+        )
+        return result
+
+    @staticmethod
+    def _topic_result(artifacts: dict[str, Any]) -> NicheGateResult:
+        raw = _dict(artifacts.get("niche_gate_results")).get(
+            NicheGateKey.TOPIC.value
+        ) or artifacts.get(NicheGateKey.TOPIC.value)
+        try:
+            result = NicheGateResult.model_validate(raw)
+        except Exception as exc:
+            raise ValidationFailureError("NICH1_TOPIC_GATE_TYPED_RESULT_INVALID") from exc
+        if (
+            result.gate_key != NicheGateKey.TOPIC
+            or result.verdict != NicheGateVerdict.PASS
+        ):
+            raise ValidationFailureError("NICH1_TOPIC_GATE_NOT_PASS")
+        return result
+
+    def _script_input(
+        self,
+        *,
+        common: dict[str, Any],
+        artifact: dict[str, Any],
+        digest: NicheContractDigest,
+        approved_topic: str,
+        topic_result: NicheGateResult,
+        evidence_ref: NicheEvidenceRef,
+    ) -> ScriptNicheAlignmentInput:
+        script_text = _script_text(artifact)[:250_000] or "UNSPECIFIED"
+        declared = _dict(artifact.get("niche_alignment_input"))
+        script_topic = str(
+            declared.get("script_topic")
+            or artifact.get("script_topic")
+            or artifact.get("topic")
+            or script_text[:2000]
+        )[:2000]
+        pains = _declared_or_matched_values(
+            declared.get("addressed_audience_pain_points")
+            or artifact.get("addressed_audience_pain_points"),
+            digest.audience_pain_points,
+            script_text,
+        )
+        outcomes = _declared_or_matched_values(
+            declared.get("addressed_audience_desired_outcomes")
+            or artifact.get("addressed_audience_desired_outcomes"),
+            digest.audience_desired_outcomes,
+            script_text,
+        )
+        claims = _strings(declared.get("claim_scope") or artifact.get("claim_scope"))
+        facts = {
+            NicheCriterion.TOPIC_FIDELITY: _semantic_overlap(
+                approved_topic, f"{script_topic} {script_text}"
+            ),
+            NicheCriterion.NICHE_RELEVANCE: _matches_any_authority(
+                f"{script_topic} {script_text}",
+                [
+                    digest.primary_niche,
+                    digest.sub_niche,
+                    digest.category_sub_niche,
+                    digest.content_pillar_key,
+                    *digest.allowed_topics,
+                    *digest.category_allowed_topics,
+                ],
+            ),
+            NicheCriterion.AUDIENCE_FIT: bool(pains and outcomes),
+            NicheCriterion.POSITIONING_FIT: _semantic_overlap(
+                digest.positioning, script_text
+            ),
+            NicheCriterion.BRAND_PROMISE_FIT: _semantic_overlap(
+                digest.brand_promise, script_text
+            )
+            or bool(outcomes),
+            NicheCriterion.CLAIM_SCOPE_FIT: not claims
+            or bool(_artifact_evidence_refs(artifact)),
+        }
+        return ScriptNicheAlignmentInput(
+            **common,
+            daily_idea_ref=topic_result.subject_ref,
+            daily_idea_hash=topic_result.subject_hash,
+            topic_gate_ref=f"niche-gate-result://{topic_result.content_hash}",
+            topic_gate_result=topic_result,
+            approved_topic=approved_topic or "UNSPECIFIED",
+            script_topic=script_topic or "UNSPECIFIED",
+            script_text=script_text,
+            declared_primary_niche=str(
+                declared.get("primary_niche") or digest.primary_niche
+            ),
+            declared_sub_niche=str(
+                declared.get("sub_niche") or digest.category_sub_niche
+            ),
+            declared_category_id=declared.get("category_id") or digest.category_id,
+            declared_content_pillar_key=str(
+                declared.get("content_pillar_key") or digest.content_pillar_key
+            ),
+            addressed_audience_pain_points=pains,
+            addressed_audience_desired_outcomes=outcomes,
+            claim_scope=claims,
+            adjacent_niche_conflict=bool(
+                declared.get("adjacent_niche_conflict")
+                or artifact.get("adjacent_niche_conflict")
+            ),
+            semantic_evidence=_semantic_criterion_evidence(facts, evidence_ref),
+        )
+
+    def _visual_input(
+        self,
+        *,
+        common: dict[str, Any],
+        artifact: dict[str, Any],
+        digest: NicheContractDigest,
+        evidence_ref: NicheEvidenceRef,
+    ) -> VisualNicheAlignmentInput:
+        declared = _dict(artifact.get("niche_alignment_input"))
+        raw_scenes = [item for item in _list(artifact.get("scenes")) if isinstance(item, dict)]
+        if not raw_scenes:
+            raw_scenes = [{"scene_id": "missing-scene", "scene_meaning": ""}]
+        scene_intents: list[dict[str, Any]] = []
+        decisions: list[dict[str, Any]] = []
+        explicit_decisions = {
+            str(item.get("scene_id")): item
+            for item in _list(
+                declared.get("visual_source_decisions")
+                or artifact.get("visual_source_decisions")
+            )
+            if isinstance(item, dict) and item.get("scene_id") not in (None, "")
+        }
+        for index, raw_scene in enumerate(raw_scenes, start=1):
+            scene = dict(raw_scene)
+            scene_id = str(
+                scene.get("scene_id") or scene.get("sentence_id") or f"scene-{index}"
+            )
+            scene["scene_id"] = scene_id
+            scene_intents.append(scene)
+            source = _dict(scene.get("visual_source_decision")) or explicit_decisions.get(
+                scene_id, {}
+            )
+            route = (
+                source.get("preferred_source_route")
+                or source.get("visual_source_route")
+                or scene.get("preferred_source_route")
+                or scene.get("visual_source_route")
+                or scene.get("intended_visual_source")
+                or ""
+            )
+            decisions.append(
+                {
+                    **source,
+                    "scene_id": scene_id,
+                    "preferred_source_route": _canonical_niche_visual_route(route),
+                    "niche_visual_source_profile": source.get(
+                        "niche_visual_source_profile"
+                    )
+                    or scene.get("niche_visual_source_profile")
+                    or digest.visual_source_profile,
+                }
+            )
+        direction = _dict(artifact.get("visual_direction_contract"))
+        if not direction:
+            direction = {
+                "channel_id": str(digest.channel_id),
+                "authority": "frozen_niche_contract_digest",
+            }
+        complete_meaning = all(
+            any(
+                str(scene.get(key) or "").strip()
+                for key in (
+                    "scene_meaning",
+                    "semantic_intent",
+                    "editorial_intent",
+                    "narrative_function",
+                    "visual_description",
+                )
+            )
+            for scene in scene_intents
+        )
+        profiles_match = all(
+            not decision.get("niche_visual_source_profile")
+            or str(decision["niche_visual_source_profile"]).casefold()
+            == digest.visual_source_profile.casefold()
+            for decision in decisions
+        )
+        routes_present = all(
+            bool(str(decision.get("preferred_source_route") or "").strip())
+            for decision in decisions
+        )
+        visual_meaning_corpus = " ".join(
+            str(scene.get(key) or "")
+            for scene in scene_intents
+            for key in (
+                "scene_meaning",
+                "semantic_intent",
+                "editorial_intent",
+                "narrative_function",
+                "visual_description",
+            )
+        )
+        declared_pillar = str(
+            declared.get("content_pillar_key")
+            or artifact.get("content_pillar_key")
+            or digest.content_pillar_key
+        )
+        declared_category = (
+            declared.get("category_id") or artifact.get("category_id") or digest.category_id
+        )
+        facts = {
+            NicheCriterion.VISUAL_LANGUAGE_FIT: bool(decisions)
+            and routes_present
+            and profiles_match,
+            NicheCriterion.VISUAL_MEANING_FIDELITY: complete_meaning
+            and _matches_any_authority(
+                visual_meaning_corpus,
+                [
+                    digest.primary_niche,
+                    digest.sub_niche,
+                    digest.category_sub_niche,
+                    digest.content_pillar_key,
+                    *digest.allowed_topics,
+                    *digest.category_allowed_topics,
+                ],
+            ),
+            NicheCriterion.PILLAR_CATEGORY_FIT: str(declared_category)
+            == str(digest.category_id)
+            and declared_pillar.casefold() == digest.content_pillar_key.casefold(),
+        }
+        return VisualNicheAlignmentInput(
+            **common,
+            visual_direction_contract=direction,
+            scene_visual_intents=scene_intents,
+            visual_source_decisions=decisions,
+            content_pillar_key=declared_pillar,
+            category_id=declared_category,
+            ai_image_editorial_justification_refs=_dict(
+                declared.get("ai_image_editorial_justification_refs")
+                or artifact.get("ai_image_editorial_justification_refs")
+            ),
+            authorized_asset_evidence_refs=_dict(
+                declared.get("authorized_asset_evidence_refs")
+                or artifact.get("authorized_asset_evidence_refs")
+            ),
+            semantic_evidence=_semantic_criterion_evidence(facts, evidence_ref),
+        )
+
+    def _thumbnail_input(
+        self,
+        *,
+        common: dict[str, Any],
+        artifact: dict[str, Any],
+        digest: NicheContractDigest,
+        approved_topic: str,
+        evidence_ref: NicheEvidenceRef,
+    ) -> ThumbnailNicheAlignmentInput:
+        declared = _dict(artifact.get("niche_alignment_input"))
+        promise = str(
+            declared.get("thumbnail_promise")
+            or artifact.get("thumbnail_promise")
+            or artifact.get("promise")
+            or artifact.get("headline")
+            or artifact.get("title")
+            or artifact.get("text")
+            or "UNSPECIFIED"
+        )[:2000]
+        visual_language = str(
+            declared.get("visual_language")
+            or artifact.get("visual_language")
+            or artifact.get("visual_direction")
+            or artifact.get("style")
+            or "UNSPECIFIED"
+        )[:2000]
+        text_claims = _strings(
+            declared.get("text_claims") or artifact.get("text_claims")
+        )
+        number_claims = _strings(
+            declared.get("number_claims") or artifact.get("number_claims")
+        )
+        claim_refs = _niche_evidence_refs(
+            declared.get("claim_evidence_refs")
+            or artifact.get("claim_evidence_refs")
+            or _artifact_evidence_refs(artifact)
+        )
+        facts = {
+            NicheCriterion.THUMBNAIL_PROMISE_FIDELITY: _semantic_overlap(
+                approved_topic, promise
+            ),
+            NicheCriterion.VISUAL_LANGUAGE_FIT: visual_language != "UNSPECIFIED",
+            NicheCriterion.CLAIM_SCOPE_FIT: not (text_claims or number_claims)
+            or bool(claim_refs),
+        }
+        return ThumbnailNicheAlignmentInput(
+            **common,
+            approved_topic=approved_topic or "UNSPECIFIED",
+            thumbnail_promise=promise,
+            implied_niche=str(
+                declared.get("implied_niche")
+                or artifact.get("implied_niche")
+                or digest.primary_niche
+            ),
+            visual_language=visual_language,
+            text_claims=text_claims,
+            number_claims=number_claims,
+            claim_evidence_refs=claim_refs,
+            misleading_product_or_ui_representation=bool(
+                declared.get("misleading_product_or_ui_representation")
+                or artifact.get("misleading_product_or_ui_representation")
+            ),
+            semantic_evidence=_semantic_criterion_evidence(facts, evidence_ref),
+        )
+
+    def _metadata_input(
+        self,
+        *,
+        common: dict[str, Any],
+        artifact: dict[str, Any],
+        digest: NicheContractDigest,
+        approved_topic: str,
+        evidence_ref: NicheEvidenceRef,
+    ) -> MetadataNicheAlignmentInput:
+        declared = _dict(artifact.get("niche_alignment_input"))
+        title = str(artifact.get("title") or "UNSPECIFIED")[:2000]
+        description = str(artifact.get("description") or "UNSPECIFIED")[:20_000]
+        chapters = [
+            str(item.get("title") or item.get("name") or item)
+            if isinstance(item, dict)
+            else str(item)
+            for item in _list(artifact.get("chapters"))
+        ]
+        cta = artifact.get("cta") or artifact.get("call_to_action")
+        claims = _strings(declared.get("claim_scope") or artifact.get("claim_scope"))
+        claim_refs = _niche_evidence_refs(
+            declared.get("claim_evidence_refs")
+            or artifact.get("claim_evidence_refs")
+            or _artifact_evidence_refs(artifact)
+        )
+        corpus = " ".join(
+            [
+                title,
+                description,
+                *chapters,
+                str(artifact.get("summary_copy") or ""),
+                str(artifact.get("upload_card_copy") or ""),
+                str(cta or ""),
+            ]
+        )
+        facts = {
+            NicheCriterion.METADATA_TOPIC_FIDELITY: _semantic_overlap(
+                approved_topic, title
+            ),
+            NicheCriterion.AUDIENCE_FIT: _matches_any_authority(
+                corpus,
+                [
+                    digest.target_audience,
+                    *digest.audience_segments,
+                    *digest.audience_pain_points,
+                    *digest.audience_desired_outcomes,
+                ],
+            ),
+            NicheCriterion.POSITIONING_FIT: _semantic_overlap(
+                digest.positioning, corpus
+            ),
+            NicheCriterion.CLAIM_SCOPE_FIT: not claims or bool(claim_refs),
+            NicheCriterion.CTA_FIT: not cta
+            or not _contains_forbidden_topic(
+                str(cta),
+                [*digest.forbidden_topics, *digest.category_forbidden_topics],
+            ),
+        }
+        return MetadataNicheAlignmentInput(
+            **common,
+            approved_topic=approved_topic or "UNSPECIFIED",
+            title=title,
+            description=description,
+            keywords=_strings(artifact.get("keywords")),
+            tags=_strings(artifact.get("tags")),
+            chapters=chapters,
+            summary_copy=str(artifact.get("summary_copy") or "") or None,
+            upload_card_copy=str(artifact.get("upload_card_copy") or "") or None,
+            cta=str(cta)[:4000] if cta else None,
+            declared_category_id=declared.get("category_id") or digest.category_id,
+            declared_content_pillar_key=str(
+                declared.get("content_pillar_key") or digest.content_pillar_key
+            ),
+            claim_scope=claims,
+            claim_evidence_refs=claim_refs,
+            adjacent_niche_conflict=bool(
+                declared.get("adjacent_niche_conflict")
+                or artifact.get("adjacent_niche_conflict")
+            ),
+            semantic_evidence=_semantic_criterion_evidence(facts, evidence_ref),
+        )
+
+    @staticmethod
+    def _refresh_dossier(
+        *,
+        artifacts: dict[str, Any],
+        digest: NicheContractDigest,
+        digest_ref: str,
+    ) -> None:
+        raw_results = _dict(artifacts.get("niche_gate_results"))
+        try:
+            results = [
+                NicheGateResult.model_validate(raw_results[key.value])
+                for key in (
+                    NicheGateKey.TOPIC,
+                    NicheGateKey.SCRIPT,
+                    NicheGateKey.VISUAL,
+                    NicheGateKey.THUMBNAIL,
+                    NicheGateKey.METADATA,
+                )
+            ]
+        except (KeyError, TypeError, ValueError):
+            return
+        try:
+            channel_fit = ChannelFitEvaluation.model_validate(
+                artifacts.get("channel_fit_gate")
+            )
+        except Exception:
+            return
+        dossier = NicheAlignmentDossierBuilder().build(
+            digest=digest,
+            digest_ref=digest_ref,
+            gate_results=results,
+            channel_fit=channel_fit,
+            dossier_scope=NicheDossierScope.PRODUCTION_PACKAGE,
+        )
+        artifacts["niche_alignment_dossier"] = dossier.model_dump(mode="json")
 
 
 def verify_m12_2_required_tags(repo_root: Path = ROOT) -> dict[str, Any]:
@@ -185,6 +748,7 @@ class FirstScriptedVideoPackageService:
         self.llm_router = llm_router or LLMRouterService(session)
         self.output_validation = AgentOutputValidationService(session)
         self.deterministic_gates = R3D4GateService(session)
+        self.niche_gate_evaluator = M122NicheGateEvaluator()
         self.package_status_reducer = PackageStatusReducer()
         self.repo_root = repo_root
 
@@ -204,7 +768,10 @@ class FirstScriptedVideoPackageService:
             ))
 
         readiness_snapshot = ProviderReadinessService(self.session, self.settings).run()
-        snapshot = self._active_snapshot(channel)
+        snapshot = self._snapshot_for_request(
+            channel,
+            video_project_id=data.video_project_id,
+        )
         if snapshot is None:
             return self._read(self._create_package(
                 channel_id=channel.id,
@@ -227,7 +794,12 @@ class FirstScriptedVideoPackageService:
                 next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
             ))
 
-        video_project_id = self._validate_optional_project(data.video_project_id, channel_id=channel.id, snapshot_id=snapshot.id)
+        video_project_id = self._validate_optional_project(
+            data.video_project_id,
+            channel_id=channel.id,
+            snapshot=snapshot,
+            profile_version=profile_version,
+        )
         flag_block = self._flag_block(data)
         if flag_block is not None:
             return self._read(self._create_package(
@@ -361,7 +933,10 @@ class FirstScriptedVideoPackageService:
             ))
 
         readiness_snapshot = ProviderReadinessService(self.session, self.settings).run()
-        snapshot = self._active_snapshot(channel)
+        snapshot = self._snapshot_for_request(
+            channel,
+            video_project_id=data.video_project_id,
+        )
         if snapshot is None:
             raise ValidationFailureError(f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}")
 
@@ -369,7 +944,12 @@ class FirstScriptedVideoPackageService:
         if profile_version is None:
             raise ValidationFailureError(f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}")
 
-        video_project_id = self._validate_optional_project(data.video_project_id, channel_id=channel.id, snapshot_id=snapshot.id)
+        video_project_id = self._validate_optional_project(
+            data.video_project_id,
+            channel_id=channel.id,
+            snapshot=snapshot,
+            profile_version=profile_version,
+        )
 
         channel_contract = (
             snapshot.compiled_payload.get("channel_contract_json")
@@ -680,6 +1260,39 @@ class FirstScriptedVideoPackageService:
         artifacts["duration_model"] = _duration_model_from_context(effective_context_snapshot, target_video_type=data.target_video_type)
         if effective_context_snapshot is not None:
             artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
+        niche_seed_errors = self._seed_frozen_niche_authority(
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+            video_project_id=video_project_id,
+            requested_topic=data.topic,
+        )
+        if niche_seed_errors:
+            artifacts["niche_authority_block"] = {
+                "status": "BLOCK",
+                "reason_codes": niche_seed_errors,
+                "provider_calls_made": False,
+            }
+            artifacts["human_review_checklist"] = self._human_review_checklist(
+                artifacts, provider_readiness_snapshot_id
+            )
+            return {
+                "id": package_id,
+                "channel_id": channel.id,
+                "video_project_id": video_project_id,
+                "channel_profile_version_id": profile_version.id,
+                "compiled_policy_snapshot_id": snapshot.id,
+                "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
+                "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
+                "provider_readiness_snapshot_id": provider_readiness_snapshot_id,
+                "status": "BLOCKED",
+                "agent_run_refs": [],
+                "prompt_render_run_refs": [],
+                "prompt_audit_snapshot_refs": [],
+                "artifacts": artifacts,
+                "limitations": ["Strict NICH1 frozen authority failed before any LLM route."],
+                "risk_limitations_summary": self._risk_summary(artifacts, "BLOCKED"),
+                "next_action": "Repair the frozen NICH1 lineage before package generation.",
+            }
         agent_run_refs: list[dict[str, Any]] = []
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
@@ -844,6 +1457,16 @@ class FirstScriptedVideoPackageService:
             artifacts[step.artifact_key] = output_validation.canonical_artifact or {}
             output = {**output, "artifact": artifacts[step.artifact_key]}
             envelope_status = output.get("status")
+            niche_stop = self._run_niche_gate_after_agent(
+                package_id=package_id,
+                step=step,
+                artifacts=artifacts,
+                effective_context_snapshot=effective_context_snapshot,
+            )
+            if niche_stop is not None:
+                status = niche_stop["stop_status"]
+                next_action = niche_stop["next_action"]
+                break
             if step.agent_key == "VisualPlanningAgent":
                 visual_block = self._visual_plan_block(artifacts[step.artifact_key])
                 if visual_block is not None:
@@ -981,6 +1604,41 @@ class FirstScriptedVideoPackageService:
         artifacts["duration_model"] = _duration_model_from_context(effective_context_snapshot, target_video_type=data.target_video_type)
         if effective_context_snapshot is not None:
             artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
+        niche_seed_errors = self._seed_frozen_niche_authority(
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+            video_project_id=video_project_id,
+            requested_topic=data.topic,
+        )
+        if niche_seed_errors:
+            artifacts["niche_authority_block"] = {
+                "status": "BLOCK",
+                "reason_codes": niche_seed_errors,
+                "provider_calls_made": False,
+            }
+            readiness_id = provider_readiness_snapshot.get("id")
+            provider_id = uuid.UUID(str(readiness_id)) if readiness_id else None
+            artifacts["human_review_checklist"] = self._human_review_checklist(
+                artifacts, provider_id
+            )
+            return {
+                "id": package_id,
+                "channel_id": channel.id,
+                "video_project_id": video_project_id,
+                "channel_profile_version_id": profile_version.id,
+                "compiled_policy_snapshot_id": snapshot.id,
+                "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
+                "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
+                "provider_readiness_snapshot_id": provider_id,
+                "status": "BLOCKED",
+                "agent_run_refs": [],
+                "prompt_render_run_refs": [],
+                "prompt_audit_snapshot_refs": [],
+                "artifacts": artifacts,
+                "limitations": ["Strict NICH1 frozen authority failed before any LLM route."],
+                "risk_limitations_summary": self._risk_summary(artifacts, "BLOCKED"),
+                "next_action": "Repair the frozen NICH1 lineage before full rehearsal.",
+            }
         agent_run_refs: list[dict[str, Any]] = []
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
@@ -1358,6 +2016,18 @@ class FirstScriptedVideoPackageService:
         if step.agent_key in {"ScriptWriterAgent", "ScriptRewriteAgent"} and isinstance(artifacts[step.artifact_key], dict):
             _refresh_script_duration_self_check(artifacts[step.artifact_key], _dict(artifacts.get("duration_model")))
         output = {**output, "artifact": artifacts[step.artifact_key]}
+        niche_stop = self._run_niche_gate_after_agent(
+            package_id=package_id,
+            step=step,
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+        )
+        if niche_stop is not None:
+            return {
+                "stop_status": niche_stop["stop_status"],
+                "next_action": niche_stop["next_action"],
+                "parsed_output": output,
+            }
         agent_block = self._full_rehearsal_artifact_block(step.agent_key, artifacts[step.artifact_key])
         if agent_block is not None:
             artifacts[f"{step.artifact_key}_review"] = agent_block
@@ -1721,6 +2391,14 @@ class FirstScriptedVideoPackageService:
             return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"]}
         _refresh_script_duration_self_check(repaired_script, _dict(artifacts.get("duration_model")))
         artifacts["narration_script"] = repaired_script
+        niche_stop = self._run_niche_gate_after_agent(
+            package_id=package_id,
+            step=PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+        )
+        if niche_stop is not None:
+            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -1815,6 +2493,14 @@ class FirstScriptedVideoPackageService:
                 return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
             _refresh_script_duration_self_check(repaired_script, duration_model)
             artifacts["narration_script"] = repaired_script
+            niche_stop = self._run_niche_gate_after_agent(
+                package_id=package_id,
+                step=PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
+                artifacts=artifacts,
+                effective_context_snapshot=effective_context_snapshot,
+            )
+            if niche_stop is not None:
+                return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
             rerun = self.deterministic_gates.run_after_agent(
                 package_id=package_id,
                 video_project_id=video_project_id,
@@ -1859,6 +2545,14 @@ class FirstScriptedVideoPackageService:
             return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
         _refresh_script_duration_self_check(repaired_script, duration_model)
         artifacts["narration_script"] = repaired_script
+        niche_stop = self._run_niche_gate_after_agent(
+            package_id=package_id,
+            step=PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+        )
+        if niche_stop is not None:
+            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -1928,6 +2622,14 @@ class FirstScriptedVideoPackageService:
         if not patches:
             return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
         artifacts["visual_plan"] = repaired_plan
+        niche_stop = self._run_niche_gate_after_agent(
+            package_id=package_id,
+            step=PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+        )
+        if niche_stop is not None:
+            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -1982,6 +2684,14 @@ class FirstScriptedVideoPackageService:
             note = f"Future planned AI media disclosure note: {note}"
         repaired_metadata = {**metadata, "disclosure_notes": note}
         artifacts["metadata_package"] = repaired_metadata
+        niche_stop = self._run_niche_gate_after_agent(
+            package_id=package_id,
+            step=PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
+            artifacts=artifacts,
+            effective_context_snapshot=effective_context_snapshot,
+        )
+        if niche_stop is not None:
+            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
         artifacts["disclosure_wording_repair_attempt"] = {
             "attempted": True,
             "repair_type": "complete_ai_disclosure_conditional_wording",
@@ -2038,6 +2748,45 @@ class FirstScriptedVideoPackageService:
             return None
         return snapshot if snapshot.status == "active" else None
 
+    def _snapshot_for_request(
+        self,
+        channel: ChannelWorkspace,
+        *,
+        video_project_id: uuid.UUID | None,
+    ) -> CompiledChannelPolicySnapshot | None:
+        if video_project_id is None:
+            return self._active_snapshot(channel)
+        project = self.session.get(VideoProject, video_project_id)
+        if project is None:
+            raise NotFoundError(f"video project not found: {video_project_id}")
+        if project.channel_workspace_id != channel.id:
+            raise ValidationFailureError(
+                "video project does not belong to selected channel"
+            )
+        if project.company_id != channel.company_id:
+            raise ValidationFailureError(
+                "video project company scope does not match selected channel"
+            )
+        snapshot = self.session.get(
+            CompiledChannelPolicySnapshot,
+            project.policy_snapshot_id,
+        )
+        if snapshot is None:
+            raise ValidationFailureError("video project frozen policy snapshot is missing")
+        if snapshot.channel_workspace_id != channel.id:
+            raise ValidationFailureError(
+                "video project frozen policy snapshot channel mismatch"
+            )
+        if snapshot.status not in {"active", "approved"}:
+            raise ValidationFailureError(
+                "video project frozen policy snapshot was never approved/activated"
+            )
+        if snapshot.content_hash != stable_hash(snapshot.compiled_payload or {}):
+            raise ValidationFailureError(
+                "video project frozen policy snapshot content hash mismatch"
+            )
+        return snapshot
+
     def _select_preflight_channel(self, channel_id: uuid.UUID | None) -> ChannelWorkspace | None:
         if channel_id is not None:
             return self.session.get(ChannelWorkspace, channel_id)
@@ -2054,7 +2803,8 @@ class FirstScriptedVideoPackageService:
         video_project_id: uuid.UUID | None,
         *,
         channel_id: uuid.UUID,
-        snapshot_id: uuid.UUID,
+        snapshot: CompiledChannelPolicySnapshot,
+        profile_version: ChannelProfileVersion,
     ) -> uuid.UUID | None:
         if video_project_id is None:
             return None
@@ -2063,8 +2813,69 @@ class FirstScriptedVideoPackageService:
             raise NotFoundError(f"video project not found: {video_project_id}")
         if project.channel_workspace_id != channel_id:
             raise ValidationFailureError("video project does not belong to selected channel")
-        if project.policy_snapshot_id != snapshot_id:
-            raise ValidationFailureError("video project is not bound to the active compiled policy snapshot")
+        if project.policy_snapshot_id != snapshot.id:
+            raise ValidationFailureError(
+                "video project is not bound to the selected frozen policy snapshot"
+            )
+        if snapshot.channel_profile_version_id != profile_version.id:
+            raise ValidationFailureError(
+                "frozen policy snapshot profile binding mismatch"
+            )
+        if project.channel_profile_version_id not in (None, profile_version.id):
+            raise ValidationFailureError(
+                "video project frozen channel profile version mismatch"
+            )
+        if profile_version.channel_workspace_id != channel_id:
+            raise ValidationFailureError(
+                "frozen channel profile version channel mismatch"
+            )
+        if profile_version.status not in {"active", "approved"}:
+            raise ValidationFailureError(
+                "frozen channel profile version was never approved/activated"
+            )
+        if (
+            snapshot.profile_input_hash != profile_version.profile_input_hash
+            or profile_version.profile_input_hash
+            != stable_hash(profile_version.profile_input or {})
+        ):
+            raise ValidationFailureError(
+                "frozen channel profile version content hash mismatch"
+            )
+        channel_contract = _dict(
+            (snapshot.compiled_payload or {}).get("channel_contract_json")
+        )
+        channel_contract_hash = stable_hash(channel_contract)
+        if (
+            project.channel_contract_content_hash
+            and project.channel_contract_content_hash != channel_contract_hash
+        ):
+            raise ValidationFailureError(
+                "video project frozen channel contract hash mismatch"
+            )
+        frozen = _dict(
+            (project.audience_delivery_summary or {}).get("niche_governance")
+        )
+        frozen_digest = _dict(frozen.get("niche_contract_digest"))
+        if frozen and (
+            project.channel_profile_version_id != profile_version.id
+            or str(frozen.get("channel_id")) != str(channel_id)
+            or str(frozen_digest.get("category_id"))
+            != str(project.category_id)
+        ):
+            raise ValidationFailureError(
+                "video project NICH1 frozen scope mismatch"
+            )
+        if frozen_digest and (
+            frozen_digest.get("compiled_policy_snapshot_hash")
+            != snapshot.content_hash
+            or frozen_digest.get("channel_profile_version_hash")
+            != profile_version.profile_input_hash
+            or frozen_digest.get("channel_contract_hash")
+            != channel_contract_hash
+        ):
+            raise ValidationFailureError(
+                "video project NICH1 frozen authority hash mismatch"
+            )
         return project.id
 
     def _ensure_effective_context(
@@ -2230,6 +3041,160 @@ class FirstScriptedVideoPackageService:
             provider_readiness_state=provider_readiness_state,
             schema_requirements={"base_envelope": "m12.1.0", "response_format": "json"},
         )
+
+    def _seed_frozen_niche_authority(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+        video_project_id: uuid.UUID | None,
+        requested_topic: str,
+    ) -> list[str]:
+        if effective_context_snapshot is None:
+            return []
+        authority = resolve_frozen_niche_authority(effective_context_snapshot)
+        if not authority.strict:
+            return []
+        if not authority.valid or authority.digest is None or authority.digest_ref is None:
+            return authority.reason_codes or ["NICHE_CONTRACT_DIGEST_MISSING"]
+        if video_project_id is None:
+            return ["NICH1_STRICT_PROJECT_REQUIRED"]
+        project = self.session.get(VideoProject, video_project_id)
+        if project is None:
+            return ["NICH1_STRICT_PROJECT_MISSING"]
+        frozen = _dict((project.audience_delivery_summary or {}).get("niche_governance"))
+        if not frozen:
+            return ["NICH1_PROJECT_FROZEN_LINEAGE_MISSING"]
+        reasons: list[str] = []
+        if frozen.get("niche_contract_digest") != authority.digest:
+            reasons.append("NICH1_PROJECT_DIGEST_MISMATCH")
+        if frozen.get("niche_contract_digest_ref") != authority.digest_ref:
+            reasons.append("NICH1_PROJECT_DIGEST_REF_MISMATCH")
+        approved_topic = str(frozen.get("topic") or "").strip()
+        if not approved_topic:
+            reasons.append("NICH1_APPROVED_TOPIC_MISSING")
+        elif requested_topic.strip() != approved_topic:
+            reasons.append("NICH1_REQUESTED_TOPIC_FROZEN_LINEAGE_MISMATCH")
+        try:
+            topic_result = NicheGateResult.model_validate(
+                frozen.get("topic_niche_alignment_gate")
+            )
+        except Exception:
+            topic_result = None
+            reasons.append("NICH1_TOPIC_GATE_TYPED_RESULT_INVALID")
+        try:
+            channel_fit = ChannelFitEvaluation.model_validate(
+                frozen.get("channel_fit_gate")
+            )
+        except Exception:
+            channel_fit = None
+            reasons.append("NICH1_CHANNEL_FIT_TYPED_RESULT_INVALID")
+        try:
+            pre_admission_dossier = NicheAlignmentDossier.model_validate(
+                frozen.get("niche_alignment_dossier")
+            )
+        except Exception:
+            pre_admission_dossier = None
+            reasons.append("NICH1_ALIGNMENT_DOSSIER_TYPED_RESULT_INVALID")
+        if topic_result is not None:
+            if (
+                topic_result.gate_key != NicheGateKey.TOPIC
+                or topic_result.verdict != NicheGateVerdict.PASS
+            ):
+                reasons.append("NICH1_TOPIC_GATE_NOT_PASS")
+            if (
+                topic_result.niche_contract_digest_ref != authority.digest_ref["ref"]
+                or topic_result.niche_contract_digest_hash
+                != authority.digest["content_hash"]
+            ):
+                reasons.append("NICH1_TOPIC_GATE_DIGEST_BINDING_MISMATCH")
+            if (
+                topic_result.checked_policy_snapshot_ref
+                != authority.digest["compiled_policy_snapshot_ref"]
+                or topic_result.checked_policy_snapshot_hash
+                != authority.digest["compiled_policy_snapshot_hash"]
+            ):
+                reasons.append("NICH1_TOPIC_GATE_POLICY_BINDING_MISMATCH")
+            daily_idea_ref = _dict(frozen.get("daily_idea_decision_ref"))
+            if (
+                daily_idea_ref.get("ref") != topic_result.subject_ref
+                or daily_idea_ref.get("content_hash") != topic_result.subject_hash
+            ):
+                reasons.append("NICH1_DAILY_IDEA_TOPIC_GATE_BINDING_MISMATCH")
+        if channel_fit is not None:
+            if channel_fit.channel_fit_result != NicheGateVerdict.PASS:
+                reasons.append("NICH1_CHANNEL_FIT_NOT_PASS")
+            if topic_result is not None and channel_fit.gate_result_hashes.get(
+                NicheGateKey.TOPIC
+            ) != topic_result.content_hash:
+                reasons.append("NICH1_CHANNEL_FIT_TOPIC_HASH_MISMATCH")
+        if (
+            pre_admission_dossier is None
+            or pre_admission_dossier.dossier_scope
+            != NicheDossierScope.PRE_ADMISSION
+            or pre_admission_dossier.overall_verdict != NicheGateVerdict.PASS
+            or pre_admission_dossier.topic_result is None
+            or topic_result is None
+            or pre_admission_dossier.topic_result.content_hash
+            != topic_result.content_hash
+            or pre_admission_dossier.niche_contract_digest_ref
+            != authority.digest_ref["ref"]
+            or pre_admission_dossier.niche_contract_digest_hash
+            != authority.digest["content_hash"]
+            or pre_admission_dossier.compiled_policy_snapshot_ref
+            != authority.digest["compiled_policy_snapshot_ref"]
+            or pre_admission_dossier.compiled_policy_snapshot_hash
+            != authority.digest["compiled_policy_snapshot_hash"]
+            or channel_fit is None
+            or pre_admission_dossier.channel_fit_result
+            != channel_fit.channel_fit_result
+            or pre_admission_dossier.channel_fit_score
+            != channel_fit.channel_fit_score
+            or pre_admission_dossier.channel_fit_threshold
+            != channel_fit.channel_fit_threshold
+        ):
+            reasons.append("NICH1_ALIGNMENT_DOSSIER_BINDING_MISMATCH")
+        editorial_slot_ref = _dict(frozen.get("editorial_slot_ref"))
+        if (
+            editorial_slot_ref.get("content_hash")
+            != authority.digest.get("editorial_slot_hash")
+            or str(frozen.get("category_id"))
+            != str(authority.digest.get("category_id"))
+            or str(frozen.get("content_pillar") or "").casefold()
+            != str(authority.digest.get("content_pillar_key") or "").casefold()
+            or str(frozen.get("series_key") or "").casefold()
+            != str(authority.digest.get("series_key") or "").casefold()
+            or str(frozen.get("production_goal") or "").casefold()
+            != str(authority.digest.get("production_goal") or "").casefold()
+        ):
+            reasons.append("NICH1_PROJECT_EDITORIAL_BINDING_MISMATCH")
+        if reasons:
+            return list(dict.fromkeys(reasons))
+
+        assert topic_result is not None
+        assert channel_fit is not None
+        artifacts["niche_contract_digest"] = authority.digest
+        artifacts["niche_contract_digest_ref"] = authority.digest_ref
+        artifacts["approved_daily_idea"] = {
+            "topic": approved_topic,
+            "angle": frozen.get("angle"),
+            "daily_idea_decision_ref": frozen.get("daily_idea_decision_ref"),
+            "editorial_slot_ref": frozen.get("editorial_slot_ref"),
+            "category_id": frozen.get("category_id"),
+            "content_pillar": frozen.get("content_pillar"),
+            "series_key": frozen.get("series_key"),
+            "production_goal": frozen.get("production_goal"),
+        }
+        artifacts["topic_niche_alignment_gate"] = topic_result.model_dump(mode="json")
+        artifacts["channel_fit_gate"] = channel_fit.model_dump(mode="json")
+        artifacts["niche_gate_results"] = {
+            NicheGateKey.TOPIC.value: topic_result.model_dump(mode="json")
+        }
+        assert pre_admission_dossier is not None
+        artifacts["niche_alignment_dossier_pre_admission"] = (
+            pre_admission_dossier.model_dump(mode="json")
+        )
+        return []
 
     def _task_payload(
         self,
@@ -2451,6 +3416,39 @@ class FirstScriptedVideoPackageService:
             agent_context_pack_snapshot_id=context_pack_snapshot.id if context_pack_snapshot else None,
             raw_output_ref=f"prompt-output:{render.prompt_render_run_id}",
         )
+
+    def _run_niche_gate_after_agent(
+        self,
+        *,
+        package_id: uuid.UUID,
+        step: PackageAgentStep,
+        artifacts: dict[str, Any],
+        effective_context_snapshot: EffectiveChannelRuntimeContextSnapshot | None,
+    ) -> dict[str, str] | None:
+        try:
+            self.niche_gate_evaluator.evaluate_after_agent(
+                package_id=package_id,
+                step=step,
+                artifacts=artifacts,
+                effective_context=effective_context_snapshot,
+            )
+        except Exception as exc:
+            reason = (
+                str(exc)
+                if isinstance(exc, ValidationFailureError)
+                else f"NICH1_TYPED_GATE_GENERATION_FAILED:{type(exc).__name__}"
+            )
+            artifacts["niche_gate_generation_block"] = {
+                "status": "BLOCK",
+                "agent_key": step.agent_key,
+                "reason_codes": [reason],
+                "provider_calls_made": False,
+            }
+            return {
+                "stop_status": "BLOCKED",
+                "next_action": "Repair the strict NICH1 artifact input and generate a new typed gate result.",
+            }
+        return None
 
     def _run_agent_deterministic_gates(
         self,
@@ -3752,6 +4750,193 @@ def _gate_report_after_repair(existing: dict[str, Any] | None, batch: Any) -> di
             if result.status != "PASS"
         ],
     }
+
+
+def _niche_subject_hash(artifact_key: str, artifact: dict[str, Any]) -> str:
+    return nich1_stable_hash(
+        {"artifact_key": artifact_key, "canonical_artifact": artifact}
+    )
+
+
+def _script_text(artifact: dict[str, Any]) -> str:
+    sentences = [item for item in _list(artifact.get("sentences")) if isinstance(item, dict)]
+    text = " ".join(str(item.get("text") or "").strip() for item in sentences).strip()
+    if text:
+        return text
+    return str(
+        artifact.get("script_text")
+        or artifact.get("narration")
+        or artifact.get("body")
+        or ""
+    ).strip()
+
+
+def _niche_tokens(value: Any) -> set[str]:
+    normalized = "".join(
+        character.casefold() if character.isalnum() else " "
+        for character in str(value or "")
+    )
+    stopwords = {
+        "and",
+        "for",
+        "from",
+        "into",
+        "one",
+        "the",
+        "this",
+        "that",
+        "with",
+        "your",
+        "cua",
+        "cho",
+        "mot",
+        "nhung",
+        "trong",
+    }
+    return {
+        token
+        for token in normalized.split()
+        if len(token) >= 3 and token not in stopwords and token != "unspecified"
+    }
+
+
+def _semantic_overlap(authority: Any, candidate: Any) -> bool:
+    authority_text = " ".join(str(authority or "").casefold().split())
+    candidate_text = " ".join(str(candidate or "").casefold().split())
+    if not authority_text or not candidate_text or "unspecified" in candidate_text:
+        return False
+    if authority_text in candidate_text:
+        return True
+    authority_tokens = _niche_tokens(authority_text)
+    candidate_tokens = _niche_tokens(candidate_text)
+    if not authority_tokens or not candidate_tokens:
+        return False
+    required = min(2, len(authority_tokens))
+    return len(authority_tokens & candidate_tokens) >= required
+
+
+def _matches_any_authority(candidate: str, authority_values: list[str]) -> bool:
+    return any(
+        _semantic_overlap(authority, candidate)
+        for authority in authority_values
+        if str(authority or "").strip()
+    )
+
+
+def _declared_or_matched_values(
+    declared: Any,
+    authority_values: list[str],
+    corpus: str,
+) -> list[str]:
+    declared_values = _strings(declared)
+    if declared_values:
+        return [
+            authority
+            for authority in authority_values
+            if any(_semantic_overlap(authority, value) for value in declared_values)
+            and _semantic_overlap(authority, corpus)
+        ]
+    return [
+        authority
+        for authority in authority_values
+        if _semantic_overlap(authority, corpus)
+    ]
+
+
+def _artifact_evidence_refs(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for key in ("evidence_refs", "claim_evidence_refs", "source_refs"):
+        refs.extend(item for item in _list(artifact.get(key)) if isinstance(item, dict))
+    return refs
+
+
+def _niche_evidence_refs(values: Any) -> list[NicheEvidenceRef]:
+    refs: list[NicheEvidenceRef] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    for index, raw in enumerate(_list(values), start=1):
+        if isinstance(raw, NicheEvidenceRef):
+            item = raw
+        elif isinstance(raw, dict):
+            ref_type = str(raw.get("type") or "artifact_evidence")
+            ref = str(
+                raw.get("ref")
+                or (
+                    f"{ref_type}://{raw.get('id')}"
+                    if raw.get("id") not in (None, "")
+                    else f"artifact-evidence://{nich1_stable_hash(raw)}#{index}"
+                )
+            )
+            raw_hash = raw.get("content_hash")
+            content_hash = (
+                str(raw_hash)
+                if isinstance(raw_hash, str)
+                and re.fullmatch(r"[0-9a-f]{64}", raw_hash)
+                else None
+            )
+            item = NicheEvidenceRef(
+                type=ref_type[:100],
+                ref=ref[:1000],
+                content_hash=content_hash,
+            )
+        else:
+            item = NicheEvidenceRef(
+                type="artifact_evidence",
+                ref=f"artifact-evidence://{str(raw)[:900]}",
+            )
+        marker = (item.type, item.ref, item.content_hash)
+        if marker not in seen:
+            seen.add(marker)
+            refs.append(item)
+    return refs[:64]
+
+
+def _semantic_criterion_evidence(
+    facts: dict[NicheCriterion, bool],
+    evidence_ref: NicheEvidenceRef,
+) -> list[NicheCriterionEvidence]:
+    return [
+        NicheCriterionEvidence(
+            criterion=criterion,
+            verdict=(
+                NicheGateVerdict.PASS
+                if passed
+                else NicheGateVerdict.BLOCK
+            ),
+            score=1.0 if passed else 0.0,
+            rationale=(
+                f"Deterministic canonical-artifact check passed for {criterion.value}."
+                if passed
+                else f"Canonical artifact lacks deterministic evidence for {criterion.value}."
+            ),
+            reason_codes=(
+                []
+                if passed
+                else [NicheReasonCode.SEMANTIC_ALIGNMENT_BLOCKED]
+            ),
+            evidence_refs=[evidence_ref],
+        )
+        for criterion, passed in sorted(facts.items(), key=lambda item: item[0].value)
+    ]
+
+
+def _canonical_niche_visual_route(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    return {
+        "DIAGRAM": "NATIVE_DIAGRAM",
+        "CARD": "EDITORIAL_TEXT_GRAPHIC",
+        "SCREENSHOT": "AUTHORIZED_UI_OR_PRODUCT_ASSET",
+        "EXISTING_ASSET": "HUMAN_SUPPLIED_ASSET",
+        "AI_HERO_CANDIDATE_ONLY": "AI_GENERATED_IMAGE",
+    }.get(raw, raw)
+
+
+def _contains_forbidden_topic(text: str, forbidden_topics: list[str]) -> bool:
+    normalized = " ".join(str(text or "").casefold().split())
+    return any(
+        " ".join(topic.casefold().split()) in normalized
+        for topic in forbidden_topics
+        if topic.strip()
+    )
 
 
 def _dict(value: Any) -> dict[str, Any]:

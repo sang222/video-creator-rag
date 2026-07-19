@@ -1,5 +1,5 @@
 catalog_key: gate_definition_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -182,3 +182,48 @@ items:
       logic: publish_risk_gate
       review_required: false
     reason_code_refs: [MANUAL_REVIEW_REQUIRED, SYSTEM_OK]
+  - gate_key: topic_niche_alignment_gate
+    gate_name: Topic Niche Alignment Gate
+    gate_domain: niche_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: nich1.topic-input.v1
+    output_schema_version: nich1.gate-result.v1
+    definition: {logic: topic_niche_alignment_gate, review_required: true, review_type: editorial}
+    reason_code_refs: [FORBIDDEN_TOPIC_CONFLICT, ADJACENT_NICHE_CONFLICT, SEMANTIC_EVIDENCE_MISSING]
+  - gate_key: script_niche_alignment_gate
+    gate_name: Script Niche Alignment Gate
+    gate_domain: niche_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: nich1.script-input.v1
+    output_schema_version: nich1.gate-result.v1
+    definition: {logic: script_niche_alignment_gate, review_required: true, review_type: editorial}
+    reason_code_refs: [APPROVED_TOPIC_DRIFT, FORBIDDEN_TOPIC_CONFLICT, CLAIM_SCOPE_MISMATCH]
+  - gate_key: visual_niche_alignment_gate
+    gate_name: Visual Niche Alignment Gate
+    gate_domain: niche_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: nich1.visual-input.v1
+    output_schema_version: nich1.gate-result.v1
+    definition: {logic: visual_niche_alignment_gate, review_required: true, review_type: editorial}
+    reason_code_refs: [MECHANISM_MEANING_REPLACED_BY_GENERIC_STOCK, AUTHORIZED_ASSET_REQUIRED_FOR_EVIDENCE]
+  - gate_key: thumbnail_niche_alignment_gate
+    gate_name: Thumbnail Niche Alignment Gate
+    gate_domain: niche_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: nich1.thumbnail-input.v1
+    output_schema_version: nich1.gate-result.v1
+    definition: {logic: thumbnail_niche_alignment_gate, review_required: true, review_type: packaging_review}
+    reason_code_refs: [THUMBNAIL_TOPIC_PROMISE_MISMATCH, THUMBNAIL_CLAIM_EVIDENCE_MISSING]
+  - gate_key: metadata_niche_alignment_gate
+    gate_name: Metadata Niche Alignment Gate
+    gate_domain: niche_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: nich1.metadata-input.v1
+    output_schema_version: nich1.gate-result.v1
+    definition: {logic: metadata_niche_alignment_gate, review_required: true, review_type: seo_review}
+    reason_code_refs: [METADATA_TOPIC_MISMATCH, METADATA_CLAIM_EVIDENCE_MISSING, ADJACENT_NICHE_CONFLICT]

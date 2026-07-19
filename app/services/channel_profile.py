@@ -13,6 +13,7 @@ from app.contracts import (
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
+    AuditEvent,
     ChannelProfileVersion,
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
@@ -20,7 +21,11 @@ from app.db.models import (
 )
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
-from app.services.channel_contract import CONTRACT_COMPLETE, contract_status_from_snapshot_payload, ensure_snapshot_contract_activatable, reject_legacy_provider_budget_fields
+from app.services.channel_contract import (
+    CONTRACT_COMPLETE,
+    contract_status_from_snapshot_payload,
+    reject_legacy_provider_budget_fields,
+)
 from app.services.profile_compiler import ChannelProfileCompiler
 from app.services.domain_events import DomainEventBus
 from app.contracts import EventEnvelope
@@ -164,6 +169,210 @@ class ChannelProfileService:
             correlation_id=correlation_id,
         )
 
+    def approve_and_activate_ch1_flex_v2(
+        self,
+        *,
+        channel_id: uuid.UUID,
+        approval_ref: str,
+        approved_by: uuid.UUID | None = None,
+        correlation_id: str = "ch1-flex-v2",
+    ) -> dict:
+        """Reuse the mutable v2 slot, compile exact visual policy, approve and activate.
+
+        The helper deliberately does not call any provider. It records the semantic
+        diff and returns the existing compiler/audit receipts plus an explicit v1
+        rollback pointer.
+        """
+
+        channel = self.session.get(ChannelWorkspace, channel_id)
+        if channel is None:
+            raise NotFoundError(f"channel not found: {channel_id}")
+        if channel.key != "small-team-ai":
+            raise ValidationFailureError("CH1-FLEX v2 is scoped to small-team-ai")
+        if approved_by is not None and self.session.get(User, approved_by) is None:
+            raise NotFoundError(f"user not found: {approved_by}")
+
+        versions = self.list_profile_versions(channel_id)
+        profile_v1 = next((item for item in versions if item.version == 1), None)
+        if profile_v1 is None:
+            raise ValidationFailureError("CH1-FLEX v1 profile is required")
+        snapshot_v1 = self._latest_snapshot_for_profile(profile_v1.id)
+        if snapshot_v1 is None:
+            raise ValidationFailureError("CH1-FLEX v1 compiled snapshot is required")
+        v1_profile_payload = deepcopy(profile_v1.profile_input)
+        v1_snapshot_payload = deepcopy(snapshot_v1.compiled_payload)
+        v1_snapshot_hash = snapshot_v1.content_hash
+
+        compiler = ChannelProfileCompiler(self.session)
+        effective_v1 = ChannelProfileInput.model_validate(
+            self._effective_profile_input(profile_v1)
+        )
+        target_input = compiler.build_ch1_flex_v2_profile_input(
+            active_profile_input=effective_v1,
+            approval_ref=approval_ref,
+        )
+        target_payload = target_input.model_dump(mode="json")
+        target_hash = content_hash(target_payload)
+
+        profile_v2 = next((item for item in versions if item.version == 2), None)
+        if profile_v2 is None:
+            if any(item.version > 2 for item in versions):
+                raise ValidationFailureError(
+                    "CH1-FLEX v2 slot is missing but later profile versions exist"
+                )
+            active = self.get_active_profile_version(channel_id)
+            if active is None or active.id != profile_v1.id:
+                raise ValidationFailureError(
+                    "CH1-FLEX v1 must be active before creating profile v2"
+                )
+            profile_v2 = self.create_profile_version(
+                channel_id=channel_id,
+                data=ChannelProfileVersionCreate(
+                    profile_input=target_input,
+                    created_by=approved_by,
+                ),
+                correlation_id=f"{correlation_id}-profile",
+            )
+            if profile_v2.version != 2:
+                raise ValidationFailureError("CH1-FLEX v2 version collision")
+        elif profile_v2.profile_input_hash != target_hash:
+            if profile_v2.status != "draft":
+                raise ValidationFailureError(
+                    "existing CH1-FLEX v2 is immutable and does not match exact policy"
+                )
+            profile_v2 = self.update_draft(
+                profile_version_id=profile_v2.id,
+                data=ChannelProfileDraftUpdate(
+                    profile_input=target_input,
+                    expected_profile_input_hash=profile_v2.profile_input_hash,
+                ),
+                correlation_id=f"{correlation_id}-profile",
+            )
+
+        validation = self.validate_draft(profile_v2.id)
+        if validation["status"] != "PASS":
+            raise ValidationFailureError(
+                f"CH1-FLEX v2 validation blocked: {validation['blockers']}"
+            )
+        preview_first = self.preview_compile(profile_v2.id)
+        preview_second = self.preview_compile(profile_v2.id)
+        if preview_first["content_hash"] != preview_second["content_hash"]:
+            raise ValidationFailureError("CH1-FLEX v2 preview compile is not deterministic")
+
+        diff = self.semantic_diff(profile_v2.id, profile_v1.id)
+        if not diff["different"]:
+            raise ValidationFailureError("CH1-FLEX v2 semantic diff is empty")
+        allowed_diff_paths = {
+            "$.channel_policy.policy_version",
+            "$.channel_policy.policy_status",
+            "$.channel_policy.approval_ref",
+            "$.channel_policy.visual_source_policy_binding",
+            "$.channel_policy.provider_usage_policy.google_gemini_image",
+            "$.channel_policy.capability_requirements.required",
+            "$.channel_policy.budget_policy.derivation_refs",
+        }
+        changed_paths = {
+            str(item.get("path")) for item in diff.get("changed_paths", [])
+        }
+        required_diff_paths = {
+            "$.channel_policy.policy_version",
+            "$.channel_policy.approval_ref",
+            "$.channel_policy.visual_source_policy_binding",
+            "$.channel_policy.provider_usage_policy.google_gemini_image",
+        }
+        unexpected_paths = changed_paths - allowed_diff_paths
+        missing_required_paths = required_diff_paths - changed_paths
+        if unexpected_paths or missing_required_paths:
+            raise ValidationFailureError(
+                "CH1-FLEX v2 exact scoped diff mismatch:"
+                f" unexpected={sorted(unexpected_paths)}"
+                f" missing={sorted(missing_required_paths)}"
+            )
+        diff_payload = {
+            **diff,
+            "from_profile_version": profile_v1.version,
+            "to_profile_version": profile_v2.version,
+            "status": "PASS",
+            "allowed_diff_paths": sorted(allowed_diff_paths),
+            "diff_hash": content_hash(diff),
+        }
+        diff_receipt = self._audit(
+            action="channel_profile.diff_reviewed",
+            target_id=profile_v2.id,
+            company_id=channel.company_id,
+            correlation_id=f"{correlation_id}-diff",
+            payload=diff_payload,
+        )
+
+        compiled = compiler.compile(
+            profile_version_id=profile_v2.id,
+            correlation_id=f"{correlation_id}-compile",
+        )
+        if compiled.content_hash != preview_first["content_hash"]:
+            raise ValidationFailureError("CH1-FLEX v2 preview/persisted hash mismatch")
+        snapshot_v2 = self.session.get(
+            CompiledChannelPolicySnapshot,
+            compiled.snapshot_id,
+        )
+        if snapshot_v2 is None:
+            raise ValidationFailureError("CH1-FLEX v2 compiled snapshot is missing")
+
+        if profile_v2.status == "compiled":
+            self.submit_for_approval(profile_v2.id)
+        if profile_v2.status == "pending_approval":
+            self.approve_profile_version(
+                profile_version_id=profile_v2.id,
+                approved_by=approved_by,
+                approval_ref=approval_ref,
+                correlation_id=f"{correlation_id}-approval",
+            )
+        if profile_v2.status == "approved":
+            self.activate_snapshot(
+                snapshot_id=snapshot_v2.id,
+                correlation_id=f"{correlation_id}-activation",
+            )
+        if profile_v2.status != "active" or channel.active_policy_snapshot_id != snapshot_v2.id:
+            raise ValidationFailureError("CH1-FLEX v2 activation did not resolve as active")
+
+        if (
+            profile_v1.profile_input != v1_profile_payload
+            or snapshot_v1.compiled_payload != v1_snapshot_payload
+            or snapshot_v1.content_hash != v1_snapshot_hash
+        ):
+            raise ValidationFailureError("CH1-FLEX v1 immutable content changed")
+
+        approval_receipt = self._find_audit_receipt(
+            event_type="channel_profile.approved",
+            target_id=profile_v2.id,
+        )
+        activation_receipt = self._find_audit_receipt(
+            event_type="policy_snapshot.activated",
+            target_id=snapshot_v2.id,
+        )
+        return {
+            "status": "PASS",
+            "channel_id": str(channel.id),
+            "channel_profile_version_id": str(profile_v2.id),
+            "channel_profile_version": profile_v2.version,
+            "profile_input_hash": profile_v2.profile_input_hash,
+            "compiled_policy_snapshot_id": str(snapshot_v2.id),
+            "compiled_policy_snapshot_version": snapshot_v2.snapshot_version,
+            "compiled_policy_snapshot_hash": snapshot_v2.content_hash,
+            "rollback_pointer": {
+                "channel_profile_version_id": str(profile_v1.id),
+                "channel_profile_version": profile_v1.version,
+                "compiled_policy_snapshot_id": str(snapshot_v1.id),
+                "compiled_policy_snapshot_hash": snapshot_v1.content_hash,
+            },
+            "receipts": {
+                "profile_diff_audit_id": str(diff_receipt.id),
+                "compiler_receipt_id": str(compiled.compile_run_id),
+                "approval_audit_id": str(approval_receipt.id) if approval_receipt else None,
+                "activation_audit_id": str(activation_receipt.id) if activation_receipt else None,
+            },
+            "provider_calls": 0,
+        }
+
     def update_draft(
         self,
         *,
@@ -268,6 +477,34 @@ class ChannelProfileService:
         if isinstance(scoped, dict):
             payload["channel_policy"] = deepcopy(scoped)
         return payload
+
+    def _latest_snapshot_for_profile(
+        self,
+        profile_version_id: uuid.UUID,
+    ) -> CompiledChannelPolicySnapshot | None:
+        return self.session.scalars(
+            select(CompiledChannelPolicySnapshot)
+            .where(
+                CompiledChannelPolicySnapshot.channel_profile_version_id
+                == profile_version_id
+            )
+            .order_by(CompiledChannelPolicySnapshot.snapshot_version.desc())
+        ).first()
+
+    def _find_audit_receipt(
+        self,
+        *,
+        event_type: str,
+        target_id: uuid.UUID,
+    ) -> AuditEvent | None:
+        return self.session.scalars(
+            select(AuditEvent)
+            .where(
+                AuditEvent.event_type == event_type,
+                AuditEvent.target_id == target_id,
+            )
+            .order_by(AuditEvent.created_at.desc())
+        ).first()
 
     def submit_for_approval(self, profile_version_id: uuid.UUID) -> ChannelProfileVersion:
         profile = self.get_profile_version(profile_version_id)
@@ -403,6 +640,7 @@ class ChannelProfileService:
             if channel.active_policy_snapshot_id and channel.active_policy_snapshot_id != snapshot.id
             else None
         )
+        previous_profile = None
         if previous_snapshot is not None and previous_snapshot.status == "active":
             previous_snapshot.status = "approved"
             previous_profile = self.session.get(ChannelProfileVersion, previous_snapshot.channel_profile_version_id)
@@ -424,7 +662,18 @@ class ChannelProfileService:
             target_id=snapshot.id,
             company_id=channel.company_id,
             correlation_id=correlation_id,
-            payload={"channel_id": str(channel.id), "profile_version_id": str(snapshot.channel_profile_version_id), "previous_status": previous_status, "new_status": "active"},
+            payload={
+                "channel_id": str(channel.id),
+                "profile_version_id": str(snapshot.channel_profile_version_id),
+                "previous_status": previous_status,
+                "new_status": "active",
+                "rollback_snapshot_id": (
+                    str(previous_snapshot.id) if previous_snapshot else None
+                ),
+                "rollback_profile_version_id": (
+                    str(previous_profile.id) if previous_profile else None
+                ),
+            },
         )
         AuditService(self.session).append(
             AuditEnvelope(
@@ -434,7 +683,16 @@ class ChannelProfileService:
                 target_id=channel.id,
                 reason_code="CHANNEL_ACTIVATED",
                 correlation_id=correlation_id,
-                payload={"snapshot_id": str(snapshot.id), "previous_status": previous_status},
+                payload={
+                    "snapshot_id": str(snapshot.id),
+                    "previous_status": previous_status,
+                    "rollback_snapshot_id": (
+                        str(previous_snapshot.id) if previous_snapshot else None
+                    ),
+                    "rollback_profile_version_id": (
+                        str(previous_profile.id) if previous_profile else None
+                    ),
+                },
             ),
             company_id=channel.company_id,
         )
@@ -450,6 +708,12 @@ class ChannelProfileService:
                     "reason_code": "CHANNEL_ACTIVATED",
                     "previous_status": previous_status,
                     "new_status": "active",
+                    "rollback_snapshot_id": (
+                        str(previous_snapshot.id) if previous_snapshot else None
+                    ),
+                    "rollback_profile_version_id": (
+                        str(previous_profile.id) if previous_profile else None
+                    ),
                 },
             ),
             company_id=channel.company_id,
@@ -464,8 +728,8 @@ class ChannelProfileService:
         company_id: uuid.UUID | None,
         correlation_id: str,
         payload: dict,
-    ) -> None:
-        AuditService(self.session).append(
+    ) -> AuditEvent:
+        return AuditService(self.session).append(
             AuditEnvelope(
                 actor_type="system",
                 action=action,

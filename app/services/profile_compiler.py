@@ -1,4 +1,7 @@
 import uuid
+import hashlib
+import json
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,13 +19,16 @@ from app.contracts import (
 )
 from app.contracts.channel_policy import (
     CapabilityEvaluation,
+    ChannelVisualSourcePolicyBinding,
     ChannelScopedPolicy,
     CompilerInputManifest,
+    GeminiImageUsagePolicy,
     LaunchRestrictions,
     NativeRenderPolicySnapshot,
     PolicyRef,
     PolicySnapshotRefs,
 )
+from app.contracts.visual_routing import NicheVisualSourceProfile, VisualSourceRoute
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -36,6 +42,12 @@ from app.services.config_registry import LoadedCatalog, canonical_json, content_
 from app.services.config_registry import ConfigRegistryService
 from app.services.channel_contract import build_channel_contract, reject_legacy_provider_budget_fields
 from app.services.creative_quality_policy import CreativeQualityPolicyCatalog
+
+
+CH1_FLEX_V2_MASTER_APPROVAL_REF = (
+    "operator-approval://ch1-flex-v2/"
+    "small-team-ai/master-prompt-2026-07-19"
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +88,70 @@ class ChannelProfileCompiler:
             policies=template.default_policies,
         )
         return profile_input, catalogs
+
+    def build_ch1_flex_v2_profile_input(
+        self,
+        *,
+        active_profile_input: ChannelProfileInput | dict[str, Any],
+        approval_ref: str,
+    ) -> ChannelProfileInput:
+        """Copy the effective v1 input and add only the approved CH1-FLEX v2 overlay."""
+
+        parsed = ChannelProfileInput.model_validate(active_profile_input)
+        if parsed.channel_policy is None:
+            raise ValidationFailureError(
+                "effective active channel policy is required for CH1-FLEX v2"
+            )
+        payload = deepcopy(parsed.model_dump(mode="json"))
+        payload["channel_policy"] = self.build_ch1_flex_v2_policy(
+            active_policy=parsed.channel_policy,
+            approval_ref=approval_ref,
+        ).model_dump(mode="json")
+        return ChannelProfileInput.model_validate(payload)
+
+    def build_ch1_flex_v2_policy(
+        self,
+        *,
+        active_policy: ChannelScopedPolicy | dict[str, Any],
+        approval_ref: str,
+    ) -> ChannelScopedPolicy:
+        """Build a deterministic v2 policy overlay from immutable evidence."""
+
+        policy = ChannelScopedPolicy.model_validate(active_policy)
+        if (
+            policy.channel_key != "small-team-ai"
+            or approval_ref != CH1_FLEX_V2_MASTER_APPROVAL_REF
+        ):
+            raise ValidationFailureError("CH1-FLEX v2 requires its exact scoped operator approval")
+        binding = self._qualified_visual_source_binding()
+        raw = deepcopy(policy.model_dump(mode="json"))
+        raw["policy_version"] = f"{policy.channel_key}.channel-policy.v2"
+        raw["policy_status"] = "APPROVED"
+        raw["approval_ref"] = approval_ref
+        raw["visual_source_policy_binding"] = binding.model_dump(mode="json")
+        raw["provider_usage_policy"]["google_gemini_image"] = (
+            GeminiImageUsagePolicy().model_dump(mode="json")
+        )
+        required = list(raw["capability_requirements"]["required"])
+        for capability in (
+            "visual_source_routing",
+            "google_gemini_image_planning",
+            "image_visual_quality_control",
+            "drive_verified_image_canary",
+        ):
+            if capability not in required:
+                required.append(capability)
+        raw["capability_requirements"]["required"] = required
+        derivation_refs = list(raw["budget_policy"]["derivation_refs"])
+        for ref in (
+            binding.gemini_image_model_catalog.ref,
+            binding.image_canary_v3_qualification.ref,
+            approval_ref,
+        ):
+            if ref not in derivation_refs:
+                derivation_refs.append(ref)
+        raw["budget_policy"]["derivation_refs"] = derivation_refs
+        return ChannelScopedPolicy.model_validate(raw)
 
     def compile(
         self,
@@ -262,6 +338,47 @@ class ChannelProfileCompiler:
         }
         if channel_policy_payload is not None:
             payload.update(channel_policy_payload)
+            scoped_policy = channel_policy_payload["channel_scoped_policy"]
+            visual_binding = scoped_policy.get("visual_source_policy_binding") or {}
+            if (
+                visual_binding.get("schema_version")
+                == "ch1-flex.visual-source-policy-binding.v2"
+            ):
+                provider_policy = scoped_policy.get("provider_usage_policy") or {}
+                pexels_policy = provider_policy.get("pexels") or {}
+                threshold = pexels_policy.get("semantic_fit_threshold")
+                if (
+                    isinstance(threshold, bool)
+                    or not isinstance(threshold, (int, float))
+                    or not 0 < float(threshold) <= 1
+                ):
+                    raise ValidationFailureError(
+                        "NICH1_APPROVED_SEMANTIC_FIT_THRESHOLD_MISSING"
+                    )
+                provider_ref = channel_policy_payload["snapshot_refs"][
+                    "provider_usage_policy"
+                ]
+                payload["gate_policy"] = {
+                    **payload["gate_policy"],
+                    "channel_fit_threshold": float(threshold),
+                    "channel_fit_threshold_authority": {
+                        "ref": provider_ref["ref"]
+                        + "#pexels.semantic_fit_threshold",
+                        "version": provider_ref["version"],
+                        "content_hash": provider_ref["content_hash"],
+                        "derivation": "REUSE_APPROVED_SEMANTIC_FIT_THRESHOLD",
+                    },
+                }
+                payload["compiler_decision_log"].append(
+                    {
+                        "decision": "NICH1_CHANNEL_FIT_THRESHOLD_AUTHORITY",
+                        "result": "PASS",
+                        "threshold": float(threshold),
+                        "authority_ref": payload["gate_policy"][
+                            "channel_fit_threshold_authority"
+                        ]["ref"],
+                    }
+                )
             payload["activation_required"] = bool(
                 payload["activation_required"]
                 or channel_policy_payload["capability_evaluation"]["status"] != "PASS"
@@ -323,6 +440,7 @@ class ChannelProfileCompiler:
         format_contract_evidence: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Compile any typed channel policy through one branch-free deterministic path."""
+        visual_binding = self._validated_visual_source_binding(policy)
         blockers: list[str] = []
         if creative_quality_policies is None:
             blockers.append("CREATIVE_QUALITY_POLICY_MISSING")
@@ -430,7 +548,56 @@ class ChannelProfileCompiler:
                 version=policy.format_identity_contract.version,
                 content_hash=policy.format_identity_contract.content_hash,
             ),
+            visual_source_routing_policy=(
+                visual_binding.visual_source_routing_policy if visual_binding else None
+            ),
+            visual_source_routing_catalog=(
+                visual_binding.visual_source_routing_catalog if visual_binding else None
+            ),
+            gemini_image_provider_registry=(
+                visual_binding.gemini_image_provider_registry if visual_binding else None
+            ),
+            gemini_image_model_catalog=(
+                visual_binding.gemini_image_model_catalog if visual_binding else None
+            ),
+            image_visual_quality_control=(
+                visual_binding.image_visual_quality_control if visual_binding else None
+            ),
+            image_canary_v3_qualification=(
+                visual_binding.image_canary_v3_qualification if visual_binding else None
+            ),
+            drive_verified_canary_receipt=(
+                visual_binding.drive_verified_canary_receipt if visual_binding else None
+            ),
         )
+        decision_log = [
+            {"decision": "HARD_POLICY_PRECEDENCE_LOCKED", "result": "PASS"},
+            {"decision": "CHANNEL_POLICY_SCOPE", "result": policy.channel_key},
+            {"decision": "STRATEGY_RANGES_PLANNING_ONLY", "result": "PASS"},
+            {"decision": "NO_MINIMUM_PROVIDER_QUOTAS", "result": "PASS"},
+            {"decision": "CAPABILITY_EVALUATION", "result": capability.status},
+        ]
+        if visual_binding is not None:
+            decision_log.extend(
+                [
+                    {
+                        "decision": "NICHE_VISUAL_SOURCE_PROFILE",
+                        "result": visual_binding.niche_visual_source_profile.value,
+                    },
+                    {
+                        "decision": "VISUAL_QUALIFICATION_BINDINGS",
+                        "result": "PASS",
+                    },
+                    {
+                        "decision": "PEXELS_FAILURE_OPENS_AI",
+                        "result": "FORBIDDEN",
+                    },
+                    {
+                        "decision": "GEMINI_IMAGE_PROVIDER_EXECUTION_DEFAULT",
+                        "result": "DISABLED",
+                    },
+                ]
+            )
         return {
             "channel_scoped_policy": policy.model_dump(mode="json"),
             "native_render_policy_snapshot": native_snapshot.model_dump(mode="json"),
@@ -452,13 +619,7 @@ class ChannelProfileCompiler:
             "capability_evaluation": capability.model_dump(mode="json"),
             "launch_restrictions": LaunchRestrictions().model_dump(mode="json"),
             "compiler_input_manifest": input_manifest.model_dump(mode="json"),
-            "compiler_decision_log": [
-                {"decision": "HARD_POLICY_PRECEDENCE_LOCKED", "result": "PASS"},
-                {"decision": "CHANNEL_POLICY_SCOPE", "result": policy.channel_key},
-                {"decision": "STRATEGY_RANGES_PLANNING_ONLY", "result": "PASS"},
-                {"decision": "NO_MINIMUM_PROVIDER_QUOTAS", "result": "PASS"},
-                {"decision": "CAPABILITY_EVALUATION", "result": capability.status},
-            ],
+            "compiler_decision_log": decision_log,
             "snapshot_refs": refs.model_dump(mode="json"),
         }
 
@@ -507,6 +668,205 @@ class ChannelProfileCompiler:
             **policy,
             "channel_key": channel_key,
         }
+
+    def _validated_visual_source_binding(
+        self,
+        policy: ChannelScopedPolicy,
+    ) -> ChannelVisualSourcePolicyBinding | None:
+        binding = policy.visual_source_policy_binding
+        if binding is None:
+            return None
+        expected = self._qualified_visual_source_binding()
+        if binding.model_dump(mode="json") != expected.model_dump(mode="json"):
+            raise ValidationFailureError(
+                "CH1_FLEX_V2_VISUAL_QUALIFICATION_BINDING_MISMATCH"
+            )
+        image_policy = policy.provider_usage_policy.google_gemini_image
+        if image_policy is None or (
+            image_policy.model_dump(mode="json")
+            != GeminiImageUsagePolicy().model_dump(mode="json")
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_POLICY_MISMATCH")
+        return binding
+
+    def _qualified_visual_source_binding(self) -> ChannelVisualSourcePolicyBinding:
+        """Resolve and verify immutable qualification evidence without provider I/O."""
+
+        # Imported lazily to keep the generic compiler module free of service-load cycles.
+        from app.services.visual_source_routing import VisualSourceRoutingPolicyCatalog
+
+        registry = ConfigRegistryService(self.session)
+        visual_catalog_loaded = registry.validate_catalog(
+            self.config_dir / "visual_source_routing_policy_catalog.yaml"
+        )
+        provider_registry_loaded = registry.validate_catalog(
+            self.config_dir / "provider_registry_catalog.yaml"
+        )
+        image_catalog_loaded = registry.validate_catalog(
+            self.config_dir / "google_gemini_image_model_price_catalog.yaml"
+        )
+        visual_catalog = VisualSourceRoutingPolicyCatalog(
+            self.config_dir / "visual_source_routing_policy_catalog.yaml"
+        )
+        lifecycle = visual_catalog.typed_item.lifecycle
+        if (
+            lifecycle.activation_milestone != "CH1-FLEX_v2"
+            or lifecycle.provider_execution_allowed is not False
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_VSR1_ACTIVATION_BOUNDARY_INVALID")
+
+        provider_rows = [
+            item
+            for item in provider_registry_loaded.content["items"]
+            if item.get("provider_key") == "google_gemini_image"
+        ]
+        if len(provider_rows) != 1:
+            raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_PROVIDER_NOT_UNIQUE")
+        provider_row = provider_rows[0]
+        if (
+            provider_row.get("status") != "ACTIVE"
+            or provider_row.get("capability_blob", {}).get("capability")
+            != "AI_IMAGE_GENERATION"
+            or provider_row.get("policy_fit_blob", {}).get(
+                "provider_fallback_allowed"
+            )
+            is not False
+            or provider_row.get("policy_fit_blob", {}).get(
+                "production_enabled_when_configured"
+            )
+            is not False
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_PROVIDER_POLICY_INVALID")
+
+        default_image_rows = [
+            item
+            for item in image_catalog_loaded.content["items"]
+            if item.get("is_default_route") is True
+        ]
+        if len(default_image_rows) != 1:
+            raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_DEFAULT_NOT_UNIQUE")
+        default_image = default_image_rows[0]
+        if (
+            default_image.get("model_id") != "gemini-3.1-flash-image"
+            or default_image.get("size") != "2K"
+            or default_image.get("aspect_ratio") != "16:9"
+            or default_image.get("policy_state") != "ALLOWED"
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_DEFAULT_INVALID")
+
+        vsr1, vsr1_hash = self._load_immutable_json_report("vsr1_summary.json")
+        img1, img1_hash = self._load_immutable_json_report("img1_summary.json")
+        vqc1, vqc1_hash = self._load_immutable_json_report("vqc1_summary.json")
+        canary, canary_hash = self._load_immutable_json_report(
+            "img_canary_v3_summary.json"
+        )
+        drive, _drive_summary_hash = self._load_immutable_json_report(
+            "img_canary_v3_drive_closeout_summary.json"
+        )
+        del vsr1_hash, img1_hash, _drive_summary_hash
+        if (
+            vsr1.get("verdicts", {}).get("VSR1_FINAL") != "PASS"
+            or img1.get("verdicts", {}).get("IMG1_FINAL") != "PASS"
+            or vqc1.get("verdicts", {}).get("VQC1_FINAL") != "PASS"
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_FOUNDATION_QUALIFICATION_MISSING")
+        canary_verdicts = canary.get("verdicts", {})
+        canary_boundaries = canary.get("boundaries", {})
+        drive_verdicts = drive.get("verdicts", {})
+        if (
+            canary_verdicts.get("IMG_CANARY_V3_FINAL") != "PASS"
+            or canary_verdicts.get("IMG_CANARY_V3_HUMAN_REVIEW") != "PASS"
+            or canary_verdicts.get("IMG_CANARY_V3_DRIVE_ARCHIVE") != "PASS"
+            or canary_verdicts.get("ARCHIVE_VERIFIED_ON_DRIVE") is not True
+            or canary_boundaries.get("PROCEED_TO_CH1_FLEX_V2") is not True
+            or canary_boundaries.get("MR1_EXECUTION") != "ON_HOLD"
+            or canary_boundaries.get("PROCEED_TO_MR1") is not False
+            or drive.get("human_review", {}).get("decision") != "PASS"
+            or drive.get("drive", {}).get("archive_verified") is not True
+            or drive_verdicts.get("IMG_CANARY_V3_FINAL") != "PASS"
+            or drive_verdicts.get("PROCEED_TO_CH1_FLEX_V2") is not True
+            or drive_verdicts.get("MR1_EXECUTION") != "ON_HOLD"
+            or drive_verdicts.get("PROCEED_TO_MR1") is not False
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_CANARY_QUALIFICATION_MISSING")
+        canary_receipt_hash = str(drive.get("drive", {}).get("receipt_hash") or "")
+        if (
+            len(canary_receipt_hash) != 64
+            or canary.get("drive", {}).get("drive_receipt_hash")
+            != canary_receipt_hash
+        ):
+            raise ValidationFailureError("CH1_FLEX_V2_DRIVE_RECEIPT_BINDING_INVALID")
+
+        run_id = str(canary.get("run", {}).get("run_id") or "")
+        vqc_schema = str(vqc1.get("implementation", {}).get("schema_version") or "")
+        canary_schema = str(canary.get("schema_version") or "")
+        drive_schema = str(drive.get("schema_version") or "")
+        if not all((run_id, vqc_schema, canary_schema, drive_schema)):
+            raise ValidationFailureError("CH1_FLEX_V2_QUALIFICATION_VERSION_MISSING")
+
+        return ChannelVisualSourcePolicyBinding(
+            niche_visual_source_profile=NicheVisualSourceProfile.STOCK_ASSISTED,
+            visual_source_routing_policy=PolicyRef(
+                ref=visual_catalog.policy_ref,
+                version=visual_catalog.policy_version,
+                content_hash=visual_catalog.policy_hash,
+            ),
+            visual_source_routing_catalog=PolicyRef(
+                ref=(
+                    "config://visual_source_routing_policy_catalog/"
+                    f"{visual_catalog_loaded.catalog_version}"
+                ),
+                version=visual_catalog_loaded.catalog_version,
+                content_hash=visual_catalog_loaded.content_hash,
+            ),
+            gemini_image_provider_registry=PolicyRef(
+                ref=(
+                    "config://provider_registry_catalog/"
+                    f"{provider_registry_loaded.catalog_version}#google_gemini_image"
+                ),
+                version=provider_registry_loaded.catalog_version,
+                content_hash=provider_registry_loaded.content_hash,
+            ),
+            gemini_image_model_catalog=PolicyRef(
+                ref=(
+                    "config://google_gemini_image_model_price_catalog/"
+                    f"{image_catalog_loaded.catalog_version}"
+                ),
+                version=image_catalog_loaded.catalog_version,
+                content_hash=image_catalog_loaded.content_hash,
+            ),
+            image_visual_quality_control=PolicyRef(
+                ref=f"report://vqc1_summary/{vqc_schema}",
+                version=vqc_schema,
+                content_hash=vqc1_hash,
+            ),
+            image_canary_v3_qualification=PolicyRef(
+                ref=f"report://img_canary_v3_summary/{run_id}",
+                version=canary_schema,
+                content_hash=canary_hash,
+            ),
+            drive_verified_canary_receipt=PolicyRef(
+                ref=f"drive-receipt://img-canary-v3/{run_id}",
+                version=drive_schema,
+                content_hash=canary_receipt_hash,
+            ),
+            allowed_source_routes=list(VisualSourceRoute),
+        )
+
+    def _load_immutable_json_report(self, filename: str) -> tuple[dict[str, Any], str]:
+        path = self.config_dir.resolve().parent / "reports" / filename
+        try:
+            raw = path.read_bytes()
+            payload = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValidationFailureError(
+                f"CH1_FLEX_V2_QUALIFICATION_REPORT_INVALID:{filename}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ValidationFailureError(
+                f"CH1_FLEX_V2_QUALIFICATION_REPORT_INVALID:{filename}"
+            )
+        return payload, hashlib.sha256(raw).hexdigest()
 
     def load_catalogs(self, template_key: str) -> LoadedM1Catalogs:
         registry = ConfigRegistryService(self.session)

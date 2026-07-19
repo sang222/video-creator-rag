@@ -16,6 +16,19 @@ Use the existing channel workspace, API and Vietnamese operator cockpit. There i
 
 Rollback uses the same activation operation on an older approved snapshot. It changes only which snapshot future projects receive. Active profile content, historical snapshots and existing project bindings are never edited.
 
+## CH1-FLEX v2 bounded lifecycle
+
+The v2 lifecycle uses `ChannelProfileService.approve_and_activate_ch1_flex_v2()` for the exact `small-team-ai` transition. It:
+
+1. reads immutable v1 profile/snapshot content;
+2. reuses the existing mutable version-2 draft, or creates version 2 only when that slot is absent and no later version exists;
+3. applies the typed VSR1/Gemini Image/VQC1/canary/Drive overlay and scoped operator approval ref;
+4. validates two deterministic preview hashes and records the semantic diff;
+5. compiles, approves, and activates the exact snapshot;
+6. returns immutable receipt IDs and a rollback pointer to v1.
+
+The helper blocks a version collision, a mismatched immutable v2, incomplete qualification evidence, or any v1 content change. It creates no provider attempt, media/render job, Drive upload, or publish action.
+
 ## API surface
 
 - `GET /channels/{channel_id}/profile-management`
@@ -34,6 +47,6 @@ Rollback uses the same activation operation on an older approved snapshot. It ch
 
 An active scoped version cannot compile to changed content. Create a draft instead. Activation rejects an unapproved snapshot or any capability blocker.
 
-## Current first-channel evidence
+## First-channel policy lineage
 
-`small-team-ai` profile v1 uses approval `operator-approval://ch1-flex/small-team-ai/profile-v1`. Its policy keeps ElevenLabs narration plus Forced Alignment, `CanonicalMediaTimeline`, NativeFFmpeg final render, optional Pexels/Veo roles, Drive verification before cleanup and manual YouTube upload. CH1-FLEX performs no provider, render, archive or publish execution.
+`small-team-ai` profile v1 uses approval `operator-approval://ch1-flex/small-team-ai/profile-v1` and remains the immutable rollback baseline. The v2 policy preserves ElevenLabs narration plus Forced Alignment, `CanonicalMediaTimeline`, NativeFFmpeg final render, Drive verification before cleanup, and manual YouTube upload while adding qualified `STOCK_ASSISTED` visual governance and NICH1 policy truth. Profile lifecycle work itself performs no provider, render, archive, or publish execution.

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.contracts.r3d1 import CharacterPolicyMode, RuntimeScopeErrorCode
-from app.core.errors import NotFoundError, ValidationFailureError
+from app.core.errors import NotFoundError
 from app.db.models import (
     ChannelProfileVersion,
     ChannelWorkspace,
@@ -144,6 +144,12 @@ class EffectiveChannelRuntimeContextCompiler:
             *authority.reason_codes,
             *self._category_reason_codes(project, category),
             *character_refs.reason_codes,
+            *self._niche_lineage_reason_codes(
+                project=project,
+                authority=authority,
+                category=category,
+                editorial_slot=editorial_calendar_slot,
+            ),
             *self._conflict_reason_codes(
                 channel_contract=authority.channel_contract_json,
                 compiled_policy=authority.compiled_policy_json,
@@ -359,6 +365,51 @@ class EffectiveChannelRuntimeContextCompiler:
             return ["OPTIONAL_STYLE_NOTE_MISSING"]
         return []
 
+    def _niche_lineage_reason_codes(
+        self,
+        *,
+        project: VideoProject,
+        authority: _Authority,
+        category: ContentCategory | None,
+        editorial_slot: EditorialCalendarSlot | None,
+    ) -> list[str]:
+        scoped = _dict(
+            _dict(authority.policy_snapshot.compiled_payload if authority.policy_snapshot else {}).get(
+                "channel_scoped_policy"
+            )
+        )
+        binding = _dict(scoped.get("visual_source_policy_binding"))
+        strict = binding.get("schema_version") == "ch1-flex.visual-source-policy-binding.v2"
+        frozen = _dict((project.audience_delivery_summary or {}).get("niche_governance"))
+        if not frozen:
+            return ["NICHE_CONTRACT_DIGEST_MISSING"] if strict else []
+        digest = _dict(frozen.get("niche_contract_digest"))
+        digest_ref = _dict(frozen.get("niche_contract_digest_ref"))
+        reasons: list[str] = []
+        claimed_hash = digest.get("content_hash")
+        computed_hash = content_hash({key: value for key, value in digest.items() if key != "content_hash"}) if digest else None
+        if not digest or claimed_hash != computed_hash or digest_ref.get("content_hash") != claimed_hash:
+            reasons.append("NICHE_CONTRACT_DIGEST_HASH_MISMATCH")
+        if authority.policy_snapshot is None or (
+            digest.get("compiled_policy_snapshot_hash") != authority.policy_snapshot.content_hash
+            or str(authority.policy_snapshot.id) not in str(digest.get("compiled_policy_snapshot_ref") or "")
+        ):
+            reasons.append("NICHE_CONTRACT_DIGEST_STALE")
+        if authority.channel_contract_hash and digest.get("channel_contract_hash") != authority.channel_contract_hash:
+            reasons.append("NICHE_CHANNEL_CONTRACT_HASH_MISMATCH")
+        if category is None or str(category.id) != str(digest.get("category_id")):
+            reasons.append("NICHE_CATEGORY_BINDING_MISMATCH")
+        if category is not None and category.content_pillar and str(category.content_pillar).casefold() != str(digest.get("content_pillar_key") or "").casefold():
+            reasons.append("NICHE_PILLAR_BINDING_MISMATCH")
+        if editorial_slot is not None:
+            if editorial_slot.id and str(editorial_slot.id) != str(digest.get("editorial_slot_id")):
+                reasons.append("NICHE_EDITORIAL_SLOT_MISMATCH")
+            if str(editorial_slot.series_key or "").casefold() != str(digest.get("series_key") or "").casefold():
+                reasons.append("NICHE_SERIES_BINDING_MISMATCH")
+            if str(editorial_slot.production_goal or "") != str(digest.get("production_goal") or ""):
+                reasons.append("NICHE_PRODUCTION_GOAL_MISMATCH")
+        return _ordered_unique(reasons)
+
     def _build_subcontexts(
         self,
         *,
@@ -378,6 +429,9 @@ class EffectiveChannelRuntimeContextCompiler:
         rights = _dict(channel_contract.get("rights_policy"))
         budget = _dict(channel_contract.get("budget_policy"))
         learning = _dict(channel_contract.get("learning_policy"))
+        niche_governance = _dict((project.audience_delivery_summary or {}).get("niche_governance"))
+        niche_digest = _dict(niche_governance.get("niche_contract_digest"))
+        niche_digest_ref = _dict(niche_governance.get("niche_contract_digest_ref"))
         monetization = _dict(compiled_policy.get("monetization_policy") or _dict(channel_contract.get("monetization_policy")))
         voice_profile = character_refs.voice
         version = character_refs.version
@@ -402,6 +456,10 @@ class EffectiveChannelRuntimeContextCompiler:
                 "audience_segment": (category.audience_segment if category else None) or audience.get("primary_persona"),
                 "audience_level": audience.get("audience_level"),
                 "audience_pain_points": _strings(audience.get("pain_points")),
+                "audience_desired_outcomes": _strings(
+                    audience.get("desired_outcomes") or audience.get("desired_outcome")
+                ),
+                "niche_contract_digest_ref": niche_digest_ref or None,
                 "forbidden_assumptions": _strings(editorial.get("forbidden_assumptions")) or _strings(editorial.get("forbidden_angles")),
                 "source_contract_paths": _source_paths("target_audience", "editorial_strategy.forbidden_angles"),
             },
@@ -418,6 +476,13 @@ class EffectiveChannelRuntimeContextCompiler:
                 "sub_niche": category.sub_niche if category else None,
                 "content_pillar": category.content_pillar if category else None,
                 "default_format_policy": _dict(category.default_format_policy_json) if category else {},
+                "primary_niche": niche_digest.get("primary_niche"),
+                "positioning": niche_digest.get("positioning"),
+                "brand_promise": niche_digest.get("brand_promise"),
+                "allowed_topics": niche_digest.get("allowed_topics") or [],
+                "forbidden_topics": niche_digest.get("forbidden_topics") or [],
+                "niche_contract_digest": niche_digest or None,
+                "niche_contract_digest_ref": niche_digest_ref or None,
                 "source_contract_paths": _source_paths("format_policy", "editorial_strategy.content_pillars"),
             },
             "character_identity_context_json": {
@@ -547,6 +612,16 @@ class EffectiveChannelRuntimeContextCompiler:
             refs.append({"type": "field_source_map", "content_hash": authority.field_source_map_hash})
         if category is not None:
             refs.append({"type": "content_category", "id": str(category.id), "content_hash": category.content_hash})
+        niche_governance = _dict((project.audience_delivery_summary or {}).get("niche_governance"))
+        niche_ref = _dict(niche_governance.get("niche_contract_digest_ref"))
+        if niche_ref:
+            refs.append(
+                {
+                    "type": "niche_contract_digest",
+                    "ref": niche_ref.get("ref"),
+                    "content_hash": niche_ref.get("content_hash"),
+                }
+            )
         if character_refs.binding is not None:
             refs.append({"type": "character_binding", "id": str(character_refs.binding.id), "content_hash": character_refs.binding.content_hash})
         for label, record in [
@@ -573,6 +648,8 @@ def build_effective_channel_runtime_digest(snapshot: EffectiveChannelRuntimeCont
 
 
 def build_script_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+    category = _dict(snapshot.category_runtime_context_json)
+    niche = _dict(category.get("niche_contract_digest"))
     return {
         "effective_context_snapshot_id": str(snapshot.id),
         "context_hash": snapshot.context_hash,
@@ -581,6 +658,18 @@ def build_script_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapsho
         "brand_voice_persona": snapshot.brand_voice_persona_context_json,
         "category": snapshot.category_runtime_context_json,
         "safety_forbidden_claims": snapshot.safety_forbidden_claims_context_json,
+        "primary_niche": niche.get("primary_niche"),
+        "sub_niche": niche.get("sub_niche"),
+        "positioning": niche.get("positioning"),
+        "brand_promise": niche.get("brand_promise"),
+        "content_pillar": niche.get("content_pillar_key") or category.get("content_pillar"),
+        "category_id": niche.get("category_id") or category.get("category_id"),
+        "category_sub_niche": niche.get("category_sub_niche") or category.get("sub_niche"),
+        "allowed_topics": niche.get("allowed_topics") or [],
+        "forbidden_topics": niche.get("forbidden_topics") or [],
+        "audience_pain_points": niche.get("audience_pain_points") or [],
+        "audience_desired_outcomes": niche.get("audience_desired_outcomes") or [],
+        "niche_contract_digest_ref": category.get("niche_contract_digest_ref"),
     }
 
 

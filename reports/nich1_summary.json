@@ -1,0 +1,115 @@
+{
+  "schema_version": "nich1-summary/v1",
+  "date": "2026-07-19",
+  "status": "PASS",
+  "implementation": {
+    "niche_contract_digest": "PASS",
+    "authoritative_digest_recompile": "PASS",
+    "daily_semantic_context_binding": "PASS",
+    "strict_editorial_slot_contract": "PASS",
+    "daily_idea_agent_registry": "PASS",
+    "llm_router_wiring": "PASS",
+    "prompt_budget_gate": "PASS",
+    "cost_firewall_frozen_cap": "PASS",
+    "channel_fit_enforcement": "PASS",
+    "caller_policy_fit_pass_trusted": false,
+    "script_contract_digest_projection": "PASS",
+    "niche_alignment_dossier": "PASS"
+  },
+  "authoritative_digest": {
+    "version": "nich1.niche-contract-digest.v1",
+    "hash_bound": true,
+    "bounded": true,
+    "caller_supplied_arbitrary_content_allowed": false,
+    "strict_daily_requires_active_snapshot": true,
+    "admitted_historical_resume_allows_frozen_approved_snapshot": true,
+    "historical_resume_still_validates_scope_and_hashes": true
+  },
+  "daily_context": {
+    "semantic_digest_content_present": true,
+    "digest_ref_hash_present": true,
+    "active_policy_ref_hash_present": true,
+    "category_pillar_series_goal_present": true,
+    "agent_context_pack_present": true,
+    "runtime_guard_present": true,
+    "bounded_by_prompt_budget_gate": true,
+    "reserved_authority_override_allowed": false
+  },
+  "editorial_slot": {
+    "required_strict_fields": [
+      "category_id",
+      "content_pillar_id_or_key",
+      "series_key",
+      "production_goal"
+    ],
+    "legacy_readable": true,
+    "legacy_production_eligible_without_bindings": false
+  },
+  "daily_llm": {
+    "agent_key": "DailyIdeaAgent",
+    "uses_prompt_registry": true,
+    "uses_agent_context_pack": true,
+    "uses_llm_router": true,
+    "persisted_llm_run_snapshot_required": true,
+    "uses_cost_firewall": true,
+    "direct_provider_sdk": false,
+    "silent_production_mock": false,
+    "review_or_block_envelope_propagates_closed": true,
+    "offline_fake_router_acceptance": "PASS"
+  },
+  "channel_fit": {
+    "threshold_source": "compiled gate policy derived from approved Pexels semantic-fit authority",
+    "v2_threshold": 0.78,
+    "authority_derivation": "REUSE_APPROVED_SEMANTIC_FIT_THRESHOLD",
+    "score_range_validated": true,
+    "criterion_evidence_persisted": true,
+    "below_threshold_can_pass": false,
+    "policy_fit_derived_internally": true
+  },
+  "required_gates": [
+    "topic_niche_alignment_gate",
+    "script_niche_alignment_gate",
+    "visual_niche_alignment_gate",
+    "thumbnail_niche_alignment_gate",
+    "metadata_niche_alignment_gate"
+  ],
+  "gate_registry": {
+    "all_five_registered": true,
+    "strict_order_enforced": true,
+    "strict_missing_evidence_blocks": true,
+    "production_dossier_missing_gate_can_pass": false
+  },
+  "verification": {
+    "ch1_nich1_focused": "22 passed",
+    "d2p1_focused": "15 passed",
+    "master_suite": "148 passed, 1 warning",
+    "shared_m5_r3d_m12": "107 passed, 12 skipped, 1 warning",
+    "m12_validator_and_agent_envelope": "11 passed",
+    "no_real_llm_call": "PASS"
+  },
+  "boundaries": {
+    "provider_calls": 0,
+    "media_render_calls": 0,
+    "drive_calls": 0,
+    "youtube_calls": 0,
+    "mr1_execution": "ON_HOLD"
+  },
+  "verdicts": {
+    "NICH1_ENTRY": "PASS",
+    "NICH1_NICHE_CONTRACT_DIGEST": "PASS",
+    "NICH1_DAILY_CONTEXT_BINDING": "PASS",
+    "NICH1_EDITORIAL_SLOT_CONTRACT": "PASS",
+    "NICH1_DAILY_LLM_ROUTER": "PASS",
+    "NICH1_CHANNEL_FIT_ENFORCEMENT": "PASS",
+    "NICH1_TOPIC_GATE": "PASS",
+    "NICH1_SCRIPT_GATE": "PASS",
+    "NICH1_VISUAL_GATE": "PASS",
+    "NICH1_THUMBNAIL_GATE": "PASS",
+    "NICH1_METADATA_GATE": "PASS",
+    "NICH1_GATE_REGISTRY": "PASS",
+    "NICH1_ALIGNMENT_DOSSIER": "PASS",
+    "NICH1_FINAL": "PASS"
+  },
+  "proceed_to_lpro1": true,
+  "exact_next_action": "Do not start LPRO1 in this task; wait for a separate operator-started LPRO1 task and keep MR1 on hold."
+}

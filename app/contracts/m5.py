@@ -66,7 +66,7 @@ class ChannelDailyRunCreate(BaseModel):
     editorial_calendar_slot_id: uuid.UUID | None = None
     run_date: date
     status: DailyRunStatus = "PENDING"
-    run_mode: DailyRunMode = "REAL_DISABLED"
+    run_mode: DailyRunMode = "REAL"
     trigger_type: DailyRunTriggerType = "MANUAL"
     reason_codes: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -278,7 +278,7 @@ class DailyIdeaDecisionCreate(BaseModel):
     provider_key: str = "llm_router"
     quota_account_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
-    estimated_cost: Decimal = Decimal("0")
+    estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -311,7 +311,7 @@ class DailyRunExecuteRequest(BaseModel):
     provider_key: str = "llm_router"
     quota_account_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
-    estimated_cost: Decimal = Decimal("0")
+    estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
     created_by_user_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -355,6 +355,8 @@ class MockAuthorityProposal(BaseModel):
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     confidence: ConfidenceLevel
     idea_source_refs: list[dict[str, Any]] = Field(min_length=1)
+    channel_fit_score: Decimal = Field(ge=0, le=1)
+    channel_fit_evidence: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid", strict=True)
 

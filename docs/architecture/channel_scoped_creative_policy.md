@@ -1,10 +1,11 @@
 # Channel-scoped creative policy
 
-CH1-FLEX freezes the first production policy as channel data, not renderer or service logic. The active `small-team-ai` chain is:
+CH1-FLEX freezes the first production policy as channel data, not renderer or service logic. The versioned `small-team-ai` chain is:
 
 ```text
 NicheProfileTemplate / init preset
-  -> ChannelProfileVersion v1
+  -> ChannelProfileVersion v1 (historical immutable baseline)
+  -> ChannelProfileVersion v2 (qualified visual/niche policy)
   -> ChannelProfileCompiler
   -> CompiledChannelPolicySnapshot
   -> NativeRenderPolicySnapshot
@@ -12,6 +13,17 @@ NicheProfileTemplate / init preset
 ```
 
 `config/channel_scoped_policy_catalog.yaml` is validated as `ChannelScopedPolicy`. It owns typed identity, pacing, format identity, visual strategy, media production, voice, creative-quality binding, character, provider use, cost, evidence, originality, publish, analytics maturity, gate and capability blocks. Draft profile versions can embed the same typed policy in `ChannelProfileInput.channel_policy`; an embedded draft overrides the initialization catalog only for that new version.
+
+## v2 visual and niche policy
+
+CH1-FLEX v2 extends the channel policy through two optional typed blocks which must appear together:
+
+- `visual_source_policy_binding` binds VSR1, the routing catalog, the Gemini Image provider/model catalogs, VQC1, IMG-CANARY-v3, and the Drive-verified canary receipt by ref/version/hash.
+- `provider_usage_policy.google_gemini_image` fixes the editorial-still role, `gemini-3.1-flash-image`, 2K, 16:9, one output, one automated attempt, no fallback, and execution-disabled-by-default guards.
+
+The visual binding requires the complete route taxonomy, exactly one source decision per scene, no automatic Pexels-to-AI failover, NativeFFmpeg composition, native-only exact text/numbers, no generated evidence authority, a 1080p floor, final human visual approval, and archive verification. The compiler also publishes `channel_fit_threshold=0.78` as top-level compiled policy truth by reusing the approved Pexels semantic-fit threshold with its ref/version/hash and `REUSE_APPROVED_SEMANTIC_FIT_THRESHOLD` derivation. This avoids an unrelated profile diff, and callers cannot supply a different policy-fit state.
+
+These blocks authorize planning and deterministic governance only. They do not authorize a provider call, render, Drive upload, or YouTube action.
 
 ## Deterministic precedence
 
@@ -54,8 +66,10 @@ For a channel with a scoped policy the compiler emits immutable, hashed blocks:
 - `compiler_input_manifest` and `compiler_decision_log`;
 - `snapshot_refs` for native render, creative quality, provider use, budget, publish and format identity.
 
+When the v2 visual binding exists, `snapshot_refs` also includes visual routing policy/catalog, Gemini Image registry/model catalog, VQC1, canary qualification, and Drive receipt refs/hashes. Missing, stale, or mismatched qualification evidence blocks compilation.
+
 The CQR1 binding points to `creative-policy://small-team-ai/small-team-ai.creative-quality.v1` and its catalog hash. Numeric narration, caption, sync and visual thresholds remain in the approved CQR1 catalog; renderer code does not copy them.
 
 ## VideoProject freeze boundary
 
-New scoped projects copy the exact profile ID plus every compiled ref/hash from their selected active snapshot. Project creation rejects a caller-provided mismatch. After creation, runtime reads the project snapshot; it does not resolve “latest profile.” Migration `0037_ch1_flex` adds nullable freeze columns and performs no historical backfill, so old project rows and snapshots remain unchanged.
+New scoped projects copy the exact profile ID plus every compiled ref/hash from their selected active snapshot. NICH1 additionally freezes the channel-contract and `NicheContractDigest` lineage selected during admission. Project creation rejects a caller-provided mismatch. After creation, runtime reads the project snapshot and frozen niche lineage; it does not resolve “latest profile.” Migration `0037_ch1_flex` adds nullable freeze columns and performs no historical backfill, so old project rows and snapshots remain unchanged.

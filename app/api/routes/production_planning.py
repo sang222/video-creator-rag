@@ -1,4 +1,6 @@
 from fastapi import APIRouter
+from app.contracts.d2p1 import DailyToPackageStatusRead
+from app.services.d2p1 import DailyToPackageOrchestrator
 
 from app.api.routes.imports import (
     AccessibilityQCService,
@@ -186,6 +188,19 @@ def create_router() -> APIRouter:
                 if decision is None:
                     raise NotFoundError(f"daily idea decision not found: {decision_id}")
                 return DailyIdeaDecisionRead.model_validate(_daily_idea_decision(decision))
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get(
+        "/daily-idea-decisions/{decision_id}/production-handoff",
+        response_model=DailyToPackageStatusRead,
+    )
+    def get_daily_idea_production_handoff(decision_id: uuid.UUID) -> DailyToPackageStatusRead:
+        """Read durable D2P1 state; this endpoint never runs providers or media."""
+
+        try:
+            with session_scope() as session:
+                return DailyToPackageOrchestrator(session).status(decision_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

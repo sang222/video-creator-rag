@@ -20,6 +20,13 @@ Hard rule:
 * Prompt Registry decides what the agent is allowed to think/do/output.
 * Channel Contract decides what channel boundary the agent must obey.
 
+Daily idea rule:
+
+* `DailyIdeaAgent` is a registered Prompt Registry agent on the `cheap_structured` router lane.
+* It receives an allowlisted NICH1 context pack containing the full bounded semantic digest, editorial-slot digest, runtime guards, evidence digest, and common-skill digest.
+* It proposes `channel_fit_score` and evidence; deterministic NICH1 policy derives the final fit state from the compiled threshold and gate evidence.
+* Missing or invalid NICH1 authority blocks before a daily proposal can become project admission.
+
 ## Channel Init / Channel Contract Truth
 
 Human-entered Channel Init / Channel Profile data is production truth.
@@ -36,6 +43,8 @@ Every production prompt must bind to:
 * compiled_policy_snapshot_json
 * channel_profile_version_id
 * compiled_policy_snapshot_id
+
+Before project admission, a daily prompt also binds the active category/editorial-slot authority through `NicheContractDigest` ref/hash. After admission, Effective Context and ScriptContractDigest preserve that frozen niche/category/pillar/series/goal lineage for package agents.
 
 Agents must not:
 

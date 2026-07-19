@@ -8,6 +8,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.contracts.nich1 import (
+    NicheContractDigest,
+    NicheDigestRef,
+    NicheGateKey,
+    NicheGateResult,
+    NicheGateVerdict,
+)
 from app.db.models import (
     AgentOutputValidationRun,
     EffectiveChannelRuntimeContextSnapshot,
@@ -58,6 +65,22 @@ DEFAULT_OUTPUT_CONTRACTS: dict[str, AgentOutputContract] = {
         R3D4_SCHEMA_VERSION,
         "PACKAGE_CRITICAL",
         ("decision",),
+    ),
+    "DailyIdeaAgent": AgentOutputContract(
+        "DailyIdeaAgent",
+        "daily_idea_proposal",
+        "daily_idea",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+        (
+            "proposed_title",
+            "proposed_angle",
+            "proposed_format",
+            "proposed_pillar",
+            "proposed_series_key",
+            "channel_fit_score",
+            "channel_fit_evidence",
+        ),
     ),
     "TopicIdeaScoringAgent": AgentOutputContract("TopicIdeaScoringAgent", "topic_scores", "topic_scoring", R3D4_SCHEMA_VERSION, "REVIEWABLE"),
     "ResearchPackSummarizer": AgentOutputContract("ResearchPackSummarizer", "research_notes", "research_summary", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
@@ -1271,6 +1294,190 @@ class PackageStatusReducer:
         return {"package_status": current_status, "reason_codes": [], "source": "package_state"}
 
 
+class NicheAlignmentEvidenceGate:
+    """R3D4 adapter for the authoritative NICH1 typed gate evidence.
+
+    Legacy projects stay readable. A strict v2 Effective Context fails closed when
+    the matching semantic gate result is missing or non-PASS.
+    """
+
+    def __init__(self, gate_key: str):
+        self.gate_key = gate_key
+
+    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+        category = _dict(effective_context.category_runtime_context_json)
+        strict = isinstance(category.get("niche_contract_digest"), dict) or isinstance(
+            category.get("niche_contract_digest_ref"), dict
+        )
+        if not strict:
+            return _gate_result(
+                self.gate_key,
+                GATE_PASS,
+                SEVERITY_INFO,
+                {"legacy_not_applicable": True},
+                [],
+                [],
+                ["category_runtime_context_json.niche_contract_digest_ref"],
+                None,
+            )
+
+        result = self._resolve_result(artifacts)
+        if result is None:
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                {"required": True, "evidence_present": False},
+                ["MANDATORY_NICHE_GATE_EVIDENCE_MISSING"],
+                [self.gate_key],
+                ["category_runtime_context_json.niche_contract_digest_ref"],
+                "Persist the exact typed NICH1 gate result bound to the package lineage.",
+            )
+
+        typed_result, binding_failures = self._validate_typed_result(
+            result=result,
+            category=category,
+            effective_context=effective_context,
+        )
+        if typed_result is None or binding_failures:
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                {
+                    "required": True,
+                    "evidence_present": True,
+                    "content_hash": result.get("content_hash"),
+                    "binding_failures": binding_failures,
+                },
+                binding_failures or ["NICHE_GATE_TYPED_RESULT_INVALID"],
+                [self.gate_key],
+                [
+                    "category_runtime_context_json.niche_contract_digest",
+                    "category_runtime_context_json.niche_contract_digest_ref",
+                    "compiled_policy_snapshot_id",
+                ],
+                "Regenerate the typed NICH1 result from the frozen digest and exact agent artifact.",
+            )
+
+        status = typed_result.verdict.value
+        fail_codes = [code.value for code in typed_result.reason_codes]
+        if status != GATE_PASS and not fail_codes:
+            fail_codes = ["NICHE_GATE_NOT_PASS"]
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_CRITICAL if status == GATE_BLOCK else SEVERITY_MEDIUM if status == GATE_REVIEW else SEVERITY_INFO,
+            {
+                "content_hash": typed_result.content_hash,
+                "niche_contract_digest_hash": typed_result.niche_contract_digest_hash,
+                "checked_policy_snapshot_ref": typed_result.checked_policy_snapshot_ref,
+                "checked_policy_snapshot_hash": typed_result.checked_policy_snapshot_hash,
+                "evidence_present": True,
+                "typed_result_valid": True,
+            },
+            fail_codes,
+            [self.gate_key],
+            ["category_runtime_context_json.niche_contract_digest_ref"],
+            None if status == GATE_PASS else "Repair the semantic niche mismatch and create a new version.",
+        )
+
+    def _validate_typed_result(
+        self,
+        *,
+        result: dict[str, Any],
+        category: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+    ) -> tuple[NicheGateResult | None, list[str]]:
+        failures: list[str] = []
+        try:
+            digest = NicheContractDigest.model_validate(
+                category.get("niche_contract_digest")
+            )
+        except Exception:
+            return None, ["NICHE_CONTRACT_DIGEST_INVALID"]
+        try:
+            digest_ref = NicheDigestRef.model_validate(
+                category.get("niche_contract_digest_ref")
+            )
+        except Exception:
+            return None, ["NICHE_CONTRACT_DIGEST_REF_INVALID"]
+        try:
+            typed = NicheGateResult.model_validate(result)
+        except Exception:
+            return None, ["NICHE_GATE_TYPED_RESULT_INVALID"]
+
+        expected_key = NicheGateKey(self.gate_key)
+        if typed.gate_key != expected_key:
+            failures.append("NICHE_GATE_KEY_MISMATCH")
+        if digest_ref.content_hash != digest.content_hash:
+            failures.append("NICHE_CONTRACT_DIGEST_REF_HASH_MISMATCH")
+        if (
+            typed.niche_contract_digest_ref != digest_ref.ref
+            or typed.niche_contract_digest_hash != digest.content_hash
+        ):
+            failures.append("NICHE_GATE_DIGEST_BINDING_MISMATCH")
+        if (
+            typed.checked_policy_snapshot_ref
+            != digest.compiled_policy_snapshot_ref
+            or typed.checked_policy_snapshot_hash
+            != digest.compiled_policy_snapshot_hash
+        ):
+            failures.append("NICHE_GATE_POLICY_SNAPSHOT_BINDING_MISMATCH")
+        expected_policy_ref = (
+            f"compiled-policy-snapshot://{effective_context.compiled_policy_snapshot_id}"
+            if effective_context.compiled_policy_snapshot_id is not None
+            else None
+        )
+        if digest.compiled_policy_snapshot_ref != expected_policy_ref:
+            failures.append("NICHE_CONTRACT_POLICY_SNAPSHOT_REF_MISMATCH")
+        compiled_ref = next(
+            (
+                item
+                for item in _list(getattr(effective_context, "source_refs_json", []))
+                if isinstance(item, dict)
+                and item.get("type") == "compiled_channel_policy_snapshot"
+                and str(item.get("id"))
+                == str(effective_context.compiled_policy_snapshot_id)
+            ),
+            None,
+        )
+        if compiled_ref is None:
+            failures.append("NICHE_CONTRACT_POLICY_SNAPSHOT_EVIDENCE_MISSING")
+        elif compiled_ref.get("content_hash") != digest.compiled_policy_snapshot_hash:
+            failures.append("NICHE_CONTRACT_POLICY_SNAPSHOT_HASH_MISMATCH")
+        if digest.channel_id != effective_context.channel_workspace_id:
+            failures.append("NICHE_CONTRACT_CHANNEL_SCOPE_MISMATCH")
+        if digest.category_id != effective_context.content_category_id:
+            failures.append("NICHE_CONTRACT_CATEGORY_SCOPE_MISMATCH")
+
+        check_verdicts = {check.verdict for check in typed.checks}
+        derived_verdict = (
+            NicheGateVerdict.BLOCK
+            if NicheGateVerdict.BLOCK in check_verdicts
+            else NicheGateVerdict.REVIEW_REQUIRED
+            if NicheGateVerdict.REVIEW_REQUIRED in check_verdicts
+            else NicheGateVerdict.PASS
+        )
+        if typed.verdict != derived_verdict:
+            failures.append("NICHE_GATE_VERDICT_NOT_DERIVED_FROM_CHECKS")
+        return typed, list(dict.fromkeys(failures))
+
+    def _resolve_result(self, artifacts: dict[str, Any]) -> dict[str, Any] | None:
+        direct = artifacts.get(self.gate_key)
+        if isinstance(direct, dict):
+            return direct
+        results = artifacts.get("niche_gate_results")
+        if isinstance(results, dict) and isinstance(results.get(self.gate_key), dict):
+            return results[self.gate_key]
+        dossier = artifacts.get("niche_alignment_dossier")
+        if isinstance(dossier, dict):
+            key = self.gate_key.removesuffix("_niche_alignment_gate") + "_result"
+            if isinstance(dossier.get(key), dict):
+                return dossier[key]
+        return None
+
+
 class R3D4GateService:
     GATES_BY_KEY = {
         "channel_runtime_contract_gate": ChannelRuntimeContractGate(),
@@ -1303,13 +1510,19 @@ class R3D4GateService:
         "voice_profile_readiness_gate": VoiceProfileReadinessGate(),
         "character_consistency_gate": CharacterConsistencyGate(),
         "provider_character_input_gate": ProviderCharacterInputGate(),
+        "topic_niche_alignment_gate": NicheAlignmentEvidenceGate("topic_niche_alignment_gate"),
+        "script_niche_alignment_gate": NicheAlignmentEvidenceGate("script_niche_alignment_gate"),
+        "visual_niche_alignment_gate": NicheAlignmentEvidenceGate("visual_niche_alignment_gate"),
+        "thumbnail_niche_alignment_gate": NicheAlignmentEvidenceGate("thumbnail_niche_alignment_gate"),
+        "metadata_niche_alignment_gate": NicheAlignmentEvidenceGate("metadata_niche_alignment_gate"),
     }
     GATES_AFTER_AGENT = {
-        "ScriptWriterAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate"],
-        "ScriptRewriteAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate"],
-        "VisualPlanningAgent": ["visual_coverage_gate", "visual_style_compliance_gate", "character_runtime_compliance_gate"],
-        "ThumbnailBriefAgent": ["thumbnail_style_compliance_gate", "character_consistency_gate"],
-        "PublishingMetadataAgent": ["metadata_locale_compliance_gate"],
+        "TopicIdeaScoringAgent": ["topic_niche_alignment_gate"],
+        "ScriptWriterAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate", "script_niche_alignment_gate"],
+        "ScriptRewriteAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate", "script_niche_alignment_gate"],
+        "VisualPlanningAgent": ["visual_coverage_gate", "visual_style_compliance_gate", "character_runtime_compliance_gate", "visual_niche_alignment_gate"],
+        "ThumbnailBriefAgent": ["thumbnail_style_compliance_gate", "character_consistency_gate", "thumbnail_niche_alignment_gate"],
+        "PublishingMetadataAgent": ["metadata_locale_compliance_gate", "metadata_niche_alignment_gate"],
         "RightsDisclosureReviewer": ["rights_disclosure_compliance_gate", "disclosure_consistency_gate"],
         "UploadCardCopyAgent": ["upload_copy_truthfulness_gate", "monetization_cta_compliance_gate", "publish_timing_compliance_gate"],
     }
@@ -1361,6 +1574,11 @@ class R3D4GateService:
             "script_to_srt_consistency_gate",
             "hook_caption_gate",
             "visual_srt_timeline_gate",
+            "topic_niche_alignment_gate",
+            "script_niche_alignment_gate",
+            "visual_niche_alignment_gate",
+            "thumbnail_niche_alignment_gate",
+            "metadata_niche_alignment_gate",
         ]
         if include_provider_boundary:
             gate_keys.extend(["provider_boundary_gate", "provider_character_input_gate"])

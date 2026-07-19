@@ -46,6 +46,22 @@ If future data does not exist yet, a gate can return `REVIEW_REQUIRED`, `SKIPPED
 
 `publish_risk_gate` only aggregates existing gate results for the same target. It does not build publish packages or upload anything.
 
+## NICH1 semantic gate registry
+
+NICH1 adds five versioned gate definitions to `config/gate_definition_catalog.yaml` and typed implementations in `app.services.nich1`:
+
+- `topic_niche_alignment_gate` before admission;
+- `script_niche_alignment_gate` after script output;
+- `visual_niche_alignment_gate` after visual planning;
+- `thumbnail_niche_alignment_gate` after thumbnail brief;
+- `metadata_niche_alignment_gate` after publishing metadata.
+
+Each result binds the exact subject hash, active policy snapshot ref/hash, `NicheContractDigest` ref/hash, criterion-level evidence, reason codes, and human-review state. Missing semantic evidence, stale digest lineage, forbidden/adjacent-topic conflicts, or a non-PASS upstream binding fails closed for strict CH1-FLEX v2 work.
+
+`NicheAlignmentGateRegistry` requires all five typed implementations. R3D4 registers corresponding evidence adapters in `GATES_BY_KEY`, schedules them after the relevant agents, and includes all five in the final package gate list. Legacy packages without a strict niche digest remain readable; a strict v2 package cannot reach ready-for-review when any mandatory niche result is missing or non-PASS.
+
+`NicheAlignmentDossier` is the aggregate audit artifact. The pre-admission form requires topic and channel-fit evidence. The production-package form requires all five niche gates and records completed/missing gates, overall verdict, reason codes, and human-review requirements.
+
 ## Review Integration
 
 Gate review mapping:

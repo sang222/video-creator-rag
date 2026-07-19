@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.contracts.nich1 import NicheContractDigest, NicheDigestRef
 from app.core.config import get_settings
 from app.db.models import AgentContextPackSnapshot, EffectiveChannelRuntimeContextSnapshot, PromptRenderRun
 
@@ -183,6 +184,108 @@ class AgentContextContract:
         }
 
 
+@dataclass(frozen=True)
+class FrozenNicheAuthorityResult:
+    """Validated NICH1 authority frozen into Effective Context.
+
+    A legacy context has ``strict=False`` and remains readable. Once either
+    frozen NICH1 field exists, both the typed digest and its exact ref become
+    mandatory and artifact copies may only repeat that authority verbatim.
+    """
+
+    strict: bool
+    digest: dict[str, Any] | None
+    digest_ref: dict[str, Any] | None
+    reason_codes: list[str]
+
+    @property
+    def valid(self) -> bool:
+        return not self.reason_codes
+
+
+def resolve_frozen_niche_authority(
+    effective: EffectiveChannelRuntimeContextSnapshot,
+    *,
+    artifacts: dict[str, Any] | None = None,
+) -> FrozenNicheAuthorityResult:
+    category = _dict(effective.category_runtime_context_json)
+    raw_digest = category.get("niche_contract_digest")
+    raw_ref = category.get("niche_contract_digest_ref")
+    strict = isinstance(raw_digest, dict) or isinstance(raw_ref, dict)
+    if not strict:
+        return FrozenNicheAuthorityResult(
+            strict=False,
+            digest=None,
+            digest_ref=None,
+            reason_codes=[],
+        )
+
+    reasons: list[str] = []
+    digest: NicheContractDigest | None = None
+    digest_ref: NicheDigestRef | None = None
+    try:
+        digest = NicheContractDigest.model_validate(raw_digest)
+    except Exception:
+        reasons.append("NICHE_CONTRACT_DIGEST_INVALID")
+    try:
+        digest_ref = NicheDigestRef.model_validate(raw_ref)
+    except Exception:
+        reasons.append("NICHE_CONTRACT_DIGEST_REF_INVALID")
+
+    if digest is not None and digest_ref is not None:
+        if digest_ref.content_hash != digest.content_hash:
+            reasons.append("NICHE_CONTRACT_DIGEST_REF_HASH_MISMATCH")
+        if digest.channel_id != effective.channel_workspace_id:
+            reasons.append("NICHE_CONTRACT_CHANNEL_SCOPE_MISMATCH")
+        if digest.category_id != effective.content_category_id:
+            reasons.append("NICHE_CONTRACT_CATEGORY_SCOPE_MISMATCH")
+        expected_policy_ref = (
+            f"compiled-policy-snapshot://{effective.compiled_policy_snapshot_id}"
+            if effective.compiled_policy_snapshot_id is not None
+            else None
+        )
+        if digest.compiled_policy_snapshot_ref != expected_policy_ref:
+            reasons.append("NICHE_CONTRACT_POLICY_SNAPSHOT_REF_MISMATCH")
+        expected_profile_ref = (
+            f"channel-profile-version://{effective.channel_profile_version_id}"
+            if effective.channel_profile_version_id is not None
+            else None
+        )
+        if digest.channel_profile_version_ref != expected_profile_ref:
+            reasons.append("NICHE_CONTRACT_PROFILE_SCOPE_MISMATCH")
+        compiled_ref = next(
+            (
+                item
+                for item in _list(getattr(effective, "source_refs_json", []))
+                if isinstance(item, dict)
+                and item.get("type") == "compiled_channel_policy_snapshot"
+                and str(item.get("id")) == str(effective.compiled_policy_snapshot_id)
+            ),
+            None,
+        )
+        if compiled_ref is None:
+            reasons.append("NICHE_CONTRACT_POLICY_SNAPSHOT_EVIDENCE_MISSING")
+        elif compiled_ref.get("content_hash") != digest.compiled_policy_snapshot_hash:
+            reasons.append("NICHE_CONTRACT_POLICY_SNAPSHOT_HASH_MISMATCH")
+        if effective.channel_contract_hash and digest.channel_contract_hash != effective.channel_contract_hash:
+            reasons.append("NICHE_CONTRACT_CHANNEL_CONTRACT_HASH_MISMATCH")
+
+        supplied = artifacts or {}
+        supplied_digest = supplied.get("niche_contract_digest")
+        supplied_ref = supplied.get("niche_contract_digest_ref")
+        if supplied_digest is not None and supplied_digest != digest.model_dump(mode="json"):
+            reasons.append("NICHE_CONTRACT_ARTIFACT_COPY_MISMATCH")
+        if supplied_ref is not None and supplied_ref != digest_ref.model_dump(mode="json"):
+            reasons.append("NICHE_CONTRACT_REF_ARTIFACT_COPY_MISMATCH")
+
+    return FrozenNicheAuthorityResult(
+        strict=True,
+        digest=digest.model_dump(mode="json") if digest is not None else None,
+        digest_ref=digest_ref.model_dump(mode="json") if digest_ref is not None else None,
+        reason_codes=list(dict.fromkeys(reasons)),
+    )
+
+
 def _contract(
     agent_key: str,
     *,
@@ -212,6 +315,19 @@ def _contract(
 
 
 DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
+    "DailyIdeaAgent": _contract(
+        "DailyIdeaAgent",
+        lane="cheap_structured",
+        task_type="daily_idea",
+        required=[
+            "niche_contract_digest",
+            "editorial_slot_digest",
+            "runtime_guard_digest",
+            "evidence_digest",
+            "common_skill_digest",
+        ],
+        optional=["channel_state_digest"],
+    ),
     "ChannelAuthorityAgent": _contract(
         "ChannelAuthorityAgent",
         lane="cheap_structured",
@@ -222,7 +338,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
         "TopicIdeaScoringAgent",
         lane="cheap_structured",
         required=["effective_channel_runtime_digest", "runtime_guard_digest", "evidence_digest", "common_skill_digest"],
-        optional=["script_contract_digest"],
+        optional=["script_contract_digest", "niche_contract_digest"],
     ),
     "ResearchPackSummarizer": _contract(
         "ResearchPackSummarizer",
@@ -241,7 +357,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["package_status_digest"],
+        optional=["package_status_digest", "niche_contract_digest"],
     ),
     "ScriptWriterAgent": _contract(
         "ScriptWriterAgent",
@@ -255,7 +371,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["package_status_digest"],
+        optional=["package_status_digest", "niche_contract_digest"],
         forbidden=["full_visual_plan", "upload_card_copy", "media_qc_report"],
     ),
     "PublishingMetadataAgent": _contract(
@@ -270,7 +386,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["package_status_digest"],
+        optional=["package_status_digest", "niche_contract_digest"],
         forbidden=["full_visual_plan", "provider_internals", "full_research_pack"],
         max_context_chars=12500,
     ),
@@ -284,7 +400,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["asset_inventory_digest", "package_status_digest"],
+        optional=["asset_inventory_digest", "package_status_digest", "niche_contract_digest"],
         forbidden=["full_research_pack", "full_provider_logs", "full_previous_artifacts"],
     ),
     "ThumbnailBriefAgent": _contract(
@@ -297,7 +413,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["character_thumbnail_digest", "package_status_digest"],
+        optional=["character_thumbnail_digest", "package_status_digest", "niche_contract_digest"],
         forbidden=["full_narration_script", "raw_research_pack", "provider_readiness_snapshot_raw"],
     ),
     "RightsDisclosureReviewer": _contract(
@@ -426,6 +542,32 @@ def _contract_with_memory_digest(contract: AgentContextContract) -> AgentContext
     )
 
 
+def _contract_with_required_niche_authority(
+    contract: AgentContextContract,
+) -> AgentContextContract:
+    required = list(contract.required_context_sections)
+    for section in ("niche_contract_digest", "niche_contract_digest_ref"):
+        if section not in required:
+            required.append(section)
+    optional = [
+        section
+        for section in contract.optional_context_sections
+        if section not in {"niche_contract_digest", "niche_contract_digest_ref"}
+    ]
+    payload = {
+        **contract.to_dict(),
+        "required_context_sections": required,
+        "optional_context_sections": optional,
+    }
+    payload.pop("content_hash", None)
+    return replace(
+        contract,
+        required_context_sections=required,
+        optional_context_sections=optional,
+        content_hash=stable_hash(payload),
+    )
+
+
 def _memory_use_case_for_agent(agent_key: str) -> str:
     return {
         "ScriptWriterAgent": "script",
@@ -450,7 +592,9 @@ class PromptBudgetResult:
 
 class PromptBudgetGate:
     def apply(self, *, contract: AgentContextContract, sections: dict[str, Any], initial_omitted: list[dict[str, Any]]) -> PromptBudgetResult:
-        required = set(contract.required_context_sections) | {"effective_channel_runtime_digest"}
+        required = set(contract.required_context_sections)
+        if contract.task_type != "daily_idea":
+            required.add("effective_channel_runtime_digest")
         selected = dict(sections)
         omitted = list(initial_omitted)
         contributors = self._contributors(selected)
@@ -509,7 +653,7 @@ class ContextPackShapeGate:
         for section in contract.forbidden_context_sections:
             if section in digests or _contains_key(context_pack, section):
                 errors.append(f"forbidden section present: {section}")
-        if "effective_channel_runtime_digest" not in digests:
+        if contract.task_type != "daily_idea" and "effective_channel_runtime_digest" not in digests:
             errors.append("EffectiveChannelRuntimeDigest missing")
         if context_pack.get("agent_context_contract", {}).get("content_hash") != contract.content_hash:
             errors.append("AgentContextContract hash mismatch")
@@ -758,12 +902,45 @@ class AgentContextPackBuilder:
                 },
             )
 
+        niche_authority = resolve_frozen_niche_authority(
+            effective,
+            artifacts=artifacts,
+        )
+        if niche_authority.strict:
+            contract = _contract_with_required_niche_authority(contract)
+        if not niche_authority.valid:
+            return self._persist_blocking_snapshot(
+                package_id=package_id,
+                video_project_id=video_project_id,
+                contract=contract,
+                effective=effective,
+                compiled_policy_snapshot_id=compiled_policy_snapshot_id,
+                compiled_policy_snapshot_hash=compiled_policy_snapshot_hash,
+                channel_contract_hash=channel_contract_hash,
+                sections={
+                    "effective_channel_runtime_digest": build_effective_channel_runtime_digest(
+                        effective
+                    )
+                },
+                omitted=[],
+                shape_gate={
+                    "status": "BLOCK",
+                    "errors": niche_authority.reason_codes,
+                },
+                reason_codes=niche_authority.reason_codes,
+                blocking_status="BLOCK",
+            )
+        authoritative_artifacts = dict(artifacts)
+        if niche_authority.strict:
+            authoritative_artifacts["niche_contract_digest"] = niche_authority.digest
+            authoritative_artifacts["niche_contract_digest_ref"] = niche_authority.digest_ref
+
         candidate_sections = self._candidate_sections(
             package_id=package_id,
             effective=effective,
             contract=contract,
             agent_key=agent_key,
-            artifacts=artifacts,
+            artifacts=authoritative_artifacts,
             evidence_refs=evidence_refs,
             current_package_state=current_package_state,
             runtime_guard_state=runtime_guard_state,
@@ -917,7 +1094,12 @@ class AgentContextPackBuilder:
         )
         evidence = build_evidence_digest(evidence_refs=evidence_refs, artifacts=artifacts, current_package_state=current_package_state)
         common = build_common_skill_digest()
-        script = build_script_contract_digest(effective)
+        niche_contract = _dict(artifacts.get("niche_contract_digest"))
+        niche_contract_ref = _dict(artifacts.get("niche_contract_digest_ref"))
+        script = build_script_contract_digest(
+            effective,
+            niche_contract_digest=niche_contract or None,
+        )
         visual = build_visual_contract_digest(effective)
         thumbnail = build_thumbnail_contract_digest(effective)
         metadata = build_metadata_contract_digest(effective)
@@ -958,6 +1140,9 @@ class AgentContextPackBuilder:
             "media_inventory_digest": build_media_inventory_digest(artifacts=artifacts, package_id=package_id),
             "gate_summary_digest": build_gate_summary_digest(artifacts=artifacts),
         }
+        if niche_contract:
+            sections["niche_contract_digest"] = niche_contract
+            sections["niche_contract_digest_ref"] = niche_contract_ref
         memory_digest = self._optional_memory_digest(
             package_id=package_id,
             effective=effective,
@@ -1243,12 +1428,22 @@ def build_effective_channel_runtime_digest(snapshot: EffectiveChannelRuntimeCont
     )
 
 
-def build_script_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_script_contract_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+    *,
+    niche_contract_digest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     market = _dict(snapshot.market_locale_context_json)
     audience = _dict(snapshot.audience_context_json)
     persona = _dict(snapshot.brand_voice_persona_context_json)
     category = _dict(snapshot.category_runtime_context_json)
     safety = _dict(snapshot.safety_forbidden_claims_context_json)
+    niche = _dict(
+        niche_contract_digest
+        or category.get("niche_contract_digest")
+        or audience.get("niche_contract_digest")
+    )
+    niche_ref = _dict(category.get("niche_contract_digest_ref"))
     payload = {
         "content_language": market.get("content_language"),
         "market": market.get("primary_market"),
@@ -1264,6 +1459,19 @@ def build_script_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapsho
             "forbidden_claims": safety.get("forbidden_claims"),
         },
         "character_persona": _dict(snapshot.character_identity_context_json).get("identity"),
+        "primary_niche": niche.get("primary_niche") or category.get("primary_niche"),
+        "sub_niche": niche.get("sub_niche") or category.get("sub_niche"),
+        "positioning": niche.get("positioning") or category.get("positioning"),
+        "brand_promise": niche.get("brand_promise") or category.get("brand_promise"),
+        "content_pillar": niche.get("content_pillar_key") or category.get("content_pillar"),
+        "category_id": niche.get("category_id") or category.get("category_id"),
+        "category_sub_niche": niche.get("category_sub_niche") or category.get("sub_niche"),
+        "allowed_topics": niche.get("allowed_topics") or category.get("allowed_topics") or [],
+        "forbidden_topics": niche.get("forbidden_topics") or safety.get("forbidden_topics") or [],
+        "audience_pain_points": niche.get("audience_pain_points") or audience.get("audience_pain_points") or [],
+        "audience_desired_outcomes": niche.get("audience_desired_outcomes") or audience.get("audience_desired_outcomes") or [],
+        "niche_contract_digest_ref": niche_ref.get("ref") or niche.get("ref"),
+        "niche_contract_digest_hash": niche_ref.get("content_hash") or niche.get("content_hash"),
     }
     return _compact_digest(
         digest_type="ScriptContractDigest",

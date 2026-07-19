@@ -1,0 +1,192 @@
+{
+  "schema_version": "ch1-nich1-d2p1-master-repair-cycles/v1",
+  "date": "2026-07-19",
+  "status": "PASS",
+  "repair_cycle_count": 20,
+  "repair_cycles": [
+    {
+      "cycle": 1,
+      "phase": "CH1-FLEX-v2",
+      "failure_classification": "VISUAL_POLICY_LITERAL_AND_ROUTE_AUTHORITY",
+      "root_cause": "The profile model did not expose the exact v2 visual-source authority and closed route taxonomy.",
+      "repair": "Added typed exact literals, 13 routes, NativeFFmpegRenderer authority, native exact-content rules, 1080p block, human approval, and archive verification.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 2,
+      "phase": "CH1-FLEX-v2",
+      "failure_classification": "QUALIFICATION_BINDING_DRIFT",
+      "root_cause": "VSR1, IMG1, VQC1, canary, and Drive evidence could be copied or weakly referenced.",
+      "repair": "Compiler now validates and hash-binds the existing qualified refs without duplicating their payloads.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 3,
+      "phase": "CH1-FLEX-v2",
+      "failure_classification": "OVERBROAD_OPERATOR_APPROVAL",
+      "root_cause": "A generic approval ref or unbounded semantic diff could authorize unrelated v2 changes.",
+      "repair": "Required the exact master approval ref and an allowlist plus required-set check for the approved v2 diff paths.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 4,
+      "phase": "CH1-FLEX-v2/NICH1",
+      "failure_classification": "INVENTED_CHANNEL_FIT_THRESHOLD",
+      "root_cause": "An initial 0.75 threshold would have added an unapproved profile diff.",
+      "repair": "Removed the invented profile field and deterministically reused the approved Pexels semantic-fit threshold 0.78 with ref/version/hash derivation evidence.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 5,
+      "phase": "NICH1",
+      "failure_classification": "VISUAL_PROFILE_PROJECTION_PATH",
+      "root_cause": "Digest compilation initially read visual-source profile data from the wrong compiled payload level.",
+      "repair": "Resolved the value from channel_scoped_policy.visual_source_policy_binding while preserving the compiled snapshot as authority.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 6,
+      "phase": "NICH1",
+      "failure_classification": "SELF_HASHED_DIGEST_SUBSTITUTION",
+      "root_cause": "Hash shape alone could not prove that caller-provided semantic digest content came from authoritative objects.",
+      "repair": "M5 and D2P1 now recompile the digest and compare exact semantic content, nested AgentContextPack content, runtime guard, refs, and pack hash.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 7,
+      "phase": "NICH1",
+      "failure_classification": "RESERVED_CONTEXT_OVERRIDE",
+      "root_cause": "Strict context callers could attempt to replace authority, digest, or policy fields.",
+      "repair": "Reserved fields are compiler-owned and caller overrides fail closed before prompt routing.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 8,
+      "phase": "NICH1",
+      "failure_classification": "GENERIC_ANCHOR_SEMANTIC_FALSE_PASS",
+      "root_cause": "A single generic word could make an adjacent-niche topic appear relevant.",
+      "repair": "Required criterion-level evidence, two scope tokens, and a distinctive non-generic anchor with deterministic plural normalization.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 9,
+      "phase": "NICH1",
+      "failure_classification": "CALLER_POLICY_FIT_AND_COST_BYPASS",
+      "root_cause": "Optional runtime values could attempt to force policy PASS or loosen the compiled cost cap.",
+      "repair": "Policy fit is derived from typed gates and score evidence; the cost firewall always uses the frozen compiled cap.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 10,
+      "phase": "NICH1",
+      "failure_classification": "DAILY_LLM_READINESS_AND_AUDIT_GAP",
+      "root_cause": "Daily generation had an obsolete hard block and could not prove a persisted router run on success.",
+      "repair": "Wired DailyIdeaAgent through Prompt Registry and LLMRouter, required LLMRunSnapshot, and propagated unconfigured/failed routes closed.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 11,
+      "phase": "NICH1/M5",
+      "failure_classification": "PREFLIGHT_SUBJECT_HASH_AND_GATE_EVIDENCE",
+      "root_cause": "Admission evidence did not fully bind the DailyIdeaDecision subject hash, digest, snapshot, typed gate, and channel-fit dossier.",
+      "repair": "Unified the M5/D2P1 subject-hash contract and made all pre-admission bindings exact and content-hashed.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 12,
+      "phase": "NICH1/M12.2",
+      "failure_classification": "MISSING_OR_UNORDERED_PRODUCTION_GATES",
+      "root_cause": "A package could lack typed thumbnail or other downstream niche evidence.",
+      "repair": "Registered all five gates, enforced Topic to Script to Visual to Thumbnail to Metadata ordering, and required a complete production dossier.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 13,
+      "phase": "D2P1",
+      "failure_classification": "CIRCULAR_ADMISSION_ENTRY_CONTRACT",
+      "root_cause": "Requiring an already-ADMITTED DailyIdeaDecision prevented D2P1 from owning the existing M5 admission step.",
+      "repair": "Accepted an admissible immutable PROPOSED decision, created/reused the M5 ADMIT receipt, and rejected caller topic overrides.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 14,
+      "phase": "D2P1",
+      "failure_classification": "LATEST_PREFLIGHT_AFTER_ADMISSION",
+      "root_cause": "Resolving the newest preflight could replace the preflight frozen by an existing admission.",
+      "repair": "Historical resume resolves the exact admission preflight; initial admission deterministically uses the earliest eligible preflight.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 15,
+      "phase": "D2P1",
+      "failure_classification": "STALE_STATUS_APPEARED_UNBLOCKED",
+      "root_cause": "Read-only status without a receipt could report an unvalidated entry after storage drift.",
+      "repair": "Status now recomputes entry lineage read-only and exposes the earliest terminal admission without creating rows.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 16,
+      "phase": "D2P1/M5",
+      "failure_classification": "CANDIDATE_PROJECT_LEAK_ON_EFFECTIVE_CONTEXT_BLOCK",
+      "root_cause": "A failed Effective Context compile could leave a candidate project or initial artifacts behind.",
+      "repair": "Candidate project, Effective Context, and initial artifacts now share a nested transaction; failure rolls back the candidate and persists one idempotent BLOCK receipt.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 17,
+      "phase": "D2P1",
+      "failure_classification": "NONAUTHORITATIVE_TEST_DIGEST_FALLBACK",
+      "root_cause": "The D2P1 fixture hid incomplete Channel Contract data behind a hand-built digest fallback.",
+      "repair": "Removed the fallback and supplied a COMPLETE authoritative contract so every D2P1 test uses the real digest compiler.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 18,
+      "phase": "D2P1",
+      "failure_classification": "CHANNEL_FIT_THRESHOLD_WRONG_PAYLOAD_LEVEL",
+      "root_cause": "D2P1 compared gate evidence with an optional scoped value instead of the compiled top-level authority.",
+      "repair": "D2P1 now uses channel_fit_threshold_from_compiled_policy and fails closed when authority is missing.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 19,
+      "phase": "D2P1/M5",
+      "failure_classification": "IMMUTABLE_DECISION_MUTATION_AND_HISTORICAL_RECOMPILE",
+      "root_cause": "M5 attempted PROPOSED-to-ADMITTED mutation on an immutable row, while digest recompile incorrectly required a formerly active frozen snapshot to remain current.",
+      "repair": "Kept DailyIdeaDecision immutable, made ProjectAdmissionDecision the transition authority, and added a narrow approved-historical recompile mode reachable only after an ADMIT project exists.",
+      "result": "PASS"
+    },
+    {
+      "cycle": 20,
+      "phase": "NICH1/M12.1",
+      "failure_classification": "VALIDATOR_STATUS_AND_AGENT_VERDICT_CONFLATION",
+      "root_cause": "REVIEW_REQUIRED agent output was incorrectly returned as schema-validation failure, breaking nine M12.1 compatibility tests.",
+      "repair": "Restored validator status OK for valid repaired schema and made M5 inspect the normalized agent verdict to propagate REVIEW_REQUIRED or BLOCK closed.",
+      "result": "PASS"
+    }
+  ],
+  "final_evidence": {
+    "production_activation": "PASS",
+    "ch1_nich1_focused": "22 passed",
+    "d2p1_focused": "15 passed",
+    "master_suite": "148 passed, 1 warning",
+    "shared_m5_r3d_m12": "107 passed, 12 skipped, 1 warning",
+    "m12_1_compatibility_rerun": "11 passed",
+    "alembic_heads": "0037_ch1_flex (head)",
+    "compileall": "PASS",
+    "ruff": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "execution_boundaries": {
+    "master_provider_calls": 0,
+    "master_media_render_calls": 0,
+    "master_drive_calls": 0,
+    "master_youtube_calls": 0,
+    "mr1_execution": "ON_HOLD",
+    "proceed_to_mr1": false,
+    "proceed_to_lpro1": true,
+    "lpro1_started": false,
+    "pkg1_revised": false
+  },
+  "exact_next_action": "Wait for a separate operator-started LPRO1 task; keep PKG1 revision and MR1 execution on hold."
+}

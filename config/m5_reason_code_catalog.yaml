@@ -1,5 +1,5 @@
 catalog_key: m5_reason_code_catalog
-catalog_version: "1.0.1"
+catalog_version: "1.0.3"
 schema_version: catalog.v1
 status: active
 items:
@@ -21,6 +21,26 @@ items:
     description: Metric reference is unknown or absent.
   - code: LLM_PROVIDER_NOT_CONFIGURED
     description: Real LLM provider is not configured.
+  - code: LLM_ROUTE_NOT_APPROVED
+    description: Daily idea execution attempted to bypass the registered LLMRouter route.
+  - code: DAILY_PROMPT_NOT_READY
+    description: DailyIdeaAgent prompt or bounded context failed readiness validation.
+  - code: DAILY_IDEA_ROUTED
+    description: Daily idea generation completed through Prompt Registry and LLMRouter.
+  - code: DAILY_LLM_ROUTE_FAILED
+    description: The registered DailyIdeaAgent LLM route failed safely.
+  - code: LLM_RUN_SNAPSHOT_REQUIRED
+    description: A successful router result did not provide its mandatory persisted LLMRunSnapshot.
+  - code: DAILY_IDEA_REVIEW_REQUIRED
+    description: DailyIdeaAgent returned a valid envelope that explicitly requires review.
+  - code: DAILY_IDEA_BLOCKED
+    description: DailyIdeaAgent returned an explicit policy block.
+  - code: DAILY_IDEA_OUTPUT_STATUS_NOT_OK
+    description: Daily idea output did not carry the required OK authority status.
+  - code: NICH1_DAILY_CONTEXT_AUTHORITY_INVALID
+    description: The strict daily context failed authoritative digest and frozen-snapshot revalidation.
+  - code: POLICY_SNAPSHOT_MISSING
+    description: The frozen compiled policy snapshot required by the daily run is missing.
   - code: LLM_OUTPUT_MALFORMED
     description: LLM output was malformed.
   - code: LLM_SCHEMA_VALIDATION_FAILED
@@ -35,6 +55,12 @@ items:
     description: Provider quota blocked execution.
   - code: COST_BUDGET_BLOCKED
     description: Cost or budget gate blocked execution.
+  - code: COST_BUDGET_POLICY_REQUIRED
+    description: The frozen channel policy has no usable compiled cost envelope.
+  - code: ESTIMATED_COST_EXCEEDS_FROZEN_CAP
+    description: Estimated daily LLM cost exceeds the frozen channel cap.
+  - code: COMPILED_COST_ENVELOPE_PASS
+    description: Estimated daily LLM cost passed the frozen compiled policy envelope.
   - code: LLM_RUN_SNAPSHOT_CREATED
     description: LLM run snapshot was created.
   - code: SEARCH_DEMAND_EVIDENCE_MISSING

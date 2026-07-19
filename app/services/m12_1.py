@@ -52,6 +52,7 @@ BASE_SCHEMA_REF = "base_agent_envelope"
 MISSING_CHANNEL_NEXT_ACTION = "Bổ sung hoặc compile lại ChannelProfileVersion trước khi render prompt."
 REQUIRED_AGENT_KEYS = [
     "ChannelAuthorityAgent",
+    "DailyIdeaAgent",
     "TopicIdeaScoringAgent",
     "ResearchPackSummarizer",
     "ScriptPlanningAgent",
@@ -220,7 +221,7 @@ class PromptRegistryService:
         self.repository = repository or PromptRegistryRepository()
 
     def sync_repo_registry(self) -> PromptRegistrySyncSummary:
-        manifests = self.repository.load_agent_manifests()
+        self.repository.load_agent_manifests()
         prompt_hashes: dict[str, str] = {}
         schema_identities: set[tuple[str, str]] = set()
         for agent_key in REQUIRED_AGENT_KEYS:
@@ -362,7 +363,11 @@ class PromptRegistryService:
         validation = validate_base_envelope(parsed, schema=schema, expected_agent_key=data.agent_key)
         status = "OK" if validation["valid"] else "REVIEW_REQUIRED"
         if parsed.get("status") in {"BLOCK", "REFUSAL", "ERROR"}:
-            status = parsed["status"] if parsed["status"] in {"BLOCK", "ERROR"} else "REVIEW_REQUIRED"
+            status = (
+                parsed["status"]
+                if parsed["status"] in {"BLOCK", "ERROR"}
+                else "REVIEW_REQUIRED"
+            )
         if data.prompt_render_run_id is not None:
             render_run = self.session.get(PromptRenderRun, data.prompt_render_run_id)
             if render_run is not None:

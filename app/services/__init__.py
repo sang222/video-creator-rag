@@ -239,6 +239,19 @@ from app.services.r3d4 import (
     R3D4GateService,
     StrictRepairService,
 )
+from app.services.nich1 import (
+    EditorialSlotValidator,
+    MetadataNicheAlignmentGate,
+    NicheAlignmentDossierBuilder,
+    NicheAlignmentGateRegistry,
+    NicheContractDigestCompiler,
+    ScriptNicheAlignmentGate,
+    ThumbnailNicheAlignmentGate,
+    TopicNicheAlignmentGate,
+    VisualNicheAlignmentGate,
+    evaluate_channel_fit,
+)
+from app.services.d2p1 import DailyToPackageOrchestrator
 from app.services.controlled_memory import (
     ControlledMemoryService,
     MemoryApprovalGate,
@@ -324,6 +337,17 @@ from app.services.visual_source_routing import (
 
 __all__ = [
     "AuditService",
+    "DailyToPackageOrchestrator",
+    "EditorialSlotValidator",
+    "MetadataNicheAlignmentGate",
+    "NicheAlignmentDossierBuilder",
+    "NicheAlignmentGateRegistry",
+    "NicheContractDigestCompiler",
+    "ScriptNicheAlignmentGate",
+    "ThumbnailNicheAlignmentGate",
+    "TopicNicheAlignmentGate",
+    "VisualNicheAlignmentGate",
+    "evaluate_channel_fit",
     "ChannelProfileCompiler",
     "ChannelProfileService",
     "ChannelWorkspaceService",
