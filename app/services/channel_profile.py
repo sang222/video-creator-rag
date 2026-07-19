@@ -9,6 +9,9 @@ from app.contracts import (
     ChannelProfileDraftUpdate,
     ChannelProfileInput,
     ChannelProfileVersionCreate,
+    DestinationBinding,
+    TargetMarketDigest,
+    TargetMarketProfile,
 )
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
@@ -371,6 +374,258 @@ class ChannelProfileService:
                 "activation_audit_id": str(activation_receipt.id) if activation_receipt else None,
             },
             "provider_calls": 0,
+        }
+
+    def approve_and_activate_ch1_market_v3(
+        self,
+        *,
+        channel_id: uuid.UUID,
+        target_market_profile: TargetMarketProfile,
+        target_market_digest: TargetMarketDigest,
+        destination_binding: DestinationBinding,
+        approval_ref: str,
+        approved_by: uuid.UUID | None = None,
+        correlation_id: str = "ch1-market-v3",
+    ) -> dict:
+        """Compile and activate the exact v2→v3 market overlay without provider I/O."""
+
+        channel = self.session.get(ChannelWorkspace, channel_id)
+        if channel is None:
+            raise NotFoundError(f"channel not found: {channel_id}")
+        if channel.key != "small-team-ai":
+            raise ValidationFailureError("CH1-MARKET v3 is scoped to small-team-ai")
+        if approved_by is not None and self.session.get(User, approved_by) is None:
+            raise NotFoundError(f"user not found: {approved_by}")
+        if (
+            target_market_profile.channel_id != channel.id
+            or target_market_profile.channel_key != channel.key
+            or destination_binding.channel_id != channel.id
+            or destination_binding.channel_key != channel.key
+        ):
+            raise ValidationFailureError("CH1_MARKET_V3_CHANNEL_BINDING_MISMATCH")
+
+        versions = self.list_profile_versions(channel_id)
+        profile_v2 = next((item for item in versions if item.version == 2), None)
+        if profile_v2 is None:
+            raise ValidationFailureError("CH1-FLEX v2 profile is required")
+        snapshot_v2 = self._latest_snapshot_for_profile(profile_v2.id)
+        if snapshot_v2 is None:
+            raise ValidationFailureError("CH1-FLEX v2 compiled snapshot is required")
+        if (
+            profile_v2.status != "active"
+            or snapshot_v2.status != "active"
+            or channel.active_policy_snapshot_id != snapshot_v2.id
+        ):
+            raise ValidationFailureError("CH1-FLEX v2 must be active before v3")
+
+        v2_profile_payload = deepcopy(profile_v2.profile_input)
+        v2_snapshot_payload = deepcopy(snapshot_v2.compiled_payload)
+        v2_snapshot_hash = snapshot_v2.content_hash
+        compiler = ChannelProfileCompiler(self.session)
+        effective_v2 = ChannelProfileInput.model_validate(
+            self._effective_profile_input(profile_v2)
+        )
+        target_input = compiler.build_ch1_market_v3_profile_input(
+            active_profile_input=effective_v2,
+            target_market_profile=target_market_profile,
+            target_market_digest=target_market_digest,
+            destination_binding=destination_binding,
+            approval_ref=approval_ref,
+        )
+        target_payload = target_input.model_dump(mode="json")
+        target_hash = content_hash(target_payload)
+
+        profile_v3 = next((item for item in versions if item.version == 3), None)
+        if profile_v3 is None:
+            if any(item.version > 3 for item in versions):
+                raise ValidationFailureError(
+                    "CH1-MARKET v3 slot is missing but later profile versions exist"
+                )
+            profile_v3 = self.create_profile_version(
+                channel_id=channel.id,
+                data=ChannelProfileVersionCreate(
+                    profile_input=target_input,
+                    created_by=approved_by,
+                ),
+                correlation_id=f"{correlation_id}-profile",
+            )
+            if profile_v3.version != 3:
+                raise ValidationFailureError("CH1-MARKET v3 version collision")
+        elif profile_v3.profile_input_hash != target_hash:
+            if profile_v3.status != "draft":
+                raise ValidationFailureError(
+                    "existing CH1-MARKET v3 is immutable and does not match exact policy"
+                )
+            profile_v3 = self.update_draft(
+                profile_version_id=profile_v3.id,
+                data=ChannelProfileDraftUpdate(
+                    profile_input=target_input,
+                    expected_profile_input_hash=profile_v3.profile_input_hash,
+                ),
+                correlation_id=f"{correlation_id}-profile",
+            )
+
+        validation = self.validate_draft(profile_v3.id)
+        if validation["status"] != "PASS":
+            raise ValidationFailureError(
+                f"CH1-MARKET v3 validation blocked: {validation['blockers']}"
+            )
+        preview_first = self.preview_compile(profile_v3.id)
+        preview_second = self.preview_compile(profile_v3.id)
+        if preview_first["content_hash"] != preview_second["content_hash"]:
+            raise ValidationFailureError("CH1-MARKET v3 preview compile is not deterministic")
+
+        diff = self.semantic_diff(profile_v3.id, profile_v2.id)
+        allowed_diff_paths = {
+            "$.channel_policy.policy_version",
+            "$.channel_policy.approval_ref",
+            "$.channel_policy.target_market_profile",
+            "$.channel_policy.target_market_digest",
+            "$.channel_policy.market_alignment_policy",
+            "$.channel_policy.destination_binding_policy",
+            "$.channel_policy.market_package_freeze_policy",
+            "$.channel_policy.publish_timing_localization_policy",
+            "$.channel_policy.geo_evaluation_policy",
+        }
+        changed_paths = {
+            str(item.get("path")) for item in diff.get("changed_paths", [])
+        }
+        required_diff_paths = set(allowed_diff_paths)
+        unexpected_paths = changed_paths - allowed_diff_paths
+        missing_required_paths = required_diff_paths - changed_paths
+        if unexpected_paths or missing_required_paths:
+            raise ValidationFailureError(
+                "CH1-MARKET v3 exact scoped diff mismatch:"
+                f" unexpected={sorted(unexpected_paths)}"
+                f" missing={sorted(missing_required_paths)}"
+            )
+        diff_payload = {
+            **diff,
+            "from_profile_version": 2,
+            "to_profile_version": 3,
+            "status": "PASS",
+            "classification": {
+                "unchanged": "all v2 editorial, visual, provider, budget, evidence and archive policy",
+                "added": sorted(path for path in changed_paths if path not in {"$.channel_policy.policy_version", "$.channel_policy.approval_ref"}),
+                "modified": ["$.channel_policy.policy_version", "$.channel_policy.approval_ref"],
+                "removed": [],
+            },
+            "allowed_diff_paths": sorted(allowed_diff_paths),
+            "diff_hash": content_hash(diff),
+        }
+        diff_receipt = self._audit(
+            action="channel_profile.market_v3_diff_reviewed",
+            target_id=profile_v3.id,
+            company_id=channel.company_id,
+            correlation_id=f"{correlation_id}-diff",
+            payload=diff_payload,
+        )
+
+        compiled = compiler.compile(
+            profile_version_id=profile_v3.id,
+            correlation_id=f"{correlation_id}-compile",
+        )
+        if compiled.content_hash != preview_first["content_hash"]:
+            raise ValidationFailureError("CH1-MARKET v3 preview/persisted hash mismatch")
+        snapshot_v3 = self.session.get(
+            CompiledChannelPolicySnapshot,
+            compiled.snapshot_id,
+        )
+        if snapshot_v3 is None:
+            raise ValidationFailureError("CH1-MARKET v3 compiled snapshot is missing")
+
+        if profile_v3.status == "compiled":
+            self.submit_for_approval(profile_v3.id)
+        if profile_v3.status == "pending_approval":
+            self.approve_profile_version(
+                profile_version_id=profile_v3.id,
+                approved_by=approved_by,
+                approval_ref=approval_ref,
+                correlation_id=f"{correlation_id}-approval",
+            )
+        if profile_v3.status == "approved":
+            self.activate_snapshot(
+                snapshot_id=snapshot_v3.id,
+                correlation_id=f"{correlation_id}-activation",
+            )
+        if profile_v3.status != "active" or channel.active_policy_snapshot_id != snapshot_v3.id:
+            raise ValidationFailureError("CH1-MARKET v3 activation did not resolve as active")
+
+        if (
+            profile_v2.profile_input != v2_profile_payload
+            or snapshot_v2.compiled_payload != v2_snapshot_payload
+            or snapshot_v2.content_hash != v2_snapshot_hash
+        ):
+            raise ValidationFailureError("CH1-FLEX v2 immutable content changed")
+
+        metadata = deepcopy(channel.metadata_ or {})
+        governance = deepcopy(metadata.get("target_market_governance") or {})
+        governance.setdefault("drafts", [])
+        governance.setdefault("profiles", [])
+        governance.setdefault("digests", [])
+        governance.setdefault("approvals", [])
+        if not any(item.get("content_hash") == target_market_profile.content_hash for item in governance["profiles"]):
+            governance["profiles"].append(target_market_profile.model_dump(mode="json"))
+        if not any(item.get("content_hash") == target_market_digest.content_hash for item in governance["digests"]):
+            governance["digests"].append(target_market_digest.model_dump(mode="json"))
+        governance["active_profile_ref"] = (
+            f"target-market-profile://{channel.key}/v{target_market_profile.profile_version}"
+        )
+        governance["state"] = "ACTIVE"
+        metadata["target_market_governance"] = governance
+        destination_governance = deepcopy(metadata.get("destination_governance") or {})
+        destination_governance.setdefault("bindings", [])
+        if not any(item.get("content_hash") == destination_binding.content_hash for item in destination_governance["bindings"]):
+            destination_governance["bindings"].append(destination_binding.model_dump(mode="json"))
+        destination_governance["active_binding_ref"] = (
+            f"destination-binding://{channel.key}/v{destination_binding.binding_version}"
+        )
+        metadata["destination_governance"] = destination_governance
+        metadata["active_visual_profile"] = "STOCK_ASSISTED"
+        metadata["market_policy_state"] = "ACTIVE"
+        channel.metadata_ = metadata
+        self.session.flush()
+
+        approval_receipt = self._find_audit_receipt(
+            event_type="channel_profile.approved",
+            target_id=profile_v3.id,
+        )
+        activation_receipt = self._find_audit_receipt(
+            event_type="policy_snapshot.activated",
+            target_id=snapshot_v3.id,
+        )
+        return {
+            "status": "PASS",
+            "channel_id": str(channel.id),
+            "channel_profile_version_id": str(profile_v3.id),
+            "channel_profile_version": profile_v3.version,
+            "profile_input_hash": profile_v3.profile_input_hash,
+            "compiled_policy_snapshot_id": str(snapshot_v3.id),
+            "compiled_policy_snapshot_version": snapshot_v3.snapshot_version,
+            "compiled_policy_snapshot_hash": snapshot_v3.content_hash,
+            "target_market_profile_ref": governance["active_profile_ref"],
+            "target_market_profile_hash": target_market_profile.content_hash,
+            "target_market_digest_hash": target_market_digest.content_hash,
+            "destination_binding_ref": destination_governance["active_binding_ref"],
+            "destination_binding_hash": destination_binding.content_hash,
+            "destination_status": destination_binding.destination_status,
+            "publish_execution_allowed": destination_binding.destination_status == "VERIFIED",
+            "diff": diff_payload,
+            "rollback_pointer": {
+                "channel_profile_version_id": str(profile_v2.id),
+                "channel_profile_version": 2,
+                "compiled_policy_snapshot_id": str(snapshot_v2.id),
+                "compiled_policy_snapshot_hash": snapshot_v2.content_hash,
+            },
+            "receipts": {
+                "profile_diff_audit_id": str(diff_receipt.id),
+                "compiler_receipt_id": str(compiled.compile_run_id),
+                "approval_audit_id": str(approval_receipt.id) if approval_receipt else None,
+                "activation_audit_id": str(activation_receipt.id) if activation_receipt else None,
+            },
+            "provider_calls": 0,
+            "drive_calls": 0,
+            "youtube_calls": 0,
         }
 
     def update_draft(

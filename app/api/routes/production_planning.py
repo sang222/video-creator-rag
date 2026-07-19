@@ -1,6 +1,15 @@
 from fastapi import APIRouter
-from app.contracts.d2p1 import DailyToPackageStatusRead
+from pathlib import Path
+
+from app.contracts.d2p1 import DailyToPackageRequest, DailyToPackageRunRequest, DailyToPackageStatusRead
+from app.contracts.long_production import (
+    LongProductionOrchestrationReceipt,
+    LongProductionRunRequest,
+    LongProductionStatusRead,
+)
 from app.services.d2p1 import DailyToPackageOrchestrator
+from app.services.long_production import LongProductionOrchestrator
+from app.db.models import VideoProject
 
 from app.api.routes.imports import (
     AccessibilityQCService,
@@ -69,6 +78,48 @@ from app.api.routes.serializers_publish_learning import (
 
 def create_router() -> APIRouter:
     router = APIRouter()
+    lpro1_workspace = Path(__file__).resolve().parents[3] / "artifacts" / "lpro1"
+
+    @router.get("/video-projects/{project_id}/market-alignment")
+    def read_project_market_alignment(project_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                project = session.get(VideoProject, project_id)
+                if project is None:
+                    raise NotFoundError(f"video project not found: {project_id}")
+                summary = project.audience_delivery_summary or {}
+                freeze = summary.get("target_market_freeze")
+                alignment = summary.get("market_alignment") or {}
+                blockers = []
+                if not freeze:
+                    blockers.append("TARGET_MARKET_PROFILE_MISSING")
+                if not alignment:
+                    blockers.append("MARKET_ALIGNMENT_EVIDENCE_MISSING")
+                return {
+                    "project_id": str(project.id),
+                    "target_market_freeze": freeze,
+                    "profile_version": (freeze or {}).get(
+                        "target_market_profile_version"
+                    ),
+                    "target_market": (freeze or {}).get("primary_market"),
+                    "primary_locale": (freeze or {}).get("primary_locale"),
+                    "component_gate_states": alignment.get("component_gate_states", {}),
+                    "overall_verdict": alignment.get("overall_verdict", "BLOCK"),
+                    "reason_codes": sorted(
+                        set([*blockers, *alignment.get("reason_codes", [])])
+                    ),
+                    "blockers": blockers,
+                    "exact_next_action": (
+                        "Review the market alignment evidence and create a new artifact version."
+                        if blockers
+                        else alignment.get(
+                            "exact_next_action", "Continue to exact package review."
+                        )
+                    ),
+                    "read_only": True,
+                }
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @router.post("/editorial-calendar-slots", response_model=EditorialCalendarSlotRead)
     def create_editorial_calendar_slot(data: EditorialCalendarSlotCreate) -> EditorialCalendarSlotRead:
@@ -201,6 +252,66 @@ def create_router() -> APIRouter:
         try:
             with session_scope() as session:
                 return DailyToPackageOrchestrator(session).status(decision_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/daily-idea-decisions/{decision_id}/production-handoff/run",
+        response_model=DailyToPackageStatusRead,
+    )
+    def run_daily_idea_production_handoff(
+        decision_id: uuid.UUID,
+        data: DailyToPackageRunRequest | None = None,
+    ) -> DailyToPackageStatusRead:
+        """Run or resume D2P1 from immutable DailyIdeaDecision lineage."""
+
+        try:
+            control = data or DailyToPackageRunRequest()
+            with session_scope() as session:
+                return DailyToPackageOrchestrator(session).run(
+                    DailyToPackageRequest(
+                        daily_idea_decision_id=decision_id,
+                        **control.model_dump(),
+                    )
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get(
+        "/video-projects/{project_id}/long-production",
+        response_model=LongProductionStatusRead,
+    )
+    def get_long_production_status(project_id: uuid.UUID) -> LongProductionStatusRead:
+        """Read the durable LPRO1 lifecycle without executing media or providers."""
+
+        try:
+            with session_scope() as session:
+                return LongProductionOrchestrator.status(session, project_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/video-projects/{project_id}/long-production/run",
+        response_model=LongProductionOrchestrationReceipt,
+    )
+    def run_long_production(
+        project_id: uuid.UUID,
+        data: LongProductionRunRequest | None = None,
+    ) -> LongProductionOrchestrationReceipt:
+        """Run/resume LPRO1 from frozen package lineage; no creative overrides are accepted."""
+
+        try:
+            control = data or LongProductionRunRequest()
+            with session_scope() as session:
+                return LongProductionOrchestrator(
+                    session,
+                    workspace_root=lpro1_workspace,
+                ).run(
+                    project_id=project_id,
+                    package_id=control.package_id,
+                    execution_mode=control.execution_mode,
+                    execution_envelope=control.execution_envelope,
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

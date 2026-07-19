@@ -771,6 +771,7 @@ def _daily_idea_decision(decision: Any) -> dict[str, Any]:
     }
 
 def _idea_market_preflight(preflight: Any) -> dict[str, Any]:
+    market = preflight.evidence_blob or {}
     return {
         "id": preflight.id,
         "company_id": preflight.company_id,
@@ -782,6 +783,16 @@ def _idea_market_preflight(preflight: Any) -> dict[str, Any]:
         "demand_score": preflight.demand_score,
         "channel_fit_score": preflight.channel_fit_score,
         "policy_fit_state": preflight.policy_fit_state,
+        "niche_contract_digest_ref": market.get("niche_contract_digest_ref"),
+        "niche_contract_digest_hash": market.get("niche_contract_digest_hash"),
+        "target_market_digest_ref": market.get("target_market_digest_ref"),
+        "target_market_digest_hash": market.get("target_market_digest_hash"),
+        "editorial_slot_ref": market.get("editorial_slot_ref"),
+        "content_category_ref": market.get("content_category_ref"),
+        "target_market": market.get("target_market"),
+        "market_scope": market.get("market_scope", []),
+        "market_fit_score": market.get("market_fit_score"),
+        "market_fit_threshold": market.get("market_fit_threshold"),
         "confidence_state": preflight.confidence_state,
         "evidence_blob": preflight.evidence_blob,
         "reason_codes": preflight.reason_codes,

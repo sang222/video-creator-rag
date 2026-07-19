@@ -1,5 +1,5 @@
 catalog_key: artifact_type_registry
-catalog_version: "1.2.0"
+catalog_version: "1.4.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -41,6 +41,8 @@ items:
     description: Packaging variant set artifact allowance.
   - key: idea_admission_lineage
     description: PKG1 editorial slot, idea-gate, and project-admission lineage.
+  - key: long_production_orchestration
+    description: Versioned LPRO1 orchestration receipt through the human-review media boundary.
   - key: spoken_text_normalized
     description: Deterministic provider-free spoken-text normalization output.
   - key: claim_evidence_ledger
@@ -73,3 +75,13 @@ items:
     description: Immutable PKG1 artifact, gate, and review manifest.
   - key: mr1_readiness_state
     description: Provider-free MR1 entry state bound to the approved immutable PKG1 package.
+  - key: target_market_profile
+    description: Approved, versioned channel target-market production truth.
+  - key: target_market_digest
+    description: Bounded semantic projection of an approved target-market profile.
+  - key: market_alignment_dossier
+    description: Hash-bound results for all mandatory market-alignment gates.
+  - key: destination_binding
+    description: Exact manual-publish destination binding kept separate from target market.
+  - key: market_bound_publish_package
+    description: Exact destination and market package frozen for manual publishing.

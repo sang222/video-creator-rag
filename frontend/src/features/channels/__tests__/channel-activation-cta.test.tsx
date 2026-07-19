@@ -119,6 +119,8 @@ describe("ChannelWorkspaceView - Activation CTA", () => {
     vi.spyOn(api, "getChannelPublishLedger").mockResolvedValue(emptyLedger);
     vi.spyOn(api, "getChannelUploadTasks").mockResolvedValue(emptyTaskList);
     vi.spyOn(api, "getChannelUploadedVideos").mockResolvedValue(emptyUploadedVideos);
+    vi.spyOn(api, "getTargetMarketPreview").mockResolvedValue(marketPreview as never);
+    vi.spyOn(api, "getDestinationBinding").mockResolvedValue(destinationBinding as never);
     return render(
       <QueryClientProvider client={queryClient}>
         <ChannelWorkspaceView channelId="ch-1" />
@@ -277,4 +279,63 @@ describe("ChannelWorkspaceView - Activation CTA", () => {
       expect(screen.queryByRole("button", { name: /upload/i })).not.toBeInTheDocument();
     });
   });
+
+  it("shows active v3 market, locale, visual profile and truthful destination status", async () => {
+    renderView(makeWorkspace({
+      channel: { status: "active" },
+      health_summary: {
+        contract_review: {
+          contract_status: "COMPLETE",
+          label: "Hồ sơ đang áp dụng",
+          latest_snapshot_id: "snap-v3",
+          active_snapshot_id: "snap-v3",
+          snapshot_version: 4,
+          channel_profile_version: 3,
+          visual_profile: "STOCK_ASSISTED",
+          market_policy_state: "ACTIVE"
+        }
+      },
+      lifecycle: { lifecycle_state: "ACTIVE" }
+    }));
+    await openProfileTab();
+    expect(await screen.findByText("Hồ sơ thị trường & destination")).toBeInTheDocument();
+    expect(screen.getByText("v3")).toBeInTheDocument();
+    expect(screen.getByText("v1 · đã duyệt")).toBeInTheDocument();
+    expect(screen.getAllByText("US").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("en-US").length).toBeGreaterThan(0);
+    expect(screen.getByText("America/New_York")).toBeInTheDocument();
+    expect(screen.getByText("USD")).toBeInTheDocument();
+    expect(screen.getByText("STOCK_ASSISTED")).toBeInTheDocument();
+    expect(screen.getByText("YOUTUBE @SmallTeamAI · chờ platform ID")).toBeInTheDocument();
+    expect(screen.getAllByText("Đang áp dụng").length).toBeGreaterThan(0);
+  });
 });
+
+const marketPreview = {
+  channel_id: "ch-1",
+  state: "ACTIVE",
+  target_market: "US",
+  primary_locale: "en-US",
+  profile: {
+    profile_version: 1,
+    primary_market: "US",
+    primary_locale: "en-US",
+    narration_locale: "en-US",
+    primary_timezone: "America/New_York",
+    currency: "USD",
+    account_country: null
+  },
+  digest: {},
+  component_gate_states: {},
+  reason_codes: [],
+  blockers: [],
+  exact_next_action: "Use active v3.",
+  organic_target_country_supported: false
+};
+
+const destinationBinding = {
+  platform: "YOUTUBE",
+  channel_handle: "@SmallTeamAI",
+  destination_status: "PENDING_PLATFORM_ID",
+  account_country: null
+};

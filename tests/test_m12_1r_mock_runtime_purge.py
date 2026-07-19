@@ -57,9 +57,9 @@ def test_runtime_catalogs_contain_no_mock_provider_entries() -> None:
         assert "local_fixture" not in raw, path
 
 
-def test_runtime_defaults_are_not_mock() -> None:
-    assert "MOCK" not in get_args(DailyRunMode)
-    assert ChannelDailyRunCreate.model_fields["run_mode"].default == "REAL_DISABLED"
+def test_daily_runtime_modes_match_schema_and_default_real() -> None:
+    assert set(get_args(DailyRunMode)) == {"MOCK", "REAL_DISABLED", "REAL"}
+    assert ChannelDailyRunCreate.model_fields["run_mode"].default == "REAL"
     assert "MOCK" not in get_args(ProductionRunMode)
     assert ProductionArtifactRunCreate.model_fields["run_mode"].default == "REAL_DISABLED"
     assert "MOCK" not in get_args(AnalyticsSyncMode)

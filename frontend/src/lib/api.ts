@@ -33,6 +33,10 @@ import type {
   RuntimeOpsCommandCenter,
   ChannelRuntimeTrace,
   ChannelProfileManagement,
+  DestinationBinding,
+  TargetMarketPreview,
+  TargetMarketProfile,
+  TargetMarketProfileDraft,
   VideoPackageReview,
   UploadedVideoOpsSummary,
   UploadedVideoLedgerList
@@ -62,6 +66,8 @@ export const queryKeys = {
   channels: ["channels"],
   channelWorkspace: (channelId: string) => ["channel-workspace", channelId],
   channelProfileManagement: (channelId: string) => ["channel-profile-management", channelId],
+  targetMarketPreview: (channelId: string) => ["target-market-preview", channelId],
+  destinationBinding: (channelId: string) => ["destination-binding", channelId],
   channelPublishLedger: (channelId: string) => ["channel-publish-ledger", channelId],
   channelUploadTasks: (channelId: string) => ["channel-upload-tasks", channelId],
   channelUploadedVideos: (channelId: string) => ["channel-uploaded-videos", channelId],
@@ -147,6 +153,82 @@ export function createChannelInitDraft(input: MinimalChannelInitInput) {
     method: "POST",
     body: JSON.stringify(input)
   });
+}
+
+export type MinimalMarketChannelInitInput = {
+  company_id: string;
+  channel_name: string;
+  channel_key: string;
+  channel_purpose: string;
+  primary_market: string;
+  primary_language: string;
+  primary_locale: string;
+  target_audience_summary: string;
+  channel_market_type: "MARKET_NATIVE" | "GLOBAL_ENGLISH";
+  known_destination_channel?: string | null;
+  account_country?: string | null;
+};
+
+export function createMinimalMarketChannel(input: MinimalMarketChannelInitInput) {
+  return request<{
+    channel: ChannelSummary;
+    target_market_state: string;
+    profile_activation_allowed: false;
+    organic_target_country_supported: false;
+  }>("/channels/init", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function runTargetMarketDraft(channelId: string) {
+  return request<TargetMarketProfileDraft>(`/channels/${channelId}/target-market-draft/run`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function getTargetMarketDraft(channelId: string) {
+  return request<TargetMarketProfileDraft>(`/channels/${channelId}/target-market-draft`);
+}
+
+export function updateTargetMarketDraft(
+  channelId: string,
+  draft: Omit<TargetMarketProfileDraft, "content_hash"> & { content_hash?: string },
+  expectedDraftHash: string
+) {
+  return request<TargetMarketProfileDraft>(`/channels/${channelId}/target-market-draft`, {
+    method: "PATCH",
+    body: JSON.stringify({ expected_draft_hash: expectedDraftHash, draft })
+  });
+}
+
+export function approveTargetMarketDraft(
+  channelId: string,
+  draft: TargetMarketProfileDraft,
+  reviewer = "operator"
+) {
+  return request<{
+    decision: "APPROVE";
+    profile: TargetMarketProfile;
+    profile_activation_allowed: false;
+    exact_approved_draft_hash: string;
+  }>(`/channels/${channelId}/target-market-draft/approve`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_draft_id: draft.draft_id,
+      expected_draft_version: draft.draft_version,
+      expected_draft_hash: draft.content_hash,
+      reviewer,
+      approval_ref: `operator-approval://target-market/${channelId}/draft-${draft.draft_version}`,
+      decision: "APPROVE"
+    })
+  });
+}
+
+export function getTargetMarketPreview(channelId: string) {
+  return request<TargetMarketPreview>(`/channels/${channelId}/target-market-preview`);
+}
+
+export function getDestinationBinding(channelId: string) {
+  return request<DestinationBinding | null>(`/channels/${channelId}/destination-binding`);
 }
 
 export function researchChannelInitDraft(draftId: string) {

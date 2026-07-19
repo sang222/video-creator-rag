@@ -1,5 +1,5 @@
 catalog_key: gate_definition_catalog
-catalog_version: "1.1.0"
+catalog_version: "1.2.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -227,3 +227,75 @@ items:
     output_schema_version: nich1.gate-result.v1
     definition: {logic: metadata_niche_alignment_gate, review_required: true, review_type: seo_review}
     reason_code_refs: [METADATA_TOPIC_MISMATCH, METADATA_CLAIM_EVIDENCE_MISSING, ADJACENT_NICHE_CONFLICT]
+  - gate_key: idea_market_preflight
+    gate_name: Idea Market Preflight
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.idea-market-preflight.v1
+    output_schema_version: geo1.idea-market-preflight.v1
+    definition: {logic: idea_market_preflight, review_required: true, review_type: editorial}
+    reason_code_refs: [MARKET_DEMAND_SCOPE_MISSING, TOPIC_MARKET_DEMAND_WEAK]
+  - gate_key: topic_market_alignment_gate
+    gate_name: Topic Market Alignment Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.topic-market-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: topic_market_alignment_gate, review_required: true, review_type: editorial}
+    reason_code_refs: [TARGET_MARKET_PROFILE_MISSING, TARGET_MARKET_PROFILE_STALE, MARKET_DEMAND_SCOPE_MISSING, TOPIC_MARKET_DEMAND_WEAK]
+  - gate_key: research_jurisdiction_gate
+    gate_name: Research Jurisdiction Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.research-jurisdiction-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: research_jurisdiction_gate, review_required: true, review_type: policy_review}
+    reason_code_refs: [SOURCE_JURISDICTION_MISMATCH, FOREIGN_CONTEXT_NOT_DISCLOSED, CURRENCY_MISMATCH, UNITS_POLICY_MISMATCH, DATE_FORMAT_MISMATCH]
+  - gate_key: script_market_alignment_gate
+    gate_name: Script Market Alignment Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.script-market-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: script_market_alignment_gate, review_required: true, review_type: editorial}
+    reason_code_refs: [SCRIPT_MARKET_CONTEXT_MISMATCH, CURRENCY_MISMATCH, UNITS_POLICY_MISMATCH, DATE_FORMAT_MISMATCH, TRANSLATED_SOUNDING_LANGUAGE_RISK]
+  - gate_key: voice_locale_alignment_gate
+    gate_name: Voice Locale Alignment Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.voice-locale-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: voice_locale_alignment_gate, review_required: true, review_type: editorial}
+    reason_code_refs: [VOICE_LOCALE_MISMATCH]
+  - gate_key: visual_market_alignment_gate
+    gate_name: Visual Market Alignment Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.visual-market-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: visual_market_alignment_gate, review_required: true, review_type: packaging_review}
+    reason_code_refs: [VISUAL_MARKET_CONTEXT_MISMATCH, CURRENCY_MISMATCH, DATE_FORMAT_MISMATCH]
+  - gate_key: thumbnail_market_alignment_gate
+    gate_name: Thumbnail Market Alignment Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.thumbnail-market-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: thumbnail_market_alignment_gate, review_required: true, review_type: packaging_review}
+    reason_code_refs: [THUMBNAIL_LOCALE_MISMATCH, CURRENCY_MISMATCH]
+  - gate_key: metadata_market_alignment_gate
+    gate_name: Metadata Market Alignment Gate
+    gate_domain: target_market_governance
+    version: "1.0.0"
+    status: active
+    input_schema_version: geo1.metadata-market-input.v1
+    output_schema_version: geo1.market-gate-result.v1
+    definition: {logic: metadata_market_alignment_gate, review_required: true, review_type: seo_review}
+    reason_code_refs: [LANGUAGE_METADATA_MISMATCH, PRODUCT_AVAILABILITY_MISMATCH]

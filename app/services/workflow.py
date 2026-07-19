@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from app.contracts.workflow import (
     RevisionRequestCreate,
     VideoProjectCreate,
 )
+from app.contracts.geo_market import TargetMarketDigest, TargetMarketProfile
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -201,6 +203,30 @@ class VideoProjectService:
             provided = getattr(data, field_name)
             if provided is not None and provided != expected_value:
                 raise ValidationFailureError(f"project policy freeze mismatch: {field_name}")
+        scoped_policy = (snapshot.compiled_payload or {}).get("channel_scoped_policy") or {}
+        profile_raw = scoped_policy.get("target_market_profile")
+        digest_raw = scoped_policy.get("target_market_digest")
+        if profile_raw is not None or digest_raw is not None:
+            if not isinstance(profile_raw, dict) or not isinstance(digest_raw, dict):
+                raise ValidationFailureError("TARGET_MARKET_PROFILE_OR_DIGEST_MISSING")
+            profile = TargetMarketProfile.model_validate(profile_raw)
+            digest = TargetMarketDigest.model_validate(digest_raw)
+            if digest.profile_hash != profile.content_hash:
+                raise ValidationFailureError("TARGET_MARKET_PROFILE_STALE")
+            audience_summary = deepcopy(data.audience_delivery_summary)
+            audience_summary["target_market_freeze"] = {
+                "target_market_profile_ref": digest.profile_ref,
+                "target_market_profile_version": profile.profile_version,
+                "target_market_profile_hash": profile.content_hash,
+                "target_market_digest_ref": f"{digest.profile_ref}/digest",
+                "target_market_digest_hash": digest.content_hash,
+                "primary_market": profile.primary_market,
+                "primary_locale": profile.primary_locale,
+                "narration_locale": profile.narration_locale,
+                "primary_timezone": profile.primary_timezone,
+                "actual_viewer_geography_state": "UNMEASURED",
+            }
+            expected["audience_delivery_summary"] = audience_summary
         return expected
 
     def get_project(self, project_id: uuid.UUID) -> VideoProject | None:

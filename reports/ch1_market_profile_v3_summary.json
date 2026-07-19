@@ -1,0 +1,89 @@
+{
+  "schema_version": "ch1-market-profile-v3-summary/v1",
+  "date": "2026-07-19",
+  "channel_key": "small-team-ai",
+  "status": "PASS",
+  "production_activation": {
+    "channel_id": "a77bc5dc-f7be-4ae0-8523-55fb846d64bd",
+    "profile_v3_id": "d0d16fc5-0dc9-4022-bfd3-7f9a47c3a711",
+    "profile_v3_input_hash": "1c96bd4dd254ae04f57ba3d7156eb4bc612aeeedc59d2c8e65dda369cd627640",
+    "snapshot_v3_id": "e6c33d80-f5d8-4f72-9abc-87de3601b89e",
+    "snapshot_v3_version": 4,
+    "snapshot_v3_hash": "12b66551bd9bdfce1d59d1019ff50bc1c49756b6dc4ab505fde080630b4551bc",
+    "target_market_profile_hash": "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e",
+    "target_market_digest_hash": "244989186381a71c4eda812743b3b095426397ae0cdfb791641b2875918014f0",
+    "destination_binding_hash": "411aae66418315da8e6a0bf2cd23e896e89e7cd4827a5b54c36c0437ad63efab",
+    "destination_status": "PENDING_PLATFORM_ID",
+    "publish_execution_allowed": false,
+    "account_country": null,
+    "account_country_source": "UNAVAILABLE_NOT_INVENTED",
+    "approval_ref": "operator-approval://ch1-market-v3/small-team-ai/master-prompt-2026-07-19",
+    "rollback_profile_v2_id": "d735ec40-d29f-4d73-9e8a-58b4e1bfe325",
+    "rollback_snapshot_v2_id": "6304e2a4-f096-410b-af09-a2748b311855"
+  },
+  "exact_diff": {
+    "modified": [
+      "$.channel_policy.policy_version",
+      "$.channel_policy.approval_ref"
+    ],
+    "added": [
+      "$.channel_policy.target_market_profile",
+      "$.channel_policy.target_market_digest",
+      "$.channel_policy.market_alignment_policy",
+      "$.channel_policy.destination_binding_policy",
+      "$.channel_policy.market_package_freeze_policy",
+      "$.channel_policy.publish_timing_localization_policy",
+      "$.channel_policy.geo_evaluation_policy"
+    ],
+    "removed": [],
+    "diff_hash": "1b566730d22a5f056da09e0fc40f284cc6a512b2a7393fd6f047efbbc419c955"
+  },
+  "no_execution_proof": {
+    "provider_attempts_before": 674,
+    "provider_attempts_after": 674,
+    "llm_run_snapshots_before": 675,
+    "llm_run_snapshots_after": 675,
+    "media_render_jobs_before": 0,
+    "media_render_jobs_after": 0,
+    "cloud_media_refs_before": 4,
+    "cloud_media_refs_after": 4,
+    "human_upload_tasks_before": 0,
+    "human_upload_tasks_after": 0,
+    "uploaded_videos_before": 0,
+    "uploaded_videos_after": 0,
+    "all_execution_deltas_zero": true
+  },
+  "verification": {
+    "required_backend_suite": "39 passed",
+    "exact_ch1_prompt_suite_rerun": "23 passed, 1 warning",
+    "m11_dashboard_suite": "6 passed, 1 warning",
+    "frontend_unit": "35 passed",
+    "frontend_typecheck": "PASS",
+    "frontend_lint": "PASS",
+    "frontend_build": "PASS",
+    "compileall": "PASS",
+    "alembic_heads": "0038_lpro1_daily_mode (head)",
+    "git_diff_check": "PASS"
+  },
+  "verdicts": {
+    "CH1_MARKET_V3_ENTRY": "PASS",
+    "CH1_MARKET_V3_PROFILE_VERSION": "PASS",
+    "CH1_MARKET_V3_TARGET_MARKET_BINDING": "PASS",
+    "CH1_MARKET_V3_DESTINATION_BINDING": "PASS",
+    "CH1_MARKET_V3_VISUAL_POLICY_PRESERVATION": "PASS",
+    "CH1_MARKET_V3_MARKET_GATE_POLICY": "PASS",
+    "CH1_MARKET_V3_MARKET_PACKAGE_POLICY": "PASS",
+    "CH1_MARKET_V3_GEO_EVALUATION_FOUNDATION": "PASS",
+    "CH1_MARKET_V3_DIFF": "PASS",
+    "CH1_MARKET_V3_COMPILER": "PASS",
+    "CH1_MARKET_V3_APPROVAL": "PASS",
+    "CH1_MARKET_V3_ACTIVATION": "PASS",
+    "CH1_MARKET_V3_BACKWARD_COMPATIBILITY": "PASS",
+    "CH1_MARKET_V3_DASHBOARD_BINDING": "PASS",
+    "CH1_MARKET_V3_FINAL": "PASS"
+  },
+  "repair_cycles": 2,
+  "mr1_execution": "ON_HOLD",
+  "proceed_to_mr1": false,
+  "proceed_to_pkg1_revision": true
+}

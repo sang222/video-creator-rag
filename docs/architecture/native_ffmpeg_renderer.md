@@ -61,3 +61,8 @@ VSR1 defines this typed admission boundary only. It does not render media and
 does not change the renderer's final-composition authority. Legacy plans remain
 readable without route-aware fields; new strict plans cannot silently inherit a
 historical Pexels choice.
+# LPRO1 production authorization
+
+Manifest `production_eligible=true` không còn bị từ chối vô điều kiện. `NativeFFmpegRenderer.authorize` yêu cầu `ProductionRenderExecutionEnvelope` exact plan ref/hash, operator approval, provider/cost policies và MR1 scoped approval. Việc authorize không tự bật execution; `VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED` vẫn là fail-closed runtime guard.
+
+Fixture LPRO1 được phép riêng với purpose `LPRO1_OFFLINE_FIXTURE`, bắt buộc non-production và chạy actual-byte QC gồm caption, black-output và scene coverage.

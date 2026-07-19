@@ -80,6 +80,11 @@ CH1_FLEX_V2_APPROVAL_REF = (
     "small-team-ai/master-prompt-2026-07-19"
 )
 CH1_FLEX_V2_VISUAL_BINDING_SCHEMA = "ch1-flex.visual-source-policy-binding.v2"
+CH1_MARKET_V3_POLICY_VERSION = "small-team-ai.channel-policy.v3"
+CH1_MARKET_V3_APPROVAL_REF = (
+    "operator-approval://ch1-market-v3/"
+    "small-team-ai/master-prompt-2026-07-19"
+)
 COMPILED_POLICY_SCHEMA_VERSION = "m12.2p.channel_policy_snapshot.v1"
 PRODUCTION_DOSSIER_BINDING_SCHEMA = "d2p1.production-niche-dossier-binding.v1"
 NICHE_GATE_BINDING_SCHEMA = "d2p1.package-niche-gate-binding.v1"
@@ -214,6 +219,13 @@ class DailyToPackageOrchestrator:
                 )
             else:
                 self._validate_receipt_lineage(prior_receipt[1], receipt_values)
+                promoted = self._promote_reviewed_handoff(
+                    project=project,
+                    actor_id=actor_id,
+                    receipt_version=prior_receipt[1],
+                )
+                if promoted is not None:
+                    return promoted
         except ValidationFailureError as exc:
             receipt_values["project_ref"] = self._project_ref(project)
             return self._persisted_blocked(
@@ -798,7 +810,7 @@ class DailyToPackageOrchestrator:
         except Exception:
             typed_scoped = None
             channel_fit_threshold = None
-        exact = (
+        common_exact = (
             typed_scoped is not None
             and typed_scoped.visual_source_policy_binding is not None
             and typed_scoped.provider_usage_policy.google_gemini_image is not None
@@ -812,13 +824,10 @@ class DailyToPackageOrchestrator:
             and threshold_authority.get("derivation")
             == "REUSE_APPROVED_SEMANTIC_FIT_THRESHOLD"
             and channel.key == CH1_FLEX_V2_CHANNEL_KEY
-            and profile.version == 2
             and profile.status
             in ({"active", "approved"} if historical_resume else {"active"})
             and scoped.get("channel_key") == CH1_FLEX_V2_CHANNEL_KEY
-            and scoped.get("policy_version") == CH1_FLEX_V2_POLICY_VERSION
             and scoped.get("policy_status") == "APPROVED"
-            and scoped.get("approval_ref") == CH1_FLEX_V2_APPROVAL_REF
             and compiled_schema == COMPILED_POLICY_SCHEMA_VERSION
             and visual_binding.get("schema_version")
             == CH1_FLEX_V2_VISUAL_BINDING_SCHEMA
@@ -827,6 +836,29 @@ class DailyToPackageOrchestrator:
             and visual_binding.get("one_source_decision_per_scene") is True
             and visual_binding.get("auto_pexels_to_ai_failover") is False
         )
+        exact_v2 = (
+            profile.version == 2
+            and scoped.get("policy_version") == CH1_FLEX_V2_POLICY_VERSION
+            and scoped.get("approval_ref") == CH1_FLEX_V2_APPROVAL_REF
+        )
+        exact_v3 = (
+            profile.version == 3
+            and scoped.get("policy_version") == CH1_MARKET_V3_POLICY_VERSION
+            and scoped.get("approval_ref") == CH1_MARKET_V3_APPROVAL_REF
+            and typed_scoped is not None
+            and typed_scoped.target_market_profile is not None
+            and typed_scoped.target_market_digest is not None
+            and typed_scoped.market_alignment_policy is not None
+            and typed_scoped.destination_binding_policy is not None
+            and typed_scoped.market_package_freeze_policy is not None
+            and typed_scoped.publish_timing_localization_policy is not None
+            and typed_scoped.geo_evaluation_policy is not None
+            and typed_scoped.target_market_profile.primary_market == "US"
+            and typed_scoped.target_market_profile.primary_locale == "en-US"
+            and typed_scoped.destination_binding_policy.destination.manual_publish_required
+            is True
+        )
+        exact = common_exact and (exact_v2 or exact_v3)
         if not exact:
             raise ValidationFailureError(
                 "CH1_FLEX_V2_EXACT_POLICY_SCHEMA_REQUIRED"
@@ -1604,6 +1636,7 @@ class DailyToPackageOrchestrator:
             "research_assignment_ref": None,
             "research_pack_ref": None,
             "scripted_package_ref": None,
+            "package_human_review_ref": current_content.get("package_human_review_ref"),
             "niche_gate_refs": [],
             "human_review_state": "NOT_READY",
             # These are lineage-cumulative counters.  A later rerun is never
@@ -1658,7 +1691,13 @@ class DailyToPackageOrchestrator:
                 artifact_id=artifact.id,
                 parent_version_id=current_version.id if current_version is not None else None,
                 content=payload,
-                status="submitted" if payload["state"] == "PACKAGE_READY_FOR_HUMAN_REVIEW" else "draft",
+                status=(
+                    "approved"
+                    if payload["state"] in {"PACKAGE_HUMAN_REVIEW_PASSED", "READY_FOR_LONG_PRODUCTION"}
+                    else "submitted"
+                    if payload["state"] == "PACKAGE_READY_FOR_HUMAN_REVIEW"
+                    else "draft"
+                ),
                 created_by_user_id=actor_id,
                 evidence_refs=[
                     payload["daily_idea_decision_ref"],
@@ -1678,6 +1717,9 @@ class DailyToPackageOrchestrator:
         )
         if payload["state"] == "PACKAGE_READY_FOR_HUMAN_REVIEW":
             artifact.status = "in_review"
+            self.session.flush()
+        elif payload["state"] == "READY_FOR_LONG_PRODUCTION":
+            artifact.status = "approved"
             self.session.flush()
         return artifact, version
 
@@ -1730,7 +1772,78 @@ class DailyToPackageOrchestrator:
             "RESEARCH_READY": 3,
             "PACKAGE_BUILDING": 4,
             "PACKAGE_READY_FOR_HUMAN_REVIEW": 5,
+            "PACKAGE_HUMAN_REVIEW_PASSED": 6,
+            "READY_FOR_LONG_PRODUCTION": 7,
         }.get(state, 0)
+
+    def _promote_reviewed_handoff(
+        self,
+        *,
+        project: VideoProject,
+        actor_id: uuid.UUID,
+        receipt_version: ArtifactVersion,
+    ) -> DailyToPackageStatusRead | None:
+        """Advance only from an exact completed human review and approval."""
+
+        content = DailyToPackageReceiptContent.model_validate(receipt_version.content)
+        if content.state == "READY_FOR_LONG_PRODUCTION":
+            return self._status_from_receipt(receipt_version)
+        if content.state != "PACKAGE_READY_FOR_HUMAN_REVIEW":
+            return None
+        review = self.session.scalars(
+            select(ReviewTask)
+            .where(ReviewTask.video_project_id == project.id)
+            .where(ReviewTask.target_artifact_version_id == receipt_version.id)
+            .where(ReviewTask.review_type == "final_human")
+            .where(ReviewTask.review_reason_codes.contains([FINAL_HUMAN_REVIEW_REASON]))
+            .order_by(ReviewTask.created_at.asc())
+        ).first()
+        approval = self.session.scalars(
+            select(ApprovalDecision)
+            .where(ApprovalDecision.target_type == "artifact_version")
+            .where(ApprovalDecision.target_id == receipt_version.id)
+            .where(ApprovalDecision.target_artifact_version_id == receipt_version.id)
+            .where(ApprovalDecision.decision == "approved")
+            .order_by(ApprovalDecision.created_at.asc())
+        ).first()
+        if review is None or review.status != "completed" or approval is None:
+            return None
+        review_ref = {
+            "type": "human_review_receipt",
+            "review_task_id": str(review.id),
+            "approval_decision_id": str(approval.id),
+            "reviewed_artifact_version_id": str(receipt_version.id),
+            "reviewed_artifact_hash": receipt_version.content_hash,
+            "decision": "PASS",
+        }
+        stable = {key: value for key, value in review_ref.items() if key != "content_hash"}
+        review_ref["content_hash"] = content_hash(_json_dict(stable))
+        base = content.model_dump(mode="json")
+        _, passed = self._persist_receipt(
+            project=project,
+            actor_id=actor_id,
+            values={
+                **base,
+                "state": "PACKAGE_HUMAN_REVIEW_PASSED",
+                "last_successful_state": "PACKAGE_HUMAN_REVIEW_PASSED",
+                "package_human_review_ref": review_ref,
+                "human_review_state": "PASS",
+                "blockers": [],
+                "exact_next_action": "Select an explicit long-production execution mode; no media has been created.",
+            },
+        )
+        _, ready = self._persist_receipt(
+            project=project,
+            actor_id=actor_id,
+            values={
+                **passed.content,
+                "state": "READY_FOR_LONG_PRODUCTION",
+                "last_successful_state": "READY_FOR_LONG_PRODUCTION",
+                "human_review_state": "PASS",
+                "exact_next_action": "Run the controlled long-production trigger in OFFLINE_FIXTURE or with an MR1 envelope.",
+            },
+        )
+        return self._status_from_receipt(ready)
 
     def _ensure_final_human_review(
         self,
@@ -1850,6 +1963,7 @@ class DailyToPackageOrchestrator:
                 "pack": content.research_pack_ref,
             },
             package=content.scripted_package_ref,
+            package_human_review=content.package_human_review_ref,
             niche_gates=gate_map,
             blockers=content.blockers,
             exact_next_action=content.exact_next_action,

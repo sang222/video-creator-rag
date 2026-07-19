@@ -19,6 +19,8 @@ import {
   getChannelUploadedVideos,
   getChannelUploadTasks,
   getChannelWorkspace,
+  getDestinationBinding,
+  getTargetMarketPreview,
   queryKeys,
   startUploadTask,
   verifyUploadedVideo
@@ -41,6 +43,8 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
   const ledgerQuery = useQuery({ queryKey: queryKeys.channelPublishLedger(channelId), queryFn: () => getChannelPublishLedger(channelId) });
   const tasksQuery = useQuery({ queryKey: queryKeys.channelUploadTasks(channelId), queryFn: () => getChannelUploadTasks(channelId) });
   const uploadedQuery = useQuery({ queryKey: queryKeys.channelUploadedVideos(channelId), queryFn: () => getChannelUploadedVideos(channelId) });
+  const marketQuery = useQuery({ queryKey: queryKeys.targetMarketPreview(channelId), queryFn: () => getTargetMarketPreview(channelId), retry: false });
+  const destinationQuery = useQuery({ queryKey: queryKeys.destinationBinding(channelId), queryFn: () => getDestinationBinding(channelId), retry: false });
   const invalidateLedger = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.channelPublishLedger(channelId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.channelUploadTasks(channelId) });
@@ -94,6 +98,16 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
     latest_snapshot_id?: string | null;
     active_snapshot_id?: string | null;
     snapshot_version?: number;
+    channel_profile_version?: number | null;
+    target_market_profile_version?: number | null;
+    target_market?: string | null;
+    primary_locale?: string | null;
+    narration_locale?: string | null;
+    primary_timezone?: string | null;
+    currency?: string | null;
+    visual_profile?: string | null;
+    destination_status?: string | null;
+    market_policy_state?: string | null;
     missing_fields?: string[];
     contradiction_reasons?: string[];
     market_locale?: Record<string, unknown>;
@@ -348,6 +362,47 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
         </Tabs.Content>
         <Tabs.Content value="profile-policy" className="mt-5">
           <div className="space-y-4">
+          <Panel id="target-market-profile">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold">Hồ sơ thị trường & destination</h2>
+                <p className="mt-2 text-sm text-muted-foreground">Bản active chỉ đọc. Mọi thay đổi phải tạo revision, compile và có phê duyệt mới.</p>
+              </div>
+              <StatusBadge value={marketStateLabel(marketQuery.data?.state)} />
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <InfoTile label="Active ChannelProfileVersion" value={contractReview?.channel_profile_version ? `v${contractReview.channel_profile_version}` : "Chưa active"} />
+              <InfoTile label="Target Market Profile" value={marketQuery.data?.profile ? `v${marketQuery.data.profile.profile_version} · đã duyệt` : "Chưa có hồ sơ được duyệt"} />
+              <InfoTile label="Thị trường chính" value={marketQuery.data?.profile?.primary_market ?? "Chưa có"} />
+              <InfoTile label="Locale chính" value={marketQuery.data?.profile?.primary_locale ?? "Chưa có"} />
+              <InfoTile label="Locale giọng đọc" value={marketQuery.data?.profile?.narration_locale ?? "Chưa có"} />
+              <InfoTile label="Múi giờ" value={marketQuery.data?.profile?.primary_timezone ?? "Chưa có"} />
+              <InfoTile label="Tiền tệ" value={marketQuery.data?.profile?.currency ?? "Chưa có"} />
+              <InfoTile label="Visual Profile" value={contractReview?.visual_profile ?? String(workspace.technical_appendix.active_visual_profile ?? "Chưa có")} />
+              <InfoTile label="Destination" value={destinationLabel(destinationQuery.data)} />
+              <InfoTile label="Market Policy" value={contractReview?.market_policy_state === "ACTIVE" || marketQuery.data?.state === "ACTIVE" ? "Đang áp dụng" : marketQuery.data?.profile ? "Đã duyệt, chờ compile" : "Cần thiết lập"} />
+              <InfoTile label="Quốc gia tài khoản" value={destinationQuery.data?.account_country ?? marketQuery.data?.profile?.account_country ?? "Chưa xác minh"} />
+              <InfoTile label="Geo người xem thực tế" value="Chưa đo" />
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button asChild><a href="#target-market-profile">Xem market profile</a></Button>
+              <Button asChild><a href="#profile-version-manager">So sánh phiên bản</a></Button>
+              <Button asChild><a href="#profile-version-manager">Tạo revision</a></Button>
+              <Button asChild><a href="#market-draft-review">Rà soát draft</a></Button>
+              <Button asChild><a href="#profile-version-manager">Xem policy đã compile</a></Button>
+            </div>
+            <p className="mt-4 text-xs text-muted-foreground">Quốc gia tài khoản, thị trường mục tiêu và địa lý người xem thực tế là ba dữ liệu riêng biệt.</p>
+            <details id="market-draft-review" className="mt-4 text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Draft/approval lineage</summary>
+              <pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify({
+                draft_version: marketQuery.data?.draft?.draft_version ?? null,
+                draft_hash: marketQuery.data?.draft?.content_hash ?? null,
+                profile_version: marketQuery.data?.profile?.profile_version ?? null,
+                profile_hash: marketQuery.data?.profile?.content_hash ?? null,
+                exact_next_action: marketQuery.data?.exact_next_action ?? null
+              }, null, 2)}</pre>
+            </details>
+          </Panel>
           <Panel>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -422,7 +477,7 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
               </div>
             ) : null}
           </Panel>
-          <ChannelProfileManager channelId={channelId} />
+          <div id="profile-version-manager"><ChannelProfileManager channelId={channelId} /></div>
           </div>
         </Tabs.Content>
         <Tabs.Content value="provider-health" className="mt-5">
@@ -539,4 +594,20 @@ function visibilityLabel(value: string) {
     SCHEDULED: "Đã lên lịch trên YouTube",
     UNKNOWN: "Chưa rõ"
   }[value] ?? "Chưa rõ";
+}
+
+function marketStateLabel(value: string | undefined) {
+  return {
+    ACTIVE: "Đang áp dụng",
+    APPROVED_NOT_ACTIVE: "Đã duyệt, chờ compile",
+    DRAFT_NEEDS_HUMAN_REVIEW: "Cần người rà soát",
+    RESEARCH_DRAFT_REQUIRED: "Cần chạy nghiên cứu",
+    MISSING: "Chưa thiết lập"
+  }[value ?? "MISSING"] ?? "Cần kiểm tra";
+}
+
+function destinationLabel(binding: { channel_handle?: string | null; platform?: string; destination_status?: string } | null | undefined) {
+  if (!binding) return "Chưa bind destination";
+  const status = binding.destination_status === "VERIFIED" ? "đã xác minh" : binding.destination_status === "PENDING_PLATFORM_ID" ? "chờ platform ID" : "chưa xác minh";
+  return `${binding.platform ?? "Platform"} ${binding.channel_handle ?? "chưa có handle"} · ${status}`;
 }

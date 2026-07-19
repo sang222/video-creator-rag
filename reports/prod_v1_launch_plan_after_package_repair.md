@@ -17,7 +17,7 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | CH1 first production channel | `PASS / v2 ACTIVE` | CH1-FLEX v2 profile `d735ec40-d29f-4d73-9e8a-58b4e1bfe325` and snapshot `6304e2a4-f096-410b-af09-a2748b311855` are active for future work; v1 remains the immutable rollback baseline. |
 | NICH1 niche governance | `PASS` | Bounded authoritative digest, strict slot contract, DailyIdeaAgent router path, derived channel fit, five gates, and consolidated dossier are enforced. |
 | D2P1 daily-to-package bridge | `PASS / NO MEDIA` | Immutable DailyIdeaDecision admission receipt, Effective Context, idempotent research resume, M12.2 package, read-only status, and zero-execution guards passed. |
-| LPRO1 | `AUTHORIZED NEXT / NOT_STARTED` | `PROCEED_TO_LPRO1=true`; this master task did not start LPRO1. |
+| LPRO1 | `PASS / OFFLINE REVIEW CANDIDATE` | Strict reviewed-package handoff, canonical timeline, asset normalization, native plan/compiler, real local FFmpeg render, actual-byte TechnicalMediaQC, review-only candidate and FinalMediaRef closeout boundary passed with zero provider/Drive/YouTube calls. |
 | PKG1 first production package | `PASS` | Technical and explicit human review passed; all six review areas approved. |
 | Visual impact review | `PASS` | Repository-grounded mapping complete; VSR1 may proceed without a DB migration. |
 | VSR1 niche-aware visual routing | `PASS` | Provider-neutral taxonomy, gates, deterministic router, routing evidence and offline fixtures complete; provider execution remains disabled. |
@@ -84,8 +84,8 @@ Required sequence before MR1:
    `img-canary-v3-20260718T162027Z-a90959ed` (47/47 Drive items verified).
 7. CH1-FLEX v2 approval/activation for future projects — `PASS` on 2026-07-19 with provider/media/Drive/YouTube deltas all zero.
 8. NICH1 and D2P1 governance/bridge — `PASS` on 2026-07-19; scripted package remains no-media and human-review-only.
-9. LPRO1 — authorized as the next separate operator-started task, not started here.
-10. PKG1 visual/provider/cost/disclosure revision — still on hold and not performed by this task.
+9. LPRO1 — `PASS` on 2026-07-19; the offline MP4 is a non-publishable review candidate and not a production FinalMediaRef.
+10. PKG1 visual/provider/cost/disclosure revision — authorized as the next separate task and not performed by LPRO1.
 11. New exact-target MR1 approval.
 12. MR1.
 
@@ -246,14 +246,17 @@ Rules:
 
 `CH1_FLEX_V2_FINAL=PASS`
 
+`LPRO1_FINAL=PASS`
+
 Next checkpoint:
 
-`PROCEED_TO_LPRO1=true`
+`PROCEED_TO_PKG1_VISUAL_REVISION=true`
 
 The registered route is `google_gemini_image`, separate from
 `google_veo`. Its default model is `gemini-3.1-flash-image`; generated
 pixels are only a visual foundation, while exact text/numbers remain native
 overlay authority. The V3 paid canary and its Drive closeout passed; no
 CH1-FLEX v2 was subsequently activated by the 2026-07-19 master task with
-NICH1 and D2P1 PASS. No PKG1 revision, LPRO1 execution, or MR1 execution
-occurred.
+NICH1 and D2P1 PASS. LPRO1 then produced only a local, non-production review
+candidate and passed its foundation acceptance. No PKG1 visual revision or
+MR1 execution occurred.

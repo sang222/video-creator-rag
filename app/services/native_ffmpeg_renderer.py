@@ -15,6 +15,7 @@ from pathlib import Path
 
 from app.contracts.ai_image import ai_image_stable_hash
 from app.contracts.img_canary import IMGCanaryNativeHeadlineArtifact
+from app.contracts.long_production import ProductionRenderExecutionEnvelope
 from app.contracts.native_renderer import (
     CompiledNativeRenderManifest,
     FFmpegCommandManifest,
@@ -319,6 +320,207 @@ class FFmpegCommandBuilder:
         (work / "command.sh").write_text("#!/bin/sh\n" + shlex.join(argv) + "\n", encoding="utf-8")
         return command
 
+    def build_lpro1_fixture(
+        self,
+        manifest: CompiledNativeRenderManifest,
+        *,
+        run_key: str,
+        audio_path: Path,
+    ) -> FFmpegCommandManifest:
+        """Build a multi-scene, asset-backed, canonical-timeline fixture render."""
+
+        if manifest.production_eligible or manifest.render_purpose != "LPRO1_OFFLINE_FIXTURE":
+            raise ValueError("LPRO1_OFFLINE_FIXTURE_MANIFEST_REQUIRED")
+        if manifest.temporal_authority_mode != "CANONICAL_STRICT":
+            raise ValueError("LPRO1_CANONICAL_TIMELINE_REQUIRED")
+        if len(manifest.compiled_scenes) < 3 or not manifest.canonical_duration_ms:
+            raise ValueError("LPRO1_MULTIPLE_CANONICAL_SCENES_REQUIRED")
+        width = int(manifest.normalized_canvas["width"])
+        height = int(manifest.normalized_canvas["height"])
+        fps = int(manifest.normalized_canvas.get("fps", 30))
+        if (width, height, fps) != (1920, 1080, 30):
+            raise ValueError("LPRO1_OUTPUT_PROFILE_INVALID")
+        audio = _inside(self.root, audio_path, must_exist=True)
+        if audio.is_symlink() or not audio.is_file():
+            raise ValueError("LPRO1_AUDIO_INPUT_INVALID")
+
+        asset_paths: list[Path] = []
+        scene_midpoints: list[float] = []
+        for scene in manifest.compiled_scenes:
+            refs = list(scene.get("asset_refs") or [])
+            if len(refs) != 1:
+                raise ValueError("LPRO1_ONE_NORMALIZED_ASSET_PER_SCENE_REQUIRED")
+            asset = _inside(self.root, Path(str(refs[0]["path"])), must_exist=True)
+            if asset.is_symlink() or not asset.is_file():
+                raise ValueError("LPRO1_NORMALIZED_ASSET_INVALID")
+            asset_paths.append(asset)
+            scene_midpoints.append(
+                (float(scene["start_ms"]) + float(scene["end_ms"])) / 2000.0
+            )
+
+        work = _inside(self.root, Path("runs") / run_key)
+        work.mkdir(parents=True, exist_ok=True)
+        output = _inside(self.root, work / "lpro1-review-candidate.mp4")
+        filtergraph = _inside(self.root, work / "filtergraph.txt")
+        caption_path = _inside(self.root, work / "canonical-captions.ass")
+        cues = list(manifest.caption_schedule.get("cues") or [])
+        if not cues:
+            raise ValueError("LPRO1_CANONICAL_CAPTIONS_REQUIRED")
+        _write_canonical_ass(
+            caption_path,
+            cues=cues,
+            width=width,
+            height=height,
+            caption_policy=dict(
+                manifest.caption_schedule.get("render_style")
+                or manifest.normalized_caption
+            ),
+        )
+        font_candidates = (
+            Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        )
+        font_path = next((item for item in font_candidates if item.is_file()), None)
+        if font_path is None:
+            raise FileNotFoundError("LPRO1_NATIVE_FONT_NOT_FOUND")
+
+        graph_parts: list[str] = []
+        generated_text_files: list[str] = [str(caption_path)]
+        for index, scene in enumerate(manifest.compiled_scenes):
+            route = str((scene.get("visual_routing") or {}).get("preferred_source_route") or "NATIVE_DIAGRAM")
+            label_path = _inside(self.root, work / f"scene-{index + 1}-native-label.txt")
+            label = {
+                "NATIVE_DIAGRAM": "Native diagram: one approved flow",
+                "PEXELS_VIDEO": "Stock-like fixture: team workflow in motion",
+                "AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY": "Generated-like fixture + native overlay",
+            }.get(route, f"VCOS fixture route: {route}")
+            label_path.write_text(label + "\n", encoding="utf-8")
+            generated_text_files.append(str(label_path))
+            duration = float(scene["duration_ms"]) / 1000.0
+            graph_parts.append(
+                f"[{index}:v]trim=start=0:duration={duration:.6f},setpts=PTS-STARTPTS,"
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},setsar=1,fps={fps},format=yuv420p,"
+                "drawbox=x=96:y=72:w=920:h=96:color=0x07111f@0.88:t=fill,"
+                f"drawtext=fontfile='{font_path}':textfile='{label_path}':"
+                "fontcolor=white:fontsize=38:x=128:y=98[s"
+                f"{index}]"
+            )
+        concat_inputs = "".join(f"[s{index}]" for index in range(len(asset_paths)))
+        graph_parts.append(
+            f"{concat_inputs}concat=n={len(asset_paths)}:v=1:a=0[scenevideo]"
+        )
+        escaped_caption = str(caption_path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        graph_parts.append(f"[scenevideo]ass=filename='{escaped_caption}'[v]")
+        filtergraph.write_text(";\n".join(graph_parts) + "\n", encoding="utf-8")
+
+        duration_seconds = manifest.canonical_duration_ms / 1000.0
+        argv = [self.ffmpeg, "-hide_banner", "-nostdin", "-y"]
+        for asset in asset_paths:
+            argv.extend(["-i", str(asset)])
+        argv.extend(
+            [
+                "-i",
+                str(audio),
+                "-filter_complex_script",
+                str(filtergraph),
+                "-map",
+                "[v]",
+                "-map",
+                f"{len(asset_paths)}:a:0",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-b:v",
+                "6M",
+                "-maxrate",
+                "8M",
+                "-bufsize",
+                "12M",
+                "-pix_fmt",
+                "yuv420p",
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-c:a",
+                "aac",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                "-movflags",
+                "+faststart",
+                "-t",
+                f"{duration_seconds:.6f}",
+                "-shortest",
+                str(output) + ".part.mp4",
+            ]
+        )
+        version = subprocess.run(
+            [self.ffmpeg, "-version"], capture_output=True, text=True, check=True
+        ).stdout.splitlines()[0]
+        caption_midpoint = (
+            float(cues[0]["caption_start_ms"]) + float(cues[0]["caption_end_ms"])
+        ) / 2000.0
+        expected_qc = {
+            **manifest.output_specs[0],
+            "expected_duration_seconds": duration_seconds,
+            "max_av_drift_ms": 250,
+            "black_output_check_required": True,
+            "caption_required": True,
+            "caption_probe_seconds": caption_midpoint,
+            "scene_coverage_required": True,
+            "scene_probe_seconds": scene_midpoints,
+        }
+        checksums = {
+            str(filtergraph): _sha256_file(filtergraph),
+            str(caption_path): _sha256_file(caption_path),
+            str(audio): _sha256_file(audio),
+            **{str(path): _sha256_file(path) for path in asset_paths},
+            **{
+                path: _sha256_file(Path(path))
+                for path in generated_text_files
+                if path != str(caption_path)
+            },
+        }
+        core = {
+            "run_key": run_key,
+            "compiled_manifest_ref": manifest.compiled_manifest_id,
+            "compiled_manifest_hash": manifest.manifest_hash,
+            "ffmpeg_binary_path": self.ffmpeg,
+            "ffprobe_binary_path": self.ffprobe,
+            "ffmpeg_version": version,
+            "command_builder_version": COMMAND_BUILDER_VERSION,
+            "input_files": [str(path) for path in [*asset_paths, audio]],
+            "generated_filtergraph_path": str(filtergraph),
+            "generated_text_files": generated_text_files,
+            "generated_caption_path": str(caption_path),
+            "generated_file_checksums": checksums,
+            "output_file": str(output),
+            "output_profile": manifest.renderer_profile_refs[0],
+            "sanitized_argv": argv,
+            "working_directory": str(work),
+            "expected_qc": expected_qc,
+            "temporal_authority_mode": manifest.temporal_authority_mode,
+            "canonical_media_timeline_ref": manifest.canonical_media_timeline_ref,
+            "canonical_media_timeline_hash": manifest.canonical_media_timeline_hash,
+            "canonical_audio_asset_ref": manifest.canonical_audio_asset_ref,
+            "canonical_duration_ms": manifest.canonical_duration_ms,
+            "canonical_caption_compilation_ref": manifest.canonical_caption_compilation_ref,
+            "canonical_caption_compilation_hash": manifest.canonical_caption_compilation_hash,
+            "canonical_caption_render_payload_hash": manifest.canonical_caption_render_payload_hash,
+        }
+        command = FFmpegCommandManifest(
+            **core,
+            command_hash=stable_hash(core),
+            created_at=datetime.now(UTC),
+        )
+        return _persist_or_reuse_command(work=work, candidate=command)
+
     def build_image_review(
         self,
         manifest: CompiledNativeRenderManifest,
@@ -520,13 +722,69 @@ class NativeFFmpegRenderer:
         self.smoke_enabled = _flag("VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED") if smoke_enabled is None else smoke_enabled
         self.production_enabled = _flag("VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED") if production_enabled is None else production_enabled
 
-    def execute(self, manifest: CompiledNativeRenderManifest, command: FFmpegCommandManifest, *, purpose: str) -> tuple[NativeRenderExecutionReceipt, object]:
-        if manifest.production_eligible and not self.production_enabled:
-            raise PermissionError("PRODUCTION_RENDER_DISABLED")
-        if purpose not in {"NR1_LOCAL_SYNTHETIC_SMOKE", "PA1R_NON_PRODUCTION_SMOKE", "CQR1_LOCAL_GOLDEN_FIXTURE", "CQR1_CONTROLLED_PAID_CANARY", "IMG_CANARY_NON_PRODUCTION_REVIEW"} or manifest.production_eligible or not self.smoke_enabled:
-            raise PermissionError("LOCAL_SMOKE_BOUNDARY_REJECTED")
+    def authorize(
+        self,
+        manifest: CompiledNativeRenderManifest,
+        *,
+        purpose: str,
+        execution_envelope: ProductionRenderExecutionEnvelope | None = None,
+    ) -> dict[str, object]:
+        """Validate execution eligibility without starting FFmpeg."""
+
         if purpose != manifest.render_purpose:
             raise PermissionError("RENDER_PURPOSE_MISMATCH")
+        if manifest.production_eligible:
+            if execution_envelope is None:
+                raise PermissionError("PRODUCTION_RENDER_EXECUTION_ENVELOPE_REQUIRED")
+            payload = execution_envelope.model_dump(
+                mode="json", exclude={"authorization_hash"}
+            )
+            if stable_hash(payload) != execution_envelope.authorization_hash:
+                raise PermissionError("PRODUCTION_RENDER_AUTHORIZATION_HASH_MISMATCH")
+            if (
+                not execution_envelope.production_eligible
+                or execution_envelope.execution_mode.value != "REAL_APPROVED_PRODUCTION"
+                or execution_envelope.plan_ref != manifest.source_plan_ref
+                or execution_envelope.plan_hash != manifest.source_plan_hash
+                or not str(execution_envelope.operator_approval_ref).startswith("operator-approval://")
+                or not str(execution_envelope.mr1_scoped_approval_ref).startswith("mr1-approval://")
+                or purpose != "REAL_APPROVED_PRODUCTION"
+            ):
+                raise PermissionError("PRODUCTION_RENDER_EXECUTION_ENVELOPE_INVALID")
+            return {
+                "eligible": True,
+                "production_eligible": True,
+                "authorization_hash": execution_envelope.authorization_hash,
+            }
+        allowed_fixture_purposes = {
+            "NR1_LOCAL_SYNTHETIC_SMOKE",
+            "PA1R_NON_PRODUCTION_SMOKE",
+            "CQR1_LOCAL_GOLDEN_FIXTURE",
+            "CQR1_CONTROLLED_PAID_CANARY",
+            "IMG_CANARY_NON_PRODUCTION_REVIEW",
+            "LPRO1_OFFLINE_FIXTURE",
+        }
+        if purpose not in allowed_fixture_purposes or not self.smoke_enabled:
+            raise PermissionError("LOCAL_SMOKE_BOUNDARY_REJECTED")
+        if execution_envelope is not None and execution_envelope.production_eligible:
+            raise PermissionError("OFFLINE_RENDER_REJECTS_PRODUCTION_ENVELOPE")
+        return {"eligible": True, "production_eligible": False}
+
+    def execute(
+        self,
+        manifest: CompiledNativeRenderManifest,
+        command: FFmpegCommandManifest,
+        *,
+        purpose: str,
+        execution_envelope: ProductionRenderExecutionEnvelope | None = None,
+    ) -> tuple[NativeRenderExecutionReceipt, object]:
+        self.authorize(
+            manifest,
+            purpose=purpose,
+            execution_envelope=execution_envelope,
+        )
+        if manifest.production_eligible and not self.production_enabled:
+            raise PermissionError("PRODUCTION_RENDER_DISABLED")
         if command.compiled_manifest_hash != manifest.manifest_hash:
             raise ValueError("MANIFEST_HASH_MISMATCH")
         if stable_hash(_manifest_hash_payload(manifest)) != manifest.manifest_hash:
@@ -568,7 +826,7 @@ class NativeFFmpegRenderer:
                 raise ValueError("CAPTION_RENDER_COMMAND_AUTHORITY_MISMATCH")
         output = _inside(self.root, Path(command.output_file))
         work = _inside(self.root, Path(command.working_directory))
-        if purpose == "IMG_CANARY_NON_PRODUCTION_REVIEW":
+        if not manifest.production_eligible:
             completed_render = _load_completed_render(
                 output=output,
                 work=work,
@@ -598,7 +856,7 @@ class NativeFFmpegRenderer:
             if qc.result == "FAIL":
                 raise RuntimeError("MEDIA_QC_FAILED:" + ",".join(qc.reason_codes))
             ended = datetime.now(UTC); checksum = hashlib.sha256(output.read_bytes()).hexdigest()
-            body = {"run_key": command.run_key, "manifest_refs": {"compiled_manifest": manifest.compiled_manifest_id, "compiled_manifest_hash": manifest.manifest_hash}, "command_hash": command.command_hash, "start_time": started, "end_time": ended, "exit_code": 0, "elapsed_time": time.monotonic() - tick, "realtime_factor": None, "peak_rss": None, "output_path": str(output), "output_checksum": checksum, "local_only": True, "production_eligible": False, "no_provider_calls_confirmed": True}
+            body = {"run_key": command.run_key, "manifest_refs": {"compiled_manifest": manifest.compiled_manifest_id, "compiled_manifest_hash": manifest.manifest_hash}, "command_hash": command.command_hash, "start_time": started, "end_time": ended, "exit_code": 0, "elapsed_time": time.monotonic() - tick, "realtime_factor": None, "peak_rss": None, "output_path": str(output), "output_checksum": checksum, "local_only": not manifest.production_eligible, "production_eligible": manifest.production_eligible, "no_provider_calls_confirmed": True}
             receipt = NativeRenderExecutionReceipt(receipt_hash=stable_hash(body), **body)
             _write_text_atomic(
                 work / "media_qc.json",

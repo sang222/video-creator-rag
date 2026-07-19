@@ -42,6 +42,7 @@ from app.core.config import (
     get_settings,
 )
 from app.core.time import utc_now
+from app.services.native_render_plan import stable_hash
 from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
 from app.db.models import (
     AIHeroAsset,
@@ -914,6 +915,34 @@ class LongFormRenderPackageService:
                 job_type=LONG_FORM_FINAL_RENDER,
             )
         )
+        strict_payload = (
+            data.strict_contract.model_dump(mode="json")
+            if data.strict_contract is not None
+            else None
+        )
+        readiness_blockers: list[str] = []
+        if data.strict_production and data.strict_contract is not None:
+            contract = data.strict_contract
+            expected_hash = stable_hash(
+                contract.model_dump(mode="json", exclude={"content_hash"})
+            )
+            if contract.content_hash != expected_hash:
+                readiness_blockers.append("STRICT_RENDER_PACKAGE_HASH_MISMATCH")
+            audio_path = Path(contract.audio_asset_ref)
+            if not audio_path.is_file() or audio_path.is_symlink():
+                readiness_blockers.append("AUDIO_FILE_MISSING")
+            for asset in contract.resolved_assets:
+                path = Path(asset.local_file_ref)
+                if not path.is_file() or path.is_symlink():
+                    readiness_blockers.append(f"ASSET_FILE_MISSING:{asset.scene_id}")
+        else:
+            readiness_blockers.append("STRICT_RENDER_INPUTS_INCOMPLETE")
+        if decision.routing_result != "ROUTED":
+            package_state = "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
+        elif readiness_blockers:
+            package_state = "ROUTED_AWAITING_MEDIA"
+        else:
+            package_state = "READY_FOR_FINAL_RENDER"
         package = LongFormRenderPackage(
             company_id=project.company_id,
             channel_workspace_id=project.channel_workspace_id,
@@ -928,11 +957,18 @@ class LongFormRenderPackageService:
             render_manifest={
                 **data.render_manifest,
                 "routing_decision_id": str(decision.id),
+                "routing_result": decision.routing_result,
+                "strict_production": data.strict_production,
+                "strict_contract": strict_payload,
+                "render_readiness": {
+                    "result": "PASS" if not readiness_blockers else "BLOCK",
+                    "blockers": readiness_blockers,
+                },
                 "real_render_executed": False,
             },
             final_renderer_required=True,
             final_renderer_provider_key=decision.selected_provider_key,
-            package_state="READY_FOR_FINAL_RENDER" if decision.routing_result == "ROUTED" else "BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
+            package_state=package_state,
         )
         self.session.add(package)
         self.session.flush()

@@ -46,6 +46,38 @@ VCOS owns orchestration, artifact state, provider routing, budget checks, manife
 
 `LONG_FORM_FINAL_RENDER` requires an approved NativeRenderPlan and the local NativeFFmpeg boundary.
 
+LPRO1 tightens this invariant with a strict package projection. A provider route
+decision is planning evidence only. Legacy packages that lack approved script,
+exact package review, final narration/alignment, canonical timeline, captions,
+per-scene source decisions, resolved normalized assets, frozen policy/provider/
+cost authorities, rights and idempotency evidence are readable but cannot be
+reported as `READY_FOR_FINAL_RENDER`.
+
+## Render Readiness States
+
+| State | Exact meaning |
+| --- | --- |
+| `PACKAGE_READY_FOR_HUMAN_REVIEW` | Scripted/no-media package awaits exact human review. |
+| `PACKAGE_HUMAN_REVIEW_PASSED` | The reviewed package version has a completed ReviewTask and matching PASS decision. |
+| `READY_FOR_LONG_PRODUCTION` | Frozen package/context/niche/provider-cost lineage may enter LPRO1. No MP4 is implied. |
+| `ROUTED_AWAITING_MEDIA` | Provider routing exists, but one or more strict media/render authorities are absent. |
+| `NATIVE_RENDER_PLAN_READY` | A checksum-bound native plan exists. Render completion is not implied. |
+| `READY_FOR_HUMAN_REVIEW` | Actual MP4 exists and actual-byte TechnicalMediaQC passed; creative/human review remains separate. |
+| `UPLOAD_INPUT_MISSING` | Upload metadata may exist, but exact final media bytes are absent. |
+| `UPLOAD_READY` | Exact final file/checksum and matching human PASS are present. |
+
+No API or read model may collapse these states.
+
+## FinalMediaRef Lifecycle
+
+An LPRO1 `ReviewMediaCandidate` is never a production `FinalMediaRef`. Production
+closeout requires the exact candidate bytes and SHA-256, TechnicalMediaQC PASS,
+accepted creative evidence, exact human PASS on the same package/plan/output,
+current package and plan lineage, complete asset rights/provenance, and verified
+archive evidence when archive is required. Any missing or stale authority fails
+closed. `FinalMediaRef` creation does not itself create an upload task or grant
+Drive/YouTube write authority.
+
 
 
 ## Job Routing

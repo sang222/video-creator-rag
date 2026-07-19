@@ -1,894 +1,359 @@
 "use client";
 
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Search, Settings2, ShieldCheck } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import { useForm, type UseFormRegisterReturn } from "react-hook-form";
+import { CheckCircle2, FileSearch, PencilLine, ShieldCheck } from "lucide-react";
 
 import { PageHeader } from "@/components/cockpit";
 import { ErrorState } from "@/components/states";
-import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import {
-  activateChannel,
-  compileChannelInitDraft,
-  createChannelInitDraft,
+  approveTargetMarketDraft,
   createCompany,
+  createMinimalMarketChannel,
   getCompanies,
-  initChannel,
   queryKeys,
-  researchChannelInitDraft,
-  reviewChannelInitDraft
+  runTargetMarketDraft,
+  updateTargetMarketDraft
 } from "@/lib/api";
-import type { ChannelContractDraft, ChannelInitCompileResult, ChannelInitDraft, Company, FieldMeta } from "@/lib/types";
-import {
-  advancedSchema,
-  contractPreview,
-  dateFormatOptions,
-  localeOptions,
-  marketOptions,
-  minimalSchema,
-  splitLines,
-  type FormValues,
-  type MinimalFormValues
-} from "./channel-init-wizard-form";
+import type { TargetMarketProfileDraft } from "@/lib/types";
+
+type InitForm = {
+  company_id: string;
+  channel_name: string;
+  channel_key: string;
+  channel_purpose: string;
+  target_audience_summary: string;
+  primary_market: string;
+  primary_language: string;
+  primary_locale: string;
+  channel_market_type: "MARKET_NATIVE" | "GLOBAL_ENGLISH";
+  known_destination_channel: string;
+  account_country: string;
+};
+
+const defaultForm: InitForm = {
+  company_id: "",
+  channel_name: "",
+  channel_key: "",
+  channel_purpose: "",
+  target_audience_summary: "",
+  primary_market: "US",
+  primary_language: "en",
+  primary_locale: "en-US",
+  channel_market_type: "MARKET_NATIVE",
+  known_destination_channel: "",
+  account_country: ""
+};
 
 export function ChannelInitWizard() {
-  const [mode, setMode] = useState<"minimal" | "advanced">("minimal");
-
-  if (mode === "advanced") {
-    return (
-      <div className="space-y-4">
-        <div className="px-4 pt-4 md:px-8 md:pt-8">
-          <Button type="button" onClick={() => setMode("minimal")}>
-            <Search size={16} />
-            Quay lại flow research tối thiểu
-          </Button>
-        </div>
-        <AdvancedManualChannelInitForm />
-      </div>
-    );
-  }
-
-  return <MinimalResearchChannelInitWizard onAdvanced={() => setMode("advanced")} />;
-}
-
-function MinimalResearchChannelInitWizard({ onAdvanced }: { onAdvanced: () => void }) {
   const queryClient = useQueryClient();
+  const [form, setForm] = useState(defaultForm);
   const [companyDraft, setCompanyDraft] = useState({ name: "VCOS Company", slug: "vcos-company" });
-  const [initDraft, setInitDraft] = useState<ChannelInitDraft | null>(null);
-  const [contractDraft, setContractDraft] = useState<ChannelContractDraft | null>(null);
-  const [compileResult, setCompileResult] = useState<ChannelInitCompileResult | null>(null);
-  const form = useForm<MinimalFormValues>({
-    resolver: zodResolver(minimalSchema),
-    defaultValues: {
-      company_id: "",
-      public_presence_mode: "EXISTING_PUBLIC_CHANNEL",
-      youtube_url_or_handle: "",
-      website_url: "",
-      social_profile_links: "",
-      operator_note_purpose: "",
-      intended_content_language: "",
-      intended_primary_market: "",
-      owner_operator_language: "vi-VN",
-      initial_topic_pillar_hints: "",
-      source_usage_attestation: false
-    }
-  });
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<TargetMarketProfileDraft | null>(null);
+  const [approvedHash, setApprovedHash] = useState<string | null>(null);
   const companiesQuery = useQuery({ queryKey: queryKeys.companies, queryFn: getCompanies });
+
+  useEffect(() => {
+    if (!form.company_id && companiesQuery.data?.length === 1) {
+      setForm((current) => ({ ...current, company_id: companiesQuery.data![0].id }));
+    }
+  }, [companiesQuery.data, form.company_id]);
+
   const companyMutation = useMutation({
     mutationFn: createCompany,
     onSuccess: async (company) => {
-      form.setValue("company_id", company.id, { shouldDirty: true, shouldValidate: true });
-      setCompanyDraft({ name: "", slug: "" });
+      setForm((current) => ({ ...current, company_id: company.id }));
       await queryClient.invalidateQueries({ queryKey: queryKeys.companies });
     }
   });
-  const companies = companiesQuery.data?.length ? companiesQuery.data : companyMutation.data ? [companyMutation.data] : [];
-  const selectedCompanyId = form.watch("company_id");
-  useEffect(() => {
-    const fetchedCompanies = companiesQuery.data ?? [];
-    if (fetchedCompanies.length === 1 && !selectedCompanyId) {
-      form.setValue("company_id", fetchedCompanies[0].id, { shouldValidate: true });
+  const initMutation = useMutation({
+    mutationFn: () =>
+      createMinimalMarketChannel({
+        ...form,
+        known_destination_channel: form.known_destination_channel || null,
+        account_country: form.account_country || null
+      }),
+    onSuccess: (result) => {
+      setChannelId(result.channel.id);
+      setDraft(null);
+      setApprovedHash(null);
     }
-  }, [companiesQuery.data, form, selectedCompanyId]);
-
+  });
   const researchMutation = useMutation({
-    mutationFn: async (submitted: MinimalFormValues) => {
-      const draft = await createChannelInitDraft({
-        company_id: submitted.company_id,
-        channel_name: submitted.channel_name,
-        public_presence_mode: submitted.public_presence_mode,
-        youtube_url_or_handle: submitted.youtube_url_or_handle || null,
-        website_url: submitted.website_url || null,
-        social_profile_links: splitLines(submitted.social_profile_links),
-        operator_note_purpose: submitted.operator_note_purpose,
-        intended_content_language: submitted.intended_content_language || null,
-        intended_primary_market: submitted.intended_primary_market || null,
-        owner_operator_language: submitted.owner_operator_language || "vi-VN",
-        initial_topic_pillar_hints: splitLines(submitted.initial_topic_pillar_hints),
-        source_usage_attestation: submitted.source_usage_attestation
-      });
-      const researched = await researchChannelInitDraft(draft.id);
-      return { draft, researched };
+    mutationFn: () => {
+      if (!channelId) throw new Error("Hãy lưu thông tin kênh trước.");
+      return runTargetMarketDraft(channelId);
     },
-    onSuccess: ({ draft, researched }) => {
-      setInitDraft(draft);
-      setContractDraft(researched);
-      setCompileResult(null);
-    }
+    onSuccess: setDraft
   });
-  const reviewMutation = useMutation({
-    mutationFn: async () => {
-      if (!initDraft || !contractDraft) throw new Error("Chưa có draft để review.");
-      const decisions = reviewPaths
-        .filter((item) => contractDraft.field_source_map_json[item.path])
-        .map((item) => ({ field_path: item.path, action: "confirm", note: "Operator confirmed in minimal review step." }));
-      return reviewChannelInitDraft(initDraft.id, decisions, "Xác nhận các field chiến lược trước compile.");
+  const editMutation = useMutation({
+    mutationFn: () => {
+      if (!channelId || !draft) throw new Error("Chưa có research draft để lưu.");
+      const expectedHash = draft.content_hash;
+      const payload: Omit<TargetMarketProfileDraft, "content_hash"> & { content_hash?: string } = { ...draft };
+      delete payload.content_hash;
+      return updateTargetMarketDraft(channelId, payload, expectedHash);
     },
-    onSuccess: (reviewed) => {
-      setContractDraft(reviewed);
-      setCompileResult(null);
-    }
+    onSuccess: setDraft
   });
-  const compileMutation = useMutation({
-    mutationFn: async () => {
-      if (!initDraft) throw new Error("Chưa có init draft.");
-      return compileChannelInitDraft(initDraft.id);
+  const approveMutation = useMutation({
+    mutationFn: () => {
+      if (!channelId || !draft) throw new Error("Chưa có bản nháp chính xác để duyệt.");
+      return approveTargetMarketDraft(channelId, draft);
     },
-    onSuccess: async (compiled) => {
-      setCompileResult(compiled);
+    onSuccess: async (result) => {
+      setApprovedHash(result.exact_approved_draft_hash);
       await queryClient.invalidateQueries({ queryKey: queryKeys.channels });
     }
   });
-  const activateMutation = useMutation({
-    mutationFn: async () => {
-      if (!compileResult) throw new Error("Chưa có snapshot COMPLETE.");
-      return activateChannel(compileResult.channel_id, compileResult.compiled_policy_snapshot_id);
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.channels });
-    }
-  });
-  const canActivate = compileResult?.contract_status === "COMPLETE";
+
+  const failure = initMutation.error ?? researchMutation.error ?? editMutation.error ?? approveMutation.error ?? companyMutation.error;
+  const busy = initMutation.isPending || researchMutation.isPending || editMutation.isPending || approveMutation.isPending;
 
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
-        title="Tạo kênh"
-        subtitle="Dữ liệu khởi tạo kênh là nguồn sự thật vận hành sau khi người vận hành xác nhận."
+        title="Tạo kênh theo thị trường"
+        subtitle="Thông tin tối thiểu → đề xuất nghiên cứu → người vận hành chỉnh sửa và duyệt đúng nội dung."
         breadcrumbs={[{ label: "Kênh", href: "/channels" }, { label: "Tạo kênh" }]}
       />
 
       <Panel className="border-primary/30">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1 text-sm text-muted-foreground">
-            <p>Kết quả research chỉ là đề xuất, chưa phải cấu hình runtime.</p>
-            <p>VCOS không tự publish/upload/reupload.</p>
-            <p>Không dùng YouTube Studio scraping.</p>
-            <p>Ngân sách provider được cấu hình trong Cài đặt / Tích hợp, không nhập theo từng kênh.</p>
-          </div>
-          <Button type="button" onClick={onAdvanced}>
-            <Settings2 size={16} />
-            Nâng cao: nhập thủ công toàn bộ hồ sơ
-          </Button>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          VCOS tạo gói nội dung phù hợp thị trường; organic không có target country và không bảo đảm phân phối tới một quốc gia.
+        </p>
       </Panel>
 
-      <form className="space-y-5" onSubmit={form.handleSubmit((submitted) => researchMutation.mutate(submitted))}>
-        <Section title="1. Thiết lập tối thiểu">
-          <CompanySelect
-            companies={companies}
-            loading={companiesQuery.isLoading}
-            error={form.formState.errors.company_id?.message}
-            registration={form.register("company_id")}
-          />
-          {!companiesQuery.isLoading && companies.length === 0 ? (
-            <CompanyBootstrapInline
-              draft={companyDraft}
-              onDraftChange={setCompanyDraft}
-              onCreate={() => companyMutation.mutate(companyDraft)}
-              pending={companyMutation.isPending}
-              error={companyMutation.isError ? companyMutation.error.message : null}
-            />
-          ) : null}
-          <TextInput label="Tên kênh *" error={form.formState.errors.channel_name?.message} registration={form.register("channel_name")} />
-          <SelectInput
-            label="Public presence mode *"
-            registration={form.register("public_presence_mode")}
-            options={[
-              ["EXISTING_PUBLIC_CHANNEL", "Kênh đã có footprint công khai"],
-              ["NEW_CHANNEL_NO_PUBLIC_FOOTPRINT", "Kênh mới chưa có footprint công khai"]
-            ]}
-          />
-          <TextInput label="YouTube URL/handle" error={form.formState.errors.youtube_url_or_handle?.message} registration={form.register("youtube_url_or_handle")} />
-          <TextInput label="Website URL" error={form.formState.errors.website_url?.message} registration={form.register("website_url")} />
-          <TextArea label="Social/profile links" error={form.formState.errors.social_profile_links?.message} registration={form.register("social_profile_links")} />
-          <TextArea label="Ghi chú ngắn của operator *" error={form.formState.errors.operator_note_purpose?.message} registration={form.register("operator_note_purpose")} />
-          <TextInput label="Content language" error={form.formState.errors.intended_content_language?.message} registration={form.register("intended_content_language")} />
-          <TextInput label="Primary market" error={form.formState.errors.intended_primary_market?.message} registration={form.register("intended_primary_market")} />
-          <TextInput label="Owner/operator language" error={form.formState.errors.owner_operator_language?.message} registration={form.register("owner_operator_language")} />
-          <TextArea label="Initial topic/pillar hints" error={form.formState.errors.initial_topic_pillar_hints?.message} registration={form.register("initial_topic_pillar_hints")} />
-          <Checkbox label="Tôi xác nhận các URL này là nguồn công khai hoặc được phép dùng để research hồ sơ kênh." registration={form.register("source_usage_attestation")} />
-          {form.formState.errors.source_usage_attestation?.message ? <div className="text-sm text-rose-100">{form.formState.errors.source_usage_attestation.message}</div> : null}
-        </Section>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="primary" disabled={researchMutation.isPending || companiesQuery.isLoading || !selectedCompanyId}>
-            <Search size={16} />
-            {researchMutation.isPending ? "Đang tạo nháp..." : "Tạo nháp & research hồ sơ kênh"}
-          </Button>
-        </div>
-      </form>
-
-      {researchMutation.isError ? <ErrorState message={researchMutation.error.message} /> : null}
-      {reviewMutation.isError ? <ErrorState message={reviewMutation.error.message} /> : null}
-      {compileMutation.isError ? <ErrorState message={compileMutation.error.message} /> : null}
-      {activateMutation.isError ? <ErrorState message={activateMutation.error.message} /> : null}
-
-      {contractDraft ? (
-        <>
-          <ResearchResultPanel contractDraft={contractDraft} />
-          <ReviewPanel contractDraft={contractDraft} onConfirm={() => reviewMutation.mutate()} pending={reviewMutation.isPending} />
-          <CompilePanel result={compileResult} contractDraft={contractDraft} onCompile={() => compileMutation.mutate()} pending={compileMutation.isPending} />
-        </>
-      ) : null}
-
-      {canActivate ? (
-        <Panel className="border-emerald-500/40">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold">5. Activate</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Chỉ kích hoạt sau khi Channel Contract COMPILED_COMPLETE và người vận hành bấm rõ ràng.</p>
-            </div>
-            <Button type="button" onClick={() => activateMutation.mutate()} disabled={activateMutation.isPending}>
-              <ShieldCheck size={16} />
-              Kích hoạt kênh
-            </Button>
-          </div>
-        </Panel>
-      ) : null}
-    </div>
-  );
-}
-
-function AdvancedManualChannelInitForm() {
-  const queryClient = useQueryClient();
-  const [companyDraft, setCompanyDraft] = useState({ name: "VCOS Company", slug: "vcos-company" });
-  const form = useForm<FormValues>({
-    resolver: zodResolver(advancedSchema),
-    defaultValues: {
-      company_id: "",
-      template_key: "saas_digital_leverage",
-      channel_type: "YOUTUBE_CHANNEL",
-      secondary_platforms: "Shorts",
-      audience_level: "semi_technical",
-      operator_language: "vi",
-      measurement_units: "metric",
-      date_format: "DD/MM/YYYY",
-      market_examples_preference: "prefer",
-      long_form_enabled: true,
-      long_form_min_minutes: 8,
-      long_form_max_minutes: 14,
-      shorts_enabled: true,
-      shorts_min_seconds: 30,
-      shorts_max_seconds: 45,
-      shorts_hard_max_seconds: 59,
-      captions_required: true,
-      chapters_required_for_long_form: true,
-      derivative_shorts_per_long_form: 2,
-      narration_tone: "practical_explainer",
-      pacing: "clear_short_sentences",
-      forbidden_style: "hype\nfearmongering\naggressive_sales\nfake_urgency",
-      cost_sensitivity: "medium",
-      avoid_unnecessary_ai_hero: true,
-      prefer_reuse_safe_assets: true,
-      exact_cost_claim_requires_provider_snapshot: true,
-      reused_content_sensitivity: "medium",
-      drive_offload_enabled: true
-    }
-  });
-  const companiesQuery = useQuery({ queryKey: queryKeys.companies, queryFn: getCompanies });
-  const companyMutation = useMutation({
-    mutationFn: createCompany,
-    onSuccess: async (company) => {
-      form.setValue("company_id", company.id, { shouldDirty: true, shouldValidate: true });
-      setCompanyDraft({ name: "", slug: "" });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.companies });
-    }
-  });
-  const companies = companiesQuery.data?.length ? companiesQuery.data : companyMutation.data ? [companyMutation.data] : [];
-  const values = form.watch();
-  const selectedCompanyId = values.company_id;
-  const preview = contractPreview(values);
-  const mutation = useMutation({
-    mutationFn: initChannel,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.channels });
-    }
-  });
-  const compiled = mutation.data?.compiled as Record<string, unknown> | undefined;
-  const compiledContract = compiled?.channel_contract_json as Record<string, unknown> | undefined;
-  const compiledStatus = String(compiled?.contract_status ?? compiledContract?.contract_status ?? "");
-  const activateMutation = useMutation({
-    mutationFn: () => activateChannel(String(mutation.data?.channel.id), String(compiled?.id ?? compiled?.snapshot_id ?? "")),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.channels });
-    }
-  });
-  const canActivate = mutation.isSuccess && compiledStatus === "COMPLETE";
-  const channelSubmitDisabled = mutation.isPending || companiesQuery.isLoading || !selectedCompanyId;
-
-  useEffect(() => {
-    const fetchedCompanies = companiesQuery.data ?? [];
-    if (fetchedCompanies.length === 1 && !selectedCompanyId) {
-      form.setValue("company_id", fetchedCompanies[0].id, { shouldValidate: true });
-    }
-  }, [companiesQuery.data, form, selectedCompanyId]);
-
-  return (
-    <div className="space-y-6 p-4 md:p-8">
-      <PageHeader
-        title="Tạo kênh"
-        subtitle="Channel initialization data là production truth. Người vận hành nhập cấu hình, agent không tự đoán."
-        breadcrumbs={[{ label: "Kênh", href: "/channels" }, { label: "Tạo kênh" }]}
-      />
-
-      <Panel className="border-primary/30">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold">Trạng thái hồ sơ</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Ngân sách provider được cấu hình trong Cài đặt / Tích hợp, không nhập theo từng kênh.</p>
-            <p className="mt-1 text-sm text-muted-foreground">VCOS không tự publish/upload/reupload.</p>
-          </div>
-          <StatusBadge value={preview.status === "COMPLETE" ? "Hồ sơ đủ để kích hoạt" : "Thiếu thông tin cấu hình"} />
-        </div>
-        {preview.missing.length ? (
-          <div className="mt-4 rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-            Thiếu: {preview.missing.join(", ")}
-          </div>
-        ) : null}
-      </Panel>
-
-      <form className="space-y-5" onSubmit={form.handleSubmit((submitted) => mutation.mutate(submitted))}>
-        <Section title="Thông tin kênh">
-          <CompanySelect
-            companies={companies}
-            loading={companiesQuery.isLoading}
-            error={form.formState.errors.company_id?.message}
-            registration={form.register("company_id")}
-          />
-          {!companiesQuery.isLoading && companies.length === 0 ? (
-            <CompanyBootstrapInline
-              draft={companyDraft}
-              onDraftChange={setCompanyDraft}
-              onCreate={() => companyMutation.mutate(companyDraft)}
-              pending={companyMutation.isPending}
-              error={companyMutation.isError ? companyMutation.error.message : null}
-            />
-          ) : null}
-          {companiesQuery.isError ? <div className="text-sm text-rose-100">Không tải được danh sách công ty: {companiesQuery.error.message}</div> : null}
-          <TextInput label="Khóa kênh *" error={form.formState.errors.key?.message} registration={form.register("key")} />
-          <TextInput label="Tên kênh *" error={form.formState.errors.name?.message} registration={form.register("name")} />
-          <TextInput label="Template hồ sơ *" error={form.formState.errors.template_key?.message} registration={form.register("template_key")} />
-          <TextInput label="Loại kênh *" error={form.formState.errors.channel_type?.message} registration={form.register("channel_type")} />
-          <TextInput label="Niche / chủ đề chính *" error={form.formState.errors.niche?.message} registration={form.register("niche")} />
-          <TextInput label="Định vị kênh *" error={form.formState.errors.positioning?.message} registration={form.register("positioning")} />
-          <TextInput label="Brand promise / lời hứa nội dung *" error={form.formState.errors.brand_promise?.message} registration={form.register("brand_promise")} />
-          <ReadOnly label="Platform chính" value="YouTube" />
-          <TextInput label="Platform phụ" error={form.formState.errors.secondary_platforms?.message} registration={form.register("secondary_platforms")} />
-        </Section>
-
-        <Section title="Đối tượng người xem">
-          <TextInput label="Persona chính *" error={form.formState.errors.primary_persona?.message} registration={form.register("primary_persona")} />
-          <SelectInput label="Mức độ hiểu biết *" registration={form.register("audience_level")} options={[["non_technical", "Không kỹ thuật"], ["semi_technical", "Có hiểu biết cơ bản"], ["technical", "Kỹ thuật"], ["expert", "Chuyên gia"]]} />
-          <TextArea label="Pain points *" error={form.formState.errors.pain_points?.message} registration={form.register("pain_points")} />
-          <TextArea label="Desired outcome *" error={form.formState.errors.desired_outcome?.message} registration={form.register("desired_outcome")} />
-          <TextArea label="Audience notes" error={form.formState.errors.audience_notes?.message} registration={form.register("audience_notes")} />
-        </Section>
-
-        <Section title="Thị trường & locale">
-          <SelectInput label="Primary market *" registration={form.register("primary_market")} options={marketOptions} placeholder="Chọn thị trường" error={form.formState.errors.primary_market?.message} />
-          <TextInput label="Secondary markets" error={form.formState.errors.secondary_markets?.message} registration={form.register("secondary_markets")} />
-          <SelectInput label="Audience locale *" registration={form.register("audience_locale")} options={localeOptions} placeholder="Chọn locale" error={form.formState.errors.audience_locale?.message} />
-          <TextInput label="Content language *" error={form.formState.errors.content_language?.message} registration={form.register("content_language")} />
-          <TextInput label="Operator language *" error={form.formState.errors.operator_language?.message} registration={form.register("operator_language")} />
-          <TextInput label="Timezone *" error={form.formState.errors.timezone?.message} registration={form.register("timezone")} />
-          <TextInput label="Currency *" error={form.formState.errors.currency?.message} registration={form.register("currency")} />
-          <SelectInput label="Measurement units *" registration={form.register("measurement_units")} options={[["metric", "Metric"], ["imperial", "Imperial"], ["imperial_or_mixed", "Imperial hoặc mixed"]]} />
-          <SelectInput label="Date format *" registration={form.register("date_format")} options={dateFormatOptions} />
-          <TextInput label="Tone văn hóa *" error={form.formState.errors.cultural_tone?.message} registration={form.register("cultural_tone")} />
-          <TextInput label="Formality *" error={form.formState.errors.cultural_formality?.message} registration={form.register("cultural_formality")} />
-          <TextInput label="Humor *" error={form.formState.errors.cultural_humor?.message} registration={form.register("cultural_humor")} />
-          <TextInput label="CTA style *" error={form.formState.errors.cta_style?.message} registration={form.register("cta_style")} />
-          <SelectInput label="Market examples preference *" registration={form.register("market_examples_preference")} options={[["prefer", "Ưu tiên"], ["avoid", "Tránh"]]} />
-          <TextInput label="Finance claim sensitivity *" error={form.formState.errors.finance_claim_sensitivity?.message} registration={form.register("finance_claim_sensitivity")} />
-          <TextInput label="Health claim sensitivity *" error={form.formState.errors.health_claim_sensitivity?.message} registration={form.register("health_claim_sensitivity")} />
-          <TextInput label="Disclosure standard *" error={form.formState.errors.disclosure_standard?.message} registration={form.register("disclosure_standard")} />
-        </Section>
-
-        <Section title="Editorial strategy">
-          <TextArea label="Content pillars *" error={form.formState.errors.content_pillars?.message} registration={form.register("content_pillars")} />
-          <TextArea label="Allowed angles *" error={form.formState.errors.allowed_angles?.message} registration={form.register("allowed_angles")} />
-          <TextArea label="Forbidden angles *" error={form.formState.errors.forbidden_angles?.message} registration={form.register("forbidden_angles")} />
-          <ReadOnly label="Claim style" value="Measured, evidence-backed, no exaggerated ROI" />
-          <TextArea label="Allowed topics *" error={form.formState.errors.allowed_topics?.message} registration={form.register("allowed_topics")} />
-          <TextArea label="Forbidden topics *" error={form.formState.errors.forbidden_topics?.message} registration={form.register("forbidden_topics")} />
-        </Section>
-
-        <Section title="Format policy">
-          <Checkbox label="Long-form enabled" registration={form.register("long_form_enabled")} />
-          <NumberInput label="Long-form min phút" error={form.formState.errors.long_form_min_minutes?.message} registration={form.register("long_form_min_minutes")} />
-          <NumberInput label="Long-form max phút" error={form.formState.errors.long_form_max_minutes?.message} registration={form.register("long_form_max_minutes")} />
-          <ReadOnly label="Long-form structure" value="Hook, problem, mechanism, result, takeaway" />
-          <Checkbox label="Shorts enabled" registration={form.register("shorts_enabled")} />
-          <NumberInput label="Shorts min giây" error={form.formState.errors.shorts_min_seconds?.message} registration={form.register("shorts_min_seconds")} />
-          <NumberInput label="Shorts max giây" error={form.formState.errors.shorts_max_seconds?.message} registration={form.register("shorts_max_seconds")} />
-          <NumberInput label="Shorts hard max seconds" error={form.formState.errors.shorts_hard_max_seconds?.message} registration={form.register("shorts_hard_max_seconds")} />
-          <Checkbox label="Captions required" registration={form.register("captions_required")} />
-          <Checkbox label="Chapters required for long-form" registration={form.register("chapters_required_for_long_form")} />
-          <NumberInput label="Số Shorts phải sinh mỗi video dài" error={form.formState.errors.derivative_shorts_per_long_form?.message} registration={form.register("derivative_shorts_per_long_form")} />
-        </Section>
-
-        <Section title="Voice / tone style">
-          <SelectInput label="Narration tone *" registration={form.register("narration_tone")} options={[["documentary_explainer", "Documentary explainer"], ["practical_explainer", "Practical explainer"], ["calm_professional", "Calm professional"], ["investigative", "Investigative"]]} />
-          <SelectInput label="Pacing *" registration={form.register("pacing")} options={[["clear_short_sentences", "Câu ngắn, rõ"], ["moderate", "Vừa phải"], ["fast", "Nhanh"]]} />
-          <TextArea label="Allowed style *" error={form.formState.errors.allowed_style?.message} registration={form.register("allowed_style")} />
-          <TextArea label="Forbidden style *" error={form.formState.errors.forbidden_style?.message} registration={form.register("forbidden_style")} />
-        </Section>
-
-        <Section title="Platform strategy">
-          <ReadOnly label="Primary platform" value="YouTube" />
-          <ReadOnly label="YouTube is learning authority" value="True" />
-          <ReadOnly label="Publish mode" value="Human handoff only" />
-          <ReadOnly label="Auto publish allowed" value="False" />
-          <ReadOnly label="Studio scraping allowed" value="False" />
-          <ReadOnly label="Disabled authorities" value="TikTok analytics learning, Facebook analytics learning" />
-        </Section>
-
-        <Section title="Media/provider policy">
-          <ReadOnly label="Voice provider" value="ElevenLabs" />
-          <ReadOnly label="AI hero provider" value="Google Veo API" />
-          <ReadOnly label="AI hero model ID" value="veo-3.1-fast-generate-preview" />
-          <ReadOnly label="AI hero allowed durations" value="8 giây" />
-          <ReadOnly label="AI hero default duration" value="8 giây" />
-          <ReadOnly label="AI hero provider audio" value="Có thể có; luôn loại bỏ khi chuẩn hóa" />
-          <ReadOnly label="AI hero allowed use" value="Hero shot, hard-to-find visual" />
-          <ReadOnly label="AI hero forbidden use" value="Data diagram, workflow chart, factual evidence visualization" />
-          <ReadOnly label="Renderer" value="NativeFFmpegRenderer" />
-          <ReadOnly label="Storage archive" value="Google Drive" />
-          <Checkbox label="Drive offload enabled" registration={form.register("drive_offload_enabled")} />
-        </Section>
-
-        <Section title="Rights / disclosure policy">
-          <ReadOnly label="Source manifest required" value="True" />
-          <ReadOnly label="Rights evidence required" value="True" />
-          <ReadOnly label="AI disclosure required when AI media used" value="True" />
-          <ReadOnly label="Synthetic media warning when applicable" value="True" />
-          <ReadOnly label="Music policy" value="Approved/licensed/audio-library-safe only" />
-          <SelectInput label="Reused content sensitivity *" registration={form.register("reused_content_sensitivity")} options={[["low", "Thấp"], ["medium", "Vừa"], ["high", "Cao"]]} />
-        </Section>
-
-        <Section title="Cost policy">
-          <SelectInput label="Cost sensitivity *" registration={form.register("cost_sensitivity")} options={[["low", "Thấp"], ["medium", "Vừa"], ["high", "Cao"]]} />
-          <Checkbox label="Avoid unnecessary AI hero" registration={form.register("avoid_unnecessary_ai_hero")} />
-          <Checkbox label="Prefer reuse safe assets" registration={form.register("prefer_reuse_safe_assets")} />
-          <Checkbox label="Exact cost claim requires provider snapshot" registration={form.register("exact_cost_claim_requires_provider_snapshot")} />
-        </Section>
-
-        <Section title="Learning policy">
-          <ReadOnly label="Authority" value="YouTube analytics only" />
-          <TextInput label="Min evidence required *" error={form.formState.errors.min_evidence_required?.message} registration={form.register("min_evidence_required")} />
-          <ReadOnly label="Auto-promote learning" value="False" />
-          <ReadOnly label="Config mutation by agent allowed" value="False" />
-          <ReadOnly label="Weak evidence action" value="Summarize limitations only" />
-        </Section>
-
-        <Section title="Forbidden behavior">
-          {["fake_traffic", "bot_engagement", "spam_reupload", "algorithm_manipulation", "platform_evasion", "ip_vps_tricks", "youtube_studio_scraping", "dashboard_scraping", "invented_metrics", "invented_sources", "invented_rights", "unsupported_local_claims"].map((item) => (
-            <ReadOnly key={item} label={item} value="Locked forbidden" />
-          ))}
-        </Section>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="primary" disabled={channelSubmitDisabled}>
-            <CheckCircle2 size={16} />
-            Tạo và compile snapshot
-          </Button>
-          {canActivate ? (
-            <Button type="button" onClick={() => activateMutation.mutate()} disabled={activateMutation.isPending}>
-              <ShieldCheck size={16} />
-              Kích hoạt kênh
-            </Button>
-          ) : null}
-          <StatusBadge value={preview.status === "COMPLETE" ? "Hồ sơ đủ để kích hoạt" : "Thiếu thông tin cấu hình"} />
-        </div>
-      </form>
-
-      {mutation.isError ? <ErrorState message={mutation.error.message} /> : null}
-      {activateMutation.isError ? <ErrorState message={activateMutation.error.message} /> : null}
-      {mutation.isSuccess ? (
-        <Panel className="border-emerald-500/40">
-          <h2 className="text-base font-semibold">{compiledStatus === "COMPLETE" ? "Hồ sơ đủ để kích hoạt" : "Cần bổ sung hồ sơ"}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Snapshot đã compile. Kênh chỉ được kích hoạt khi Channel Contract COMPLETE.</p>
-        </Panel>
-      ) : null}
-    </div>
-  );
-}
-
-function ResearchResultPanel({ contractDraft }: { contractDraft: ChannelContractDraft }) {
-  return (
-    <Panel>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold">2. Kết quả research</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Kết quả research chỉ là đề xuất, chưa phải cấu hình runtime.</p>
-        </div>
-        <StatusBadge value={contractDraft.contract_status ?? "PARTIAL"} />
-      </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <div className="rounded-md border border-border p-3">
-          <h3 className="text-sm font-semibold">Summary</h3>
-          <p className="mt-2 text-sm text-muted-foreground">{String(getPath(contractDraft.suggested_channel_contract, "channel_identity.positioning") ?? "Chưa có đề xuất.")}</p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <h3 className="text-sm font-semibold">Evidence refs</h3>
-          <div className="mt-2 space-y-2 text-sm text-muted-foreground">
-            {contractDraft.evidence_refs.map((item) => (
-              <div key={item.ref_id}>
-                <span className="font-medium text-foreground">{item.ref_id}</span> · {item.source_type} · {item.reliability}
+      <form
+        className="space-y-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          initMutation.mutate();
+        }}
+      >
+        <StepPanel number="1" title="Basics" icon={PencilLine}>
+          {companiesQuery.data?.length ? (
+            <Field label="Công ty *">
+              <select className={controlClass} value={form.company_id} onChange={(event) => updateForm("company_id", event.target.value)} required>
+                <option value="">Chọn công ty</option>
+                {companiesQuery.data.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+              </select>
+            </Field>
+          ) : (
+            <div className="rounded-md border border-border p-3 md:col-span-2">
+              <p className="mb-3 text-sm font-medium">Tạo công ty trước</p>
+              <div className="grid gap-3 md:grid-cols-3">
+                <input aria-label="Tên công ty" className={controlClass} value={companyDraft.name} onChange={(event) => setCompanyDraft((current) => ({ ...current, name: event.target.value }))} />
+                <input aria-label="Slug công ty" className={controlClass} value={companyDraft.slug} onChange={(event) => setCompanyDraft((current) => ({ ...current, slug: event.target.value }))} />
+                <Button type="button" onClick={() => companyMutation.mutate(companyDraft)} disabled={companyMutation.isPending}>Tạo công ty</Button>
               </div>
-            ))}
+            </div>
+          )}
+          <TextField label="Tên kênh *" value={form.channel_name} onChange={(value) => updateForm("channel_name", value)} required />
+          <TextField label="Key kênh *" value={form.channel_key} onChange={(value) => updateForm("channel_key", value)} required />
+          <TextField label="Mục đích kênh *" value={form.channel_purpose} onChange={(value) => updateForm("channel_purpose", value)} required multiline />
+          <TextField label="Tóm tắt khán giả *" value={form.target_audience_summary} onChange={(value) => updateForm("target_audience_summary", value)} required multiline />
+        </StepPanel>
+
+        <StepPanel number="2" title="Target Market" icon={FileSearch}>
+          <TextField label="Thị trường chính *" value={form.primary_market} onChange={(value) => updateForm("primary_market", value.toUpperCase())} required />
+          <TextField label="Ngôn ngữ chính *" value={form.primary_language} onChange={(value) => updateForm("primary_language", value)} required />
+          <TextField label="Locale chính *" value={form.primary_locale} onChange={(value) => updateForm("primary_locale", value)} required />
+          <Field label="Kiểu thị trường *">
+            <select className={controlClass} value={form.channel_market_type} onChange={(event) => updateForm("channel_market_type", event.target.value as InitForm["channel_market_type"])}>
+              <option value="MARKET_NATIVE">Market-native</option>
+              <option value="GLOBAL_ENGLISH">Global English</option>
+            </select>
+          </Field>
+          <TextField label="Kênh đích đã biết" value={form.known_destination_channel} onChange={(value) => updateForm("known_destination_channel", value)} />
+          <TextField label="Quốc gia tài khoản" value={form.account_country} onChange={(value) => updateForm("account_country", value.toUpperCase())} />
+          <div className="rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100 md:col-span-2">
+            Account country does not control organic audience targeting.
           </div>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <h3 className="text-sm font-semibold">Cannot determine fields</h3>
-          <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-            {contractDraft.missing_fields.length ? contractDraft.missing_fields.slice(0, 8).map((field) => <div key={field}>{field}</div>) : <div>Chưa có blocker.</div>}
+          <div className="md:col-span-2">
+            <Button type="submit" variant="primary" disabled={busy || !form.company_id}>
+              Lưu thông tin tối thiểu
+            </Button>
           </div>
-        </div>
-      </div>
-      {contractDraft.risks.length ? (
-        <div className="mt-4 rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-          {contractDraft.risks.map((risk) => String(risk.message_vi ?? risk.risk_code)).join(" · ")}
-        </div>
-      ) : null}
-    </Panel>
-  );
-}
+        </StepPanel>
+      </form>
 
-function ReviewPanel({ contractDraft, onConfirm, pending }: { contractDraft: ChannelContractDraft; onConfirm: () => void; pending: boolean }) {
-  return (
-    <Panel>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold">3. Người vận hành rà soát</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Research inference chưa đủ để COMPLETE. Người vận hành cần xác nhận field chiến lược.</p>
+      <StepPanel number="3" title="Research Draft" icon={FileSearch}>
+        <div className="md:col-span-2">
+          <Button type="button" onClick={() => researchMutation.mutate()} disabled={!channelId || busy}>
+            Chạy Setup/Research Agent offline
+          </Button>
+          <p className="mt-2 text-xs text-muted-foreground">Đề xuất của agent không có quyền kích hoạt hay tự phê duyệt hồ sơ.</p>
         </div>
-        <Button type="button" onClick={onConfirm} disabled={pending}>
-          <CheckCircle2 size={16} />
-          {pending ? "Đang xác nhận..." : "Xác nhận các field bắt buộc"}
-        </Button>
-      </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {reviewPaths.map((item) => (
-          <FieldReviewRow
-            key={item.path}
-            label={item.label}
-            path={item.path}
-            value={getPath(contractDraft.suggested_channel_contract, item.path)}
-            meta={contractDraft.field_source_map_json[item.path]}
-          />
-        ))}
-      </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        <LockedPolicy title="Provider policy" items={["media_policy.voice_provider", "media_policy.ai_hero_provider", "media_policy.renderer"]} fieldMap={contractDraft.field_source_map_json} contract={contractDraft.suggested_channel_contract} />
-        <LockedPolicy title="Safety policy" items={["platform_strategy.auto_publish_allowed", "platform_strategy.studio_scraping_allowed", "learning_policy.config_mutation_by_agent_allowed"]} fieldMap={contractDraft.field_source_map_json} contract={contractDraft.suggested_channel_contract} />
-        <LockedPolicy title="Publish policy" items={["platform_strategy.publish_mode", "forbidden_behavior"]} fieldMap={contractDraft.field_source_map_json} contract={contractDraft.suggested_channel_contract} />
-      </div>
-    </Panel>
-  );
-}
+        {draft ? <ResearchSuggestions draft={draft} /> : <EmptyCopy text="Chưa có đề xuất nghiên cứu." />}
+      </StepPanel>
 
-function CompilePanel({
-  result,
-  contractDraft,
-  onCompile,
-  pending
-}: {
-  result: ChannelInitCompileResult | null;
-  contractDraft: ChannelContractDraft;
-  onCompile: () => void;
-  pending: boolean;
-}) {
-  const status = result?.contract_status ?? contractDraft.contract_status ?? "PARTIAL";
-  const missing = result?.missing_fields ?? contractDraft.missing_fields;
-  const fieldMap = result?.field_source_map_json ?? contractDraft.field_source_map_json;
-  const contract = result?.channel_contract_json ?? contractDraft.suggested_channel_contract;
-  const leafCount = Object.keys(flattenLeafPaths(contract)).length;
-  const coveredCount = Object.keys(flattenLeafPaths(contract)).filter((path) => fieldMap[path]).length;
-  return (
-    <Panel>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold">4. Compile Channel Contract</h2>
-          <p className="mt-1 text-sm text-muted-foreground">channel_contract_json giữ canonical values; provenance nằm trong field_source_map_json.</p>
-        </div>
-        <Button type="button" onClick={onCompile} disabled={pending}>
-          <CheckCircle2 size={16} />
-          {pending ? "Đang compile..." : "Compile Channel Contract"}
-        </Button>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <ReadOnly label="Contract status" value={status} />
-        <ReadOnly label="Field source coverage" value={`${coveredCount}/${leafCount}`} />
-        <ReadOnly label="Activation eligibility" value={result?.activation_eligibility ? "Có" : "Chưa"} />
-      </div>
-      {missing.length ? (
-        <div className="mt-4 rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-          Missing: {missing.slice(0, 12).join(", ")}
-        </div>
-      ) : null}
-      {result?.contradiction_reasons.length ? (
-        <div className="mt-4 rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">
-          Contradictory: {result.contradiction_reasons.join(", ")}
-        </div>
-      ) : null}
-    </Panel>
-  );
-}
+      <StepPanel number="4" title="Human Review" icon={PencilLine}>
+        {draft ? (
+          <>
+            <ListField label="Thị trường phụ" value={draft.acceptable_secondary_geos} onChange={(value) => setDraft({ ...draft, acceptable_secondary_geos: value })} />
+            <TextField label="Locale giọng đọc" value={draft.narration_locale} onChange={(value) => setDraft({ ...draft, narration_locale: value })} />
+            <TextField label="Múi giờ" value={draft.primary_timezone} onChange={(value) => setDraft({ ...draft, primary_timezone: value })} />
+            <TextField label="Tiền tệ" value={draft.currency} onChange={(value) => setDraft({ ...draft, currency: value })} />
+            <TextField label="Quy ước đơn vị" value={draft.units_policy} onChange={(value) => setDraft({ ...draft, units_policy: value })} />
+            <TextField label="Quy tắc chính tả" value={draft.spelling_system} onChange={(value) => setDraft({ ...draft, spelling_system: value })} />
+            <TextField label="Định dạng ngày" value={draft.date_format} onChange={(value) => setDraft({ ...draft, date_format: value })} />
+            <TextField label="Bối cảnh thị trường" value={draft.audience_market_context} onChange={(value) => setDraft({ ...draft, audience_market_context: value, workplace_context: value })} />
+            <TextField label="Chính sách nguồn theo pháp vực" value={draft.source_jurisdiction_policy} onChange={(value) => setDraft({ ...draft, source_jurisdiction_policy: value })} />
+            <ListField label="Sai lệch bản địa hóa bị cấm" value={draft.prohibited_market_mismatches} onChange={(value) => setDraft({ ...draft, prohibited_market_mismatches: value })} />
+            <Field label="Giả thuyết khung giờ publish">
+              <textarea
+                className={`${controlClass} min-h-28 font-mono text-xs`}
+                value={JSON.stringify(draft.initial_publish_window_hypotheses, null, 2)}
+                onChange={(event) => {
+                  try {
+                    const parsed = JSON.parse(event.target.value) as Array<Record<string, unknown>>;
+                    if (Array.isArray(parsed)) setDraft({ ...draft, initial_publish_window_hypotheses: parsed });
+                  } catch {
+                    // Keep the last valid typed value while the operator is editing JSON.
+                  }
+                }}
+              />
+            </Field>
+            <div className="md:col-span-2">
+              <Button type="button" onClick={() => editMutation.mutate()} disabled={busy}>Lưu bản chỉnh sửa của người vận hành</Button>
+            </div>
+          </>
+        ) : <EmptyCopy text="Chạy research draft để bắt đầu rà soát." />}
+      </StepPanel>
 
-function FieldReviewRow({ label, path, value, meta }: { label: string; path: string; value: unknown; meta?: FieldMeta }) {
-  return (
-    <div className="rounded-md border border-border p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="font-medium">{label}</div>
-        <FieldSourceBadge meta={meta} />
-      </div>
-      <div className="mt-1 text-xs text-muted-foreground">{path}</div>
-      <div className="mt-2 break-words text-muted-foreground">{formatValue(value)}</div>
-      <div className="mt-2 text-xs text-muted-foreground">Confidence: {meta?.confidence_label ?? "LOW"}</div>
+      <StepPanel number="5" title="Approval" icon={ShieldCheck}>
+        {draft ? (
+          <div className="space-y-4 md:col-span-2">
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-sm font-medium">Nội dung chính xác chờ duyệt</p>
+              <p className="mt-2 break-all font-mono text-xs text-muted-foreground">{draft.content_hash}</p>
+              <p className="mt-2 text-sm text-muted-foreground">Phiên bản nháp {draft.draft_version}; mọi thay đổi sau duyệt phải tạo phiên bản và hash mới.</p>
+            </div>
+            <Button type="button" variant="primary" onClick={() => approveMutation.mutate()} disabled={busy || Boolean(approvedHash)}>
+              <CheckCircle2 size={16} /> Duyệt đúng bản nháp này
+            </Button>
+            {approvedHash ? (
+              <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">
+                Đã duyệt đúng hash {approvedHash.slice(0, 12)}…. Hồ sơ sẵn sàng để compile ở phase profile v3; chưa có tự kích hoạt.
+              </div>
+            ) : null}
+          </div>
+        ) : <EmptyCopy text="Chưa có bản nháp để duyệt." />}
+      </StepPanel>
+
+      {failure ? <ErrorState message={failure.message} /> : null}
     </div>
   );
-}
 
-function LockedPolicy({
-  title,
-  items,
-  fieldMap,
-  contract
-}: {
-  title: string;
-  items: string[];
-  fieldMap: Record<string, FieldMeta>;
-  contract: Record<string, unknown>;
-}) {
-  return (
-    <div className="rounded-md border border-border p-3 text-sm">
-      <h3 className="font-semibold">{title}</h3>
-      <div className="mt-2 space-y-2">
-        {items.map((path) => (
-          <div key={path} className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">{path}</span>
-            <FieldSourceBadge meta={fieldMap[path]} fallbackValue={formatValue(getPath(contract, path))} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function FieldSourceBadge({ meta, fallbackValue }: { meta?: FieldMeta; fallbackValue?: string }) {
-  const label = sourceTypeLabel(meta?.source_type);
-  return <StatusBadge value={label || fallbackValue || "Không xác định"} />;
-}
-
-const reviewPaths = [
-  { path: "market_locale.primary_market", label: "Market" },
-  { path: "market_locale.audience_locale", label: "Locale" },
-  { path: "target_audience.primary_persona", label: "Audience" },
-  { path: "channel_identity.niche", label: "Niche" },
-  { path: "channel_identity.positioning", label: "Positioning" },
-  { path: "editorial_strategy.content_pillars", label: "Content pillars" },
-  { path: "editorial_strategy.claim_style", label: "Claim style" },
-  { path: "format_policy.long_form.enabled", label: "Long-form policy" },
-  { path: "format_policy.shorts.enabled", label: "Shorts policy" },
-  { path: "rights_policy.source_manifest_required", label: "Rights/disclosure" },
-  { path: "learning_policy.min_evidence_required", label: "Learning policy" }
-];
-
-function sourceTypeLabel(sourceType?: string) {
-  const labels: Record<string, string> = {
-    ADMIN_INPUT: "Người vận hành nhập",
-    ADMIN_HINT: "Gợi ý từ research",
-    PUBLIC_RESEARCH_EVIDENCE: "Gợi ý từ research",
-    RESEARCH_INFERENCE: "Cần xác nhận",
-    HUMAN_CONFIRMED: "Người vận hành nhập",
-    GLOBAL_LOCKED_POLICY: "Chính sách hệ thống khóa",
-    PROVIDER_POLICY: "Nhà cung cấp khóa",
-    COMPILER_DERIVED: "Chính sách hệ thống khóa",
-    UNKNOWN: "Không xác định"
-  };
-  return sourceType ? labels[sourceType] ?? "Không xác định" : "Không xác định";
-}
-
-function getPath(payload: Record<string, unknown>, path: string): unknown {
-  return path.split(".").reduce<unknown>((current, key) => {
-    if (current && typeof current === "object" && key in current) {
-      return (current as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, payload);
-}
-
-function flattenLeafPaths(value: unknown, prefix = ""): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [key, child]) => {
-      return { ...acc, ...flattenLeafPaths(child, prefix ? `${prefix}.${key}` : key) };
-    }, {});
+  function updateForm<Key extends keyof InitForm>(key: Key, value: InitForm[Key]) {
+    setForm((current) => ({ ...current, [key]: value }));
   }
-  return prefix ? { [prefix]: value } : {};
 }
 
-function formatValue(value: unknown) {
-  if (Array.isArray(value)) return value.map((item) => (typeof item === "object" ? JSON.stringify(item) : String(item))).join(", ");
-  if (value && typeof value === "object") return JSON.stringify(value);
-  if (value === undefined || value === null || value === "") return "Không xác định";
-  return String(value);
-}
-
-function CompanySelect({
-  companies,
-  loading,
-  error,
-  registration
-}: {
-  companies: Company[];
-  loading: boolean;
-  error?: string;
-  registration: UseFormRegisterReturn;
-}) {
+function ResearchSuggestions({ draft }: { draft: TargetMarketProfileDraft }) {
   return (
-    <label className="block text-sm">
-      <span className="mb-2 block text-muted-foreground">Công ty *</span>
-      <select className="w-full rounded-md border border-border bg-background px-3 py-2" disabled={loading || companies.length === 0} {...registration}>
-        <option value="">{loading ? "Đang tải công ty" : "Chọn công ty"}</option>
-        {companies.map((company) => (
-          <option key={company.id} value={company.id}>{company.name} ({company.slug})</option>
+    <div className="space-y-3 md:col-span-2">
+      <div className="grid gap-3 md:grid-cols-3">
+        <Summary label="Trạng thái" value="Cần người vận hành rà soát" />
+        <Summary label="Thông tin còn thiếu" value={draft.missing_information.length ? draft.missing_information.join(", ") : "Không có"} />
+        <Summary label="Quyền của agent" value="Chỉ đề xuất" />
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {draft.suggestions.map((suggestion) => (
+          <div key={suggestion.suggested_field} className="rounded-md border border-border p-3 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-medium">{suggestionLabel(suggestion.suggested_field)}</p>
+              <span className="rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">Tin cậy {Math.round(suggestion.confidence * 100)}%</span>
+            </div>
+            <p className="mt-2 text-muted-foreground">{displayValue(suggestion.suggested_value)}</p>
+            <p className="mt-2 text-xs text-muted-foreground">Lý do: {suggestion.rationale}</p>
+            <details className="mt-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Bằng chứng ({suggestion.evidence_refs.length})</summary>
+              <pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify(suggestion.evidence_refs, null, 2)}</pre>
+            </details>
+          </div>
         ))}
-      </select>
-      {error ? <span className="mt-1 block text-xs text-rose-100">{error}</span> : null}
-    </label>
-  );
-}
-
-function CompanyBootstrapInline({
-  draft,
-  onDraftChange,
-  onCreate,
-  pending,
-  error
-}: {
-  draft: { name: string; slug: string };
-  onDraftChange: (draft: { name: string; slug: string }) => void;
-  onCreate: () => void;
-  pending: boolean;
-  error: string | null;
-}) {
-  const canCreate = draft.name.trim() && draft.slug.trim();
-  return (
-    <div className="rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm xl:col-span-2">
-      <h3 className="font-semibold text-amber-100">Tạo công ty trước</h3>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <label className="block">
-          <span className="mb-2 block text-muted-foreground">Tên công ty</span>
-          <input
-            className="w-full rounded-md border border-border bg-background px-3 py-2"
-            value={draft.name}
-            onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-muted-foreground">Slug công ty</span>
-          <input
-            className="w-full rounded-md border border-border bg-background px-3 py-2"
-            value={draft.slug}
-            onChange={(event) => onDraftChange({ ...draft, slug: event.target.value })}
-          />
-        </label>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={onCreate} disabled={pending || !canCreate}>
-          {pending ? "Đang tạo..." : "Tạo công ty"}
-        </Button>
-        <span className="text-xs text-muted-foreground">Company là dữ liệu setup do operator nhập, không phải nội dung do AI tạo.</span>
-      </div>
-      {error ? <div className="mt-2 text-xs text-rose-100">{error}</div> : null}
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function StepPanel({ number, title, icon: Icon, children }: { number: string; title: string; icon: typeof PencilLine; children: React.ReactNode }) {
   return (
     <Panel>
-      <h2 className="text-base font-semibold">{title}</h2>
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>
+      <div className="mb-4 flex items-center gap-2">
+        <Icon size={17} className="text-primary" />
+        <h2 className="text-base font-semibold">{number}. {title}</h2>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">{children}</div>
     </Panel>
   );
 }
 
-function TextInput({ label, error, registration }: { label: string; error?: string; registration: UseFormRegisterReturn }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="space-y-2 text-sm"><span className="text-muted-foreground">{label}</span>{children}</label>;
+}
+
+function TextField({ label, value, onChange, required = false, multiline = false }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; multiline?: boolean }) {
   return (
-    <label className="block text-sm">
-      <span className="mb-2 block text-muted-foreground">{label}</span>
-      <input className="w-full rounded-md border border-border bg-background px-3 py-2" {...registration} />
-      {error ? <span className="mt-1 block text-xs text-rose-100">{error}</span> : null}
-    </label>
+    <Field label={label}>
+      {multiline ? (
+        <textarea aria-label={label} className={`${controlClass} min-h-24`} value={value} onChange={(event) => onChange(event.target.value)} required={required} />
+      ) : (
+        <input aria-label={label} className={controlClass} value={value} onChange={(event) => onChange(event.target.value)} required={required} />
+      )}
+    </Field>
   );
 }
 
-function NumberInput({ label, error, registration }: { label: string; error?: string; registration: UseFormRegisterReturn }) {
+function ListField({ label, value, onChange }: { label: string; value: string[]; onChange: (value: string[]) => void }) {
+  const [text, setText] = useState(value.join("\n"));
+  useEffect(() => setText(value.join("\n")), [value]);
   return (
-    <label className="block text-sm">
-      <span className="mb-2 block text-muted-foreground">{label}</span>
-      <input type="number" className="w-full rounded-md border border-border bg-background px-3 py-2" {...registration} />
-      {error ? <span className="mt-1 block text-xs text-rose-100">{error}</span> : null}
-    </label>
+    <Field label={label}>
+      <textarea
+        aria-label={label}
+        className={`${controlClass} min-h-24`}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => onChange(text.split(/\n|,/).map((item) => item.trim()).filter(Boolean))}
+      />
+    </Field>
   );
 }
 
-function TextArea({ label, error, registration }: { label: string; error?: string; registration: UseFormRegisterReturn }) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-2 block text-muted-foreground">{label}</span>
-      <textarea className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2" {...registration} />
-      {error ? <span className="mt-1 block text-xs text-rose-100">{error}</span> : null}
-    </label>
-  );
+function Summary({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-md border border-border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm font-medium">{value}</p></div>;
 }
 
-function SelectInput({
-  label,
-  error,
-  registration,
-  options,
-  placeholder
-}: {
-  label: string;
-  error?: string;
-  registration: UseFormRegisterReturn;
-  options: string[][];
-  placeholder?: string;
-}) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-2 block text-muted-foreground">{label}</span>
-      <select className="w-full rounded-md border border-border bg-background px-3 py-2" {...registration}>
-        {placeholder ? <option value="">{placeholder}</option> : null}
-        {options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-      </select>
-      {error ? <span className="mt-1 block text-xs text-rose-100">{error}</span> : null}
-    </label>
-  );
+function EmptyCopy({ text }: { text: string }) {
+  return <p className="text-sm text-muted-foreground md:col-span-2">{text}</p>;
 }
 
-function Checkbox({ label, registration }: { label: string; registration: UseFormRegisterReturn }) {
-  return (
-    <label className="flex min-h-10 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
-      <input type="checkbox" {...registration} />
-      {label}
-    </label>
-  );
+function suggestionLabel(field: string) {
+  return ({
+    acceptable_secondary_geos: "Thị trường phụ",
+    narration_locale: "Locale giọng đọc",
+    primary_timezone: "Múi giờ",
+    currency: "Tiền tệ",
+    units_policy: "Quy ước đơn vị",
+    spelling_system: "Quy tắc chính tả",
+    date_format: "Định dạng ngày",
+    audience_market_context: "Bối cảnh khán giả",
+    workplace_context: "Bối cảnh nơi làm việc",
+    source_jurisdiction_policy: "Chính sách pháp vực nguồn",
+    prohibited_market_mismatches: "Sai lệch bị cấm",
+    initial_publish_window_hypotheses: "Giả thuyết khung giờ publish",
+    market_terminology_notes: "Ghi chú thuật ngữ thị trường"
+  } as Record<string, string>)[field] ?? field;
 }
 
-function ReadOnly({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-      <div className="text-muted-foreground">{label}</div>
-      <div className="mt-1 font-medium">{value}</div>
-    </div>
-  );
+function displayValue(value: unknown) {
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
+
+const controlClass = "block w-full rounded-md border border-border bg-muted px-3 py-2 text-foreground outline-none focus:border-primary";

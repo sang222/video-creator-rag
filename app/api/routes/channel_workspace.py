@@ -1,5 +1,15 @@
 from fastapi import APIRouter
 
+from app.contracts.geo_market import (
+    DestinationBinding,
+    MinimalMarketChannelInit,
+    TargetMarketDraftApproval,
+    TargetMarketDraftPatch,
+    TargetMarketProfile,
+    TargetMarketProfileDraft,
+)
+from app.services.geo_market import MarketChannelGovernanceService
+
 from app.api.routes.imports import (
     Any,
     ChannelActivateRequest,
@@ -80,6 +90,115 @@ from app.api.routes.serializers_publish_learning import (
 
 def create_router() -> APIRouter:
     router = APIRouter()
+
+    @router.post("/channels/init")
+    def create_minimal_market_channel(data: MinimalMarketChannelInit) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                channel = MarketChannelGovernanceService(session).create_minimal_channel(data)
+                return {
+                    "channel": _channel(channel),
+                    "target_market_state": "RESEARCH_DRAFT_REQUIRED",
+                    "profile_activation_allowed": False,
+                    "organic_target_country_supported": False,
+                }
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/channels/{channel_id}/target-market-draft/run",
+        response_model=TargetMarketProfileDraft,
+    )
+    def run_target_market_draft(channel_id: uuid.UUID) -> TargetMarketProfileDraft:
+        try:
+            with session_scope() as session:
+                return MarketChannelGovernanceService(session).run_market_research_draft(
+                    channel_id
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get(
+        "/channels/{channel_id}/target-market-draft",
+        response_model=TargetMarketProfileDraft,
+    )
+    def read_target_market_draft(channel_id: uuid.UUID) -> TargetMarketProfileDraft:
+        try:
+            with session_scope() as session:
+                return MarketChannelGovernanceService(session).get_market_draft(channel_id)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.patch(
+        "/channels/{channel_id}/target-market-draft",
+        response_model=TargetMarketProfileDraft,
+    )
+    def patch_target_market_draft(
+        channel_id: uuid.UUID, data: TargetMarketDraftPatch
+    ) -> TargetMarketProfileDraft:
+        try:
+            with session_scope() as session:
+                return MarketChannelGovernanceService(session).update_market_draft(
+                    channel_id,
+                    expected_hash=data.expected_draft_hash,
+                    draft=data.draft,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post("/channels/{channel_id}/target-market-draft/approve")
+    def approve_target_market_draft(
+        channel_id: uuid.UUID, data: TargetMarketDraftApproval
+    ) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                profile = MarketChannelGovernanceService(session).approve_market_draft(
+                    channel_id, data
+                )
+                return {
+                    "decision": data.decision,
+                    "profile": profile.model_dump(mode="json") if profile else None,
+                    "profile_activation_allowed": False,
+                    "exact_approved_draft_hash": data.expected_draft_hash,
+                }
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get("/channels/{channel_id}/target-market-preview")
+    def target_market_preview(channel_id: uuid.UUID) -> dict[str, Any]:
+        try:
+            with session_scope() as session:
+                return MarketChannelGovernanceService(session).target_market_preview(
+                    channel_id
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/channels/{channel_id}/destination-bindings",
+        response_model=DestinationBinding,
+    )
+    def save_destination_binding(
+        channel_id: uuid.UUID, data: DestinationBinding
+    ) -> DestinationBinding:
+        try:
+            with session_scope() as session:
+                return MarketChannelGovernanceService(session).save_destination_binding(
+                    channel_id, data
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get("/channels/{channel_id}/destination-binding")
+    def read_destination_binding(channel_id: uuid.UUID) -> dict[str, Any] | None:
+        try:
+            with session_scope() as session:
+                binding = MarketChannelGovernanceService(
+                    session
+                ).latest_destination_binding(channel_id)
+                return binding.model_dump(mode="json") if binding else None
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @router.post("/companies", response_model=CompanyRead)
     def create_company(data: CompanyCreate) -> CompanyRead:

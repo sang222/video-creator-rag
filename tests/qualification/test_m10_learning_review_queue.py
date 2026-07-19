@@ -123,7 +123,7 @@ def _uploaded_video(
             "human_handoff_only": True,
             "no_upload_api_by_policy": True,
         },
-        monitoring_state="NOT_STARTED",
+        monitoring_state="READY_FOR_ANALYTICS",
         operator_summary={
             "title": metadata["actual_title"],
             "operator_summary_vi": "Video đã được ghi nhận thủ công cho fixture dashboard.",
@@ -205,7 +205,7 @@ def test_m10_preflight_schema_catalogs_defaults_and_scope(engine, db_session, qu
     assert M10_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_2_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_m12_2r_handoff_ledger"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
         defaults = connection.execute(
             text(
                 """

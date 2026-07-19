@@ -323,12 +323,28 @@ class M11DashboardService:
             "STALE": "Cần review policy snapshot",
             "MISSING": "Cần bổ sung hồ sơ",
         }
+        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        scoped_policy = payload.get("channel_scoped_policy") if isinstance(payload.get("channel_scoped_policy"), dict) else {}
+        target_market_profile = scoped_policy.get("target_market_profile") if isinstance(scoped_policy.get("target_market_profile"), dict) else {}
+        destination_policy = scoped_policy.get("destination_binding_policy") if isinstance(scoped_policy.get("destination_binding_policy"), dict) else {}
+        destination = destination_policy.get("destination") if isinstance(destination_policy.get("destination"), dict) else {}
+        visual_binding = scoped_policy.get("visual_source_policy_binding") if isinstance(scoped_policy.get("visual_source_policy_binding"), dict) else {}
         return {
             "contract_status": contract_status,
             "label": labels.get(contract_status, "Cần review policy snapshot"),
             "latest_snapshot_id": str(snapshot.id),
             "active_snapshot_id": str(active.id) if active is not None else None,
             "snapshot_version": snapshot.snapshot_version,
+            "channel_profile_version": profile_version.version if profile_version else None,
+            "target_market_profile_version": target_market_profile.get("profile_version"),
+            "target_market": target_market_profile.get("primary_market"),
+            "primary_locale": target_market_profile.get("primary_locale"),
+            "narration_locale": target_market_profile.get("narration_locale"),
+            "primary_timezone": target_market_profile.get("primary_timezone"),
+            "currency": target_market_profile.get("currency"),
+            "visual_profile": visual_binding.get("niche_visual_source_profile"),
+            "destination_status": destination.get("destination_status"),
+            "market_policy_state": "ACTIVE" if target_market_profile and active is not None else "NOT_ACTIVE",
             "missing_fields": missing_fields,
             "contradiction_reasons": contract.get("contradiction_reasons") or payload.get("contradiction_reasons") or [],
             "market_locale": contract.get("market_locale") or {},
@@ -1151,12 +1167,17 @@ def _project_card(project: VideoProject) -> dict[str, Any]:
 
 
 def _daily_run_card(run: ChannelDailyRun) -> dict[str, Any]:
+    metadata = run.metadata_ if isinstance(run.metadata_, dict) else {}
     return {
         "id": run.id,
         "run_date": run.run_date,
-        "run_state": run.run_state,
-        "admission_state": run.admission_state,
-        "next_action": run.next_action,
+        "run_state": run.status,
+        "admission_state": metadata.get("admission_state") or (
+            "ADMITTED" if run.project_admission_decision_id else "PENDING"
+        ),
+        "next_action": metadata.get("next_action") or (
+            "Xem kết quả daily run." if run.status == "COMPLETED" else "Tiếp tục daily run theo gate hiện tại."
+        ),
         "policy_snapshot_id": run.policy_snapshot_id,
     }
 

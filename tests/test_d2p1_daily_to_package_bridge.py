@@ -173,7 +173,18 @@ class _OfflinePackageService:
             agent_run_refs=[],
             prompt_render_run_refs=[],
             prompt_audit_snapshot_refs=[],
-            artifacts={"niche_gate_results": gate_results},
+            artifacts={
+                "niche_gate_results": gate_results,
+                "narration_script": {
+                    "script": (
+                        "One approved script anchors the workflow. Local stock motion shows operational context. "
+                        "Native overlays keep generated visuals accurate and reviewable."
+                    )
+                },
+                "visual_plan": {"authority": "OFFLINE_D2P_FIXTURE", "scene_count": 3},
+                "provider_execution_plan": {"mode": "MR1_GATED", "provider_calls_allowed": False},
+                "cost_estimate_snapshot": {"currency": "USD", "estimated_total": "0", "fixture": True},
+            },
             limitations=["offline deterministic D2P1 fixture"],
             risk_limitations_summary={"no_media": True, "human_review_required": True},
             next_action="Human review required.",
@@ -899,6 +910,58 @@ def test_resume_to_package_is_exact_version_idempotent_and_provider_free(db_sess
     status = orchestrator.status(scope.decision.id)
     assert status.current_state == "PACKAGE_READY_FOR_HUMAN_REVIEW"
     assert status.receipt == fourth.receipt
+
+    review = db_session.scalars(
+        select(ReviewTask).where(
+            ReviewTask.target_artifact_version_id == uuid.UUID(ready_receipt_id),
+            ReviewTask.review_type == "final_human",
+        )
+    ).one()
+    review.status = "completed"
+    ApprovalService(db_session).create_approval_decision(
+        data=ApprovalDecisionCreate(
+            target_type="artifact_version",
+            target_id=uuid.UUID(ready_receipt_id),
+            target_artifact_version_id=uuid.UUID(ready_receipt_id),
+            decision="approved",
+            decided_by_user_id=scope.admin.id,
+            rationale="Exact D2P package receipt passed fixture human review.",
+            evidence_basis={"review_task_id": str(review.id)},
+        )
+    )
+    promoted = orchestrator.run(request)
+    assert promoted.current_state == "READY_FOR_LONG_PRODUCTION"
+    assert promoted.human_review_state == "PASS"
+    assert promoted.package_human_review["reviewed_artifact_version_id"] == ready_receipt_id
+    resumed = orchestrator.run(request)
+    assert resumed.current_state == "READY_FOR_LONG_PRODUCTION"
+    assert resumed.receipt["artifact_version_id"] == promoted.receipt["artifact_version_id"]
+
+
+def test_daily_to_package_runtime_post_is_real_idempotent_application_wiring(db_session) -> None:
+    scope = _d2p_scope(db_session)
+    db_session.commit()
+    client = create_app()
+    from fastapi.testclient import TestClient
+
+    with TestClient(client) as api:
+        first = api.post(
+            f"/daily-idea-decisions/{scope.decision.id}/production-handoff/run",
+            json={},
+        )
+        second = api.post(
+            f"/daily-idea-decisions/{scope.decision.id}/production-handoff/run",
+            json={},
+        )
+        rejected_override = api.post(
+            f"/daily-idea-decisions/{scope.decision.id}/production-handoff/run",
+            json={"topic": "forbidden caller override"},
+        )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["current_state"] == "AWAITING_RESEARCH"
+    assert second.json()["receipt"]["artifact_version_id"] == first.json()["receipt"]["artifact_version_id"]
+    assert rejected_override.status_code == 422
 
 
 def test_failed_downstream_niche_gate_blocks_human_review(db_session) -> None:

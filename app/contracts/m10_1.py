@@ -48,7 +48,15 @@ ReleasePlanState = Literal["DRAFT", "READY_FOR_HUMAN_REVIEW", "BLOCKED", "CANCEL
 FunnelPackageState = Literal["DRAFT", "READY_FOR_HUMAN_REVIEW", "READY_FOR_UPLOAD_TASKS", "BLOCKED", "CANCELLED"]
 CTAType = Literal["NONE", "SEARCH_YOUTUBE", "BRAND_CTA", "LINK_IN_BIO", "PINNED_COMMENT"]
 MusicPolicy = Literal["SAFE_MODE", "PLATFORM_NATIVE_MODE", "NO_MUSIC_MODE"]
-UploadCardState = Literal["DRAFT", "READY", "BLOCKED", "USED", "CANCELLED"]
+UploadCardState = Literal[
+    "DRAFT",
+    "UPLOAD_INPUT_MISSING",
+    "AWAITING_FINAL_MEDIA",
+    "READY",
+    "BLOCKED",
+    "USED",
+    "CANCELLED",
+]
 HumanUploadTaskState = Literal[
     "READY",
     "UPLOADED",

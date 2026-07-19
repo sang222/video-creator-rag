@@ -61,7 +61,7 @@ def test_path_security(tmp_path):
 def test_production_execution_disabled_by_default():
     manifest = NativeMotionCompiler().compile(plan(production_eligible=True, purpose="PRODUCTION"))
     renderer = NativeFFmpegRenderer(WORK, smoke_enabled=False, production_enabled=False)
-    with pytest.raises(PermissionError, match="PRODUCTION_RENDER_DISABLED"):
+    with pytest.raises(PermissionError, match="PRODUCTION_RENDER_EXECUTION_ENVELOPE_REQUIRED"):
         renderer.execute(manifest, object(), purpose="PRODUCTION")
 
 

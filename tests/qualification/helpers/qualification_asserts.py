@@ -23,7 +23,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0031_r3d8_cost_firewall"
+EXPECTED_ALEMBIC_HEAD = "0038_lpro1_daily_mode"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

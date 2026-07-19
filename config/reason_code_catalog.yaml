@@ -103,3 +103,49 @@ items:
     description: Policy version is stale.
   - code: GATE_INPUT_INSUFFICIENT
     description: Gate input is insufficient.
+  - code: TARGET_MARKET_PROFILE_MISSING
+    description: Approved target market production truth is missing.
+  - code: TARGET_MARKET_PROFILE_STALE
+    description: Frozen target market profile or digest no longer matches its bound hash.
+  - code: MARKET_DEMAND_SCOPE_MISSING
+    description: Demand evidence is global or does not explicitly cover the target market.
+  - code: TOPIC_MARKET_DEMAND_WEAK
+    description: Topic demand evidence is below the approved market-fit threshold.
+  - code: SOURCE_JURISDICTION_MISMATCH
+    description: Source or claim jurisdiction conflicts with the declared market context.
+  - code: FOREIGN_CONTEXT_NOT_DISCLOSED
+    description: Foreign-source context is required but absent.
+  - code: SCRIPT_MARKET_CONTEXT_MISMATCH
+    description: Script terminology or business assumptions conflict with target market truth.
+  - code: VOICE_LOCALE_MISMATCH
+    description: Voice profile or narration locale conflicts with the approved locale.
+  - code: VISUAL_MARKET_CONTEXT_MISMATCH
+    description: Visual market cues conflict with approved market truth.
+  - code: THUMBNAIL_LOCALE_MISMATCH
+    description: Thumbnail text locale or market promise conflicts with the approved market.
+  - code: LANGUAGE_METADATA_MISMATCH
+    description: Metadata or caption language conflicts with the approved market package.
+  - code: CURRENCY_MISMATCH
+    description: Currency lacks the context required by target market policy.
+  - code: UNITS_POLICY_MISMATCH
+    description: Units do not follow target market policy.
+  - code: DATE_FORMAT_MISMATCH
+    description: Date formatting does not follow target market policy.
+  - code: TRANSLATED_SOUNDING_LANGUAGE_RISK
+    description: Language appears translated rather than market-native and needs review.
+  - code: PRODUCT_AVAILABILITY_MISMATCH
+    description: Product or offer availability does not match the target market.
+  - code: DESTINATION_BINDING_MISSING
+    description: Exact manual-publish destination binding is missing.
+  - code: DESTINATION_BINDING_MISMATCH
+    description: Publish package destination differs from its approved binding.
+  - code: DESTINATION_NOT_VERIFIED
+    description: Destination is not verified and cannot be an execution destination.
+  - code: MARKET_ALIGNMENT_EVIDENCE_MISSING
+    description: Mandatory market-alignment evidence is missing.
+  - code: MARKET_PACKAGE_APPROVAL_MISSING
+    description: Exact human market package approval is missing.
+  - code: MARKET_PACKAGE_INTEGRITY_MISMATCH
+    description: A frozen field changed after market package approval.
+  - code: MEDIA_FILE_MISSING
+    description: Upload readiness is blocked because exact media bytes are missing.

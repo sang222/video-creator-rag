@@ -1031,7 +1031,9 @@ class UploadCardService:
                 {"note": "TikTok/Facebook exports are support surfaces only in M10.1."},
             ],
             paste_back_required_fields=["actual_video_id", "actual_video_url", "actual_published_at", "actual_metadata"],
-            card_state="READY",
+            # Metadata readiness is not upload readiness.  A card without an
+            # exact final media ref/checksum/human PASS must stay fail-closed.
+            card_state="UPLOAD_INPUT_MISSING",
         )
         self.session.add(card)
         self.session.flush()

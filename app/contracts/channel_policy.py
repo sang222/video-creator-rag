@@ -5,6 +5,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.contracts.visual_routing import NicheVisualSourceProfile, VisualSourceRoute
+from app.contracts.geo_market import (
+    MARKET_GATE_STRICT_ORDER,
+    DestinationBinding,
+    MarketGateKey,
+    TargetMarketDigest,
+    TargetMarketProfile,
+)
 
 
 class PolicyRef(BaseModel):
@@ -356,6 +363,87 @@ class CapabilityRequirements(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class MarketAlignmentPolicy(BaseModel):
+    schema_version: Literal["ch1-market.market-alignment-policy.v3"] = (
+        "ch1-market.market-alignment-policy.v3"
+    )
+    required_gate_order: list[MarketGateKey]
+    all_mandatory_market_gates_must_pass: Literal[True] = True
+    niche_pass_cannot_substitute_market_pass: Literal[True] = True
+    package_market_ready_requires_dossier: Literal[True] = True
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def strict_market_gate_order(self) -> "MarketAlignmentPolicy":
+        if self.required_gate_order != list(MARKET_GATE_STRICT_ORDER):
+            raise ValueError("CH1_MARKET_V3_MARKET_GATE_ORDER_MISMATCH")
+        return self
+
+
+class DestinationBindingPolicy(BaseModel):
+    schema_version: Literal["ch1-market.destination-binding-policy.v3"] = (
+        "ch1-market.destination-binding-policy.v3"
+    )
+    destination: DestinationBinding
+    publish_execution_requires_verified_destination: Literal[True] = True
+    wrong_destination_blocks_package: Literal[True] = True
+    account_country_is_not_target_market_authority: Literal[True] = True
+    actual_viewer_geography_is_measured_post_publish: Literal[True] = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MarketPackageFreezePolicy(BaseModel):
+    schema_version: Literal["ch1-market.market-package-freeze-policy.v3"] = (
+        "ch1-market.market-package-freeze-policy.v3"
+    )
+    frozen_state: Literal["MARKET_PACKAGE_FROZEN"] = "MARKET_PACKAGE_FROZEN"
+    required_preconditions: list[str] = Field(min_length=6)
+    frozen_fields: list[str] = Field(min_length=9)
+    exact_package_human_approval_required: Literal[True] = True
+    post_approval_integrity_required: Literal[True] = True
+    mutation_requires_new_version_hash_and_approval: Literal[True] = True
+    upload_ready_requires_final_file: Literal[True] = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PublishTimingLocalizationPolicy(BaseModel):
+    schema_version: Literal["ch1-market.publish-timing-localization-policy.v3"] = (
+        "ch1-market.publish-timing-localization-policy.v3"
+    )
+    localization_mode: Literal["EN_US_MASTER_ONLY"] = "EN_US_MASTER_ONLY"
+    primary_timezone: Literal["America/New_York"] = "America/New_York"
+    primary_locale: Literal["en-US"] = "en-US"
+    narration_locale: Literal["en-US"] = "en-US"
+    original_language: Literal["en"] = "en"
+    title_locale: Literal["en-US"] = "en-US"
+    thumbnail_text_locale: Literal["en-US"] = "en-US"
+    caption_locales: list[Literal["en-US"]] = Field(min_length=1)
+    publish_windows_are_hypotheses: Literal[True] = True
+    manual_publish_only: Literal[True] = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GeoEvaluationPolicy(BaseModel):
+    schema_version: Literal["ch1-market.geo-evaluation-policy.v3"] = (
+        "ch1-market.geo-evaluation-policy.v3"
+    )
+    minimum_comparable_videos: int = Field(ge=3)
+    video_level_evaluation_window_days: int = Field(ge=7)
+    channel_review_window_days: int = Field(ge=30)
+    single_video_strategy_mutation_prohibited: Literal[True] = True
+    paid_and_organic_signals_separated: Literal[True] = True
+    actual_viewer_geography_source: Literal["POST_PUBLISH_ANALYTICS"] = (
+        "POST_PUBLISH_ANALYTICS"
+    )
+    organic_country_delivery_guaranteed: Literal[False] = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChannelScopedPolicy(BaseModel):
     channel_key: str
     policy_version: str
@@ -378,6 +466,34 @@ class ChannelScopedPolicy(BaseModel):
     gate_policy: GatePolicy
     capability_requirements: CapabilityRequirements
     visual_source_policy_binding: ChannelVisualSourcePolicyBinding | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    target_market_profile: TargetMarketProfile | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    target_market_digest: TargetMarketDigest | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    market_alignment_policy: MarketAlignmentPolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    destination_binding_policy: DestinationBindingPolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    market_package_freeze_policy: MarketPackageFreezePolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    publish_timing_localization_policy: PublishTimingLocalizationPolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    geo_evaluation_policy: GeoEvaluationPolicy | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
@@ -416,6 +532,36 @@ class ChannelScopedPolicy(BaseModel):
                 raise ValueError("CH1_FLEX_V2_DRIVE_ARCHIVE_REQUIRED")
             if self.publish_policy.local_purge_after_archive_state != "ARCHIVE_VERIFIED":
                 raise ValueError("CH1_FLEX_V2_ARCHIVE_VERIFICATION_REQUIRED")
+        market_fields = (
+            self.target_market_profile,
+            self.target_market_digest,
+            self.market_alignment_policy,
+            self.destination_binding_policy,
+            self.market_package_freeze_policy,
+            self.publish_timing_localization_policy,
+            self.geo_evaluation_policy,
+        )
+        is_v3 = self.policy_version == "small-team-ai.channel-policy.v3"
+        if is_v3 and any(item is None for item in market_fields):
+            raise ValueError("CH1_MARKET_V3_POLICY_BINDING_INCOMPLETE")
+        if not is_v3 and any(item is not None for item in market_fields):
+            raise ValueError("CH1_MARKET_V3_POLICY_FIELDS_REQUIRE_V3")
+        if is_v3:
+            profile = self.target_market_profile
+            digest = self.target_market_digest
+            destination = self.destination_binding_policy.destination
+            timing = self.publish_timing_localization_policy
+            if (
+                profile.primary_market != self.channel_identity_policy.primary_market
+                or profile.primary_locale != self.channel_identity_policy.locale
+                or digest.profile_hash != profile.content_hash
+                or destination.target_market_profile_hash != profile.content_hash
+                or destination.primary_market != profile.primary_market
+                or destination.primary_locale != profile.primary_locale
+                or timing.primary_timezone != profile.primary_timezone
+                or timing.narration_locale != profile.narration_locale
+            ):
+                raise ValueError("CH1_MARKET_V3_MARKET_DESTINATION_SCOPE_MISMATCH")
         return self
 
 
@@ -499,5 +645,11 @@ class PolicySnapshotRefs(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    target_market_profile: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    target_market_digest: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    destination_binding: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    market_alignment_policy: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    market_package_freeze_policy: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    geo_evaluation_policy: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
 
     model_config = ConfigDict(extra="forbid")

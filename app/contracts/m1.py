@@ -114,6 +114,8 @@ class PackagingHandoffSnapshotRead(BaseModel):
     packaging_gate_summary: PackagingGateSummaryRead
     manual_upload: dict[str, Any] = Field(default_factory=dict)
     provider_readiness_summary: dict[str, Any] = Field(default_factory=dict)
+    market_alignment: dict[str, Any] = Field(default_factory=dict)
+    market_package: dict[str, Any] = Field(default_factory=dict)
     manual_publish_only: bool = True
     no_upload_or_publish_calls_made: bool = True
     created_at: AwareDatetime

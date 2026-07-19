@@ -22,11 +22,22 @@ from app.contracts.channel_policy import (
     ChannelVisualSourcePolicyBinding,
     ChannelScopedPolicy,
     CompilerInputManifest,
+    DestinationBindingPolicy,
+    GeoEvaluationPolicy,
     GeminiImageUsagePolicy,
     LaunchRestrictions,
+    MarketAlignmentPolicy,
+    MarketPackageFreezePolicy,
     NativeRenderPolicySnapshot,
     PolicyRef,
     PolicySnapshotRefs,
+    PublishTimingLocalizationPolicy,
+)
+from app.contracts.geo_market import (
+    MARKET_GATE_STRICT_ORDER,
+    DestinationBinding,
+    TargetMarketDigest,
+    TargetMarketProfile,
 )
 from app.contracts.visual_routing import NicheVisualSourceProfile, VisualSourceRoute
 from app.core.errors import ValidationFailureError
@@ -46,6 +57,10 @@ from app.services.creative_quality_policy import CreativeQualityPolicyCatalog
 
 CH1_FLEX_V2_MASTER_APPROVAL_REF = (
     "operator-approval://ch1-flex-v2/"
+    "small-team-ai/master-prompt-2026-07-19"
+)
+CH1_MARKET_V3_MASTER_APPROVAL_REF = (
+    "operator-approval://ch1-market-v3/"
     "small-team-ai/master-prompt-2026-07-19"
 )
 
@@ -151,6 +166,140 @@ class ChannelProfileCompiler:
             if ref not in derivation_refs:
                 derivation_refs.append(ref)
         raw["budget_policy"]["derivation_refs"] = derivation_refs
+        return ChannelScopedPolicy.model_validate(raw)
+
+    def build_ch1_market_v3_profile_input(
+        self,
+        *,
+        active_profile_input: ChannelProfileInput | dict[str, Any],
+        target_market_profile: TargetMarketProfile,
+        target_market_digest: TargetMarketDigest,
+        destination_binding: DestinationBinding,
+        approval_ref: str,
+    ) -> ChannelProfileInput:
+        parsed = ChannelProfileInput.model_validate(active_profile_input)
+        if parsed.channel_policy is None:
+            raise ValidationFailureError("effective CH1-FLEX v2 policy is required")
+        payload = deepcopy(parsed.model_dump(mode="json"))
+        payload["channel_policy"] = self.build_ch1_market_v3_policy(
+            active_policy=parsed.channel_policy,
+            target_market_profile=target_market_profile,
+            target_market_digest=target_market_digest,
+            destination_binding=destination_binding,
+            approval_ref=approval_ref,
+        ).model_dump(mode="json")
+        return ChannelProfileInput.model_validate(payload)
+
+    def build_ch1_market_v3_policy(
+        self,
+        *,
+        active_policy: ChannelScopedPolicy | dict[str, Any],
+        target_market_profile: TargetMarketProfile,
+        target_market_digest: TargetMarketDigest,
+        destination_binding: DestinationBinding,
+        approval_ref: str,
+    ) -> ChannelScopedPolicy:
+        """Copy v2 exactly and add the operator-approved market/destination overlay."""
+
+        policy = ChannelScopedPolicy.model_validate(active_policy)
+        if (
+            policy.channel_key != "small-team-ai"
+            or policy.policy_version != "small-team-ai.channel-policy.v2"
+            or policy.approval_ref != CH1_FLEX_V2_MASTER_APPROVAL_REF
+            or approval_ref != CH1_MARKET_V3_MASTER_APPROVAL_REF
+        ):
+            raise ValidationFailureError(
+                "CH1-MARKET v3 requires the exact active v2 and scoped operator approval"
+            )
+        expected_market = {
+            "primary_market": "US",
+            "primary_geo_cluster": ["US"],
+            "acceptable_secondary_geos": ["CA", "GB", "AU"],
+            "primary_locale": "en-US",
+            "content_language": "en",
+            "narration_locale": "en-US",
+            "primary_timezone": "America/New_York",
+            "spelling_system": "US",
+            "currency": "USD",
+            "units_policy": "US_WITH_METRIC_WHEN_RELEVANT",
+            "date_format": "MMM D, YYYY",
+            "title_locale": "en-US",
+            "thumbnail_text_locale": "en-US",
+            "caption_locales": ["en-US"],
+            "audience_market_context": "US_SMALL_BUSINESS",
+            "workplace_context": "US_SMALL_BUSINESS",
+            "minimum_comparable_videos": 3,
+            "video_geo_evaluation_window_days": 7,
+            "channel_geo_review_window_days": 30,
+        }
+        for key, expected in expected_market.items():
+            if getattr(target_market_profile, key) != expected:
+                raise ValidationFailureError(f"CH1_MARKET_V3_PROFILE_VALUE_MISMATCH:{key}")
+        expected_mismatches = {
+            "TRANSLATED_SOUNDING_ENGLISH",
+            "NON_US_CURRENCY_WITHOUT_USD_EQUIVALENT",
+            "FOREIGN_LEGAL_ASSUMPTION_WITHOUT_CONTEXT",
+            "WRONG_VOICE_LOCALE",
+            "WRONG_METADATA_LOCALE",
+            "WRONG_THUMBNAIL_LOCALE",
+        }
+        if set(target_market_profile.prohibited_market_mismatches) != expected_mismatches:
+            raise ValidationFailureError("CH1_MARKET_V3_PROHIBITED_MISMATCHES_INVALID")
+        if (
+            target_market_digest.profile_hash != target_market_profile.content_hash
+            or target_market_digest.primary_market != target_market_profile.primary_market
+            or destination_binding.channel_id != target_market_profile.channel_id
+            or destination_binding.channel_key != target_market_profile.channel_key
+            or destination_binding.target_market_profile_hash != target_market_profile.content_hash
+            or destination_binding.platform != "YOUTUBE"
+            or destination_binding.manual_publish_required is not True
+            or destination_binding.destination_status not in {"VERIFIED", "PENDING_PLATFORM_ID"}
+        ):
+            raise ValidationFailureError("CH1_MARKET_V3_BINDING_SCOPE_MISMATCH")
+
+        raw = deepcopy(policy.model_dump(mode="json"))
+        raw["policy_version"] = "small-team-ai.channel-policy.v3"
+        raw["policy_status"] = "APPROVED"
+        raw["approval_ref"] = approval_ref
+        raw["target_market_profile"] = target_market_profile.model_dump(mode="json")
+        raw["target_market_digest"] = target_market_digest.model_dump(mode="json")
+        raw["market_alignment_policy"] = MarketAlignmentPolicy(
+            required_gate_order=list(MARKET_GATE_STRICT_ORDER)
+        ).model_dump(mode="json")
+        raw["destination_binding_policy"] = DestinationBindingPolicy(
+            destination=destination_binding
+        ).model_dump(mode="json")
+        raw["market_package_freeze_policy"] = MarketPackageFreezePolicy(
+            required_preconditions=[
+                "TechnicalMediaQC.PASS",
+                "CreativeHumanReview.PASS",
+                "MarketAlignmentDossier.PASS",
+                "DestinationBinding.VERIFIED",
+                "PublishRiskDossier.PASS",
+                "ExactPackageHumanApproval.PASS",
+                "PostApprovalIntegrity.PASS",
+            ],
+            frozen_fields=[
+                "media_file_and_hash",
+                "thumbnail_and_hash",
+                "title",
+                "description",
+                "captions",
+                "disclosures",
+                "destination_binding",
+                "target_market_profile",
+                "publish_window",
+                "package_hash",
+            ],
+        ).model_dump(mode="json")
+        raw["publish_timing_localization_policy"] = PublishTimingLocalizationPolicy(
+            caption_locales=["en-US"]
+        ).model_dump(mode="json")
+        raw["geo_evaluation_policy"] = GeoEvaluationPolicy(
+            minimum_comparable_videos=3,
+            video_level_evaluation_window_days=7,
+            channel_review_window_days=30,
+        ).model_dump(mode="json")
         return ChannelScopedPolicy.model_validate(raw)
 
     def compile(
@@ -569,6 +718,80 @@ class ChannelProfileCompiler:
             drive_verified_canary_receipt=(
                 visual_binding.drive_verified_canary_receipt if visual_binding else None
             ),
+            target_market_profile=(
+                PolicyRef(
+                    ref=(
+                        f"target-market-profile://{policy.channel_key}/"
+                        f"v{policy.target_market_profile.profile_version}"
+                    ),
+                    version=str(policy.target_market_profile.profile_version),
+                    content_hash=str(policy.target_market_profile.content_hash),
+                )
+                if policy.target_market_profile is not None
+                else None
+            ),
+            target_market_digest=(
+                PolicyRef(
+                    ref=(
+                        f"target-market-digest://{policy.channel_key}/"
+                        f"profile-v{policy.target_market_profile.profile_version}"
+                    ),
+                    version=str(policy.target_market_profile.profile_version),
+                    content_hash=str(policy.target_market_digest.content_hash),
+                )
+                if policy.target_market_digest is not None
+                and policy.target_market_profile is not None
+                else None
+            ),
+            destination_binding=(
+                PolicyRef(
+                    ref=(
+                        f"destination-binding://{policy.channel_key}/"
+                        f"v{policy.destination_binding_policy.destination.binding_version}"
+                    ),
+                    version=str(
+                        policy.destination_binding_policy.destination.binding_version
+                    ),
+                    content_hash=str(
+                        policy.destination_binding_policy.destination.content_hash
+                    ),
+                )
+                if policy.destination_binding_policy is not None
+                else None
+            ),
+            market_alignment_policy=(
+                PolicyRef(
+                    ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/market-alignment",
+                    version=policy.policy_version,
+                    content_hash=content_hash(
+                        policy.market_alignment_policy.model_dump(mode="json")
+                    ),
+                )
+                if policy.market_alignment_policy is not None
+                else None
+            ),
+            market_package_freeze_policy=(
+                PolicyRef(
+                    ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/market-package-freeze",
+                    version=policy.policy_version,
+                    content_hash=content_hash(
+                        policy.market_package_freeze_policy.model_dump(mode="json")
+                    ),
+                )
+                if policy.market_package_freeze_policy is not None
+                else None
+            ),
+            geo_evaluation_policy=(
+                PolicyRef(
+                    ref=f"channel-policy://{policy.channel_key}/{policy.policy_version}/geo-evaluation",
+                    version=policy.policy_version,
+                    content_hash=content_hash(
+                        policy.geo_evaluation_policy.model_dump(mode="json")
+                    ),
+                )
+                if policy.geo_evaluation_policy is not None
+                else None
+            ),
         )
         decision_log = [
             {"decision": "HARD_POLICY_PRECEDENCE_LOCKED", "result": "PASS"},
@@ -595,6 +818,31 @@ class ChannelProfileCompiler:
                     {
                         "decision": "GEMINI_IMAGE_PROVIDER_EXECUTION_DEFAULT",
                         "result": "DISABLED",
+                    },
+                ]
+            )
+        if policy.target_market_profile is not None:
+            destination = policy.destination_binding_policy.destination
+            decision_log.extend(
+                [
+                    {
+                        "decision": "TARGET_MARKET_PRODUCTION_TRUTH",
+                        "result": "PASS",
+                        "primary_market": policy.target_market_profile.primary_market,
+                        "actual_viewer_geography_state": policy.target_market_profile.actual_viewer_geography_state,
+                    },
+                    {
+                        "decision": "ORGANIC_COUNTRY_DELIVERY_GUARANTEE",
+                        "result": "FORBIDDEN",
+                    },
+                    {
+                        "decision": "DESTINATION_BINDING",
+                        "result": destination.destination_status,
+                        "publish_execution_allowed": destination.destination_status == "VERIFIED",
+                    },
+                    {
+                        "decision": "MARKET_PACKAGE_FREEZE_POLICY",
+                        "result": "BOUND",
                     },
                 ]
             )

@@ -52,3 +52,6 @@ Each durable transition is an immutable `idea_admission_lineage` ArtifactVersion
 ## Read-only status
 
 `GET /daily-idea-decisions/{decision_id}/production-handoff` returns current project, Effective Context, research, package, niche gates, blockers, receipt, human-review state, and exact next action. It never compiles, creates, calls a provider, or advances workflow state.
+# LPRO1 handoff
+
+`READY_FOR_HUMAN_REVIEW` của M12.2 chỉ là package boundary và không ngụ ý media/render readiness. D2P1 chỉ phát `READY_FOR_LONG_PRODUCTION` sau completed `ReviewTask` và exact `ApprovalDecision` trên receipt version. LPRO1 sau đó tự resolve script/profile/policy/niche/provider-cost lineage; caller không được nhập lại creative truth.

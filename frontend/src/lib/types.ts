@@ -122,6 +122,121 @@ export type ChannelInitCompileResult = {
   field_source_map_json: Record<string, FieldMeta>;
 };
 
+export type MarketFieldSuggestion = {
+  suggested_field: string;
+  suggested_value: unknown;
+  confidence: number;
+  evidence_refs: Array<Record<string, unknown>>;
+  rationale: string;
+  missing_information: string[];
+  human_confirmation_required: boolean;
+};
+
+export type TargetMarketProfileDraft = {
+  schema_version: string;
+  draft_id: string;
+  draft_version: number;
+  channel_id: string;
+  channel_key: string;
+  channel_name: string;
+  channel_purpose: string;
+  target_audience_summary: string;
+  channel_market_type: "MARKET_NATIVE" | "GLOBAL_ENGLISH";
+  proposal_authority: "AGENT_PROPOSAL_ONLY";
+  status: string;
+  primary_market: string;
+  primary_geo_cluster: string[];
+  acceptable_secondary_geos: string[];
+  primary_locale: string;
+  content_language: string;
+  narration_locale: string;
+  primary_timezone: string;
+  spelling_system: string;
+  currency: string;
+  units_policy: string;
+  date_format: string;
+  title_locale: string;
+  thumbnail_text_locale: string;
+  caption_locales: string[];
+  audience_market_context: string;
+  workplace_context: string;
+  source_jurisdiction_policy: string;
+  preferred_source_jurisdictions: string[];
+  foreign_source_context_required: boolean;
+  allowed_market_contexts: string[];
+  prohibited_market_mismatches: string[];
+  initial_publish_window_hypotheses: Array<Record<string, unknown>>;
+  minimum_comparable_videos: number;
+  video_geo_evaluation_window_days: number;
+  channel_geo_review_window_days: number;
+  account_country?: string | null;
+  target_market: string;
+  actual_viewer_geography_state: string;
+  suggestions: MarketFieldSuggestion[];
+  missing_information: string[];
+  human_confirmation_required: boolean;
+  content_hash: string;
+};
+
+export type TargetMarketProfile = Omit<
+  TargetMarketProfileDraft,
+  | "draft_id"
+  | "draft_version"
+  | "channel_name"
+  | "channel_purpose"
+  | "target_audience_summary"
+  | "channel_market_type"
+  | "proposal_authority"
+  | "status"
+  | "suggestions"
+  | "missing_information"
+  | "human_confirmation_required"
+> & {
+  profile_version: number;
+  approval_ref: string;
+  approved_draft_ref?: string | null;
+};
+
+export type TargetMarketPreview = {
+  channel_id: string;
+  state: string;
+  draft?: TargetMarketProfileDraft | null;
+  profile?: TargetMarketProfile | null;
+  digest?: Record<string, unknown> | null;
+  target_market?: string | null;
+  primary_locale?: string | null;
+  component_gate_states: Record<string, unknown>;
+  reason_codes: string[];
+  blockers: string[];
+  exact_next_action: string;
+  organic_target_country_supported: false;
+};
+
+export type DestinationBinding = {
+  binding_version: number;
+  channel_id: string;
+  channel_key: string;
+  platform: "YOUTUBE" | "TIKTOK";
+  platform_account_ref?: string | null;
+  platform_channel_id?: string | null;
+  channel_handle?: string | null;
+  account_country?: string | null;
+  target_market_profile_ref: string;
+  target_market_profile_hash: string;
+  target_market: string;
+  primary_market: string;
+  primary_locale: string;
+  original_language: string;
+  default_visibility: string;
+  manual_publish_required: true;
+  destination_status: string;
+  credential_ref?: string | null;
+  verification_state: string;
+  verification_timestamp?: string | null;
+  approval_ref: string;
+  content_hash: string;
+};
+
 export type ApprovalQueueItem = {
   queue_item_id?: string | null;
   queue_type: string;
@@ -187,6 +302,16 @@ export type ChannelSummary = {
     latest_snapshot_id?: string | null;
     active_snapshot_id?: string | null;
     snapshot_version?: number;
+    channel_profile_version?: number | null;
+    target_market_profile_version?: number | null;
+    target_market?: string | null;
+    primary_locale?: string | null;
+    narration_locale?: string | null;
+    primary_timezone?: string | null;
+    currency?: string | null;
+    visual_profile?: string | null;
+    destination_status?: string | null;
+    market_policy_state?: string | null;
     missing_fields?: string[];
     contradiction_reasons?: string[];
     market_locale?: Record<string, unknown>;
@@ -548,6 +673,33 @@ export type PackagingHandoff = {
   };
   manual_upload: Record<string, unknown>;
   provider_readiness_summary: Record<string, unknown>;
+  market_alignment?: {
+    target_market_profile_version?: number | null;
+    primary_market?: string | null;
+    primary_locale?: string | null;
+    narration_locale?: string | null;
+    publish_timezone?: string | null;
+    destination_binding?: Record<string, unknown> | null;
+    topic_market_fit?: string;
+    research_jurisdiction?: string;
+    script_context?: string;
+    voice_locale?: string;
+    visual_context?: string;
+    thumbnail_locale?: string;
+    metadata_locale?: string;
+    currency_units?: string;
+    overall_verdict?: string;
+    reason_codes?: string[];
+    review_required_items?: string[];
+  };
+  market_package?: {
+    package_state?: string;
+    approved_package_hash?: string | null;
+    destination_binding_hash?: string | null;
+    target_market_profile_hash?: string | null;
+    media_file_ref?: string | null;
+    media_file_hash?: string | null;
+  };
   manual_publish_only: boolean;
   no_upload_or_publish_calls_made: boolean;
   created_at: string;

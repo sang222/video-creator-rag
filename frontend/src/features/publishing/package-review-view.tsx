@@ -111,6 +111,8 @@ export function PackageReviewView({ packageId }: { packageId: string }) {
         <MetricSummaryCard icon={Clock} label="Publish thủ công" value={handoff.publish_timing_recommendation.channel_timezone ?? "Chưa có timezone"} hint="VCOS chỉ nhắc thời điểm, không schedule." />
         <MetricSummaryCard icon={UploadCloud} label="Paste-back" value={summaryPasteBackValue(handoff, query.data?.packaging_review_queue ?? null)} hint={summaryPasteBackHint(handoff, query.data?.packaging_review_queue ?? null)} />
       </div>
+      <MarketAlignmentPanel handoff={handoff} />
+      <MarketPackageQueuePanel handoff={handoff} />
       {taskMessage ? <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">{taskMessage}</div> : null}
       {taskMutation.isError ? <div className="rounded-md border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-100">{taskMutation.error.message}</div> : null}
       {queueMessage ? <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">{queueMessage}</div> : null}
@@ -167,6 +169,81 @@ function ReviewVerdictCard({ handoff, queue }: { handoff: PackagingHandoff; queu
         <InfoLine label="Tạo upload task" value={uploadAllowed ? "Được phép" : "Chưa được phép"} compact />
         <InfoLine label="Manual-only" value={handoff.manual_publish_only ? "Có" : "Cần kiểm tra"} compact />
       </div>
+    </Panel>
+  );
+}
+
+function MarketAlignmentPanel({ handoff }: { handoff: PackagingHandoff }) {
+  const market = handoff.market_alignment ?? {};
+  const destination = asRecord(market.destination_binding);
+  const checks: Array<[string, unknown]> = [
+    ["Topic market fit", market.topic_market_fit],
+    ["Pháp vực nghiên cứu", market.research_jurisdiction],
+    ["Bối cảnh script", market.script_context],
+    ["Locale giọng đọc", market.voice_locale],
+    ["Bối cảnh visual", market.visual_context],
+    ["Locale thumbnail", market.thumbnail_locale],
+    ["Locale metadata", market.metadata_locale],
+    ["Tiền tệ / đơn vị", market.currency_units]
+  ];
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Market Alignment</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Đánh giá market-native theo hồ sơ và lineage đã freeze của project.</p>
+        </div>
+        <span className="rounded-full border border-border px-3 py-1 text-sm">{friendlyVerdict(market.overall_verdict)}</span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <InfoLine label="Target Market Profile" value={market.target_market_profile_version ? `v${market.target_market_profile_version}` : "Chưa gắn"} compact />
+        <InfoLine label="Thị trường" value={market.primary_market ?? "Chưa gắn"} compact />
+        <InfoLine label="Locale" value={market.primary_locale ?? "Chưa gắn"} compact />
+        <InfoLine label="Destination" value={destinationDisplay(destination)} compact />
+        {checks.map(([label, value]) => <InfoLine key={label} label={label} value={friendlyVerdict(value)} compact />)}
+        <InfoLine label="Múi giờ publish" value={market.publish_timezone ?? "Chưa có"} compact />
+      </div>
+      {market.review_required_items?.length ? (
+        <div className="mt-4 rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+          Cần người rà soát: {market.review_required_items.join("; ")}
+        </div>
+      ) : null}
+      <details className="mt-4 text-xs text-muted-foreground">
+        <summary className="cursor-pointer">Chi tiết bằng chứng kỹ thuật</summary>
+        <pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify({ reason_codes: market.reason_codes ?? [], destination }, null, 2)}</pre>
+      </details>
+    </Panel>
+  );
+}
+
+function MarketPackageQueuePanel({ handoff }: { handoff: PackagingHandoff }) {
+  const market = handoff.market_alignment ?? {};
+  const frozen = handoff.market_package ?? {};
+  const destination = asRecord(market.destination_binding);
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Hàng chờ publish theo thị trường</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Một màn hình cho file, metadata, destination, lịch và hash đã duyệt. Chỉ handoff thủ công.</p>
+        </div>
+        <span className="rounded-full border border-border px-3 py-1 text-sm">{packageStateLabel(frozen.package_state)}</span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <InfoLine label="MP4" value={frozen.media_file_ref ?? "Thiếu file final"} compact />
+        <InfoLine label="Thumbnail" value={handoff.thumbnail_handoff.thumbnail_ref || handoff.thumbnail_handoff.drive_ref ? "Đã gắn" : "Chưa gắn"} compact />
+        <InfoLine label="Title" value={handoff.upload_handoff_copy.title ?? "Chưa có"} compact />
+        <InfoLine label="Description" value={handoff.upload_handoff_copy.description ? "Đã có" : "Chưa có"} compact />
+        <InfoLine label="Captions" value={`${handoff.upload_handoff_copy.subtitle_refs_json.length} tệp`} compact />
+        <InfoLine label="Disclosures" value={`${handoff.upload_handoff_copy.disclosure_notes_json.length} mục`} compact />
+        <InfoLine label="Target market" value={`${market.primary_market ?? "Chưa gắn"} · ${market.primary_locale ?? "chưa có locale"}`} compact />
+        <InfoLine label="Destination" value={destinationDisplay(destination)} compact />
+        <InfoLine label="Publish timezone/window" value={`${market.publish_timezone ?? "Chưa có"} · ${handoff.publish_timing_recommendation.suggested_publish_time_channel_tz ?? "chưa chọn giờ"}`} compact />
+        <InfoLine label="Market alignment" value={friendlyVerdict(market.overall_verdict)} compact />
+        <InfoLine label="Package hash" value={frozen.approved_package_hash ? `${frozen.approved_package_hash.slice(0, 12)}…` : "Chưa duyệt exact package"} compact />
+        <InfoLine label="Manual publish" value={handoff.manual_publish_only ? "Bắt buộc" : "Không hợp lệ"} compact />
+      </div>
+      <p className="mt-4 text-xs text-muted-foreground">Không có nút auto-publish. Thay đổi trường đã freeze phải tạo package version, hash và approval mới.</p>
     </Panel>
   );
 }
@@ -725,6 +802,35 @@ function missingPatchReason(item: PackagingReviewQueueItem) {
     NEEDS_PROPOSED_PATCH: "Đang cần proposed patch"
   };
   return reasons[item.next_action_code] ?? "Đang cần proposed patch";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function friendlyVerdict(value: unknown) {
+  return {
+    PASS: "Phù hợp",
+    REVIEW_REQUIRED: "Cần người rà soát",
+    BLOCK: "Đang bị chặn",
+    NOT_EVALUATED: "Chưa có bằng chứng đánh giá"
+  }[String(value ?? "NOT_EVALUATED")] ?? "Cần kiểm tra";
+}
+
+function destinationDisplay(destination: Record<string, unknown>) {
+  if (!Object.keys(destination).length) return "Chưa bind destination";
+  const status = destination.destination_status === "VERIFIED" ? "đã xác minh" : destination.destination_status === "PENDING_PLATFORM_ID" ? "chờ platform ID" : "chưa xác minh";
+  return `${String(destination.platform ?? "Platform")} ${String(destination.channel_handle ?? "chưa có handle")} · ${status}`;
+}
+
+function packageStateLabel(value: unknown) {
+  return {
+    MARKET_PACKAGE_FROZEN: "Đã freeze đúng package",
+    READY_FOR_APPROVAL: "Chờ người duyệt exact package",
+    INVALIDATED: "Cần tạo revision",
+    BLOCKED: "Đang bị chặn",
+    NOT_FROZEN: "Chưa freeze"
+  }[String(value ?? "NOT_FROZEN")] ?? "Cần kiểm tra";
 }
 
 function shortValue(value?: string | null) {

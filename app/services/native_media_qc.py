@@ -119,6 +119,60 @@ class NativeMediaQC:
             )
         )
         stream_integrity = bool(probe_ok and video and audio and full_decode)
+        black_output_absent: bool | None = None
+        if expected.get("black_output_check_required"):
+            black_probe = subprocess.run(
+                [
+                    self.ffmpeg,
+                    "-hide_banner",
+                    "-nostdin",
+                    "-i",
+                    str(output),
+                    "-vf",
+                    # pix_th is the per-pixel luma threshold, not the required
+                    # percentage of black pixels.  A value near 1.0 labels
+                    # ordinary dark branded backgrounds as black.  pic_th
+                    # expresses the intended 98% frame-coverage threshold.
+                    "blackdetect=d=0.40:pix_th=0.10:pic_th=0.98",
+                    "-an",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            black_output_absent = (
+                black_probe.returncode == 0 and "black_start:" not in black_probe.stderr
+            )
+        caption_likely_present: bool | None = None
+        if expected.get("caption_required"):
+            caption_frame = _frame_bytes(
+                self.ffmpeg,
+                output,
+                seconds=float(expected.get("caption_probe_seconds") or 0.5),
+                filtergraph="crop=iw:ih*0.30:0:ih*0.70,scale=320:90,format=gray",
+            )
+            caption_likely_present = bool(
+                caption_frame
+                and max(caption_frame) - min(caption_frame) >= 120
+                and sum(value >= 220 for value in caption_frame) >= 8
+            )
+        scene_coverage: bool | None = None
+        if expected.get("scene_coverage_required"):
+            frames = [
+                _frame_bytes(
+                    self.ffmpeg,
+                    output,
+                    seconds=float(seconds),
+                    filtergraph="scale=96:54,format=gray",
+                )
+                for seconds in list(expected.get("scene_probe_seconds") or [])
+            ]
+            fingerprints = {
+                hashlib.sha256(frame).hexdigest() for frame in frames if frame
+            }
+            scene_coverage = bool(frames) and all(frames) and len(fingerprints) == len(frames)
         checksum_sha256 = _sha256_file(output)
         checks.update(
             {
@@ -149,11 +203,12 @@ class NativeMediaQC:
                 "dimensions_match_expected": dimensions_match_expected,
                 "fps_matches_expected": fps_matches_expected,
                 "audio_format_matches_expected": audio_format_matches_expected,
-                "caption_likely_present": None,
-                "blackdetect": "NOT_EVALUATED_BY_TECHNICAL_PROBE",
+                "caption_likely_present": caption_likely_present,
+                "black_output_absent": black_output_absent,
+                "blackdetect": "PASS" if black_output_absent is True else "NOT_REQUIRED" if black_output_absent is None else "FAIL",
                 "audio_presence": bool(audio),
                 "av_drift_ms": av_drift_ms,
-                "timeline_coverage": None,
+                "timeline_coverage": scene_coverage,
             }
         )
         requirements = {
@@ -176,6 +231,12 @@ class NativeMediaQC:
             requirements["fps"] = float(expected["fps"])
         if expected.get("color") is not None:
             requirements["color_space"] = expected["color"]
+        if expected.get("black_output_check_required"):
+            requirements["black_output_absent"] = True
+        if expected.get("caption_required"):
+            requirements["caption_likely_present"] = True
+        if expected.get("scene_coverage_required"):
+            requirements["timeline_coverage"] = True
         for key, value in requirements.items():
             if value is not None and checks.get(key) != value:
                 failures.append("QC_" + key.upper())
@@ -229,6 +290,37 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _frame_bytes(
+    ffmpeg: str | None,
+    output: Path,
+    *,
+    seconds: float,
+    filtergraph: str,
+) -> bytes:
+    if not ffmpeg:
+        return b""
+    frame = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-ss",
+            f"{max(0.0, seconds):.6f}",
+            "-i",
+            str(output),
+            "-frames:v",
+            "1",
+            "-vf",
+            filtergraph,
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+    )
+    return frame.stdout if frame.returncode == 0 else b""
 
 
 def _fast_start_atom_order(path: Path) -> bool:

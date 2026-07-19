@@ -6,143 +6,117 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelInitWizard } from "@/features/channels/channel-init-wizard";
 
 const apiMocks = vi.hoisted(() => ({
-  activateChannel: vi.fn(),
-  compileChannelInitDraft: vi.fn(),
-  createChannelInitDraft: vi.fn(),
+  approveTargetMarketDraft: vi.fn(),
   createCompany: vi.fn(),
+  createMinimalMarketChannel: vi.fn(),
   getCompanies: vi.fn(),
-  initChannel: vi.fn(),
-  researchChannelInitDraft: vi.fn(),
-  reviewChannelInitDraft: vi.fn()
+  runTargetMarketDraft: vi.fn(),
+  updateTargetMarketDraft: vi.fn()
 }));
 
 vi.mock("@/lib/api", () => ({
-  activateChannel: apiMocks.activateChannel,
-  compileChannelInitDraft: apiMocks.compileChannelInitDraft,
-  createChannelInitDraft: apiMocks.createChannelInitDraft,
-  createCompany: apiMocks.createCompany,
-  getCompanies: apiMocks.getCompanies,
-  initChannel: apiMocks.initChannel,
-  researchChannelInitDraft: apiMocks.researchChannelInitDraft,
-  reviewChannelInitDraft: apiMocks.reviewChannelInitDraft,
-  queryKeys: {
-    channels: ["channels"],
-    companies: ["companies"]
-  }
+  ...apiMocks,
+  queryKeys: { channels: ["channels"], companies: ["companies"] }
 }));
 
 function renderWithQuery() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <ChannelInitWizard />
-    </QueryClientProvider>
-  );
+  return render(<QueryClientProvider client={client}><ChannelInitWizard /></QueryClientProvider>);
 }
 
-describe("ChannelInitWizard", () => {
+describe("ChannelInitWizard market-aware flow", () => {
   beforeEach(() => {
-    apiMocks.activateChannel.mockResolvedValue({ contract_status: "COMPLETE" });
-    apiMocks.compileChannelInitDraft.mockResolvedValue(compileResult);
-    apiMocks.createChannelInitDraft.mockResolvedValue(initDraft);
-    apiMocks.createCompany.mockResolvedValue(company);
     apiMocks.getCompanies.mockResolvedValue([company]);
-    apiMocks.initChannel.mockResolvedValue({ channel: { id: "channel-1" }, compiled: { id: "snapshot-1", contract_status: "COMPLETE" } });
-    apiMocks.researchChannelInitDraft.mockResolvedValue(contractDraft);
-    apiMocks.reviewChannelInitDraft.mockResolvedValue(reviewedContractDraft);
+    apiMocks.createCompany.mockResolvedValue(company);
+    apiMocks.createMinimalMarketChannel.mockResolvedValue({
+      channel: { id: draft.channel_id, name: "Small Team AI", key: "small-team-ai" },
+      target_market_state: "RESEARCH_DRAFT_REQUIRED",
+      profile_activation_allowed: false,
+      organic_target_country_supported: false
+    });
+    apiMocks.runTargetMarketDraft.mockResolvedValue(draft);
+    apiMocks.updateTargetMarketDraft.mockResolvedValue({ ...draft, acceptable_secondary_geos: ["CA", "GB"], content_hash: "b".repeat(64) });
+    apiMocks.approveTargetMarketDraft.mockResolvedValue({
+      decision: "APPROVE",
+      profile: { profile_version: 1 },
+      profile_activation_allowed: false,
+      exact_approved_draft_hash: "b".repeat(64)
+    });
   });
 
-  it("renders minimal research-assisted wizard by default without template preset", async () => {
+  it("shows the five market steps, account-country warning, and no activation action", async () => {
     renderWithQuery();
-
-    expect(screen.getByRole("heading", { name: "Tạo kênh" })).toBeInTheDocument();
-    expect(screen.getByText("1. Thiết lập tối thiểu")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Tạo nháp & research hồ sơ kênh" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Nâng cao: nhập thủ công toàn bộ hồ sơ" })).toBeInTheDocument();
-    expect(screen.getByText("Kết quả research chỉ là đề xuất, chưa phải cấu hình runtime.")).toBeInTheDocument();
-    expect(screen.getByText("Không dùng YouTube Studio scraping.")).toBeInTheDocument();
-    expect(screen.getByText("Ngân sách provider được cấu hình trong Cài đặt / Tích hợp, không nhập theo từng kênh.")).toBeInTheDocument();
-    expect(screen.queryByText("Template hồ sơ *")).not.toBeInTheDocument();
-    expect(screen.queryByText("Thông tin kênh")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /upload/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tạo kênh theo thị trường" })).toBeInTheDocument();
+    for (const step of ["1. Basics", "2. Target Market", "3. Research Draft", "4. Human Review", "5. Approval"]) {
+      expect(screen.getByRole("heading", { name: step })).toBeInTheDocument();
+    }
+    expect(screen.getByText("Account country does not control organic audience targeting.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /kích hoạt/i })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText("Công ty *")).toHaveValue(company.id));
   });
 
-  it("keeps advanced manual mode available", async () => {
+  it("accepts minimal input and displays agent confidence and evidence", async () => {
     const user = userEvent.setup();
     renderWithQuery();
-
-    await user.click(screen.getByRole("button", { name: "Nâng cao: nhập thủ công toàn bộ hồ sơ" }));
-
-    expect(screen.getByText("Thông tin kênh")).toBeInTheDocument();
-    expect(screen.getByText("Template hồ sơ *")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Tạo và compile snapshot" })).toBeInTheDocument();
+    await fillMinimalInput(user);
+    await user.click(screen.getByRole("button", { name: "Lưu thông tin tối thiểu" }));
+    await waitFor(() => expect(apiMocks.createMinimalMarketChannel).toHaveBeenCalledWith(expect.objectContaining({
+      channel_name: "Small Team AI",
+      channel_key: "small-team-ai",
+      primary_market: "US",
+      primary_language: "en",
+      primary_locale: "en-US",
+      account_country: "VN"
+    })));
+    expect(apiMocks.createMinimalMarketChannel.mock.calls[0][0]).not.toHaveProperty("currency");
+    await user.click(screen.getByRole("button", { name: "Chạy Setup/Research Agent offline" }));
+    expect(await screen.findByText("Tin cậy 90%")).toBeInTheDocument();
+    expect(screen.getAllByText("Bằng chứng (1)").length).toBeGreaterThan(0);
+    expect(screen.getByText("Chỉ đề xuất")).toBeInTheDocument();
   });
 
-  it("shows create-company CTA when no companies exist", async () => {
-    apiMocks.getCompanies.mockResolvedValue([]);
-
+  it("lets a human edit and approve the exact hash without auto-activation", async () => {
+    const user = userEvent.setup();
     renderWithQuery();
+    await fillMinimalInput(user);
+    await user.click(screen.getByRole("button", { name: "Lưu thông tin tối thiểu" }));
+    await user.click(await screen.findByRole("button", { name: "Chạy Setup/Research Agent offline" }));
+    const secondary = await screen.findByLabelText("Thị trường phụ");
+    await user.clear(secondary);
+    await user.type(secondary, "CA, GB");
+    await user.click(screen.getByRole("button", { name: "Lưu bản chỉnh sửa của người vận hành" }));
+    await waitFor(() => expect(apiMocks.updateTargetMarketDraft).toHaveBeenCalled());
+    const [channelId, payload, expectedHash] = apiMocks.updateTargetMarketDraft.mock.calls[0];
+    expect(channelId).toBe(draft.channel_id);
+    expect(payload.acceptable_secondary_geos).toEqual(["CA", "GB"]);
+    expect(payload).not.toHaveProperty("content_hash");
+    expect(expectedHash).toBe(draft.content_hash);
 
+    await user.click(screen.getByRole("button", { name: "Duyệt đúng bản nháp này" }));
+    await waitFor(() => expect(apiMocks.approveTargetMarketDraft).toHaveBeenCalledWith(
+      draft.channel_id,
+      expect.objectContaining({ content_hash: "b".repeat(64) })
+    ));
+    expect(await screen.findByText(/Hồ sơ sẵn sàng để compile ở phase profile v3/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /kích hoạt/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps company bootstrap available when the workspace is empty", async () => {
+    apiMocks.getCompanies.mockResolvedValue([]);
+    renderWithQuery();
     expect(await screen.findByText("Tạo công ty trước")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tạo công ty" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("ID công ty *")).not.toBeInTheDocument();
-  });
-
-  it("submits minimal draft and research without template key", async () => {
-    const user = userEvent.setup();
-    renderWithQuery();
-
-    await fillMinimalFields(user);
-    await user.click(screen.getByRole("button", { name: "Tạo nháp & research hồ sơ kênh" }));
-
-    await waitFor(() => expect(apiMocks.createChannelInitDraft).toHaveBeenCalled());
-    expect(apiMocks.createChannelInitDraft.mock.calls[0][0]).toMatchObject({
-      company_id: company.id,
-      channel_name: "Small Team AI",
-      public_presence_mode: "EXISTING_PUBLIC_CHANNEL",
-      youtube_url_or_handle: "https://www.youtube.com/@SmallTeamAI",
-      website_url: "https://smallteamai.com/",
-      owner_operator_language: "vi-VN",
-      source_usage_attestation: true
-    });
-    expect(apiMocks.createChannelInitDraft.mock.calls[0][0]).not.toHaveProperty("template_key");
-    expect(apiMocks.researchChannelInitDraft).toHaveBeenCalledWith(initDraft.id);
-    expect(await screen.findByText("2. Kết quả research")).toBeInTheDocument();
-    expect(screen.getByText("Evidence refs")).toBeInTheDocument();
-    expect(screen.getAllByText(/Confidence:/).length).toBeGreaterThan(0);
-    expect(screen.getByText("Provider policy")).toBeInTheDocument();
-    expect(screen.getByText("Safety policy")).toBeInTheDocument();
-  });
-
-  it("requires human confirmation before COMPLETE activation CTA", async () => {
-    const user = userEvent.setup();
-    renderWithQuery();
-
-    await fillMinimalFields(user);
-    await user.click(screen.getByRole("button", { name: "Tạo nháp & research hồ sơ kênh" }));
-    await screen.findByText("3. Người vận hành rà soát");
-    expect(screen.queryByRole("button", { name: "Kích hoạt kênh" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Xác nhận các field bắt buộc" }));
-    await waitFor(() => expect(apiMocks.reviewChannelInitDraft).toHaveBeenCalled());
-    await user.click(screen.getByRole("button", { name: "Compile Channel Contract" }));
-    await waitFor(() => expect(apiMocks.compileChannelInitDraft).toHaveBeenCalledWith(initDraft.id));
-
-    expect(await screen.findByRole("button", { name: "Kích hoạt kênh" })).toBeInTheDocument();
   });
 });
 
-async function fillMinimalFields(user: ReturnType<typeof userEvent.setup>) {
-  await waitFor(() => {
-    expect(screen.getByLabelText("Công ty *")).toHaveValue(company.id);
-  });
+async function fillMinimalInput(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() => expect(screen.getByLabelText("Công ty *")).toHaveValue(company.id));
   await user.type(screen.getByLabelText("Tên kênh *"), "Small Team AI");
-  await user.type(screen.getByLabelText("YouTube URL/handle"), "https://www.youtube.com/@SmallTeamAI");
-  await user.type(screen.getByLabelText("Website URL"), "https://smallteamai.com/");
-  await user.type(screen.getByLabelText("Ghi chú ngắn của operator *"), "Kênh chia sẻ AI workflows thực tế, automation systems, dashboards cho đội ngũ nhỏ.");
-  await user.type(screen.getByLabelText("Initial topic/pillar hints"), "AI workflows\nautomation systems\noperating dashboards");
-  await user.click(screen.getByLabelText("Tôi xác nhận các URL này là nguồn công khai hoặc được phép dùng để research hồ sơ kênh."));
+  await user.type(screen.getByLabelText("Key kênh *"), "small-team-ai");
+  await user.type(screen.getByLabelText("Mục đích kênh *"), "Practical AI workflows for small teams.");
+  await user.type(screen.getByLabelText("Tóm tắt khán giả *"), "US small business operators");
+  await user.type(screen.getByLabelText("Kênh đích đã biết"), "@SmallTeamAI");
+  await user.type(screen.getByLabelText("Quốc gia tài khoản"), "VN");
 }
 
 const company = {
@@ -154,116 +128,56 @@ const company = {
   default_currency: "USD"
 };
 
-const initDraft = {
-  id: "22222222-2222-4222-8222-222222222222",
-  company_id: company.id,
+const draft = {
+  schema_version: "geo2.target-market-profile-draft.v1",
+  draft_id: "22222222-2222-4222-8222-222222222222",
+  draft_version: 1,
+  channel_id: "33333333-3333-4333-8333-333333333333",
+  channel_key: "small-team-ai",
   channel_name: "Small Team AI",
-  public_presence_mode: "EXISTING_PUBLIC_CHANNEL",
-  youtube_url_or_handle: "https://www.youtube.com/@SmallTeamAI",
-  website_url: "https://smallteamai.com/",
-  social_profile_links: [],
-  operator_note_purpose: "Kênh chia sẻ AI workflows thực tế.",
-  intended_content_language: null,
-  intended_primary_market: null,
-  owner_operator_language: "vi-VN",
-  initial_topic_pillar_hints: ["AI workflows", "automation systems", "operating dashboards"],
-  source_usage_attestation: true,
-  workflow_status: "NEEDS_HUMAN_REVIEW",
-  contract_status: "PARTIAL",
-  channel_id: null,
-  channel_profile_version_id: null,
-  compiled_policy_snapshot_id: null,
-  latest_contract_draft: null,
-  created_at: "2026-06-28T00:00:00Z",
-  updated_at: "2026-06-28T00:00:00Z"
-};
-
-const fieldSourceMap = {
-  "market_locale.primary_market": meta("UNKNOWN", "UNKNOWN", true),
-  "market_locale.audience_locale": meta("en-US", "RESEARCH_INFERENCE", true),
-  "market_locale.content_language": meta("en", "RESEARCH_INFERENCE", true),
-  "target_audience.primary_persona": meta("Small business owners and team leads", "RESEARCH_INFERENCE", true),
-  "channel_identity.niche": meta("Practical AI workflows / automation systems / operating dashboards", "ADMIN_HINT", true),
-  "channel_identity.positioning": meta("Clear implementation-first guidance", "ADMIN_HINT", true),
-  "editorial_strategy.content_pillars": meta(["AI workflows", "automation systems", "operating dashboards"], "ADMIN_HINT", true),
-  "editorial_strategy.claim_style": meta(["practical", "evidence_bounded"], "RESEARCH_INFERENCE", true),
-  "format_policy.long_form.enabled": meta(true, "RESEARCH_INFERENCE", true),
-  "format_policy.shorts.enabled": meta(true, "RESEARCH_INFERENCE", true),
-  "rights_policy.source_manifest_required": meta(true, "GLOBAL_LOCKED_POLICY", false),
-  "learning_policy.min_evidence_required": meta("2 source refs", "RESEARCH_INFERENCE", true),
-  "media_policy.voice_provider": meta("ElevenLabs", "PROVIDER_POLICY", false),
-  "media_policy.ai_hero_provider": meta("Google Veo API", "PROVIDER_POLICY", false),
-  "media_policy.renderer": meta("NativeFFmpegRenderer", "PROVIDER_POLICY", false),
-  "platform_strategy.auto_publish_allowed": meta(false, "GLOBAL_LOCKED_POLICY", false),
-  "platform_strategy.studio_scraping_allowed": meta(false, "GLOBAL_LOCKED_POLICY", false),
-  "learning_policy.config_mutation_by_agent_allowed": meta(false, "GLOBAL_LOCKED_POLICY", false),
-  "platform_strategy.publish_mode": meta("human_handoff_only", "GLOBAL_LOCKED_POLICY", false),
-  forbidden_behavior: meta(["fake_traffic", "bot_engagement", "platform_evasion"], "GLOBAL_LOCKED_POLICY", false)
-};
-
-const suggestedContract = {
-  channel_identity: { niche: "Practical AI workflows / automation systems / operating dashboards", positioning: "Clear implementation-first guidance" },
-  target_audience: { primary_persona: "Small business owners and team leads" },
-  market_locale: { primary_market: "UNKNOWN", audience_locale: "en-US", content_language: "en" },
-  editorial_strategy: { content_pillars: ["AI workflows", "automation systems", "operating dashboards"], claim_style: ["practical", "evidence_bounded"] },
-  format_policy: { long_form: { enabled: true }, shorts: { enabled: true } },
-  rights_policy: { source_manifest_required: true },
-  learning_policy: { min_evidence_required: "2 source refs", config_mutation_by_agent_allowed: false },
-  media_policy: { voice_provider: "ElevenLabs", ai_hero_provider: "Google Veo API", renderer: "NativeFFmpegRenderer" },
-  platform_strategy: { auto_publish_allowed: false, studio_scraping_allowed: false, publish_mode: "human_handoff_only" },
-  forbidden_behavior: ["fake_traffic", "bot_engagement", "platform_evasion"]
-};
-
-const contractDraft = {
-  id: "33333333-3333-4333-8333-333333333333",
-  init_draft_id: initDraft.id,
-  company_id: company.id,
-  channel_name: "Small Team AI",
-  source_urls: [],
-  admin_minimal_input: {},
-  suggested_channel_contract: suggestedContract,
-  field_source_map_json: fieldSourceMap,
-  confidence_summary: {},
-  missing_fields: ["market_locale.primary_market:requires_human_confirmation"],
-  human_questions: [],
-  risks: [{ risk_code: "RESEARCH_DRAFT_NOT_RUNTIME_TRUTH", message_vi: "Kết quả research chỉ là đề xuất, chưa phải cấu hình runtime." }],
-  evidence_refs: [{ ref_id: "ev_website_public_anchor", source_type: "PUBLIC_WEB", url: "https://smallteamai.com/", title: "Website", snippet: "Anchor", captured_at: "2026-06-28T00:00:00Z", reliability: "MEDIUM" }],
-  workflow_status: "NEEDS_HUMAN_REVIEW",
-  contract_status: "PARTIAL",
-  review_decision_log_json: [],
-  created_at: "2026-06-28T00:00:00Z",
-  updated_at: "2026-06-28T00:00:00Z"
-};
-
-const reviewedContractDraft = {
-  ...contractDraft,
-  workflow_status: "READY_TO_COMPILE",
-  contract_status: "COMPLETE",
-  missing_fields: []
-};
-
-const compileResult = {
-  init_draft_id: initDraft.id,
-  channel_id: "channel-1",
-  channel_profile_version_id: "profile-1",
-  compiled_policy_snapshot_id: "snapshot-1",
-  workflow_status: "COMPILED_COMPLETE",
-  contract_status: "COMPLETE",
-  missing_fields: [],
-  contradiction_reasons: [],
-  activation_eligibility: true,
-  channel_contract_json: suggestedContract,
-  field_source_map_json: fieldSourceMap
-};
-
-function meta(value: unknown, sourceType: string, reviewRequired: boolean) {
-  return {
-    value,
-    source_type: sourceType,
-    confidence_label: sourceType === "UNKNOWN" ? "LOW" : "HIGH",
-    evidence_refs: [],
-    review_required: reviewRequired,
-    editable_by_human: sourceType !== "GLOBAL_LOCKED_POLICY" && sourceType !== "PROVIDER_POLICY",
-    locked_reason: sourceType === "GLOBAL_LOCKED_POLICY" || sourceType === "PROVIDER_POLICY" ? "Locked" : null
-  };
-}
+  channel_purpose: "Practical AI workflows",
+  target_audience_summary: "US small business operators",
+  channel_market_type: "MARKET_NATIVE",
+  proposal_authority: "AGENT_PROPOSAL_ONLY",
+  status: "NEEDS_HUMAN_REVIEW",
+  primary_market: "US",
+  primary_geo_cluster: ["US"],
+  acceptable_secondary_geos: ["CA", "GB", "AU"],
+  primary_locale: "en-US",
+  content_language: "en",
+  narration_locale: "en-US",
+  primary_timezone: "America/New_York",
+  spelling_system: "US",
+  currency: "USD",
+  units_policy: "US_WITH_METRIC_WHEN_RELEVANT",
+  date_format: "MMM D, YYYY",
+  title_locale: "en-US",
+  thumbnail_text_locale: "en-US",
+  caption_locales: ["en-US"],
+  audience_market_context: "US_SMALL_BUSINESS",
+  workplace_context: "US_SMALL_BUSINESS",
+  source_jurisdiction_policy: "TARGET_MARKET_FIRST_CONTEXTUAL_FOREIGN_ALLOWED",
+  preferred_source_jurisdictions: ["US"],
+  foreign_source_context_required: true,
+  allowed_market_contexts: ["US", "CA", "GB", "AU"],
+  prohibited_market_mismatches: ["TRANSLATED_SOUNDING_ENGLISH"],
+  initial_publish_window_hypotheses: [{ timezone: "America/New_York", local_time: "10:00" }],
+  minimum_comparable_videos: 3,
+  video_geo_evaluation_window_days: 7,
+  channel_geo_review_window_days: 30,
+  account_country: "VN",
+  target_market: "US",
+  actual_viewer_geography_state: "UNMEASURED",
+  suggestions: [{
+    suggested_field: "currency",
+    suggested_value: "USD",
+    confidence: 0.9,
+    evidence_refs: [{ ref: "offline-fixture://geo2/us" }],
+    rationale: "Offline US market policy fixture.",
+    missing_information: [],
+    human_confirmation_required: true
+  }],
+  missing_information: [],
+  human_confirmation_required: true,
+  content_hash: "a".repeat(64)
+} as const;

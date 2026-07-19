@@ -1,0 +1,38 @@
+{
+  "schema_version": "geo2-summary/v1",
+  "date": "2026-07-19",
+  "status": "PASS",
+  "verdicts": {
+    "GEO2_ENTRY": "PASS",
+    "GEO2_MINIMAL_CHANNEL_INIT": "PASS",
+    "GEO2_MARKET_RESEARCH_DRAFT": "PASS",
+    "GEO2_HUMAN_DRAFT_APPROVAL": "PASS",
+    "GEO2_CHANNEL_INIT_DASHBOARD": "PASS",
+    "GEO2_CHANNEL_DETAIL_MARKET_UI": "PASS",
+    "GEO2_DESTINATION_BINDING": "PASS",
+    "GEO2_MARKET_ALIGNMENT_DASHBOARD": "PASS",
+    "GEO2_PUBLISH_RISK_MARKET_ALIGNMENT": "PASS",
+    "GEO2_MARKET_BOUND_PUBLISH_PACKAGE": "PASS",
+    "GEO2_MARKET_PACKAGE_FREEZE": "PASS",
+    "GEO2_PUBLISH_QUEUE_DASHBOARD": "PASS",
+    "GEO2_POST_APPROVAL_INTEGRITY": "PASS",
+    "GEO2_BACKEND_TESTS": "PASS",
+    "GEO2_FRONTEND_TESTS": "PASS",
+    "GEO2_FINAL": "PASS"
+  },
+  "verification": {
+    "geo2_backend_and_handoff": "16 passed, 1 warning",
+    "frontend_unit": "35 passed",
+    "frontend_typecheck": "PASS",
+    "frontend_lint": "PASS",
+    "frontend_build": "PASS",
+    "alembic_heads": "0038_lpro1_daily_mode (head)",
+    "provider_calls": 0,
+    "drive_calls": 0,
+    "youtube_calls": 0
+  },
+  "repair_cycles": 3,
+  "mr1_execution": "ON_HOLD",
+  "proceed_to_mr1": false,
+  "proceed_to_channel_profile_v3": true
+}

@@ -2,7 +2,9 @@ import uuid
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+
+from app.contracts.long_production import LongFormRenderPackageStrictContract
 
 
 MediaProviderType = Literal[
@@ -79,6 +81,11 @@ MediaBudgetEnforcement = Literal["HARD_BLOCK", "REVIEW_REQUIRED", "OBSERVE_ONLY"
 MediaBudgetState = Literal["OK", "WARNING", "EXCEEDED", "UNKNOWN"]
 LongFormRenderPackageState = Literal[
     "DRAFT",
+    "RENDER_PACKAGE_DRAFT",
+    "RENDER_INPUTS_INCOMPLETE",
+    "ROUTED_AWAITING_MEDIA",
+    "AWAITING_PROVIDER_EXECUTION",
+    "AWAITING_ASSET_RESOLUTION",
     "READY_FOR_FINAL_RENDER",
     "BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
     "FINAL_RENDERED",
@@ -326,8 +333,18 @@ class LongFormRenderPackageCreate(BaseModel):
     music_sfx_refs: list[dict[str, Any]] = Field(default_factory=list)
     cloud_media_refs: list[dict[str, Any]] = Field(default_factory=list)
     render_manifest: dict[str, Any] = Field(default_factory=dict)
+    strict_production: bool = False
+    strict_contract: LongFormRenderPackageStrictContract | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def strict_mode_requires_contract(self) -> "LongFormRenderPackageCreate":
+        if self.strict_production and self.strict_contract is None:
+            raise ValueError("LPRO1_STRICT_RENDER_PACKAGE_CONTRACT_REQUIRED")
+        if not self.strict_production and self.strict_contract is not None:
+            raise ValueError("LPRO1_STRICT_RENDER_PACKAGE_FLAG_REQUIRED")
+        return self
 
 
 class LongFormRenderPackageRead(_ReadModel):

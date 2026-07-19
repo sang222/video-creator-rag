@@ -21,7 +21,13 @@ from app.contracts.r3d1 import ContentCategoryCreate
 from app.contracts.m6 import ProductionArtifactRunCreate
 from app.contracts.ops import ProviderRegistryEntryCreate, QuotaAccountCreate
 from app.contracts.workflow import VideoProjectCreate
-from app.db.models import User, VideoProject
+from app.db.models import (
+    CaptionTrackSnapshot,
+    User,
+    VideoProject,
+    VisualPlanSnapshot,
+    VoiceTimelineSnapshot,
+)
 from app.services import (
     ArtifactService,
     ChannelDailyRunService,
@@ -212,12 +218,13 @@ class QualificationFactory:
                 policy_snapshot_id=scope.snapshot.id,
                 editorial_calendar_slot_id=slot.id,
                 run_date=slot.slot_date,
+                run_mode="MOCK",
             )
         )
         executed = ChannelDailyRunService(self.session).execute_run(
             daily_run_id=daily_run.id,
             data=DailyRunExecuteRequest(
-                mock_mode=mock_mode,
+                fixture_mode=mock_mode,
                 quota_account_id=quota_account.id if quota_account else None,
                 created_by_user_id=scope.operator.id,
             ),
@@ -276,10 +283,79 @@ class QualificationFactory:
                 source_project_admission_decision_id=flow.admission.id,
             )
         )
-        executed = ProductionArtifactRunService(self.session).execute_local_mock_flow(
-            run_id=run.id,
-            output_dir=output_dir,
+        # Test-only, database-backed derivative input.  The removed M6 runtime
+        # mock provider is deliberately not restored in application code.
+        segments = [
+            {
+                "narration_segment_id": f"segment-{index}",
+                "sequence_index": index - 1,
+                "text": text,
+                "estimated_start_time": float((index - 1) * 8),
+                "estimated_end_time": float(index * 8),
+            }
+            for index, text in enumerate(
+                (
+                    "How small teams can make a reliable workflow.",
+                    "Why canonical timing keeps every production stage aligned.",
+                    "A review boundary protects the final publishing decision.",
+                ),
+                start=1,
+            )
+        ]
+        voice = VoiceTimelineSnapshot(
+            production_artifact_run_id=run.id,
+            video_project_id=flow.project.id,
+            script_artifact_version_id=None,
+            policy_snapshot_id=flow.project.policy_snapshot_id,
+            timeline_blob={"segments": segments},
+            total_duration_seconds=Decimal("24"),
+            timing_source="ESTIMATED",
+            confidence_level="HIGH",
+            timeline_hash="qualification-voice-timeline-hash",
         )
+        self.session.add(voice)
+        self.session.flush()
+        captions = CaptionTrackSnapshot(
+            production_artifact_run_id=run.id,
+            video_project_id=flow.project.id,
+            voice_timeline_snapshot_id=voice.id,
+            caption_blob={
+                "cues": [
+                    {
+                        "caption_id": f"caption-{index}",
+                        "narration_segment_id": segment["narration_segment_id"],
+                        "text": segment["text"],
+                    }
+                    for index, segment in enumerate(segments, start=1)
+                ]
+            },
+            srt_text=None,
+            language="en",
+            caption_hash="qualification-caption-track-hash",
+        )
+        self.session.add(captions)
+        self.session.flush()
+        visual = VisualPlanSnapshot(
+            production_artifact_run_id=run.id,
+            video_project_id=flow.project.id,
+            voice_timeline_snapshot_id=voice.id,
+            caption_track_snapshot_id=captions.id,
+            visual_plan_blob={
+                "scenes": [
+                    {"scene_id": f"scene-{index}", "narration_segment_id": segment["narration_segment_id"]}
+                    for index, segment in enumerate(segments, start=1)
+                ]
+            },
+            visual_plan_hash="qualification-visual-plan-hash",
+        )
+        self.session.add(visual)
+        run.voice_timeline_snapshot_id = voice.id
+        run.caption_track_snapshot_id = captions.id
+        run.visual_plan_snapshot_id = visual.id
+        run.status = "COMPLETED"
+        run.reason_codes = ["QUALIFICATION_DERIVATIVE_INPUT_READY"]
+        self.session.flush()
+        executed = run
         if require_completed:
             assert executed.status == "COMPLETED"
         return SimpleNamespace(**flow.__dict__, production_run=executed)

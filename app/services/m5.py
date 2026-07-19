@@ -900,6 +900,70 @@ class IdeaMarketPreflightService:
                 "channel_fit_result": strict_result["channel_fit_result"],
                 "caller_policy_fit_state_ignored": data.policy_fit_state,
             }
+        if data.target_market is not None:
+            evidence_blob.update(
+                {
+                    "niche_contract_digest_ref": data.niche_contract_digest_ref,
+                    "niche_contract_digest_hash": data.niche_contract_digest_hash,
+                    "target_market_digest_ref": data.target_market_digest_ref,
+                    "target_market_digest_hash": data.target_market_digest_hash,
+                    "editorial_slot_ref": data.editorial_slot_ref,
+                    "content_category_ref": data.content_category_ref,
+                    "target_market": data.target_market,
+                    "market_scope": sorted({item.upper() for item in data.market_scope}),
+                    "market_fit_score": (
+                        float(data.market_fit_score)
+                        if data.market_fit_score is not None
+                        else None
+                    ),
+                    "market_fit_threshold": (
+                        float(data.market_fit_threshold)
+                        if data.market_fit_threshold is not None
+                        else None
+                    ),
+                }
+            )
+            missing_market_authority = [
+                key
+                for key, value in {
+                    "TARGET_MARKET_DIGEST": data.target_market_digest_ref
+                    and data.target_market_digest_hash,
+                    "NICHE_CONTRACT_DIGEST": data.niche_contract_digest_ref
+                    and data.niche_contract_digest_hash,
+                    "EDITORIAL_SLOT": data.editorial_slot_ref,
+                    "CONTENT_CATEGORY": data.content_category_ref,
+                }.items()
+                if not value
+            ]
+            target_scoped = data.target_market in {
+                item.upper() for item in data.market_scope
+            }
+            global_only = "GLOBAL" in {
+                item.upper() for item in data.market_scope
+            } and not target_scoped
+            if missing_market_authority:
+                decision = "BLOCK"
+                reasons = sorted(
+                    set([*reasons, "TARGET_MARKET_PROFILE_MISSING"])
+                )
+                confidence = "LOW"
+            elif not target_scoped or global_only:
+                if decision != "BLOCK":
+                    decision = "REVIEW_REQUIRED"
+                reasons = sorted(
+                    set([*reasons, "MARKET_DEMAND_SCOPE_MISSING"])
+                )
+                confidence = "LOW"
+            elif (
+                data.market_fit_score is None
+                or data.market_fit_threshold is None
+                or data.market_fit_score < data.market_fit_threshold
+            ):
+                if decision == "PASS":
+                    decision = "REVIEW_REQUIRED"
+                reasons = sorted(
+                    set([*reasons, "TOPIC_MARKET_DEMAND_WEAK"])
+                )
         item = IdeaMarketPreflight(
             company_id=data.company_id,
             channel_workspace_id=data.channel_workspace_id,
@@ -1004,6 +1068,71 @@ class LLMWorkflowService:
                     message="The strict daily niche context failed authoritative revalidation.",
                     correlation_id=correlation_id,
                 )
+        if getattr(daily_run, "run_mode", "REAL") == "MOCK":
+            fixture_mode = str((daily_run.metadata_ or {}).get("fixture_mode") or "success")
+            if fixture_mode == "unavailable":
+                return self._blocked_run(
+                    daily_run=daily_run,
+                    context_pack=context_pack,
+                    provider_key="offline_daily_fixture",
+                    reason_codes=["OFFLINE_DAILY_FIXTURE_UNAVAILABLE"],
+                    message="The explicitly selected offline Daily fixture is unavailable.",
+                    correlation_id=correlation_id,
+                )
+            try:
+                proposal = _proposal_from_context(context_pack, None)
+                proposal.update(
+                    {
+                        "channel_fit_score": Decimal("0.80"),
+                        "channel_fit_evidence": {"source": "OFFLINE_DETERMINISTIC_FIXTURE"},
+                    }
+                )
+                if fixture_mode == "malformed":
+                    proposal.pop("proposed_title", None)
+                proposal = _validated_authority_proposal(proposal)
+            except (ValidationError, ValidationFailureError, ValueError):
+                llm_run = self._create_llm_run(
+                    daily_run=daily_run,
+                    context_pack=context_pack,
+                    provider_key="offline_daily_fixture",
+                    status="FAILED",
+                    output_payload={"error": "offline fixture schema validation failed"},
+                    quota_event_id=None,
+                    cost_event_id=None,
+                    correlation_id=correlation_id,
+                    run_mode="MOCK",
+                )
+                return LLMWorkflowResult(
+                    terminal_status="FAILED",
+                    reason_codes=["LLM_OUTPUT_MALFORMED", "LLM_SCHEMA_VALIDATION_FAILED"],
+                    llm_run=llm_run,
+                    proposal=None,
+                    provider_attempt=None,
+                    quota_event_id=None,
+                    cost_event_id=None,
+                    budget_gate_result={"decision": "PASS", "source": "OFFLINE_FIXTURE"},
+                )
+            llm_run = self._create_llm_run(
+                daily_run=daily_run,
+                context_pack=context_pack,
+                provider_key="offline_daily_fixture",
+                status="COMPLETED",
+                output_payload=proposal,
+                quota_event_id=None,
+                cost_event_id=None,
+                correlation_id=correlation_id,
+                run_mode="MOCK",
+            )
+            return LLMWorkflowResult(
+                terminal_status="COMPLETED",
+                reason_codes=["OFFLINE_DAILY_FIXTURE_COMPLETED"],
+                llm_run=llm_run,
+                proposal=proposal,
+                provider_attempt=None,
+                quota_event_id=None,
+                cost_event_id=None,
+                budget_gate_result={"decision": "PASS", "source": "OFFLINE_FIXTURE"},
+            )
         scoped = (snapshot.compiled_payload or {}).get("channel_scoped_policy") or {}
         compiled_budget = scoped.get("budget_policy") or {}
         raw_cap = compiled_budget.get("max_estimated_cost_per_video")
@@ -1321,6 +1450,7 @@ class LLMWorkflowService:
             quota_event_id=None,
             cost_event_id=None,
             correlation_id=correlation_id,
+            run_mode=getattr(daily_run, "run_mode", "REAL"),
         )
         return LLMWorkflowResult(
             terminal_status="BLOCKED",
@@ -1500,11 +1630,11 @@ class ChannelDailyRunService:
         data: ChannelDailyRunCreate,
         correlation_id: str = "m5-daily-run-create",
     ) -> ChannelDailyRun:
-        if data.run_mode == "REAL":
+        if data.run_mode in {"REAL", "MOCK"}:
             reason_codes: list[str] = []
             status = data.status
         else:
-            reason_codes = ["LLM_PROVIDER_NOT_CONFIGURED", "HUMAN_ACTION_REQUIRED"]
+            reason_codes = ["REAL_LLM_EXECUTION_DISABLED", "HUMAN_ACTION_REQUIRED"]
             status = "BLOCKED"
         _validate_channel_policy_scope(
             self.session,
@@ -1558,6 +1688,11 @@ class ChannelDailyRunService:
         if daily_run.status != "PENDING":
             raise ConflictError(f"daily run is not executable from status: {daily_run.status}")
         daily_run.status = "RUNNING"
+        if daily_run.run_mode == "MOCK":
+            daily_run.metadata_ = {
+                **(daily_run.metadata_ or {}),
+                "fixture_mode": data.fixture_mode,
+            }
         daily_run.started_at = utc_now()
         self.session.flush()
         _record_m5_event(

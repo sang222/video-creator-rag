@@ -27,6 +27,8 @@ from app.db.models import (
     HumanUploadTask,
     R3D4GateBatchRun,
     UploadedVideo,
+    VideoProject,
+    ChannelWorkspace,
     VideoGenerationBoundary,
 )
 from app.services.r3d3 import stable_hash
@@ -107,6 +109,7 @@ class PackagingHandoffReadService:
             effective_context=effective_context,
             packaging_gate_status=gate_summary.overall_status,
         )
+        market_alignment, market_package = self._market_handoff_state(package, artifacts)
         return PackagingHandoffSnapshotRead(
             package_id=package.id,
             package_status=package.package_status,
@@ -121,9 +124,64 @@ class PackagingHandoffReadService:
             packaging_gate_summary=gate_summary,
             manual_upload=self._manual_upload_state(package),
             provider_readiness_summary=self._provider_boundary_state(package),
+            market_alignment=market_alignment,
+            market_package=market_package,
             manual_publish_only=True,
             no_upload_or_publish_calls_made=True,
             created_at=package.created_at,
+        )
+
+    def _market_handoff_state(
+        self,
+        package: FirstScriptedVideoPackage,
+        artifacts: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        project = self.session.get(VideoProject, package.video_project_id) if package.video_project_id else None
+        channel = self.session.get(ChannelWorkspace, package.channel_id)
+        audience = _dict(project.audience_delivery_summary) if project is not None else {}
+        frozen = _dict(audience.get("target_market_freeze"))
+        alignment = _dict(audience.get("market_alignment") or artifacts.get("market_alignment_dossier"))
+        component_states = _dict(alignment.get("component_gate_states"))
+        if not component_states:
+            for result in _list(alignment.get("component_results")):
+                row = _dict(result)
+                key = str(row.get("gate_key") or "")
+                if key:
+                    component_states[key] = row.get("verdict") or row.get("status")
+        destination_root = _dict(_dict(channel.metadata_ if channel is not None else {}).get("destination_governance"))
+        destination_rows = _list(destination_root.get("bindings"))
+        destination = _dict(destination_rows[-1]) if destination_rows else {}
+        market_package = _dict(artifacts.get("market_bound_publish_package"))
+        if not market_package:
+            market_package = {
+                "package_state": "NOT_FROZEN",
+                "approved_package_hash": None,
+                "destination_binding_hash": destination.get("content_hash"),
+                "target_market_profile_hash": frozen.get("target_market_profile_hash"),
+                "media_file_ref": _dict(artifacts.get("render_package_snapshot")).get("final_video_ref"),
+                "media_file_hash": _dict(artifacts.get("render_package_snapshot")).get("final_video_hash"),
+            }
+        return (
+            {
+                "target_market_profile_version": frozen.get("target_market_profile_version"),
+                "primary_market": frozen.get("primary_market"),
+                "primary_locale": frozen.get("primary_locale"),
+                "narration_locale": frozen.get("narration_locale"),
+                "publish_timezone": frozen.get("primary_timezone") or timing_timezone(artifacts),
+                "destination_binding": destination or None,
+                "topic_market_fit": component_states.get("topic_market_alignment_gate", "NOT_EVALUATED"),
+                "research_jurisdiction": component_states.get("research_jurisdiction_gate", "NOT_EVALUATED"),
+                "script_context": component_states.get("script_market_alignment_gate", "NOT_EVALUATED"),
+                "voice_locale": component_states.get("voice_locale_alignment_gate", "NOT_EVALUATED"),
+                "visual_context": component_states.get("visual_market_alignment_gate", "NOT_EVALUATED"),
+                "thumbnail_locale": component_states.get("thumbnail_market_alignment_gate", "NOT_EVALUATED"),
+                "metadata_locale": component_states.get("metadata_market_alignment_gate", "NOT_EVALUATED"),
+                "currency_units": alignment.get("currency_units") or "NOT_EVALUATED",
+                "overall_verdict": alignment.get("overall_verdict") or "NOT_EVALUATED",
+                "reason_codes": _strings(alignment.get("reason_codes")),
+                "review_required_items": _strings(alignment.get("human_review_requirements")),
+            },
+            market_package,
         )
 
     def _r3d4_gate_batch_refs(self, package_id: uuid.UUID) -> list[str]:
@@ -534,6 +592,12 @@ def _strings(value: Any) -> list[str]:
         if item not in (None, ""):
             result.append(str(item))
     return result
+
+
+def timing_timezone(artifacts: dict[str, Any]) -> str | None:
+    timing = _dict(artifacts.get("publish_timing") or artifacts.get("publish_timing_recommendation"))
+    value = timing.get("channel_timezone") or timing.get("timezone")
+    return str(value) if value else None
 
 
 def _str_or_none(value: Any) -> str | None:

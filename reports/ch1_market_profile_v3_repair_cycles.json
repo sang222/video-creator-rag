@@ -1,0 +1,22 @@
+{
+  "schema_version": "ch1-market-v3-repair-cycles/v1",
+  "date": "2026-07-19",
+  "repair_cycles": 2,
+  "cycles": [
+    {
+      "cycle": 1,
+      "root_cause": "The production channel workspace read model still referenced removed ChannelDailyRun attributes run_state/admission_state/next_action.",
+      "repair": "Mapped the card to current status/project-admission/metadata fields without changing workflow gates.",
+      "result": "production v3 dashboard read model returned active profile v3 and market policy ACTIVE"
+    },
+    {
+      "cycle": 2,
+      "root_cause": "A historical analytics fixture created a confirmed upload with monitoring_state NOT_STARTED, then attempted strict analytics import.",
+      "repair": "Marked that explicit confirmed-upload fixture READY_FOR_ANALYTICS; the production analytics gate remained unchanged.",
+      "result": "6 M11/dashboard tests passed"
+    }
+  ],
+  "weakened_gates": false,
+  "mutated_v2_content": false,
+  "skipped_tests": false
+}

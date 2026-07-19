@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.config_catalog import CatalogDocument
 from app.contracts.channel_policy import ChannelScopedPolicy
+from app.contracts.geo_market import InactiveTargetMarketProfileFixture
 from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
 from app.contracts.visual_routing import VisualSourceRoutingPolicyCatalogItem
 from app.core.config import (
@@ -567,6 +568,7 @@ class ConfigRegistryService:
             "niche_profile_templates": NicheProfileTemplate,
             "capability_matrix": CapabilityMatrix,
             "profile_compiler_policy": ProfileCompilerPolicy,
+            "target_market_profile_catalog": InactiveTargetMarketProfileFixture,
         }
         item_model = validators.get(document.catalog_key)
         if item_model is None:

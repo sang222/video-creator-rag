@@ -10,7 +10,7 @@ SlotType = Literal["DAILY", "WEEKLY", "CAMPAIGN", "EVERGREEN", "EXPERIMENT", "MA
 SlotStatus = Literal["OPEN", "ASSIGNED", "ADMITTED", "SKIPPED", "CANCELLED"]
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
 DailyRunStatus = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
-DailyRunMode = Literal["REAL", "REAL_DISABLED", "NOT_CONFIGURED", "HUMAN_REVIEW_ONLY", "BLOCKED"]
+DailyRunMode = Literal["MOCK", "REAL_DISABLED", "REAL"]
 DailyRunTriggerType = Literal["MANUAL", "SCHEDULED", "TEST"]
 ContextPackPurpose = Literal["DAILY_IDEA", "PROJECT_ADMISSION", "AUTHORITY_REVIEW", "SEARCH_DEMAND", "TEST"]
 FreshnessState = Literal["FRESH", "STALE", "UNKNOWN", "NOT_REQUIRED"]
@@ -258,6 +258,16 @@ class IdeaMarketPreflightCreate(BaseModel):
     demand_score: Decimal | None = None
     channel_fit_score: Decimal | None = None
     policy_fit_state: PolicyFitState = "UNKNOWN"
+    niche_contract_digest_ref: str | None = None
+    niche_contract_digest_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    target_market_digest_ref: str | None = None
+    target_market_digest_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    editorial_slot_ref: str | None = None
+    content_category_ref: str | None = None
+    target_market: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
+    market_scope: list[str] = Field(default_factory=list)
+    market_fit_score: Decimal | None = Field(default=None, ge=0, le=1)
+    market_fit_threshold: Decimal | None = Field(default=None, ge=0, le=1)
     evidence_blob: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -309,6 +319,7 @@ class DailyIdeaDecisionRead(BaseModel):
 
 class DailyRunExecuteRequest(BaseModel):
     provider_key: str = "llm_router"
+    fixture_mode: Literal["success", "malformed", "unavailable"] = "success"
     quota_account_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
     estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
