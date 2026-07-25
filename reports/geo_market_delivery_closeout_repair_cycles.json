@@ -1,0 +1,124 @@
+{
+  "cycles": [
+    {
+      "acceptance_results": {
+        "GEO_DELIVERY_CLOSEOUT_DESTINATION_ENFORCEMENT": "PASS",
+        "GEO_DELIVERY_CLOSEOUT_MARKET_LINEAGE": "PASS"
+      },
+      "cycle": 1,
+      "failure_class": "SCHEMA_RUNTIME_GAP",
+      "repair": "Added nullable first-class lineage columns, migration 0041, strict fail-closed validation, and M7 propagation.",
+      "root_cause": "M7 stored destination/market lineage only in JSON and did not enforce exact approval-to-actual destination invariants."
+    },
+    {
+      "acceptance_results": {
+        "GEO_DIAGNOSTIC_RULES": "PASS",
+        "GEO_DISTRIBUTION_TRACKER": "PASS",
+        "GEO_MATURITY_INTEGRATION": "PASS"
+      },
+      "cycle": 2,
+      "failure_class": "DELIVERY_READ_MODEL_GAP",
+      "repair": "Added MarketDeliveryAlignmentGate, GeoDistributionTracker, maturity diagnostics, and M9 integration.",
+      "root_cause": "No deterministic aggregate market delivery gate or maturity-aware derived geo tracker existed."
+    },
+    {
+      "acceptance_results": {
+        "ADS_ONLY_MONETIZATION_POLICY": "PASS"
+      },
+      "cycle": 3,
+      "failure_class": "POLICY_CONTRADICTION",
+      "repair": "Preserved snapshot v3 and persisted an exact base-hash-bound PLATFORM_AD_REVENUE_ONLY overlay as submitted immutable evidence.",
+      "root_cause": "Immutable snapshot v3 still declares mixed/affiliate monetization."
+    },
+    {
+      "acceptance_results": {
+        "GEO_DELIVERY_CLOSEOUT_MARKET_ALIGNMENT": "PASS"
+      },
+      "cycle": 4,
+      "failure_class": "TEST_FIXTURE_HASH_LINEAGE",
+      "repair": "Revalidated the fixture so its derived hash matched content.",
+      "root_cause": "A focused test changed channel_workspace_id via model_copy while retaining the old content_hash."
+    }
+  ],
+  "final_state": "PASS",
+  "schema_version": "geo-market-delivery-closeout-repair-cycles/v1",
+  "verification": {
+    "generated_at": "2026-07-22T16:06:06.915095+00:00",
+    "manifest_content_hash": "a881d30bf8189b69376b3b9c012fbcdaaa5f7bdf3d257d979e99b439b201c691",
+    "producer": "VCOS_MACHINE_VERIFICATION_RUNNER",
+    "receipt_artifact_version_id": "581c41c9-6e83-428a-86b3-0c710f6057aa",
+    "receipt_content_hash": "244ef35c583cbf0a569b94a6e3632d50b5c7b6dbca574e40c7255dc6a3dcfd09",
+    "receipt_locator_path": "reports/geo_market_delivery_verification_receipt.json",
+    "repository_revision": "workspace-sha256:c97c08f79c784c04745dcbe75efb82cda9a0f4d6c7bb421505673df9cae69fd4",
+    "runs": [
+      {
+        "command": [
+          "/Users/sangss/Desktop/video-creator-rag/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "tests/test_geo_market_delivery_closeout.py",
+          "tests/qualification/test_m7_publish_handoff.py",
+          "tests/qualification/test_m9_post_publish_diagnostics.py",
+          "tests/qualification/test_m12_2r_publish_handoff_ledger.py"
+        ],
+        "content_hash": "b73180a3cacd6fa2456b4d26cedfa47559a63999e508a399e5155a3b5a8fd4e5",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "1e94279afbb810e176d7559d92f84f9f5eb6608bfb80b119420edfd41ba3407c",
+        "passed": 42,
+        "run_id": "geo-delivery-focused-and-regression",
+        "skipped": 14,
+        "verdict": "PASS"
+      },
+      {
+        "command": [
+          "/Users/sangss/Desktop/video-creator-rag/.venv/bin/python",
+          "-m",
+          "compileall",
+          "-q",
+          "app",
+          "scripts"
+        ],
+        "content_hash": "9e21d6f32c30539e2e6eec6ad43bb8b84b5ba88743df35d885bde6657278e6a5",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "passed": 1,
+        "run_id": "geo-delivery-compileall",
+        "skipped": 0,
+        "verdict": "PASS"
+      },
+      {
+        "command": [
+          "/Users/sangss/Desktop/video-creator-rag/.venv/bin/alembic",
+          "heads"
+        ],
+        "content_hash": "5b8dede363e1301afaf43a3331f167563a836339c1e98d6364e4f216545559b8",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "8888ff68099f86ffbb6ec3099a4b5d336fc38d864681ae447470e98a2c073bb6",
+        "passed": 1,
+        "run_id": "geo-delivery-alembic-head",
+        "skipped": 0,
+        "verdict": "PASS"
+      },
+      {
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "content_hash": "2666757ad4285c53534d6c9b927b1b673e6c706afce2f0536ed22b20736f7885",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "passed": 1,
+        "run_id": "geo-delivery-git-diff-check",
+        "skipped": 0,
+        "verdict": "PASS"
+      }
+    ],
+    "workspace_hash": "c97c08f79c784c04745dcbe75efb82cda9a0f4d6c7bb421505673df9cae69fd4"
+  }
+}

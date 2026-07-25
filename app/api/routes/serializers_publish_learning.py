@@ -14,6 +14,7 @@ from app.api.routes.imports import (
     uuid,
 )
 
+
 def _publish_handoff(handoff: Any) -> dict[str, Any]:
     return {
         "id": handoff.id,
@@ -31,6 +32,16 @@ def _publish_handoff(handoff: Any) -> dict[str, Any]:
         "target_platform": handoff.target_platform,
         "target_surface": handoff.target_surface,
         "destination_binding_id": handoff.destination_binding_id,
+        "destination_binding_fingerprint": handoff.destination_binding_fingerprint,
+        "market_policy_hash": handoff.market_policy_hash,
+        "approved_package_hash": handoff.approved_package_hash,
+        "approval_decision_id": handoff.approval_decision_id,
+        "target_market_profile_ref": handoff.target_market_profile_ref,
+        "target_market_profile_hash": handoff.target_market_profile_hash,
+        "market_alignment_dossier_ref": handoff.market_alignment_dossier_ref,
+        "market_alignment_dossier_hash": handoff.market_alignment_dossier_hash,
+        "approved_publish_timezone": handoff.approved_publish_timezone,
+        "approved_publish_window": handoff.approved_publish_window,
         "render_variant_id": handoff.render_variant_id,
         "package_state": handoff.package_state,
         "planned_metadata": handoff.planned_metadata,
@@ -47,6 +58,7 @@ def _publish_handoff(handoff: Any) -> dict[str, Any]:
         "updated_at": handoff.updated_at,
     }
 
+
 def _manual_publish_confirmation(confirmation: Any) -> dict[str, Any]:
     return {
         "id": confirmation.id,
@@ -62,6 +74,10 @@ def _manual_publish_confirmation(confirmation: Any) -> dict[str, Any]:
         "actual_video_id": confirmation.actual_video_id,
         "actual_video_url": confirmation.actual_video_url,
         "actual_published_at": confirmation.actual_published_at,
+        "destination_binding_id": confirmation.destination_binding_id,
+        "destination_binding_fingerprint": confirmation.destination_binding_fingerprint,
+        "market_policy_hash": confirmation.market_policy_hash,
+        "approved_package_hash": confirmation.approved_package_hash,
         "actual_metadata": confirmation.actual_metadata,
         "actual_disclosures": confirmation.actual_disclosures,
         "actual_files": confirmation.actual_files,
@@ -73,6 +89,7 @@ def _manual_publish_confirmation(confirmation: Any) -> dict[str, Any]:
         "created_at": confirmation.created_at,
         "updated_at": confirmation.updated_at,
     }
+
 
 def _uploaded_video(uploaded: Any) -> dict[str, Any]:
     return {
@@ -87,6 +104,10 @@ def _uploaded_video(uploaded: Any) -> dict[str, Any]:
         "first_scripted_video_package_id": uploaded.first_scripted_video_package_id,
         "human_upload_task_id": uploaded.human_upload_task_id,
         "destination": uploaded.destination,
+        "destination_binding_id": uploaded.destination_binding_id,
+        "destination_binding_fingerprint": uploaded.destination_binding_fingerprint,
+        "market_policy_hash": uploaded.market_policy_hash,
+        "approved_package_hash": uploaded.approved_package_hash,
         "source_manifest_snapshot_id": uploaded.source_manifest_snapshot_id,
         "rights_envelope_ref": uploaded.rights_envelope_ref,
         "platform": uploaded.platform,
@@ -119,6 +140,7 @@ def _uploaded_video(uploaded: Any) -> dict[str, Any]:
         "updated_at": uploaded.updated_at,
     }
 
+
 def _uploaded_video_summary(summary: Any) -> dict[str, Any]:
     return {
         "id": summary.id,
@@ -140,6 +162,7 @@ def _uploaded_video_summary(summary: Any) -> dict[str, Any]:
         "created_at": summary.created_at,
         "updated_at": summary.updated_at,
     }
+
 
 def _analytics_sync_run(run: Any) -> dict[str, Any]:
     return {
@@ -167,6 +190,7 @@ def _analytics_sync_run(run: Any) -> dict[str, Any]:
         "updated_at": run.updated_at,
     }
 
+
 def _analytics_snapshot(snapshot: Any) -> dict[str, Any]:
     return {
         "id": snapshot.id,
@@ -192,6 +216,7 @@ def _analytics_snapshot(snapshot: Any) -> dict[str, Any]:
         "created_at": snapshot.created_at,
     }
 
+
 def _traffic_source_snapshot(snapshot: Any) -> dict[str, Any]:
     return {
         "id": snapshot.id,
@@ -206,6 +231,7 @@ def _traffic_source_snapshot(snapshot: Any) -> dict[str, Any]:
         "confidence_level": snapshot.confidence_level,
         "created_at": snapshot.created_at,
     }
+
 
 def _retention_curve_snapshot(snapshot: Any) -> dict[str, Any]:
     return {
@@ -225,6 +251,7 @@ def _retention_curve_snapshot(snapshot: Any) -> dict[str, Any]:
         "confidence_level": snapshot.confidence_level,
         "created_at": snapshot.created_at,
     }
+
 
 def _uploaded_video_metrics_summary(summary: Any) -> dict[str, Any]:
     return {
@@ -251,6 +278,7 @@ def _uploaded_video_metrics_summary(summary: Any) -> dict[str, Any]:
         "updated_at": summary.updated_at,
     }
 
+
 def _youtube_oauth_session(session: Any) -> dict[str, Any]:
     return {
         "id": session.id,
@@ -266,6 +294,7 @@ def _youtube_oauth_session(session: Any) -> dict[str, Any]:
         "updated_at": session.updated_at,
     }
 
+
 def _google_drive_oauth_session(session: Any) -> dict[str, Any]:
     return {
         "id": session.id,
@@ -280,6 +309,7 @@ def _google_drive_oauth_session(session: Any) -> dict[str, Any]:
         "created_at": session.created_at,
         "updated_at": session.updated_at,
     }
+
 
 def _media_offload_job(job: Any) -> dict[str, Any]:
     return {
@@ -305,6 +335,7 @@ def _media_offload_job(job: Any) -> dict[str, Any]:
         "updated_at": job.updated_at,
     }
 
+
 def _local_media_retention_policy(policy: Any) -> dict[str, Any]:
     return {
         "id": policy.id,
@@ -320,6 +351,7 @@ def _local_media_retention_policy(policy: Any) -> dict[str, Any]:
         "created_at": policy.created_at,
         "updated_at": policy.updated_at,
     }
+
 
 def _youtube_public_sync_run(run: Any) -> dict[str, Any]:
     return {
@@ -340,6 +372,7 @@ def _youtube_public_sync_run(run: Any) -> dict[str, Any]:
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
+
 
 def _youtube_owner_sync_run(run: Any) -> dict[str, Any]:
     return {
@@ -363,6 +396,7 @@ def _youtube_owner_sync_run(run: Any) -> dict[str, Any]:
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
+
 
 def _youtube_public_snapshot(snapshot: Any) -> dict[str, Any]:
     return {
@@ -401,6 +435,7 @@ def _youtube_public_snapshot(snapshot: Any) -> dict[str, Any]:
         "created_at": snapshot.created_at,
     }
 
+
 def _youtube_owner_snapshot(snapshot: Any) -> dict[str, Any]:
     return {
         "id": snapshot.id,
@@ -429,6 +464,7 @@ def _youtube_owner_snapshot(snapshot: Any) -> dict[str, Any]:
         "technical_appendix": snapshot.technical_appendix,
         "created_at": snapshot.created_at,
     }
+
 
 def _post_publish_health_run(run: Any) -> dict[str, Any]:
     return {
@@ -459,6 +495,7 @@ def _post_publish_health_run(run: Any) -> dict[str, Any]:
         "created_at": run.created_at,
     }
 
+
 def _failure_trace_report(report: Any) -> dict[str, Any]:
     return {
         "id": report.id,
@@ -482,6 +519,7 @@ def _failure_trace_report(report: Any) -> dict[str, Any]:
         "created_at": report.created_at,
     }
 
+
 def _recovery_proposal(proposal: Any) -> dict[str, Any]:
     return {
         "id": proposal.id,
@@ -499,6 +537,7 @@ def _recovery_proposal(proposal: Any) -> dict[str, Any]:
         "created_at": proposal.created_at,
         "updated_at": proposal.updated_at,
     }
+
 
 def _learning_generation_run(run: Any) -> dict[str, Any]:
     return {
@@ -522,6 +561,7 @@ def _learning_generation_run(run: Any) -> dict[str, Any]:
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
+
 
 def _learning_candidate(candidate: Any) -> dict[str, Any]:
     return {
@@ -556,6 +596,7 @@ def _learning_candidate(candidate: Any) -> dict[str, Any]:
         "updated_at": candidate.updated_at,
     }
 
+
 def _learning_evidence_bundle(bundle: Any) -> dict[str, Any]:
     return {
         "id": bundle.id,
@@ -576,6 +617,7 @@ def _learning_evidence_bundle(bundle: Any) -> dict[str, Any]:
         "policy_rights_summary": bundle.policy_rights_summary,
         "created_at": bundle.created_at,
     }
+
 
 def _learning_review_queue_item(item: Any) -> dict[str, Any]:
     return {
@@ -605,6 +647,7 @@ def _learning_review_queue_item(item: Any) -> dict[str, Any]:
         "updated_at": item.updated_at,
     }
 
+
 def _playbook_candidate_draft(draft: Any) -> dict[str, Any]:
     return {
         "id": draft.id,
@@ -629,9 +672,15 @@ def _learning_review_action(
     data: LearningReviewDecisionCreate | None,
 ) -> LearningReviewDecisionRead:
     try:
-        request = data.model_copy(update={"action": action}) if data is not None else LearningReviewDecisionCreate(action=action)
+        request = (
+            data.model_copy(update={"action": action})
+            if data is not None
+            else LearningReviewDecisionCreate(action=action)
+        )
         with session_scope() as session:
-            decision = M11LearningReviewService(session).decide(candidate_id=candidate_id, data=request)
+            decision = M11LearningReviewService(session).decide(
+                candidate_id=candidate_id, data=request
+            )
             return learning_review_decision_read(session, decision)
     except Exception as exc:
         raise _as_http_error(exc) from exc
@@ -646,6 +695,9 @@ def _as_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, (ValidationFailureError, ValueError)):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+    )
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

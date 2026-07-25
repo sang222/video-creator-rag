@@ -1,0 +1,26 @@
+{
+  "schema_version": "mr1-reapproval-v3-repair-cycles/v1",
+  "date": "2026-07-19",
+  "cycle_count": 1,
+  "cycles": [
+    {
+      "cycle": 1,
+      "phase": "focused re-approval verification",
+      "trigger": "The first focused run exposed one fixture-authority mismatch and one invalid negative-test mutation technique.",
+      "findings": [
+        "The service compared fixture DB UUIDs against production activation UUIDs from the committed CH1 report even though package/profile/snapshot hashes were already revalidated directly in the active DB.",
+        "The negative test attempted to UPDATE an immutable ArtifactVersion row, so the database trigger rejected setup before the service could evaluate the mismatch."
+      ],
+      "repairs": [
+        "Kept upstream report verdict checks while resolving and hashing exact profile, snapshot and package authority directly from current DB lineage.",
+        "Changed the negative test to corrupt only the SQLAlchemy identity-map read; no immutable database row is updated."
+      ],
+      "verification": "Focused suite passed 3 tests; the required cross-phase suite passed 29 tests. Production approval passed on its first write attempt."
+    }
+  ],
+  "excluded_from_cycle_count": [
+    "Sandbox localhost approvals are environment controls, not application repair cycles.",
+    "Production approval creation made zero provider, render, Drive, or YouTube calls and needed no repair."
+  ],
+  "final_status": "PASS"
+}

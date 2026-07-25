@@ -1,0 +1,202 @@
+{
+  "acceptance": {
+    "ADS_ONLY_MONETIZATION_POLICY": "PASS",
+    "GEO_DELIVERY_CLOSEOUT_DESTINATION_ENFORCEMENT": "PASS",
+    "GEO_DELIVERY_CLOSEOUT_MARKET_ALIGNMENT": "PASS",
+    "GEO_DELIVERY_CLOSEOUT_MARKET_LINEAGE": "PASS",
+    "GEO_DIAGNOSTIC_RULES": "PASS",
+    "GEO_DISTRIBUTION_TRACKER": "PASS",
+    "GEO_MATURITY_INTEGRATION": "PASS"
+  },
+  "artifacts": {
+    "effective_ads_only_monetization_policy": {
+      "artifact_id": "9610e18f-835c-4b4d-8b44-1f246723a244",
+      "artifact_type": "effective_ads_only_monetization_policy",
+      "artifact_version_id": "72c42303-cdeb-46c4-9b90-881f2f7fd14e",
+      "content_hash": "d2595b424ab27a5ba84b33aad171251261225e3673531c415c8a55c4a50ea9db",
+      "ref": "artifact-version://72c42303-cdeb-46c4-9b90-881f2f7fd14e",
+      "version_number": 1
+    },
+    "geo_market_delivery_closeout_evidence": {
+      "artifact_id": "e63c1c00-73ab-488d-9938-9eac4a2c0c21",
+      "artifact_type": "geo_market_delivery_closeout_evidence",
+      "artifact_version_id": "312474a4-adc1-4979-aec4-a20376e91e0c",
+      "content_hash": "8650d6ec33fe82848aefc6a4814dbb8e8560e70a297280f94d347d676ee8b178",
+      "ref": "artifact-version://312474a4-adc1-4979-aec4-a20376e91e0c",
+      "version_number": 1
+    }
+  },
+  "base_snapshot": {
+    "content_hash": "12b66551bd9bdfce1d59d1019ff50bc1c49756b6dc4ab505fde080630b4551bc",
+    "id": "e6c33d80-f5d8-4f72-9abc-87de3601b89e",
+    "monetization_policy": {
+      "channels": [
+        "adsense",
+        "affiliate"
+      ],
+      "primary": "mixed"
+    },
+    "mutated": false
+  },
+  "builder_version": "geo-market-delivery-closeout-builder/1.0.0",
+  "channel_key": "small-team-ai",
+  "date": "2026-07-22",
+  "destination": {
+    "binding_fingerprint": "411aae66418315da8e6a0bf2cd23e896e89e7cd4827a5b54c36c0437ad63efab",
+    "destination_binding_id": "1ea640c1-2330-56d3-97bc-ecb591c7b19d",
+    "platform": "YOUTUBE",
+    "platform_channel_id": null,
+    "publish_execution_ready": false,
+    "status": "PENDING_PLATFORM_ID",
+    "upload_ready": false
+  },
+  "final_state": "PASS",
+  "no_execution_proof": {
+    "after_counts": {
+      "cloud_media_refs": 4,
+      "final_media_refs": 0,
+      "human_upload_tasks": 0,
+      "media_offload_jobs": 3,
+      "media_render_jobs": 0,
+      "paid_provider_calls": 0,
+      "provider_attempts": 674,
+      "provider_jobs": 0,
+      "uploaded_videos": 0
+    },
+    "all_deltas_zero": true,
+    "before_counts": {
+      "cloud_media_refs": 4,
+      "final_media_refs": 0,
+      "human_upload_tasks": 0,
+      "media_offload_jobs": 3,
+      "media_render_jobs": 0,
+      "paid_provider_calls": 0,
+      "provider_attempts": 674,
+      "provider_jobs": 0,
+      "uploaded_videos": 0
+    },
+    "content_hash": "4de07630c8b03a4927b3bf65baef19f1d643f5f21d1883f619a6b7e6d59b7cb6",
+    "deltas": {
+      "cloud_media_refs": 0,
+      "final_media_refs": 0,
+      "human_upload_tasks": 0,
+      "media_offload_jobs": 0,
+      "media_render_jobs": 0,
+      "paid_provider_calls": 0,
+      "provider_attempts": 0,
+      "provider_jobs": 0,
+      "uploaded_videos": 0
+    },
+    "schema_version": "geo-delivery.no-execution-proof.v1"
+  },
+  "policy": {
+    "base_snapshot_monetization_contradiction": "REPAIRED_BY_IMMUTABLE_ADS_ONLY_OVERLAY",
+    "effective_market_policy_hash": "a0e37064715370a137ddc142a4d844076dc0c0670db4bfb67cd25d9727218b85",
+    "monetization_mode": "PLATFORM_AD_REVENUE_ONLY",
+    "overlay_authority_ref": "operator-prompt://geo-market-delivery-closeout/2026-07-21/ads-only-effective-overlay"
+  },
+  "project": {
+    "id": "4624b948-897e-4112-b680-752beb44a7da",
+    "project_type": "GEO_MARKET_DELIVERY_CLOSEOUT"
+  },
+  "schema_version": "geo-market-delivery-closeout-summary/v1",
+  "source": {
+    "approval_decision_id": "ef766b1d-c1a5-43b8-be98-0751bd055653",
+    "approved_package_artifact_version_id": "7de25ac8-46e4-46da-b112-f805f16ebaaa",
+    "approved_package_hash": "200b3be30b92ccff3b0efb26881d5654ab4b53162afe73d4e7f34bed3b0454bd",
+    "bound_artifact_refs": {
+      "creative_brief": "artifact-version://8c993b88-ffe3-4345-a6ce-bcde62b644ee",
+      "market_alignment_dossier": "artifact-version://dba5a8cd-ca61-49e8-b662-c27ad7f02959",
+      "publish_handoff_package": "artifact-version://774466a6-0978-429a-873c-a019dbd55268",
+      "publishing_metadata_package": "artifact-version://688c283e-54ea-44e2-a46d-6c10a002790f",
+      "research_pack": "artifact-version://65dd7023-57de-4d5a-ac5a-2c8ab8e0db9a",
+      "script": "artifact-version://4c0ac729-32c5-4005-9078-013b399e8802",
+      "target_market_consistency_check": "artifact-version://32831f52-c7f0-4379-a25c-aab08a112ddd",
+      "thumbnail_brief": "artifact-version://63f1d8a3-2e33-4c5d-988d-8ba3dcdd1875",
+      "visual_direction_contract": "artifact-version://24a1ca16-cdaa-4b2e-ba4a-158613dcd267",
+      "visual_plan": "artifact-version://82fe70e5-1fd9-451c-a4c6-3fc9fe0aa8c8",
+      "visual_source_decision_set": "artifact-version://db078937-620a-4394-bd9e-3a305595a1da",
+      "voice_policy": "artifact-version://f52c3033-83a6-4455-87f9-9bb24dda7549"
+    },
+    "human_review_receipt_artifact_version_id": "a35c55b8-6887-4e60-a19c-22928205c572"
+  },
+  "verification": {
+    "generated_at": "2026-07-22T16:06:06.915095+00:00",
+    "manifest_content_hash": "a881d30bf8189b69376b3b9c012fbcdaaa5f7bdf3d257d979e99b439b201c691",
+    "producer": "VCOS_MACHINE_VERIFICATION_RUNNER",
+    "receipt_artifact_version_id": "581c41c9-6e83-428a-86b3-0c710f6057aa",
+    "receipt_content_hash": "244ef35c583cbf0a569b94a6e3632d50b5c7b6dbca574e40c7255dc6a3dcfd09",
+    "receipt_locator_path": "reports/geo_market_delivery_verification_receipt.json",
+    "repository_revision": "workspace-sha256:c97c08f79c784c04745dcbe75efb82cda9a0f4d6c7bb421505673df9cae69fd4",
+    "runs": [
+      {
+        "command": [
+          "/Users/sangss/Desktop/video-creator-rag/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "tests/test_geo_market_delivery_closeout.py",
+          "tests/qualification/test_m7_publish_handoff.py",
+          "tests/qualification/test_m9_post_publish_diagnostics.py",
+          "tests/qualification/test_m12_2r_publish_handoff_ledger.py"
+        ],
+        "content_hash": "b73180a3cacd6fa2456b4d26cedfa47559a63999e508a399e5155a3b5a8fd4e5",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "1e94279afbb810e176d7559d92f84f9f5eb6608bfb80b119420edfd41ba3407c",
+        "passed": 42,
+        "run_id": "geo-delivery-focused-and-regression",
+        "skipped": 14,
+        "verdict": "PASS"
+      },
+      {
+        "command": [
+          "/Users/sangss/Desktop/video-creator-rag/.venv/bin/python",
+          "-m",
+          "compileall",
+          "-q",
+          "app",
+          "scripts"
+        ],
+        "content_hash": "9e21d6f32c30539e2e6eec6ad43bb8b84b5ba88743df35d885bde6657278e6a5",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "passed": 1,
+        "run_id": "geo-delivery-compileall",
+        "skipped": 0,
+        "verdict": "PASS"
+      },
+      {
+        "command": [
+          "/Users/sangss/Desktop/video-creator-rag/.venv/bin/alembic",
+          "heads"
+        ],
+        "content_hash": "5b8dede363e1301afaf43a3331f167563a836339c1e98d6364e4f216545559b8",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "8888ff68099f86ffbb6ec3099a4b5d336fc38d864681ae447470e98a2c073bb6",
+        "passed": 1,
+        "run_id": "geo-delivery-alembic-head",
+        "skipped": 0,
+        "verdict": "PASS"
+      },
+      {
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "content_hash": "2666757ad4285c53534d6c9b927b1b673e6c706afce2f0536ed22b20736f7885",
+        "exit_code": 0,
+        "failed": 0,
+        "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "passed": 1,
+        "run_id": "geo-delivery-git-diff-check",
+        "skipped": 0,
+        "verdict": "PASS"
+      }
+    ],
+    "workspace_hash": "c97c08f79c784c04745dcbe75efb82cda9a0f4d6c7bb421505673df9cae69fd4"
+  }
+}

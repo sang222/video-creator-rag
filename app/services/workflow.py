@@ -17,7 +17,7 @@ from app.contracts.workflow import (
     VideoProjectCreate,
 )
 from app.contracts.geo_market import TargetMarketDigest, TargetMarketProfile
-from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailureError
+from app.core.errors import ForbiddenError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
     ApprovalDecision,
@@ -76,7 +76,9 @@ class DecisionRightsService:
 
     def required_permission(self, action: str) -> str:
         try:
-            loaded = ConfigRegistryService(self.session).validate_catalog(DECISION_RIGHTS_POLICY)
+            loaded = ConfigRegistryService(self.session).validate_catalog(
+                DECISION_RIGHTS_POLICY
+            )
         except FileNotFoundError:
             return self.DEFAULT_ACTION_PERMISSIONS[action]
         for item in loaded.content["items"]:
@@ -107,7 +109,9 @@ class DecisionRightsService:
         company_id: uuid.UUID,
         action: str,
     ) -> None:
-        if not self.has_capability(user_id=user_id, company_id=company_id, action=action):
+        if not self.has_capability(
+            user_id=user_id, company_id=company_id, action=action
+        ):
             raise ForbiddenError(f"missing permission for {action}")
 
 
@@ -126,27 +130,53 @@ class VideoProjectService:
             raise NotFoundError(f"channel not found: {data.channel_workspace_id}")
         if channel.company_id != data.company_id:
             raise ValidationFailureError("channel does not belong to project company")
-        snapshot = self.session.get(CompiledChannelPolicySnapshot, data.policy_snapshot_id)
+        snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, data.policy_snapshot_id
+        )
         if snapshot is None:
             raise NotFoundError(f"policy snapshot not found: {data.policy_snapshot_id}")
         if snapshot.channel_workspace_id != data.channel_workspace_id:
-            raise ValidationFailureError("policy snapshot does not belong to project channel")
-        if snapshot.status != "active" or channel.active_policy_snapshot_id != snapshot.id:
-            raise ValidationFailureError("policy snapshot must be active for project creation")
+            raise ValidationFailureError(
+                "policy snapshot does not belong to project channel"
+            )
+        if (
+            snapshot.status != "active"
+            or channel.active_policy_snapshot_id != snapshot.id
+        ):
+            raise ValidationFailureError(
+                "policy snapshot must be active for project creation"
+            )
         if data.category_id is not None:
             category = self.session.get(ContentCategory, data.category_id)
             if category is None:
                 raise NotFoundError(f"content category not found: {data.category_id}")
-            if category.company_id != data.company_id or category.channel_workspace_id != data.channel_workspace_id:
-                raise ValidationFailureError("content category does not belong to project scope")
+            if (
+                category.company_id != data.company_id
+                or category.channel_workspace_id != data.channel_workspace_id
+            ):
+                raise ValidationFailureError(
+                    "content category does not belong to project scope"
+                )
         if data.character_binding_id is not None:
             binding = self.session.get(CharacterBinding, data.character_binding_id)
             if binding is None:
-                raise NotFoundError(f"character binding not found: {data.character_binding_id}")
-            if binding.company_id != data.company_id or binding.channel_workspace_id != data.channel_workspace_id:
-                raise ValidationFailureError("character binding does not belong to project scope")
-            if data.category_id is not None and binding.content_category_id not in (None, data.category_id):
-                raise ValidationFailureError("character binding does not belong to project category")
+                raise NotFoundError(
+                    f"character binding not found: {data.character_binding_id}"
+                )
+            if (
+                binding.company_id != data.company_id
+                or binding.channel_workspace_id != data.channel_workspace_id
+            ):
+                raise ValidationFailureError(
+                    "character binding does not belong to project scope"
+                )
+            if data.category_id is not None and binding.content_category_id not in (
+                None,
+                data.category_id,
+            ):
+                raise ValidationFailureError(
+                    "character binding does not belong to project category"
+                )
         _require_user(self.session, data.created_by_user_id, "created_by_user_id")
         if data.owner_user_id is not None:
             _require_user(self.session, data.owner_user_id, "owner_user_id")
@@ -189,21 +219,31 @@ class VideoProjectService:
         expected = {
             "channel_profile_version_id": snapshot.channel_profile_version_id,
             "native_render_policy_snapshot_ref": refs["native_render_policy"]["ref"],
-            "native_render_policy_snapshot_hash": refs["native_render_policy"]["content_hash"],
+            "native_render_policy_snapshot_hash": refs["native_render_policy"][
+                "content_hash"
+            ],
             "creative_quality_policy_ref": refs["creative_quality_policy"]["ref"],
-            "creative_quality_policy_hash": refs["creative_quality_policy"]["content_hash"],
+            "creative_quality_policy_hash": refs["creative_quality_policy"][
+                "content_hash"
+            ],
             "provider_usage_policy_ref": refs["provider_usage_policy"]["ref"],
             "provider_usage_policy_hash": refs["provider_usage_policy"]["content_hash"],
             "budget_policy_ref": refs["budget_policy"]["ref"],
             "budget_policy_hash": refs["budget_policy"]["content_hash"],
             "format_identity_contract_ref": refs["format_identity_contract"]["ref"],
-            "format_identity_contract_hash": refs["format_identity_contract"]["content_hash"],
+            "format_identity_contract_hash": refs["format_identity_contract"][
+                "content_hash"
+            ],
         }
         for field_name, expected_value in expected.items():
             provided = getattr(data, field_name)
             if provided is not None and provided != expected_value:
-                raise ValidationFailureError(f"project policy freeze mismatch: {field_name}")
-        scoped_policy = (snapshot.compiled_payload or {}).get("channel_scoped_policy") or {}
+                raise ValidationFailureError(
+                    f"project policy freeze mismatch: {field_name}"
+                )
+        scoped_policy = (snapshot.compiled_payload or {}).get(
+            "channel_scoped_policy"
+        ) or {}
         profile_raw = scoped_policy.get("target_market_profile")
         digest_raw = scoped_policy.get("target_market_digest")
         if profile_raw is not None or digest_raw is not None:
@@ -238,39 +278,59 @@ class VideoProjectService:
             raise NotFoundError(f"project not found: {project_id}")
         artifacts = list(
             self.session.scalars(
-                select(Artifact).where(Artifact.video_project_id == project_id).order_by(Artifact.created_at.asc())
+                select(Artifact)
+                .where(Artifact.video_project_id == project_id)
+                .order_by(Artifact.created_at.asc())
             ).all()
         )
         artifact_ids = [artifact.id for artifact in artifacts]
-        versions = list(
-            self.session.scalars(
-                select(ArtifactVersion)
-                .where(ArtifactVersion.artifact_id.in_(artifact_ids))
-                .order_by(ArtifactVersion.created_at.asc())
-            ).all()
-        ) if artifact_ids else []
+        versions = (
+            list(
+                self.session.scalars(
+                    select(ArtifactVersion)
+                    .where(ArtifactVersion.artifact_id.in_(artifact_ids))
+                    .order_by(ArtifactVersion.created_at.asc())
+                ).all()
+            )
+            if artifact_ids
+            else []
+        )
         reviews = list(
             self.session.scalars(
-                select(ReviewTask).where(ReviewTask.video_project_id == project_id).order_by(ReviewTask.created_at.asc())
+                select(ReviewTask)
+                .where(ReviewTask.video_project_id == project_id)
+                .order_by(ReviewTask.created_at.asc())
             ).all()
         )
         review_ids = [review.id for review in reviews]
-        revisions = list(
-            self.session.scalars(
-                select(RevisionRequest)
-                .where(RevisionRequest.review_task_id.in_(review_ids))
-                .order_by(RevisionRequest.created_at.asc())
-            ).all()
-        ) if review_ids else []
+        revisions = (
+            list(
+                self.session.scalars(
+                    select(RevisionRequest)
+                    .where(RevisionRequest.review_task_id.in_(review_ids))
+                    .order_by(RevisionRequest.created_at.asc())
+                ).all()
+            )
+            if review_ids
+            else []
+        )
         version_ids = [version.id for version in versions]
-        approvals = list(
-            self.session.scalars(
-                select(ApprovalDecision)
-                .where(ApprovalDecision.target_artifact_version_id.in_(version_ids))
-                .order_by(ApprovalDecision.created_at.asc())
-            ).all()
-        ) if version_ids else []
-        current_by_version = {artifact.current_version_id: artifact.id for artifact in artifacts if artifact.current_version_id}
+        approvals = (
+            list(
+                self.session.scalars(
+                    select(ApprovalDecision)
+                    .where(ApprovalDecision.target_artifact_version_id.in_(version_ids))
+                    .order_by(ApprovalDecision.created_at.asc())
+                ).all()
+            )
+            if version_ids
+            else []
+        )
+        current_by_version = {
+            artifact.current_version_id: artifact.id
+            for artifact in artifacts
+            if artifact.current_version_id
+        }
         version_to_artifact = {version.id: version.artifact_id for version in versions}
         return {
             "project_id": str(project.id),
@@ -279,7 +339,9 @@ class VideoProjectService:
                 {
                     "id": str(artifact.id),
                     "artifact_type": artifact.artifact_type,
-                    "current_version_id": str(artifact.current_version_id) if artifact.current_version_id else None,
+                    "current_version_id": str(artifact.current_version_id)
+                    if artifact.current_version_id
+                    else None,
                 }
                 for artifact in artifacts
             ],
@@ -297,7 +359,9 @@ class VideoProjectService:
                     "id": str(review.id),
                     "target_type": review.target_type,
                     "target_id": str(review.target_id),
-                    "target_artifact_version_id": str(review.target_artifact_version_id) if review.target_artifact_version_id else None,
+                    "target_artifact_version_id": str(review.target_artifact_version_id)
+                    if review.target_artifact_version_id
+                    else None,
                     "status": review.status,
                 }
                 for review in reviews
@@ -305,8 +369,14 @@ class VideoProjectService:
             "revision_requests": [
                 {
                     "id": str(revision.id),
-                    "target_artifact_version_id": str(revision.target_artifact_version_id),
-                    "resolved_by_artifact_version_id": str(revision.resolved_by_artifact_version_id) if revision.resolved_by_artifact_version_id else None,
+                    "target_artifact_version_id": str(
+                        revision.target_artifact_version_id
+                    ),
+                    "resolved_by_artifact_version_id": str(
+                        revision.resolved_by_artifact_version_id
+                    )
+                    if revision.resolved_by_artifact_version_id
+                    else None,
                     "status": revision.status,
                 }
                 for revision in revisions
@@ -314,11 +384,16 @@ class VideoProjectService:
             "approval_decisions": [
                 {
                     "id": str(approval.id),
-                    "target_artifact_version_id": str(approval.target_artifact_version_id) if approval.target_artifact_version_id else None,
+                    "target_artifact_version_id": str(
+                        approval.target_artifact_version_id
+                    )
+                    if approval.target_artifact_version_id
+                    else None,
                     "decision": approval.decision,
                     "stale_for_current_artifact_version": (
                         approval.target_artifact_version_id not in current_by_version
-                        and version_to_artifact.get(approval.target_artifact_version_id) is not None
+                        and version_to_artifact.get(approval.target_artifact_version_id)
+                        is not None
                     ),
                 }
                 for approval in approvals
@@ -340,7 +415,9 @@ class ArtifactService:
         if project is None:
             raise NotFoundError(f"project not found: {data.video_project_id}")
         _require_user(self.session, data.created_by_user_id, "created_by_user_id")
-        _require_registry_key(self.session, ARTIFACT_TYPE_REGISTRY, data.artifact_type, "artifact_type")
+        _require_registry_key(
+            self.session, ARTIFACT_TYPE_REGISTRY, data.artifact_type, "artifact_type"
+        )
         DecisionRightsService(self.session).require_capability(
             user_id=data.created_by_user_id,
             company_id=project.company_id,
@@ -359,7 +436,10 @@ class ArtifactService:
             target_id=artifact.id,
             company_id=project.company_id,
             correlation_id=correlation_id,
-            payload={"video_project_id": str(project.id), "artifact_type": artifact.artifact_type},
+            payload={
+                "video_project_id": str(project.id),
+                "artifact_type": artifact.artifact_type,
+            },
         )
         return artifact
 
@@ -382,9 +462,14 @@ class ArtifactService:
             company_id=project.company_id,
             action="artifact_version.create",
         )
-        max_version = self.session.scalar(
-            select(func.max(ArtifactVersion.version_number)).where(ArtifactVersion.artifact_id == artifact.id)
-        ) or 0
+        max_version = (
+            self.session.scalar(
+                select(func.max(ArtifactVersion.version_number)).where(
+                    ArtifactVersion.artifact_id == artifact.id
+                )
+            )
+            or 0
+        )
         if max_version == 0 and data.parent_version_id is not None:
             raise ValidationFailureError("v1 cannot have a parent version")
         if max_version > 0 and data.parent_version_id is None:
@@ -392,9 +477,13 @@ class ArtifactService:
         if data.parent_version_id is not None:
             parent = self.session.get(ArtifactVersion, data.parent_version_id)
             if parent is None:
-                raise NotFoundError(f"parent artifact version not found: {data.parent_version_id}")
+                raise NotFoundError(
+                    f"parent artifact version not found: {data.parent_version_id}"
+                )
             if parent.artifact_id != artifact.id:
-                raise ValidationFailureError("parent version must belong to the same artifact")
+                raise ValidationFailureError(
+                    "parent version must belong to the same artifact"
+                )
         _validate_allowance_payloads(data)
         payload = data.model_dump()
         payload["version_number"] = max_version + 1
@@ -427,7 +516,9 @@ class ArtifactService:
     def get_artifact(self, artifact_id: uuid.UUID) -> Artifact | None:
         return self.session.get(Artifact, artifact_id)
 
-    def get_artifact_version(self, artifact_version_id: uuid.UUID) -> ArtifactVersion | None:
+    def get_artifact_version(
+        self, artifact_version_id: uuid.UUID
+    ) -> ArtifactVersion | None:
         return self.session.get(ArtifactVersion, artifact_version_id)
 
 
@@ -447,7 +538,9 @@ class ReviewService:
         _require_user(self.session, data.requested_by_user_id, "requested_by_user_id")
         if data.assigned_to_user_id is not None:
             _require_user(self.session, data.assigned_to_user_id, "assigned_to_user_id")
-        _require_registry_key(self.session, REVIEW_TYPE_REGISTRY, data.review_type, "review_type")
+        _require_registry_key(
+            self.session, REVIEW_TYPE_REGISTRY, data.review_type, "review_type"
+        )
         self._validate_exact_review_target(project, data)
         DecisionRightsService(self.session).require_capability(
             user_id=data.requested_by_user_id,
@@ -472,7 +565,11 @@ class ReviewService:
                 "review_type": review_task.review_type,
                 "target_type": review_task.target_type,
                 "target_id": str(review_task.target_id),
-                "target_artifact_version_id": str(review_task.target_artifact_version_id) if review_task.target_artifact_version_id else None,
+                "target_artifact_version_id": str(
+                    review_task.target_artifact_version_id
+                )
+                if review_task.target_artifact_version_id
+                else None,
             },
         )
         return review_task
@@ -508,7 +605,10 @@ class ReviewService:
             target_id=finding.id,
             company_id=project.company_id,
             correlation_id=correlation_id,
-            payload={"review_task_id": str(review_task.id), "severity": finding.severity},
+            payload={
+                "review_task_id": str(review_task.id),
+                "severity": finding.severity,
+            },
         )
         return finding
 
@@ -528,8 +628,13 @@ class ReviewService:
         if project is None:
             raise NotFoundError(f"project not found: {review_task.video_project_id}")
         _require_user(self.session, actor_user_id, "actor_user_id")
-        if review_task.assigned_to_user_id is not None and review_task.assigned_to_user_id != actor_user_id:
-            raise ForbiddenError("only the assigned reviewer may complete the review task")
+        if (
+            review_task.assigned_to_user_id is not None
+            and review_task.assigned_to_user_id != actor_user_id
+        ):
+            raise ForbiddenError(
+                "only the assigned reviewer may complete the review task"
+            )
         DecisionRightsService(self.session).require_capability(
             user_id=actor_user_id,
             company_id=project.company_id,
@@ -541,7 +646,9 @@ class ReviewService:
             "type": "explicit_human_approval_resolution",
             "resolution_ref": resolution_ref,
             "approval_decision_ids": [str(item) for item in approval_decision_ids],
-            "prior_review_reason_codes_retained": list(review_task.review_reason_codes or []),
+            "prior_review_reason_codes_retained": list(
+                review_task.review_reason_codes or []
+            ),
         }
         existing_refs = list(review_task.evidence_refs or [])
         if evidence not in existing_refs:
@@ -582,11 +689,17 @@ class ReviewService:
         project = self.session.get(VideoProject, review_task.video_project_id)
         if project is None:
             raise NotFoundError(f"project not found: {review_task.video_project_id}")
-        target_version = self.session.get(ArtifactVersion, data.target_artifact_version_id)
+        target_version = self.session.get(
+            ArtifactVersion, data.target_artifact_version_id
+        )
         if target_version is None:
-            raise NotFoundError(f"artifact version not found: {data.target_artifact_version_id}")
+            raise NotFoundError(
+                f"artifact version not found: {data.target_artifact_version_id}"
+            )
         if review_task.target_artifact_version_id != target_version.id:
-            raise ValidationFailureError("revision request must target the review task artifact version")
+            raise ValidationFailureError(
+                "revision request must target the review task artifact version"
+            )
         _require_user(self.session, data.requested_by_user_id, "requested_by_user_id")
         DecisionRightsService(self.session).require_capability(
             user_id=data.requested_by_user_id,
@@ -624,18 +737,30 @@ class ReviewService:
         revision = self.session.get(RevisionRequest, revision_request_id)
         if revision is None:
             raise NotFoundError(f"revision request not found: {revision_request_id}")
-        old_version = self.session.get(ArtifactVersion, revision.target_artifact_version_id)
+        old_version = self.session.get(
+            ArtifactVersion, revision.target_artifact_version_id
+        )
         new_version = self.session.get(ArtifactVersion, resolved_by_artifact_version_id)
         if old_version is None or new_version is None:
             raise NotFoundError("artifact version not found for revision resolution")
         if old_version.id == new_version.id:
-            raise ValidationFailureError("revision resolution requires a new artifact version")
+            raise ValidationFailureError(
+                "revision resolution requires a new artifact version"
+            )
         if old_version.artifact_id != new_version.artifact_id:
-            raise ValidationFailureError("resolved version must belong to the same artifact")
+            raise ValidationFailureError(
+                "resolved version must belong to the same artifact"
+            )
         if new_version.version_number <= old_version.version_number:
-            raise ValidationFailureError("resolved version must be newer than the target version")
+            raise ValidationFailureError(
+                "resolved version must be newer than the target version"
+            )
         review_task = self.session.get(ReviewTask, revision.review_task_id)
-        project = self.session.get(VideoProject, review_task.video_project_id) if review_task else None
+        project = (
+            self.session.get(VideoProject, review_task.video_project_id)
+            if review_task
+            else None
+        )
         if project is None:
             raise NotFoundError("project not found for revision request")
         actor_id = actor_user_id or new_version.created_by_user_id
@@ -665,26 +790,42 @@ class ReviewService:
         )
         return revision
 
-    def _validate_exact_review_target(self, project: VideoProject, data: ReviewTaskCreate) -> None:
+    def _validate_exact_review_target(
+        self, project: VideoProject, data: ReviewTaskCreate
+    ) -> None:
         if data.target_type == "artifact_version":
             if data.target_artifact_version_id is None:
-                raise ValidationFailureError("artifact version review requires target_artifact_version_id")
+                raise ValidationFailureError(
+                    "artifact version review requires target_artifact_version_id"
+                )
             if data.target_id != data.target_artifact_version_id:
-                raise ValidationFailureError("artifact version review target_id must equal target_artifact_version_id")
+                raise ValidationFailureError(
+                    "artifact version review target_id must equal target_artifact_version_id"
+                )
             version = self.session.get(ArtifactVersion, data.target_artifact_version_id)
             if version is None:
-                raise NotFoundError(f"artifact version not found: {data.target_artifact_version_id}")
+                raise NotFoundError(
+                    f"artifact version not found: {data.target_artifact_version_id}"
+                )
             artifact = self.session.get(Artifact, version.artifact_id)
             if artifact is None or artifact.video_project_id != project.id:
-                raise ValidationFailureError("artifact version does not belong to review project")
+                raise ValidationFailureError(
+                    "artifact version does not belong to review project"
+                )
             return
         if data.target_type == "video_project":
             if data.target_id != project.id:
-                raise ValidationFailureError("video_project review target_id must equal video_project_id")
+                raise ValidationFailureError(
+                    "video_project review target_id must equal video_project_id"
+                )
             if data.target_artifact_version_id is not None:
-                raise ValidationFailureError("video_project review cannot carry artifact version target")
+                raise ValidationFailureError(
+                    "video_project review cannot carry artifact version target"
+                )
             return
-        raise ValidationFailureError(f"unsupported review target_type: {data.target_type}")
+        raise ValidationFailureError(
+            f"unsupported review target_type: {data.target_type}"
+        )
 
 
 class ApprovalService:
@@ -724,7 +865,10 @@ class ApprovalService:
                 target_id=data.target_id,
                 company_id=project.company_id,
                 correlation_id=correlation_id,
-                payload={"reason": "SELF_APPROVAL_BLOCKED", "target_artifact_version_id": str(version.id)},
+                payload={
+                    "reason": "SELF_APPROVAL_BLOCKED",
+                    "target_artifact_version_id": str(version.id),
+                },
             )
             raise ForbiddenError("creator cannot self-approve own artifact version")
         try:
@@ -774,7 +918,9 @@ class ApprovalService:
                 "decision": decision.decision,
                 "target_type": decision.target_type,
                 "target_id": str(decision.target_id),
-                "target_artifact_version_id": str(decision.target_artifact_version_id) if decision.target_artifact_version_id else None,
+                "target_artifact_version_id": str(decision.target_artifact_version_id)
+                if decision.target_artifact_version_id
+                else None,
             },
         )
         if data.decision in {"rejected", "blocked"}:
@@ -800,23 +946,47 @@ class ApprovalService:
         version: ArtifactVersion | None,
         review_task_id: uuid.UUID,
     ) -> ReviewTask:
-        if data.decision != "approved" or data.target_type != "artifact_version" or version is None:
-            raise ValidationFailureError("assigned final reviewer authority only supports exact artifact approval")
+        if (
+            data.decision != "approved"
+            or data.target_type != "artifact_version"
+            or version is None
+        ):
+            raise ValidationFailureError(
+                "assigned final reviewer authority only supports exact artifact approval"
+            )
+        target_artifact = self.session.get(Artifact, version.artifact_id)
+        if (
+            target_artifact is not None
+            and target_artifact.artifact_type
+            == "mr1_provider_attempt_continuation_review_manifest"
+        ):
+            return self._validate_provider_continuation_review_authority(
+                data=data,
+                project=project,
+                version=version,
+                target_artifact=target_artifact,
+                review_task_id=review_task_id,
+            )
         if project.project_type not in {
             "PKG1_FIRST_PRODUCTION_PACKAGE",
             "PKG1_MARKET_REVISION",
+            "PKG1_SC04_REVISION",
         }:
-            raise ValidationFailureError("assigned final reviewer authority is limited to PKG1")
+            raise ValidationFailureError(
+                "assigned final reviewer authority is limited to PKG1"
+            )
         approval_ref = data.metadata.get("approval_ref")
-        required_prefix = (
-            "operator-approval://pkg1-market-revision/"
-            if project.project_type == "PKG1_MARKET_REVISION"
-            else "operator-approval://pkg1/"
-        )
+        required_prefix = {
+            "PKG1_FIRST_PRODUCTION_PACKAGE": "operator-approval://pkg1/",
+            "PKG1_MARKET_REVISION": "operator-approval://pkg1-market-revision/",
+            "PKG1_SC04_REVISION": "operator-approval://pkg1-sc04-revision/",
+        }[project.project_type]
         if not isinstance(approval_ref, str) or not approval_ref.startswith(
             required_prefix
         ):
-            raise ValidationFailureError("assigned final reviewer approval requires an explicit PKG1 operator ref")
+            raise ValidationFailureError(
+                "assigned final reviewer approval requires an explicit PKG1 operator ref"
+            )
         review_task = self.session.get(ReviewTask, review_task_id)
         if review_task is None:
             raise NotFoundError(f"review task not found: {review_task_id}")
@@ -828,8 +998,14 @@ class ApprovalService:
             or review_task.target_artifact_version_id is None
         ):
             raise ForbiddenError("actor is not the assigned PKG1 final reviewer")
-        package_version = self.session.get(ArtifactVersion, review_task.target_artifact_version_id)
-        package_artifact = self.session.get(Artifact, package_version.artifact_id) if package_version else None
+        package_version = self.session.get(
+            ArtifactVersion, review_task.target_artifact_version_id
+        )
+        package_artifact = (
+            self.session.get(Artifact, package_version.artifact_id)
+            if package_version
+            else None
+        )
         if (
             package_version is None
             or package_artifact is None
@@ -838,23 +1014,129 @@ class ApprovalService:
             or package_artifact.current_version_id != package_version.id
             or review_task.target_id != package_version.id
         ):
-            raise ValidationFailureError("final review is not bound to the current PKG1 package manifest")
+            raise ValidationFailureError(
+                "final review is not bound to the current PKG1 package manifest"
+            )
         target_artifact = self.session.get(Artifact, version.artifact_id)
         if target_artifact is None or target_artifact.video_project_id != project.id:
-            raise ValidationFailureError("approval target does not belong to the reviewed PKG1 project")
-        if project.project_type == "PKG1_MARKET_REVISION":
+            raise ValidationFailureError(
+                "approval target does not belong to the reviewed PKG1 project"
+            )
+        if project.project_type in {
+            "PKG1_MARKET_REVISION",
+            "PKG1_SC04_REVISION",
+        }:
             if version.id != package_version.id:
                 raise ValidationFailureError(
-                    "market revision final review may approve only the exact package manifest"
+                    "package revision final review may approve only the exact package manifest"
                 )
             return review_task
         manifest_version_ids = {
             item.get("artifact_version_id")
-            for item in ((package_version.content or {}).get("artifacts") or {}).values()
+            for item in (
+                (package_version.content or {}).get("artifacts") or {}
+            ).values()
             if isinstance(item, dict)
         }
-        if version.id != package_version.id and str(version.id) not in manifest_version_ids:
-            raise ValidationFailureError("approval target is not an exact component of the reviewed PKG1 manifest")
+        if (
+            version.id != package_version.id
+            and str(version.id) not in manifest_version_ids
+        ):
+            raise ValidationFailureError(
+                "approval target is not an exact component of the reviewed PKG1 manifest"
+            )
+        return review_task
+
+    def _validate_provider_continuation_review_authority(
+        self,
+        *,
+        data: ApprovalDecisionCreate,
+        project: VideoProject,
+        version: ArtifactVersion,
+        target_artifact: Artifact,
+        review_task_id: uuid.UUID,
+    ) -> ReviewTask:
+        metadata = data.metadata
+        decision_basis = data.decision_basis
+        approval_ref = metadata.get("approval_ref")
+        if (
+            not isinstance(approval_ref, str)
+            or not approval_ref.startswith(
+                "operator-approval://mr1-provider-continuation/"
+            )
+            or metadata.get("approval_scope")
+            != "MR1_EXACT_PROVIDER_ATTEMPT_CONTINUATION"
+            or metadata.get("authorization_content_hash")
+            != content_hash(decision_basis)
+            or metadata.get("operator_review_manifest_artifact_version_id")
+            != str(version.id)
+            or metadata.get("operator_review_manifest_content_hash")
+            != version.content_hash
+            or metadata.get("operator_review_task_id") != str(review_task_id)
+            or decision_basis.get(
+                "operator_review_manifest_artifact_version_id"
+            )
+            != str(version.id)
+            or decision_basis.get("operator_review_manifest_content_hash")
+            != version.content_hash
+            or decision_basis.get("operator_review_task_id")
+            != str(review_task_id)
+        ):
+            raise ValidationFailureError(
+                "continuation approval is not bound to the exact operator review"
+            )
+        review_task = self.session.get(ReviewTask, review_task_id)
+        if review_task is None:
+            raise NotFoundError(f"review task not found: {review_task_id}")
+        expected_context_ref = (
+            f"mr1-provider-continuation://{decision_basis.get('run_id')}/"
+            f"{version.id}?content_hash={version.content_hash}"
+        )
+        manifest_evidence = {
+            "type": "mr1_provider_attempt_continuation_review_manifest",
+            "artifact_version_id": str(version.id),
+            "content_hash": version.content_hash,
+        }
+        prior_snapshot = decision_basis.get("prior_consumed_attempt") or {}
+        prior_evidence = {
+            "type": "mr1_prior_consumed_pexels_attempt",
+            "artifact_version_id": prior_snapshot.get("artifact_version_id"),
+            "content_hash": prior_snapshot.get("content_hash"),
+            "snapshot_content_hash": prior_snapshot.get(
+                "snapshot_content_hash"
+            ),
+        }
+        evidence_refs = list(review_task.evidence_refs or [])
+        if (
+            target_artifact.video_project_id != project.id
+            or target_artifact.current_version_id != version.id
+            or content_hash(version.content or {}) != version.content_hash
+            or review_task.video_project_id != project.id
+            or review_task.target_type != "artifact_version"
+            or review_task.target_id != version.id
+            or review_task.target_artifact_version_id != version.id
+            or review_task.review_type != "final_human"
+            or review_task.status not in {"open", "in_progress", "completed"}
+            or review_task.assigned_to_user_id != data.decided_by_user_id
+            or review_task.requested_by_user_id != data.decided_by_user_id
+            or review_task.review_reason_codes
+            != ["MR1_EXACT_PROVIDER_ATTEMPT_CONTINUATION_REVIEW_REQUIRED"]
+            or review_task.evidence_required is not True
+            or manifest_evidence not in evidence_refs
+            or prior_evidence not in evidence_refs
+            or review_task.review_scope
+            != (
+                "Review the exact immutable MR1 Pexels continuation manifest, "
+                "including the prior consumed attempt, exact approved query "
+                "authority, and any pending query amendments. This task authorizes "
+                "no provider call until the assigned reviewer submits the exact "
+                "manifest-bound operator decision."
+            )
+            or review_task.context_pack_ref != expected_context_ref
+        ):
+            raise ForbiddenError(
+                "actor is not the exact assigned continuation reviewer"
+            )
         return review_task
 
     def is_decision_stale_for_current_version(self, decision_id: uuid.UUID) -> bool:
@@ -877,12 +1159,18 @@ class ApprovalService:
     ) -> tuple[VideoProject, ArtifactVersion | None]:
         if data.target_type == "artifact_version":
             if data.target_artifact_version_id is None:
-                raise ValidationFailureError("artifact version approval requires target_artifact_version_id")
+                raise ValidationFailureError(
+                    "artifact version approval requires target_artifact_version_id"
+                )
             if data.target_id != data.target_artifact_version_id:
-                raise ValidationFailureError("artifact version approval target_id must equal target_artifact_version_id")
+                raise ValidationFailureError(
+                    "artifact version approval target_id must equal target_artifact_version_id"
+                )
             version = self.session.get(ArtifactVersion, data.target_artifact_version_id)
             if version is None:
-                raise NotFoundError(f"artifact version not found: {data.target_artifact_version_id}")
+                raise NotFoundError(
+                    f"artifact version not found: {data.target_artifact_version_id}"
+                )
             artifact = self.session.get(Artifact, version.artifact_id)
             if artifact is None:
                 raise NotFoundError(f"artifact not found: {version.artifact_id}")
@@ -894,21 +1182,36 @@ class ApprovalService:
             review_task = self.session.get(ReviewTask, data.target_id)
             if review_task is None:
                 raise NotFoundError(f"review task not found: {data.target_id}")
-            if review_task.target_artifact_version_id != data.target_artifact_version_id:
-                raise ValidationFailureError("approval must carry the exact review task artifact version")
+            if (
+                review_task.target_artifact_version_id
+                != data.target_artifact_version_id
+            ):
+                raise ValidationFailureError(
+                    "approval must carry the exact review task artifact version"
+                )
             project = self.session.get(VideoProject, review_task.video_project_id)
             if project is None:
-                raise NotFoundError(f"project not found: {review_task.video_project_id}")
-            version = self.session.get(ArtifactVersion, data.target_artifact_version_id) if data.target_artifact_version_id else None
+                raise NotFoundError(
+                    f"project not found: {review_task.video_project_id}"
+                )
+            version = (
+                self.session.get(ArtifactVersion, data.target_artifact_version_id)
+                if data.target_artifact_version_id
+                else None
+            )
             return project, version
         if data.target_type == "video_project":
             project = self.session.get(VideoProject, data.target_id)
             if project is None:
                 raise NotFoundError(f"project not found: {data.target_id}")
             if data.target_artifact_version_id is not None:
-                raise ValidationFailureError("video_project approval cannot carry artifact version target")
+                raise ValidationFailureError(
+                    "video_project approval cannot carry artifact version target"
+                )
             return project, None
-        raise ValidationFailureError(f"unsupported approval target_type: {data.target_type}")
+        raise ValidationFailureError(
+            f"unsupported approval target_type: {data.target_type}"
+        )
 
 
 def deterministic_artifact_content_hash(content: dict[str, Any]) -> str:

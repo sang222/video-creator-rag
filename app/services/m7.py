@@ -8,6 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts import AuditEnvelope, EventEnvelope
+from app.contracts.geo_delivery import (
+    ActualPublishDestination,
+    DeliveryVerdict,
+    DestinationRuntimeContract,
+    StrictMarketLineageEnvelope,
+)
 from app.contracts.m7 import (
     ActualDisclosureConfirmationContract,
     ActualPublishMetadataContract,
@@ -23,6 +29,9 @@ from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.db.models import (
     AccessibilityQCReport,
     AssetManifestSnapshot,
+    ApprovalDecision,
+    Artifact,
+    ArtifactVersion,
     ManualPublishConfirmation,
     MediaQCReport,
     ProductionArtifactRun,
@@ -36,10 +45,26 @@ from app.db.models import (
 )
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
+from app.services.geo_delivery import StrictMarketLineageService
 
 
-SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
-RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_")
+SECRET_KEY_FRAGMENTS = {
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential_value",
+}
+RAW_SECRET_MARKERS = (
+    "sk-",
+    "pk_live_",
+    "BEGIN PRIVATE KEY",
+    "anthropic-",
+    "xoxb-",
+    "ghp_",
+)
 
 
 class PublishHandoffService:
@@ -52,16 +77,56 @@ class PublishHandoffService:
         data: PublishHandoffCreate,
         correlation_id: str = "m7-publish-handoff-create",
     ) -> PublishHandoffPackage:
-        package = self.session.get(RenderPackageSnapshot, data.render_package_snapshot_id)
+        package = self.session.get(
+            RenderPackageSnapshot, data.render_package_snapshot_id
+        )
         if package is None:
-            raise NotFoundError(f"render package not found: {data.render_package_snapshot_id}")
+            raise NotFoundError(
+                f"render package not found: {data.render_package_snapshot_id}"
+            )
         project = _require_project(self.session, package.video_project_id)
-        run = self.session.get(ProductionArtifactRun, package.production_artifact_run_id) if package.production_artifact_run_id else None
-        render_spec = self.session.get(RenderSpecSnapshot, package.render_spec_snapshot_id)
+        run = (
+            self.session.get(ProductionArtifactRun, package.production_artifact_run_id)
+            if package.production_artifact_run_id
+            else None
+        )
+        render_spec = self.session.get(
+            RenderSpecSnapshot, package.render_spec_snapshot_id
+        )
         media_qc = _latest_media_qc(self.session, package)
         accessibility_qc = _latest_accessibility_qc(self.session, package, run)
-        source_manifest = _source_manifest_for_package(self.session, package, render_spec, run)
+        source_manifest = _source_manifest_for_package(
+            self.session, package, render_spec, run
+        )
         asset_manifest = _asset_manifest_for_package(self.session, render_spec, run)
+        strict_reason_codes: list[str] = []
+        if data.strict_market_lineage is not None:
+            assert data.destination_runtime is not None
+            strict_service = StrictMarketLineageService()
+            _validate_strict_approval_binding(
+                self.session,
+                data.strict_market_lineage,
+                expected_video_project_id=project.id,
+            )
+            strict_reason_codes = strict_service.validate_handoff_context(
+                envelope=data.strict_market_lineage,
+                destination=data.destination_runtime,
+                project_policy_snapshot_id=project.policy_snapshot_id,
+                target_platform=data.target_platform,
+            )
+            fatal = [
+                reason
+                for reason in strict_reason_codes
+                if reason
+                not in {
+                    "DESTINATION_NOT_VERIFIED",
+                    "DESTINATION_PLATFORM_CHANNEL_ID_MISSING",
+                }
+            ]
+            if fatal:
+                raise ValidationFailureError(
+                    "STRICT_MARKET_HANDOFF_LINEAGE_MISMATCH:" + ",".join(fatal)
+                )
 
         planned_metadata = self._compile_planned_metadata(
             project=project,
@@ -87,6 +152,14 @@ class PublishHandoffService:
             media_qc=media_qc,
             accessibility_qc=accessibility_qc,
         )
+        if strict_reason_codes:
+            checklist = checklist.model_copy(
+                update={
+                    "blocking_reason_codes": _dedupe(
+                        [*checklist.blocking_reason_codes, *strict_reason_codes]
+                    )
+                }
+            )
         instructions = self._compile_operator_instructions(
             target_platform=data.target_platform,
             target_surface=data.target_surface,
@@ -117,12 +190,64 @@ class PublishHandoffService:
             render_package_snapshot_id=package.id,
             render_spec_snapshot_id=package.render_spec_snapshot_id,
             media_qc_report_id=media_qc.id if media_qc else None,
-            accessibility_qc_report_id=accessibility_qc.id if accessibility_qc else None,
+            accessibility_qc_report_id=accessibility_qc.id
+            if accessibility_qc
+            else None,
             source_manifest_snapshot_id=source_manifest.id if source_manifest else None,
             asset_manifest_snapshot_id=asset_manifest.id if asset_manifest else None,
             target_platform=data.target_platform,
             target_surface=data.target_surface,
             destination_binding_id=data.destination_binding_id,
+            destination_binding_fingerprint=(
+                data.strict_market_lineage.approved_destination_fingerprint
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            market_policy_hash=(
+                data.strict_market_lineage.approved_market_policy_hash
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            approved_package_hash=(
+                data.strict_market_lineage.approved_package_hash
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            approval_decision_id=(
+                data.strict_market_lineage.approval_decision_id
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            target_market_profile_ref=(
+                data.strict_market_lineage.target_market_profile_ref
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            target_market_profile_hash=(
+                data.strict_market_lineage.target_market_profile_hash
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            market_alignment_dossier_ref=(
+                data.strict_market_lineage.market_alignment_dossier_ref
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            market_alignment_dossier_hash=(
+                data.strict_market_lineage.market_alignment_dossier_hash
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            approved_publish_timezone=(
+                data.strict_market_lineage.approved_publish_timezone
+                if data.strict_market_lineage is not None
+                else None
+            ),
+            approved_publish_window=(
+                data.strict_market_lineage.approved_publish_window
+                if data.strict_market_lineage is not None
+                else None
+            ),
             render_variant_id=data.render_variant_id,
             package_state=package_state,
             planned_metadata=planned_metadata.model_dump(mode="json"),
@@ -133,10 +258,29 @@ class PublishHandoffService:
             operator_instructions=instructions.model_dump(mode="json"),
             risk_summary={
                 "media_qc_state": media_qc.qc_state if media_qc else "MISSING",
-                "accessibility_qc_state": accessibility_qc.qc_state if accessibility_qc else "MISSING",
+                "accessibility_qc_state": accessibility_qc.qc_state
+                if accessibility_qc
+                else "MISSING",
                 "ai_disclosure_required": planned_metadata.planned_ai_disclosure_required,
                 "rights_confirmation_required": True,
                 "no_platform_api_call": True,
+                "strict_market_lineage": (
+                    data.strict_market_lineage.model_dump(mode="json")
+                    if data.strict_market_lineage is not None
+                    else None
+                ),
+                "destination_runtime": (
+                    data.destination_runtime.model_dump(mode="json")
+                    if data.destination_runtime is not None
+                    else None
+                ),
+                "strict_market_lineage_state": (
+                    "BLOCKED_PUBLISH"
+                    if strict_reason_codes
+                    else "PASS"
+                    if data.strict_market_lineage is not None
+                    else "LEGACY_NOT_BOUND"
+                ),
             },
             reason_codes=reason_codes,
             next_action=next_action,
@@ -176,7 +320,10 @@ class PublishHandoffService:
                 company_id=handoff.company_id,
                 correlation_id=correlation_id,
                 reason_code=checklist.blocking_reason_codes[0],
-                payload={"reason_codes": checklist.blocking_reason_codes, "next_action": handoff.next_action},
+                payload={
+                    "reason_codes": checklist.blocking_reason_codes,
+                    "next_action": handoff.next_action,
+                },
             )
         return handoff
 
@@ -198,15 +345,35 @@ class PublishHandoffService:
         handoff = self.require(handoff_id)
         if handoff.package_state == "BLOCKED":
             raise ValidationFailureError("blocked handoff cannot be marked ready")
-        package = self.session.get(RenderPackageSnapshot, handoff.render_package_snapshot_id)
+        package = self.session.get(
+            RenderPackageSnapshot, handoff.render_package_snapshot_id
+        )
         if package is None:
-            raise NotFoundError(f"render package not found: {handoff.render_package_snapshot_id}")
+            raise NotFoundError(
+                f"render package not found: {handoff.render_package_snapshot_id}"
+            )
         media_qc = _latest_media_qc(self.session, package)
-        blockers = _handoff_blockers(package, media_qc)
+        strict_envelope, _strict_destination = _strict_handoff_context(handoff)
+        if strict_envelope is not None:
+            _validate_strict_approval_binding(
+                self.session,
+                strict_envelope,
+                expected_video_project_id=handoff.video_project_id,
+            )
+        blockers = _dedupe(
+            [
+                *_handoff_blockers(package, media_qc),
+                *_strict_handoff_blockers(handoff),
+            ]
+        )
         if blockers:
             handoff.package_state = "BLOCKED"
-            handoff.reason_codes = _dedupe([*handoff.reason_codes, "PUBLISH_HANDOFF_BLOCKED", *blockers])
-            handoff.next_action = "Fix render package or QC blockers before manual upload."
+            handoff.reason_codes = _dedupe(
+                [*handoff.reason_codes, "PUBLISH_HANDOFF_BLOCKED", *blockers]
+            )
+            handoff.next_action = (
+                "Fix render package or QC blockers before manual upload."
+            )
             self.session.flush()
             _record_m7_event(
                 self.session,
@@ -257,12 +424,20 @@ class PublishHandoffService:
     ) -> PlannedPublishMetadataContract:
         source_blob = source_manifest.source_manifest_blob if source_manifest else {}
         asset_blob = asset_manifest.asset_manifest_blob if asset_manifest else {}
-        ai_required = _contains_ai_disclosure_signal(source_blob) or _contains_ai_disclosure_signal(asset_blob)
+        ai_required = _contains_ai_disclosure_signal(
+            source_blob
+        ) or _contains_ai_disclosure_signal(asset_blob)
         rights_summary = _rights_summary(source_blob=source_blob, asset_blob=asset_blob)
         source_summary = {
-            "source_manifest_snapshot_id": str(source_manifest.id) if source_manifest else None,
-            "asset_manifest_snapshot_id": str(asset_manifest.id) if asset_manifest else None,
-            "source_ref_count": len(source_blob.get("source_refs", [])) if isinstance(source_blob.get("source_refs"), list) else 0,
+            "source_manifest_snapshot_id": str(source_manifest.id)
+            if source_manifest
+            else None,
+            "asset_manifest_snapshot_id": str(asset_manifest.id)
+            if asset_manifest
+            else None,
+            "source_ref_count": len(source_blob.get("source_refs", []))
+            if isinstance(source_blob.get("source_refs"), list)
+            else 0,
         }
         render_spec_blob = render_spec.render_spec_blob if render_spec else {}
         language = _caption_language(render_spec_blob)
@@ -278,7 +453,9 @@ class PublishHandoffService:
             "planned_privacy_status": "UNKNOWN",
             "planned_made_for_kids": None,
             "planned_ai_disclosure_required": ai_required,
-            "planned_ai_disclosure_reason": "Source manifest indicates AI placeholder or realistic generated scene." if ai_required else None,
+            "planned_ai_disclosure_reason": "Source manifest indicates AI placeholder or realistic generated scene."
+            if ai_required
+            else None,
             "planned_paid_promotion_disclosure_required": False,
             "planned_music_license_summary": None,
             "planned_rights_summary": rights_summary,
@@ -306,7 +483,9 @@ class PublishHandoffService:
                 description="Upload the final MP4 file listed in planned files.",
                 required=True,
                 state="CONFIRMED" if package.final_video_ref else "BLOCKED",
-                reason_code=None if package.final_video_ref else "RENDER_PACKAGE_NOT_READY",
+                reason_code=None
+                if package.final_video_ref
+                else "RENDER_PACKAGE_NOT_READY",
                 evidence_ref=_file_evidence(package.final_video_ref),
                 operator_help_text="Use the final video file path, not a database id.",
             ),
@@ -317,7 +496,9 @@ class PublishHandoffService:
                 description="Paste the planned title and description unless the operator intentionally changes them.",
                 required=True,
                 state="CONFIRMED" if planned_metadata.planned_title else "BLOCKED",
-                reason_code=None if planned_metadata.planned_title else "ACTUAL_METADATA_CAPTURED",
+                reason_code=None
+                if planned_metadata.planned_title
+                else "ACTUAL_METADATA_CAPTURED",
                 operator_help_text="If you change metadata during upload, copy the actual values back into VCOS.",
             ),
             PublishChecklistItem(
@@ -326,8 +507,12 @@ class PublishHandoffService:
                 label="Thumbnail reference reviewed",
                 description="Use the planned thumbnail when present, otherwise use the platform default or a human-approved thumbnail.",
                 required=False,
-                state="CONFIRMED" if planned_metadata.planned_thumbnail_ref else "NOT_REQUIRED",
-                reason_code=None if planned_metadata.planned_thumbnail_ref else "THUMBNAIL_REF_MISSING",
+                state="CONFIRMED"
+                if planned_metadata.planned_thumbnail_ref
+                else "NOT_REQUIRED",
+                reason_code=None
+                if planned_metadata.planned_thumbnail_ref
+                else "THUMBNAIL_REF_MISSING",
                 operator_help_text="Record the actual thumbnail ref or hash after upload when it differs.",
             ),
             PublishChecklistItem(
@@ -347,8 +532,12 @@ class PublishHandoffService:
                 label="AI disclosure decision",
                 description="Check the platform AI disclosure box when the planned package says it is required.",
                 required=planned_metadata.planned_ai_disclosure_required,
-                state="PENDING" if planned_metadata.planned_ai_disclosure_required else "NOT_REQUIRED",
-                reason_code="AI_DISCLOSURE_REQUIRED" if planned_metadata.planned_ai_disclosure_required else None,
+                state="PENDING"
+                if planned_metadata.planned_ai_disclosure_required
+                else "NOT_REQUIRED",
+                reason_code="AI_DISCLOSURE_REQUIRED"
+                if planned_metadata.planned_ai_disclosure_required
+                else None,
                 operator_help_text="Copy the exact disclosure choice back into VCOS after publishing.",
             ),
             PublishChecklistItem(
@@ -357,7 +546,9 @@ class PublishHandoffService:
                 label="Paid promotion disclosure",
                 description="Confirm whether paid promotion disclosure applies.",
                 required=planned_metadata.planned_paid_promotion_disclosure_required,
-                state="PENDING" if planned_metadata.planned_paid_promotion_disclosure_required else "NOT_REQUIRED",
+                state="PENDING"
+                if planned_metadata.planned_paid_promotion_disclosure_required
+                else "NOT_REQUIRED",
                 reason_code="PAID_PROMOTION_DISCLOSURE_REQUIRED"
                 if planned_metadata.planned_paid_promotion_disclosure_required
                 else None,
@@ -399,7 +590,9 @@ class PublishHandoffService:
                 label="Privacy status selected",
                 description="Select the intended privacy state on the platform.",
                 required=True,
-                state="PENDING" if planned_metadata.planned_privacy_status == "UNKNOWN" else "CONFIRMED",
+                state="PENDING"
+                if planned_metadata.planned_privacy_status == "UNKNOWN"
+                else "CONFIRMED",
                 operator_help_text="Copy actual privacy status back into VCOS.",
             ),
             PublishChecklistItem(
@@ -440,7 +633,9 @@ class PublishHandoffService:
         planned_files: dict[str, Any],
         planned_disclosures: dict[str, Any],
     ) -> PlatformPublishInstructionContract:
-        final_path = (planned_files.get("final_video_ref") or {}).get("file_path") or "the final video file from planned_files"
+        final_path = (planned_files.get("final_video_ref") or {}).get(
+            "file_path"
+        ) or "the final video file from planned_files"
         caption_path = (planned_files.get("caption_ref") or {}).get("file_path")
         thumbnail_path = (planned_files.get("thumbnail_ref") or {}).get("file_path")
         return PlatformPublishInstructionContract(
@@ -497,7 +692,17 @@ class ManualPublishConfirmationService:
         data: ManualPublishConfirmationCreate,
         correlation_id: str = "m7-manual-publish-confirm",
     ) -> ManualPublishConfirmation:
-        handoff = PublishHandoffService(self.session).require(data.publish_handoff_package_id)
+        handoff = PublishHandoffService(self.session).require(
+            data.publish_handoff_package_id
+        )
+        strict_envelope, _strict_destination = _strict_handoff_context(handoff)
+        if (
+            strict_envelope is not None
+            and handoff.package_state != "READY_FOR_OPERATOR"
+        ):
+            raise ValidationFailureError(
+                "strict market handoff is not ready for manual confirmation"
+            )
         if handoff.package_state not in {"READY_FOR_OPERATOR", "DRAFT"}:
             raise ValidationFailureError("handoff is not ready for manual confirmation")
         _validate_video_url(data.actual_video_url or "")
@@ -506,8 +711,12 @@ class ManualPublishConfirmationService:
             platform=handoff.target_platform,
             platform_video_id=data.actual_video_id or "",
         )
-        actual_metadata = ActualPublishMetadataContract.model_validate(data.actual_metadata)
-        actual_disclosures = ActualDisclosureConfirmationContract.model_validate(data.actual_disclosures)
+        actual_metadata = ActualPublishMetadataContract.model_validate(
+            data.actual_metadata
+        )
+        actual_disclosures = ActualDisclosureConfirmationContract.model_validate(
+            data.actual_disclosures
+        )
         diff = compute_metadata_diff(
             planned_metadata=handoff.planned_metadata,
             planned_disclosures=handoff.planned_disclosures,
@@ -519,7 +728,32 @@ class ManualPublishConfirmationService:
             actual_disclosures=actual_disclosures.model_dump(mode="json"),
             metadata_diff=diff,
         )
-        state = "REVIEW_REQUIRED" if validation_summary["requires_review"] else "SUBMITTED"
+        strict_result = None
+        if strict_envelope is not None:
+            if data.actual_destination is None:
+                raise ValidationFailureError(
+                    "STRICT_MARKET_ACTUAL_DESTINATION_REQUIRED"
+                )
+            strict_result = StrictMarketLineageService().verify(
+                envelope=strict_envelope,
+                actual=data.actual_destination,
+            )
+            validation_summary = {
+                **validation_summary,
+                "strict_market_lineage": strict_result.model_dump(mode="json"),
+                "actual_destination": data.actual_destination.model_dump(mode="json"),
+            }
+            if strict_result.verdict != DeliveryVerdict.PASS:
+                reason_codes = _dedupe([*reason_codes, *strict_result.reason_codes])
+                validation_summary["requires_review"] = True
+                next_action = strict_result.exact_next_action
+        elif data.actual_destination is not None:
+            raise ValidationFailureError(
+                "ACTUAL_DESTINATION_WITHOUT_STRICT_MARKET_LINEAGE"
+            )
+        state = (
+            "REVIEW_REQUIRED" if validation_summary["requires_review"] else "SUBMITTED"
+        )
         confirmation = ManualPublishConfirmation(
             publish_handoff_package_id=handoff.id,
             company_id=handoff.company_id,
@@ -533,6 +767,26 @@ class ManualPublishConfirmationService:
             actual_video_id=data.actual_video_id,
             actual_video_url=data.actual_video_url,
             actual_published_at=data.actual_published_at,
+            destination_binding_id=(
+                data.actual_destination.destination_binding_id
+                if data.actual_destination is not None
+                else None
+            ),
+            destination_binding_fingerprint=(
+                data.actual_destination.destination_binding_fingerprint
+                if data.actual_destination is not None
+                else None
+            ),
+            market_policy_hash=(
+                data.actual_destination.published_market_policy_hash
+                if data.actual_destination is not None
+                else None
+            ),
+            approved_package_hash=(
+                data.actual_destination.published_package_hash
+                if data.actual_destination is not None
+                else None
+            ),
             actual_metadata=actual_metadata.model_dump(mode="json"),
             actual_disclosures=actual_disclosures.model_dump(mode="json"),
             actual_files=_jsonable(data.actual_files),
@@ -592,9 +846,15 @@ class ManualPublishConfirmationService:
                 company_id=confirmation.company_id,
                 correlation_id=correlation_id,
                 reason_code=confirmation.reason_codes[-1],
-                payload={"reason_codes": confirmation.reason_codes, "next_action": confirmation.next_action},
+                payload={
+                    "reason_codes": confirmation.reason_codes,
+                    "next_action": confirmation.next_action,
+                },
             )
-            if "AI_DISCLOSURE_NOT_CONFIRMED" in confirmation.reason_codes or "RIGHTS_CONFIRMATION_REQUIRED" in confirmation.reason_codes:
+            if (
+                "AI_DISCLOSURE_NOT_CONFIRMED" in confirmation.reason_codes
+                or "RIGHTS_CONFIRMATION_REQUIRED" in confirmation.reason_codes
+            ):
                 _record_m7_event(
                     self.session,
                     event_type="disclosure_confirmation.missing",
@@ -610,13 +870,19 @@ class ManualPublishConfirmationService:
                 )
         return confirmation
 
-    def get_confirmation(self, confirmation_id: uuid.UUID) -> ManualPublishConfirmation | None:
+    def get_confirmation(
+        self, confirmation_id: uuid.UUID
+    ) -> ManualPublishConfirmation | None:
         return self.session.get(ManualPublishConfirmation, confirmation_id)
 
-    def require_confirmation(self, confirmation_id: uuid.UUID) -> ManualPublishConfirmation:
+    def require_confirmation(
+        self, confirmation_id: uuid.UUID
+    ) -> ManualPublishConfirmation:
         confirmation = self.get_confirmation(confirmation_id)
         if confirmation is None:
-            raise NotFoundError(f"manual publish confirmation not found: {confirmation_id}")
+            raise NotFoundError(
+                f"manual publish confirmation not found: {confirmation_id}"
+            )
         return confirmation
 
     def accept_confirmation(
@@ -628,16 +894,45 @@ class ManualPublishConfirmationService:
         confirmation = self.require_confirmation(confirmation_id)
         if confirmation.confirmation_state == "ACCEPTED":
             existing = self.session.scalars(
-                select(UploadedVideo).where(UploadedVideo.manual_publish_confirmation_id == confirmation.id)
+                select(UploadedVideo).where(
+                    UploadedVideo.manual_publish_confirmation_id == confirmation.id
+                )
             ).one_or_none()
             if existing is None:
-                raise ValidationFailureError("accepted confirmation is missing uploaded video record")
+                raise ValidationFailureError(
+                    "accepted confirmation is missing uploaded video record"
+                )
             return existing
         if confirmation.confirmation_state != "SUBMITTED":
             raise ValidationFailureError("only submitted confirmations can be accepted")
-        handoff = self.session.get(PublishHandoffPackage, confirmation.publish_handoff_package_id)
+        handoff = self.session.get(
+            PublishHandoffPackage, confirmation.publish_handoff_package_id
+        )
         if handoff is None:
-            raise NotFoundError(f"publish handoff package not found: {confirmation.publish_handoff_package_id}")
+            raise NotFoundError(
+                f"publish handoff package not found: {confirmation.publish_handoff_package_id}"
+            )
+        strict_envelope, _strict_destination = _strict_handoff_context(handoff)
+        if strict_envelope is not None:
+            _validate_strict_approval_binding(
+                self.session,
+                strict_envelope,
+                expected_video_project_id=handoff.video_project_id,
+            )
+            actual_raw = (confirmation.validation_summary or {}).get(
+                "actual_destination"
+            )
+            if not actual_raw:
+                raise ValidationFailureError("STRICT_MARKET_ACTUAL_DESTINATION_MISSING")
+            strict_result = StrictMarketLineageService().verify(
+                envelope=strict_envelope,
+                actual=ActualPublishDestination.model_validate(actual_raw),
+            )
+            if strict_result.verdict != DeliveryVerdict.PASS:
+                raise ValidationFailureError(
+                    "STRICT_MARKET_CONFIRMATION_BLOCKED:"
+                    + ",".join(strict_result.reason_codes)
+                )
         self._reject_duplicate(
             channel_workspace_id=confirmation.channel_workspace_id,
             platform=confirmation.target_platform,
@@ -655,6 +950,13 @@ class ManualPublishConfirmationService:
             render_package_snapshot_id=handoff.render_package_snapshot_id,
             source_manifest_snapshot_id=handoff.source_manifest_snapshot_id,
             rights_envelope_ref=_rights_envelope_ref(handoff),
+            destination=confirmation.target_platform,
+            destination_binding_id=confirmation.destination_binding_id,
+            destination_binding_fingerprint=(
+                confirmation.destination_binding_fingerprint
+            ),
+            market_policy_hash=confirmation.market_policy_hash,
+            approved_package_hash=confirmation.approved_package_hash,
             platform=confirmation.target_platform,
             platform_video_id=confirmation.actual_video_id or "",
             video_url=confirmation.actual_video_url or "",
@@ -670,10 +972,24 @@ class ManualPublishConfirmationService:
         self.session.flush()
         summary = _create_publication_summary(self.session, uploaded)
         confirmation.confirmation_state = "ACCEPTED"
-        confirmation.reason_codes = _dedupe([*confirmation.reason_codes, "MANUAL_PUBLISH_CONFIRMED", "UPLOADED_VIDEO_CREATED"])
-        confirmation.next_action = "Uploaded video is ready for a future analytics sync milestone."
+        confirmation.reason_codes = _dedupe(
+            [
+                *confirmation.reason_codes,
+                "MANUAL_PUBLISH_CONFIRMED",
+                "UPLOADED_VIDEO_CREATED",
+            ]
+        )
+        confirmation.next_action = (
+            "Uploaded video is ready for a future analytics sync milestone."
+        )
         handoff.package_state = "CONFIRMED_PUBLISHED"
-        handoff.reason_codes = _dedupe([*handoff.reason_codes, "MANUAL_PUBLISH_CONFIRMED", "UPLOADED_VIDEO_CREATED"])
+        handoff.reason_codes = _dedupe(
+            [
+                *handoff.reason_codes,
+                "MANUAL_PUBLISH_CONFIRMED",
+                "UPLOADED_VIDEO_CREATED",
+            ]
+        )
         handoff.next_action = "Future M8 analytics may sync this uploaded video."
         self.session.flush()
         _record_m7_event(
@@ -723,23 +1039,34 @@ class ManualPublishConfirmationService:
             company_id=uploaded.company_id,
             correlation_id=correlation_id,
             reason_code="READY_FOR_ANALYTICS",
-            payload={"monitoring_state": uploaded.monitoring_state, "summary_id": str(summary.id)},
+            payload={
+                "monitoring_state": uploaded.monitoring_state,
+                "summary_id": str(summary.id),
+            },
         )
         return uploaded
 
     def get_uploaded_video(self, uploaded_video_id: uuid.UUID) -> UploadedVideo | None:
         return self.session.get(UploadedVideo, uploaded_video_id)
 
-    def list_uploaded_videos_by_project(self, project_id: uuid.UUID) -> list[UploadedVideo]:
+    def list_uploaded_videos_by_project(
+        self, project_id: uuid.UUID
+    ) -> list[UploadedVideo]:
         return list(
             self.session.scalars(
-                select(UploadedVideo).where(UploadedVideo.video_project_id == project_id).order_by(UploadedVideo.published_at.desc())
+                select(UploadedVideo)
+                .where(UploadedVideo.video_project_id == project_id)
+                .order_by(UploadedVideo.published_at.desc())
             ).all()
         )
 
-    def get_publication_summary(self, uploaded_video_id: uuid.UUID) -> UploadedVideoPublicationSummary | None:
+    def get_publication_summary(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoPublicationSummary | None:
         return self.session.scalars(
-            select(UploadedVideoPublicationSummary).where(UploadedVideoPublicationSummary.uploaded_video_id == uploaded_video_id)
+            select(UploadedVideoPublicationSummary).where(
+                UploadedVideoPublicationSummary.uploaded_video_id == uploaded_video_id
+            )
         ).one_or_none()
 
     def _reject_duplicate(
@@ -768,7 +1095,9 @@ class ManualPublishConfirmationService:
             ManualPublishConfirmation.confirmation_state.in_(["SUBMITTED", "ACCEPTED"]),
         )
         if exclude_confirmation_id is not None:
-            duplicate_statement = duplicate_statement.where(ManualPublishConfirmation.id != exclude_confirmation_id)
+            duplicate_statement = duplicate_statement.where(
+                ManualPublishConfirmation.id != exclude_confirmation_id
+            )
         duplicate_confirmation = self.session.scalars(duplicate_statement).first()
         if duplicate_confirmation is not None:
             raise ConflictError("duplicate platform video id for channel/platform")
@@ -781,7 +1110,9 @@ class ManualPublishConfirmationService:
         metadata_diff: PublishMetadataDiffContract,
     ) -> tuple[dict[str, Any], list[str], str | None]:
         reason_codes: list[str] = []
-        if handoff.planned_disclosures.get("ai_disclosure_required") and not actual_disclosures.get("ai_disclosure_confirmed"):
+        if handoff.planned_disclosures.get(
+            "ai_disclosure_required"
+        ) and not actual_disclosures.get("ai_disclosure_confirmed"):
             reason_codes.append("AI_DISCLOSURE_NOT_CONFIRMED")
         if not actual_disclosures.get("rights_confirmed"):
             reason_codes.append("RIGHTS_CONFIRMATION_REQUIRED")
@@ -791,7 +1122,13 @@ class ManualPublishConfirmationService:
             reason_codes.append("STOCK_LICENSE_CONFIRMATION_REQUIRED")
         if metadata_diff.changed_fields:
             reason_codes.append("METADATA_DIFF_DETECTED")
-        requires_review = bool(reason_codes and any(code != "METADATA_DIFF_DETECTED" for code in reason_codes)) or metadata_diff.requires_review
+        requires_review = (
+            bool(
+                reason_codes
+                and any(code != "METADATA_DIFF_DETECTED" for code in reason_codes)
+            )
+            or metadata_diff.requires_review
+        )
         return (
             {
                 "valid_video_id": True,
@@ -801,7 +1138,9 @@ class ManualPublishConfirmationService:
                 "no_platform_api_call": True,
             },
             reason_codes,
-            "Resolve disclosure/license review before accepting publication." if requires_review else None,
+            "Resolve disclosure/license review before accepting publication."
+            if requires_review
+            else None,
         )
 
 
@@ -813,17 +1152,30 @@ def compute_metadata_diff(
     actual_disclosures: dict[str, Any],
 ) -> PublishMetadataDiffContract:
     changed_fields: list[str] = []
-    title_changed = (planned_metadata.get("planned_title") or "") != (actual_metadata.get("actual_title") or "")
-    description_changed = (planned_metadata.get("planned_description") or "") != (actual_metadata.get("actual_description") or "")
-    tags_changed = sorted(planned_metadata.get("planned_tags") or []) != sorted(actual_metadata.get("actual_tags") or [])
-    thumbnail_changed = bool(actual_metadata.get("actual_thumbnail_hash")) or bool(actual_metadata.get("actual_thumbnail_ref")) and (
-        planned_metadata.get("planned_thumbnail_ref") != actual_metadata.get("actual_thumbnail_ref")
+    title_changed = (planned_metadata.get("planned_title") or "") != (
+        actual_metadata.get("actual_title") or ""
+    )
+    description_changed = (planned_metadata.get("planned_description") or "") != (
+        actual_metadata.get("actual_description") or ""
+    )
+    tags_changed = sorted(planned_metadata.get("planned_tags") or []) != sorted(
+        actual_metadata.get("actual_tags") or []
+    )
+    thumbnail_changed = (
+        bool(actual_metadata.get("actual_thumbnail_hash"))
+        or bool(actual_metadata.get("actual_thumbnail_ref"))
+        and (
+            planned_metadata.get("planned_thumbnail_ref")
+            != actual_metadata.get("actual_thumbnail_ref")
+        )
     )
     planned_privacy = planned_metadata.get("planned_privacy_status") or "UNKNOWN"
-    privacy_status_changed = planned_privacy != "UNKNOWN" and planned_privacy != (actual_metadata.get("actual_privacy_status") or "UNKNOWN")
-    disclosure_changed = bool(planned_disclosures.get("ai_disclosure_required")) and not bool(
-        actual_disclosures.get("ai_disclosure_confirmed")
+    privacy_status_changed = planned_privacy != "UNKNOWN" and planned_privacy != (
+        actual_metadata.get("actual_privacy_status") or "UNKNOWN"
     )
+    disclosure_changed = bool(
+        planned_disclosures.get("ai_disclosure_required")
+    ) and not bool(actual_disclosures.get("ai_disclosure_confirmed"))
     for field_name, changed in [
         ("title", title_changed),
         ("description", description_changed),
@@ -870,7 +1222,9 @@ def _require_project(session: Session, project_id: uuid.UUID) -> VideoProject:
     return project
 
 
-def _latest_media_qc(session: Session, package: RenderPackageSnapshot) -> MediaQCReport | None:
+def _latest_media_qc(
+    session: Session, package: RenderPackageSnapshot
+) -> MediaQCReport | None:
     return session.scalars(
         select(MediaQCReport)
         .where(MediaQCReport.render_package_snapshot_id == package.id)
@@ -883,8 +1237,12 @@ def _latest_accessibility_qc(
     package: RenderPackageSnapshot,
     run: ProductionArtifactRun | None,
 ) -> AccessibilityQCReport | None:
-    statement = select(AccessibilityQCReport).where(AccessibilityQCReport.render_package_snapshot_id == package.id)
-    report = session.scalars(statement.order_by(AccessibilityQCReport.created_at.desc())).first()
+    statement = select(AccessibilityQCReport).where(
+        AccessibilityQCReport.render_package_snapshot_id == package.id
+    )
+    report = session.scalars(
+        statement.order_by(AccessibilityQCReport.created_at.desc())
+    ).first()
     if report is not None:
         return report
     if run and run.accessibility_qc_report_id:
@@ -904,7 +1262,10 @@ def _source_manifest_for_package(
         return None
     return session.scalars(
         select(SourceManifestSnapshot)
-        .where(SourceManifestSnapshot.asset_manifest_snapshot_id == render_spec.asset_manifest_snapshot_id)
+        .where(
+            SourceManifestSnapshot.asset_manifest_snapshot_id
+            == render_spec.asset_manifest_snapshot_id
+        )
         .order_by(SourceManifestSnapshot.created_at.desc())
     ).first()
 
@@ -921,7 +1282,9 @@ def _asset_manifest_for_package(
     return session.get(AssetManifestSnapshot, render_spec.asset_manifest_snapshot_id)
 
 
-def _handoff_blockers(package: RenderPackageSnapshot, media_qc: MediaQCReport | None) -> list[str]:
+def _handoff_blockers(
+    package: RenderPackageSnapshot, media_qc: MediaQCReport | None
+) -> list[str]:
     blockers: list[str] = []
     if package.package_state not in {"QC_PASSED", "QC_REVIEW_REQUIRED"}:
         blockers.append("RENDER_PACKAGE_NOT_READY")
@@ -938,7 +1301,11 @@ def _contains_ai_disclosure_signal(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
             lowered_key = str(key).lower()
-            if lowered_key in {"requires_ai_disclosure_check", "ai_generated", "synthetic_media"} and item is True:
+            if (
+                lowered_key
+                in {"requires_ai_disclosure_check", "ai_generated", "synthetic_media"}
+                and item is True
+            ):
                 return True
             if _contains_ai_disclosure_signal(item):
                 return True
@@ -950,14 +1317,22 @@ def _contains_ai_disclosure_signal(value: Any) -> bool:
     return False
 
 
-def _rights_summary(*, source_blob: dict[str, Any], asset_blob: dict[str, Any]) -> dict[str, Any]:
-    candidates = asset_blob.get("candidates", []) if isinstance(asset_blob, dict) else []
-    requirements = asset_blob.get("requirements", []) if isinstance(asset_blob, dict) else []
+def _rights_summary(
+    *, source_blob: dict[str, Any], asset_blob: dict[str, Any]
+) -> dict[str, Any]:
+    candidates = (
+        asset_blob.get("candidates", []) if isinstance(asset_blob, dict) else []
+    )
+    requirements = (
+        asset_blob.get("requirements", []) if isinstance(asset_blob, dict) else []
+    )
     license_required = 0
     internal_test_only = 0
     unknown = 0
     for candidate in candidates if isinstance(candidates, list) else []:
-        rights = candidate.get("rights_envelope", {}) if isinstance(candidate, dict) else {}
+        rights = (
+            candidate.get("rights_envelope", {}) if isinstance(candidate, dict) else {}
+        )
         state = rights.get("license_state")
         if state == "LICENSE_REQUIRED":
             license_required += 1
@@ -966,7 +1341,11 @@ def _rights_summary(*, source_blob: dict[str, Any], asset_blob: dict[str, Any]) 
         elif state in {None, "UNKNOWN"}:
             unknown += 1
     for requirement in requirements if isinstance(requirements, list) else []:
-        state = requirement.get("license_requirement") if isinstance(requirement, dict) else None
+        state = (
+            requirement.get("license_requirement")
+            if isinstance(requirement, dict)
+            else None
+        )
         if state == "LICENSE_REQUIRED":
             license_required += 1
         elif state == "UNKNOWN":
@@ -976,11 +1355,15 @@ def _rights_summary(*, source_blob: dict[str, Any], asset_blob: dict[str, Any]) 
         "internal_test_only_asset_count": internal_test_only,
         "unknown_license_count": unknown,
         "rights_confirmation_required": True,
-        "source_manifest_hash": source_blob.get("manifest_hash") if isinstance(source_blob, dict) else None,
+        "source_manifest_hash": source_blob.get("manifest_hash")
+        if isinstance(source_blob, dict)
+        else None,
     }
 
 
-def _planned_disclosures(planned_metadata: PlannedPublishMetadataContract) -> dict[str, Any]:
+def _planned_disclosures(
+    planned_metadata: PlannedPublishMetadataContract,
+) -> dict[str, Any]:
     rights = planned_metadata.planned_rights_summary
     return {
         "ai_disclosure_required": planned_metadata.planned_ai_disclosure_required,
@@ -995,7 +1378,11 @@ def _planned_disclosures(planned_metadata: PlannedPublishMetadataContract) -> di
 
 
 def _caption_language(render_spec_blob: dict[str, Any]) -> str | None:
-    ref = render_spec_blob.get("caption_track_ref") if isinstance(render_spec_blob, dict) else None
+    ref = (
+        render_spec_blob.get("caption_track_ref")
+        if isinstance(render_spec_blob, dict)
+        else None
+    )
     return "en" if ref else None
 
 
@@ -1014,17 +1401,113 @@ def _validate_video_url(url: str) -> None:
 
 
 def _lineage_refs(handoff: PublishHandoffPackage) -> dict[str, Any]:
-    return {
+    refs = {
         "video_project_id": str(handoff.video_project_id),
         "policy_snapshot_id": str(handoff.policy_snapshot_id),
-        "production_artifact_run_id": str(handoff.production_artifact_run_id) if handoff.production_artifact_run_id else None,
+        "production_artifact_run_id": str(handoff.production_artifact_run_id)
+        if handoff.production_artifact_run_id
+        else None,
         "render_package_snapshot_id": str(handoff.render_package_snapshot_id),
-        "render_spec_snapshot_id": str(handoff.render_spec_snapshot_id) if handoff.render_spec_snapshot_id else None,
-        "media_qc_report_id": str(handoff.media_qc_report_id) if handoff.media_qc_report_id else None,
-        "accessibility_qc_report_id": str(handoff.accessibility_qc_report_id) if handoff.accessibility_qc_report_id else None,
-        "source_manifest_snapshot_id": str(handoff.source_manifest_snapshot_id) if handoff.source_manifest_snapshot_id else None,
-        "asset_manifest_snapshot_id": str(handoff.asset_manifest_snapshot_id) if handoff.asset_manifest_snapshot_id else None,
+        "render_spec_snapshot_id": str(handoff.render_spec_snapshot_id)
+        if handoff.render_spec_snapshot_id
+        else None,
+        "media_qc_report_id": str(handoff.media_qc_report_id)
+        if handoff.media_qc_report_id
+        else None,
+        "accessibility_qc_report_id": str(handoff.accessibility_qc_report_id)
+        if handoff.accessibility_qc_report_id
+        else None,
+        "source_manifest_snapshot_id": str(handoff.source_manifest_snapshot_id)
+        if handoff.source_manifest_snapshot_id
+        else None,
+        "asset_manifest_snapshot_id": str(handoff.asset_manifest_snapshot_id)
+        if handoff.asset_manifest_snapshot_id
+        else None,
     }
+    strict_envelope, destination = _strict_handoff_context(handoff)
+    if strict_envelope is not None:
+        refs["strict_market_lineage"] = strict_envelope.model_dump(mode="json")
+        refs["destination_runtime"] = (
+            destination.model_dump(mode="json") if destination else None
+        )
+    return refs
+
+
+def _strict_handoff_context(
+    handoff: PublishHandoffPackage,
+) -> tuple[StrictMarketLineageEnvelope | None, DestinationRuntimeContract | None]:
+    risk = handoff.risk_summary or {}
+    envelope_raw = risk.get("strict_market_lineage")
+    destination_raw = risk.get("destination_runtime")
+    if envelope_raw is None and destination_raw is None:
+        return None, None
+    if envelope_raw is None or destination_raw is None:
+        raise ValidationFailureError("STRICT_MARKET_HANDOFF_CONTEXT_INCOMPLETE")
+    envelope = StrictMarketLineageEnvelope.model_validate(envelope_raw)
+    destination = DestinationRuntimeContract.model_validate(destination_raw)
+    first_class_bindings = {
+        "destination_binding_id": envelope.destination_binding_id,
+        "destination_binding_fingerprint": (envelope.approved_destination_fingerprint),
+        "market_policy_hash": envelope.approved_market_policy_hash,
+        "approved_package_hash": envelope.approved_package_hash,
+        "approval_decision_id": envelope.approval_decision_id,
+        "target_market_profile_ref": envelope.target_market_profile_ref,
+        "target_market_profile_hash": envelope.target_market_profile_hash,
+        "market_alignment_dossier_ref": envelope.market_alignment_dossier_ref,
+        "market_alignment_dossier_hash": envelope.market_alignment_dossier_hash,
+        "approved_publish_timezone": envelope.approved_publish_timezone,
+        "approved_publish_window": envelope.approved_publish_window,
+    }
+    for field_name, expected in first_class_bindings.items():
+        if getattr(handoff, field_name, None) != expected:
+            raise ValidationFailureError(
+                f"STRICT_MARKET_HANDOFF_{field_name.upper()}_MISMATCH"
+            )
+    if (
+        destination.destination_binding_id != envelope.destination_binding_id
+        or destination.binding_fingerprint != envelope.approved_destination_fingerprint
+    ):
+        raise ValidationFailureError("STRICT_MARKET_HANDOFF_DESTINATION_MISMATCH")
+    return envelope, destination
+
+
+def _strict_handoff_blockers(handoff: PublishHandoffPackage) -> list[str]:
+    envelope, destination = _strict_handoff_context(handoff)
+    if envelope is None:
+        return []
+    assert destination is not None
+    return StrictMarketLineageService().validate_handoff_context(
+        envelope=envelope,
+        destination=destination,
+        project_policy_snapshot_id=handoff.policy_snapshot_id,
+        target_platform=handoff.target_platform,
+    )
+
+
+def _validate_strict_approval_binding(
+    session: Session,
+    envelope: StrictMarketLineageEnvelope,
+    *,
+    expected_video_project_id: uuid.UUID,
+) -> None:
+    approval = session.get(ApprovalDecision, envelope.approval_decision_id)
+    package_version = (
+        session.get(ArtifactVersion, approval.target_artifact_version_id)
+        if approval is not None and approval.target_artifact_version_id is not None
+        else None
+    )
+    package_artifact = (
+        session.get(Artifact, package_version.artifact_id)
+        if package_version is not None
+        else None
+    )
+    StrictMarketLineageService().validate_approval_record(
+        envelope=envelope,
+        approval=approval,
+        approved_package_version=package_version,
+        approved_package_artifact=package_artifact,
+        expected_video_project_id=expected_video_project_id,
+    )
 
 
 def _rights_envelope_ref(handoff: PublishHandoffPackage) -> str | None:
@@ -1035,7 +1518,9 @@ def _rights_envelope_ref(handoff: PublishHandoffPackage) -> str | None:
     return None
 
 
-def _uploaded_operator_summary(confirmation: ManualPublishConfirmation) -> dict[str, Any]:
+def _uploaded_operator_summary(
+    confirmation: ManualPublishConfirmation,
+) -> dict[str, Any]:
     title = confirmation.actual_metadata.get("actual_title", "Untitled")
     return {
         "summary": f"Manual publish confirmed for {confirmation.target_platform}: {title}",
@@ -1045,9 +1530,13 @@ def _uploaded_operator_summary(confirmation: ManualPublishConfirmation) -> dict[
     }
 
 
-def _create_publication_summary(session: Session, uploaded: UploadedVideo) -> UploadedVideoPublicationSummary:
+def _create_publication_summary(
+    session: Session, uploaded: UploadedVideo
+) -> UploadedVideoPublicationSummary:
     existing = session.scalars(
-        select(UploadedVideoPublicationSummary).where(UploadedVideoPublicationSummary.uploaded_video_id == uploaded.id)
+        select(UploadedVideoPublicationSummary).where(
+            UploadedVideoPublicationSummary.uploaded_video_id == uploaded.id
+        )
     ).one_or_none()
     title = str(uploaded.actual_metadata.get("actual_title") or "Untitled")
     if existing is None:
@@ -1149,9 +1638,16 @@ def _record_m7_event(
 def _ensure_no_secret_payload(value: Any) -> None:
     for key, item in _walk_items(value):
         normalized = key.lower().replace("-", "_")
-        if any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS) and normalized != "secret_ref":
-            raise ValidationFailureError(f"secret-like payload key is not allowed: {key}")
-        if isinstance(item, str) and any(marker in item for marker in RAW_SECRET_MARKERS):
+        if (
+            any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS)
+            and normalized != "secret_ref"
+        ):
+            raise ValidationFailureError(
+                f"secret-like payload key is not allowed: {key}"
+            )
+        if isinstance(item, str) and any(
+            marker in item for marker in RAW_SECRET_MARKERS
+        ):
             raise ValidationFailureError("raw secret-like value is not allowed")
 
 

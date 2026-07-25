@@ -1,0 +1,464 @@
+{
+  "approval_persisted": false,
+  "consumed_attempt_proof": {
+    "artifact_id": "944cba26-d390-4b48-ac9b-4cf16f1eaa16",
+    "artifact_version_id": "53cde90c-c8d7-40e4-96bf-aa910030e165",
+    "attempt_cap": 1,
+    "attempt_count": 1,
+    "content_hash": "5fe7b00b73ddc454a888f17ccbb700c020a8831ee11b1e9a72edcb9e510f26c2",
+    "download_submit_count": 0,
+    "failure": "RuntimeError:PEXELS_SEMANTIC_FIT_INADEQUATE",
+    "network_submit_started": true,
+    "operation": "supporting_asset_acquisition",
+    "operation_key": "pexels:SC-07",
+    "provider": "pexels_api",
+    "request_hash": "10af25b3174a6f0cc55f9c694a5228f713ed67576ec3fb8008994a4409400fec",
+    "run_id": "b932773c-4049-482a-8827-6933d924c34f",
+    "scene_id": "SC-07",
+    "schema_version": "mr1.prior-consumed-pexels-attempt.v1",
+    "search_submit_count": 1,
+    "snapshot_content_hash": "f9c8277d2d2c1bc5009f3593f97688293b77639cd16d17af0525701419761d6d",
+    "state": "CONSUMED_FAILED",
+    "submit_state": "FAILED_CONSUMED"
+  },
+  "exact_refs": {
+    "operator_review_task_id": "83158e94-671d-4fee-9a4f-3c1562354cb4",
+    "package_artifact_version_id": "d8471bc0-7d58-4b39-a1f9-267d7b8a02b1",
+    "package_content_hash": "7d827b7b37a654639383f21c6b6e5cd634c64c68f87832b3b9907dbd4b1fa07c",
+    "review_manifest_artifact_version_id": "5e6e89d7-1363-4883-b64f-da7dec1d19fe",
+    "review_manifest_content_hash": "b3c745534ff6e241ab783c7024ed763f8859299e792702919611c8d52eaca7cd",
+    "run_artifact_version_id": "edec476c-bf1a-4d19-b5ff-455be0a79427"
+  },
+  "generated_at": "2026-07-24T18:25:34.512689+00:00",
+  "invocation": "continuation-review:b932773c-4049-482a-8827-6933d924c34f",
+  "operation_key": "pexels:SC-07",
+  "package_semantic_intent_unchanged": true,
+  "pending_unsubmitted_attempt_proofs": {
+    "SC-09": {
+      "artifact_id": "6c97864a-ac47-4c5b-973a-59708ddd5630",
+      "artifact_version_id": "c98da711-f2a2-4806-85e0-1f53b9f09276",
+      "attempt_cap": 1,
+      "attempt_count": 0,
+      "content_hash": "5db5127d0f474b4f9351443385f022ba9bfd3e2a4024ed07273791a248221a50",
+      "download_submit_count": 0,
+      "network_submit_started": false,
+      "operation": "supporting_asset_acquisition",
+      "operation_key": "pexels:SC-09",
+      "provider": "pexels_api",
+      "request_hash": null,
+      "run_id": "b932773c-4049-482a-8827-6933d924c34f",
+      "scene_id": "SC-09",
+      "schema_version": "mr1.unsubmitted-pexels-attempt.v1",
+      "search_submit_count": 0,
+      "snapshot_content_hash": "20edd282cb312f4679ce8c42cff186420b8a9c44c1fd1391196dcfc6e1712a13",
+      "state": "PLANNED",
+      "submit_state": "NOT_SUBMITTED"
+    }
+  },
+  "provider_calls_made": 0,
+  "query_review": {
+    "pending_amendments": {
+      "SC-09": {
+        "approved_query_authority": {
+          "endpoint": "/v1/videos/search",
+          "intent_field": "stock_search_intent",
+          "locale": "en-US",
+          "minimum_duration_seconds": 8.0,
+          "minimum_resolution": "1920x1080",
+          "orientation": "landscape",
+          "package_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+          "per_page": 20,
+          "plan_hash": "08d7762fbc0bc0a90096c1d139613b5e976c5d3094892927f7c75c8d1c9a9607",
+          "planner_version": "pexels-query-planner/v1.0.0",
+          "preferred_resolution": "1920x1080",
+          "primary_query": "people working together office workplace b roll",
+          "query_family": [
+            "people working together office workplace b roll",
+            "people working together office close up action",
+            "people working together office clean composition"
+          ],
+          "schema_version": "mr1.pexels-query-authority.v1",
+          "size_preference": "large",
+          "stock_search_intent": "People working together in an office, planning."
+        },
+        "approved_stock_search_intent": "People working together in an office, planning.",
+        "base_query_evidence": {
+          "base_stock_search_intent": "Close with grounded planning context and a native five-item audit checklist.",
+          "content_hash": "73d3069e6b9d5410f1643d63f2adb05fb9a54dca6ff31217cef2483813c45a7b",
+          "package_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+          "query_authority": {
+            "endpoint": "/v1/videos/search",
+            "intent_field": "stock_search_intent",
+            "locale": "en-US",
+            "minimum_duration_seconds": 8.0,
+            "minimum_resolution": "1920x1080",
+            "orientation": "landscape",
+            "package_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+            "per_page": 20,
+            "plan_hash": "c282824b0764d364b9e3089400943e5bda7b5a632feca90ce9e439f28814f747",
+            "planner_version": "pexels-query-planner/v1.0.0",
+            "preferred_resolution": "1920x1080",
+            "primary_query": "close grounded planning context workplace b roll",
+            "query_family": [
+              "close grounded planning context workplace b roll",
+              "close grounded planning context close up action",
+              "close grounded planning context clean composition"
+            ],
+            "schema_version": "mr1.pexels-query-authority.v1",
+            "size_preference": "large",
+            "stock_search_intent": "Close with grounded planning context and a native five-item audit checklist."
+          },
+          "reconstruction": "DETERMINISTIC_FROM_EXACT_PACKAGE_AUTHORITY",
+          "request_hash": "9d4ebd150d4e8280965e3ffe4d882716f413e13e8aa7b8ab00c1b47646624e51",
+          "request_state": "PLANNED_NOT_SUBMITTED",
+          "schema_version": "mr1.pexels-base-query-evidence.v1"
+        },
+        "operation_key": "pexels:SC-09",
+        "package_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+        "query_intent_coverage_evidence": {
+          "content_hash": "85530ec4d8f98847055f3561292f59e361cea3d2e642b6faa4b2a495f0d1a0c3",
+          "intent_field": "stock_search_intent",
+          "intent_token_count": 5,
+          "intent_token_count_result": "PASS",
+          "intent_tokens": [
+            "office",
+            "people",
+            "planning",
+            "together",
+            "working"
+          ],
+          "matched_intent_token_count": 4,
+          "matched_intent_tokens": [
+            "office",
+            "people",
+            "together",
+            "working"
+          ],
+          "maximum_missing_intent_token_count_at_threshold": 1,
+          "minimum_observable_intent_token_count": 2,
+          "package_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+          "planner_generic_query_core_token_cap": 4,
+          "primary_query": "people working together office workplace b roll",
+          "query_intent_coverage": 0.8,
+          "query_retention_margin_tokens": 0,
+          "query_tokens": [
+            "office",
+            "people",
+            "roll",
+            "together",
+            "working",
+            "workplace"
+          ],
+          "required_match_availability_result": "PASS",
+          "required_matched_intent_token_count": 4,
+          "result": "PASS",
+          "schema_version": "mr1.pexels-stock-search-intent-coverage.v1",
+          "semantic_fit_threshold": 0.78,
+          "stock_search_intent": "People working together in an office, planning."
+        },
+        "query_material_diff": {
+          "approved_primary_query": "people working together office workplace b roll",
+          "approved_query_authority_hash": "95554e739a0e7d460e2f58d7400b43a426ef7db95c67431dbb1abae19f97c5f1",
+          "approved_query_family": [
+            "people working together office workplace b roll",
+            "people working together office close up action",
+            "people working together office clean composition"
+          ],
+          "base_primary_query": "close grounded planning context workplace b roll",
+          "base_query_authority_hash": "424dce78dea2cd258eda709c33a56b9550433f2040841af7484418c073bcefc1",
+          "base_query_family": [
+            "close grounded planning context workplace b roll",
+            "close grounded planning context close up action",
+            "close grounded planning context clean composition"
+          ],
+          "content_hash": "e7d156e3a36325b63f8ffdb860b674a0af0970bf888a70263d946df3121afd22",
+          "materially_different": true,
+          "schema_version": "mr1.pexels-stock-search-query-diff.v1"
+        },
+        "stock_search_intent_derivation": {
+          "approved_stock_search_intent": "People working together in an office, planning.",
+          "automatic_semantic_rewrite_authorized": false,
+          "content_hash": "4aec3716f02a28984d71dd9b35a87370d23b9a5d5605e26671c5a12d86ce5c9c",
+          "derivation_evidence": [
+            {
+              "observable_paraphrase": "People working together in an office, planning.",
+              "relationship": "BOUNDED_STOCK_SEARCH_PARAPHRASE_REQUIRES_EXACT_HUMAN_REVIEW",
+              "source_phrase": "Close with grounded planning context and a native five-item audit checklist."
+            },
+            {
+              "observable_paraphrase": "People working together in an office, planning.",
+              "relationship": "SCRIPT_VISUAL_HINT_TO_CONTEXT_ONLY_STOCK_SEARCH_REQUIRES_EXACT_HUMAN_REVIEW",
+              "source_phrase": "Close with grounded planning context and a native five-item audit checklist."
+            },
+            {
+              "observable_paraphrase": "People working together in an office, planning.",
+              "relationship": "SCRIPT_SEGMENT_CONTEXT_TO_OBSERVABLE_STOCK_SEARCH_REQUIRES_EXACT_HUMAN_REVIEW",
+              "source_phrase": "Choose one handoff that repeats this week. Write its trigger, inputs, owner, success condition, and exception path. Measure the current manual effort before building anything. Use the twenty-hour example only as a transparent way to test assumptions. Then run a bounded pilot and keep the fallback visible. No automation can promise a universal saving. The useful outcome is a workflow the team can inspect, measure, and stop when it behaves badly. If the pilot removes real repetition, the team's own baseline will show it. If it does not, the same evidence will prevent a costly rollout. Map one workflow first. Let observed results, not the headline, decide what happens next."
+            }
+          ],
+          "evidence_role": "CONTEXT_ONLY",
+          "exact_human_review_required": true,
+          "native_explanation_unchanged": true,
+          "package_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+          "package_semantic_intent_unchanged": true,
+          "refs": {
+            "scene_visual_intent": {
+              "artifact_version_id": "b0e8b068-b79b-4854-81b7-15e68df0992f",
+              "content_hash": "55ad4f4725b66f7e1cf7e770df1ee7e0437710925d63e433c00c2ba0441bc712",
+              "json_pointer": "/scenes/8"
+            },
+            "script": {
+              "artifact_version_id": "4c0ac729-32c5-4005-9078-013b399e8802",
+              "content_hash": "48e89e95a3234f7f3abd1f86a99dd2e8009279e22dea511ede299483baa14fd7",
+              "json_pointer": "/segments/8",
+              "segment_id": "S09",
+              "segment_text_hash": "0a97f9b1dec97a255e9e007f2eb03ecdc124978a9c7faae6eaf237396b8e278d"
+            },
+            "supporting_subwindow": {
+              "canonical_timeline_hash": "eada2c27cadb13eef03d6f160c064807dc63369b77b66192e127a9cbef2bd994",
+              "native_explanation_duration_ms": 44880,
+              "native_explanation_end_ms": 449260,
+              "native_explanation_start_ms": 404380,
+              "native_mechanism": "BRIEF_CONTEXT_THEN_FIVE_ITEM_AUDIT",
+              "policy_ref": "mr1-temporal-policy://supporting-stock-subwindow/min-8000ms-or-floor-20pct/v1",
+              "stock_context_duration_ms": 8000,
+              "stock_context_end_ms": 404380,
+              "stock_context_start_ms": 396380,
+              "supporting_visual_subwindows_hash": "aad620649a67db1535a9a8927c9220271c5d9f713432336365798dbf45780809"
+            },
+            "visual_source_decision": {
+              "artifact_version_id": "658e43ed-8c8d-43f9-968d-234e41215d99",
+              "content_hash": "3e29f3d7e023be9100b62088a6a291ad9457fb70c7cc0967e4d925eef6f1871d",
+              "json_pointer": "/decisions/8"
+            }
+          },
+          "route": "PEXELS_VIDEO",
+          "scene_id": "SC-09",
+          "schema_version": "mr1.pexels-observable-subintent-derivation.v1",
+          "scope": "PEXELS_SUPPORTING_SUBWINDOW_CONTEXT_ONLY",
+          "source_context": {
+            "scene_visual_semantic_intent": "Close with grounded planning context and a native five-item audit checklist.",
+            "script_segment_text": "Choose one handoff that repeats this week. Write its trigger, inputs, owner, success condition, and exception path. Measure the current manual effort before building anything. Use the twenty-hour example only as a transparent way to test assumptions. Then run a bounded pilot and keep the fallback visible. No automation can promise a universal saving. The useful outcome is a workflow the team can inspect, measure, and stop when it behaves badly. If the pilot removes real repetition, the team's own baseline will show it. If it does not, the same evidence will prevent a costly rollout. Map one workflow first. Let observed results, not the headline, decide what happens next.",
+            "script_visual_intent_hint": "Close with grounded planning context and a native five-item audit checklist.",
+            "visual_source_semantic_intent": "Close with grounded planning context and a native five-item audit checklist."
+          },
+          "source_role": "PEXELS_SUPPORTING"
+        }
+      }
+    },
+    "primary": {
+      "approved_query_authority": {
+        "endpoint": "/v1/videos/search",
+        "intent_field": "stock_search_intent",
+        "locale": "en-US",
+        "minimum_duration_seconds": 8.0,
+        "minimum_resolution": "1920x1080",
+        "orientation": "landscape",
+        "package_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+        "per_page": 20,
+        "plan_hash": "2eb6a1f3fb1f305487ce58556d40860fa6d7e8601f6d969b7c0ddbbc7bff26c4",
+        "planner_version": "pexels-query-planner/v1.0.0",
+        "preferred_resolution": "1920x1080",
+        "primary_query": "people discussing office paperwork workplace b roll",
+        "query_family": [
+          "people discussing office paperwork workplace b roll",
+          "people discussing office paperwork close up action",
+          "people discussing office paperwork clean composition"
+        ],
+        "schema_version": "mr1.pexels-query-authority.v1",
+        "size_preference": "large",
+        "stock_search_intent": "People discussing office paperwork together."
+      },
+      "approved_stock_search_intent": "People discussing office paperwork together.",
+      "base_query_evidence": {
+        "base_stock_search_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+        "content_hash": "21cb62eb3c947cee230fa94c04270e405f210f5b4af5e94b96769e33d051620f",
+        "detailed_candidate_ranking_evidence_fabricated": false,
+        "detailed_candidate_ranking_evidence_state": "UNAVAILABLE_NOT_DURABLY_CAPTURED",
+        "package_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+        "prior_attempt_artifact_version_id": "53cde90c-c8d7-40e4-96bf-aa910030e165",
+        "prior_attempt_content_hash": "5fe7b00b73ddc454a888f17ccbb700c020a8831ee11b1e9a72edcb9e510f26c2",
+        "prior_request_schema": "mr1.pexels-provider-request.v1",
+        "query_authority": {
+          "endpoint": "/v1/videos/search",
+          "intent_field": "semantic_intent",
+          "locale": "en-US",
+          "minimum_duration_seconds": 8.0,
+          "minimum_resolution": "1920x1080",
+          "orientation": "landscape",
+          "package_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+          "per_page": 20,
+          "plan_hash": "c3e0da72fc040baa320ab3c19121783ae0a25bbe30261b12d7bd7feeb3983865",
+          "planner_version": "pexels-query-planner/v1.0.0",
+          "preferred_resolution": "1920x1080",
+          "primary_query": "use supporting review context workplace b roll",
+          "query_family": [
+            "use supporting review context workplace b roll",
+            "use supporting review context close up action",
+            "use supporting review context clean composition"
+          ],
+          "schema_version": "mr1.pexels-query-authority.v1",
+          "size_preference": "large",
+          "stock_search_intent": "Use supporting review context followed by a native exception queue and reason codes."
+        },
+        "reconstruction": "DETERMINISTIC_FROM_EXACT_PACKAGE_AUTHORITY_AND_CONSUMED_REQUEST_HASH",
+        "request_hash": "10af25b3174a6f0cc55f9c694a5228f713ed67576ec3fb8008994a4409400fec",
+        "request_hash_match_consumed_ledger": true,
+        "request_state": "CONSUMED_FAILED_AFTER_SEARCH_SUBMIT",
+        "schema_version": "mr1.pexels-base-query-evidence.v1"
+      },
+      "package_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+      "query_intent_coverage_evidence": {
+        "content_hash": "7263d2ac827a9cee71dae131d6150cb148a69b5ff389ae75d959d406b74109c9",
+        "intent_field": "stock_search_intent",
+        "intent_token_count": 5,
+        "intent_token_count_result": "PASS",
+        "intent_tokens": [
+          "discussing",
+          "office",
+          "paperwork",
+          "people",
+          "together"
+        ],
+        "matched_intent_token_count": 4,
+        "matched_intent_tokens": [
+          "discussing",
+          "office",
+          "paperwork",
+          "people"
+        ],
+        "maximum_missing_intent_token_count_at_threshold": 1,
+        "minimum_observable_intent_token_count": 2,
+        "package_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+        "planner_generic_query_core_token_cap": 4,
+        "primary_query": "people discussing office paperwork workplace b roll",
+        "query_intent_coverage": 0.8,
+        "query_retention_margin_tokens": 0,
+        "query_tokens": [
+          "discussing",
+          "office",
+          "paperwork",
+          "people",
+          "roll",
+          "workplace"
+        ],
+        "required_match_availability_result": "PASS",
+        "required_matched_intent_token_count": 4,
+        "result": "PASS",
+        "schema_version": "mr1.pexels-stock-search-intent-coverage.v1",
+        "semantic_fit_threshold": 0.78,
+        "stock_search_intent": "People discussing office paperwork together."
+      },
+      "query_material_diff": {
+        "approved_primary_query": "people discussing office paperwork workplace b roll",
+        "approved_query_authority_hash": "be0989d17c7befb1dcfa32e9f7b9e7cd2080b9bc8a9d4cb43d23312c66f623b2",
+        "approved_query_family": [
+          "people discussing office paperwork workplace b roll",
+          "people discussing office paperwork close up action",
+          "people discussing office paperwork clean composition"
+        ],
+        "base_primary_query": "use supporting review context workplace b roll",
+        "base_query_authority_hash": "ab3af342173d75bf374f38413d79a82f88adb993c9914a30adcf67383d0ddd2d",
+        "base_query_family": [
+          "use supporting review context workplace b roll",
+          "use supporting review context close up action",
+          "use supporting review context clean composition"
+        ],
+        "content_hash": "dcfbaedffed820b9f324aeee454d19cdf6a658fcd39238730a85d5c5766f6dfb",
+        "materially_different": true,
+        "schema_version": "mr1.pexels-stock-search-query-diff.v1"
+      },
+      "scene_id": "SC-07",
+      "stock_search_intent_derivation": {
+        "approved_stock_search_intent": "People discussing office paperwork together.",
+        "automatic_semantic_rewrite_authorized": false,
+        "content_hash": "b0c17bbadb1ce72bf35e165761f0849d69bd3006d24eaca029db4a8d2c638b59",
+        "derivation_evidence": [
+          {
+            "observable_paraphrase": "People discussing office paperwork together.",
+            "relationship": "BOUNDED_STOCK_SEARCH_PARAPHRASE_REQUIRES_EXACT_HUMAN_REVIEW",
+            "source_phrase": "Use supporting review context followed by a native exception queue and reason codes."
+          },
+          {
+            "observable_paraphrase": "People discussing office paperwork together.",
+            "relationship": "SCRIPT_VISUAL_HINT_TO_CONTEXT_ONLY_STOCK_SEARCH_REQUIRES_EXACT_HUMAN_REVIEW",
+            "source_phrase": "Use supporting review context followed by a native exception queue and reason codes."
+          },
+          {
+            "observable_paraphrase": "People discussing office paperwork together.",
+            "relationship": "SCRIPT_SEGMENT_CONTEXT_TO_OBSERVABLE_STOCK_SEARCH_REQUIRES_EXACT_HUMAN_REVIEW",
+            "source_phrase": "The normal path is only half the design. Missing data, duplicate requests, unusual approvals, and system outages need an explicit destination. Route them to a named owner. Preserve the original input. Avoid silent retries that can create duplicate work. A supporting shot of a team reviewing an exception can make the operational context clear, but the visual remains illustrative. The workflow record is the evidence. Set a threshold for pausing the pilot if exceptions rise. This does not need a complicated control room. A simple queue, a reason code, and a manual fallback can be enough. Control is part of the time-saving design, not a separate concern added later."
+          }
+        ],
+        "evidence_role": "CONTEXT_ONLY",
+        "exact_human_review_required": true,
+        "native_explanation_unchanged": true,
+        "package_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+        "package_semantic_intent_unchanged": true,
+        "refs": {
+          "scene_visual_intent": {
+            "artifact_version_id": "b0e8b068-b79b-4854-81b7-15e68df0992f",
+            "content_hash": "55ad4f4725b66f7e1cf7e770df1ee7e0437710925d63e433c00c2ba0441bc712",
+            "json_pointer": "/scenes/6"
+          },
+          "script": {
+            "artifact_version_id": "4c0ac729-32c5-4005-9078-013b399e8802",
+            "content_hash": "48e89e95a3234f7f3abd1f86a99dd2e8009279e22dea511ede299483baa14fd7",
+            "json_pointer": "/segments/6",
+            "segment_id": "S07",
+            "segment_text_hash": "c2ba49c02fae0290360d8650ade5ace5ff49da96ad3fc5349704fc652f585e20"
+          },
+          "supporting_subwindow": {
+            "canonical_timeline_hash": "eada2c27cadb13eef03d6f160c064807dc63369b77b66192e127a9cbef2bd994",
+            "native_explanation_duration_ms": 45310,
+            "native_explanation_end_ms": 345360,
+            "native_explanation_start_ms": 300050,
+            "native_mechanism": "BRIEF_CONTEXT_THEN_EXCEPTION_QUEUE",
+            "policy_ref": "mr1-temporal-policy://supporting-stock-subwindow/min-8000ms-or-floor-20pct/v1",
+            "stock_context_duration_ms": 8000,
+            "stock_context_end_ms": 300050,
+            "stock_context_start_ms": 292050,
+            "supporting_visual_subwindows_hash": "aad620649a67db1535a9a8927c9220271c5d9f713432336365798dbf45780809"
+          },
+          "visual_source_decision": {
+            "artifact_version_id": "658e43ed-8c8d-43f9-968d-234e41215d99",
+            "content_hash": "3e29f3d7e023be9100b62088a6a291ad9457fb70c7cc0967e4d925eef6f1871d",
+            "json_pointer": "/decisions/6"
+          }
+        },
+        "route": "PEXELS_VIDEO",
+        "scene_id": "SC-07",
+        "schema_version": "mr1.pexels-observable-subintent-derivation.v1",
+        "scope": "PEXELS_SUPPORTING_SUBWINDOW_CONTEXT_ONLY",
+        "source_context": {
+          "scene_visual_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+          "script_segment_text": "The normal path is only half the design. Missing data, duplicate requests, unusual approvals, and system outages need an explicit destination. Route them to a named owner. Preserve the original input. Avoid silent retries that can create duplicate work. A supporting shot of a team reviewing an exception can make the operational context clear, but the visual remains illustrative. The workflow record is the evidence. Set a threshold for pausing the pilot if exceptions rise. This does not need a complicated control room. A simple queue, a reason code, and a manual fallback can be enough. Control is part of the time-saving design, not a separate concern added later.",
+          "script_visual_intent_hint": "Use supporting review context followed by a native exception queue and reason codes.",
+          "visual_source_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes."
+        },
+        "source_role": "PEXELS_SUPPORTING"
+      }
+    }
+  },
+  "required_operator_authority": {
+    "decided_by_user_id": "287ab3a3-8a66-4c06-83c7-e0a8e6ca06aa",
+    "operator_decision_text": "Ph\u00ea duy\u1ec7t th\u00eam \u0111\u00fang 1 Pexels SC-07 attempt v\u00e0 \u0111\u1ed5i query Pexels SC-09 tr\u01b0\u1edbc attempt \u0111\u1ea7u ti\u00ean cho run n\u00e0y; manifest sha256 b3c745534ff6e241ab783c7024ed763f8859299e792702919611c8d52eaca7cd",
+    "operator_review_task_id": "83158e94-671d-4fee-9a4f-3c1562354cb4"
+  },
+  "run_id": "b932773c-4049-482a-8827-6933d924c34f",
+  "safety_boundary": {
+    "automatic_retry_allowed": false,
+    "provider_substitution_allowed": false,
+    "publish_execution_authorized": false,
+    "youtube_upload_authorized": false
+  },
+  "schema_version": "mr1.pexels-continuation-review-report.v1",
+  "semantic_fit_threshold": {
+    "approved": 0.78,
+    "pending_scene_values": {
+      "SC-09": 0.78
+    },
+    "unchanged": true
+  },
+  "superseded_review_tasks": []
+}

@@ -1,5 +1,5 @@
 catalog_key: artifact_type_registry
-catalog_version: "1.6.0"
+catalog_version: "1.11.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -117,3 +117,41 @@ items:
     description: Immutable exact-target operator PASS receipt for the reviewed PKG1 market revision package.
   - key: pkg1_market_revision_read_model
     description: Operator-facing approved-package state that preserves pending destination and publish boundaries.
+  - key: mr1_execution_approval_receipt
+    description: Immutable exact-target single-run MR1 real-production execution approval receipt.
+  - key: mr1_execution_readiness_preflight
+    description: Provider-free MR1 render readiness and publish-boundary preflight evidence.
+  - key: mr1_approval_supersession_ledger
+    description: Append-only ledger marking earlier MR1 approvals superseded without mutating historical decisions.
+  - key: mr1_reuse_decision_manifest
+    description: Fail-closed exact-proof classification of prior MR1 outputs before a fresh revision-bound execution.
+  - key: mr1_execution_run
+    description: Fresh immutable MR1 execution identity, lineage, stage state, and terminal single-run authority.
+  - key: mr1_provider_attempt_ledger
+    description: Exact provider and scene attempt limits, submission states, idempotency, and cost evidence for MR1.
+  - key: mr1_provider_attempt_continuation_review_manifest
+    description: Immutable operator-review manifest binding one exact consumed Pexels continuation, any pending query amendment, and the prior ledger proof before approval.
+  - key: mr1_review_media_candidate
+    description: Exact rendered MR1 candidate awaiting operator full-watch; never a FinalMediaRef.
+  - key: mr1_drive_archive_receipt
+    description: Exact MR1 Drive archive item-set and read-back verification receipt.
+  - key: mr1_human_full_watch_receipt
+    description: Immutable operator decision bound to the exact reviewed MP4 and verified Drive receipt.
+  - key: mr1_technical_media_qc_receipt
+    description: Immutable MR1 technical media-QC authority bound to exact rendered bytes and review round.
+  - key: mr1_final_media_lineage_receipt
+    description: Immutable MR1 final-media lineage binding exact MP4 bytes, candidate, Drive and cloud proofs, technical QC, human PASS, package, profile, snapshot, and market authority.
+  - key: mr1_drive_finalization_supplement_receipt
+    description: Immutable live-verified Drive supplement receipt archiving the exact human full-watch and final-lineage artifacts without reopening the canonical review archive.
+  - key: effective_ads_only_monetization_policy
+    description: Immutable effective ads-only overlay bound to an exact approved base policy snapshot without mutating it.
+  - key: geo_market_delivery_closeout_evidence
+    description: Submitted Geo/Market delivery closeout evidence binding strict lineage, destination, alignment, maturity, diagnostics, and ads-only policy.
+  - key: geo_delivery_verification_receipt
+    description: Immutable runner-created receipt containing the exact Geo verification manifest and pytest/static command-output hashes.
+  - key: pkg1_sc04_revision_diff
+    description: Immutable scene-scoped diff proving only SC-04 and its dependent planning artifacts changed.
+  - key: pkg1_sc04_review_packet
+    description: Exact SC-04 repair evidence packet for final human package review without execution authority.
+  - key: pkg1_sc04_revision_human_review_receipt
+    description: Immutable exact-target human PASS receipt for the reviewed SC-04 revision package without execution authority.

@@ -164,15 +164,22 @@ def test_pexels_query_unsupported_options_and_unsafe_concepts_block():
         PexelsQueryPlanner().plan(_asset_request(semantic_visual_intent="fake testimonial proof"))
 
 
-def test_candidate_ranking_is_deterministic_multidimensional_and_reuse_aware():
+def test_candidate_ranking_ignores_non_official_pexels_enrichment():
     candidates = _parsed_candidates()
     ranker = StockCandidateRanker()
     first = ranker.rank(_asset_request(), candidates, previous_asset_usage_refs=["old-asset"])
     second = ranker.rank(_asset_request(), candidates, previous_asset_usage_refs=["old-asset"])
     assert first == second
     assert first.selected_candidate_id == "pexels-1001"
-    assert first.rejected_candidates[0].candidate_id == "pexels-1002"
-    assert "SAME_ASSET_REUSE_RISK_REPRESENTED" in first.ranking_reason_codes
+    assert first.rejected_candidates == []
+    assert "SAME_ASSET_REUSE_RISK_REPRESENTED" not in first.ranking_reason_codes
+    assert all(candidate.tags == [] for candidate in candidates)
+    assert all(candidate.logo_or_text_present is None for candidate in candidates)
+    assert all(candidate.prior_use_count == 0 for candidate in candidates)
+    assert all(
+        "METADATA_RISK_REQUIRES_HUMAN_REVIEW" in item.reason_codes
+        for item in first.candidate_scores
+    )
     assert len(first.candidate_scores[0].dimensions) == 12 and first.selection_requires_human_review
 
 

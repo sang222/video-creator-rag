@@ -349,6 +349,11 @@ class QualificationFactory:
             visual_plan_hash="qualification-visual-plan-hash",
         )
         self.session.add(visual)
+        # Materialize the generated snapshot identifier before binding it into
+        # the production-run lineage.  SQLAlchemy column defaults are applied
+        # on flush, so assigning ``visual.id`` before this point silently
+        # persisted a NULL run pointer even though the snapshot itself existed.
+        self.session.flush()
         run.voice_timeline_snapshot_id = voice.id
         run.caption_track_snapshot_id = captions.id
         run.visual_plan_snapshot_id = visual.id

@@ -1,0 +1,14 @@
+{
+  "cycles": [
+    {
+      "classification": "DETERMINISTIC_PACKAGE_REPAIR",
+      "cycle": 1,
+      "outcome": "PASS_HUMAN_REVIEW_PENDING",
+      "provider_calls": 0,
+      "root_cause": "INSUFFICIENT_SCENE_SPEC",
+      "route": "NATIVE_MOTION_GRAPHIC"
+    }
+  ],
+  "result": "PASS",
+  "schema_version": "pkg1.sc04-repair-cycles.v1"
+}

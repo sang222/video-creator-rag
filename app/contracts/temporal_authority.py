@@ -96,18 +96,27 @@ class SpokenTextNormalized(BaseModel):
         operation_ids = {item.operation_id for item in self.normalization_operations}
         referenced_operation_ids: set[str] = set()
         for mapping in self.source_to_spoken_spans:
-            if mapping.source_span.start != source_cursor or mapping.spoken_span.start != spoken_cursor:
+            if (
+                mapping.source_span.start != source_cursor
+                or mapping.spoken_span.start != spoken_cursor
+            ):
                 raise ValueError("NORMALIZATION_SOURCE_ACCOUNTING_GAP")
             if not set(mapping.operation_ids).issubset(operation_ids):
                 raise ValueError("NORMALIZATION_OPERATION_REF_UNKNOWN")
             referenced_operation_ids.update(mapping.operation_ids)
             source_cursor = mapping.source_span.end
             spoken_cursor = mapping.spoken_span.end
-        if source_cursor != self.source_character_count or spoken_cursor != self.spoken_character_count:
+        if (
+            source_cursor != self.source_character_count
+            or spoken_cursor != self.spoken_character_count
+        ):
             raise ValueError("NORMALIZATION_SOURCE_ACCOUNTING_GAP")
         if referenced_operation_ids != operation_ids:
             raise ValueError("NORMALIZATION_OPERATION_UNTRACEABLE")
-        if any(token.spoken_span.end > self.spoken_character_count for token in self.spoken_tokens):
+        if any(
+            token.spoken_span.end > self.spoken_character_count
+            for token in self.spoken_tokens
+        ):
             raise ValueError("NORMALIZATION_TOKEN_SPAN_INVALID")
         return self
 
@@ -153,7 +162,9 @@ class NarrationTimingSeed(BaseModel):
     source_text_hash: str = Field(min_length=1)
     spoken_text_hash: str = Field(min_length=1)
     original_character_alignment: list[CharacterAlignment] = Field(default_factory=list)
-    normalized_character_alignment: list[CharacterAlignment] = Field(default_factory=list)
+    normalized_character_alignment: list[CharacterAlignment] = Field(
+        default_factory=list
+    )
     provider_model_id: str = Field(min_length=1)
     provider_voice_id: str = Field(min_length=1)
     seed: int | None = None
@@ -187,9 +198,7 @@ class AlignedWord(BaseModel):
 class ForcedAlignmentEvidence(BaseModel):
     provider_key: str = Field(min_length=1)
     provider_request_id: str | None = None
-    provider_request_id_availability: Literal[
-        "PRESENT", "NOT_EXPOSED_BY_ENDPOINT"
-    ]
+    provider_request_id_availability: Literal["PRESENT", "NOT_EXPOSED_BY_ENDPOINT"]
     audio_asset_ref: str = Field(min_length=1)
     audio_duration_ms: int = Field(gt=0)
     spoken_text_hash: str = Field(min_length=1)
@@ -303,7 +312,9 @@ class CanonicalTimelineSegment(BaseModel):
     semantic_score: float | None = None
     continuity_score: float | None = None
     alignment_confidence: float = Field(ge=0, le=1)
-    timing_source: Literal["VERIFIED_NARRATION_ALIGNMENT"] = "VERIFIED_NARRATION_ALIGNMENT"
+    timing_source: Literal["VERIFIED_NARRATION_ALIGNMENT"] = (
+        "VERIFIED_NARRATION_ALIGNMENT"
+    )
     source_provenance: list[dict[str, Any]] = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
@@ -322,10 +333,19 @@ class CanonicalTimelineSegment(BaseModel):
                 raise ValueError("CAPTION_CUE_ID_DUPLICATE")
             if self.caption_cue_ids and self.caption_cue_ids != cue_ids:
                 raise ValueError("CAPTION_CUE_INDEX_MISMATCH")
-            cue_tokens = [token_id for cue in self.caption_cues for token_id in cue.spoken_token_ids]
-            if self.caption_spoken_token_ids and self.caption_spoken_token_ids != cue_tokens:
+            cue_tokens = [
+                token_id
+                for cue in self.caption_cues
+                for token_id in cue.spoken_token_ids
+            ]
+            if (
+                self.caption_spoken_token_ids
+                and self.caption_spoken_token_ids != cue_tokens
+            ):
                 raise ValueError("CAPTION_TOKEN_INDEX_MISMATCH")
-            if any(cue.source_segment_ids != [self.segment_id] for cue in self.caption_cues):
+            if any(
+                cue.source_segment_ids != [self.segment_id] for cue in self.caption_cues
+            ):
                 raise ValueError("CAPTION_CUE_SEGMENT_MISMATCH")
         return self
 
@@ -375,6 +395,9 @@ class TemporalAuthorityGateResult(BaseModel):
     gate_status: VerificationStatus
     block_reasons: list[str] = Field(default_factory=list)
     exact_next_action: str = Field(min_length=1)
+    supporting_visual_subwindows_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     content_hash: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")

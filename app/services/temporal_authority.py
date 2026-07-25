@@ -5,7 +5,6 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -94,7 +93,18 @@ _ONES = (
     "eighteen",
     "nineteen",
 )
-_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+_TENS = (
+    "",
+    "",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+)
 _MONTHS = (
     "",
     "January",
@@ -111,12 +121,37 @@ _MONTHS = (
     "December",
 )
 _ORDINAL_DAYS = {
-    1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth", 7: "seventh",
-    8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth", 13: "thirteenth",
-    14: "fourteenth", 15: "fifteenth", 16: "sixteenth", 17: "seventeenth", 18: "eighteenth",
-    19: "nineteenth", 20: "twentieth", 21: "twenty first", 22: "twenty second", 23: "twenty third",
-    24: "twenty fourth", 25: "twenty fifth", 26: "twenty sixth", 27: "twenty seventh",
-    28: "twenty eighth", 29: "twenty ninth", 30: "thirtieth", 31: "thirty first",
+    1: "first",
+    2: "second",
+    3: "third",
+    4: "fourth",
+    5: "fifth",
+    6: "sixth",
+    7: "seventh",
+    8: "eighth",
+    9: "ninth",
+    10: "tenth",
+    11: "eleventh",
+    12: "twelfth",
+    13: "thirteenth",
+    14: "fourteenth",
+    15: "fifteenth",
+    16: "sixteenth",
+    17: "seventeenth",
+    18: "eighteenth",
+    19: "nineteenth",
+    20: "twentieth",
+    21: "twenty first",
+    22: "twenty second",
+    23: "twenty third",
+    24: "twenty fourth",
+    25: "twenty fifth",
+    26: "twenty sixth",
+    27: "twenty seventh",
+    28: "twenty eighth",
+    29: "twenty ninth",
+    30: "thirtieth",
+    31: "thirty first",
 }
 
 
@@ -130,11 +165,22 @@ def _integer_words(number: int) -> str:
         return _TENS[tens] + (" " + _integer_words(rest) if rest else "")
     if number < 1_000:
         hundreds, rest = divmod(number, 100)
-        return _ONES[hundreds] + " hundred" + (" " + _integer_words(rest) if rest else "")
-    for unit, label in ((1_000_000_000, "billion"), (1_000_000, "million"), (1_000, "thousand")):
+        return (
+            _ONES[hundreds] + " hundred" + (" " + _integer_words(rest) if rest else "")
+        )
+    for unit, label in (
+        (1_000_000_000, "billion"),
+        (1_000_000, "million"),
+        (1_000, "thousand"),
+    ):
         if number >= unit:
             head, rest = divmod(number, unit)
-            return _integer_words(head) + " " + label + (" " + _integer_words(rest) if rest else "")
+            return (
+                _integer_words(head)
+                + " "
+                + label
+                + (" " + _integer_words(rest) if rest else "")
+            )
     raise ValueError("NUMBER_OUT_OF_SUPPORTED_RANGE")
 
 
@@ -162,7 +208,9 @@ def _currency_words(value: str) -> str:
     if dot:
         cents = int(cents_text.ljust(2, "0"))
         if cents:
-            result += f" and {_integer_words(cents)} {'cent' if cents == 1 else 'cents'}"
+            result += (
+                f" and {_integer_words(cents)} {'cent' if cents == 1 else 'cents'}"
+            )
     return result
 
 
@@ -170,11 +218,17 @@ def _url_words(value: str) -> str:
     output = value
     for prefix in ("https://", "http://"):
         if output.startswith(prefix):
-            output = output[len(prefix):]
+            output = output[len(prefix) :]
     output = output.replace("www.", "w w w dot ", 1)
     replacements = {
-        ".": " dot ", "/": " slash ", "-": " dash ", "_": " underscore ",
-        ":": " colon ", "?": " question mark ", "=": " equals ", "&": " and ",
+        ".": " dot ",
+        "/": " slash ",
+        "-": " dash ",
+        "_": " underscore ",
+        ":": " colon ",
+        "?": " question mark ",
+        "=": " equals ",
+        "&": " and ",
     }
     for source, spoken in replacements.items():
         output = output.replace(source, spoken)
@@ -215,7 +269,12 @@ class SpokenTextNormalizer:
         if language.casefold() != "en" or not locale.casefold().startswith("en"):
             raise ValueError("NORMALIZATION_LOCALE_NOT_SUPPORTED")
         channel_policy = dict(channel_pronunciation_policy or {})
-        unknown_policy_keys = set(channel_policy) - {"approved", "abbreviations", "pronunciations", "policy_ref"}
+        unknown_policy_keys = set(channel_policy) - {
+            "approved",
+            "abbreviations",
+            "pronunciations",
+            "policy_ref",
+        }
         if unknown_policy_keys or channel_policy.get("approved") is False:
             raise ValueError("CHANNEL_PRONUNCIATION_POLICY_INVALID")
         dictionary = {
@@ -250,19 +309,37 @@ class SpokenTextNormalizer:
             )
             if match is None:
                 end = position + 1
-                chunks.append(_Chunk(position, end, source_text[position:end], source_text[position:end], None, None))
+                chunks.append(
+                    _Chunk(
+                        position,
+                        end,
+                        source_text[position:end],
+                        source_text[position:end],
+                        None,
+                        None,
+                    )
+                )
                 position = end
                 continue
             source_value = match.group(0)
-            spoken_value = replacement(source_value) if callable(replacement) else replacement
+            spoken_value = (
+                replacement(source_value) if callable(replacement) else replacement
+            )
             if spoken_value is None:
                 spoken_value = source_value
             if operation_type == "WHITESPACE_NORMALIZATION":
                 has_prior = any(chunk.spoken_text for chunk in chunks)
-                has_future = bool(source_text[match.end():].strip())
+                has_future = bool(source_text[match.end() :].strip())
                 spoken_value = " " if has_prior and has_future else ""
             chunks.append(
-                _Chunk(position, match.end(), source_value, str(spoken_value), operation_type, reason_code)
+                _Chunk(
+                    position,
+                    match.end(),
+                    source_value,
+                    str(spoken_value),
+                    operation_type,
+                    reason_code,
+                )
             )
             position = match.end()
 
@@ -273,7 +350,10 @@ class SpokenTextNormalizer:
         spoken_cursor = 0
         source_cursor = 0
         for index, chunk in enumerate(chunks, start=1):
-            if chunk.source_start != source_cursor or chunk.source_end <= chunk.source_start:
+            if (
+                chunk.source_start != source_cursor
+                or chunk.source_end <= chunk.source_start
+            ):
                 raise ValueError("NORMALIZATION_SOURCE_ACCOUNTING_GAP")
             start = spoken_cursor
             spoken_parts.append(chunk.spoken_text)
@@ -284,7 +364,9 @@ class SpokenTextNormalizer:
                 operation = NormalizationOperation(
                     operation_id=operation_id,
                     operation_type=chunk.operation_type,
-                    source_span=TextSpan(start=chunk.source_start, end=chunk.source_end),
+                    source_span=TextSpan(
+                        start=chunk.source_start, end=chunk.source_end
+                    ),
                     spoken_span=TextSpan(start=start, end=spoken_cursor),
                     source_text=chunk.source_text,
                     spoken_text=chunk.spoken_text,
@@ -296,7 +378,9 @@ class SpokenTextNormalizer:
                 operation_ids.append(operation_id)
             mappings.append(
                 SourceToSpokenSpan(
-                    source_span=TextSpan(start=chunk.source_start, end=chunk.source_end),
+                    source_span=TextSpan(
+                        start=chunk.source_start, end=chunk.source_end
+                    ),
                     spoken_span=TextSpan(start=start, end=spoken_cursor),
                     operation_ids=operation_ids,
                 )
@@ -311,13 +395,21 @@ class SpokenTextNormalizer:
         tokens: list[SpokenToken] = []
         for index, match in enumerate(_TOKEN_RE.finditer(spoken_text), start=1):
             matching = [
-                item for item in mappings
-                if item.spoken_span.start < match.end() and item.spoken_span.end > match.start()
+                item
+                for item in mappings
+                if item.spoken_span.start < match.end()
+                and item.spoken_span.end > match.start()
             ]
             source_spans = [item.source_span for item in matching]
             if not source_spans:
                 raise ValueError("NORMALIZATION_UNMAPPED_INSERTED_WORD")
-            operation_ids = sorted({operation_id for item in matching for operation_id in item.operation_ids})
+            operation_ids = sorted(
+                {
+                    operation_id
+                    for item in matching
+                    for operation_id in item.operation_ids
+                }
+            )
             comparison = _comparison_key(match.group(0))
             if not comparison:
                 raise ValueError("NORMALIZATION_TOKEN_INVALID")
@@ -334,24 +426,42 @@ class SpokenTextNormalizer:
         if not tokens:
             raise ValueError("NORMALIZATION_SPOKEN_TOKENS_MISSING")
         payload = {
-            "normalization_version": normalization_policy_version or self.normalization_version,
+            "normalization_version": normalization_policy_version
+            or self.normalization_version,
             "script_revision_id": script_revision_id,
             "source_text_hash": _sha_text(source_text),
             "source_character_count": len(source_text),
             "spoken_text": spoken_text,
             "spoken_text_hash": _sha_text(spoken_text),
             "spoken_character_count": len(spoken_text),
-            "normalization_operations": [item.model_dump(mode="json") for item in operations],
-            "source_to_spoken_spans": [item.model_dump(mode="json") for item in mappings],
+            "normalization_operations": [
+                item.model_dump(mode="json") for item in operations
+            ],
+            "source_to_spoken_spans": [
+                item.model_dump(mode="json") for item in mappings
+            ],
             "spoken_tokens": [item.model_dump(mode="json") for item in tokens],
-            "pronunciation_dictionary_refs": sorted(pronunciation_dictionary_refs or []),
+            "pronunciation_dictionary_refs": sorted(
+                pronunciation_dictionary_refs or []
+            ),
             "normalization_warnings": [],
         }
         return SpokenTextNormalized(**payload, content_hash=stable_hash(payload))
 
     @staticmethod
-    def editorial_script(*, script_revision_id: str, text: str, locale: str = "en-US", language: str = "en") -> EditorialScriptText:
-        payload = {"script_revision_id": script_revision_id, "text": text, "locale": locale, "language": language}
+    def editorial_script(
+        *,
+        script_revision_id: str,
+        text: str,
+        locale: str = "en-US",
+        language: str = "en",
+    ) -> EditorialScriptText:
+        payload = {
+            "script_revision_id": script_revision_id,
+            "text": text,
+            "locale": locale,
+            "language": language,
+        }
         return EditorialScriptText(**payload, content_hash=stable_hash(payload))
 
     @staticmethod
@@ -368,19 +478,56 @@ class SpokenTextNormalizer:
                 after = position + len(source)
                 after_ok = after == len(text) or not text[after].isalnum()
                 if before_ok and after_ok:
-                    return re.compile(re.escape(source)).match(text, position), "PRONUNCIATION_DICTIONARY_MAPPING", "APPROVED_PRONUNCIATION_DICTIONARY", dictionary[source]
+                    return (
+                        re.compile(re.escape(source)).match(text, position),
+                        "PRONUNCIATION_DICTIONARY_MAPPING",
+                        "APPROVED_PRONUNCIATION_DICTIONARY",
+                        dictionary[source],
+                    )
         for source in sorted(abbreviations, key=lambda item: (-len(item), item)):
             if text.startswith(source, position):
-                return re.compile(re.escape(source)).match(text, position), "ABBREVIATION_EXPANSION", "KNOWN_ABBREVIATION", abbreviations[source]
+                return (
+                    re.compile(re.escape(source)).match(text, position),
+                    "ABBREVIATION_EXPANSION",
+                    "KNOWN_ABBREVIATION",
+                    abbreviations[source],
+                )
         rules: tuple[tuple[re.Pattern[str], str, str, Any], ...] = (
             (_URL_RE, "URL_PRONUNCIATION", "APPROVED_URL_RULE", _url_words),
             (_ISO_DATE_RE, "DATE_VERBALIZATION", "ISO_DATE", _date_words),
             (_CURRENCY_RE, "CURRENCY_VERBALIZATION", "USD_CURRENCY", _currency_words),
-            (_PERCENT_RE, "PERCENTAGE_VERBALIZATION", "PERCENT_SYMBOL", lambda value: _number_words(value[:-1]) + " percent"),
-            (_RANGE_RE, "NUMBER_RANGE_VERBALIZATION", "NUMBER_RANGE", lambda value: " to ".join(_number_words(part) for part in re.split(r"[-–]", value))),
-            (_NUMBER_RE, "NUMBER_VERBALIZATION", "CARDINAL_OR_DECIMAL_NUMBER", _number_words),
-            (_ACRONYM_RE, "ACRONYM_PRONUNCIATION", "KNOWN_ACRONYM_PATTERN", lambda value: " ".join(value)),
-            (_WHITESPACE_RE, "WHITESPACE_NORMALIZATION", "WHITESPACE_CANONICALIZATION", " "),
+            (
+                _PERCENT_RE,
+                "PERCENTAGE_VERBALIZATION",
+                "PERCENT_SYMBOL",
+                lambda value: _number_words(value[:-1]) + " percent",
+            ),
+            (
+                _RANGE_RE,
+                "NUMBER_RANGE_VERBALIZATION",
+                "NUMBER_RANGE",
+                lambda value: " to ".join(
+                    _number_words(part) for part in re.split(r"[-–]", value)
+                ),
+            ),
+            (
+                _NUMBER_RE,
+                "NUMBER_VERBALIZATION",
+                "CARDINAL_OR_DECIMAL_NUMBER",
+                _number_words,
+            ),
+            (
+                _ACRONYM_RE,
+                "ACRONYM_PRONUNCIATION",
+                "KNOWN_ACRONYM_PATTERN",
+                lambda value: " ".join(value),
+            ),
+            (
+                _WHITESPACE_RE,
+                "WHITESPACE_NORMALIZATION",
+                "WHITESPACE_CANONICALIZATION",
+                " ",
+            ),
         )
         for pattern, operation_type, reason_code, replacement in rules:
             match = pattern.match(text, position)
@@ -450,15 +597,24 @@ class ElevenLabsTimingResponseParser:
         if audio_duration_ms <= 0:
             raise ValueError("TEMPORAL_AUDIO_DURATION_INVALID")
         warnings: list[str] = []
-        original = self._characters(response.get("alignment"), audio_duration_ms, "PROVIDER_ALIGNMENT")
-        normalized_chars = self._characters(response.get("normalized_alignment"), audio_duration_ms, "PROVIDER_NORMALIZED_ALIGNMENT")
+        original = self._characters(
+            response.get("alignment"), audio_duration_ms, "PROVIDER_ALIGNMENT"
+        )
+        normalized_chars = self._characters(
+            response.get("normalized_alignment"),
+            audio_duration_ms,
+            "PROVIDER_NORMALIZED_ALIGNMENT",
+        )
         normalized_chars, boundary_whitespace_trimmed = self._trim_boundary_whitespace(
             normalized_chars,
             expected_text=normalized.spoken_text,
         )
         if boundary_whitespace_trimmed:
             warnings.append("WHITELISTED_PROVIDER_BOUNDARY_WHITESPACE")
-        reconstructed = "".join(item.character for item in sorted(normalized_chars, key=lambda item: item.character_index))
+        reconstructed = "".join(
+            item.character
+            for item in sorted(normalized_chars, key=lambda item: item.character_index)
+        )
         if normalized_chars and reconstructed != normalized.spoken_text:
             warnings.append("NORMALIZED_ALIGNMENT_TEXT_MISMATCH")
         if not normalized_chars:
@@ -470,10 +626,22 @@ class ElevenLabsTimingResponseParser:
         timing_available = bool(normalized_chars) and not any(
             warning in fatal_warnings for warning in warnings
         )
-        headers = {key.casefold(): value for key, value in (response_headers or {}).items()}
-        provider_request_id = str(response.get("request_id") or headers.get("request-id") or headers.get("x-request-id") or "") or None
+        headers = {
+            key.casefold(): value for key, value in (response_headers or {}).items()
+        }
+        provider_request_id = (
+            str(
+                response.get("request_id")
+                or headers.get("request-id")
+                or headers.get("x-request-id")
+                or ""
+            )
+            or None
+        )
         response_metadata = {
-            "audio_payload_present": bool(response.get("audio_base64") or response.get("audio")),
+            "audio_payload_present": bool(
+                response.get("audio_base64") or response.get("audio")
+            ),
             "alignment_present": bool(response.get("alignment")),
             "normalized_alignment_present": bool(response.get("normalized_alignment")),
             "normalized_alignment_boundary_whitespace_trimmed": boundary_whitespace_trimmed,
@@ -485,13 +653,19 @@ class ElevenLabsTimingResponseParser:
             "audio_duration_ms": audio_duration_ms,
             "source_text_hash": normalized.source_text_hash,
             "spoken_text_hash": normalized.spoken_text_hash,
-            "original_character_alignment": [item.model_dump(mode="json") for item in original],
-            "normalized_character_alignment": [item.model_dump(mode="json") for item in normalized_chars],
+            "original_character_alignment": [
+                item.model_dump(mode="json") for item in original
+            ],
+            "normalized_character_alignment": [
+                item.model_dump(mode="json") for item in normalized_chars
+            ],
             "provider_model_id": model_id,
             "provider_voice_id": voice_id,
             "seed": seed,
             "voice_settings": dict(voice_settings or {}),
-            "pronunciation_dictionary_refs": sorted(pronunciation_dictionary_refs or []),
+            "pronunciation_dictionary_refs": sorted(
+                pronunciation_dictionary_refs or []
+            ),
             "response_metadata": response_metadata,
             "timing_available": timing_available,
             "timing_parse_warnings": warnings,
@@ -533,27 +707,50 @@ class ElevenLabsTimingResponseParser:
         if not isinstance(raw, dict):
             return []
         characters = raw.get("characters") or []
-        starts = raw.get("character_start_times_seconds") or raw.get("character_start_times") or []
-        ends = raw.get("character_end_times_seconds") or raw.get("character_end_times") or []
-        if not (isinstance(characters, list) and isinstance(starts, list) and isinstance(ends, list)):
+        starts = (
+            raw.get("character_start_times_seconds")
+            or raw.get("character_start_times")
+            or []
+        )
+        ends = (
+            raw.get("character_end_times_seconds")
+            or raw.get("character_end_times")
+            or []
+        )
+        if not (
+            isinstance(characters, list)
+            and isinstance(starts, list)
+            and isinstance(ends, list)
+        ):
             raise ValueError(f"{label}_SHAPE_INVALID")
         if len(characters) != len(starts) or len(characters) != len(ends):
             raise ValueError(f"{label}_LENGTH_MISMATCH")
         result: list[CharacterAlignment] = []
         last_start = -1
-        for index, (character, start, end) in enumerate(zip(characters, starts, ends, strict=True)):
+        for index, (character, start, end) in enumerate(
+            zip(characters, starts, ends, strict=True)
+        ):
             start_ms, end_ms = round(float(start) * 1000), round(float(end) * 1000)
             if start_ms < last_start:
                 raise ValueError("TEMPORAL_ALIGNMENT_NON_MONOTONIC")
             if start_ms < 0 or end_ms <= start_ms or end_ms > duration_ms:
                 raise ValueError("TEMPORAL_ALIGNMENT_AUDIO_BOUNDS_INVALID")
-            result.append(CharacterAlignment(character_index=index, character=str(character), start_ms=start_ms, end_ms=end_ms))
+            result.append(
+                CharacterAlignment(
+                    character_index=index,
+                    character=str(character),
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                )
+            )
             last_start = start_ms
         return result
 
 
 class ElevenLabsForcedAlignmentRequestBuilder:
-    def build(self, *, audio_asset_ref: str, normalized: SpokenTextNormalized) -> dict[str, Any]:
+    def build(
+        self, *, audio_asset_ref: str, normalized: SpokenTextNormalized
+    ) -> dict[str, Any]:
         request = {
             "provider_key": "elevenlabs",
             "endpoint_path": "/v1/forced-alignment",
@@ -571,7 +768,9 @@ class FixtureOnlyAlignmentTransport:
     provider_call_made = False
     network_call_made = False
 
-    def execute(self, *, request: dict[str, Any], fixture_response: dict[str, Any]) -> dict[str, Any]:
+    def execute(
+        self, *, request: dict[str, Any], fixture_response: dict[str, Any]
+    ) -> dict[str, Any]:
         if request.get("transport_enabled") is not False:
             raise ValueError("FIXTURE_TRANSPORT_REQUIRES_DISABLED_REQUEST")
         return json.loads(json.dumps(fixture_response))
@@ -586,11 +785,19 @@ class NarrationAlignmentVerifier:
         request_builder: ElevenLabsForcedAlignmentRequestBuilder | None = None,
         response_parser: "ElevenLabsForcedAlignmentResponseParser | None" = None,
     ):
-        self.request_builder = request_builder or ElevenLabsForcedAlignmentRequestBuilder()
-        self.response_parser = response_parser or ElevenLabsForcedAlignmentResponseParser()
+        self.request_builder = (
+            request_builder or ElevenLabsForcedAlignmentRequestBuilder()
+        )
+        self.response_parser = (
+            response_parser or ElevenLabsForcedAlignmentResponseParser()
+        )
 
-    def build_request(self, *, audio_asset_ref: str, normalized: SpokenTextNormalized) -> dict[str, Any]:
-        return self.request_builder.build(audio_asset_ref=audio_asset_ref, normalized=normalized)
+    def build_request(
+        self, *, audio_asset_ref: str, normalized: SpokenTextNormalized
+    ) -> dict[str, Any]:
+        return self.request_builder.build(
+            audio_asset_ref=audio_asset_ref, normalized=normalized
+        )
 
     def parse_evidence(self, **kwargs: Any) -> ForcedAlignmentEvidence:
         return self.response_parser.parse(**kwargs)
@@ -606,7 +813,11 @@ class ElevenLabsForcedAlignmentResponseParser:
         audio_duration_ms: int,
         response_headers: dict[str, str] | None = None,
     ) -> ForcedAlignmentEvidence:
-        raw_words = [item for item in (response.get("words") or []) if isinstance(item, dict) and item.get("type", "word") == "word"]
+        raw_words = [
+            item
+            for item in (response.get("words") or [])
+            if isinstance(item, dict) and item.get("type", "word") == "word"
+        ]
         words: list[AlignedWord] = []
         last_start = -1
         skipped_empty_word_count = 0
@@ -632,8 +843,15 @@ class ElevenLabsForcedAlignmentResponseParser:
                     source_spoken_token_ids=[],
                 )
             )
-        mapping, missing, extra, differences = _map_words_to_tokens(normalized.spoken_tokens, words)
-        mapped_words = [word.model_copy(update={"source_spoken_token_ids": mapping.get(word.word_id, [])}) for word in words]
+        mapping, missing, extra, differences = _map_words_to_tokens(
+            normalized.spoken_tokens, words
+        )
+        mapped_words = [
+            word.model_copy(
+                update={"source_spoken_token_ids": mapping.get(word.word_id, [])}
+            )
+            for word in words
+        ]
         warnings = [item["reason_code"] for item in differences]
         if skipped_empty_word_count:
             warnings.append("WHITELISTED_FORCED_ALIGNMENT_EMPTY_WORD_ENTRY")
@@ -648,7 +866,9 @@ class ElevenLabsForcedAlignmentResponseParser:
             warnings.append(
                 "WHITELISTED_FORCED_ALIGNMENT_ZERO_DURATION_CHARACTER_ENTRY"
             )
-        headers = {key.casefold(): value for key, value in (response_headers or {}).items()}
+        headers = {
+            key.casefold(): value for key, value in (response_headers or {}).items()
+        }
         provider_request_id = (
             str(
                 response.get("request_id")
@@ -672,8 +892,14 @@ class ElevenLabsForcedAlignmentResponseParser:
             "spoken_text_hash": normalized.spoken_text_hash,
             "words": [item.model_dump(mode="json") for item in mapped_words],
             "characters": [item.model_dump(mode="json") for item in characters],
-            "alignment_loss": float(response.get("alignment_loss", response.get("loss"))) if response.get("alignment_loss", response.get("loss")) is not None else None,
-            "transcript_loss": float(response["transcript_loss"]) if response.get("transcript_loss") is not None else None,
+            "alignment_loss": float(
+                response.get("alignment_loss", response.get("loss"))
+            )
+            if response.get("alignment_loss", response.get("loss")) is not None
+            else None,
+            "transcript_loss": float(response["transcript_loss"])
+            if response.get("transcript_loss") is not None
+            else None,
             "missing_tokens": missing,
             "extra_words": extra,
             "warnings": sorted(set(warnings)),
@@ -717,9 +943,7 @@ class ElevenLabsForcedAlignmentResponseParser:
                 raise ValueError("FORCED_ALIGNMENT_CHARACTERS_LENGTH_MISMATCH")
             raw = [
                 {"text": character, "start": start, "end": end}
-                for character, start, end in zip(
-                    characters, starts, ends, strict=True
-                )
+                for character, start, end in zip(characters, starts, ends, strict=True)
             ]
         if not isinstance(raw, list):
             raise ValueError("FORCED_ALIGNMENT_CHARACTERS_SHAPE_INVALID")
@@ -767,24 +991,28 @@ def _map_words_to_tokens(
         if token.comparison_key == word_key:
             mapping[word.word_id] = [token.token_id]
             if token.text != word.text:
-                differences.append({
-                    "reason_code": "WHITELISTED_ORTHOGRAPHIC_DIFFERENCE",
-                    "forced_text": word.text,
-                    "spoken_token_ids": [token.token_id],
-                })
+                differences.append(
+                    {
+                        "reason_code": "WHITELISTED_ORTHOGRAPHIC_DIFFERENCE",
+                        "forced_text": word.text,
+                        "spoken_token_ids": [token.token_id],
+                    }
+                )
             token_index += 1
             word_index += 1
             continue
         matched = False
         for count in range(2, min(4, len(tokens) - token_index) + 1):
-            token_group = tokens[token_index: token_index + count]
+            token_group = tokens[token_index : token_index + count]
             if "".join(item.comparison_key for item in token_group) == word_key:
                 mapping[word.word_id] = [item.token_id for item in token_group]
-                differences.append({
-                    "reason_code": "WHITELISTED_TOKEN_COMPACTION",
-                    "forced_text": word.text,
-                    "spoken_token_ids": mapping[word.word_id],
-                })
+                differences.append(
+                    {
+                        "reason_code": "WHITELISTED_TOKEN_COMPACTION",
+                        "forced_text": word.text,
+                        "spoken_token_ids": mapping[word.word_id],
+                    }
+                )
                 token_index += count
                 word_index += 1
                 matched = True
@@ -792,22 +1020,27 @@ def _map_words_to_tokens(
         if matched:
             continue
         for count in range(2, min(4, len(words) - word_index) + 1):
-            word_group = words[word_index: word_index + count]
-            if "".join(_comparison_key(item.text) for item in word_group) == token.comparison_key:
+            word_group = words[word_index : word_index + count]
+            if (
+                "".join(_comparison_key(item.text) for item in word_group)
+                == token.comparison_key
+            ):
                 for grouped in word_group:
                     mapping[grouped.word_id] = [token.token_id]
-                differences.append({
-                    "reason_code": "WHITELISTED_TOKEN_EXPANSION",
-                    "forced_word_ids": [item.word_id for item in word_group],
-                    "spoken_token_ids": [token.token_id],
-                })
+                differences.append(
+                    {
+                        "reason_code": "WHITELISTED_TOKEN_EXPANSION",
+                        "forced_word_ids": [item.word_id for item in word_group],
+                        "spoken_token_ids": [token.token_id],
+                    }
+                )
                 token_index += 1
                 word_index += count
                 matched = True
                 break
         if matched:
             continue
-        remaining_keys = {item.comparison_key for item in tokens[token_index + 1:]}
+        remaining_keys = {item.comparison_key for item in tokens[token_index + 1 :]}
         if word_key in remaining_keys:
             missing.append(token.token_id)
             token_index += 1
@@ -833,6 +1066,24 @@ class NarrationAlignmentReconciler:
         audio_asset_ref: str,
         audio_duration_ms: int,
     ) -> VerifiedNarrationAlignment:
+        # A consumed narration request can leave durable audio without a usable
+        # TTS timestamp payload.  In that narrowly identified recovery case the
+        # approved forced-alignment response is the only truthful timing
+        # authority.  Do not feed its sparse character list through the normal
+        # provider-character path: the forced-alignment parser intentionally
+        # omits zero-duration characters while retaining their source indexes.
+        if (
+            timing_seed is not None
+            and timing_seed.provider_key == "elevenlabs_forced_alignment_recovery"
+        ):
+            return self._reconcile_forced_alignment_recovery(
+                normalized=normalized,
+                timing_seed=timing_seed,
+                forced_alignment=forced_alignment,
+                audio_asset_ref=audio_asset_ref,
+                audio_duration_ms=audio_duration_ms,
+            )
+
         reason_codes: list[str] = []
         if timing_seed is None or not timing_seed.timing_available:
             reason_codes.append("TEMPORAL_PROVIDER_TIMING_MISSING")
@@ -840,14 +1091,27 @@ class NarrationAlignmentReconciler:
             reason_codes.append("TEMPORAL_FORCED_ALIGNMENT_MISSING")
         if timing_seed and timing_seed.spoken_text_hash != normalized.spoken_text_hash:
             reason_codes.append("TEMPORAL_SPOKEN_TEXT_MISMATCH")
-        if forced_alignment and forced_alignment.spoken_text_hash != normalized.spoken_text_hash:
+        if (
+            forced_alignment
+            and forced_alignment.spoken_text_hash != normalized.spoken_text_hash
+        ):
             reason_codes.append("TEMPORAL_SPOKEN_TEXT_MISMATCH")
-        if timing_seed and (timing_seed.audio_asset_ref != audio_asset_ref or timing_seed.audio_duration_ms != audio_duration_ms):
+        if timing_seed and (
+            timing_seed.audio_asset_ref != audio_asset_ref
+            or timing_seed.audio_duration_ms != audio_duration_ms
+        ):
             reason_codes.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
-        if forced_alignment and (forced_alignment.audio_asset_ref != audio_asset_ref or forced_alignment.audio_duration_ms != audio_duration_ms):
+        if forced_alignment and (
+            forced_alignment.audio_asset_ref != audio_asset_ref
+            or forced_alignment.audio_duration_ms != audio_duration_ms
+        ):
             reason_codes.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
 
-        provider_by_token = self._provider_word_spans(normalized, timing_seed) if timing_seed and timing_seed.timing_available else {}
+        provider_by_token = (
+            self._provider_word_spans(normalized, timing_seed)
+            if timing_seed and timing_seed.timing_available
+            else {}
+        )
         forced_by_token: dict[str, tuple[int, int]] = {}
         normalization_differences: list[dict[str, Any]] = []
         if forced_alignment:
@@ -859,11 +1123,13 @@ class NarrationAlignmentReconciler:
                         max(current[1], word.end_ms) if current else word.end_ms,
                     )
                 if len(word.source_spoken_token_ids) != 1:
-                    normalization_differences.append({
-                        "reason_code": "WHITELISTED_TOKEN_COMPACTION",
-                        "forced_word_id": word.word_id,
-                        "spoken_token_ids": word.source_spoken_token_ids,
-                    })
+                    normalization_differences.append(
+                        {
+                            "reason_code": "WHITELISTED_TOKEN_COMPACTION",
+                            "forced_word_id": word.word_id,
+                            "spoken_token_ids": word.source_spoken_token_ids,
+                        }
+                    )
             normalization_differences.extend(
                 {"reason_code": warning}
                 for warning in forced_alignment.warnings
@@ -927,7 +1193,11 @@ class NarrationAlignmentReconciler:
             reason_codes.append("TEMPORAL_TOKEN_COVERAGE_GAP")
         if extra_tokens:
             reason_codes.append("TEMPORAL_UNEXPLAINED_EXTRA_TOKEN")
-        covered = {token_id for word in verified_words for token_id in word.source_spoken_token_ids}
+        covered = {
+            token_id
+            for word in verified_words
+            for token_id in word.source_spoken_token_ids
+        }
         token_coverage = len(covered) / len(normalized.spoken_tokens)
         if token_coverage != 1.0:
             reason_codes.append("TEMPORAL_TOKEN_COVERAGE_GAP")
@@ -940,8 +1210,12 @@ class NarrationAlignmentReconciler:
             "audio_asset_ref": audio_asset_ref,
             "audio_duration_ms": audio_duration_ms,
             "verified_words": [item.model_dump(mode="json") for item in verified_words],
-            "provider_seed_ref": f"narration-timing-seed:{timing_seed.content_hash}" if timing_seed else None,
-            "forced_alignment_ref": f"forced-alignment:{forced_alignment.content_hash}" if forced_alignment else None,
+            "provider_seed_ref": f"narration-timing-seed:{timing_seed.content_hash}"
+            if timing_seed
+            else None,
+            "forced_alignment_ref": f"forced-alignment:{forced_alignment.content_hash}"
+            if forced_alignment
+            else None,
             "token_coverage": round(token_coverage, 6),
             "missing_tokens": sorted(set(missing_tokens)),
             "extra_tokens": extra_tokens,
@@ -954,17 +1228,184 @@ class NarrationAlignmentReconciler:
         return VerifiedNarrationAlignment(**payload, content_hash=stable_hash(payload))
 
     @staticmethod
+    def _reconcile_forced_alignment_recovery(
+        *,
+        normalized: SpokenTextNormalized,
+        timing_seed: NarrationTimingSeed,
+        forced_alignment: ForcedAlignmentEvidence | None,
+        audio_asset_ref: str,
+        audio_duration_ms: int,
+    ) -> VerifiedNarrationAlignment:
+        """Use strict approved forced-word timings when TTS timestamps were lost.
+
+        This path never estimates or interpolates timing.  Any identity,
+        coverage, ordering, or bounds mismatch produces a BLOCK result.
+        """
+
+        reason_codes: list[str] = []
+        expected_token_ids = [item.token_id for item in normalized.spoken_tokens]
+        if not timing_seed.timing_available:
+            reason_codes.append("TEMPORAL_PROVIDER_TIMING_MISSING")
+        if timing_seed.spoken_text_hash != normalized.spoken_text_hash:
+            reason_codes.append("TEMPORAL_SPOKEN_TEXT_MISMATCH")
+        if (
+            timing_seed.audio_asset_ref != audio_asset_ref
+            or timing_seed.audio_duration_ms != audio_duration_ms
+        ):
+            reason_codes.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
+
+        if forced_alignment is None:
+            reason_codes.append("TEMPORAL_FORCED_ALIGNMENT_MISSING")
+            forced_words: list[AlignedWord] = []
+            forced_ref = None
+            forced_extra: list[str] = []
+        else:
+            forced_words = forced_alignment.words
+            forced_ref = f"forced-alignment:{forced_alignment.content_hash}"
+            forced_extra = list(forced_alignment.extra_words)
+            if forced_alignment.verification_status != "PASS":
+                reason_codes.append("TEMPORAL_FORCED_ALIGNMENT_NOT_PASS")
+            if forced_alignment.missing_tokens:
+                reason_codes.append("TEMPORAL_TOKEN_COVERAGE_GAP")
+            if forced_extra:
+                reason_codes.append("TEMPORAL_UNEXPLAINED_EXTRA_TOKEN")
+            if forced_alignment.spoken_text_hash != normalized.spoken_text_hash:
+                reason_codes.append("TEMPORAL_SPOKEN_TEXT_MISMATCH")
+            if (
+                forced_alignment.audio_asset_ref != audio_asset_ref
+                or forced_alignment.audio_duration_ms != audio_duration_ms
+            ):
+                reason_codes.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
+
+        flattened_token_ids = [
+            token_id
+            for word in forced_words
+            for token_id in word.source_spoken_token_ids
+        ]
+        if flattened_token_ids != expected_token_ids:
+            reason_codes.append("TEMPORAL_TOKEN_COVERAGE_GAP")
+        if len(flattened_token_ids) != len(set(flattened_token_ids)):
+            reason_codes.append("TEMPORAL_TOKEN_MAPPING_DUPLICATE")
+
+        verified_words: list[VerifiedNarrationWord] = []
+        normalization_differences: list[dict[str, Any]] = []
+        previous_end_ms = -1
+        for word in forced_words:
+            if (
+                not word.source_spoken_token_ids
+                or word.start_ms < previous_end_ms
+                or word.end_ms <= word.start_ms
+                or word.end_ms > audio_duration_ms
+            ):
+                reason_codes.append("TEMPORAL_ALIGNMENT_NON_MONOTONIC_OR_OUT_OF_BOUNDS")
+                continue
+            loss = (
+                word.loss
+                if word.loss is not None
+                else (
+                    forced_alignment.alignment_loss
+                    if forced_alignment is not None
+                    and forced_alignment.alignment_loss is not None
+                    else 0.0
+                )
+            )
+            confidence = max(0.0, min(1.0, 1.0 - float(loss)))
+            verified_words.append(
+                VerifiedNarrationWord(
+                    word_id=f"verified-{len(verified_words) + 1:04d}",
+                    text=word.text,
+                    start_ms=word.start_ms,
+                    end_ms=word.end_ms,
+                    source_spoken_token_ids=list(word.source_spoken_token_ids),
+                    provider_start_ms=None,
+                    provider_end_ms=None,
+                    forced_start_ms=word.start_ms,
+                    forced_end_ms=word.end_ms,
+                    confidence=round(confidence, 6),
+                    reason_codes=["FORCED_ALIGNMENT_CANONICAL_RECOVERY"],
+                )
+            )
+            if len(word.source_spoken_token_ids) != 1:
+                normalization_differences.append(
+                    {
+                        "reason_code": "WHITELISTED_TOKEN_COMPACTION",
+                        "forced_word_id": word.word_id,
+                        "spoken_token_ids": list(word.source_spoken_token_ids),
+                    }
+                )
+            previous_end_ms = word.end_ms
+
+        covered = {
+            token_id
+            for word in verified_words
+            for token_id in word.source_spoken_token_ids
+        }
+        expected = set(expected_token_ids)
+        missing_tokens = [
+            token_id for token_id in expected_token_ids if token_id not in covered
+        ]
+        extra_tokens = [
+            token_id for token_id in flattened_token_ids if token_id not in expected
+        ]
+        if missing_tokens:
+            reason_codes.append("TEMPORAL_TOKEN_COVERAGE_GAP")
+        if extra_tokens:
+            reason_codes.append("TEMPORAL_UNEXPLAINED_EXTRA_TOKEN")
+        token_coverage = len(covered.intersection(expected)) / max(len(expected), 1)
+        if token_coverage != 1.0:
+            reason_codes.append("TEMPORAL_TOKEN_COVERAGE_GAP")
+
+        status = "BLOCK" if reason_codes else "PASS"
+        if status == "PASS":
+            reason_codes.extend(
+                [
+                    "FORCED_ALIGNMENT_CANONICAL_RECOVERY",
+                    "TTS_TIMESTAMP_SEED_UNAVAILABLE",
+                ]
+            )
+        confidence = min((word.confidence for word in verified_words), default=0.0)
+        payload = {
+            "spoken_text_hash": normalized.spoken_text_hash,
+            "audio_asset_ref": audio_asset_ref,
+            "audio_duration_ms": audio_duration_ms,
+            "verified_words": [item.model_dump(mode="json") for item in verified_words],
+            "provider_seed_ref": (f"narration-timing-seed:{timing_seed.content_hash}"),
+            "forced_alignment_ref": forced_ref,
+            "token_coverage": round(token_coverage, 6),
+            "missing_tokens": missing_tokens,
+            "extra_tokens": sorted(set([*forced_extra, *extra_tokens])),
+            "normalization_only_differences": normalization_differences,
+            "timing_conflicts": [],
+            "alignment_confidence": round(confidence, 6),
+            "reconciliation_reason_codes": sorted(set(reason_codes)),
+            "verification_status": status,
+        }
+        return VerifiedNarrationAlignment(
+            **payload,
+            content_hash=stable_hash(payload),
+        )
+
+    @staticmethod
     def _provider_word_spans(
         normalized: SpokenTextNormalized,
         seed: NarrationTimingSeed,
     ) -> dict[str, tuple[int, int]]:
-        by_index = {item.character_index: item for item in seed.normalized_character_alignment}
+        by_index = {
+            item.character_index: item for item in seed.normalized_character_alignment
+        }
         result: dict[str, tuple[int, int]] = {}
         for token in normalized.spoken_tokens:
-            characters = [by_index[index] for index in range(token.spoken_span.start, token.spoken_span.end) if index in by_index]
+            characters = [
+                by_index[index]
+                for index in range(token.spoken_span.start, token.spoken_span.end)
+                if index in by_index
+            ]
             if len(characters) != token.spoken_span.end - token.spoken_span.start:
                 continue
-            result[token.token_id] = (min(item.start_ms for item in characters), max(item.end_ms for item in characters))
+            result[token.token_id] = (
+                min(item.start_ms for item in characters),
+                max(item.end_ms for item in characters),
+            )
         return result
 
 
@@ -998,29 +1439,45 @@ class CanonicalMediaTimelineCompiler:
         compiled: list[CanonicalTimelineSegment] = []
         previous_scene_end = -1
         for index, segment in enumerate(segments):
-            if any(token_id not in token_by_id or token_id not in word_by_token for token_id in segment.spoken_token_ids):
+            if any(
+                token_id not in token_by_id or token_id not in word_by_token
+                for token_id in segment.spoken_token_ids
+            ):
                 raise ValueError("TEMPORAL_SEGMENT_TOKEN_UNKNOWN")
             if seen_tokens.intersection(segment.spoken_token_ids):
                 raise ValueError("TEMPORAL_SEGMENT_TOKEN_OVERLAP")
             seen_tokens.update(segment.spoken_token_ids)
-            tokens = sorted((token_by_id[token_id] for token_id in segment.spoken_token_ids), key=lambda item: item.spoken_span.start)
+            tokens = sorted(
+                (token_by_id[token_id] for token_id in segment.spoken_token_ids),
+                key=lambda item: item.spoken_span.start,
+            )
             words = [word_by_token[item.token_id] for item in tokens]
             audio_start, audio_end = words[0].start_ms, words[-1].end_ms
             scene_start = audio_start
-            scene_end = alignment.audio_duration_ms if index == len(segments) - 1 else audio_end
+            scene_end = (
+                alignment.audio_duration_ms if index == len(segments) - 1 else audio_end
+            )
             if scene_start < previous_scene_end:
                 raise ValueError("TEMPORAL_SCENE_OVERLAP")
-            phrases = self._phrase_boundaries(normalized, tokens, word_by_token, segment.segment_id)
+            phrases = self._phrase_boundaries(
+                normalized, tokens, word_by_token, segment.segment_id
+            )
             provenance = [
                 *segment.source_provenance,
-                {"type": "verified_narration_alignment", "ref": f"verified-alignment:{alignment.content_hash}"},
+                {
+                    "type": "verified_narration_alignment",
+                    "ref": f"verified-alignment:{alignment.content_hash}",
+                },
                 {"type": "timing_derivation", "value": "VERIFIED_WORD_SPANS"},
             ]
             compiled.append(
                 CanonicalTimelineSegment(
                     segment_id=segment.segment_id,
                     editorial_span=segment.editorial_span,
-                    spoken_span=TextSpan(start=tokens[0].spoken_span.start, end=tokens[-1].spoken_span.end),
+                    spoken_span=TextSpan(
+                        start=tokens[0].spoken_span.start,
+                        end=tokens[-1].spoken_span.end,
+                    ),
                     display_span=segment.display_span,
                     spoken_token_ids=[item.token_id for item in tokens],
                     audio_start_ms=audio_start,
@@ -1062,7 +1519,10 @@ class CanonicalMediaTimelineCompiler:
             },
             "compilation_warnings": [],
         }
-        if not payload["provider_timing_seed_ref"] or not payload["forced_alignment_ref"]:
+        if (
+            not payload["provider_timing_seed_ref"]
+            or not payload["forced_alignment_ref"]
+        ):
             raise ValueError("TEMPORAL_STRICT_EVIDENCE_REF_MISSING")
         return CanonicalMediaTimeline(**payload, timeline_hash=stable_hash(payload))
 
@@ -1077,8 +1537,12 @@ class CanonicalMediaTimelineCompiler:
         current: list[SpokenToken] = []
         for index, token in enumerate(tokens):
             current.append(token)
-            next_start = tokens[index + 1].spoken_span.start if index + 1 < len(tokens) else token.spoken_span.end + 1
-            separator = normalized.spoken_text[token.spoken_span.end:next_start]
+            next_start = (
+                tokens[index + 1].spoken_span.start
+                if index + 1 < len(tokens)
+                else token.spoken_span.end + 1
+            )
+            separator = normalized.spoken_text[token.spoken_span.end : next_start]
             if re.search(r"[.!?;:]", separator) or index == len(tokens) - 1:
                 phrase_words = [word_by_token[item.token_id] for item in current]
                 phrases.append(
@@ -1087,7 +1551,9 @@ class CanonicalMediaTimelineCompiler:
                         spoken_token_ids=[item.token_id for item in current],
                         audio_start_ms=phrase_words[0].start_ms,
                         audio_end_ms=phrase_words[-1].end_ms,
-                        boundary_reason="PUNCTUATION" if re.search(r"[.!?;:]", separator) else "SEGMENT_END",
+                        boundary_reason="PUNCTUATION"
+                        if re.search(r"[.!?;:]", separator)
+                        else "SEGMENT_END",
                     )
                 )
                 current = []
@@ -1104,7 +1570,13 @@ class TemporalAuthorityGate:
         timeline: CanonicalMediaTimeline | None,
     ) -> TemporalAuthorityGateResult:
         reasons: list[str] = []
-        audio_items = [] if final_audio is None else final_audio if isinstance(final_audio, list) else [final_audio]
+        audio_items = (
+            []
+            if final_audio is None
+            else final_audio
+            if isinstance(final_audio, list)
+            else [final_audio]
+        )
         final_items = [item for item in audio_items if item.is_final]
         if not final_items:
             reasons.append("TEMPORAL_AUDIO_MISSING")
@@ -1112,7 +1584,12 @@ class TemporalAuthorityGate:
             reasons.append("TEMPORAL_MULTIPLE_FINAL_AUDIO_AUTHORITIES")
         audio = final_items[0] if len(final_items) == 1 else None
         if alignment is None:
-            reasons.extend(["TEMPORAL_PROVIDER_TIMING_MISSING", "TEMPORAL_FORCED_ALIGNMENT_MISSING"])
+            reasons.extend(
+                [
+                    "TEMPORAL_PROVIDER_TIMING_MISSING",
+                    "TEMPORAL_FORCED_ALIGNMENT_MISSING",
+                ]
+            )
         else:
             if alignment.spoken_text_hash != normalized.spoken_text_hash:
                 reasons.append("TEMPORAL_SPOKEN_TEXT_MISMATCH")
@@ -1120,7 +1597,11 @@ class TemporalAuthorityGate:
                 reasons.append("TEMPORAL_PROVIDER_TIMING_MISSING")
             if not alignment.forced_alignment_ref:
                 reasons.append("TEMPORAL_FORCED_ALIGNMENT_MISSING")
-            if alignment.token_coverage != 1.0 or alignment.missing_tokens or alignment.extra_tokens:
+            if (
+                alignment.token_coverage != 1.0
+                or alignment.missing_tokens
+                or alignment.extra_tokens
+            ):
                 reasons.append("TEMPORAL_TOKEN_COVERAGE_GAP")
             if alignment.verification_status != "PASS":
                 reasons.extend(alignment.reconciliation_reason_codes)
@@ -1129,23 +1610,44 @@ class TemporalAuthorityGate:
                 if word.start_ms < previous_end or word.end_ms <= word.start_ms:
                     reasons.append("TEMPORAL_ALIGNMENT_NON_MONOTONIC")
                 previous_end = word.end_ms
-            if audio and (alignment.audio_asset_ref != audio.audio_asset_ref or alignment.audio_duration_ms != audio.duration_ms):
+            if audio and (
+                alignment.audio_asset_ref != audio.audio_asset_ref
+                or alignment.audio_duration_ms != audio.duration_ms
+            ):
                 reasons.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
         if timeline is None:
             reasons.append("TEMPORAL_PARALLEL_TIMELINE_DETECTED")
         else:
-            if timeline.timeline_hash != stable_hash(timeline.model_dump(mode="json", exclude={"timeline_hash"})):
+            if timeline.timeline_hash != stable_hash(
+                timeline.model_dump(mode="json", exclude={"timeline_hash"})
+            ):
                 reasons.append("TEMPORAL_PARALLEL_TIMELINE_DETECTED")
             if timeline.script_revision_id != normalized.script_revision_id:
                 reasons.append("TEMPORAL_SPOKEN_TEXT_MISMATCH")
-            if audio and (timeline.audio_asset_id != audio.audio_asset_ref or abs(timeline.audio_duration_ms - audio.duration_ms) > 20):
+            if audio and (
+                timeline.audio_asset_id != audio.audio_asset_ref
+                or abs(timeline.audio_duration_ms - audio.duration_ms) > 20
+            ):
                 reasons.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
-            if timeline.segments and abs(timeline.segments[-1].scene_end_ms - timeline.audio_duration_ms) > 20:
+            if (
+                timeline.segments
+                and abs(timeline.segments[-1].scene_end_ms - timeline.audio_duration_ms)
+                > 20
+            ):
                 reasons.append("TEMPORAL_AUDIO_DURATION_MISMATCH")
-            if any(segment.timing_source != "VERIFIED_NARRATION_ALIGNMENT" for segment in timeline.segments):
+            if any(
+                segment.timing_source != "VERIFIED_NARRATION_ALIGNMENT"
+                for segment in timeline.segments
+            ):
                 reasons.append("TEMPORAL_SCENE_ESTIMATE_USED")
-            timeline_tokens = [token_id for segment in timeline.segments for token_id in segment.spoken_token_ids]
-            if set(timeline_tokens) != {item.token_id for item in normalized.spoken_tokens} or len(timeline_tokens) != len(set(timeline_tokens)):
+            timeline_tokens = [
+                token_id
+                for segment in timeline.segments
+                for token_id in segment.spoken_token_ids
+            ]
+            if set(timeline_tokens) != {
+                item.token_id for item in normalized.spoken_tokens
+            } or len(timeline_tokens) != len(set(timeline_tokens)):
                 reasons.append("TEMPORAL_TOKEN_COVERAGE_GAP")
             if "TEMPORAL_SCENE_ESTIMATE_USED" in timeline.compilation_warnings:
                 reasons.append("TEMPORAL_SCENE_ESTIMATE_USED")
@@ -1156,7 +1658,9 @@ class TemporalAuthorityGate:
         payload = {
             "gate_status": status,
             "block_reasons": reasons,
-            "exact_next_action": "COMPILE_DOWNSTREAM_FROM_CANONICAL_MEDIA_TIMELINE" if status == "PASS" else "REPAIR_TEMPORAL_EVIDENCE_AND_RECOMPILE",
+            "exact_next_action": "COMPILE_DOWNSTREAM_FROM_CANONICAL_MEDIA_TIMELINE"
+            if status == "PASS"
+            else "REPAIR_TEMPORAL_EVIDENCE_AND_RECOMPILE",
         }
         return TemporalAuthorityGateResult(**payload, content_hash=stable_hash(payload))
 
@@ -1164,8 +1668,12 @@ class TemporalAuthorityGate:
 class CanonicalTimelineWorkspaceStore:
     """Atomic local manifest persistence; never invokes Drive or another provider."""
 
-    def persist(self, *, workspace_root: Path, timeline: CanonicalMediaTimeline) -> Path:
-        if timeline.timeline_hash != stable_hash(timeline.model_dump(mode="json", exclude={"timeline_hash"})):
+    def persist(
+        self, *, workspace_root: Path, timeline: CanonicalMediaTimeline
+    ) -> Path:
+        if timeline.timeline_hash != stable_hash(
+            timeline.model_dump(mode="json", exclude={"timeline_hash"})
+        ):
             raise ValueError("TEMPORAL_TIMELINE_HASH_MISMATCH")
         manifests = workspace_root.resolve() / "manifests"
         manifests.mkdir(parents=True, exist_ok=True)
@@ -1197,7 +1705,10 @@ class CanonicalTimelineArtifactPersistenceService:
         if project is None:
             raise ValueError("VIDEO_PROJECT_NOT_FOUND")
         artifact = self.session.scalars(
-            select(Artifact).where(Artifact.video_project_id == project_id, Artifact.artifact_type == self.artifact_type)
+            select(Artifact).where(
+                Artifact.video_project_id == project_id,
+                Artifact.artifact_type == self.artifact_type,
+            )
         ).one_or_none()
         service = ArtifactService(self.session)
         if artifact is None:
@@ -1209,13 +1720,20 @@ class CanonicalTimelineArtifactPersistenceService:
                 ),
                 correlation_id="cqr1a-canonical-media-timeline",
             )
-        version_count = self.session.scalar(
-            select(func.count(ArtifactVersion.id)).where(ArtifactVersion.artifact_id == artifact.id)
-        ) or 0
+        version_count = (
+            self.session.scalar(
+                select(func.count(ArtifactVersion.id)).where(
+                    ArtifactVersion.artifact_id == artifact.id
+                )
+            )
+            or 0
+        )
         return service.create_artifact_version(
             data=ArtifactVersionCreate(
                 artifact_id=artifact.id,
-                parent_version_id=artifact.current_version_id if version_count else None,
+                parent_version_id=artifact.current_version_id
+                if version_count
+                else None,
                 content=timeline.model_dump(mode="json"),
                 created_by_user_id=created_by_user_id,
                 context_refs=[
@@ -1223,21 +1741,34 @@ class CanonicalTimelineArtifactPersistenceService:
                     {"type": "package", "id": timeline.package_id},
                 ],
                 evidence_refs=[
-                    {"type": "provider_timing_seed", "ref": timeline.provider_timing_seed_ref},
+                    {
+                        "type": "provider_timing_seed",
+                        "ref": timeline.provider_timing_seed_ref,
+                    },
                     {"type": "forced_alignment", "ref": timeline.forced_alignment_ref},
-                    {"type": "verified_alignment", "ref": timeline.verified_alignment_ref},
+                    {
+                        "type": "verified_alignment",
+                        "ref": timeline.verified_alignment_ref,
+                    },
                 ],
-                source_manifest={"timeline_hash": timeline.timeline_hash, "timing_source": "FINAL_NARRATION_AUDIO"},
+                source_manifest={
+                    "timeline_hash": timeline.timeline_hash,
+                    "timing_source": "FINAL_NARRATION_AUDIO",
+                },
             ),
             correlation_id="cqr1a-canonical-media-timeline-version",
         )
 
 
-def elevenlabs_temporal_permission_readiness(settings: Settings | None = None) -> dict[str, bool | str]:
+def elevenlabs_temporal_permission_readiness(
+    settings: Settings | None = None,
+) -> dict[str, bool | str]:
     settings = settings or get_settings()
     return {
         "ELEVENLABS_TTS_CONFIGURED": bool(
-            settings.elevenlabs_api_key and settings.elevenlabs_voice_id and settings.elevenlabs_model_id
+            settings.elevenlabs_api_key
+            and settings.elevenlabs_voice_id
+            and settings.elevenlabs_model_id
         ),
         "ELEVENLABS_FORCED_ALIGNMENT_PERMISSION_CONFIRMED": (
             settings.elevenlabs_forced_alignment_permission_confirmed
@@ -1247,7 +1778,9 @@ def elevenlabs_temporal_permission_readiness(settings: Settings | None = None) -
     }
 
 
-def fixture_alignment_response(normalized: SpokenTextNormalized, *, duration_ms: int) -> tuple[dict[str, Any], dict[str, Any]]:
+def fixture_alignment_response(
+    normalized: SpokenTextNormalized, *, duration_ms: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Generate deterministic local fixture payloads; this is not provider verification."""
     character_count = len(normalized.spoken_text)
     step = duration_ms / max(character_count, 1)
@@ -1298,7 +1831,9 @@ def run_cqr1a_fixture_rehearsal(workspace_root: Path) -> dict[str, Any]:
         pronunciation_dictionary_refs=["fixture-pronunciation-dictionary-v1"],
     )
     duration_ms = max(4_000, len(normalized.spoken_text) * 45)
-    provider_fixture, forced_fixture = fixture_alignment_response(normalized, duration_ms=duration_ms)
+    provider_fixture, forced_fixture = fixture_alignment_response(
+        normalized, duration_ms=duration_ms
+    )
     timing_seed = ElevenLabsTimingResponseParser().parse(
         response=provider_fixture,
         normalized=normalized,
@@ -1354,7 +1889,9 @@ def run_cqr1a_fixture_rehearsal(workspace_root: Path) -> dict[str, Any]:
         "duration_ms": duration_ms,
         "is_final": True,
     }
-    final_audio = FinalNarrationAudio(**final_audio_payload, content_hash=stable_hash(final_audio_payload))
+    final_audio = FinalNarrationAudio(
+        **final_audio_payload, content_hash=stable_hash(final_audio_payload)
+    )
     gate = TemporalAuthorityGate().evaluate(
         normalized=normalized,
         final_audio=final_audio,
@@ -1411,5 +1948,7 @@ def run_cqr1a_fixture_rehearsal(workspace_root: Path) -> dict[str, Any]:
         ],
     }
     summary_path = root / "cqr1a_fixture_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
+    )
     return summary

@@ -27,6 +27,7 @@ NATIVE_TREATMENTS = {
     "STATIC_COMPOSITION",
 }
 PROVIDER_BY_ROLE = {"NATIVE_VISUAL": "NATIVE", "SUPPORTING_STOCK": "PEXELS", "AI_HERO": "GOOGLE_VEO"}
+CHANNEL_SCOPED_STRATEGIES = {"NR2_B_BALANCED": "small-team-ai"}
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,18 @@ class AssetRequestCompiler:
                 raise ValueError(";".join(sorted(set(temporal_reasons))))
         if format_identity.status != "APPROVED":
             raise ValueError("FORMAT_IDENTITY_NOT_APPROVED")
+        expected_channel_id = CHANNEL_SCOPED_STRATEGIES.get(
+            strategy_profile.strategy_key
+        )
+        if expected_channel_id is not None and any(
+            channel_id != expected_channel_id
+            for channel_id in (
+                plan.channel_id,
+                format_identity.channel_id,
+                strategy_profile.channel_id,
+            )
+        ):
+            raise ValueError("STRATEGY_B_CHANNEL_SCOPE_VIOLATION")
         if plan.channel_id != format_identity.channel_id or plan.channel_id != strategy_profile.channel_id:
             raise ValueError("CHANNEL_SCOPE_MISMATCH")
         if not strategy_profile.native_is_backbone or not format_identity.native_explanatory_backbone_required:

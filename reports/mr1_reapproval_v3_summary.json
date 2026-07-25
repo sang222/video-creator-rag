@@ -1,0 +1,210 @@
+{
+  "schema_version": "mr1-reapproval-v3-summary/v1",
+  "date": "2026-07-19",
+  "channel_key": "small-team-ai",
+  "technical_status": "PASS",
+  "terminal_state": "PASS",
+  "approval": {
+    "approval_decision_id": "4ccc7185-e760-4470-aba9-857ab0a18f77",
+    "approval_version": 1,
+    "approval_ref": "mr1-approval://small-team-ai/2522a8f1-1ea4-4d66-8ea5-411aaa8f152b/a90e2786-f6e0-5480-94a4-fb28fd000edf/v1",
+    "approval_content_hash": "4a8c259debc1ae3f94feb7c5be959e0d42bca048911b052a221eda7373d1c25c",
+    "decision": "APPROVED",
+    "decision_source": "OPERATOR",
+    "approval_purpose": "MR1_REAL_PRODUCTION_EXECUTION",
+    "execution_mode": "REAL_APPROVED_PRODUCTION",
+    "run_type": "MR1",
+    "single_run": true,
+    "terminal_after_execution_begins": true,
+    "production_eligible": true,
+    "publishable": false,
+    "created_at": "2026-07-19T14:21:40.756103+00:00",
+    "expires_at": null
+  },
+  "exact_target": {
+    "video_project_id": "2522a8f1-1ea4-4d66-8ea5-411aaa8f152b",
+    "video_project_hash": "d84682f68160c4bc3d0d27accee417667bb195129bf1bed3519f0d5c2b36f539",
+    "revision_id": "a90e2786-f6e0-5480-94a4-fb28fd000edf",
+    "revision_version": 2,
+    "revision_hash": "b50ff5d3bcbf07de4b709ae0d9017a9df04fec49481fb14c224a709c85b0875b",
+    "package_artifact_version_id": "7de25ac8-46e4-46da-b112-f805f16ebaaa",
+    "package_content_hash": "200b3be30b92ccff3b0efb26881d5654ab4b53162afe73d4e7f34bed3b0454bd",
+    "planning_output_set_hash": "b9f3dda910bf3b08d0e6b3173f8be32247ca4f7dc63f5224749eb75b99d906f0",
+    "reviewed_snapshot_hash": "f5e4932ddac49a20216dd0b16415d0bb378bfd2e970a1dce3c3736ad1c0510b2",
+    "pkg1_approval_decision_id": "ef766b1d-c1a5-43b8-be98-0751bd055653",
+    "pkg1_human_review_receipt_version_id": "a35c55b8-6887-4e60-a19c-22928205c572",
+    "pkg1_human_review_receipt_hash": "24a2d4c7b0dec7394a8b78ab646f66750fbca35282700d50dcde77bd304c2231"
+  },
+  "immutable_artifacts": {
+    "approval_receipt": {
+      "artifact_id": "5d4ebabc-b0e8-45d8-a790-8aba7ea8928f",
+      "artifact_version_id": "d875858d-46fe-4ce5-a89c-785f266c6b4c",
+      "content_hash": "749f167ecce6309a42f67330ea829a530468eea5ee332fa662567b0017c4e11d",
+      "recomputed_hash_matches": true
+    },
+    "readiness_preflight": {
+      "artifact_id": "76c142ea-5930-4225-9140-659bf7f5fb68",
+      "artifact_version_id": "432f42be-3a17-400a-a97d-2658b05a2ebc",
+      "content_hash": "57147774df5f982dacc435e0adb622a5471a9f0f9b4cff3dea6ceef402c56bd8",
+      "recomputed_hash_matches": true
+    },
+    "supersession_ledger": {
+      "artifact_id": "900424eb-56cd-45e1-b470-021c7e091d7f",
+      "artifact_version_id": "ef9b30bc-3dde-4691-bc0c-61b817cdcdfc",
+      "content_hash": "6da137e86171beabbce482a97e2dbb13343add8e776b10ddaef0236218d9181d",
+      "recomputed_hash_matches": true
+    }
+  },
+  "exact_bindings": {
+    "channel_profile_version_id": "d0d16fc5-0dc9-4022-bfd3-7f9a47c3a711",
+    "channel_profile_version": 3,
+    "channel_profile_hash": "1c96bd4dd254ae04f57ba3d7156eb4bc612aeeedc59d2c8e65dda369cd627640",
+    "compiled_policy_snapshot_id": "e6c33d80-f5d8-4f72-9abc-87de3601b89e",
+    "compiled_policy_snapshot_persisted_version": 4,
+    "compiled_policy_snapshot_hash": "12b66551bd9bdfce1d59d1019ff50bc1c49756b6dc4ab505fde080630b4551bc",
+    "target_market_profile_hash": "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e",
+    "target_market_digest_hash": "244989186381a71c4eda812743b3b095426397ae0cdfb791641b2875918014f0",
+    "niche_alignment_dossier_artifact_version_id": "7f9381e8-0697-4b77-9f55-d25d72afd547",
+    "niche_alignment_dossier_hash": "d6d82fc26373f46e13c75d61068b18c3f23176bb21046ef193240e84bb29703d",
+    "market_alignment_dossier_artifact_version_id": "dba5a8cd-ca61-49e8-b662-c27ad7f02959",
+    "market_alignment_dossier_hash": "57b87274528a909db91417071aae687baa60d33ee9aac90731819cf5bbd4c969",
+    "provider_execution_plan_artifact_version_id": "d0841143-c6bf-4f44-9086-9a8634c22b70",
+    "provider_execution_plan_hash": "4c527232b86cb033c90a93e94d00684c81b7a9559ee0ba3a1a94b9e5cd100f3b",
+    "cost_estimate_snapshot_artifact_version_id": "e6f55187-dbf8-4f4c-9a98-d47ccb645c11",
+    "cost_estimate_snapshot_hash": "eb07c0342506ec1f14f353b19d5c183920b67b3194aa34d1ad9c1156d19ba9aa",
+    "rights_report_artifact_version_id": "75f3fc78-3cd4-4c2f-802f-54f9d8603bc3",
+    "rights_report_hash": "b63b828281c64cea43eef980e18ea40d3e6cf606b625849dd08ffd408bf9942c",
+    "lpro1_execution_contract_ref": "lpro1-execution-contract://a90e2786-f6e0-5480-94a4-fb28fd000edf/f62b0bf918c63f67ed2824cfa45de36ab31b99e6cc9f138a6c7844be6b8aacdf",
+    "lpro1_execution_contract_hash": "f62b0bf918c63f67ed2824cfa45de36ab31b99e6cc9f138a6c7844be6b8aacdf"
+  },
+  "provider_attempt_scope": {
+    "single_run": true,
+    "automatic_retry_allowed": false,
+    "provider_switch_allowed": false,
+    "automatic_pexels_to_ai_fallback": false,
+    "external_ai_video_fallback": false,
+    "elevenlabs_narration": 1,
+    "forced_alignment": 1,
+    "pexels_scene_attempts": {
+      "SC-04": 1,
+      "SC-07": 1,
+      "SC-09": 1
+    },
+    "gemini_image_effective_calls": 0,
+    "google_veo_effective_calls": 0,
+    "native_scenes": ["SC-01", "SC-02", "SC-03", "SC-05", "SC-06", "SC-08"]
+  },
+  "cost_scope": {
+    "currency": "USD",
+    "estimated_cost": 0.0,
+    "hard_execution_ceiling": 1.0,
+    "approval_amount": 1.0,
+    "actual_cost": null,
+    "attempt_caps_bound": true,
+    "catalog_versions": [
+      "media_provider_budget_policy_catalog/1.0.2",
+      "google_gemini_image_model_price_catalog/2026-07-17",
+      "google_veo_model_price_catalog/2026-07-12"
+    ]
+  },
+  "market_and_destination": {
+    "primary_market": "US",
+    "primary_locale": "en-US",
+    "narration_locale": "en-US",
+    "timezone": "America/New_York",
+    "currency": "USD",
+    "visual_profile": "STOCK_ASSISTED",
+    "platform": "YOUTUBE",
+    "channel_handle": "@SmallTeamAI",
+    "platform_channel_id": null,
+    "destination_status": "PENDING_PLATFORM_ID",
+    "manual_publish_required": true,
+    "MR1_RENDER_DESTINATION_GATE": "PASS",
+    "PUBLISH_DESTINATION_GATE": "BLOCKED_PENDING_PLATFORM_ID",
+    "UPLOAD_READY": false,
+    "PUBLISH_EXECUTION_READY": false
+  },
+  "configuration_readiness": {
+    "elevenlabs_credential_configured": true,
+    "pexels_credential_configured": true,
+    "google_gemini_credential_configured": true,
+    "drive_credential_configured": true,
+    "drive_root_folder_configured": true,
+    "ffmpeg_ready": true,
+    "ffprobe_ready": true,
+    "all_exact_planned_routes_ready": true,
+    "readiness_probe_provider_calls": 0
+  },
+  "human_and_final_media_policy": {
+    "technical_media_qc_pass_required": true,
+    "creative_perceptual_media_qc_operator_acceptance_required": true,
+    "exact_final_mp4_hash_review_required": true,
+    "drive_archive_verified_required": true,
+    "rights_and_provenance_complete_required": true,
+    "pre_human_pass_media_authority": "REVIEW_MEDIA_CANDIDATE_ONLY",
+    "final_media_ref_created": false,
+    "publish_approved": false
+  },
+  "supersession": {
+    "old_mr1_approval_decision_id": "ba688de8-4274-4414-9be1-e8dda827b97e",
+    "state": "SUPERSEDED",
+    "historical_row_state": "PRESERVED",
+    "reuse_allowed": false,
+    "historical_evidence_mutated": false
+  },
+  "no_execution_proof": {
+    "all_deltas_zero": true,
+    "provider_calls": 0,
+    "render_calls": 0,
+    "drive_calls": 0,
+    "youtube_calls": 0,
+    "paid_provider_call_rows": 0,
+    "provider_job_rows": 0,
+    "media_render_rows": 0,
+    "final_media_ref_rows": 0,
+    "human_upload_task_rows": 0,
+    "uploaded_video_rows": 0
+  },
+  "idempotency": {
+    "approval_count_for_scope": 1,
+    "governance_artifact_count": 3,
+    "duplicate_records_created": false
+  },
+  "verification": {
+    "alembic_heads": "0038_lpro1_daily_mode (head)",
+    "compileall": "PASS",
+    "focused_suite_after_repair": "3 passed, 1 warning",
+    "required_acceptance_suite": "29 passed, 1 warning",
+    "git_diff_check": "PASS"
+  },
+  "repair_cycles": 1,
+  "verdicts": {
+    "MR1_REAPPROVAL_ENTRY": "PASS",
+    "MR1_REAPPROVAL_EXACT_TARGET": "PASS",
+    "MR1_REAPPROVAL_HASH_REVALIDATION": "PASS",
+    "MR1_REAPPROVAL_PROFILE_V3_BINDING": "PASS",
+    "MR1_REAPPROVAL_TARGET_MARKET_BINDING": "PASS",
+    "MR1_REAPPROVAL_MARKET_ALIGNMENT": "PASS",
+    "MR1_REAPPROVAL_DESTINATION_BINDING": "PASS",
+    "MR1_REAPPROVAL_PROVIDER_PLAN": "PASS",
+    "MR1_REAPPROVAL_COST_SCOPE": "PASS",
+    "MR1_REAPPROVAL_RIGHTS_DISCLOSURE": "PASS",
+    "MR1_REAPPROVAL_LPRO1_CONTRACT": "PASS",
+    "MR1_REAPPROVAL_APPROVAL_RECEIPT": "PASS",
+    "MR1_REAPPROVAL_READINESS": "PASS",
+    "MR1_REAPPROVAL_PUBLISH_BOUNDARY": "PASS",
+    "MR1_REAPPROVAL_REPAIR_CYCLES": 1,
+    "MR1_REAPPROVAL_PROVIDER_CALLS": 0,
+    "MR1_REAPPROVAL_RENDER_CALLS": 0,
+    "MR1_REAPPROVAL_DRIVE_CALLS": 0,
+    "MR1_REAPPROVAL_YOUTUBE_CALLS": 0,
+    "MR1_REAPPROVAL_FINAL": "PASS",
+    "MR1_EXECUTION": "NOT_STARTED",
+    "MR1_PROVIDER_CALL_COUNT": 0,
+    "MR1_RENDER_STATUS": "NOT_STARTED",
+    "MR1_HUMAN_REVIEW": "PENDING",
+    "PUBLISH_DESTINATION_STATUS": "PENDING_PLATFORM_ID",
+    "PUBLISH_EXECUTION_READY": false,
+    "PROCEED_TO_MR1": true
+  }
+}

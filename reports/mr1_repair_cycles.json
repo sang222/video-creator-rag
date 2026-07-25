@@ -1,0 +1,8 @@
+{
+  "generated_at": "2026-07-25T00:39:20.971064+00:00",
+  "provider_calls_repeated_for_local_repair": false,
+  "repair_cycle_count": 0,
+  "repair_cycles": [],
+  "run_id": "b932773c-4049-482a-8827-6933d924c34f",
+  "schema_version": "mr1-real-production-repair-cycles/v1"
+}

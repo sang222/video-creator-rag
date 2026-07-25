@@ -24,6 +24,7 @@ from app.services.config_registry import content_hash
 from app.services.nich1 import nich1_stable_hash
 from app.services.pkg1 import PKG1PackageService
 from app.services.pkg1_market_revision import (
+    DRIVE_IDEMPOTENCY_PHASES,
     PROJECT_TYPE,
     PKG1MarketRevisionService,
     REUSED_ARTIFACT_TYPES,
@@ -384,6 +385,17 @@ def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_poli
     assert provider["external_ai_video_fallback"] is False
     assert provider["provider_outputs"] == []
     assert len(provider["scene_routes"]) == scene_count
+    drive_stage = next(
+        item for item in provider["stages"] if item["provider"] == "google_drive"
+    )
+    assert drive_stage == {
+        "order": 8,
+        "provider": "google_drive",
+        "operation": "canonical_review_archive_plus_finalization_supplement",
+        "planned_requests": 2,
+        "state": "WAITING_FOR_FINAL_MEDIA",
+        "idempotency_phases": DRIVE_IDEMPOTENCY_PHASES,
+    }
     cost = artifacts["cost_estimate_snapshot"]["content"]
     assert "config://media_provider_budget_policy_catalog/1.0.2" in cost["catalog_refs"]
     assert "config://google_gemini_image_model_price_catalog/2026-07-17" in cost["catalog_refs"]
@@ -392,6 +404,12 @@ def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_poli
     assert cost["actual_cost"] is None
     assert cost["estimated_cost"] <= cost["hard_cap"]
     assert cost["decision"] == "PASS"
+    drive_cost = next(
+        item for item in cost["line_items"] if item["provider"] == "google_drive"
+    )
+    assert drive_cost["planned_requests"] == 2
+    assert drive_cost["idempotency_phases"] == DRIVE_IDEMPOTENCY_PHASES
+    assert drive_cost["estimated_incremental_cost_usd"] == 0.0
 
     provenance = artifacts["asset_provenance_plan"]["content"]
     rights = artifacts["rights_disclosure_completeness_report"]["content"]

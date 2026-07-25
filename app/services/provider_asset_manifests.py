@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -46,30 +47,79 @@ class PexelsResponseParser:
             url = str(item.get("url") or "")
             if not item.get("id") or not url or not user.get("name"):
                 continue
+            description = _observable_pexels_description(
+                source_page_url=url,
+                provider_asset_id=str(item["id"]),
+            )
+            if description is None:
+                continue
+            creator_url = str(user.get("url") or "")
+            video_files = list(item.get("video_files") or [])
             candidates.append(
                 ParsedStockCandidate(
                     candidate_id=f"pexels-{item['id']}",
                     provider_asset_id=str(item["id"]),
                     source_page_url=url,
                     creator_name=str(user["name"]),
-                    creator_url=str(user.get("url") or ""),
+                    creator_url=creator_url,
                     width=int(item.get("width") or 1),
                     height=int(item.get("height") or 1),
                     duration_seconds=float(item.get("duration") or 0),
-                    tags=[str(tag).lower() for tag in item.get("tags", [])],
-                    description=str(item.get("description") or ""),
-                    composition=str(item.get("composition") or "UNKNOWN"),
-                    logo_or_text_present=item.get("logo_or_text_present"),
-                    identifiable_person_present=item.get("identifiable_person_present"),
-                    brand_or_trademark_present=item.get("brand_or_trademark_present"),
-                    motion_suitability=float(item.get("motion_suitability", 0.5)),
-                    channel_identity_fit=float(item.get("channel_identity_fit", 0.5)),
-                    prior_use_count=int(item.get("prior_use_count", 0)),
-                    video_files=list(item.get("video_files") or []),
-                    source_complete=bool(user.get("url") and item.get("video_files")),
+                    # Pexels /v1/videos/search does not expose any of these
+                    # enriched ranking fields.  Only its public page slug is
+                    # admissible candidate text; unexpected response fields
+                    # must never fabricate semantic or risk evidence.
+                    tags=[],
+                    description=description,
+                    composition="UNKNOWN",
+                    logo_or_text_present=None,
+                    identifiable_person_present=None,
+                    brand_or_trademark_present=None,
+                    motion_suitability=0.5,
+                    channel_identity_fit=0.5,
+                    prior_use_count=0,
+                    video_files=video_files,
+                    source_complete=bool(
+                        _is_official_pexels_url(creator_url) and video_files
+                    ),
                 )
             )
         return candidates
+
+
+def _observable_pexels_description(
+    *,
+    source_page_url: str,
+    provider_asset_id: str,
+) -> str | None:
+    """Return only the public slug from an official Pexels video page URL."""
+
+    if not _is_official_pexels_url(source_page_url):
+        return None
+    path_tokens = re.findall(
+        r"[a-z0-9]+", urlsplit(source_page_url).path.casefold()
+    )
+    if (
+        len(path_tokens) < 3
+        or path_tokens[0] != "video"
+        or not path_tokens[-1].isdigit()
+        or path_tokens[-1] != provider_asset_id
+    ):
+        return None
+    path_tokens = path_tokens[1:]
+    path_tokens.pop()
+    if not path_tokens:
+        return None
+    return " ".join(path_tokens)
+
+
+def _is_official_pexels_url(value: str) -> bool:
+    parsed = urlsplit(value)
+    return bool(
+        parsed.scheme.casefold() == "https"
+        and (parsed.hostname or "").casefold()
+        in {"pexels.com", "www.pexels.com"}
+    )
 
 
 class PexelsRenditionSelector:

@@ -1,0 +1,462 @@
+{
+  "actor_user_id": "287ab3a3-8a66-4c06-83c7-e0a8e6ca06aa",
+  "artifact_versions": {
+    "asset_provenance_plan": {
+      "artifact_version_id": "41b8c641-fc03-457f-a953-899a657e6ec5",
+      "content_hash": "487cd325a3372c92fc549dcbc63dfa8638be8f9c230bfa113f226569852cc294"
+    },
+    "compiled_asset_request_plan": {
+      "artifact_version_id": "ea2724c5-a8b8-4208-a107-59fe7dabaf2a",
+      "content_hash": "29436478b9b2e02d12d81795fbe948ca916abd9991d3bca6497db4bba94c7575"
+    },
+    "cost_estimate_snapshot": {
+      "artifact_version_id": "d241fd38-935f-4965-94d3-274d1948a163",
+      "content_hash": "d8e1eb198e6d8b787a17e3ebd46d8f12a537c0a027d4df2b2bef8ad101830f47"
+    },
+    "gate_results": {
+      "artifact_version_id": "751f5789-4675-43dc-abd3-a9f51d847bff",
+      "content_hash": "cd69b61118a4476408b6679a50bf4c6ab8ca86c36deb507bcd1e15560039834f"
+    },
+    "market_gate_results": {
+      "artifact_version_id": "3d14e333-1521-4d8c-8116-621603792f4a",
+      "content_hash": "ec18252a92e5f349daa2543fd4d51e05a5e18bb24b6bdb27b4f2b5160c5d5340"
+    },
+    "package_manifest": {
+      "artifact_version_id": "d8471bc0-7d58-4b39-a1f9-267d7b8a02b1",
+      "content_hash": "7d827b7b37a654639383f21c6b6e5cd634c64c68f87832b3b9907dbd4b1fa07c"
+    },
+    "pkg1_sc04_review_packet": {
+      "artifact_version_id": "bf26f712-25ad-4139-9077-5fcfb819365f",
+      "content_hash": "9825f60534ad252ec5e52dfebb591ef1d06626de81d8bc55610557d25877d385"
+    },
+    "pkg1_sc04_revision_diff": {
+      "artifact_version_id": "7828346d-9d00-4086-87da-56557fb052b1",
+      "content_hash": "6fc7523aa4cc2db0039df6653693207641437273a4bb193031b1eb5320a244c4"
+    },
+    "provider_execution_plan": {
+      "artifact_version_id": "9557bd18-4590-40f2-ab8f-481efdd51d33",
+      "content_hash": "fcde893531705ad26109efe703d68f5fffa46ae19577f05ef1179978099d1d31"
+    },
+    "publish_risk_dossier": {
+      "artifact_version_id": "c39ac7a0-5dea-402b-b5a9-1495ecc84541",
+      "content_hash": "79759b186db73407c081ecbc7da15c8ac1571be63e1422ee0dc380160986e21e"
+    },
+    "rights_disclosure_completeness_report": {
+      "artifact_version_id": "971025f3-d1ff-40d0-8bba-de47b1742f01",
+      "content_hash": "84f8c33a569f1664e62cb98e48be3facb4d9d30549e57c8e28b7035c128d5618"
+    },
+    "scene_visual_intent": {
+      "artifact_version_id": "b0e8b068-b79b-4854-81b7-15e68df0992f",
+      "content_hash": "55ad4f4725b66f7e1cf7e770df1ee7e0437710925d63e433c00c2ba0441bc712"
+    },
+    "visual_plan": {
+      "artifact_version_id": "7186e7ad-3887-4a8d-9fb4-77c59d9be53d",
+      "content_hash": "51248879f439dae7116bac6718c833a8da23efacf0fe34a6113194ed6929d617"
+    },
+    "visual_source_decision_set": {
+      "artifact_version_id": "658e43ed-8c8d-43f9-968d-234e41215d99",
+      "content_hash": "3e29f3d7e023be9100b62088a6a291ad9457fb70c7cc0967e4d925eef6f1871d"
+    }
+  },
+  "attempt_evidence": {
+    "all_attempt_ledgers_preserved": true,
+    "attempt_count": 2,
+    "attempts": [
+      {
+        "approval_id": "4ccc7185-e760-4470-aba9-857ab0a18f77",
+        "artifact_id": "33bfa69a-6f39-4223-9ebd-88f6439a3c1f",
+        "artifact_version_id": "a057589e-faaf-4ecf-b8ac-fc072a4955dd",
+        "artifact_version_ref": "artifact-version://a057589e-faaf-4ecf-b8ac-fc072a4955dd",
+        "attempt_cap": 1,
+        "attempt_count": 1,
+        "automatic_retry_allowed": false,
+        "content_hash": "27678137a4a83b07de60b93d974705b7cd5ffeafa83c8d66390c378f927340f2",
+        "continuation_approval_id": null,
+        "download_submit_count": 0,
+        "failure": "RuntimeError:PEXELS_SEMANTIC_FIT_INADEQUATE",
+        "operation_key": "pexels:SC-04",
+        "provider_attempt_ordinal": 1,
+        "provider_substitution_allowed": false,
+        "request_hash": "85850a6965e8918e000bc9ad8c4d071de1a9ae8a76de53daf3ed581dd2e8ab8b",
+        "run_id": "020bf2a7-eb17-41a3-ac3c-301b5c6b41fd",
+        "search_submit_count": 1,
+        "state": "CONSUMED_FAILED",
+        "submit_state": "FAILED_CONSUMED",
+        "version_number": 3
+      },
+      {
+        "approval_id": "4ccc7185-e760-4470-aba9-857ab0a18f77",
+        "artifact_id": "aa4739be-7b97-47ea-a697-88f2a2831d91",
+        "artifact_version_id": "53fc5e3c-7cab-4ca5-b013-20325dab7a82",
+        "artifact_version_ref": "artifact-version://53fc5e3c-7cab-4ca5-b013-20325dab7a82",
+        "attempt_cap": 1,
+        "attempt_count": 1,
+        "automatic_retry_allowed": false,
+        "content_hash": "f9f4714c9b5d7cec9084733f2393fdff0138a5593d96c03d3d9ad533fac000e8",
+        "continuation_approval_id": "40193854-8633-45a5-97be-54b380a8c8e5",
+        "download_submit_count": 0,
+        "failure": "RuntimeError:PEXELS_SEMANTIC_FIT_INADEQUATE",
+        "operation_key": "pexels:SC-04:supplement:02",
+        "provider_attempt_ordinal": 2,
+        "provider_substitution_allowed": false,
+        "request_hash": "695e1cca4abcfb3bfa2cca58dc4cb82a8cfd88f335f3fb0cb77232bbf9dd495b",
+        "run_id": "020bf2a7-eb17-41a3-ac3c-301b5c6b41fd",
+        "search_submit_count": 1,
+        "state": "CONSUMED_FAILED",
+        "submit_state": "FAILED_CONSUMED",
+        "version_number": 3
+      }
+    ],
+    "candidate_scores": {
+      "fabricated": false,
+      "reason": "The Pexels failure path persisted request hashes and counters but did not serialize candidate rankings or semantic scores.",
+      "state": "UNAVAILABLE_NOT_PERSISTED",
+      "values": []
+    },
+    "old_query_family": {
+      "evidence_state": "DETERMINISTIC_RECONSTRUCTION_FROM_BOUND_OLD_INTENT",
+      "planner_version": "pexels-query-planner/v1.0.0",
+      "provider_call_made_for_reconstruction": false,
+      "queries": [
+        "use brief supporting team-work workplace b roll",
+        "use brief supporting team-work close up action",
+        "use brief supporting team-work clean composition"
+      ]
+    },
+    "run": {
+      "artifact_id": "3cea1fa5-97f6-452f-809c-ecd9f867ea5d",
+      "artifact_version_id": "d143f078-af8d-41f8-af23-9119b0c9ad8c",
+      "artifact_version_ref": "artifact-version://d143f078-af8d-41f8-af23-9119b0c9ad8c",
+      "blocker": "pexels:SC-04:supplement:02:POST_SUBMIT_FAILURE",
+      "content_hash": "273abbb853b688dac1b8cac9729ceb2a5402aea72e1d7fd46fda9a7d6b01a928",
+      "current_state": "BLOCKED_REQUIRES_NEW_MR1_APPROVAL",
+      "run_id": "020bf2a7-eb17-41a3-ac3c-301b5c6b41fd",
+      "version_number": 15
+    },
+    "schema_version": "pkg1.sc04-attempt-evidence.v1",
+    "third_attempt_created": false
+  },
+  "cost_difference": {
+    "actual_cost": null,
+    "estimated_cost": {
+      "after": 0.0,
+      "before": 0.0,
+      "unchanged": true
+    },
+    "evidence_ref": {
+      "artifact_id": "0db28961-6c46-4d51-9ea8-d0bf7ce11f67",
+      "artifact_version_id": "d241fd38-935f-4965-94d3-274d1948a163",
+      "artifact_version_ref": "artifact-version://d241fd38-935f-4965-94d3-274d1948a163",
+      "content_hash": "d8e1eb198e6d8b787a17e3ebd46d8f12a537c0a027d4df2b2bef8ad101830f47",
+      "version_number": 1
+    },
+    "google_drive": {
+      "idempotency_phases": [
+        {
+          "boundary": "PRE_HUMAN_PASS",
+          "cost_usd": 0.0,
+          "max_mutations": 1,
+          "operation_key": "google_drive:archive",
+          "phase": "CANONICAL_REVIEW_ARCHIVE"
+        },
+        {
+          "boundary": "POST_HUMAN_PASS_PRE_FINAL_MEDIA_REF",
+          "cost_usd": 0.0,
+          "max_mutations": 1,
+          "operation_key": "google_drive:finalization-supplement",
+          "phase": "FINALIZATION_SUPPLEMENT"
+        }
+      ],
+      "incremental_cost_usd": 0.0,
+      "planned_requests": 2
+    },
+    "hard_cap": {
+      "after": 1.0,
+      "before": 1.0,
+      "unchanged": true
+    },
+    "incremental_cost_usd": 0.0
+  },
+  "effective_ads_only_policy": {
+    "artifact_id": "9610e18f-835c-4b4d-8b44-1f246723a244",
+    "artifact_type": "effective_ads_only_monetization_policy",
+    "artifact_version_id": "72c42303-cdeb-46c4-9b90-881f2f7fd14e",
+    "content_hash": "d2595b424ab27a5ba84b33aad171251261225e3673531c415c8a55c4a50ea9db",
+    "ref": "artifact-version://72c42303-cdeb-46c4-9b90-881f2f7fd14e",
+    "version_number": 1
+  },
+  "effective_market_policy_hash": "a0e37064715370a137ddc142a4d844076dc0c0670db4bfb67cd25d9727218b85",
+  "final_state": "WAITING_HUMAN_REVIEW",
+  "geo_closeout_evidence": {
+    "artifact_id": "e63c1c00-73ab-488d-9938-9eac4a2c0c21",
+    "artifact_type": "geo_market_delivery_closeout_evidence",
+    "artifact_version_id": "312474a4-adc1-4979-aec4-a20376e91e0c",
+    "content_hash": "8650d6ec33fe82848aefc6a4814dbb8e8560e70a297280f94d347d676ee8b178",
+    "ref": "artifact-version://312474a4-adc1-4979-aec4-a20376e91e0c",
+    "version_number": 1
+  },
+  "human_review_state": "PENDING",
+  "human_review_task_ids": [
+    "d9267746-1baf-48c0-a204-90639e784c57"
+  ],
+  "mr1_execution": "BLOCKED_PENDING_PACKAGE_APPROVAL",
+  "named_gate_verdict_matrix": {
+    "ai_image_eligibility": "NOT_APPLICABLE",
+    "diagram_suitability": "PASS",
+    "evidence_truth": "PASS",
+    "pexels_eligibility": "PASS",
+    "provider_cost_estimate": "PASS",
+    "repetitive_production_risk": "PASS",
+    "rights_disclosure_completeness": "PASS",
+    "scene_spec_completeness": "PASS",
+    "semantic_match": "PASS",
+    "threshold_integrity": "PASS",
+    "visual_continuity": "PASS",
+    "visual_market_alignment": "PASS",
+    "visual_niche_alignment": "PASS"
+  },
+  "native_motion_blueprint": {
+    "exact_text_authority": "NATIVE_ONLY",
+    "native_mechanism": "BASELINE_CHECKLIST_THEN_INFORMATION_VS_JUDGMENT_SPLIT",
+    "phases": [
+      {
+        "items": [
+          "REQUEST_BEGINS",
+          "FIELDS_COPIED",
+          "MISSING_INFORMATION",
+          "GAP_OWNER"
+        ],
+        "phase": "OBSERVE_WORKFLOW"
+      },
+      {
+        "items": [
+          "COMPLETED_HANDOFFS",
+          "REWORK",
+          "JUDGMENT_STEPS"
+        ],
+        "phase": "MEASURE_BASELINE"
+      },
+      {
+        "branches": [
+          "MOVE_INFORMATION",
+          "MAKE_DECISION"
+        ],
+        "phase": "SPLIT_WORK"
+      },
+      {
+        "items": [
+          "HUMAN_EXCEPTION_PATH",
+          "VISIBLE_OWNER"
+        ],
+        "phase": "PRESERVE_RESPONSIBILITY"
+      }
+    ],
+    "provider_execution_required": false,
+    "route": "NATIVE_MOTION_GRAPHIC",
+    "stock_layer_allowed": false
+  },
+  "new_scene_meaning": {
+    "editorial_intent": "Use brief supporting team-work context, then return to a native baseline checklist.",
+    "scene_meaning": "Watch the workflow before changing it. Record where the request begins, which fields are copied, how often information is missing, and who resolves the gap. A grounded office shot can provide context here, but it cannot prove the process or the time saving. The evidence must come from the team's own baseline. Count completed handoffs. Note rework. Mark the steps that require judgment. Then separate work that moves information from work that makes a decision. Moving clean information is often easier to standardize. Judgment-heavy exceptions should stay visible to a person. The goal is not to remove humans. It is to remove avoidable repetition without hiding responsibility.",
+    "semantic_intent": "Animate the exact S04 narration as a labeled sequence: watch the workflow; request begins; fields are copied; information is missing; resolves the gap; team's own baseline; work that moves information versus work that makes a decision; without hiding responsibility."
+  },
+  "no_execution_proof": {
+    "after_counts": {
+      "cloud_media_refs": 4,
+      "final_media_refs": 0,
+      "human_upload_tasks": 0,
+      "llm_route_attempts": 674,
+      "llm_run_snapshots": 675,
+      "media_offload_jobs": 3,
+      "media_render_jobs": 0,
+      "paid_provider_calls": 0,
+      "provider_attempts": 674,
+      "provider_jobs": 0,
+      "uploaded_videos": 0
+    },
+    "all_deltas_zero": true,
+    "before_counts": {
+      "cloud_media_refs": 4,
+      "final_media_refs": 0,
+      "human_upload_tasks": 0,
+      "llm_route_attempts": 674,
+      "llm_run_snapshots": 675,
+      "media_offload_jobs": 3,
+      "media_render_jobs": 0,
+      "paid_provider_calls": 0,
+      "provider_attempts": 674,
+      "provider_jobs": 0,
+      "uploaded_videos": 0
+    },
+    "deltas": {
+      "cloud_media_refs": 0,
+      "final_media_refs": 0,
+      "human_upload_tasks": 0,
+      "llm_route_attempts": 0,
+      "llm_run_snapshots": 0,
+      "media_offload_jobs": 0,
+      "media_render_jobs": 0,
+      "paid_provider_calls": 0,
+      "provider_attempts": 0,
+      "provider_jobs": 0,
+      "uploaded_videos": 0
+    },
+    "drive_calls": 0,
+    "provider_calls": 0,
+    "render_calls": 0,
+    "youtube_calls": 0
+  },
+  "old_scene_authority": {
+    "attempt_cap": 1,
+    "preferred_source_route": "PEXELS_VIDEO",
+    "provider": "pexels_api",
+    "provider_plan_ref": {
+      "artifact_id": "dfad8517-e6ab-470b-9fe3-3f9088aaf68f",
+      "artifact_version_id": "d0841143-c6bf-4f44-9086-9a8634c22b70",
+      "artifact_version_ref": "artifact-version://d0841143-c6bf-4f44-9086-9a8634c22b70",
+      "content_hash": "4c527232b86cb033c90a93e94d00684c81b7a9559ee0ba3a1a94b9e5cd100f3b",
+      "version_number": 1
+    },
+    "scene_id": "SC-04",
+    "semantic_intent": "Use brief supporting team-work context, then return to a native baseline checklist.",
+    "source_role": "PEXELS_SUPPORTING",
+    "visual_plan_ref": {
+      "artifact_id": "9d5806cd-ae80-459b-81ac-a5c825780859",
+      "artifact_version_id": "82fe70e5-1fd9-451c-a4c6-3fc9fe0aa8c8",
+      "artifact_version_ref": "artifact-version://82fe70e5-1fd9-451c-a4c6-3fc9fe0aa8c8",
+      "content_hash": "874834a4e14ab0686801e7df521f8c35774d003a70c39c03b1a86e429b2886c6",
+      "version_number": 1
+    }
+  },
+  "package_artifact_version_id": "d8471bc0-7d58-4b39-a1f9-267d7b8a02b1",
+  "package_content_hash": "7d827b7b37a654639383f21c6b6e5cd634c64c68f87832b3b9907dbd4b1fa07c",
+  "planning_output_set_hash": "d08a7f10f4073f4d8a10b2190f4ba7cf16b58a073825a6decdcdbaa395563fc3",
+  "proceed_to_mr1": false,
+  "project_type": "PKG1_SC04_REVISION",
+  "provider_attempt_scope": {
+    "google_drive_mutation_scope": {
+      "after_planned_requests": 2,
+      "before_planned_requests": 1,
+      "canonical_archive_mutated_by_supplement": false,
+      "execution_requires_fresh_mr1_approval": true,
+      "idempotency_phases": [
+        {
+          "boundary": "PRE_HUMAN_PASS",
+          "cost_usd": 0.0,
+          "max_mutations": 1,
+          "operation_key": "google_drive:archive",
+          "phase": "CANONICAL_REVIEW_ARCHIVE"
+        },
+        {
+          "boundary": "POST_HUMAN_PASS_PRE_FINAL_MEDIA_REF",
+          "cost_usd": 0.0,
+          "max_mutations": 1,
+          "operation_key": "google_drive:finalization-supplement",
+          "phase": "FINALIZATION_SUPPLEMENT"
+        }
+      ]
+    },
+    "native_scene_count": {
+      "after": 7,
+      "before": 6
+    },
+    "pexels_scene_count": {
+      "after": 2,
+      "before": 3
+    },
+    "sc04_attempt_cap": {
+      "after": 0,
+      "before": 1
+    },
+    "sc04_provider": {
+      "after": "native",
+      "before": "pexels_api"
+    },
+    "third_sc04_attempt_allowed": false
+  },
+  "repaired_route": "NATIVE_MOTION_GRAPHIC",
+  "repaired_scene": "SC-04",
+  "result": "PASS",
+  "revision_hash": "0115137e13399ccb627845347959b285c6622cd5a0df5b4a8f85850e0dde2410",
+  "revision_id": "88fa9f76-99e8-5ec5-8cdd-63c836031bac",
+  "revision_version": 3,
+  "rights_provenance_result": {
+    "drive_archive_scope": {
+      "archive_only_not_publish": true,
+      "canonical_archive_mutated_by_supplement": false,
+      "canonical_review_archive_required": true,
+      "finalization_supplement_required": true,
+      "idempotency_phases": [
+        {
+          "boundary": "PRE_HUMAN_PASS",
+          "cost_usd": 0.0,
+          "max_mutations": 1,
+          "operation_key": "google_drive:archive",
+          "phase": "CANONICAL_REVIEW_ARCHIVE"
+        },
+        {
+          "boundary": "POST_HUMAN_PASS_PRE_FINAL_MEDIA_REF",
+          "cost_usd": 0.0,
+          "max_mutations": 1,
+          "operation_key": "google_drive:finalization-supplement",
+          "phase": "FINALIZATION_SUPPLEMENT"
+        }
+      ],
+      "rights_or_license_expansion": false
+    },
+    "generated_evidence_authority": false,
+    "provenance_ref": {
+      "artifact_id": "2adfc98c-a310-4b85-aa51-f09ffc4764ff",
+      "artifact_version_id": "41b8c641-fc03-457f-a953-899a657e6ec5",
+      "artifact_version_ref": "artifact-version://41b8c641-fc03-457f-a953-899a657e6ec5",
+      "content_hash": "487cd325a3372c92fc549dcbc63dfa8638be8f9c230bfa113f226569852cc294",
+      "version_number": 1
+    },
+    "provider_output_claimed": false,
+    "rights_ref": {
+      "artifact_id": "6704d666-9868-477c-958f-b73b95b93cf3",
+      "artifact_version_id": "971025f3-d1ff-40d0-8bba-de47b1742f01",
+      "artifact_version_ref": "artifact-version://971025f3-d1ff-40d0-8bba-de47b1742f01",
+      "content_hash": "84f8c33a569f1664e62cb98e48be3facb4d9d30549e57c8e28b7035c128d5618",
+      "version_number": 1
+    },
+    "sc04_source": "VCOS_NATIVE",
+    "stock_asset_required": false,
+    "verdict": "PASS"
+  },
+  "root_cause": "INSUFFICIENT_SCENE_SPEC",
+  "source_human_authority": {
+    "approval": {
+      "approval_decision_id": "ef766b1d-c1a5-43b8-be98-0751bd055653",
+      "approval_ref": "operator-approval://pkg1-market-revision/a90e2786-f6e0-5480-94a4-fb28fd000edf/v2/b50ff5d3bcbf07de4b709ae0d9017a9df04fec49481fb14c224a709c85b0875b/package/7de25ac8-46e4-46da-b112-f805f16ebaaa/200b3be30b92ccff3b0efb26881d5654ab4b53162afe73d4e7f34bed3b0454bd",
+      "approval_scope": "PKG1_MARKET_REVISION_PACKAGE_PLANNING",
+      "decision": "approved",
+      "target_artifact_version_id": "7de25ac8-46e4-46da-b112-f805f16ebaaa",
+      "target_content_hash": "200b3be30b92ccff3b0efb26881d5654ab4b53162afe73d4e7f34bed3b0454bd"
+    },
+    "approved_package": {
+      "artifact_id": "68560079-209d-4e21-8e73-2a5d7d1e1a78",
+      "artifact_type": "package_manifest",
+      "artifact_version_id": "7de25ac8-46e4-46da-b112-f805f16ebaaa",
+      "artifact_version_ref": "artifact-version://7de25ac8-46e4-46da-b112-f805f16ebaaa",
+      "content_hash": "200b3be30b92ccff3b0efb26881d5654ab4b53162afe73d4e7f34bed3b0454bd",
+      "version_number": 1
+    },
+    "decision": "PASS",
+    "decision_source": "OPERATOR",
+    "human_review_receipt": {
+      "artifact_id": "9dfed76b-46bf-4ee2-837d-2aef1b1eb42d",
+      "artifact_type": "pkg1_market_revision_human_review_receipt",
+      "artifact_version_id": "a35c55b8-6887-4e60-a19c-22928205c572",
+      "artifact_version_ref": "artifact-version://a35c55b8-6887-4e60-a19c-22928205c572",
+      "content_hash": "24a2d4c7b0dec7394a8b78ab646f66750fbca35282700d50dcde77bd304c2231",
+      "version_number": 1
+    },
+    "review_authority": "HUMAN",
+    "schema_version": "pkg1.sc04-source-human-authority.v1",
+    "source_project_id": "2522a8f1-1ea4-4d66-8ea5-411aaa8f152b",
+    "source_project_ref": "video-project://2522a8f1-1ea4-4d66-8ea5-411aaa8f152b"
+  },
+  "unchanged_scenes_exact": true,
+  "video_project_id": "0578b24a-1898-443e-99bf-add89d3e61e0"
+}

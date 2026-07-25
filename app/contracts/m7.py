@@ -3,10 +3,22 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.geo_delivery import (
+    ActualPublishDestination,
+    DestinationRuntimeContract,
+    StrictMarketLineageEnvelope,
+)
 
-PublishTargetPlatform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
-PublishTargetSurface = Literal["LONG_FORM", "SHORT_FORM", "REELS", "FEED", "STORY", "GENERIC"]
-PublishHandoffState = Literal["DRAFT", "READY_FOR_OPERATOR", "BLOCKED", "CONFIRMED_PUBLISHED", "CANCELLED"]
+
+PublishTargetPlatform = Literal[
+    "YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"
+]
+PublishTargetSurface = Literal[
+    "LONG_FORM", "SHORT_FORM", "REELS", "FEED", "STORY", "GENERIC"
+]
+PublishHandoffState = Literal[
+    "DRAFT", "READY_FOR_OPERATOR", "BLOCKED", "CONFIRMED_PUBLISHED", "CANCELLED"
+]
 PublishChecklistState = Literal["PENDING", "CONFIRMED", "NOT_REQUIRED", "BLOCKED"]
 PublishChecklistCategory = Literal[
     "FILE_READY",
@@ -23,9 +35,15 @@ PublishChecklistCategory = Literal[
     "FINAL_HUMAN_REVIEW",
 ]
 PrivacyStatus = Literal["PUBLIC", "UNLISTED", "PRIVATE", "SCHEDULED", "UNKNOWN"]
-ManualPublishConfirmationState = Literal["DRAFT", "SUBMITTED", "ACCEPTED", "REVIEW_REQUIRED", "REJECTED", "CANCELLED"]
-UploadedVideoPublishStatus = Literal["CONFIRMED", "REVIEW_REQUIRED", "REMOVED", "UNKNOWN"]
-UploadedVideoMonitoringState = Literal["NOT_STARTED", "READY_FOR_ANALYTICS", "PAUSED", "NOT_SUPPORTED"]
+ManualPublishConfirmationState = Literal[
+    "DRAFT", "SUBMITTED", "ACCEPTED", "REVIEW_REQUIRED", "REJECTED", "CANCELLED"
+]
+UploadedVideoPublishStatus = Literal[
+    "CONFIRMED", "REVIEW_REQUIRED", "REMOVED", "UNKNOWN"
+]
+UploadedVideoMonitoringState = Literal[
+    "NOT_STARTED", "READY_FOR_ANALYTICS", "PAUSED", "NOT_SUPPORTED"
+]
 MetadataDiffSeverity = Literal["NONE", "LOW", "MEDIUM", "HIGH"]
 OperatorStatus = Literal[
     "READY_FOR_ANALYTICS",
@@ -150,8 +168,32 @@ class PublishHandoffCreate(BaseModel):
     created_by_user_id: uuid.UUID | None = None
     planned_metadata_overrides: dict[str, Any] = Field(default_factory=dict)
     cloud_media_refs: list[dict[str, Any]] = Field(default_factory=list)
+    strict_market_lineage: StrictMarketLineageEnvelope | None = None
+    destination_runtime: DestinationRuntimeContract | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_strict_market_context(self) -> "PublishHandoffCreate":
+        if (self.strict_market_lineage is None) != (self.destination_runtime is None):
+            raise ValueError("STRICT_MARKET_CONTEXT_REQUIRES_LINEAGE_AND_DESTINATION")
+        if self.strict_market_lineage is not None:
+            assert self.destination_runtime is not None
+            if self.destination_binding_id is None:
+                raise ValueError("STRICT_MARKET_DESTINATION_BINDING_ID_REQUIRED")
+            if (
+                self.destination_binding_id
+                != self.strict_market_lineage.destination_binding_id
+            ):
+                raise ValueError("STRICT_MARKET_HANDOFF_DESTINATION_ID_MISMATCH")
+            if (
+                self.destination_binding_id
+                != self.destination_runtime.destination_binding_id
+            ):
+                raise ValueError("STRICT_MARKET_RUNTIME_DESTINATION_ID_MISMATCH")
+            if self.target_platform != self.strict_market_lineage.approved_platform:
+                raise ValueError("STRICT_MARKET_HANDOFF_PLATFORM_MISMATCH")
+        return self
 
 
 class PublishHandoffRead(BaseModel):
@@ -170,6 +212,16 @@ class PublishHandoffRead(BaseModel):
     target_platform: PublishTargetPlatform
     target_surface: PublishTargetSurface
     destination_binding_id: uuid.UUID | None
+    destination_binding_fingerprint: str | None = None
+    market_policy_hash: str | None = None
+    approved_package_hash: str | None = None
+    approval_decision_id: uuid.UUID | None = None
+    target_market_profile_ref: str | None = None
+    target_market_profile_hash: str | None = None
+    market_alignment_dossier_ref: str | None = None
+    market_alignment_dossier_hash: str | None = None
+    approved_publish_timezone: str | None = None
+    approved_publish_window: dict[str, Any] | None = None
     render_variant_id: str | None
     package_state: PublishHandoffState
     planned_metadata: dict[str, Any]
@@ -198,6 +250,7 @@ class ManualPublishConfirmationCreate(BaseModel):
     actual_disclosures: dict[str, Any] = Field(default_factory=dict)
     actual_files: dict[str, Any] = Field(default_factory=dict)
     operator_notes: str | None = None
+    actual_destination: ActualPublishDestination | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -211,7 +264,16 @@ class ManualPublishConfirmationCreate(BaseModel):
         if self.actual_published_at is None:
             missing.append("actual_published_at")
         if missing:
-            raise ValueError(f"manual publish confirmation requires: {', '.join(missing)}")
+            raise ValueError(
+                f"manual publish confirmation requires: {', '.join(missing)}"
+            )
+        if self.actual_destination is not None:
+            if self.actual_destination.external_video_id != self.actual_video_id:
+                raise ValueError("ACTUAL_DESTINATION_VIDEO_ID_MISMATCH")
+            if self.actual_destination.external_video_url != self.actual_video_url:
+                raise ValueError("ACTUAL_DESTINATION_VIDEO_URL_MISMATCH")
+            if self.actual_destination.published_at != self.actual_published_at:
+                raise ValueError("ACTUAL_DESTINATION_PUBLISHED_AT_MISMATCH")
         return self
 
 
@@ -229,6 +291,10 @@ class ManualPublishConfirmationRead(BaseModel):
     actual_video_id: str | None
     actual_video_url: str | None
     actual_published_at: AwareDatetime | None
+    destination_binding_id: uuid.UUID | None = None
+    destination_binding_fingerprint: str | None = None
+    market_policy_hash: str | None = None
+    approved_package_hash: str | None = None
     actual_metadata: dict[str, Any]
     actual_disclosures: dict[str, Any]
     actual_files: dict[str, Any]
@@ -255,6 +321,10 @@ class UploadedVideoRead(BaseModel):
     first_scripted_video_package_id: uuid.UUID | None = None
     human_upload_task_id: uuid.UUID | None = None
     destination: str = "YOUTUBE"
+    destination_binding_id: uuid.UUID | None = None
+    destination_binding_fingerprint: str | None = None
+    market_policy_hash: str | None = None
+    approved_package_hash: str | None = None
     source_manifest_snapshot_id: uuid.UUID | None
     rights_envelope_ref: str | None
     platform: PublishTargetPlatform

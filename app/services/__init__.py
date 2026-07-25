@@ -21,6 +21,28 @@ from app.services.geo_market import (
     VoiceLocaleAlignmentGate,
     freeze_project_market_lineage,
 )
+from app.services.geo_delivery import (
+    AdsOnlyMonetizationPolicyService,
+    GeoDeliveryCloseoutArtifactService,
+    GeoDistributionTrackerService,
+    GeoMaturityDiagnosticService,
+    MarketDeliveryAlignmentGate,
+    SelfFundingGate,
+    StrictMarketLineageService,
+    acceptance_evidence_from_manifest,
+    destination_binding_runtime_id,
+    destination_runtime_contract,
+    market_policy_hash,
+)
+from app.services.geo_delivery_verification import (
+    GEO_DELIVERY_PYTEST_RUN_ID,
+    GEO_DELIVERY_RELEVANT_WORKSPACE_PATHS,
+    GEO_DELIVERY_REQUIRED_RUN_IDS,
+    GEO_DELIVERY_REQUIRED_STATIC_RUN_IDS,
+    GEO_DELIVERY_REQUIRED_TEST_NODES,
+    geo_delivery_workspace_hash,
+    validate_geo_delivery_verification_scope,
+)
 from app.services.policy_snapshot import PolicySnapshotService
 from app.services.profile_compiler import ChannelProfileCompiler
 from app.services.rbac import RBACService, require_permission
@@ -212,7 +234,11 @@ from app.services.m12_1 import (
     prompt_context_hash,
     prompt_template_hash,
 )
-from app.services.m12_2 import FirstScriptedVideoPackageService, verify_m12_2_required_tags, verify_m12_2s_required_tags
+from app.services.m12_2 import (
+    FirstScriptedVideoPackageService,
+    verify_m12_2_required_tags,
+    verify_m12_2s_required_tags,
+)
 from app.services.m12_2r import PublishHandoffLedgerService, parse_youtube_video_id
 from app.services.m12_2p3 import (
     ChannelContractCompiler,
@@ -339,11 +365,18 @@ from app.services.r3d9_ux2 import (
     PackagingPatchRouter,
     PackagingReviewQueueService,
 )
-from app.services.r3d10 import PackageRuntimeDispositionService, RuntimeLTSFreezeVerifier
+from app.services.r3d10 import (
+    PackageRuntimeDispositionService,
+    RuntimeLTSFreezeVerifier,
+)
 from app.services.pkg1 import PKG1PackageService
 from app.services.pkg1_market_revision import PKG1MarketRevisionService
 from app.services.pkg1_market_revision_closeout import (
     PKG1MarketRevisionCloseoutService,
+)
+from app.services.pkg1_sc04_revision import PKG1SC04RevisionService
+from app.services.pkg1_sc04_revision_closeout import (
+    PKG1SC04RevisionCloseoutService,
 )
 from app.services.visual_source_routing import (
     AIImageEligibilityGate,
@@ -357,11 +390,30 @@ from app.services.visual_source_routing import (
 )
 
 __all__ = [
+    "IntegrationSettingsReadModel",
     "AuditService",
     "IdeaMarketPreflightEvaluator",
     "MarketAlignmentDossierBuilder",
     "MarketChannelGovernanceService",
     "MarketPackageFreezeService",
+    "AdsOnlyMonetizationPolicyService",
+    "GeoDeliveryCloseoutArtifactService",
+    "GeoDistributionTrackerService",
+    "GeoMaturityDiagnosticService",
+    "MarketDeliveryAlignmentGate",
+    "SelfFundingGate",
+    "StrictMarketLineageService",
+    "acceptance_evidence_from_manifest",
+    "destination_binding_runtime_id",
+    "destination_runtime_contract",
+    "market_policy_hash",
+    "GEO_DELIVERY_PYTEST_RUN_ID",
+    "GEO_DELIVERY_RELEVANT_WORKSPACE_PATHS",
+    "GEO_DELIVERY_REQUIRED_RUN_IDS",
+    "GEO_DELIVERY_REQUIRED_STATIC_RUN_IDS",
+    "GEO_DELIVERY_REQUIRED_TEST_NODES",
+    "geo_delivery_workspace_hash",
+    "validate_geo_delivery_verification_scope",
     "MetadataMarketAlignmentGate",
     "OfflineMarketResearchRouter",
     "ResearchJurisdictionGate",
@@ -639,6 +691,8 @@ __all__ = [
     "PKG1PackageService",
     "PKG1MarketRevisionService",
     "PKG1MarketRevisionCloseoutService",
+    "PKG1SC04RevisionService",
+    "PKG1SC04RevisionCloseoutService",
     "AIImageEligibilityGate",
     "DiagramSuitabilityGate",
     "EvidenceTruthSourceGate",

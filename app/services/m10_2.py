@@ -35,17 +35,19 @@ from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.config import (
     VEO_APPROVED_MODEL_IDS,
     VEO_ALLOWED_DURATION_SECONDS,
-    VEO_DEFAULT_DURATION_SECONDS,
     VEO_DEFAULT_MODEL_ID,
     VEO_FORBIDDEN_MODEL_IDS,
     VEO_MAX_DURATION_SECONDS,
     get_settings,
 )
 from app.core.time import utc_now
+from app.services.config_registry import content_hash
 from app.services.native_render_plan import stable_hash
 from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
 from app.db.models import (
     AIHeroAsset,
+    Artifact,
+    ArtifactVersion,
     FinalMediaRef,
     LicenseEvidenceRecord,
     LongFormRenderPackage,
@@ -141,7 +143,9 @@ def _resolve_veo_model_id(value: Any) -> str | None:
     if model_id in VEO_FORBIDDEN_MODEL_IDS:
         raise ValidationFailureError(f"Veo model id is not allowed: {model_id}")
     if model_id not in VEO_APPROVED_MODEL_IDS:
-        raise ValidationFailureError("Veo model id is not present in the approved catalog")
+        raise ValidationFailureError(
+            "Veo model id is not present in the approved catalog"
+        )
     return model_id
 
 
@@ -206,7 +210,10 @@ def _default_budget_policy_seeds() -> list[dict[str, Any]]:
 
 def _routing_policy() -> dict[str, dict[str, str]]:
     return {
-        str(item["job_type"]).upper(): {"provider_key": item["provider_key"], "reason_code": item["reason_code"]}
+        str(item["job_type"]).upper(): {
+            "provider_key": item["provider_key"],
+            "reason_code": item["reason_code"],
+        }
         for item in _read_catalog("media_provider_routing_policy_catalog")
     }
 
@@ -246,11 +253,28 @@ class GoogleVeoConfigService:
     def resolve(self) -> GoogleVeoResolvedConfig:
         settings = get_settings()
         role = self.session.scalars(
-            select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == GOOGLE_VEO_PROVIDER_KEY)
+            select(MediaProviderRoleProfile).where(
+                MediaProviderRoleProfile.provider_key == GOOGLE_VEO_PROVIDER_KEY
+            )
         ).one_or_none()
-        seed = next((item for item in _provider_role_seeds() if item["provider_key"] == GOOGLE_VEO_PROVIDER_KEY), None)
-        defaults = (role.monthly_budget_assumption if role else seed.get("monthly_budget_assumption") if seed else {}) or {}
-        allowed_duration_seconds = tuple(Decimal(str(item)) for item in VEO_ALLOWED_DURATION_SECONDS)
+        seed = next(
+            (
+                item
+                for item in _provider_role_seeds()
+                if item["provider_key"] == GOOGLE_VEO_PROVIDER_KEY
+            ),
+            None,
+        )
+        defaults = (
+            role.monthly_budget_assumption
+            if role
+            else seed.get("monthly_budget_assumption")
+            if seed
+            else {}
+        ) or {}
+        allowed_duration_seconds = tuple(
+            Decimal(str(item)) for item in VEO_ALLOWED_DURATION_SECONDS
+        )
         default_duration_seconds = _decimal_or_none(
             settings.veo_default_duration_seconds
             if settings.veo_default_duration_seconds is not None
@@ -260,9 +284,13 @@ class GoogleVeoConfigService:
         model_id = _resolve_veo_model_id(settings.veo_model_id or VEO_DEFAULT_MODEL_ID)
         mode = "GEMINI_API_NATIVE"
         if allowed_duration_seconds != (Decimal("8"),):
-            raise ValidationFailureError("Google Veo approved duration must be exactly 8 seconds")
+            raise ValidationFailureError(
+                "Google Veo approved duration must be exactly 8 seconds"
+            )
         if default_duration_seconds != Decimal("8"):
-            raise ValidationFailureError("Google Veo default duration must be 8 seconds")
+            raise ValidationFailureError(
+                "Google Veo default duration must be 8 seconds"
+            )
         if max_duration_seconds != Decimal("8"):
             raise ValidationFailureError("Google Veo max duration must be 8 seconds")
         return GoogleVeoResolvedConfig(
@@ -274,14 +302,16 @@ class GoogleVeoConfigService:
             allowed_duration_seconds=allowed_duration_seconds,
             default_duration_seconds=default_duration_seconds,
             max_duration_seconds=max_duration_seconds,
-            price_per_second=GoogleVeoModelPriceCatalog().estimate(
+            price_per_second=GoogleVeoModelPriceCatalog()
+            .estimate(
                 model_id=model_id,
                 resolution=settings.veo_default_resolution,
                 duration_seconds=8,
                 output_count=1,
                 hard_cap=Decimal("1000"),
                 approval_amount=Decimal("1000"),
-            ).price_per_second,
+            )
+            .price_per_second,
             monthly_budget_usd=None,
             project_id=None,
             location=None,
@@ -290,14 +320,22 @@ class GoogleVeoConfigService:
             real_smoke_enabled=settings.pa1r_veo_smoke_enabled,
         )
 
-    def readiness_reason_codes(self, config: GoogleVeoResolvedConfig | None = None) -> list[str]:
+    def readiness_reason_codes(
+        self, config: GoogleVeoResolvedConfig | None = None
+    ) -> list[str]:
         resolved = config or self.resolve()
         reasons: list[str] = []
-        if _normalized_ai_hero_provider(get_settings().ai_video_hero_provider) != GOOGLE_VEO_PROVIDER_KEY:
+        if (
+            _normalized_ai_hero_provider(get_settings().ai_video_hero_provider)
+            != GOOGLE_VEO_PROVIDER_KEY
+        ):
             reasons.append("UNSUPPORTED_AI_HERO_PROVIDER")
         if not resolved.model_id or not resolved.mode:
             reasons.append("VEO_CONFIG_MISSING")
-        if _google_veo_duration_block(resolved, resolved.default_duration_seconds) is not None:
+        if (
+            _google_veo_duration_block(resolved, resolved.default_duration_seconds)
+            is not None
+        ):
             reasons.append("VEO_DURATION_CONFIG_INVALID")
         return reasons or ["VEO_PROVIDER_CONFIG_READY"]
 
@@ -309,10 +347,14 @@ class MediaProviderRoleService:
     def ensure_matrix(self) -> list[MediaProviderRoleProfile]:
         records: list[MediaProviderRoleProfile] = []
         provider_role_seeds = _provider_role_seeds()
-        configured_provider_keys = {seed["provider_key"] for seed in provider_role_seeds}
+        configured_provider_keys = {
+            seed["provider_key"] for seed in provider_role_seeds
+        }
         for seed in provider_role_seeds:
             profile = self.session.scalars(
-                select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == seed["provider_key"])
+                select(MediaProviderRoleProfile).where(
+                    MediaProviderRoleProfile.provider_key == seed["provider_key"]
+                )
             ).one_or_none()
             if profile is None:
                 profile = MediaProviderRoleProfile(**seed)
@@ -327,28 +369,48 @@ class MediaProviderRoleService:
         MediaProviderBudgetService(self.session).ensure_default_policies()
         return self.list_roles()
 
-    def _remove_unconfigured_ai_hero_profiles(self, configured_provider_keys: set[str]) -> None:
+    def _remove_unconfigured_ai_hero_profiles(
+        self, configured_provider_keys: set[str]
+    ) -> None:
         removed = self.session.scalars(
             select(MediaProviderRoleProfile)
             .where(MediaProviderRoleProfile.provider_type == AI_VIDEO_HERO_PROVIDER)
-            .where(MediaProviderRoleProfile.provider_key.not_in(configured_provider_keys))
+            .where(
+                MediaProviderRoleProfile.provider_key.not_in(configured_provider_keys)
+            )
         ).all()
         for profile in removed:
-            self.session.execute(delete(ProviderCapabilityMatrixEntry).where(ProviderCapabilityMatrixEntry.provider_key == profile.provider_key))
-            self.session.execute(delete(MediaProviderBudgetPolicy).where(MediaProviderBudgetPolicy.provider_key == profile.provider_key))
+            self.session.execute(
+                delete(ProviderCapabilityMatrixEntry).where(
+                    ProviderCapabilityMatrixEntry.provider_key == profile.provider_key
+                )
+            )
+            self.session.execute(
+                delete(MediaProviderBudgetPolicy).where(
+                    MediaProviderBudgetPolicy.provider_key == profile.provider_key
+                )
+            )
             self.session.delete(profile)
         self.session.flush()
 
     def list_roles(self) -> list[MediaProviderRoleProfile]:
         if not self.session.scalars(select(MediaProviderRoleProfile).limit(1)).first():
             self.ensure_matrix()
-        return list(self.session.scalars(select(MediaProviderRoleProfile).order_by(MediaProviderRoleProfile.provider_key)).all())
+        return list(
+            self.session.scalars(
+                select(MediaProviderRoleProfile).order_by(
+                    MediaProviderRoleProfile.provider_key
+                )
+            ).all()
+        )
 
     def get_role(self, provider_key: str) -> MediaProviderRoleProfile | None:
         if not self.session.scalars(select(MediaProviderRoleProfile).limit(1)).first():
             self.ensure_matrix()
         return self.session.scalars(
-            select(MediaProviderRoleProfile).where(MediaProviderRoleProfile.provider_key == provider_key)
+            select(MediaProviderRoleProfile).where(
+                MediaProviderRoleProfile.provider_key == provider_key
+            )
         ).one_or_none()
 
     def require_role(self, provider_key: str) -> MediaProviderRoleProfile:
@@ -366,7 +428,9 @@ class ProviderCapabilityMatrixService:
         for seed in _provider_capability_seeds():
             entry = self.session.scalars(
                 select(ProviderCapabilityMatrixEntry)
-                .where(ProviderCapabilityMatrixEntry.provider_key == seed["provider_key"])
+                .where(
+                    ProviderCapabilityMatrixEntry.provider_key == seed["provider_key"]
+                )
                 .where(ProviderCapabilityMatrixEntry.job_type == seed["job_type"])
             ).one_or_none()
             if entry is None:
@@ -377,16 +441,33 @@ class ProviderCapabilityMatrixService:
         self.session.flush()
         return self.list_entries()
 
-    def list_entries(self, *, provider_key: str | None = None) -> list[ProviderCapabilityMatrixEntry]:
-        if not self.session.scalars(select(ProviderCapabilityMatrixEntry).limit(1)).first():
+    def list_entries(
+        self, *, provider_key: str | None = None
+    ) -> list[ProviderCapabilityMatrixEntry]:
+        if not self.session.scalars(
+            select(ProviderCapabilityMatrixEntry).limit(1)
+        ).first():
             self.ensure_matrix()
         statement = select(ProviderCapabilityMatrixEntry)
         if provider_key is not None:
-            statement = statement.where(ProviderCapabilityMatrixEntry.provider_key == provider_key)
-        return list(self.session.scalars(statement.order_by(ProviderCapabilityMatrixEntry.provider_key, ProviderCapabilityMatrixEntry.job_type)).all())
+            statement = statement.where(
+                ProviderCapabilityMatrixEntry.provider_key == provider_key
+            )
+        return list(
+            self.session.scalars(
+                statement.order_by(
+                    ProviderCapabilityMatrixEntry.provider_key,
+                    ProviderCapabilityMatrixEntry.job_type,
+                )
+            ).all()
+        )
 
-    def find_entry(self, *, provider_key: str, job_type: str) -> ProviderCapabilityMatrixEntry | None:
-        if not self.session.scalars(select(ProviderCapabilityMatrixEntry).limit(1)).first():
+    def find_entry(
+        self, *, provider_key: str, job_type: str
+    ) -> ProviderCapabilityMatrixEntry | None:
+        if not self.session.scalars(
+            select(ProviderCapabilityMatrixEntry).limit(1)
+        ).first():
             self.ensure_matrix()
         return self.session.scalars(
             select(ProviderCapabilityMatrixEntry)
@@ -394,11 +475,17 @@ class ProviderCapabilityMatrixService:
             .where(ProviderCapabilityMatrixEntry.job_type == job_type)
         ).one_or_none()
 
-    def find_supported_by_type(self, *, provider_type: str, job_type: str) -> tuple[MediaProviderRoleProfile, ProviderCapabilityMatrixEntry] | None:
+    def find_supported_by_type(
+        self, *, provider_type: str, job_type: str
+    ) -> tuple[MediaProviderRoleProfile, ProviderCapabilityMatrixEntry] | None:
         MediaProviderRoleService(self.session).ensure_matrix()
         rows = self.session.execute(
             select(MediaProviderRoleProfile, ProviderCapabilityMatrixEntry)
-            .join(ProviderCapabilityMatrixEntry, ProviderCapabilityMatrixEntry.provider_key == MediaProviderRoleProfile.provider_key)
+            .join(
+                ProviderCapabilityMatrixEntry,
+                ProviderCapabilityMatrixEntry.provider_key
+                == MediaProviderRoleProfile.provider_key,
+            )
             .where(MediaProviderRoleProfile.provider_type == provider_type)
             .where(MediaProviderRoleProfile.is_enabled.is_(True))
             .where(ProviderCapabilityMatrixEntry.job_type == job_type)
@@ -412,7 +499,9 @@ class MediaRenderJobRouterService:
     def __init__(self, session: Session):
         self.session = session
 
-    def decide(self, *, data: MediaRenderRoutingDecisionRequest) -> MediaRenderRoutingDecision:
+    def decide(
+        self, *, data: MediaRenderRoutingDecisionRequest
+    ) -> MediaRenderRoutingDecision:
         MediaProviderRoleService(self.session).ensure_matrix()
         job_type = data.job_type.upper()
         if job_type not in MEDIA_JOB_TYPES:
@@ -421,7 +510,10 @@ class MediaRenderJobRouterService:
                 job_type=job_type,
                 routing_result="BLOCKED_UNKNOWN_PROVIDER",
                 blocker_reason=f"Unknown media job type: {data.job_type}",
-                technical_appendix={"reason_code": "BLOCKED_UNKNOWN_PROVIDER", **data.technical_appendix},
+                technical_appendix={
+                    "reason_code": "BLOCKED_UNKNOWN_PROVIDER",
+                    **data.technical_appendix,
+                },
             )
         if job_type == LONG_FORM_FINAL_RENDER:
             return self._decide_long_form_final(data=data, job_type=job_type)
@@ -432,10 +524,15 @@ class MediaRenderJobRouterService:
                 job_type=job_type,
                 routing_result="BLOCKED_UNKNOWN_PROVIDER",
                 blocker_reason=f"No provider route is configured for {job_type}.",
-                technical_appendix={"reason_code": "BLOCKED_UNKNOWN_PROVIDER", **data.technical_appendix},
+                technical_appendix={
+                    "reason_code": "BLOCKED_UNKNOWN_PROVIDER",
+                    **data.technical_appendix,
+                },
             )
         role = MediaProviderRoleService(self.session).require_role(provider_key)
-        entry = ProviderCapabilityMatrixService(self.session).find_entry(provider_key=provider_key, job_type=job_type)
+        entry = ProviderCapabilityMatrixService(self.session).find_entry(
+            provider_key=provider_key, job_type=job_type
+        )
         if entry is None or entry.capability != "SUPPORTED":
             return self._record_decision(
                 data=data,
@@ -445,11 +542,21 @@ class MediaRenderJobRouterService:
                 routing_result="BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
                 blocker_reason=f"{role.provider_key} does not support {job_type}.",
                 capability_entry_id=entry.id if entry else None,
-                technical_appendix={"reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED", **data.technical_appendix},
+                technical_appendix={
+                    "reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
+                    **data.technical_appendix,
+                },
             )
         duration_block = _duration_block(entry, data.target_duration_seconds)
-        if duration_block is None and role.provider_key == GOOGLE_VEO_PROVIDER_KEY and job_type in AI_HERO_JOBS:
-            duration_block = _google_veo_duration_block(GoogleVeoConfigService(self.session).resolve(), data.target_duration_seconds)
+        if (
+            duration_block is None
+            and role.provider_key == GOOGLE_VEO_PROVIDER_KEY
+            and job_type in AI_HERO_JOBS
+        ):
+            duration_block = _google_veo_duration_block(
+                GoogleVeoConfigService(self.session).resolve(),
+                data.target_duration_seconds,
+            )
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block:
             return self._record_decision(
@@ -460,9 +567,16 @@ class MediaRenderJobRouterService:
                 routing_result="BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
                 blocker_reason=duration_block or aspect_block,
                 capability_entry_id=entry.id,
-                technical_appendix={"reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED", **data.technical_appendix},
+                technical_appendix={
+                    "reason_code": "BLOCKED_PROVIDER_CAPABILITY_REQUIRED",
+                    **data.technical_appendix,
+                },
             )
-        estimated_usage_seconds = data.estimated_usage_seconds or (data.target_duration_seconds if role.provider_type == AI_VIDEO_HERO_PROVIDER else None)
+        estimated_usage_seconds = data.estimated_usage_seconds or (
+            data.target_duration_seconds
+            if role.provider_type == AI_VIDEO_HERO_PROVIDER
+            else None
+        )
         if data.estimated_usage_usd is not None or estimated_usage_seconds is not None:
             budget = MediaProviderBudgetService(self.session).check(
                 data=MediaProviderBudgetCheckRequest(
@@ -483,7 +597,10 @@ class MediaRenderJobRouterService:
                     blocker_reason=budget.operator_summary,
                     capability_entry_id=entry.id,
                     budget_snapshot_id=budget.snapshot_id,
-                    technical_appendix={"reason_codes": budget.reason_codes, **data.technical_appendix},
+                    technical_appendix={
+                        "reason_codes": budget.reason_codes,
+                        **data.technical_appendix,
+                    },
                 )
         return self._record_decision(
             data=data,
@@ -495,7 +612,9 @@ class MediaRenderJobRouterService:
             budget_snapshot_id=budget.snapshot_id if "budget" in locals() else None,
             technical_appendix={
                 "reason_code": _route_reason_code(role.provider_type),
-                "budget_gate_decision": budget.decision if "budget" in locals() else None,
+                "budget_gate_decision": budget.decision
+                if "budget" in locals()
+                else None,
                 "real_provider_execution": False,
                 **data.technical_appendix,
             },
@@ -504,17 +623,26 @@ class MediaRenderJobRouterService:
     def get_decision(self, decision_id: uuid.UUID) -> MediaRenderRoutingDecision:
         decision = self.session.get(MediaRenderRoutingDecision, decision_id)
         if decision is None:
-            raise NotFoundError(f"media render routing decision not found: {decision_id}")
+            raise NotFoundError(
+                f"media render routing decision not found: {decision_id}"
+            )
         return decision
 
-    def _decide_long_form_final(self, *, data: MediaRenderRoutingDecisionRequest, job_type: str) -> MediaRenderRoutingDecision:
+    def _decide_long_form_final(
+        self, *, data: MediaRenderRoutingDecisionRequest, job_type: str
+    ) -> MediaRenderRoutingDecision:
         return self._record_decision(
             data=data,
             job_type=job_type,
             selected_provider_type=LOCAL_RENDERER_CAPABILITY,
             selected_provider_key="native_ffmpeg_renderer",
             routing_result="ROUTED",
-            technical_appendix={"reason_code": "NATIVE_FFMPEG_RENDER_AUTHORITY", "local_renderer": True, "real_provider_execution": False, **data.technical_appendix},
+            technical_appendix={
+                "reason_code": "NATIVE_FFMPEG_RENDER_AUTHORITY",
+                "local_renderer": True,
+                "real_provider_execution": False,
+                **data.technical_appendix,
+            },
         )
 
     def _record_decision(
@@ -553,7 +681,9 @@ class ProviderCapabilityGateService:
     def __init__(self, session: Session):
         self.session = session
 
-    def check(self, *, data: ProviderCapabilityGateCheckRequest) -> ProviderCapabilityGateRead:
+    def check(
+        self, *, data: ProviderCapabilityGateCheckRequest
+    ) -> ProviderCapabilityGateRead:
         job_type = data.job_type.upper()
         if data.provider_key is None and data.provider_type is None:
             decision = MediaRenderJobRouterService(self.session).decide(
@@ -578,13 +708,17 @@ class ProviderCapabilityGateService:
                 routing_result=decision.routing_result,
                 provider_key=decision.selected_provider_key,
                 provider_type=decision.selected_provider_type,
-                reason_codes=decision.technical_appendix.get("reason_codes", ["LONG_FORM_FINAL_RENDER_BLOCKED_PROVIDER_REQUIRED"]),
+                reason_codes=decision.technical_appendix.get(
+                    "reason_codes", ["LONG_FORM_FINAL_RENDER_BLOCKED_PROVIDER_REQUIRED"]
+                ),
                 blocker_reason=decision.blocker_reason,
                 operator_summary=decision.blocker_reason or f"{job_type} is blocked.",
                 capability_entry_id=decision.capability_entry_id,
             )
         role = self._resolve_role(data)
-        entry = ProviderCapabilityMatrixService(self.session).find_entry(provider_key=role.provider_key, job_type=job_type)
+        entry = ProviderCapabilityMatrixService(self.session).find_entry(
+            provider_key=role.provider_key, job_type=job_type
+        )
         if entry is None:
             return ProviderCapabilityGateRead(
                 decision="BLOCK",
@@ -595,8 +729,15 @@ class ProviderCapabilityGateService:
                 operator_summary=f"{role.provider_key} has no declared support for {job_type}.",
             )
         duration_block = _duration_block(entry, data.target_duration_seconds)
-        if duration_block is None and role.provider_key == GOOGLE_VEO_PROVIDER_KEY and job_type in AI_HERO_JOBS:
-            duration_block = _google_veo_duration_block(GoogleVeoConfigService(self.session).resolve(), data.target_duration_seconds)
+        if (
+            duration_block is None
+            and role.provider_key == GOOGLE_VEO_PROVIDER_KEY
+            and job_type in AI_HERO_JOBS
+        ):
+            duration_block = _google_veo_duration_block(
+                GoogleVeoConfigService(self.session).resolve(),
+                data.target_duration_seconds,
+            )
         aspect_block = _aspect_block(entry, data.target_aspect_ratio)
         if duration_block or aspect_block or entry.capability != "SUPPORTED":
             reason = "BLOCKED_PROVIDER_CAPABILITY_REQUIRED"
@@ -606,8 +747,12 @@ class ProviderCapabilityGateService:
                 provider_type=role.provider_type,
                 capability=entry.capability,
                 reason_codes=[reason],
-                blocker_reason=duration_block or aspect_block or entry.capability_reason,
-                operator_summary=duration_block or aspect_block or entry.capability_reason,
+                blocker_reason=duration_block
+                or aspect_block
+                or entry.capability_reason,
+                operator_summary=duration_block
+                or aspect_block
+                or entry.capability_reason,
                 capability_entry_id=entry.id,
             )
         return ProviderCapabilityGateRead(
@@ -620,10 +765,14 @@ class ProviderCapabilityGateService:
             capability_entry_id=entry.id,
         )
 
-    def _resolve_role(self, data: ProviderCapabilityGateCheckRequest) -> MediaProviderRoleProfile:
+    def _resolve_role(
+        self, data: ProviderCapabilityGateCheckRequest
+    ) -> MediaProviderRoleProfile:
         MediaProviderRoleService(self.session).ensure_matrix()
         if data.provider_key is not None:
-            return MediaProviderRoleService(self.session).require_role(data.provider_key)
+            return MediaProviderRoleService(self.session).require_role(
+                data.provider_key
+            )
         role = self.session.scalars(
             select(MediaProviderRoleProfile)
             .where(MediaProviderRoleProfile.provider_type == data.provider_type)
@@ -650,7 +799,9 @@ class MediaProviderBudgetService:
                 select(MediaProviderBudgetPolicy)
                 .where(MediaProviderBudgetPolicy.company_id.is_(None))
                 .where(MediaProviderBudgetPolicy.provider_type == seed["provider_type"])
-                .where(MediaProviderBudgetPolicy.provider_key == seed.get("provider_key"))
+                .where(
+                    MediaProviderBudgetPolicy.provider_key == seed.get("provider_key")
+                )
             ).one_or_none()
             if policy is None:
                 policy = MediaProviderBudgetPolicy(**seed)
@@ -664,17 +815,28 @@ class MediaProviderBudgetService:
 
     def list_policies(self) -> list[MediaProviderBudgetPolicy]:
         self.ensure_default_policies()
-        return list(self.session.scalars(select(MediaProviderBudgetPolicy).order_by(MediaProviderBudgetPolicy.provider_type)).all())
+        return list(
+            self.session.scalars(
+                select(MediaProviderBudgetPolicy).order_by(
+                    MediaProviderBudgetPolicy.provider_type
+                )
+            ).all()
+        )
 
     def latest_snapshots(self) -> list[MediaProviderBudgetSnapshot]:
         self.ensure_default_policies()
         return list(
             self.session.scalars(
-                select(MediaProviderBudgetSnapshot).order_by(MediaProviderBudgetSnapshot.provider_type, desc(MediaProviderBudgetSnapshot.created_at))
+                select(MediaProviderBudgetSnapshot).order_by(
+                    MediaProviderBudgetSnapshot.provider_type,
+                    desc(MediaProviderBudgetSnapshot.created_at),
+                )
             ).all()
         )
 
-    def check(self, *, data: MediaProviderBudgetCheckRequest) -> MediaProviderBudgetGateRead:
+    def check(
+        self, *, data: MediaProviderBudgetCheckRequest
+    ) -> MediaProviderBudgetGateRead:
         self.ensure_default_policies()
         data = self._with_configured_cost_estimate(data)
         policy = self._find_policy(data)
@@ -691,11 +853,17 @@ class MediaProviderBudgetService:
         state = _budget_state(policy, data)
         snapshot = self._create_snapshot(data=data, budget_state=state)
         if state == "EXCEEDED":
-            decision = "BLOCK" if policy.enforcement == "HARD_BLOCK" else "REVIEW_REQUIRED"
+            decision = (
+                "BLOCK" if policy.enforcement == "HARD_BLOCK" else "REVIEW_REQUIRED"
+            )
             return MediaProviderBudgetGateRead(
                 decision=decision,
                 budget_state=state,
-                reason_codes=["BUDGET_GATE_BLOCKED" if decision == "BLOCK" else "BUDGET_GATE_WARNING"],
+                reason_codes=[
+                    "BUDGET_GATE_BLOCKED"
+                    if decision == "BLOCK"
+                    else "BUDGET_GATE_WARNING"
+                ],
                 operator_summary="Configured media provider budget cap is exceeded.",
                 policy_id=policy.id,
                 snapshot_id=snapshot.id,
@@ -712,13 +880,19 @@ class MediaProviderBudgetService:
         return MediaProviderBudgetGateRead(
             decision="PASS",
             budget_state=state,
-            reason_codes=["BUDGET_GATE_PASSED" if state == "OK" else "BUDGET_GATE_WARNING"],
-            operator_summary="Configured media provider budget check passed." if state == "OK" else "Configured media provider budget is near a cap.",
+            reason_codes=[
+                "BUDGET_GATE_PASSED" if state == "OK" else "BUDGET_GATE_WARNING"
+            ],
+            operator_summary="Configured media provider budget check passed."
+            if state == "OK"
+            else "Configured media provider budget is near a cap.",
             policy_id=policy.id,
             snapshot_id=snapshot.id,
         )
 
-    def _find_policy(self, data: MediaProviderBudgetCheckRequest) -> MediaProviderBudgetPolicy | None:
+    def _find_policy(
+        self, data: MediaProviderBudgetCheckRequest
+    ) -> MediaProviderBudgetPolicy | None:
         statements = [
             select(MediaProviderBudgetPolicy)
             .where(MediaProviderBudgetPolicy.company_id == data.company_id)
@@ -739,19 +913,27 @@ class MediaProviderBudgetService:
                 return policy
         return None
 
-    def _with_configured_cost_estimate(self, data: MediaProviderBudgetCheckRequest) -> MediaProviderBudgetCheckRequest:
+    def _with_configured_cost_estimate(
+        self, data: MediaProviderBudgetCheckRequest
+    ) -> MediaProviderBudgetCheckRequest:
         if (
             data.provider_type == AI_VIDEO_HERO_PROVIDER
             and data.provider_key == GOOGLE_VEO_PROVIDER_KEY
             and data.estimated_usage_usd is None
             and data.estimated_usage_seconds is not None
         ):
-            estimated_cost = GoogleVeoConfigService(self.session).resolve().estimate_cost(data.estimated_usage_seconds)
+            estimated_cost = (
+                GoogleVeoConfigService(self.session)
+                .resolve()
+                .estimate_cost(data.estimated_usage_seconds)
+            )
             if estimated_cost is not None:
                 return data.model_copy(update={"estimated_usage_usd": estimated_cost})
         return data
 
-    def _create_snapshot(self, *, data: MediaProviderBudgetCheckRequest, budget_state: str) -> MediaProviderBudgetSnapshot:
+    def _create_snapshot(
+        self, *, data: MediaProviderBudgetCheckRequest, budget_state: str
+    ) -> MediaProviderBudgetSnapshot:
         now = utc_now()
         period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         period_end = (period_start + timedelta(days=32)).replace(day=1)
@@ -776,8 +958,14 @@ class LicenseEvidenceGateService:
     def __init__(self, session: Session):
         self.session = session
 
-    def check(self, *, data: LicenseEvidenceGateCheckRequest) -> LicenseEvidenceGateRead:
-        gated_provider = data.source_provider_type in {API_NATIVE_STOCK_PROVIDER, FREE_FALLBACK_PROVIDER, DEFERRED_MANUAL_LIBRARY}
+    def check(
+        self, *, data: LicenseEvidenceGateCheckRequest
+    ) -> LicenseEvidenceGateRead:
+        gated_provider = data.source_provider_type in {
+            API_NATIVE_STOCK_PROVIDER,
+            FREE_FALLBACK_PROVIDER,
+            DEFERRED_MANUAL_LIBRARY,
+        }
         record = None
         if data.company_id is not None:
             record = LicenseEvidenceRecord(
@@ -822,13 +1010,19 @@ class ReusedContentRiskGateService:
     def __init__(self, session: Session | None = None):
         self.session = session
 
-    def check(self, *, data: ReusedContentRiskGateCheckRequest) -> ReusedContentRiskGateRead:
+    def check(
+        self, *, data: ReusedContentRiskGateCheckRequest
+    ) -> ReusedContentRiskGateRead:
         reasons: list[str] = []
         if data.template_only:
             reasons.append("REUSED_CONTENT_REVIEW_REQUIRED")
         if not data.original_script_present or not data.topic_specific_examples_present:
             reasons.append("REUSED_CONTENT_REVIEW_REQUIRED")
-        if data.reused_runtime_pct is not None and data.reused_runtime_pct >= Decimal("90") and not data.human_approval_path_present:
+        if (
+            data.reused_runtime_pct is not None
+            and data.reused_runtime_pct >= Decimal("90")
+            and not data.human_approval_path_present
+        ):
             return ReusedContentRiskGateRead(
                 decision="BLOCK",
                 reason_codes=["REUSED_CONTENT_REVIEW_REQUIRED"],
@@ -855,9 +1049,15 @@ class MediaQCGateService:
         if data.media_qc_report_id is not None:
             report = self.session.get(MediaQCReport, data.media_qc_report_id)
             if report is None:
-                raise NotFoundError(f"media QC report not found: {data.media_qc_report_id}")
+                raise NotFoundError(
+                    f"media QC report not found: {data.media_qc_report_id}"
+                )
             if report.qc_state == "PASS":
-                return MediaQCGateRead(decision="PASS", reason_codes=["SYSTEM_OK"], operator_summary="Existing M6 MediaQC report passed.")
+                return MediaQCGateRead(
+                    decision="PASS",
+                    reason_codes=["SYSTEM_OK"],
+                    operator_summary="Existing M6 MediaQC report passed.",
+                )
             return MediaQCGateRead(
                 decision="BLOCK",
                 reason_codes=report.reason_codes or ["MEDIA_QC_BLOCKED"],
@@ -877,14 +1077,26 @@ class MediaQCGateService:
         if data.black_frames_detected:
             failures.append("MEDIA_BLACK_FRAMES_DETECTED")
         if failures:
-            return MediaQCGateRead(decision="BLOCK", reason_codes=failures, operator_summary="Media QC gate blocked the output.")
-        return MediaQCGateRead(decision="PASS", reason_codes=["SYSTEM_OK"], operator_summary="Media QC gate passed.")
+            return MediaQCGateRead(
+                decision="BLOCK",
+                reason_codes=failures,
+                operator_summary="Media QC gate blocked the output.",
+            )
+        return MediaQCGateRead(
+            decision="PASS",
+            reason_codes=["SYSTEM_OK"],
+            operator_summary="Media QC gate passed.",
+        )
 
 
 class HumanApprovalGateService:
     def check(self, *, approved: bool = False) -> dict[str, Any]:
         if approved:
-            return {"decision": "PASS", "reason_codes": ["SYSTEM_OK"], "operator_summary": "Human approval is present."}
+            return {
+                "decision": "PASS",
+                "reason_codes": ["SYSTEM_OK"],
+                "operator_summary": "Human approval is present.",
+            }
         return {
             "decision": "REVIEW_REQUIRED",
             "reason_codes": ["HUMAN_APPROVAL_REQUIRED"],
@@ -905,7 +1117,9 @@ class LongFormRenderPackageService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create(self, *, video_project_id: uuid.UUID, data: LongFormRenderPackageCreate) -> LongFormRenderPackage:
+    def create(
+        self, *, video_project_id: uuid.UUID, data: LongFormRenderPackageCreate
+    ) -> LongFormRenderPackage:
         project = _require_project(self.session, video_project_id)
         decision = MediaRenderJobRouterService(self.session).decide(
             data=MediaRenderRoutingDecisionRequest(
@@ -985,16 +1199,24 @@ class ShortRenderPackageService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create(self, *, short_candidate_id: uuid.UUID, data: ShortRenderPackageCreate) -> ShortRenderPackage:
+    def create(
+        self, *, short_candidate_id: uuid.UUID, data: ShortRenderPackageCreate
+    ) -> ShortRenderPackage:
         MediaProviderRoleService(self.session).ensure_matrix()
         candidate = self.session.get(ShortCandidate, short_candidate_id)
         if candidate is None:
             raise NotFoundError(f"short candidate not found: {short_candidate_id}")
-        duration = data.target_duration_seconds or Decimal(candidate.duration_ms) / Decimal("1000")
+        duration = data.target_duration_seconds or Decimal(
+            candidate.duration_ms
+        ) / Decimal("1000")
         if data.target_aspect_ratio != "9:16":
-            raise ValidationFailureError("ShortRenderPackage target_aspect_ratio must be 9:16.")
+            raise ValidationFailureError(
+                "ShortRenderPackage target_aspect_ratio must be 9:16."
+            )
         if duration >= Decimal("59"):
-            raise ValidationFailureError("ShortRenderPackage target_duration_seconds must be under 59 seconds.")
+            raise ValidationFailureError(
+                "ShortRenderPackage target_duration_seconds must be under 59 seconds."
+            )
         decision = MediaRenderJobRouterService(self.session).decide(
             data=MediaRenderRoutingDecisionRequest(
                 company_id=candidate.company_id,
@@ -1015,12 +1237,18 @@ class ShortRenderPackageService:
             caption_track_id=data.caption_track_id,
             hero_reuse_ref=data.hero_reuse_ref,
             template_asset_refs=data.template_asset_refs,
-            render_manifest={**data.render_manifest, "routing_decision_id": str(decision.id), "real_render_executed": False},
+            render_manifest={
+                **data.render_manifest,
+                "routing_decision_id": str(decision.id),
+                "real_render_executed": False,
+            },
             target_duration_seconds=duration,
             target_aspect_ratio=data.target_aspect_ratio,
             hard_cap_seconds=59,
             renderer_provider_key=decision.selected_provider_key,
-            package_state="READY_FOR_TEMPLATE_RENDER" if decision.routing_result == "ROUTED" else "BLOCKED",
+            package_state="READY_FOR_TEMPLATE_RENDER"
+            if decision.routing_result == "ROUTED"
+            else "BLOCKED",
         )
         self.session.add(package)
         self.session.flush()
@@ -1037,7 +1265,9 @@ class AIHeroAssetPlanningService:
     def __init__(self, session: Session):
         self.session = session
 
-    def plan(self, *, video_project_id: uuid.UUID, data: AIHeroAssetPlanRequest) -> AIHeroAsset:
+    def plan(
+        self, *, video_project_id: uuid.UUID, data: AIHeroAssetPlanRequest
+    ) -> AIHeroAsset:
         project = _require_project(self.session, video_project_id)
         config = GoogleVeoConfigService(self.session).resolve()
         duration_seconds = data.duration_seconds or config.default_duration_seconds
@@ -1066,7 +1296,9 @@ class AIHeroAssetPlanningService:
             asset_ref=None,
             still_frame_ref=None,
             rights_evidence_ref=None,
-            generation_state="READY_FOR_PROVIDER" if decision.routing_result == "ROUTED" else "BLOCKED",
+            generation_state="READY_FOR_PROVIDER"
+            if decision.routing_result == "ROUTED"
+            else "BLOCKED",
         )
         self.session.add(asset)
         self.session.flush()
@@ -1083,7 +1315,9 @@ class AIHeroGenerationService:
     def __init__(self, session: Session):
         self.session = session
 
-    def execute(self, *, asset_id: uuid.UUID, data: AIHeroGenerationExecuteRequest | None = None) -> AIHeroGenerationJobRead:
+    def execute(
+        self, *, asset_id: uuid.UUID, data: AIHeroGenerationExecuteRequest | None = None
+    ) -> AIHeroGenerationJobRead:
         asset = AIHeroAssetPlanningService(self.session).require(asset_id)
         config_service = GoogleVeoConfigService(self.session)
         config = config_service.resolve()
@@ -1116,7 +1350,11 @@ class AIHeroGenerationService:
                 reason_codes=["AI_HERO_ASSET_NOT_PROVIDER_READY"],
                 operator_summary="AI hero asset is not provider-ready.",
             )
-        blocking_readiness = [reason for reason in readiness if reason not in {"VEO_PROVIDER_CONFIG_READY"}]
+        blocking_readiness = [
+            reason
+            for reason in readiness
+            if reason not in {"VEO_PROVIDER_CONFIG_READY"}
+        ]
         if blocking_readiness and config.real_execution_enabled:
             return self._result(
                 asset=asset,
@@ -1181,7 +1419,9 @@ class ThumbnailVariantPlanningService:
     def __init__(self, session: Session):
         self.session = session
 
-    def plan(self, *, video_project_id: uuid.UUID, data: ThumbnailVariantPlanRequest) -> list[ThumbnailVariant]:
+    def plan(
+        self, *, video_project_id: uuid.UUID, data: ThumbnailVariantPlanRequest
+    ) -> list[ThumbnailVariant]:
         project = _require_project(self.session, video_project_id)
         decision = MediaRenderJobRouterService(self.session).decide(
             data=MediaRenderRoutingDecisionRequest(
@@ -1202,9 +1442,12 @@ class ThumbnailVariantPlanningService:
                 subtitle_text=item.subtitle_text,
                 hero_still_ref=item.hero_still_ref,
                 output_ref=None,
-                provider_type=decision.selected_provider_type or LOCAL_RENDERER_CAPABILITY,
+                provider_type=decision.selected_provider_type
+                or LOCAL_RENDERER_CAPABILITY,
                 provider_key=decision.selected_provider_key,
-                state="READY_FOR_PROVIDER" if decision.routing_result == "ROUTED" else "DRAFT",
+                state="READY_FOR_PROVIDER"
+                if decision.routing_result == "ROUTED"
+                else "DRAFT",
             )
             self.session.add(variant)
             variants.append(variant)
@@ -1224,7 +1467,51 @@ class FinalMediaRefService:
 
     def create(self, *, data: FinalMediaRefCreate) -> FinalMediaRef:
         if not data.file_ref or data.file_ref.startswith("provider://fake"):
-            raise ValidationFailureError("FinalMediaRef requires an actual known file ref or explicit test fixture ref.")
+            raise ValidationFailureError(
+                "FinalMediaRef requires an actual known file ref or explicit test fixture ref."
+            )
+        strict_native_final = bool(
+            data.media_type == "LONG_FORM_FINAL"
+            and data.provider_type == LOCAL_RENDERER_CAPABILITY
+        )
+        if strict_native_final and (
+            data.checksum_sha256 is None
+            or data.lineage_artifact_version_id is None
+            or data.cloud_media_ref_id is None
+            or data.media_qc_report_id is not None
+        ):
+            raise ValidationFailureError(
+                "Native FinalMediaRef requires checksum, immutable lineage, "
+                "verified cloud media, and no unrelated MediaQCReport binding."
+            )
+        if data.lineage_artifact_version_id is not None:
+            lineage = self.session.get(
+                ArtifactVersion, data.lineage_artifact_version_id
+            )
+            artifact = (
+                self.session.get(Artifact, lineage.artifact_id)
+                if lineage is not None
+                else None
+            )
+            if (
+                lineage is None
+                or artifact is None
+                or artifact.current_version_id != lineage.id
+                or artifact.status != "approved"
+                or lineage.status != "approved"
+                or content_hash(lineage.content or {}) != lineage.content_hash
+                or (
+                    data.video_project_id is not None
+                    and artifact.video_project_id != data.video_project_id
+                )
+                or (
+                    strict_native_final
+                    and artifact.artifact_type != "mr1_final_media_lineage_receipt"
+                )
+            ):
+                raise ValidationFailureError(
+                    "FinalMediaRef immutable lineage authority is invalid."
+                )
         ref = FinalMediaRef(**data.model_dump())
         self.session.add(ref)
         self.session.flush()
@@ -1238,8 +1525,12 @@ class MediaProviderReadService:
     def role(self, provider_key: str) -> MediaProviderRoleProfile:
         return MediaProviderRoleService(self.session).require_role(provider_key)
 
-    def capabilities(self, provider_key: str | None = None) -> list[ProviderCapabilityMatrixEntry]:
-        return ProviderCapabilityMatrixService(self.session).list_entries(provider_key=provider_key)
+    def capabilities(
+        self, provider_key: str | None = None
+    ) -> list[ProviderCapabilityMatrixEntry]:
+        return ProviderCapabilityMatrixService(self.session).list_entries(
+            provider_key=provider_key
+        )
 
 
 def _provider_key_for_job(job_type: str) -> str | None:
@@ -1255,7 +1546,9 @@ def _route_reason_code(provider_type: str) -> str:
     }.get(provider_type, "ROUTING_DECISION_CREATED")
 
 
-def _duration_block(entry: ProviderCapabilityMatrixEntry, target_duration_seconds: Decimal | None) -> str | None:
+def _duration_block(
+    entry: ProviderCapabilityMatrixEntry, target_duration_seconds: Decimal | None
+) -> str | None:
     if target_duration_seconds is None or entry.max_duration_seconds is None:
         return None
     if target_duration_seconds > entry.max_duration_seconds:
@@ -1263,17 +1556,23 @@ def _duration_block(entry: ProviderCapabilityMatrixEntry, target_duration_second
     return None
 
 
-def _google_veo_duration_block(config: GoogleVeoResolvedConfig, target_duration_seconds: Decimal | None) -> str | None:
+def _google_veo_duration_block(
+    config: GoogleVeoResolvedConfig, target_duration_seconds: Decimal | None
+) -> str | None:
     if target_duration_seconds is None:
         return None
     allowed = set(config.allowed_duration_seconds)
     if target_duration_seconds not in allowed:
-        formatted = ", ".join(str(int(item)) for item in config.allowed_duration_seconds)
+        formatted = ", ".join(
+            str(int(item)) for item in config.allowed_duration_seconds
+        )
         return f"{config.provider_key} supports Google Veo durations exactly [{formatted}] seconds."
     return None
 
 
-def _aspect_block(entry: ProviderCapabilityMatrixEntry, target_aspect_ratio: str | None) -> str | None:
+def _aspect_block(
+    entry: ProviderCapabilityMatrixEntry, target_aspect_ratio: str | None
+) -> str | None:
     if not target_aspect_ratio or not entry.supported_aspect_ratios:
         return None
     if target_aspect_ratio not in entry.supported_aspect_ratios:
@@ -1281,7 +1580,9 @@ def _aspect_block(entry: ProviderCapabilityMatrixEntry, target_aspect_ratio: str
     return None
 
 
-def _budget_state(policy: MediaProviderBudgetPolicy, data: MediaProviderBudgetCheckRequest) -> str:
+def _budget_state(
+    policy: MediaProviderBudgetPolicy, data: MediaProviderBudgetCheckRequest
+) -> str:
     estimates_present = any(
         value is not None
         for value in [
@@ -1305,16 +1606,34 @@ def _budget_state(policy: MediaProviderBudgetPolicy, data: MediaProviderBudgetCh
     warning = False
     if policy.monthly_cap_usd is not None and data.estimated_usage_usd is not None:
         exceeded = exceeded or data.estimated_usage_usd > policy.monthly_cap_usd
-        warning = warning or data.estimated_usage_usd >= policy.monthly_cap_usd * Decimal("0.8")
+        warning = (
+            warning
+            or data.estimated_usage_usd >= policy.monthly_cap_usd * Decimal("0.8")
+        )
     if policy.monthly_cap_units is not None and data.estimated_usage_units is not None:
         exceeded = exceeded or data.estimated_usage_units > policy.monthly_cap_units
-        warning = warning or data.estimated_usage_units >= policy.monthly_cap_units * Decimal("0.8")
-    if policy.monthly_cap_seconds is not None and data.estimated_usage_seconds is not None:
+        warning = (
+            warning
+            or data.estimated_usage_units >= policy.monthly_cap_units * Decimal("0.8")
+        )
+    if (
+        policy.monthly_cap_seconds is not None
+        and data.estimated_usage_seconds is not None
+    ):
         exceeded = exceeded or data.estimated_usage_seconds > policy.monthly_cap_seconds
-        warning = warning or data.estimated_usage_seconds >= policy.monthly_cap_seconds * Decimal("0.8")
-    if policy.monthly_cap_renders is not None and data.estimated_render_count is not None:
+        warning = (
+            warning
+            or data.estimated_usage_seconds
+            >= policy.monthly_cap_seconds * Decimal("0.8")
+        )
+    if (
+        policy.monthly_cap_renders is not None
+        and data.estimated_render_count is not None
+    ):
         exceeded = exceeded or data.estimated_render_count > policy.monthly_cap_renders
-        warning = warning or data.estimated_render_count >= int(policy.monthly_cap_renders * 0.8)
+        warning = warning or data.estimated_render_count >= int(
+            policy.monthly_cap_renders * 0.8
+        )
     if exceeded:
         return "EXCEEDED"
     if warning:

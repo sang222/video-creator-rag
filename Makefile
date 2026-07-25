@@ -16,7 +16,7 @@ db-down:
 	docker-compose down
 
 api-up:
-	docker-compose up -d postgres api
+	docker compose up -d --build --wait postgres api
 
 frontend-up:
 	docker-compose up -d frontend

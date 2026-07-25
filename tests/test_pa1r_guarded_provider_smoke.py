@@ -33,7 +33,12 @@ from app.services.pa1r import (
 )
 from app.services.provider_asset_manifests import build_ai_hero_request
 from app.services.provider_stack import CANONICAL_PROVIDER_KEYS
-from app.services.production_archive import DriveArchiveFixtureVerifier, ProductionArchiveBuilder, ArchiveSource, ROLE_ARCHIVE_PATHS
+from app.services.production_archive import (
+    DriveArchiveFixtureVerifier,
+    ProductionArchiveBuilder,
+    ArchiveSource,
+    ROLE_ARCHIVE_PATHS,
+)
 from app.services.as1_rehearsal import _native_plan
 
 
@@ -46,13 +51,27 @@ class FakeTransport:
         self.calls: list[dict] = []
 
     def json_request(self, method, url, *, headers, payload=None, timeout=30):
-        self.calls.append({"kind": "json", "method": method, "url": url, "headers": headers, "payload": payload})
+        self.calls.append(
+            {
+                "kind": "json",
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "payload": payload,
+            }
+        )
         if "/videos/search" in url:
-            return json.loads((FIXTURES / "pexels_response.json").read_text()), {"X-Ratelimit-Remaining": "199"}
+            return json.loads((FIXTURES / "pexels_response.json").read_text()), {
+                "X-Ratelimit-Remaining": "199"
+            }
         if url.endswith("/user/subscription"):
             return {"character_count": 100, "character_limit": 10000}, {}
         if url.endswith("/voices"):
-            return {"voices": [{"voice_id": "premade-1", "name": "Avery", "category": "premade"}]}, {}
+            return {
+                "voices": [
+                    {"voice_id": "premade-1", "name": "Avery", "category": "premade"}
+                ]
+            }, {}
         if url.endswith("/models"):
             return [{"model_id": "eleven_multilingual_v2"}], {}
         if "drive/v3/about" in url:
@@ -60,9 +79,16 @@ class FakeTransport:
         raise AssertionError(url)
 
     def bytes_request(self, method, url, *, headers, payload=None, timeout=60):
-        self.calls.append({"kind": "bytes", "method": method, "url": url, "headers": headers, "payload": payload})
+        self.calls.append(
+            {
+                "kind": "bytes",
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "payload": payload,
+            }
+        )
         return b"fake-mp3-one-output", {"request-id": "request-1"}
-
 
 
 class FakeMediaDownloader:
@@ -74,13 +100,18 @@ class FakeMediaDownloader:
         assert context.download_url_hash == plan.download_url_hash
         destination = context.workspace_target_path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes((FIXTURES / "pexels_supporting_fixture.mp4").read_bytes())
+        destination.write_bytes(
+            (FIXTURES / "pexels_supporting_fixture.mp4").read_bytes()
+        )
         context.expire()
         return {
             "path": str(destination),
             "size_bytes": destination.stat().st_size,
             "sha256": _sha(destination),
-            "http_evidence": {"redirect_count": 0, "request_header_names": ["Accept", "User-Agent"]},
+            "http_evidence": {
+                "redirect_count": 0,
+                "request_header_names": ["Accept", "User-Agent"],
+            },
             "media_probe": {"container": "mp4", "width": 1920, "height": 1080},
         }
 
@@ -133,8 +164,16 @@ def _stock_request() -> AssetRequest:
 def test_preflight_blockers_make_zero_provider_calls(tmp_path, change):
     calls = []
     ledger = PA1RCallLedger(tmp_path / "ledger.json")
-    ledger.plan("voice", provider="elevenlabs", operation="tts", paid=True, idempotency_key="idem")
-    result = GuardedProviderOperation(ledger).run("voice", gates=_gates(**change), operation=lambda: calls.append(1))
+    ledger.plan(
+        "voice",
+        provider="elevenlabs",
+        operation="tts",
+        paid=True,
+        idempotency_key="idem",
+    )
+    result = GuardedProviderOperation(ledger).run(
+        "voice", gates=_gates(**change), operation=lambda: calls.append(1)
+    )
     assert result["status"] == "BLOCKED"
     assert result["provider_call_made"] is False
     assert calls == []
@@ -151,13 +190,18 @@ def test_pexels_uses_authorization_header_and_exactly_one_download(tmp_path):
     )
     plan = PexelsDownloadPlan(**evidence["download_plan"])
     assert "video_files" not in candidate
-    receipt = client.download_once(plan=plan, execution_context=context, request_id="pa1r-stock")
+    receipt = client.download_once(
+        plan=plan, execution_context=context, request_id="pa1r-stock"
+    )
     assert client.search_flow_count == 1 and client.selected_download_count == 1
     assert transport.calls[0]["headers"] == {
         "Authorization": "secret-not-persisted",
         **PEXELS_CLIENT_HEADERS,
     }
-    assert "/v1/videos/search?" in transport.calls[0]["url"] and "api_key" not in transport.calls[0]["url"].lower()
+    assert (
+        "/v1/videos/search?" in transport.calls[0]["url"]
+        and "api_key" not in transport.calls[0]["url"].lower()
+    )
     assert media.calls == 1 and len(transport.calls) == 1
     assert receipt.sha256 and receipt.provider_call_made is True
     assert "secret-not-persisted" not in json.dumps(evidence)
@@ -165,12 +209,93 @@ def test_pexels_uses_authorization_header_and_exactly_one_download(tmp_path):
         client.download_once(plan=plan, execution_context=context, request_id="second")
 
 
+def test_pexels_cross_scene_exclusion_selects_unique_candidate_before_ranking(
+    tmp_path,
+):
+    class TwoEligibleTransport(FakeTransport):
+        def json_request(self, method, url, *, headers, payload=None, timeout=30):
+            self.calls.append(
+                {
+                    "kind": "json",
+                    "method": method,
+                    "url": url,
+                    "headers": headers,
+                    "payload": payload,
+                }
+            )
+            response = json.loads(
+                (FIXTURES / "pexels_response.json").read_text(encoding="utf-8")
+            )
+            first = response["videos"][0]
+            second = json.loads(json.dumps(first))
+            second["id"] = 1002
+            second["user"] = {
+                "name": "Fixture Creator Two",
+                "url": "https://www.pexels.com/@fixture-creator-two",
+            }
+            for rendition in second["video_files"]:
+                rendition["id"] = int(rendition["id"]) + 100
+                rendition["link"] = rendition["link"].replace("fixture", "fixture-two")
+            response["videos"] = [first, second]
+            for item in response["videos"]:
+                item["duration"] = 9
+                item["url"] = (
+                    "https://www.pexels.com/video/guarded-media-workflow-team-"
+                    f"{item['id']}/"
+                )
+            return response, {"X-Ratelimit-Remaining": "199"}
+
+    first_transport = TwoEligibleTransport()
+    first = PexelsPA1RClient(first_transport, FakeMediaDownloader())
+    _first_evidence, selected_x, _first_context = first.search_select_once(
+        api_key="secret-not-persisted",
+        request=_stock_request(),
+        workspace_directory=tmp_path / "first",
+    )
+    selected_x_id = selected_x["provider_asset_id"]
+
+    second_transport = TwoEligibleTransport()
+    second = PexelsPA1RClient(second_transport, FakeMediaDownloader())
+    second_evidence, selected_y, _second_context = second.search_select_once(
+        api_key="secret-not-persisted",
+        request=_stock_request(),
+        workspace_directory=tmp_path / "second",
+        excluded_provider_asset_ids=[selected_x_id],
+    )
+
+    assert selected_y["provider_asset_id"] != selected_x_id
+    assert second.search_flow_count == 1
+    assert len(second_transport.calls) == 1
+    assert second_evidence["cross_scene_exclusion"] == {
+        "excluded_provider_asset_count": 1,
+        "excluded_provider_asset_ids": [selected_x_id],
+        "filter_applied_before_ranking": True,
+    }
+
+    all_ids = [str(item) for item in (1001, 1002)]
+    exhausted_transport = TwoEligibleTransport()
+    exhausted_media = FakeMediaDownloader()
+    exhausted = PexelsPA1RClient(exhausted_transport, exhausted_media)
+    with pytest.raises(RuntimeError, match="NO_UNIQUE_ELIGIBLE_CANDIDATES"):
+        exhausted.search_select_once(
+            api_key="secret-not-persisted",
+            request=_stock_request(),
+            workspace_directory=tmp_path / "exhausted",
+            excluded_provider_asset_ids=all_ids,
+        )
+    assert exhausted.search_flow_count == 1
+    assert len(exhausted_transport.calls) == 1
+    assert exhausted_media.calls == 0
+
+
 def test_pexels_http_failure_persists_only_redacted_diagnostics(tmp_path):
     secret = "pexels-secret-must-not-persist"
 
     class RejectingTransport(FakeTransport):
         def json_request(self, method, url, *, headers, payload=None, timeout=30):
-            self.calls.append({"kind": "json", "method": method, "url": url, "headers": headers})
+            self.calls.append(
+                {"kind": "json", "method": method, "url": url, "headers": headers}
+            )
             response_headers = {
                 "Content-Type": "application/json",
                 "X-Request-Id": "request-safe",
@@ -186,7 +311,13 @@ def test_pexels_http_failure_persists_only_redacted_diagnostics(tmp_path):
             )
 
     ledger = PA1RCallLedger(tmp_path / "ledger.json")
-    ledger.plan("pexels", provider="pexels_api", operation="search", paid=False, idempotency_key="idem")
+    ledger.plan(
+        "pexels",
+        provider="pexels_api",
+        operation="search",
+        paid=False,
+        idempotency_key="idem",
+    )
     client = PexelsPA1RClient(RejectingTransport())
     with pytest.raises(RuntimeError, match="PEXELS_HTTP_403"):
         GuardedProviderOperation(ledger).run(
@@ -219,11 +350,20 @@ def test_elevenlabs_one_bounded_existing_voice_generation(tmp_path):
         destination=tmp_path / "narration.mp3",
     )
     assert readiness["credits_available"] is True
-    assert readiness["voice_category"] == "premade" and readiness["model_id"] in APPROVED_ELEVENLABS_MODELS
+    assert (
+        readiness["voice_category"] == "premade"
+        and readiness["model_id"] in APPROVED_ELEVENLABS_MODELS
+    )
     assert client.generation_count == 1 and result["generation_count"] == 1
     assert result["production_eligible"] is False and result["not_publishable"] is True
     with pytest.raises(RuntimeError, match="GENERATION_LIMIT"):
-        client.generate_once(api_key="secret", voice_id="premade-1", model_id="eleven_multilingual_v2", text="x", destination=tmp_path / "two.mp3")
+        client.generate_once(
+            api_key="secret",
+            voice_id="premade-1",
+            model_id="eleven_multilingual_v2",
+            text="x",
+            destination=tmp_path / "two.mp3",
+        )
 
 
 class FakeVeo:
@@ -237,7 +377,10 @@ class FakeVeo:
 
     def get_operation(self, provider_operation_id):
         self.polls += 1
-        return {"status": "SUCCEEDED", "output_url": "https://invalid.example/output?volatile=1"}
+        return {
+            "status": "SUCCEEDED",
+            "output_url": "https://invalid.example/output?volatile=1",
+        }
 
 
 def test_veo_one_submit_polling_and_duplicate_are_idempotent():
@@ -251,7 +394,15 @@ def test_veo_one_submit_polling_and_duplicate_are_idempotent():
         VEO_DEFAULT_OUTPUT_COUNT=1,
     )
     generic = build_ai_hero_request(
-        _stock_request().model_copy(update={"request_id": "hero", "scene_id": "hero-scene", "purpose": "METAPHOR", "requested_role": "AI_HERO", "projected_cost_class": "MEDIUM"}),
+        _stock_request().model_copy(
+            update={
+                "request_id": "hero",
+                "scene_id": "hero-scene",
+                "purpose": "METAPHOR",
+                "requested_role": "AI_HERO",
+                "projected_cost_class": "MEDIUM",
+            }
+        ),
         package_id="pkg",
         project_id="project",
         channel_id="channel",
@@ -267,23 +418,50 @@ def test_veo_one_submit_polling_and_duplicate_are_idempotent():
         approval_scope="PA1R_ONE_AI_HERO_CLIP",
         idempotency_key="idem-one",
     )
-    gates = GoogleVeoExecutionGates(**{name: True for name in GoogleVeoExecutionGates.model_fields if name != "approved_production_execution_scope"})
+    gates = GoogleVeoExecutionGates(
+        **{
+            name: True
+            for name in GoogleVeoExecutionGates.model_fields
+            if name != "approved_production_execution_scope"
+        }
+    )
     first = adapter.submit_generation(request, gates=gates, fixture_only=True)
     duplicate = adapter.submit_generation(request, gates=gates, fixture_only=True)
     completed = adapter.poll_operation(first, max_polls=2, fixture_only=True)
-    assert fake.submits == 1 and duplicate.provider_operation_id == first.provider_operation_id
+    assert (
+        fake.submits == 1
+        and duplicate.provider_operation_id == first.provider_operation_id
+    )
     assert fake.polls == 1 and completed.generation_attempts_consumed == 0
-    assert completed.normalized_status == "SUCCEEDED" and completed.output_reference.startswith("volatile://")
+    assert (
+        completed.normalized_status == "SUCCEEDED"
+        and completed.output_reference.startswith("volatile://")
+    )
 
 
 def test_failure_cannot_be_rendered_as_provider_pass_and_no_retry(tmp_path):
     ledger = PA1RCallLedger(tmp_path / "ledger.json")
-    ledger.plan("veo", provider="google_veo", operation="generate", paid=True, idempotency_key="idem")
+    ledger.plan(
+        "veo",
+        provider="google_veo",
+        operation="generate",
+        paid=True,
+        idempotency_key="idem",
+    )
     boundary = GuardedProviderOperation(ledger)
     with pytest.raises(RuntimeError, match="provider failed"):
-        boundary.run("veo", gates=_gates(), operation=lambda: (_ for _ in ()).throw(RuntimeError("provider failed")))
-    assert ledger.entries["veo"]["status"] == "FAILED" and ledger.entries["veo"]["attempt_count"] == 1
-    duplicate = boundary.run("veo", gates=_gates(), operation=lambda: {"unexpected": True})
+        boundary.run(
+            "veo",
+            gates=_gates(),
+            operation=lambda: (_ for _ in ()).throw(RuntimeError("provider failed")),
+        )
+    assert (
+        ledger.entries["veo"]["status"] == "FAILED"
+        and ledger.entries["veo"]["attempt_count"] == 1
+    )
+    duplicate = boundary.run(
+        "veo", gates=_gates(), operation=lambda: {"unexpected": True}
+    )
     assert duplicate["status"] == "BLOCKED" and duplicate["provider_call_made"] is False
 
 
@@ -320,8 +498,13 @@ def test_normalization_and_native_compile_accept_only_resolved_smoke_assets(tmp_
     compiled = NativeMotionCompiler().compile(plan, allow_resolved_provider_assets=True)
     assert compiled.production_eligible is False
     assert compiled.unresolved_inputs == []
-    assert any(scene["visual_treatment"] == "STOCK_VIDEO" for scene in compiled.compiled_scenes)
-    assert any(scene["visual_treatment"] == "AI_HERO_VIDEO" for scene in compiled.compiled_scenes)
+    assert any(
+        scene["visual_treatment"] == "STOCK_VIDEO" for scene in compiled.compiled_scenes
+    )
+    assert any(
+        scene["visual_treatment"] == "AI_HERO_VIDEO"
+        for scene in compiled.compiled_scenes
+    )
 
 
 def test_media_qc_gate_and_archive_mismatch_block_cleanup(tmp_path):
@@ -330,8 +513,20 @@ def test_media_qc_gate_and_archive_mismatch_block_cleanup(tmp_path):
         path = tmp_path / role.lower()
         path.write_text(role)
         sources.append(ArchiveSource(role, path, archive_path))
-    manifest = ProductionArchiveBuilder().build(manifest_id="manifest", project_id="project", package_id="package", sources=sources)
-    metadata = [{"archive_path": item.expected_archive_path, "size_bytes": item.size_bytes, "sha256": item.sha256} for item in manifest.files]
+    manifest = ProductionArchiveBuilder().build(
+        manifest_id="manifest",
+        project_id="project",
+        package_id="package",
+        sources=sources,
+    )
+    metadata = [
+        {
+            "archive_path": item.expected_archive_path,
+            "size_bytes": item.size_bytes,
+            "sha256": item.sha256,
+        }
+        for item in manifest.files
+    ]
     metadata[0]["sha256"] = "mismatch"
     receipt = DriveArchiveFixtureVerifier().verify(
         manifest=manifest,
@@ -339,8 +534,13 @@ def test_media_qc_gate_and_archive_mismatch_block_cleanup(tmp_path):
         root_relative_folder_path="smoke_tests/2026-07-12/pa1r/run",
         fixture_files=metadata,
     )
-    assert media_qc_permits_archive("FAIL") is False and media_qc_permits_archive("PASS") is True
-    assert receipt.archive_state == "FAILED" and archive_permits_cleanup(receipt) is False
+    assert (
+        media_qc_permits_archive("FAIL") is False
+        and media_qc_permits_archive("PASS") is True
+    )
+    assert (
+        receipt.archive_state == "FAILED" and archive_permits_cleanup(receipt) is False
+    )
 
 
 def test_drive_path_is_root_relative_and_nested_root_is_rejected():
@@ -352,14 +552,24 @@ def test_drive_path_is_root_relative_and_nested_root_is_rejected():
 
 
 def test_cost_approval_idempotency_and_no_publish_scope():
-    settings = Settings(_env_file=None, VCOS_ELEVENLABS_MONTHLY_CAP_USD="22", VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP="121000")
+    settings = Settings(
+        _env_file=None,
+        VCOS_ELEVENLABS_MONTHLY_CAP_USD="22",
+        VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP="121000",
+    )
     cost = pa1r_cost_evidence(settings)
     approval = PA1RApprovalScope().evidence()
     idem1 = provider_idempotency_key("run", "google_veo", "generate", {"model": "fast"})
     idem2 = provider_idempotency_key("run", "google_veo", "generate", {"model": "fast"})
     assert cost["estimated_total"] < cost["hard_cap"] == 3.0
-    assert approval["youtube_allowed"] is False and approval["production_promotion_allowed"] is False
-    assert approval["automatic_retry_allowed"] is False and approval["max_veo_generations"] == 1
+    assert (
+        approval["youtube_allowed"] is False
+        and approval["production_promotion_allowed"] is False
+    )
+    assert (
+        approval["automatic_retry_allowed"] is False
+        and approval["max_veo_generations"] == 1
+    )
     assert idem1 == idem2
 
 
@@ -375,17 +585,36 @@ def test_approval_evidence_can_be_bound_to_one_fresh_run():
 
 def test_pa1r_source_has_no_forbidden_publishing_or_frozen_context_mutation():
     source = (ROOT / "app/services/pa1r.py").read_text()
-    forbidden_models = ("FinalMediaRef", "HumanUploadTask", "UploadedVideo", "ChannelProfileVersion", "EffectiveChannelRuntimeContextSnapshot", "FormatIdentityContract", "LearningToMemoryPromotionRun")
+    forbidden_models = (
+        "FinalMediaRef",
+        "HumanUploadTask",
+        "UploadedVideo",
+        "ChannelProfileVersion",
+        "EffectiveChannelRuntimeContextSnapshot",
+        "FormatIdentityContract",
+        "LearningToMemoryPromotionRun",
+    )
     assert all(name not in source for name in forbidden_models)
     assert "youtube.com/upload" not in source.lower()
-    retired = tuple("".join(parts) for parts in (("crea", "tomate"), ("lu", "ma"), ("run", "way"), ("kli", "ng"), ("so", "ra")))
+    retired = tuple(
+        "".join(parts)
+        for parts in (
+            ("crea", "tomate"),
+            ("lu", "ma"),
+            ("run", "way"),
+            ("kli", "ng"),
+            ("so", "ra"),
+        )
+    )
     assert all(name not in source.lower() for name in retired)
 
 
 def test_drive_quota_probe_is_read_only_and_secret_free():
     transport = FakeTransport()
     archive = object.__new__(DrivePA1RArchive)
-    result = DrivePA1RArchive.quota_readiness(archive, access_token="secret", transport=transport)
+    result = DrivePA1RArchive.quota_readiness(
+        archive, access_token="secret", transport=transport
+    )
     assert result["quota_available"] is True and result["readiness_probe_only"] is True
     assert transport.calls[0]["method"] == "GET"
     assert "secret" not in json.dumps(result)
@@ -405,13 +634,21 @@ def test_resume_runner_binds_one_new_veo_attempt_and_fresh_approval():
     source = (ROOT / "tools/pa1r/run_pa1r_resume.py").read_text()
     assert 'EXPECTED_RUN_ID = "pa1r-20260713-guarded-smoke-005"' in source
     assert 'SOURCE_RUN_ID = "pa1r-20260713-guarded-smoke-004"' in source
-    assert 'APPROVAL_REF = "operator-approval-pa1r-20260713-guarded-smoke-005"' in source
+    assert (
+        'APPROVAL_REF = "operator-approval-pa1r-20260713-guarded-smoke-005"' in source
+    )
     assert source.count('boundary.run("google_veo"') == 1
-    assert "person_generation_sent" in source and "generate_audio_parameter_sent" in source
+    assert (
+        "person_generation_sent" in source and "generate_audio_parameter_sent" in source
+    )
 
 
 def test_pa1r_resume_timeline_uses_full_eight_second_hero():
     source = (ROOT / "tools/pa1r/run_pa1r.py").read_text()
-    assert 'narration_start_ms=13000, narration_end_ms=21000, duration_ms=8000' in source
-    assert 'narration_start_ms=21000, narration_end_ms=25000, duration_ms=4000' in source
+    assert (
+        "narration_start_ms=13000, narration_end_ms=21000, duration_ms=8000" in source
+    )
+    assert (
+        "narration_start_ms=21000, narration_end_ms=25000, duration_ms=4000" in source
+    )
     assert '"[2:v]trim=duration=8' in source

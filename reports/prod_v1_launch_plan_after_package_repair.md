@@ -1,6 +1,6 @@
 # Prod V1 Launch Plan After Package Repair
 
-Updated: 2026-07-19
+Updated: 2026-07-21
 
 Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 
@@ -24,7 +24,9 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | VSR1 niche-aware visual routing | `PASS` | Provider-neutral taxonomy, gates, deterministic router, routing evidence and offline fixtures complete; provider execution remains disabled. |
 | IMG1 Google Gemini Image foundation | `PASS / EXECUTION DISABLED` | Distinct `google_gemini_image` IMAGE route, versioned `gemini-3.1-flash-image` catalog, native exact-content authority and fixture-only acceptance are complete; no provider call or paid canary ran. |
 | IMG-CANARY-v3 | `PASS / ARCHIVE VERIFIED` | One provider attempt succeeded; operator human review passed; immutable 47-item Drive closeout verified. CH1-FLEX v2 may proceed in a separate task. |
-| MR1 first real media render | `RE-APPROVAL ENTRY READY / NOT STARTED` | Approved market revision and exact bindings are available for a separate MR1 human re-approval checkpoint. MR1 is not approved or running; provider call count and render count remain 0. |
+| MR1 first real media render | `BLOCKED_REQUIRES_NEW_MR1_APPROVAL` | Historical run `020bf2a7-eb17-41a3-ac3c-301b5c6b41fd` consumed narration, forced alignment, and two failed Pexels `SC-04` attempts under terminal approval `4ccc7185-e760-4470-aba9-857ab0a18f77`. Render, Drive, and YouTube counts remain 0. |
+| Geo/market delivery closeout | `IMPLEMENTED / PRODUCTION ACCEPTANCE PENDING` | Verification and immutable closeout paths are implemented. No Geo PASS receipt or closeout artifact is claimed until the DB-backed verifier runs. |
+| PKG1 `SC-04` native revision | `IMPLEMENTED / HUMAN REVIEW NOT CREATED` | The replacement route is `NATIVE_MOTION_GRAPHIC`; exact Geo authority, immutable revision, and human closeout are required before a fresh MR1 approval may exist. |
 
 ## Current Package State
 
@@ -38,7 +40,7 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | `FinalMediaRef` | `0` |
 | `CloudMediaRef` | `0` |
 | `HumanUploadTask` | `0` |
-| provider/media/upload/YouTube execution | `0` |
+| historical MR1 provider/render/Drive/upload/YouTube calls | `4 / 0 / 0 / 0 / 0` |
 
 `WAITING_FINAL_MEDIA_ASSET` is expected. The package is repaired but no final video asset exists yet.
 
@@ -56,10 +58,15 @@ Package repair package: `81c48d7a-dfc3-4207-b585-744673491b59`
 | publish risk | content `REVIEW_REQUIRED`; execution `BLOCK` |
 | upload / publish execution | `false` / `false` |
 | production package approved | `true` |
-| MR1 re-approval / execution | `READY` / `NOT_STARTED` |
-| provider/render/Drive/YouTube calls | `0 / 0 / 0 / 0` |
+| MR1 re-approval / execution | old approval `TERMINAL` / `BLOCKED_REQUIRES_NEW_MR1_APPROVAL` |
+| historical provider/render/Drive/YouTube calls | `4 / 0 / 0 / 0` |
+| Geo closeout | `PENDING_PRODUCTION_ACCEPTANCE` |
+| PKG1 `SC-04` revision | `NOT_CREATED`; implementation and static checks are ready |
 
-Operator PASS approves the exact production package/planning snapshot but does not authorize MR1 or publishing. The next allowable checkpoint is a separate exact-target MR1 re-approval review; `PROCEED_TO_MR1_REAPPROVAL=true` and `PROCEED_TO_MR1=false`.
+The source package approval remains immutable planning authority, but the old
+MR1 approval is terminal after execution began. The next allowable sequence is
+Geo closeout, immutable `SC-04` revision, exact human revision PASS, then a
+fresh exact-target MR1 re-approval. Publishing remains unauthorized.
 
 ## Production V1 Rules After Code Closeout
 
@@ -84,14 +91,18 @@ No P0/P1 is open.
 
 ## Major Visual Architecture Hold
 
-The 2026-07-17 `VISUAL-IMPACT-REVIEW` supersedes the prior permission to start MR1, while preserving CH1-FLEX v1 and PKG1 v1 as immutable historical passes.
+The 2026-07-17 visual hold was resolved far enough to start the historical MR1
+run, which then exposed the `SC-04` semantic-fit defect. Historical passes and
+failed execution evidence remain immutable; the current repair boundary is:
 
 ```text
-MR1_REAPPROVAL_ENTRY=READY
-MR1_EXECUTION=NOT_STARTED
-PROCEED_TO_MR1_REAPPROVAL=true
+GEO_DELIVERY_CLOSEOUT_FINAL=PENDING_PRODUCTION_ACCEPTANCE
+SC04_VISUAL_REPAIR=PENDING_PRODUCTION_ARTIFACT
+PKG1_SC04_REVISION_HUMAN_REVIEW=NOT_CREATED
+MR1_OLD_RUN=BLOCKED_REQUIRES_NEW_MR1_APPROVAL
+PROCEED_TO_MR1_REAPPROVAL=false
 PROCEED_TO_MR1=false
-PROCEED_TO_VSR1=true
+DESTINATION_STATUS=PENDING_PLATFORM_ID
 ```
 
 Required sequence before MR1:
@@ -108,10 +119,15 @@ Required sequence before MR1:
 8. NICH1 and D2P1 governance/bridge — `PASS` on 2026-07-19; scripted package remains no-media and human-review-only.
 9. LPRO1 — `PASS` on 2026-07-19; the offline MP4 is a non-publishable review candidate and not a production FinalMediaRef.
 10. PKG1 visual/provider/cost/disclosure revision — technical and exact human review `PASS`; production package approved while destination/publish remain not ready.
-11. Separate new exact-target MR1 human re-approval — entry `READY`, execution `NOT_STARTED`.
-12. MR1.
+11. Exact-target MR1 approval `4ccc7185-e760-4470-aba9-857ab0a18f77` — historical `PASS`, now terminal after execution began.
+12. Historical MR1 run — blocked after two consumed `SC-04` Pexels semantic-fit failures; narration and forced alignment are preserved as candidate reuse evidence.
+13. Geo/market delivery verification and immutable closeout — implementation ready; production acceptance pending.
+14. Immutable `SC-04` native-motion revision plus exact human review — not yet created.
+15. Fresh MR1 re-approval bound to the approved revision — not yet created.
+16. Fresh MR1 run, Drive verification, and human full-watch.
 
-The old PKG1/MR1 approval remains historical evidence; it is not rewritten or treated as authority for the new route.
+The old PKG1/MR1 approval remains historical evidence; it is not rewritten or
+treated as authority for the new route.
 
 ## Next Roadmap
 
@@ -195,16 +211,33 @@ Rules:
 
 ### 5. MR1 - First Real Media Render
 
-Status: `RE-APPROVAL ENTRY READY`; execution is `NOT_STARTED`. New readiness is frozen in `artifact-version://185f1b3d-bbba-44d3-845f-543ad940c91e` and binds revision `a90e2786-f6e0-5480-94a4-fb28fd000edf` plus package `7de25ac8-46e4-46da-b112-f805f16ebaaa`. It is a readiness artifact, not an execution approval.
+Status: `BLOCKED_REQUIRES_NEW_MR1_APPROVAL`. Exact historical single-run MR1
+approval `4ccc7185-e760-4470-aba9-857ab0a18f77`, approval content hash
+`4a8c259debc1ae3f94feb7c5be959e0d42bca048911b052a221eda7373d1c25c`,
+receipt `artifact-version://d875858d-46fe-4ce5-a89c-785f266c6b4c` và readiness
+`artifact-version://432f42be-3a17-400a-a97d-2658b05a2ebc` bind revision
+`a90e2786-f6e0-5480-94a4-fb28fd000edf` plus package
+`7de25ac8-46e4-46da-b112-f805f16ebaaa`. Historical run:
+`020bf2a7-eb17-41a3-ac3c-301b5c6b41fd`.
 
-Do not run MR1 until a separate exact-target human MR1 approval exists. This closeout did not call a provider, consume an attempt, render, archive, upload or publish.
+That run made four logical provider calls: successful ElevenLabs narration,
+successful forced alignment, and two consumed failed Pexels `SC-04` attempts.
+It produced no render, Drive archive, upload, or YouTube call. The approval is
+terminal and cannot authorize the repaired route.
 
-Target sequence:
+Target sequence after Geo closeout, immutable revision, human revision PASS,
+and fresh MR1 re-approval:
 
-- ElevenLabs
-- Google Veo
-- Drive archive
-- MediaQC
+- Revalidate and reuse only exact narration audio and forced alignment when all
+  request, byte-hash, settings, rights, and QC bindings still match
+- Build a fresh canonical timeline and captions
+- Use native scenes for `SC-01/02/03/04/05/06/08`; `SC-04` is
+  `NATIVE_MOTION_GRAPHIC`
+- Use Pexels only for `SC-07` and `SC-09`
+- Native render and MediaQC
+- Canonical Drive archive verification
+- Human full-watch pause
+- Finalization supplement on Drive only after human PASS, then FinalMediaRef
 
 Hard requirements:
 
@@ -250,11 +283,19 @@ Rules:
 
 ## Current Launch Decision
 
-`MR1_REAPPROVAL_ENTRY=READY`
+`GEO_DELIVERY_CLOSEOUT_FINAL=PENDING_PRODUCTION_ACCEPTANCE`
 
-`MR1_EXECUTION=NOT_STARTED`
+`SC04_VISUAL_REPAIR=PENDING_PRODUCTION_ARTIFACT`
 
-`PROCEED_TO_MR1_REAPPROVAL=true`
+`PKG1_SC04_REVISION_HUMAN_REVIEW=NOT_CREATED`
+
+`MR1_OLD_RUN_FINAL=BLOCKED_REQUIRES_NEW_MR1_APPROVAL`
+
+`MR1_FRESH_REAPPROVAL=NOT_CREATED`
+
+`MR1_EXECUTION=BLOCKED`
+
+`PROCEED_TO_MR1_REAPPROVAL=false`
 
 `PROCEED_TO_MR1=false`
 
@@ -284,20 +325,22 @@ Rules:
 
 `PRODUCTION_PACKAGE_APPROVED=true`
 
-`MR1_REAPPROVAL_ENTRY=READY`
+`MR1_OLD_RUN_FINAL=BLOCKED_REQUIRES_NEW_MR1_APPROVAL`
 
-`MR1_EXECUTION=NOT_STARTED`
+`MR1_FRESH_REAPPROVAL=NOT_CREATED`
 
-`PROCEED_TO_MR1_REAPPROVAL=true`
+`PROCEED_TO_MR1_REAPPROVAL=false`
 
 `PROCEED_TO_MR1=false`
 
-Next checkpoint: a separate exact-target MR1 human re-approval. Readiness is `READY`; execution remains `NOT_STARTED`.
+Next checkpoint: run the Geo verifier and immutable closeout against the real
+database, build the exact `SC-04` revision, and pause for human revision review.
 
 The registered route is `google_gemini_image`, separate from
 `google_veo`. Its default model is `gemini-3.1-flash-image`; generated
 pixels are only a visual foundation, while exact text/numbers remain native
 overlay authority. The V3 paid canary and its Drive closeout passed; CH1
 Market v3, NICH1, D2P1 and LPRO1 are PASS. PKG1 Market Revision and its
-exact human closeout are PASS. No MR1 execution, provider, render, Drive or
-YouTube call occurred during this closeout.
+exact human closeout remain immutable historical PASS. The old MR1 run made four
+logical provider calls but no render, Drive, upload, or YouTube call. The new
+Geo/SC-04 repair implementation has made no production or provider claim.

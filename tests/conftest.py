@@ -20,15 +20,17 @@ ADMIN_URL = os.getenv(
     "postgresql+psycopg://vcos:vcos@localhost:55432/postgres",
 )
 TEST_DB_NAME = f"vcos_test_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-TEST_DATABASE_URL = make_url(ADMIN_URL).set(database=TEST_DB_NAME).render_as_string(
-    hide_password=False
+TEST_DATABASE_URL = (
+    make_url(ADMIN_URL).set(database=TEST_DB_NAME).render_as_string(hide_password=False)
 )
 os.environ["VCOS_DATABASE_URL"] = TEST_DATABASE_URL
 
 
 def _admin_conninfo() -> str:
-    return make_url(ADMIN_URL).set(drivername="postgresql").render_as_string(
-        hide_password=False
+    return (
+        make_url(ADMIN_URL)
+        .set(drivername="postgresql")
+        .render_as_string(hide_password=False)
     )
 
 
@@ -49,7 +51,9 @@ def _wait_for_postgres() -> None:
 def _create_database() -> None:
     _wait_for_postgres()
     with psycopg.connect(_admin_conninfo(), autocommit=True) as connection:
-        connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(TEST_DB_NAME)))
+        connection.execute(
+            sql.SQL("CREATE DATABASE {}").format(sql.Identifier(TEST_DB_NAME))
+        )
 
 
 def _drop_database() -> None:
@@ -58,7 +62,9 @@ def _drop_database() -> None:
             "select pg_terminate_backend(pid) from pg_stat_activity where datname = %s",
             (TEST_DB_NAME,),
         )
-        connection.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(TEST_DB_NAME)))
+        connection.execute(
+            sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(TEST_DB_NAME))
+        )
 
 
 def _run_migrations() -> None:
@@ -95,6 +101,7 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    mr1_monthly_budget_reservations,
                     originality_gate_runs,
                     platform_native_package_plans,
                     synthetic_media_disclosure_receipts,
@@ -311,7 +318,9 @@ def clean_database(engine: Engine) -> None:
 
 @pytest.fixture
 def db_session(engine: Engine) -> Session:
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    factory = sessionmaker(
+        bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
+    )
     session = factory()
     try:
         yield session

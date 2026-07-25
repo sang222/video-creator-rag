@@ -97,6 +97,23 @@ REVISION_SCHEMA_VERSION = "pkg1.market-revision.v3"
 LPRO1_ORCHESTRATOR_VERSION = "lpro1.long-production-orchestrator/1.0.0"
 LPRO1_RENDER_CONTRACT_VERSION = "lpro1.long-form-render-package.v1"
 
+DRIVE_IDEMPOTENCY_PHASES = [
+    {
+        "phase": "CANONICAL_REVIEW_ARCHIVE",
+        "operation_key": "google_drive:archive",
+        "boundary": "PRE_HUMAN_PASS",
+        "max_mutations": 1,
+        "cost_usd": 0.0,
+    },
+    {
+        "phase": "FINALIZATION_SUPPLEMENT",
+        "operation_key": "google_drive:finalization-supplement",
+        "boundary": "POST_HUMAN_PASS_PRE_FINAL_MEDIA_REF",
+        "max_mutations": 1,
+        "cost_usd": 0.0,
+    },
+]
+
 DEFAULT_REPORT_PATHS = {
     "lpro1": ROOT / "reports/lpro1_summary.json",
     "geo1": ROOT / "reports/geo1_summary.json",
@@ -2750,7 +2767,6 @@ class PKG1MarketRevisionService:
         if idea is None:
             raise ValidationFailureError("HISTORICAL_DAILY_IDEA_DECISION_MISSING")
         idea_ref = f"daily-idea-decision://{idea.id}"
-        idea_hash = self._idea_subject_hash(idea)
         research_content = revision_artifacts["research_pack"].content
         claims_content = revision_artifacts["claim_evidence_ledger"].content
         script_content = historical_artifacts["script"].content
@@ -3121,7 +3137,16 @@ class PKG1MarketRevisionService:
                 {"order": 5, "provider": "google_veo", "model": "veo-3.1-fast-generate-preview", "planned_requests": 0, "attempt_cap_per_scene": 1, "state": "NOT_PLANNED"},
                 {"order": 6, "provider": "native_graphics", "planned_requests": sum(item["provider"] == "native" for item in decisions), "state": "PLANNING_ONLY"},
                 {"order": 7, "provider": "native_ffmpeg_renderer", "planned_requests": 1, "state": "WAITING_FOR_MR1"},
-                {"order": 8, "provider": "google_drive", "planned_requests": 1, "state": "WAITING_FOR_FINAL_MEDIA"},
+                {
+                    "order": 8,
+                    "provider": "google_drive",
+                    "operation": (
+                        "canonical_review_archive_plus_finalization_supplement"
+                    ),
+                    "planned_requests": 2,
+                    "state": "WAITING_FOR_FINAL_MEDIA",
+                    "idempotency_phases": deepcopy(DRIVE_IDEMPOTENCY_PHASES),
+                },
             ],
             "scene_routes": [
                 {"scene_id": item["scene_id"], "route": item["preferred_source_route"], "provider": item["provider"], "attempt_cap": item["maximum_automated_attempts"], "idempotency_ref": f"provider-plan://{revision_id}/{item['scene_id']}"}
@@ -3240,7 +3265,18 @@ class PKG1MarketRevisionService:
                 {"provider": "google_gemini_image", "model": "gemini-3.1-flash-image", "size": "2K", "aspect_ratio": "16:9", "planned_scenes": gemini_count, "attempt_cap_per_scene": 1, "unit_estimate_usd": gemini_unit_cost, "catalog_item_key": gemini_item["key"], "estimated_incremental_cost_usd": round(gemini_count * gemini_unit_cost, 6)},
                 {"provider": "google_veo", "model": "veo-3.1-fast-generate-preview", "duration_seconds": 8, "resolution": "720p", "planned_clips": veo_count, "attempt_cap_per_scene": 1, "price_per_second_usd": veo_second_cost, "unit_estimate_usd": veo_unit_cost, "estimated_incremental_cost_usd": round(veo_count * veo_unit_cost, 6)},
                 {"provider": "native_ffmpeg_renderer", "cost_class": "LOCAL", "estimated_incremental_cost_usd": 0.0},
-                {"provider": "google_drive", "cost_class": "EXISTING_WORKSPACE_PLAN", "estimated_incremental_cost_usd": 0.0},
+                {
+                    "provider": "google_drive",
+                    "cost_class": "EXISTING_WORKSPACE_PLAN",
+                    "planned_requests": 2,
+                    "idempotency_phases": deepcopy(DRIVE_IDEMPOTENCY_PHASES),
+                    "estimated_incremental_cost_usd": 0.0,
+                    "basis": (
+                        "Two exact zero-cost Drive mutations: canonical review "
+                        "archive before human PASS, then one finalization "
+                        "supplement before FinalMediaRef."
+                    ),
+                },
             ],
             "estimated_cost": estimated,
             "hard_cap": hard_cap,

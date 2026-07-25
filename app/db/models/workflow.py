@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,7 +30,9 @@ class VideoProject(Base):
         UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
     )
     policy_snapshot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("compiled_channel_policy_snapshots.id"),
+        nullable=False,
     )
     channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("channel_profile_versions.id")
@@ -36,8 +47,12 @@ class VideoProject(Base):
     budget_policy_hash: Mapped[str | None] = mapped_column(String(128))
     format_identity_contract_ref: Mapped[str | None] = mapped_column(Text)
     format_identity_contract_hash: Mapped[str | None] = mapped_column(String(128))
-    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("content_categories.id"))
-    character_binding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("character_bindings.id"))
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("content_categories.id")
+    )
+    character_binding_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("character_bindings.id")
+    )
     channel_contract_content_hash: Mapped[str | None] = mapped_column(Text)
     effective_context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("effective_channel_runtime_context_snapshots.id")
@@ -47,12 +62,24 @@ class VideoProject(Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
     project_type: Mapped[str | None] = mapped_column(String(80))
     priority: Mapped[str | None] = mapped_column(String(40))
-    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    financial_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    brand_safety_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    legal_compliance_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    audience_delivery_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    financial_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    brand_safety_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    legal_compliance_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    audience_delivery_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -60,11 +87,18 @@ class VideoProject(Base):
         Index("ix_video_projects_company_id", "company_id"),
         Index("ix_video_projects_channel_workspace_id", "channel_workspace_id"),
         Index("ix_video_projects_policy_snapshot_id", "policy_snapshot_id"),
-        Index("ix_video_projects_channel_profile_version_id", "channel_profile_version_id"),
+        Index(
+            "ix_video_projects_channel_profile_version_id", "channel_profile_version_id"
+        ),
         Index("ix_video_projects_category_id", "category_id"),
         Index("ix_video_projects_character_binding_id", "character_binding_id"),
-        Index("ix_video_projects_channel_contract_hash", "channel_contract_content_hash"),
-        Index("ix_video_projects_effective_context_snapshot", "effective_context_snapshot_id"),
+        Index(
+            "ix_video_projects_channel_contract_hash", "channel_contract_content_hash"
+        ),
+        Index(
+            "ix_video_projects_effective_context_snapshot",
+            "effective_context_snapshot_id",
+        ),
         Index("ix_video_projects_created_at", "created_at"),
     )
 
@@ -78,10 +112,13 @@ class Artifact(Base):
     )
     artifact_type: Mapped[str] = mapped_column(String(120), nullable=False)
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("artifact_versions.id", name="fk_artifacts_current_version_id")
+        UUID(as_uuid=True),
+        ForeignKey("artifact_versions.id", name="fk_artifacts_current_version_id"),
     )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -100,18 +137,36 @@ class ArtifactVersion(Base):
         UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=False
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    parent_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    parent_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
+    )
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    external_entity_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    packaging_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    media_qc_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    source_manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    context_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    claim_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    external_entity_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    packaging_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    media_qc_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    source_manifest: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    context_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    claim_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     retrieval_plan_ref: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = utc_created_at()
 
@@ -137,12 +192,22 @@ class ReviewTask(Base):
     )
     review_type: Mapped[str] = mapped_column(String(120), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="open")
-    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    review_reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-    evidence_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    review_reason_codes: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    evidence_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     review_scope: Mapped[str | None] = mapped_column(Text)
     context_pack_ref: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = utc_created_at()
@@ -150,7 +215,9 @@ class ReviewTask(Base):
 
     __table_args__ = (
         Index("ix_review_tasks_video_project_id", "video_project_id"),
-        Index("ix_review_tasks_target_artifact_version_id", "target_artifact_version_id"),
+        Index(
+            "ix_review_tasks_target_artifact_version_id", "target_artifact_version_id"
+        ),
         Index("ix_review_tasks_created_at", "created_at"),
     )
 
@@ -165,8 +232,12 @@ class ReviewFinding(Base):
     severity: Mapped[str] = mapped_column(String(40), nullable=False)
     reason_code: Mapped[str] = mapped_column(String(160), nullable=False)
     finding_text: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -185,16 +256,23 @@ class RevisionRequest(Base):
     target_artifact_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("artifact_versions.id"), nullable=False
     )
-    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="open")
-    resolved_by_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    resolved_by_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
+    )
     created_at: Mapped[datetime] = utc_created_at()
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_revision_requests_review_task_id", "review_task_id"),
-        Index("ix_revision_requests_target_artifact_version_id", "target_artifact_version_id"),
+        Index(
+            "ix_revision_requests_target_artifact_version_id",
+            "target_artifact_version_id",
+        ),
         Index("ix_revision_requests_created_at", "created_at"),
     )
 
@@ -209,19 +287,46 @@ class ApprovalDecision(Base):
         UUID(as_uuid=True), ForeignKey("artifact_versions.id")
     )
     decision: Mapped[str] = mapped_column(String(40), nullable=False)
-    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     rationale: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
-    decision_basis: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    evidence_basis: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    policy_basis: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
+    decision_basis: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    evidence_basis: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    policy_basis: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     context_pack_ref: Mapped[str | None] = mapped_column(Text)
     human_decision_note: Mapped[str | None] = mapped_column(Text)
+    policy_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id")
+    )
+    destination_binding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    destination_binding_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    market_policy_hash: Mapped[str | None] = mapped_column(String(64))
+    approved_package_hash: Mapped[str | None] = mapped_column(String(64))
+    target_market_profile_ref: Mapped[str | None] = mapped_column(Text)
+    target_market_profile_hash: Mapped[str | None] = mapped_column(String(64))
+    market_alignment_dossier_ref: Mapped[str | None] = mapped_column(Text)
+    market_alignment_dossier_hash: Mapped[str | None] = mapped_column(String(64))
+    approved_publish_window: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        Index("ix_approval_decisions_target_artifact_version_id", "target_artifact_version_id"),
+        Index(
+            "ix_approval_decisions_target_artifact_version_id",
+            "target_artifact_version_id",
+        ),
         Index("ix_approval_decisions_target", "target_type", "target_id"),
         Index("ix_approval_decisions_created_at", "created_at"),
     )

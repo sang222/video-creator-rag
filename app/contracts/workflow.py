@@ -4,8 +4,12 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 ProjectStatus = Literal["draft", "in_review", "approved", "archived"]
-ArtifactStatus = Literal["draft", "in_review", "approved", "revision_requested", "archived"]
-ArtifactVersionStatus = Literal["draft", "submitted", "approved", "rejected", "superseded"]
+ArtifactStatus = Literal[
+    "draft", "in_review", "approved", "revision_requested", "archived"
+]
+ArtifactVersionStatus = Literal[
+    "draft", "submitted", "approved", "rejected", "superseded"
+]
 ReviewTaskStatus = Literal["open", "in_progress", "completed", "cancelled"]
 RevisionRequestStatus = Literal["open", "resolved", "cancelled"]
 ApprovalDecisionValue = Literal["approved", "rejected", "blocked"]
@@ -165,6 +169,24 @@ class ApprovalDecisionCreate(BaseModel):
     policy_basis: dict[str, Any] = Field(default_factory=dict)
     context_pack_ref: str | None = None
     human_decision_note: str | None = None
+    # Nullable for historical/non-market approvals. Strict market publication
+    # requires all of these fields and validates them fail-closed.
+    policy_snapshot_id: uuid.UUID | None = None
+    destination_binding_id: uuid.UUID | None = None
+    destination_binding_fingerprint: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    market_policy_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    approved_package_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    target_market_profile_ref: str | None = None
+    target_market_profile_hash: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    market_alignment_dossier_ref: str | None = None
+    market_alignment_dossier_hash: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    approved_publish_window: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 

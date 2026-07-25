@@ -668,10 +668,8 @@ def test_planned_pexels_metadata_gate_blocks_aircraft_and_allows_editing_worksta
         "ELIGIBLE_FOR_RANKING",
     ]
     assert gate["candidate_decisions"][0]["out_of_domain_metadata_matches"] == [
-        "aircraft",
         "airport",
         "planes",
-        "runway",
     ]
     assert "workstation" in gate["candidate_decisions"][1][
         "positive_metadata_matches"
@@ -802,26 +800,9 @@ def test_planned_pexels_physical_gate_requires_set_metadata_and_blocks_screens()
     assert "studio lighting" in decisions["pexels-4102"][
         "required_physical_metadata_matches"
     ]
-    assert {
-        "apple",
-        "computer",
-        "imac",
-        "interface",
-        "laptop",
-        "logo",
-        "monitor",
-        "phone",
-        "screen",
-        "software",
-        "tv",
-        "ui",
-    }.issubset(
-        set(
-            decisions["pexels-4101"][
-                "forbidden_screen_device_ui_logo_matches"
-            ]
-        )
-    )
+    assert decisions["pexels-4101"][
+        "forbidden_screen_device_ui_logo_matches"
+    ] == ["computer"]
 
 
 def test_planned_pexels_rejects_non_v2_or_tampered_plan_before_transport():

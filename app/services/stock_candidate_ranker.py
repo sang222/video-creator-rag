@@ -38,6 +38,36 @@ WEIGHTS = {
     "channel_visual_identity_fit": 0.06,
     "source_completeness": 0.04,
 }
+
+OBSERVABLE_SEMANTIC_POLICY_VERSION = (
+    "candidate-description-tags-intent-coverage/v2"
+)
+CONFIRMED_QUERY_RETRIEVAL_REVIEW_FLOOR = 0.25
+_SEMANTIC_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "with",
+}
+
+
 class StockCandidateRanker:
     def rank(
         self,
@@ -50,6 +80,8 @@ class StockCandidateRanker:
         previous_scene: VisualAssetEvidence | dict | str | None = None,
         next_scene: VisualAssetEvidence | dict | str | None = None,
         asset_reuse_history: list[str] | None = None,
+        minimum_semantic_relevance: float | None = None,
+        confirmed_query_retrieval: bool = False,
         weights: VisualRankingWeights | None = None,
         risk_penalties: VisualRiskPenalties | None = None,
         thresholds: VisualScoreThresholds | None = None,
@@ -81,7 +113,13 @@ class StockCandidateRanker:
                 risk_penalties=risk_penalties,
                 thresholds=thresholds,
             )
-        return self._rank_legacy(request, candidates, previous_asset_usage_refs=previous_asset_usage_refs)
+        return self._rank_legacy(
+            request,
+            candidates,
+            previous_asset_usage_refs=previous_asset_usage_refs,
+            minimum_semantic_relevance=minimum_semantic_relevance,
+            confirmed_query_retrieval=confirmed_query_retrieval,
+        )
 
     def _rank_legacy(
         self,
@@ -89,7 +127,18 @@ class StockCandidateRanker:
         candidates: list[ParsedStockCandidate],
         *,
         previous_asset_usage_refs: list[str] | None,
+        minimum_semantic_relevance: float | None,
+        confirmed_query_retrieval: bool,
     ) -> StockCandidateRankingManifest:
+        if (
+            minimum_semantic_relevance is not None
+            and (
+                isinstance(minimum_semantic_relevance, bool)
+                or not isinstance(minimum_semantic_relevance, (int, float))
+                or not 0 < float(minimum_semantic_relevance) <= 1
+            )
+        ):
+            raise ValueError("STOCK_MINIMUM_SEMANTIC_RELEVANCE_INVALID")
         scored: list[CandidateScore] = []
         rejected: list[RejectedCandidate] = []
         for candidate in candidates:
@@ -97,7 +146,11 @@ class StockCandidateRanker:
             if hard_reasons:
                 rejected.append(RejectedCandidate(candidate_id=candidate.candidate_id, reason_codes=hard_reasons))
                 continue
-            dimensions = self._dimensions(request, candidate)
+            dimensions = self._dimensions(
+                request,
+                candidate,
+                confirmed_query_retrieval=confirmed_query_retrieval,
+            )
             score = round(sum(dimensions[key] * WEIGHTS[key] for key in WEIGHTS) * 100, 6)
             reasons = []
             if candidate.prior_use_count:
@@ -106,12 +159,29 @@ class StockCandidateRanker:
                 reasons.append("METADATA_RISK_REQUIRES_HUMAN_REVIEW")
             scored.append(CandidateScore(candidate_id=candidate.candidate_id, total_score=score, dimensions=dimensions, reason_codes=reasons))
         scored.sort(key=lambda item: (-item.total_score, item.candidate_id))
-        selected = scored[0].candidate_id if scored else None
+        selected_score = next(
+            (
+                item
+                for item in scored
+                if minimum_semantic_relevance is None
+                or item.dimensions["semantic_relevance"]
+                >= float(minimum_semantic_relevance)
+            ),
+            None,
+        )
+        selected = selected_score.candidate_id if selected_score is not None else None
         # Metadata ranking cannot replace rights/person/logo review in AS1.
         review = True
-        reason_codes = ["DETERMINISTIC_METADATA_MULTIDIMENSIONAL_RANKING"]
+        reason_codes = [
+            "DETERMINISTIC_METADATA_MULTIDIMENSIONAL_RANKING",
+            "OBSERVABLE_CANDIDATE_TEXT_SEMANTIC_EVIDENCE",
+        ]
         if any(candidate.prior_use_count for candidate in candidates):
             reason_codes.append("SAME_ASSET_REUSE_RISK_REPRESENTED")
+        if minimum_semantic_relevance is not None:
+            reason_codes.append("INDEPENDENT_SEMANTIC_SELECTION_GATE")
+            if selected is None:
+                reason_codes.append("NO_CANDIDATE_MET_SEMANTIC_SELECTION_GATE")
         if review:
             reason_codes.append("HUMAN_REVIEW_BOUNDARY")
         payload = {
@@ -293,12 +363,19 @@ class StockCandidateRanker:
         return list(dict.fromkeys(reasons))
 
     @staticmethod
-    def _dimensions(request: AssetRequest, candidate: ParsedStockCandidate) -> dict[str, float]:
-        intent = set(re.findall(r"[a-z0-9]+", request.semantic_visual_intent.lower()))
-        metadata = set(candidate.tags) | set(re.findall(r"[a-z0-9]+", candidate.description.lower()))
-        overlap = len(intent & metadata) / max(1, len(intent))
-        # Semantic fit includes curated metadata signals; keyword overlap is only one sub-signal.
-        semantic = min(1.0, 0.55 * overlap + 0.25 * candidate.channel_identity_fit + 0.20 * candidate.motion_suitability)
+    def _dimensions(
+        request: AssetRequest,
+        candidate: ParsedStockCandidate,
+        *,
+        confirmed_query_retrieval: bool = False,
+    ) -> dict[str, float]:
+        semantic = float(
+            observable_semantic_relevance_evidence(
+                request,
+                candidate,
+                confirmed_query_retrieval=confirmed_query_retrieval,
+            )["semantic_relevance"]
+        )
         min_width, min_height = (int(part) for part in request.minimum_resolution.split("x"))
         resolution = min(1.0, min(candidate.width / min_width, candidate.height / min_height))
         duration = 1.0 if request.minimum_duration_seconds <= candidate.duration_seconds <= request.maximum_duration_seconds + 5 else 0.4
@@ -331,10 +408,11 @@ class StockCandidateRanker:
         evidence = _candidate_evidence(request, candidate)
         semantic = candidate.semantic_relevance_score
         if semantic is None:
-            intent = _tokens(request.semantic_visual_intent)
-            metadata = _tokens(" ".join([candidate.description, *candidate.tags]))
-            overlap = len(intent & metadata) / max(1, len(intent))
-            semantic = min(1.0, 0.80 * overlap + 0.20 * candidate.channel_identity_fit)
+            semantic = float(
+                observable_semantic_relevance_evidence(request, candidate)[
+                    "semantic_relevance"
+                ]
+            )
         direction_fit = candidate.visual_direction_fit_score
         if direction_fit is None:
             direction_fit = visual_direction_fit_score(visual_direction, evidence)
@@ -414,6 +492,66 @@ class StockCandidateRanker:
         ):
             return "REVIEW_REQUIRED"
         return "PASS"
+
+
+def observable_semantic_relevance_evidence(
+    request: AssetRequest,
+    candidate: ParsedStockCandidate,
+    *,
+    confirmed_query_retrieval: bool = False,
+) -> dict[str, object]:
+    """Score only provider-observable candidate text against the approved intent.
+
+    Pexels search responses do not expose numeric semantic, channel-fit, or
+    motion-fit scores.  Their model defaults therefore must not contribute to
+    the independent semantic gate.  Description text (including the parser's
+    public source-page slug fallback) and provider tags are the complete
+    pre-download evidence set.
+    """
+
+    intent_tokens = observable_semantic_tokens(request.semantic_visual_intent)
+    candidate_tokens = observable_semantic_tokens(
+        " ".join([candidate.description, *candidate.tags])
+    )
+    matched_tokens = intent_tokens & candidate_tokens
+    coverage = len(matched_tokens) / max(1, len(intent_tokens))
+    retrieval_floor = (
+        CONFIRMED_QUERY_RETRIEVAL_REVIEW_FLOOR
+        if confirmed_query_retrieval
+        else 0.0
+    )
+    semantic_relevance = max(coverage, retrieval_floor)
+    return {
+        "policy_version": OBSERVABLE_SEMANTIC_POLICY_VERSION,
+        "formula": (
+            "max(matched_intent_tokens / intent_tokens, "
+            "confirmed_query_retrieval_review_floor)"
+        ),
+        "candidate_id": candidate.candidate_id,
+        "intent_tokens": sorted(intent_tokens),
+        "candidate_text_tokens": sorted(candidate_tokens),
+        "matched_intent_tokens": sorted(matched_tokens),
+        "intent_token_count": len(intent_tokens),
+        "candidate_text_token_count": len(candidate_tokens),
+        "matched_intent_token_count": len(matched_tokens),
+        "lexical_intent_coverage": round(coverage, 6),
+        "confirmed_query_retrieval": confirmed_query_retrieval,
+        "confirmed_query_retrieval_review_floor": retrieval_floor,
+        "semantic_relevance": round(semantic_relevance, 6),
+        "provider_search_order_score_contribution": 0.0,
+        "motion_suitability_score_contribution": 0.0,
+        "channel_identity_fit_score_contribution": 0.0,
+    }
+
+
+def observable_semantic_tokens(value: str) -> set[str]:
+    """Normalize the public-text tokens used by the semantic evidence gate."""
+
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if len(token) > 2 and token not in _SEMANTIC_STOP_WORDS
+    }
 
 
 def _candidate_evidence(request: AssetRequest, candidate: ParsedStockCandidate) -> VisualAssetEvidence:

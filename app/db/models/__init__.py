@@ -239,6 +239,7 @@ from app.db.models.r3d8 import (
     ProxyPreviewArtifactFlag,
     RenderRevision,
 )
+from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
 from app.db.models.r3d9_ux2 import (
     PackagingGateRerunRecord,
     PackagingPatchApplyRun,
@@ -257,6 +258,12 @@ from app.db.models.ofv0 import (
 )
 
 __all__ = [
+    "ClaimEvidenceLedger",
+    "EpisodeOriginalityManifest",
+    "FormatIdentityContract",
+    "OriginalityGateRun",
+    "PlatformNativePackagePlan",
+    "SyntheticMediaDisclosureReceipt",
     "AuditEvent",
     "Company",
     "ConfigCatalogVersion",
@@ -453,6 +460,7 @@ __all__ = [
     "PaidProviderCallLedger",
     "PaidAttemptLimitRecord",
     "ProxyPreviewArtifactFlag",
+    "MR1MonthlyBudgetReservation",
     "PackagingReviewQueueItem",
     "PackagingProposedPatch",
     "PackagingPatchApprovalDecision",

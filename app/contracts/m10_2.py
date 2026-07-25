@@ -92,12 +92,24 @@ LongFormRenderPackageState = Literal[
     "QC_READY",
     "CANCELLED",
 ]
-ShortRenderPackageState = Literal["DRAFT", "READY_FOR_TEMPLATE_RENDER", "RENDERED", "QC_READY", "BLOCKED", "CANCELLED"]
-AIHeroIntendedUsage = Literal["OPENING_HOOK", "KEY_METAPHOR", "SHORT_HOOK", "THUMBNAIL_STILL", "OTHER"]
-AIHeroAssetState = Literal["PLANNED", "READY_FOR_PROVIDER", "GENERATED", "BLOCKED", "CANCELLED"]
-ThumbnailVariantState = Literal["DRAFT", "READY_FOR_PROVIDER", "RENDERED", "SELECTED", "REJECTED", "CANCELLED"]
-FinalMediaType = Literal["LONG_FORM_FINAL", "SHORT_FINAL", "THUMBNAIL", "CARD", "AI_HERO", "PREVIEW"]
-LicenseStatus = Literal["CONFIRMED", "NEEDS_REVIEW", "BLOCKED", "NOT_REQUIRED", "UNKNOWN"]
+ShortRenderPackageState = Literal[
+    "DRAFT", "READY_FOR_TEMPLATE_RENDER", "RENDERED", "QC_READY", "BLOCKED", "CANCELLED"
+]
+AIHeroIntendedUsage = Literal[
+    "OPENING_HOOK", "KEY_METAPHOR", "SHORT_HOOK", "THUMBNAIL_STILL", "OTHER"
+]
+AIHeroAssetState = Literal[
+    "PLANNED", "READY_FOR_PROVIDER", "GENERATED", "BLOCKED", "CANCELLED"
+]
+ThumbnailVariantState = Literal[
+    "DRAFT", "READY_FOR_PROVIDER", "RENDERED", "SELECTED", "REJECTED", "CANCELLED"
+]
+FinalMediaType = Literal[
+    "LONG_FORM_FINAL", "SHORT_FINAL", "THUMBNAIL", "CARD", "AI_HERO", "PREVIEW"
+]
+LicenseStatus = Literal[
+    "CONFIRMED", "NEEDS_REVIEW", "BLOCKED", "NOT_REQUIRED", "UNKNOWN"
+]
 ProviderGateDecision = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
 
 
@@ -502,8 +514,10 @@ class FinalMediaRefCreate(BaseModel):
     resolution: str | None = None
     provider_key: str | None = None
     provider_type: MediaProviderType | None = None
+    checksum_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     media_qc_report_id: uuid.UUID | None = None
     cloud_media_ref_id: uuid.UUID | None = None
+    lineage_artifact_version_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -521,8 +535,10 @@ class FinalMediaRefRead(_ReadModel):
     resolution: str | None
     provider_key: str | None
     provider_type: MediaProviderType | None
+    checksum_sha256: str | None
     media_qc_report_id: uuid.UUID | None
     cloud_media_ref_id: uuid.UUID | None
+    lineage_artifact_version_id: uuid.UUID | None
     created_at: AwareDatetime
 
 

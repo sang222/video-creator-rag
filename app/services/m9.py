@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts import AuditEnvelope, EventEnvelope
+from app.contracts.geo_delivery import GeoDistributionTracker
 from app.contracts.m9 import PostPublishHealthRunCreate
 from app.contracts.ops import ManualActionCreate
 from app.core.errors import NotFoundError, ValidationFailureError
@@ -17,7 +18,6 @@ from app.core.time import utc_now
 from app.db.models import (
     AnalyticsSnapshot,
     DiagnosticTaxonomyVersion,
-    DomainEvent,
     EngagementDiagnosticRun,
     EngagementSnapshot,
     FailureTraceReport,
@@ -36,6 +36,7 @@ from app.db.models import (
 )
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
+from app.services.geo_delivery import GeoMaturityDiagnosticService
 from app.services.ops import ManualActionService
 
 
@@ -141,7 +142,9 @@ class ObservationWindowService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_windows_for_uploaded_video(self, uploaded_video_id: uuid.UUID) -> list[PostPublishObservationWindow]:
+    def create_windows_for_uploaded_video(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[PostPublishObservationWindow]:
         uploaded = _require_uploaded(self.session, uploaded_video_id)
         if uploaded.published_at is None:
             return []
@@ -150,7 +153,9 @@ class ObservationWindowService:
         existing = {
             item.observation_window: item
             for item in self.session.scalars(
-                select(PostPublishObservationWindow).where(PostPublishObservationWindow.uploaded_video_id == uploaded.id)
+                select(PostPublishObservationWindow).where(
+                    PostPublishObservationWindow.uploaded_video_id == uploaded.id
+                )
             ).all()
         }
         for name, delta in WINDOW_DELTAS.items():
@@ -182,7 +187,9 @@ class ObservationWindowService:
         self.session.flush()
         return sorted(windows, key=lambda item: item.expected_check_at)
 
-    def get_window(self, uploaded_video_id: uuid.UUID, observation_window: str) -> PostPublishObservationWindow | None:
+    def get_window(
+        self, uploaded_video_id: uuid.UUID, observation_window: str
+    ) -> PostPublishObservationWindow | None:
         return self.session.scalars(
             select(PostPublishObservationWindow).where(
                 PostPublishObservationWindow.uploaded_video_id == uploaded_video_id,
@@ -190,11 +197,15 @@ class ObservationWindowService:
             )
         ).one_or_none()
 
-    def require_window(self, uploaded_video_id: uuid.UUID, observation_window: str) -> PostPublishObservationWindow:
+    def require_window(
+        self, uploaded_video_id: uuid.UUID, observation_window: str
+    ) -> PostPublishObservationWindow:
         self.create_windows_for_uploaded_video(uploaded_video_id)
         window = self.get_window(uploaded_video_id, observation_window)
         if window is None:
-            raise ValidationFailureError(f"observation window is not deterministic for M9: {observation_window}")
+            raise ValidationFailureError(
+                f"observation window is not deterministic for M9: {observation_window}"
+            )
         return window
 
     def is_ready(self, window: PostPublishObservationWindow) -> bool:
@@ -205,7 +216,9 @@ class ObservationWindowService:
         ready = utc_now() >= window.expected_check_at
         window.state = "READY" if ready else "PENDING"
         if not ready:
-            window.reason_codes = _dedupe([*window.reason_codes, "OBSERVATION_WINDOW_NOT_READY"])
+            window.reason_codes = _dedupe(
+                [*window.reason_codes, "OBSERVATION_WINDOW_NOT_READY"]
+            )
         self.session.flush()
         return ready
 
@@ -247,8 +260,12 @@ class PostPublishHealthMonitorService:
         correlation_id: str = "m9-post-publish-health-create",
     ) -> PostPublishHealthRun:
         self.seed_taxonomy_versions()
-        context = _load_context(self.session, data.uploaded_video_id, data.observation_window)
-        window = ObservationWindowService(self.session).require_window(context.uploaded.id, data.observation_window)
+        context = _load_context(
+            self.session, data.uploaded_video_id, data.observation_window
+        )
+        window = ObservationWindowService(self.session).require_window(
+            context.uploaded.id, data.observation_window
+        )
         evidence_refs = _evidence_refs(context)
         run = PostPublishHealthRun(
             uploaded_video_id=context.uploaded.id,
@@ -259,11 +276,21 @@ class PostPublishHealthMonitorService:
             platform=context.uploaded.platform,
             platform_video_id=context.uploaded.platform_video_id,
             observation_window=data.observation_window,
-            analytics_snapshot_id=context.analytics_snapshot.id if context.analytics_snapshot else None,
-            uploaded_video_metrics_summary_id=context.metrics_summary.id if context.metrics_summary else None,
-            retention_curve_snapshot_id=context.retention_snapshot.id if context.retention_snapshot else None,
-            traffic_source_snapshot_id=context.traffic_snapshot.id if context.traffic_snapshot else None,
-            engagement_snapshot_id=context.engagement_snapshot.id if context.engagement_snapshot else None,
+            analytics_snapshot_id=context.analytics_snapshot.id
+            if context.analytics_snapshot
+            else None,
+            uploaded_video_metrics_summary_id=context.metrics_summary.id
+            if context.metrics_summary
+            else None,
+            retention_curve_snapshot_id=context.retention_snapshot.id
+            if context.retention_snapshot
+            else None,
+            traffic_source_snapshot_id=context.traffic_snapshot.id
+            if context.traffic_snapshot
+            else None,
+            engagement_snapshot_id=context.engagement_snapshot.id
+            if context.engagement_snapshot
+            else None,
             run_state="PENDING",
             health_state="UNKNOWN",
             severity="INFO",
@@ -295,7 +322,9 @@ class PostPublishHealthMonitorService:
             payload={
                 "uploaded_video_id": str(run.uploaded_video_id),
                 "observation_window": run.observation_window,
-                "analytics_snapshot_id": str(run.analytics_snapshot_id) if run.analytics_snapshot_id else None,
+                "analytics_snapshot_id": str(run.analytics_snapshot_id)
+                if run.analytics_snapshot_id
+                else None,
                 "m9_diagnostic_only": True,
                 "no_analytics_sync": True,
                 "no_platform_api_call": True,
@@ -312,8 +341,12 @@ class PostPublishHealthMonitorService:
         run = self.require_health_run(run_id)
         if run.run_state in {"COMPLETED", "BLOCKED", "INSUFFICIENT_DATA", "FAILED"}:
             return run
-        context = _load_context(self.session, run.uploaded_video_id, run.observation_window)
-        window = ObservationWindowService(self.session).require_window(context.uploaded.id, run.observation_window)
+        context = _load_context(
+            self.session, run.uploaded_video_id, run.observation_window
+        )
+        window = ObservationWindowService(self.session).require_window(
+            context.uploaded.id, run.observation_window
+        )
         if not ObservationWindowService(self.session).is_ready(window):
             aggregate = AggregateResult(
                 run_state="INSUFFICIENT_DATA",
@@ -325,7 +358,11 @@ class PostPublishHealthMonitorService:
                 secondary_suspected_causes=[],
                 operator_summary="Chưa đến mốc quan sát nên chưa đủ dữ liệu để kết luận.",
                 next_action=f"Chờ đến {window.expected_check_at.isoformat()} rồi chạy lại chẩn đoán.",
-                reason_codes=["OBSERVATION_WINDOW_NOT_READY", "INSUFFICIENT_ANALYTICS_DATA", "NO_DIAGNOSIS_WITHOUT_DATA"],
+                reason_codes=[
+                    "OBSERVATION_WINDOW_NOT_READY",
+                    "INSUFFICIENT_ANALYTICS_DATA",
+                    "NO_DIAGNOSIS_WITHOUT_DATA",
+                ],
                 evidence_plain_text=[
                     f"Observation window {run.observation_window} chưa sẵn sàng.",
                     "M9 không sync analytics và không tự gọi platform.",
@@ -334,22 +371,41 @@ class PostPublishHealthMonitorService:
                 recommended_actions=["wait until next observation window"],
                 risk_level="LOW",
             )
-            self._finish_run_from_aggregate(run=run, context=context, aggregate=aggregate, correlation_id=correlation_id)
+            self._finish_run_from_aggregate(
+                run=run,
+                context=context,
+                aggregate=aggregate,
+                correlation_id=correlation_id,
+            )
             window.state = "PENDING"
             self.session.flush()
             return run
 
         diagnostics = {
-            "no_view": NoViewDiagnosticService(self.session).run(run=run, context=context, correlation_id=correlation_id),
-            "packaging": PackagingDiagnosticService(self.session).run(run=run, context=context, correlation_id=correlation_id),
-            "retention": RetentionDiagnosticService(self.session).run(run=run, context=context, correlation_id=correlation_id),
-            "engagement": EngagementDiagnosticService(self.session).run(run=run, context=context, correlation_id=correlation_id),
-            "policy_rights": PolicyRightsDiagnosticService(self.session).run(run=run, context=context, correlation_id=correlation_id),
+            "no_view": NoViewDiagnosticService(self.session).run(
+                run=run, context=context, correlation_id=correlation_id
+            ),
+            "packaging": PackagingDiagnosticService(self.session).run(
+                run=run, context=context, correlation_id=correlation_id
+            ),
+            "retention": RetentionDiagnosticService(self.session).run(
+                run=run, context=context, correlation_id=correlation_id
+            ),
+            "engagement": EngagementDiagnosticService(self.session).run(
+                run=run, context=context, correlation_id=correlation_id
+            ),
+            "policy_rights": PolicyRightsDiagnosticService(self.session).run(
+                run=run, context=context, correlation_id=correlation_id
+            ),
         }
         aggregate = _aggregate_diagnostics(context=context, diagnostics=diagnostics)
-        self._finish_run_from_aggregate(run=run, context=context, aggregate=aggregate, correlation_id=correlation_id)
+        self._finish_run_from_aggregate(
+            run=run, context=context, aggregate=aggregate, correlation_id=correlation_id
+        )
         window.state = "COMPLETED"
-        window.reason_codes = _dedupe([*window.reason_codes, "POST_PUBLISH_HEALTH_COMPLETED"])
+        window.reason_codes = _dedupe(
+            [*window.reason_codes, "POST_PUBLISH_HEALTH_COMPLETED"]
+        )
         self.session.flush()
         return run
 
@@ -368,9 +424,13 @@ class PostPublishHealthMonitorService:
         run.evidence_refs = _evidence_refs(context)
         run.reason_codes = _dedupe([*run.reason_codes, *aggregate.reason_codes])
         if aggregate.run_state == "COMPLETED":
-            run.reason_codes = _dedupe([*run.reason_codes, "POST_PUBLISH_HEALTH_COMPLETED"])
+            run.reason_codes = _dedupe(
+                [*run.reason_codes, "POST_PUBLISH_HEALTH_COMPLETED"]
+            )
         elif aggregate.run_state == "INSUFFICIENT_DATA":
-            run.reason_codes = _dedupe([*run.reason_codes, "INSUFFICIENT_ANALYTICS_DATA"])
+            run.reason_codes = _dedupe(
+                [*run.reason_codes, "INSUFFICIENT_ANALYTICS_DATA"]
+            )
         run.operator_summary = aggregate.operator_summary
         run.next_action = aggregate.next_action
         run.do_not_do = DO_NOT_DO_DEFAULT
@@ -387,7 +447,9 @@ class PostPublishHealthMonitorService:
             "confidence_is_not_severity": True,
         }
         self.session.flush()
-        report = self._create_failure_trace_report(run=run, context=context, aggregate=aggregate, correlation_id=correlation_id)
+        report = self._create_failure_trace_report(
+            run=run, context=context, aggregate=aggregate, correlation_id=correlation_id
+        )
         proposal = self._create_recovery_proposal(
             report=report,
             context=context,
@@ -400,7 +462,11 @@ class PostPublishHealthMonitorService:
             aggregate=aggregate,
             correlation_id=correlation_id,
         )
-        event_type = "post_publish_health_run.completed" if run.run_state == "COMPLETED" else "post_publish_health_run.insufficient_data"
+        event_type = (
+            "post_publish_health_run.completed"
+            if run.run_state == "COMPLETED"
+            else "post_publish_health_run.insufficient_data"
+        )
         _record_m9_event(
             self.session,
             event_type=event_type,
@@ -410,7 +476,9 @@ class PostPublishHealthMonitorService:
             target_id=run.id,
             company_id=run.company_id,
             correlation_id=correlation_id,
-            reason_code="POST_PUBLISH_HEALTH_COMPLETED" if run.run_state == "COMPLETED" else "INSUFFICIENT_ANALYTICS_DATA",
+            reason_code="POST_PUBLISH_HEALTH_COMPLETED"
+            if run.run_state == "COMPLETED"
+            else "INSUFFICIENT_ANALYTICS_DATA",
             payload={
                 "uploaded_video_id": str(run.uploaded_video_id),
                 "health_state": run.health_state,
@@ -483,7 +551,9 @@ class PostPublishHealthMonitorService:
         aggregate: AggregateResult,
         correlation_id: str,
     ) -> RecoveryProposal:
-        recommended_actions = _sanitize_recommended_actions(aggregate.recommended_actions)
+        recommended_actions = _sanitize_recommended_actions(
+            aggregate.recommended_actions
+        )
         proposal = RecoveryProposal(
             failure_trace_report_id=report.id,
             uploaded_video_id=report.uploaded_video_id,
@@ -544,8 +614,11 @@ class PostPublishHealthMonitorService:
                 target_type="failure_trace_report",
                 target_id=report.id,
                 priority=_priority_from_severity(aggregate.severity),
-                reason_code=aggregate.reason_codes[0] if aggregate.reason_codes else "RECOVERY_PROPOSAL_CREATED",
-                next_action=aggregate.next_action or "Review the post-publish diagnostic report.",
+                reason_code=aggregate.reason_codes[0]
+                if aggregate.reason_codes
+                else "RECOVERY_PROPOSAL_CREATED",
+                next_action=aggregate.next_action
+                or "Review the post-publish diagnostic report.",
                 due_at=None,
             ),
             correlation_id="m9-manual-action-from-diagnostic",
@@ -578,7 +651,9 @@ class PostPublishHealthMonitorService:
             raise NotFoundError(f"post-publish health run not found: {run_id}")
         return run
 
-    def list_health_runs_by_uploaded_video(self, uploaded_video_id: uuid.UUID) -> list[PostPublishHealthRun]:
+    def list_health_runs_by_uploaded_video(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[PostPublishHealthRun]:
         _require_uploaded(self.session, uploaded_video_id)
         return list(
             self.session.scalars(
@@ -588,7 +663,9 @@ class PostPublishHealthMonitorService:
             ).all()
         )
 
-    def list_failure_trace_reports_by_uploaded_video(self, uploaded_video_id: uuid.UUID) -> list[FailureTraceReport]:
+    def list_failure_trace_reports_by_uploaded_video(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[FailureTraceReport]:
         _require_uploaded(self.session, uploaded_video_id)
         return list(
             self.session.scalars(
@@ -604,7 +681,9 @@ class PostPublishHealthMonitorService:
             raise NotFoundError(f"failure trace report not found: {report_id}")
         return report
 
-    def list_recovery_proposals_by_uploaded_video(self, uploaded_video_id: uuid.UUID) -> list[RecoveryProposal]:
+    def list_recovery_proposals_by_uploaded_video(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[RecoveryProposal]:
         _require_uploaded(self.session, uploaded_video_id)
         return list(
             self.session.scalars(
@@ -640,7 +719,10 @@ class PostPublishHealthMonitorService:
                 company_id=None,
                 correlation_id=correlation_id,
                 reason_code="RECOVERY_PROPOSAL_CREATED",
-                payload={"proposal_state": proposal.proposal_state, "no_automatic_action": True},
+                payload={
+                    "proposal_state": proposal.proposal_state,
+                    "no_automatic_action": True,
+                },
             )
         return proposal
 
@@ -664,7 +746,10 @@ class PostPublishHealthMonitorService:
                 company_id=None,
                 correlation_id=correlation_id,
                 reason_code="RECOVERY_PROPOSAL_CREATED",
-                payload={"proposal_state": proposal.proposal_state, "no_automatic_action": True},
+                payload={
+                    "proposal_state": proposal.proposal_state,
+                    "no_automatic_action": True,
+                },
             )
         return proposal
 
@@ -682,7 +767,9 @@ class NoViewDiagnosticService:
     ) -> NoViewDiagnosticRun:
         views = _metric(context, "views")
         impressions = _metric(context, "impressions")
-        min_impressions = WINDOW_MIN_IMPRESSIONS.get(run.observation_window, WINDOW_MIN_IMPRESSIONS["CUSTOM"])
+        min_impressions = WINDOW_MIN_IMPRESSIONS.get(
+            run.observation_window, WINDOW_MIN_IMPRESSIONS["CUSTOM"]
+        )
         if context.analytics_snapshot is None:
             state = "DATA_UNAVAILABLE"
             reasons = ["ANALYTICS_DATA_UNAVAILABLE", "NO_DIAGNOSIS_WITHOUT_DATA"]
@@ -696,7 +783,11 @@ class NoViewDiagnosticService:
             next_action = "Chờ hoặc import snapshot có metric views."
             confidence = "LOW"
         elif impressions.availability_state != "AVAILABLE":
-            state = "DATA_UNAVAILABLE" if views.value is not None and views.value <= 0 else "INSUFFICIENT_DATA"
+            state = (
+                "DATA_UNAVAILABLE"
+                if views.value is not None and views.value <= 0
+                else "INSUFFICIENT_DATA"
+            )
             reasons = ["ANALYTICS_DATA_UNAVAILABLE", "NO_DIAGNOSIS_WITHOUT_DATA"]
             summary = "Views thấp nhưng impressions chưa khả dụng, nên không đổ lỗi cho nội dung."
             next_action = "Chờ mốc quan sát tiếp theo hoặc import impressions nếu platform cung cấp."
@@ -711,7 +802,9 @@ class NoViewDiagnosticService:
             state = "NO_VIEW_RISK"
             reasons = ["NO_VIEW_RISK_DETECTED", "REVIEW_TITLE_THUMBNAIL_RECOMMENDED"]
             summary = "Impressions đủ mẫu nhưng views bằng 0; cần xem xét packaging bằng human review."
-            next_action = "Chuẩn bị biến thể title/thumbnail để human review nếu CTR vẫn thấp."
+            next_action = (
+                "Chuẩn bị biến thể title/thumbnail để human review nếu CTR vẫn thấp."
+            )
             confidence = "MEDIUM"
         else:
             state = "HEALTHY"
@@ -719,11 +812,24 @@ class NoViewDiagnosticService:
             summary = "Views và impressions đủ để không xếp video vào nhóm no-view."
             next_action = "Tiếp tục theo dõi ở mốc quan sát kế tiếp."
             confidence = "HIGH"
+        geo_diagnostic = _geo_diagnostic_for_context(context)
+        if geo_diagnostic is not None:
+            reasons = _dedupe(
+                [
+                    *reasons,
+                    *geo_diagnostic.video_reason_codes,
+                    *geo_diagnostic.channel_reason_codes,
+                ]
+            )
         record = NoViewDiagnosticRun(
             post_publish_health_run_id=run.id,
             uploaded_video_id=run.uploaded_video_id,
-            analytics_snapshot_id=context.analytics_snapshot.id if context.analytics_snapshot else None,
-            uploaded_video_metrics_summary_id=context.metrics_summary.id if context.metrics_summary else None,
+            analytics_snapshot_id=context.analytics_snapshot.id
+            if context.analytics_snapshot
+            else None,
+            uploaded_video_metrics_summary_id=context.metrics_summary.id
+            if context.metrics_summary
+            else None,
             observation_window=run.observation_window,
             diagnostic_state=state,
             views=views.value,
@@ -734,7 +840,16 @@ class NoViewDiagnosticService:
                 "zero_is_available": True,
                 "missing_is_not_zero": True,
             },
-            evidence_blob={"min_impressions": min_impressions, "views_ref": views.source_ref, "impressions_ref": impressions.source_ref},
+            evidence_blob={
+                "min_impressions": min_impressions,
+                "views_ref": views.source_ref,
+                "impressions_ref": impressions.source_ref,
+                "geo_diagnostic": (
+                    geo_diagnostic.model_dump(mode="json")
+                    if geo_diagnostic is not None
+                    else None
+                ),
+            },
             confidence_level=confidence,
             reason_codes=reasons,
             operator_summary=summary,
@@ -742,15 +857,50 @@ class NoViewDiagnosticService:
         )
         self.session.add(record)
         self.session.flush()
-        _diagnostic_event(self.session, "no_view_diagnostic.created", record.id, run, correlation_id, reasons[0])
+        _diagnostic_event(
+            self.session,
+            "no_view_diagnostic.created",
+            record.id,
+            run,
+            correlation_id,
+            reasons[0],
+        )
         return record
+
+
+def _geo_diagnostic_for_context(context: DiagnosticContext):
+    snapshot = context.analytics_snapshot
+    if snapshot is None:
+        return None
+    raw = (snapshot.source_metadata or {}).get("geo_distribution_tracker")
+    if raw is None:
+        return None
+    tracker = GeoDistributionTracker.model_validate(raw)
+    if (
+        tracker.uploaded_video_id != context.uploaded.id
+        or snapshot.uploaded_video_id != context.uploaded.id
+        or tracker.analytics_snapshot_id != snapshot.id
+        or tracker.channel_workspace_id != snapshot.channel_workspace_id
+        or tracker.channel_workspace_id != context.uploaded.channel_workspace_id
+        or snapshot.policy_snapshot_id != context.uploaded.policy_snapshot_id
+        or tracker.policy_snapshot_id != context.uploaded.policy_snapshot_id
+        or tracker.policy_snapshot_id != snapshot.policy_snapshot_id
+    ):
+        raise ValidationFailureError("GEO_TRACKER_ANALYTICS_LINEAGE_MISMATCH")
+    return GeoMaturityDiagnosticService().evaluate(tracker=tracker)
 
 
 class PackagingDiagnosticService:
     def __init__(self, session: Session):
         self.session = session
 
-    def run(self, *, run: PostPublishHealthRun, context: DiagnosticContext, correlation_id: str) -> PackagingDiagnosticRun:
+    def run(
+        self,
+        *,
+        run: PostPublishHealthRun,
+        context: DiagnosticContext,
+        correlation_id: str,
+    ) -> PackagingDiagnosticRun:
         impressions = _metric(context, "impressions")
         ctr = _metric(context, "click_through_rate")
         views = _metric(context, "views")
@@ -760,7 +910,10 @@ class PackagingDiagnosticService:
             summary = "Chưa có analytics snapshot nên chưa thể đánh giá CTR."
             next_action = "Import analytics từ M8 trước."
             confidence = "LOW"
-        elif impressions.availability_state != "AVAILABLE" or (impressions.value or 0) < MIN_IMPRESSIONS_FOR_CTR:
+        elif (
+            impressions.availability_state != "AVAILABLE"
+            or (impressions.value or 0) < MIN_IMPRESSIONS_FOR_CTR
+        ):
             state = "INSUFFICIENT_DATA"
             reasons = ["INSUFFICIENT_ANALYTICS_DATA", "NO_DIAGNOSIS_WITHOUT_DATA"]
             summary = "Impressions chưa đủ mẫu để kết luận title/thumbnail."
@@ -787,13 +940,18 @@ class PackagingDiagnosticService:
         record = PackagingDiagnosticRun(
             post_publish_health_run_id=run.id,
             uploaded_video_id=run.uploaded_video_id,
-            analytics_snapshot_id=context.analytics_snapshot.id if context.analytics_snapshot else None,
+            analytics_snapshot_id=context.analytics_snapshot.id
+            if context.analytics_snapshot
+            else None,
             observation_window=run.observation_window,
             diagnostic_state=state,
             impressions=impressions.value,
             click_through_rate=ctr.value,
             views=views.value,
-            evidence_blob={"min_impressions_for_ctr": MIN_IMPRESSIONS_FOR_CTR, "low_ctr_percent": LOW_CTR_PERCENT},
+            evidence_blob={
+                "min_impressions_for_ctr": MIN_IMPRESSIONS_FOR_CTR,
+                "low_ctr_percent": LOW_CTR_PERCENT,
+            },
             confidence_level=confidence,
             reason_codes=reasons,
             operator_summary=summary,
@@ -801,7 +959,14 @@ class PackagingDiagnosticService:
         )
         self.session.add(record)
         self.session.flush()
-        _diagnostic_event(self.session, "packaging_diagnostic.created", record.id, run, correlation_id, reasons[0])
+        _diagnostic_event(
+            self.session,
+            "packaging_diagnostic.created",
+            record.id,
+            run,
+            correlation_id,
+            reasons[0],
+        )
         return record
 
 
@@ -809,12 +974,26 @@ class RetentionDiagnosticService:
     def __init__(self, session: Session):
         self.session = session
 
-    def run(self, *, run: PostPublishHealthRun, context: DiagnosticContext, correlation_id: str) -> RetentionDiagnosticRun:
+    def run(
+        self,
+        *,
+        run: PostPublishHealthRun,
+        context: DiagnosticContext,
+        correlation_id: str,
+    ) -> RetentionDiagnosticRun:
         views = _metric(context, "views")
         avd = _metric(context, "average_view_duration_seconds")
         avp = _metric(context, "average_view_percentage")
-        curve = context.retention_snapshot.curve_points if context.retention_snapshot else []
-        drop = _detect_retention_drop(context.retention_snapshot) if context.retention_snapshot else None
+        curve = (
+            context.retention_snapshot.curve_points
+            if context.retention_snapshot
+            else []
+        )
+        drop = (
+            _detect_retention_drop(context.retention_snapshot)
+            if context.retention_snapshot
+            else None
+        )
         if context.analytics_snapshot is None:
             state = "INSUFFICIENT_DATA"
             reasons = ["ANALYTICS_DATA_UNAVAILABLE", "NO_DIAGNOSIS_WITHOUT_DATA"]
@@ -822,7 +1001,10 @@ class RetentionDiagnosticService:
             next_action = "Import analytics từ M8 trước."
             confidence = "LOW"
             scene_alignment: list[dict[str, Any]] = []
-        elif views.availability_state == "AVAILABLE" and (views.value or 0) < MIN_VIEWS_FOR_RETENTION:
+        elif (
+            views.availability_state == "AVAILABLE"
+            and (views.value or 0) < MIN_VIEWS_FOR_RETENTION
+        ):
             state = "INSUFFICIENT_DATA"
             reasons = ["INSUFFICIENT_ANALYTICS_DATA", "NO_DIAGNOSIS_WITHOUT_DATA"]
             summary = "Mẫu views còn nhỏ, chưa nên kết luận retention."
@@ -833,17 +1015,30 @@ class RetentionDiagnosticService:
             state = "EARLY_DROP"
             reasons = ["EARLY_RETENTION_DROP_DETECTED", "REVIEW_HOOK_RECOMMENDED"]
             summary = "Người xem rời sớm ở đoạn mở đầu."
-            next_action = "Review hook section và ghi edit note cho phiên bản tương lai."
+            next_action = (
+                "Review hook section và ghi edit note cho phiên bản tương lai."
+            )
             confidence = "MEDIUM"
-            scene_alignment = _align_drop_to_scene(context.retention_snapshot, drop["time_seconds"])
+            scene_alignment = _align_drop_to_scene(
+                context.retention_snapshot, drop["time_seconds"]
+            )
         elif drop is not None and drop["state"] == "MID_VIDEO_DROP":
             state = "MID_VIDEO_DROP"
-            reasons = ["MID_VIDEO_RETENTION_DROP_DETECTED", "REVIEW_RETENTION_SECTION_RECOMMENDED"]
+            reasons = [
+                "MID_VIDEO_RETENTION_DROP_DETECTED",
+                "REVIEW_RETENTION_SECTION_RECOMMENDED",
+            ]
             summary = "Retention tụt rõ ở phần giữa video."
             next_action = f"Review đoạn quanh {int(drop['time_seconds'])}s và ghi edit note cho phiên bản tương lai."
             confidence = "MEDIUM"
-            scene_alignment = _align_drop_to_scene(context.retention_snapshot, drop["time_seconds"])
-        elif curve or avd.availability_state == "AVAILABLE" or avp.availability_state == "AVAILABLE":
+            scene_alignment = _align_drop_to_scene(
+                context.retention_snapshot, drop["time_seconds"]
+            )
+        elif (
+            curve
+            or avd.availability_state == "AVAILABLE"
+            or avp.availability_state == "AVAILABLE"
+        ):
             state = "HEALTHY"
             reasons = ["POST_PUBLISH_HEALTH_COMPLETED"]
             summary = "Retention chưa có dấu hiệu tụt mạnh trong dữ liệu hiện có."
@@ -860,13 +1055,21 @@ class RetentionDiagnosticService:
         record = RetentionDiagnosticRun(
             post_publish_health_run_id=run.id,
             uploaded_video_id=run.uploaded_video_id,
-            analytics_snapshot_id=context.analytics_snapshot.id if context.analytics_snapshot else None,
-            retention_curve_snapshot_id=context.retention_snapshot.id if context.retention_snapshot else None,
+            analytics_snapshot_id=context.analytics_snapshot.id
+            if context.analytics_snapshot
+            else None,
+            retention_curve_snapshot_id=context.retention_snapshot.id
+            if context.retention_snapshot
+            else None,
             observation_window=run.observation_window,
             diagnostic_state=state,
             average_view_duration_seconds=avd.value,
             average_view_percentage=avp.value,
-            evidence_blob={"curve_point_count": len(curve), "min_views_for_retention": MIN_VIEWS_FOR_RETENTION, "drop": drop},
+            evidence_blob={
+                "curve_point_count": len(curve),
+                "min_views_for_retention": MIN_VIEWS_FOR_RETENTION,
+                "drop": drop,
+            },
             scene_alignment=scene_alignment,
             confidence_level=confidence,
             reason_codes=reasons,
@@ -875,7 +1078,14 @@ class RetentionDiagnosticService:
         )
         self.session.add(record)
         self.session.flush()
-        _diagnostic_event(self.session, "retention_diagnostic.created", record.id, run, correlation_id, reasons[0])
+        _diagnostic_event(
+            self.session,
+            "retention_diagnostic.created",
+            record.id,
+            run,
+            correlation_id,
+            reasons[0],
+        )
         return record
 
 
@@ -883,7 +1093,13 @@ class EngagementDiagnosticService:
     def __init__(self, session: Session):
         self.session = session
 
-    def run(self, *, run: PostPublishHealthRun, context: DiagnosticContext, correlation_id: str) -> EngagementDiagnosticRun:
+    def run(
+        self,
+        *,
+        run: PostPublishHealthRun,
+        context: DiagnosticContext,
+        correlation_id: str,
+    ) -> EngagementDiagnosticRun:
         views = _metric(context, "views")
         rate = _metric(context, "engagement_rate")
         metrics = _engagement_metrics(context)
@@ -893,10 +1109,15 @@ class EngagementDiagnosticService:
             summary = "Chưa có analytics snapshot nên chưa thể đánh giá engagement."
             next_action = "Import analytics từ M8 trước."
             confidence = "LOW"
-        elif views.availability_state != "AVAILABLE" or (views.value or 0) < MIN_VIEWS_FOR_ENGAGEMENT:
+        elif (
+            views.availability_state != "AVAILABLE"
+            or (views.value or 0) < MIN_VIEWS_FOR_ENGAGEMENT
+        ):
             state = "INSUFFICIENT_DATA"
             reasons = ["INSUFFICIENT_ANALYTICS_DATA", "NO_DIAGNOSIS_WITHOUT_DATA"]
-            summary = "Mẫu views còn nhỏ, chưa nên kết luận audience fit hay engagement."
+            summary = (
+                "Mẫu views còn nhỏ, chưa nên kết luận audience fit hay engagement."
+            )
             next_action = "Chờ thêm dữ liệu."
             confidence = "LOW"
         elif rate.availability_state != "AVAILABLE":
@@ -920,12 +1141,19 @@ class EngagementDiagnosticService:
         record = EngagementDiagnosticRun(
             post_publish_health_run_id=run.id,
             uploaded_video_id=run.uploaded_video_id,
-            analytics_snapshot_id=context.analytics_snapshot.id if context.analytics_snapshot else None,
-            engagement_snapshot_id=context.engagement_snapshot.id if context.engagement_snapshot else None,
+            analytics_snapshot_id=context.analytics_snapshot.id
+            if context.analytics_snapshot
+            else None,
+            engagement_snapshot_id=context.engagement_snapshot.id
+            if context.engagement_snapshot
+            else None,
             observation_window=run.observation_window,
             diagnostic_state=state,
             engagement_metrics=metrics,
-            evidence_blob={"min_views_for_engagement": MIN_VIEWS_FOR_ENGAGEMENT, "low_engagement_rate": LOW_ENGAGEMENT_RATE},
+            evidence_blob={
+                "min_views_for_engagement": MIN_VIEWS_FOR_ENGAGEMENT,
+                "low_engagement_rate": LOW_ENGAGEMENT_RATE,
+            },
             confidence_level=confidence,
             reason_codes=reasons,
             operator_summary=summary,
@@ -933,7 +1161,14 @@ class EngagementDiagnosticService:
         )
         self.session.add(record)
         self.session.flush()
-        _diagnostic_event(self.session, "engagement_diagnostic.created", record.id, run, correlation_id, reasons[0])
+        _diagnostic_event(
+            self.session,
+            "engagement_diagnostic.created",
+            record.id,
+            run,
+            correlation_id,
+            reasons[0],
+        )
         return record
 
 
@@ -941,18 +1176,32 @@ class PolicyRightsDiagnosticService:
     def __init__(self, session: Session):
         self.session = session
 
-    def run(self, *, run: PostPublishHealthRun, context: DiagnosticContext, correlation_id: str) -> PolicyRightsDiagnosticRun:
+    def run(
+        self,
+        *,
+        run: PostPublishHealthRun,
+        context: DiagnosticContext,
+        correlation_id: str,
+    ) -> PolicyRightsDiagnosticRun:
         disclosures = dict(context.uploaded.actual_disclosures or {})
         reasons: list[str] = []
-        if "ai_disclosure_confirmed" not in disclosures or disclosures.get("ai_disclosure_confirmed") is None:
+        if (
+            "ai_disclosure_confirmed" not in disclosures
+            or disclosures.get("ai_disclosure_confirmed") is None
+        ):
             reasons.append("DISCLOSURE_REVIEW_REQUIRED")
         if disclosures.get("rights_confirmed") is not True:
             reasons.append("RIGHTS_REVIEW_REQUIRED")
-        if disclosures.get("music_license_confirmed") is False or disclosures.get("stock_license_confirmed") is False:
+        if (
+            disclosures.get("music_license_confirmed") is False
+            or disclosures.get("stock_license_confirmed") is False
+        ):
             reasons.append("POLICY_REVIEW_REQUIRED")
         if reasons:
             state = "REVIEW_REQUIRED"
-            summary = "Cần kiểm tra quyền, nhạc, disclosure hoặc policy dựa trên dữ liệu M7."
+            summary = (
+                "Cần kiểm tra quyền, nhạc, disclosure hoặc policy dựa trên dữ liệu M7."
+            )
             next_action = "Human review disclosure/license confirmation; không tự sửa hoặc takedown trên platform."
             confidence = "HIGH"
             reasons = _dedupe([*reasons, "POLICY_RIGHTS_REVIEW_REQUIRED"])
@@ -971,8 +1220,12 @@ class PolicyRightsDiagnosticService:
             rights_envelope_ref=context.uploaded.rights_envelope_ref,
             actual_disclosures=disclosures,
             evidence_blob={
-                "manual_publish_confirmation_id": str(context.uploaded.manual_publish_confirmation_id),
-                "publish_handoff_package_id": str(context.uploaded.publish_handoff_package_id),
+                "manual_publish_confirmation_id": str(
+                    context.uploaded.manual_publish_confirmation_id
+                ),
+                "publish_handoff_package_id": str(
+                    context.uploaded.publish_handoff_package_id
+                ),
                 "no_platform_scraping": True,
             },
             confidence_level=confidence,
@@ -982,25 +1235,55 @@ class PolicyRightsDiagnosticService:
         )
         self.session.add(record)
         self.session.flush()
-        _diagnostic_event(self.session, "policy_rights_diagnostic.created", record.id, run, correlation_id, reasons[0])
+        _diagnostic_event(
+            self.session,
+            "policy_rights_diagnostic.created",
+            record.id,
+            run,
+            correlation_id,
+            reasons[0],
+        )
         return record
 
 
-def _load_context(session: Session, uploaded_video_id: uuid.UUID, observation_window: str) -> DiagnosticContext:
+def _load_context(
+    session: Session, uploaded_video_id: uuid.UUID, observation_window: str
+) -> DiagnosticContext:
     uploaded = _require_uploaded(session, uploaded_video_id)
     summary = session.scalars(
-        select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id)
+        select(UploadedVideoMetricsSummary).where(
+            UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id
+        )
     ).one_or_none()
-    analytics = session.get(AnalyticsSnapshot, summary.latest_analytics_snapshot_id) if summary and summary.latest_analytics_snapshot_id else None
+    analytics = (
+        session.get(AnalyticsSnapshot, summary.latest_analytics_snapshot_id)
+        if summary and summary.latest_analytics_snapshot_id
+        else None
+    )
     if analytics is None:
         analytics = session.scalars(
             select(AnalyticsSnapshot)
             .where(AnalyticsSnapshot.uploaded_video_id == uploaded.id)
-            .order_by(AnalyticsSnapshot.captured_at.desc(), AnalyticsSnapshot.created_at.desc())
+            .order_by(
+                AnalyticsSnapshot.captured_at.desc(),
+                AnalyticsSnapshot.created_at.desc(),
+            )
         ).first()
-    retention = session.get(RetentionCurveSnapshot, summary.latest_retention_curve_snapshot_id) if summary and summary.latest_retention_curve_snapshot_id else None
-    traffic = session.get(TrafficSourceSnapshot, summary.latest_traffic_source_snapshot_id) if summary and summary.latest_traffic_source_snapshot_id else None
-    engagement = session.get(EngagementSnapshot, summary.latest_engagement_snapshot_id) if summary and summary.latest_engagement_snapshot_id else None
+    retention = (
+        session.get(RetentionCurveSnapshot, summary.latest_retention_curve_snapshot_id)
+        if summary and summary.latest_retention_curve_snapshot_id
+        else None
+    )
+    traffic = (
+        session.get(TrafficSourceSnapshot, summary.latest_traffic_source_snapshot_id)
+        if summary and summary.latest_traffic_source_snapshot_id
+        else None
+    )
+    engagement = (
+        session.get(EngagementSnapshot, summary.latest_engagement_snapshot_id)
+        if summary and summary.latest_engagement_snapshot_id
+        else None
+    )
     if analytics is not None:
         if retention is None:
             retention = session.scalars(
@@ -1020,7 +1303,9 @@ def _load_context(session: Session, uploaded_video_id: uuid.UUID, observation_wi
                 .where(EngagementSnapshot.analytics_snapshot_id == analytics.id)
                 .order_by(EngagementSnapshot.created_at.desc())
             ).first()
-    window = ObservationWindowService(session).get_window(uploaded.id, observation_window)
+    window = ObservationWindowService(session).get_window(
+        uploaded.id, observation_window
+    )
     return DiagnosticContext(
         uploaded=uploaded,
         observation_window=observation_window,
@@ -1033,7 +1318,9 @@ def _load_context(session: Session, uploaded_video_id: uuid.UUID, observation_wi
     )
 
 
-def _aggregate_diagnostics(context: DiagnosticContext, diagnostics: dict[str, Any]) -> AggregateResult:
+def _aggregate_diagnostics(
+    context: DiagnosticContext, diagnostics: dict[str, Any]
+) -> AggregateResult:
     policy = diagnostics["policy_rights"]
     no_view = diagnostics["no_view"]
     packaging = diagnostics["packaging"]
@@ -1058,10 +1345,14 @@ def _aggregate_diagnostics(context: DiagnosticContext, diagnostics: dict[str, An
             recommended_actions=["check disclosure/license confirmation"],
             risk_level="HIGH",
         )
-    if context.analytics_snapshot is None or any(
-        item.diagnostic_state in {"DATA_UNAVAILABLE", "INSUFFICIENT_DATA"}
-        for item in [no_view, packaging, retention, engagement]
-    ) and no_view.diagnostic_state in {"DATA_UNAVAILABLE", "INSUFFICIENT_DATA"}:
+    if (
+        context.analytics_snapshot is None
+        or any(
+            item.diagnostic_state in {"DATA_UNAVAILABLE", "INSUFFICIENT_DATA"}
+            for item in [no_view, packaging, retention, engagement]
+        )
+        and no_view.diagnostic_state in {"DATA_UNAVAILABLE", "INSUFFICIENT_DATA"}
+    ):
         return AggregateResult(
             run_state="INSUFFICIENT_DATA",
             health_state="INSUFFICIENT_DATA",
@@ -1072,7 +1363,11 @@ def _aggregate_diagnostics(context: DiagnosticContext, diagnostics: dict[str, An
             secondary_suspected_causes=[],
             operator_summary="Video đang có ít dữ liệu hơn cần thiết; chưa đủ để kết luận.",
             next_action="Chờ mốc quan sát tiếp theo hoặc import thêm analytics từ M8.",
-            reason_codes=["INSUFFICIENT_ANALYTICS_DATA", "NO_DIAGNOSIS_WITHOUT_DATA", "WAIT_AND_MONITOR_RECOMMENDED"],
+            reason_codes=[
+                "INSUFFICIENT_ANALYTICS_DATA",
+                "NO_DIAGNOSIS_WITHOUT_DATA",
+                "WAIT_AND_MONITOR_RECOMMENDED",
+            ],
             evidence_plain_text=evidence,
             proposal_type="WAIT_AND_MONITOR",
             recommended_actions=["wait until next observation window"],
@@ -1110,7 +1405,10 @@ def _aggregate_diagnostics(context: DiagnosticContext, diagnostics: dict[str, An
             reason_codes=_dedupe([*no_view.reason_codes, "NO_REUPLOAD_RECOMMENDED"]),
             evidence_plain_text=evidence,
             proposal_type="REVIEW_TITLE_THUMBNAIL",
-            recommended_actions=["review title/thumbnail manually", "prepare packaging variant draft"],
+            recommended_actions=[
+                "review title/thumbnail manually",
+                "prepare packaging variant draft",
+            ],
             risk_level="MEDIUM",
         )
     if packaging.diagnostic_state == "LOW_CTR":
@@ -1127,7 +1425,10 @@ def _aggregate_diagnostics(context: DiagnosticContext, diagnostics: dict[str, An
             reason_codes=_dedupe([*packaging.reason_codes, "NO_REUPLOAD_RECOMMENDED"]),
             evidence_plain_text=evidence,
             proposal_type="REVIEW_TITLE_THUMBNAIL",
-            recommended_actions=["review title/thumbnail manually", "prepare packaging variant draft"],
+            recommended_actions=[
+                "review title/thumbnail manually",
+                "prepare packaging variant draft",
+            ],
             risk_level="MEDIUM",
         )
     if retention.diagnostic_state == "EARLY_DROP":
@@ -1204,19 +1505,37 @@ def _metric(context: DiagnosticContext, key: str) -> MetricRead:
     if context.analytics_snapshot is not None:
         availability = context.analytics_snapshot.metric_availability or {}
     elif context.metrics_summary is not None:
-        availability = (context.metrics_summary.availability_summary or {}).get("availability", {})
-    state = (availability.get(key) or {}).get("state", "UNKNOWN") if isinstance(availability, dict) else "UNKNOWN"
+        availability = (context.metrics_summary.availability_summary or {}).get(
+            "availability", {}
+        )
+    state = (
+        (availability.get(key) or {}).get("state", "UNKNOWN")
+        if isinstance(availability, dict)
+        else "UNKNOWN"
+    )
     if context.analytics_snapshot is not None:
         normalized = context.analytics_snapshot.normalized_metrics_blob or {}
         if key in normalized:
-            return MetricRead(value=_as_float(normalized[key].get("value")), availability_state="AVAILABLE", source_ref=f"analytics_snapshots.{context.analytics_snapshot.id}.{key}")
+            return MetricRead(
+                value=_as_float(normalized[key].get("value")),
+                availability_state="AVAILABLE",
+                source_ref=f"analytics_snapshots.{context.analytics_snapshot.id}.{key}",
+            )
         raw = context.analytics_snapshot.metrics_blob or {}
         if key in raw:
-            return MetricRead(value=_as_float(raw[key]), availability_state="AVAILABLE", source_ref=f"analytics_snapshots.{context.analytics_snapshot.id}.metrics_blob.{key}")
+            return MetricRead(
+                value=_as_float(raw[key]),
+                availability_state="AVAILABLE",
+                source_ref=f"analytics_snapshots.{context.analytics_snapshot.id}.metrics_blob.{key}",
+            )
     if context.metrics_summary is not None:
         metrics = context.metrics_summary.metrics_summary or {}
         if key in metrics:
-            return MetricRead(value=_as_float(metrics[key].get("value")), availability_state="AVAILABLE", source_ref=f"uploaded_video_metrics_summaries.{context.metrics_summary.id}.{key}")
+            return MetricRead(
+                value=_as_float(metrics[key].get("value")),
+                availability_state="AVAILABLE",
+                source_ref=f"uploaded_video_metrics_summaries.{context.metrics_summary.id}.{key}",
+            )
     return MetricRead(value=None, availability_state=state, source_ref=None)
 
 
@@ -1224,14 +1543,26 @@ def _engagement_metrics(context: DiagnosticContext) -> dict[str, Any]:
     if context.engagement_snapshot is not None:
         return context.engagement_snapshot.engagement_blob
     keys = ("likes", "comments", "shares", "saves", "bookmarks", "engagement_rate")
-    return {key: {"value": _metric(context, key).value, "state": _metric(context, key).availability_state} for key in keys}
+    return {
+        key: {
+            "value": _metric(context, key).value,
+            "state": _metric(context, key).availability_state,
+        }
+        for key in keys
+    }
 
 
-def _detect_retention_drop(retention: RetentionCurveSnapshot | None) -> dict[str, Any] | None:
+def _detect_retention_drop(
+    retention: RetentionCurveSnapshot | None,
+) -> dict[str, Any] | None:
     if retention is None or not retention.curve_points:
         return None
-    points = sorted(retention.curve_points, key=lambda item: float(item.get("time_seconds", 0)))
-    baseline = next((point for point in points if point.get("retention_percent") is not None), None)
+    points = sorted(
+        retention.curve_points, key=lambda item: float(item.get("time_seconds", 0))
+    )
+    baseline = next(
+        (point for point in points if point.get("retention_percent") is not None), None
+    )
     if baseline is None:
         return None
     duration = float(retention.duration_seconds or points[-1].get("time_seconds") or 0)
@@ -1244,20 +1575,38 @@ def _detect_retention_drop(retention: RetentionCurveSnapshot | None) -> dict[str
         percent = float(point.get("retention_percent") or 0)
         drop_from_baseline = previous_percent - percent
         if time_seconds <= early_limit and (percent < 55 or drop_from_baseline >= 35):
-            return {"state": "EARLY_DROP", "time_seconds": time_seconds, "retention_percent": percent}
+            return {
+                "state": "EARLY_DROP",
+                "time_seconds": time_seconds,
+                "retention_percent": percent,
+            }
         if time_seconds > early_limit and (percent < 40 or drop_from_baseline >= 35):
-            return {"state": "MID_VIDEO_DROP", "time_seconds": time_seconds, "retention_percent": percent}
+            return {
+                "state": "MID_VIDEO_DROP",
+                "time_seconds": time_seconds,
+                "retention_percent": percent,
+            }
         previous_percent = percent
     return None
 
 
-def _align_drop_to_scene(retention: RetentionCurveSnapshot | None, time_seconds: float) -> list[dict[str, Any]]:
+def _align_drop_to_scene(
+    retention: RetentionCurveSnapshot | None, time_seconds: float
+) -> list[dict[str, Any]]:
     if retention is None:
         return []
-    refs = retention.timeline_alignment.get("scene_refs", []) if isinstance(retention.timeline_alignment, dict) else []
+    refs = (
+        retention.timeline_alignment.get("scene_refs", [])
+        if isinstance(retention.timeline_alignment, dict)
+        else []
+    )
     if not isinstance(refs, list):
         return []
-    candidates = [item for item in refs if isinstance(item, dict) and item.get("time_seconds") is not None]
+    candidates = [
+        item
+        for item in refs
+        if isinstance(item, dict) and item.get("time_seconds") is not None
+    ]
     candidates.sort(key=lambda item: float(item["time_seconds"]))
     selected = None
     for item in candidates:
@@ -1288,27 +1637,46 @@ def _evidence_refs(context: DiagnosticContext) -> list[dict[str, Any]]:
         {"type": "PublishHandoff", "id": str(uploaded.publish_handoff_package_id)},
     ]
     if context.analytics_snapshot:
-        refs.append({"type": "AnalyticsSnapshot", "id": str(context.analytics_snapshot.id)})
+        refs.append(
+            {"type": "AnalyticsSnapshot", "id": str(context.analytics_snapshot.id)}
+        )
     if context.metrics_summary:
-        refs.append({"type": "UploadedVideoMetricsSummary", "id": str(context.metrics_summary.id)})
+        refs.append(
+            {
+                "type": "UploadedVideoMetricsSummary",
+                "id": str(context.metrics_summary.id),
+            }
+        )
     if context.retention_snapshot:
-        refs.append({"type": "RetentionCurveSnapshot", "id": str(context.retention_snapshot.id)})
+        refs.append(
+            {"type": "RetentionCurveSnapshot", "id": str(context.retention_snapshot.id)}
+        )
     if context.traffic_snapshot:
-        refs.append({"type": "TrafficSourceSnapshot", "id": str(context.traffic_snapshot.id)})
+        refs.append(
+            {"type": "TrafficSourceSnapshot", "id": str(context.traffic_snapshot.id)}
+        )
     if context.engagement_snapshot:
-        refs.append({"type": "EngagementSnapshot", "id": str(context.engagement_snapshot.id)})
+        refs.append(
+            {"type": "EngagementSnapshot", "id": str(context.engagement_snapshot.id)}
+        )
     if uploaded.source_manifest_snapshot_id:
-        refs.append({"type": "SourceManifest", "id": str(uploaded.source_manifest_snapshot_id)})
+        refs.append(
+            {"type": "SourceManifest", "id": str(uploaded.source_manifest_snapshot_id)}
+        )
     if lineage.get("media_qc_report_id"):
         refs.append({"type": "MediaQC", "id": lineage["media_qc_report_id"]})
     if lineage.get("accessibility_qc_report_id"):
-        refs.append({"type": "AccessibilityQC", "id": lineage["accessibility_qc_report_id"]})
+        refs.append(
+            {"type": "AccessibilityQC", "id": lineage["accessibility_qc_report_id"]}
+        )
     if uploaded.rights_envelope_ref:
         refs.append({"type": "RightsEnvelope", "id": uploaded.rights_envelope_ref})
     return refs
 
 
-def _evidence_plain_text(context: DiagnosticContext, diagnostics: dict[str, Any]) -> list[str]:
+def _evidence_plain_text(
+    context: DiagnosticContext, diagnostics: dict[str, Any]
+) -> list[str]:
     views = _metric(context, "views")
     impressions = _metric(context, "impressions")
     ctr = _metric(context, "click_through_rate")
@@ -1324,17 +1692,23 @@ def _evidence_plain_text(context: DiagnosticContext, diagnostics: dict[str, Any]
     else:
         lines.append("No AnalyticsSnapshot available.")
     for name, diagnostic in diagnostics.items():
-        lines.append(f"{name}: {diagnostic.diagnostic_state} - {diagnostic.operator_summary}")
+        lines.append(
+            f"{name}: {diagnostic.diagnostic_state} - {diagnostic.operator_summary}"
+        )
     return lines
 
 
-def _operator_report(run: PostPublishHealthRun, aggregate: AggregateResult) -> dict[str, Any]:
+def _operator_report(
+    run: PostPublishHealthRun, aggregate: AggregateResult
+) -> dict[str, Any]:
     return {
         "operator_summary": aggregate.operator_summary,
         "friendly_status": _friendly_status(aggregate.primary_status),
         "severity_label": _friendly_severity(aggregate.severity),
         "confidence_label": _friendly_confidence(aggregate.confidence_level),
-        "likely_cause_label": DIAGNOSTIC_TAXONOMY.get(aggregate.primary_suspected_cause or "", aggregate.primary_suspected_cause),
+        "likely_cause_label": DIAGNOSTIC_TAXONOMY.get(
+            aggregate.primary_suspected_cause or "", aggregate.primary_suspected_cause
+        ),
         "evidence_plain_text": aggregate.evidence_plain_text,
         "next_action": aggregate.next_action,
         "do_not_do": DO_NOT_DO_DEFAULT,
@@ -1363,15 +1737,31 @@ def _friendly_status(status: str) -> str:
 
 
 def _friendly_severity(severity: str) -> str:
-    return {"INFO": "Thông tin", "LOW": "Thấp", "MEDIUM": "Trung bình", "HIGH": "Cao", "CRITICAL": "Rất cao"}.get(severity, severity)
+    return {
+        "INFO": "Thông tin",
+        "LOW": "Thấp",
+        "MEDIUM": "Trung bình",
+        "HIGH": "Cao",
+        "CRITICAL": "Rất cao",
+    }.get(severity, severity)
 
 
 def _friendly_confidence(confidence: str) -> str:
-    return {"HIGH": "Cao", "MEDIUM": "Trung bình", "LOW": "Thấp", "UNKNOWN": "Chưa rõ"}.get(confidence, confidence)
+    return {
+        "HIGH": "Cao",
+        "MEDIUM": "Trung bình",
+        "LOW": "Thấp",
+        "UNKNOWN": "Chưa rõ",
+    }.get(confidence, confidence)
 
 
 def _owner_role(proposal_type: str) -> str | None:
-    if proposal_type in {"REVIEW_TITLE_THUMBNAIL", "REVIEW_HOOK", "REVIEW_RETENTION_SECTION", "CREATE_FUTURE_VARIANT"}:
+    if proposal_type in {
+        "REVIEW_TITLE_THUMBNAIL",
+        "REVIEW_HOOK",
+        "REVIEW_RETENTION_SECTION",
+        "CREATE_FUTURE_VARIANT",
+    }:
         return "operator"
     if proposal_type in {"REVIEW_RIGHTS_DISCLOSURE", "REVIEW_SOURCE_QUALITY"}:
         return "company_admin"
@@ -1380,11 +1770,22 @@ def _owner_role(proposal_type: str) -> str | None:
 
 def _checklist_for_proposal(proposal_type: str) -> list[str]:
     mapping = {
-        "WAIT_AND_MONITOR": ["Chờ mốc quan sát tiếp theo", "Import analytics từ M8 nếu có", "Không re-upload"],
-        "REVIEW_TITLE_THUMBNAIL": ["Review title", "Review thumbnail", "Draft variant để human approve"],
+        "WAIT_AND_MONITOR": [
+            "Chờ mốc quan sát tiếp theo",
+            "Import analytics từ M8 nếu có",
+            "Không re-upload",
+        ],
+        "REVIEW_TITLE_THUMBNAIL": [
+            "Review title",
+            "Review thumbnail",
+            "Draft variant để human approve",
+        ],
         "REVIEW_HOOK": ["Review 0-10s", "Ghi edit note cho phiên bản tương lai"],
         "REVIEW_RETENTION_SECTION": ["Review scene/time range", "Ghi pacing note"],
-        "REVIEW_RIGHTS_DISCLOSURE": ["Kiểm tra disclosure", "Kiểm tra rights/license evidence"],
+        "REVIEW_RIGHTS_DISCLOSURE": [
+            "Kiểm tra disclosure",
+            "Kiểm tra rights/license evidence",
+        ],
         "NO_ACTION": ["Không cần hành động"],
     }
     return mapping.get(proposal_type, ["Human review"])
@@ -1415,7 +1816,13 @@ def _sanitize_recommended_actions(actions: list[str]) -> list[str]:
 
 
 def _priority_from_severity(severity: str) -> str:
-    return {"CRITICAL": "URGENT", "HIGH": "HIGH", "MEDIUM": "MEDIUM", "LOW": "LOW", "INFO": "LOW"}.get(severity, "MEDIUM")
+    return {
+        "CRITICAL": "URGENT",
+        "HIGH": "HIGH",
+        "MEDIUM": "MEDIUM",
+        "LOW": "LOW",
+        "INFO": "LOW",
+    }.get(severity, "MEDIUM")
 
 
 def _metric_values_for_appendix(context: DiagnosticContext) -> dict[str, Any]:
@@ -1427,16 +1834,32 @@ def _metric_values_for_appendix(context: DiagnosticContext) -> dict[str, Any]:
         "average_view_percentage",
         "engagement_rate",
     ]
-    return {key: {"value": _metric(context, key).value, "availability": _metric(context, key).availability_state} for key in keys}
+    return {
+        key: {
+            "value": _metric(context, key).value,
+            "availability": _metric(context, key).availability_state,
+        }
+        for key in keys
+    }
 
 
 def _snapshot_refs(context: DiagnosticContext) -> dict[str, str | None]:
     return {
-        "analytics_snapshot_id": str(context.analytics_snapshot.id) if context.analytics_snapshot else None,
-        "uploaded_video_metrics_summary_id": str(context.metrics_summary.id) if context.metrics_summary else None,
-        "retention_curve_snapshot_id": str(context.retention_snapshot.id) if context.retention_snapshot else None,
-        "traffic_source_snapshot_id": str(context.traffic_snapshot.id) if context.traffic_snapshot else None,
-        "engagement_snapshot_id": str(context.engagement_snapshot.id) if context.engagement_snapshot else None,
+        "analytics_snapshot_id": str(context.analytics_snapshot.id)
+        if context.analytics_snapshot
+        else None,
+        "uploaded_video_metrics_summary_id": str(context.metrics_summary.id)
+        if context.metrics_summary
+        else None,
+        "retention_curve_snapshot_id": str(context.retention_snapshot.id)
+        if context.retention_snapshot
+        else None,
+        "traffic_source_snapshot_id": str(context.traffic_snapshot.id)
+        if context.traffic_snapshot
+        else None,
+        "engagement_snapshot_id": str(context.engagement_snapshot.id)
+        if context.engagement_snapshot
+        else None,
     }
 
 
@@ -1448,9 +1871,13 @@ def _lineage_refs(uploaded: UploadedVideo) -> dict[str, Any]:
             "video_project_id": str(uploaded.video_project_id),
             "policy_snapshot_id": str(uploaded.policy_snapshot_id),
             "publish_handoff_package_id": str(uploaded.publish_handoff_package_id),
-            "manual_publish_confirmation_id": str(uploaded.manual_publish_confirmation_id),
+            "manual_publish_confirmation_id": str(
+                uploaded.manual_publish_confirmation_id
+            ),
             "render_package_snapshot_id": str(uploaded.render_package_snapshot_id),
-            "source_manifest_snapshot_id": str(uploaded.source_manifest_snapshot_id) if uploaded.source_manifest_snapshot_id else None,
+            "source_manifest_snapshot_id": str(uploaded.source_manifest_snapshot_id)
+            if uploaded.source_manifest_snapshot_id
+            else None,
             "rights_envelope_ref": uploaded.rights_envelope_ref,
         }
     )
@@ -1482,7 +1909,10 @@ def _diagnostic_event(
         company_id=run.company_id,
         correlation_id=correlation_id,
         reason_code=reason_code,
-        payload={"post_publish_health_run_id": str(run.id), "uploaded_video_id": str(run.uploaded_video_id)},
+        payload={
+            "post_publish_health_run_id": str(run.id),
+            "uploaded_video_id": str(run.uploaded_video_id),
+        },
     )
 
 
@@ -1529,16 +1959,38 @@ def _record_m9_event(
     )
 
 
-SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
-RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_")
+SECRET_KEY_FRAGMENTS = {
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential_value",
+}
+RAW_SECRET_MARKERS = (
+    "sk-",
+    "pk_live_",
+    "BEGIN PRIVATE KEY",
+    "anthropic-",
+    "xoxb-",
+    "ghp_",
+)
 
 
 def _ensure_no_secret_payload(value: Any) -> None:
     for key, item in _walk_items(value):
         normalized = key.lower().replace("-", "_")
-        if any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS) and normalized != "secret_ref":
-            raise ValidationFailureError(f"secret-like payload key is not allowed: {key}")
-        if isinstance(item, str) and any(marker in item for marker in RAW_SECRET_MARKERS):
+        if (
+            any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS)
+            and normalized != "secret_ref"
+        ):
+            raise ValidationFailureError(
+                f"secret-like payload key is not allowed: {key}"
+            )
+        if isinstance(item, str) and any(
+            marker in item for marker in RAW_SECRET_MARKERS
+        ):
             raise ValidationFailureError("raw secret-like value is not allowed")
 
 
