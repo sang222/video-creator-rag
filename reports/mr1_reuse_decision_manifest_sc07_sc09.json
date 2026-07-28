@@ -1,0 +1,63 @@
+{
+  "schema_version": "mr1.sc07-sc09-reuse-decision-manifest.v1",
+  "source_run_id": "b932773c-4049-482a-8827-6933d924c34f",
+  "target_revision_id": "3b802f4b-44eb-51cd-8254-3cbce868de81",
+  "target_package_content_hash": "94cf5cca14f9ca60cf41714f324fa465c0aaa18cd7f28ea4f54756b148694eb0",
+  "decisions": [
+    {
+      "operation_key": "elevenlabs:narration",
+      "classification": "REUSE_VALID",
+      "request_hash": "56fcf5b846a53b11b65ce4ba55df7e0aec607b7654cd133bdae540395b22191f",
+      "artifact_checksum": "1fb69c621efbd2a4e84cc352432d0eaf6b69ef74ade0c23d1e85a64031694ffd",
+      "proof": "script/text and voice policy unchanged; exact checksum retained"
+    },
+    {
+      "operation_key": "elevenlabs:forced_alignment",
+      "classification": "REUSE_VALID",
+      "request_hash": "6be543fc3f98be26cd14b365828d3554c3957db4fb6bd067877d307678c591e1",
+      "artifact_checksum": "9179c35b4bbcb6b1c412f753d99cfd915fecc3ef1dcd64a62a3a8115c079e95c",
+      "proof": "audio and SpokenTextNormalized authorities unchanged"
+    },
+    {
+      "operation_key": "pexels:SC-07",
+      "classification": "INVALIDATED_BY_REVISION",
+      "historical_state": "CONSUMED_FAILED"
+    },
+    {
+      "operation_key": "pexels:SC-07:supplement:02",
+      "classification": "INVALIDATED_BY_REVISION",
+      "historical_state": "CONSUMED_FAILED"
+    },
+    {
+      "operation_key": "pexels:SC-09",
+      "classification": "INVALIDATED_BY_REVISION",
+      "historical_state": "PLANNED_NOT_SUBMITTED"
+    },
+    {
+      "operation_key": "native:SC-07",
+      "classification": "REQUIRES_LOCAL_COMPILATION_RENDER",
+      "route": "NATIVE_MOTION_GRAPHIC"
+    },
+    {
+      "operation_key": "native:SC-09",
+      "classification": "REQUIRES_LOCAL_COMPILATION_RENDER",
+      "route": "NATIVE_DIAGRAM"
+    },
+    {
+      "operation_key": "final_media",
+      "classification": "MISSING"
+    },
+    {
+      "operation_key": "drive:archive",
+      "classification": "REQUIRES_NEW_EXECUTION"
+    }
+  ],
+  "old_consumed_ledgers_preserved": true,
+  "provider_calls": 0,
+  "render_calls": 0,
+  "drive_calls": 0,
+  "youtube_calls": 0,
+  "artifact_version_id": "4ce06532-9b27-50a6-b0ae-4710cce1c053",
+  "artifact_version_ref": "artifact-version://4ce06532-9b27-50a6-b0ae-4710cce1c053",
+  "content_hash": "10b6448dc603d982fa883bf6cfb9e8b5a59eefc360d07c55aa59af6da696426b"
+}

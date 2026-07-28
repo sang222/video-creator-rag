@@ -1,0 +1,41 @@
+{
+  "schema_version": "pkg1.sc07-sc09-revision-repair-cycles.v1",
+  "cycle_count": 3,
+  "cycles": [
+    {
+      "cycle": 1,
+      "classification": "TEST_CONTRACT_LOOKUP",
+      "root_cause": "Test đọc approval supersession field bằng tên summary marker thay vì field canonical superseded_by trong artifact content.",
+      "repair": "Đổi assertion sang superseded_by và kiểm tra trực tiếp preserved/execution_reusable cùng consumed_ledgers_mutated.",
+      "immutable_evidence_changed": false,
+      "gates_weakened": false,
+      "focused_rerun": "PASS",
+      "full_acceptance_rerun": "PASS_TESTS_COMPILE_ALEMBIC; DIFF_CHECK_FOUND_SEPARATE_FORMATTING_ISSUE"
+    },
+    {
+      "cycle": 2,
+      "classification": "REPORT_FORMATTING",
+      "root_cause": "Markdown hard-break spaces ở dòng ngày làm git diff --check thất bại.",
+      "repair": "Xóa trailing whitespace khỏi toàn bộ report mới và roadmap.",
+      "immutable_evidence_changed": false,
+      "gates_weakened": false,
+      "focused_rerun": "PASS",
+      "full_acceptance_rerun": "PASS"
+    },
+    {
+      "cycle": 3,
+      "classification": "HASH_REVALIDATION_VERIFIER_SHAPE",
+      "root_cause": "Verifier so sánh nguyên identity object trong khi summary identity có derived bundle_hash và runtime identity có builder/schema metadata.",
+      "repair": "So sánh từng authoritative identity field, bundle_hash, package hash, review hash và từng reviewed artifact hash.",
+      "immutable_evidence_changed": false,
+      "gates_weakened": false,
+      "focused_rerun": "PASS",
+      "full_acceptance_rerun": "PASS"
+    }
+  ],
+  "thresholds_changed": false,
+  "tests_deleted_or_skipped": false,
+  "provider_calls_during_repairs": 0,
+  "render_calls_during_repairs": 0,
+  "immutable_evidence_mutated": false
+}

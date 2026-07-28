@@ -1,0 +1,37 @@
+{
+  "schema_version": "mr1.sc07-sc09-approval-receipt.v1",
+  "approval_id": "de4edc50-23df-5065-b652-69e5978825b4",
+  "approval_content_hash": "57bbc5964a5ba63bb115ec8bc82ca2db43a2b37ee79066127238dfab28aa13b5",
+  "approval_ref": "mr1-approval://small-team-ai/3b802f4b-44eb-51cd-8254-3cbce868de81/de4edc50-23df-5065-b652-69e5978825b4",
+  "exact_target": {
+    "revision_id": "3b802f4b-44eb-51cd-8254-3cbce868de81",
+    "revision_version": 4,
+    "revision_hash": "1a0c369b6445d11b3ab0f18c1a24562cf1a3dcf1f04c298eb77daf914ced7271",
+    "revision_content_hash": "540bdcb987412de6be06489bca557d1d560bc92a0fc05b2630bf6f02d59cd1c1",
+    "package_artifact_version_id": "41c94795-b79e-593a-a065-c663ffca70f1",
+    "package_content_hash": "94cf5cca14f9ca60cf41714f324fa465c0aaa18cd7f28ea4f54756b148694eb0"
+  },
+  "attempt_scope": {
+    "SC-07": {
+      "route": "NATIVE_MOTION_GRAPHIC",
+      "external_provider_attempts": 0,
+      "local_compilation_render_required": true
+    },
+    "SC-09": {
+      "route": "NATIVE_DIAGRAM",
+      "external_provider_attempts": 0,
+      "local_compilation_render_required": true
+    },
+    "fallback": false,
+    "provider_substitution": false,
+    "unaffected_scenes_authority": "7f93ef44c1cab9d9125ce4e82aeddddd81247de683e984b8441bf65f4e3db391"
+  },
+  "reuse_decision_manifest": {
+    "artifact_version_id": "4ce06532-9b27-50a6-b0ae-4710cce1c053",
+    "content_hash": "10b6448dc603d982fa883bf6cfb9e8b5a59eefc360d07c55aa59af6da696426b"
+  },
+  "approval_final": "PASS",
+  "execution_started": false,
+  "artifact_version_id": "e85366d4-fea4-5f4d-9d69-4241dc4102b3",
+  "content_hash": "003bf3487d27421efa36f4b31555bfb11a1bfbe8b1212e8ce0ef1e38cc5bb933"
+}

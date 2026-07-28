@@ -1,0 +1,40 @@
+{
+  "schema_version": "pkg1.sc07-sc09-human-closeout-summary.v1",
+  "date": "2026-07-27",
+  "review_authority": "HUMAN",
+  "decision_source": "OPERATOR",
+  "operator_decision": "PASS",
+  "operator_id": "OPERATOR_INTERACTIVE_SESSION",
+  "decision_timestamp": "2026-07-27T14:10:19+00:00",
+  "auto_approval_allowed": false,
+  "exact_hash_revalidation": "PASS",
+  "reviewed_hash_equals_current_hash": true,
+  "revision": {
+    "revision_id": "3b802f4b-44eb-51cd-8254-3cbce868de81",
+    "revision_version": 4,
+    "revision_hash": "1a0c369b6445d11b3ab0f18c1a24562cf1a3dcf1f04c298eb77daf914ced7271",
+    "revision_content_hash": "540bdcb987412de6be06489bca557d1d560bc92a0fc05b2630bf6f02d59cd1c1",
+    "bundle_hash": "55d415fb8d090093937bf4b26ddc83cbb2071e274054b0ceba78a867aaf6eb85"
+  },
+  "package": {
+    "artifact_version_id": "41c94795-b79e-593a-a065-c663ffca70f1",
+    "content_hash": "94cf5cca14f9ca60cf41714f324fa465c0aaa18cd7f28ea4f54756b148694eb0"
+  },
+  "review_packet": {
+    "path": "reports/pkg1_sc07_sc09_revision_report.md",
+    "artifact_version_id": "7cf37240-827d-560f-bae1-3be801b2ccf6",
+    "content_hash": "4b19d90cdbc694aeff8ca987d37c89c20816d2e5b3cbc2837c80e478490e0990"
+  },
+  "human_approval_receipt": {
+    "path": "reports/pkg1_sc07_sc09_human_approval_receipt.json",
+    "artifact_version_id": "b6c16961-1cd5-51b5-b262-d3b477bd6bbd",
+    "content_hash": "fe7a47b1e9afca813228c8da98e375ee4877238c77a13d0ba2e875fb5a3b0d77"
+  },
+  "PKG1_SC07_SC09_REVISION_HUMAN_REVIEW": "PASS",
+  "PKG1_SC07_SC09_REVISION_FINAL": "PASS",
+  "PRODUCTION_PACKAGE_APPROVED": true,
+  "PROCEED_TO_MR1_REAPPROVAL": true,
+  "UPLOAD_READY": false,
+  "PUBLISH_EXECUTION_READY": false,
+  "DESTINATION_STATUS": "PENDING_PLATFORM_ID"
+}

@@ -1,0 +1,270 @@
+{
+  "schema_version": "sc07.visual-route-audit.v1",
+  "audit_mode": "OFFLINE_READ_ONLY",
+  "run_id": "b932773c-4049-482a-8827-6933d924c34f",
+  "audit_input_snapshot_hash": "2484ace36230a3dc9c6cfe93ee46db40dab8767d04b46b4950f605c7bc4ebba9",
+  "entry_evidence": {
+    "VSR1_FINAL": "PASS",
+    "IMG1_FINAL": "PASS",
+    "VQC1_FINAL": "PASS",
+    "LPRO1_FINAL": "PASS",
+    "GEO1_FINAL": "PASS",
+    "GEO2_FINAL": "PASS",
+    "CH1_MARKET_V3_FINAL": "PASS",
+    "PKG1_MARKET_REVISION_FINAL": "PASS",
+    "PRODUCTION_PACKAGE_APPROVED": true,
+    "MR1_FINAL": "BLOCKED_REQUIRES_NEW_MR1_APPROVAL"
+  },
+  "exact_lineage": {
+    "video_project": {
+      "id": "0578b24a-1898-443e-99bf-add89d3e61e0",
+      "revision_id": "88fa9f76-99e8-5ec5-8cdd-63c836031bac",
+      "revision_version": 3,
+      "revision_hash": "0115137e13399ccb627845347959b285c6622cd5a0df5b4a8f85850e0dde2410"
+    },
+    "pkg1_revision": {
+      "artifact_version_id": "d8471bc0-7d58-4b39-a1f9-267d7b8a02b1",
+      "content_hash": "7d827b7b37a654639383f21c6b6e5cd634c64c68f87832b3b9907dbd4b1fa07c",
+      "planning_output_set_hash": "d08a7f10f4073f4d8a10b2190f4ba7cf16b58a073825a6decdcdbaa395563fc3"
+    },
+    "script": {
+      "artifact_version_id": "4c0ac729-32c5-4005-9078-013b399e8802",
+      "content_hash": "48e89e95a3234f7f3abd1f86a99dd2e8009279e22dea511ede299483baa14fd7",
+      "json_pointer": "/segments/6",
+      "segment_id": "S07",
+      "segment_text_hash": "c2ba49c02fae0290360d8650ade5ace5ff49da96ad3fc5349704fc652f585e20"
+    },
+    "scene_visual_intent": {
+      "artifact_version_id": "b0e8b068-b79b-4854-81b7-15e68df0992f",
+      "content_hash": "55ad4f4725b66f7e1cf7e770df1ee7e0437710925d63e433c00c2ba0441bc712",
+      "json_pointer": "/scenes/6"
+    },
+    "visual_direction_contract": {
+      "artifact_version_id": "24a1ca16-cdaa-4b2e-ba4a-158613dcd267",
+      "content_hash": "e62c2141434a7ea892453ba632f32b7461e610af8e2844536963e8d48434c317"
+    },
+    "visual_source_decision": {
+      "artifact_version_id": "658e43ed-8c8d-43f9-968d-234e41215d99",
+      "content_hash": "3e29f3d7e023be9100b62088a6a291ad9457fb70c7cc0967e4d925eef6f1871d",
+      "json_pointer": "/decisions/6"
+    },
+    "visual_plan": {
+      "artifact_version_id": "7186e7ad-3887-4a8d-9fb4-77c59d9be53d",
+      "content_hash": "51248879f439dae7116bac6718c833a8da23efacf0fe34a6113194ed6929d617"
+    },
+    "compiled_asset_request_plan": {
+      "artifact_version_id": "ea2724c5-a8b8-4208-a107-59fe7dabaf2a",
+      "content_hash": "29436478b9b2e02d12d81795fbe948ca916abd9991d3bca6497db4bba94c7575"
+    },
+    "provider_execution_plan": {
+      "artifact_version_id": "9557bd18-4590-40f2-ab8f-481efdd51d33",
+      "content_hash": "fcde893531705ad26109efe703d68f5fffa46ae19577f05ef1179978099d1d31"
+    },
+    "cost_estimate_snapshot": {
+      "artifact_version_id": "d241fd38-935f-4965-94d3-274d1948a163",
+      "content_hash": "d8e1eb198e6d8b787a17e3ebd46d8f12a537c0a027d4df2b2bef8ad101830f47"
+    },
+    "target_market_profile": {
+      "ref": "target-market-profile://small-team-ai/v1",
+      "version": 1,
+      "content_hash": "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e"
+    },
+    "niche_alignment_dossier": {
+      "artifact_version_id": "7f9381e8-0697-4b77-9f55-d25d72afd547",
+      "content_hash": "d6d82fc26373f46e13c75d61068b18c3f23176bb21046ef193240e84bb29703d"
+    },
+    "market_alignment_dossier": {
+      "artifact_version_id": "dba5a8cd-ca61-49e8-b662-c27ad7f02959",
+      "content_hash": "57b87274528a909db91417071aae687baa60d33ee9aac90731819cf5bbd4c969"
+    }
+  },
+  "scene_context": {
+    "scene_id": "SC-07",
+    "segment_id": "S07",
+    "scene_start_ms": 292050,
+    "scene_end_ms": 345360,
+    "stock_context_window_ms": [292050, 300050],
+    "native_explanation_window_ms": [300050, 345360],
+    "scene_class_reassessed": "mechanism",
+    "narrative_function": "primary_explanation",
+    "current_semantic_intent": "Use supporting review context followed by a native exception queue and reason codes.",
+    "authoritative_narration": "The normal path is only half the design. Missing data, duplicate requests, unusual approvals, and system outages need an explicit destination. Route them to a named owner. Preserve the original input. Avoid silent retries that can create duplicate work. A supporting shot of a team reviewing an exception can make the operational context clear, but the visual remains illustrative. The workflow record is the evidence. Set a threshold for pausing the pilot if exceptions rise. This does not need a complicated control room. A simple queue, a reason code, and a manual fallback can be enough. Control is part of the time-saving design, not a separate concern added later."
+  },
+  "semantic_decomposition": {
+    "viewer_must_understand": "Ngoại lệ phải rời normal path, giữ input gốc, vào queue có reason code, đến named owner và có điều kiện pause/manual fallback.",
+    "visible_objects": ["workflow path", "exception cards", "queue", "reason-code badge", "owner lane", "preserved input", "pause state", "manual fallback"],
+    "visible_actions": ["branch", "enqueue", "classify", "assign", "pause", "handoff"],
+    "environment": "provider-neutral native operator workflow canvas",
+    "meaning_carried_by": ["mechanism", "relationships", "sequence", "labels", "state changes"],
+    "real_camera_can_capture_exact_meaning": false,
+    "stock_keywords_can_retrieve_exact_meaning": false,
+    "generic_clip_semantically_hollow": true,
+    "motion_adds_meaning": true,
+    "custom_editorial_composition_required": true,
+    "exact_text_or_labels_required": true,
+    "actual_product_ui_evidence_required": false
+  },
+  "feature_reassessment": {
+    "policy_ref": "visual-routing-policy://vsr1_niche_aware_visual_source_routing/vsr1.visual-source-routing.v1",
+    "policy_catalog_sha256": "18c90390586b4c1658af0318af44c098835a1a60ec645a091ee89abcc4faefae",
+    "persisted_numeric_feature_snapshot": "NOT_PRESENT_IN_BOUND_PACKAGE_ARTIFACTS",
+    "persisted_assessment": {
+      "route": "PEXELS_VIDEO",
+      "source_role": "PEXELS_SUPPORTING",
+      "stock_search_intent": "People discussing office paperwork together.",
+      "scope": "PEXELS_SUPPORTING_SUBWINDOW_CONTEXT_ONLY",
+      "pexels_eligibility": "PEXELS_SUPPORTING_ONLY",
+      "fallback_class": "PEXELS_ONLY",
+      "policy_allowed_fallback_routes": ["PEXELS_PHOTO"],
+      "runtime_fallback_authorized": false,
+      "forbidden_runtime_routes": [
+        "AI_GENERATED_IMAGE",
+        "AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY",
+        "VEO_TEXT_TO_VIDEO",
+        "VEO_IMAGE_TO_VIDEO",
+        "PROVIDER_SUBSTITUTION"
+      ]
+    },
+    "reassessed": {
+      "filmability_score": 0.35,
+      "stock_searchability_score": 0.25,
+      "required_specificity": 0.9,
+      "custom_composition_score": 0.82,
+      "exact_text_dependency": 0.76,
+      "exact_number_dependency": 0.35,
+      "named_workflow_nodes_required": true,
+      "diagram_clarity_advantage": 0.95,
+      "product_specificity": 0.0,
+      "evidence_truth_requirement": 0.4,
+      "identity_consistency_requirement": 0.1,
+      "human_action_requirement": 0.25,
+      "motion_semantic_value": 0.86
+    },
+    "material_differences": [
+      "Đơn vị đánh giá mới là meaning của toàn SC-07, không phải riêng context stock 8 giây.",
+      "Scene class được đánh giá là mechanism; named workflow nodes và exact label authority là bắt buộc.",
+      "Stock clip chỉ match office/paperwork, không truyền được queue/owner/reason code/preserved input/pause/fallback.",
+      "Diagram advantage, specificity, composition và motion semantic value đều trở thành route-determining features."
+    ],
+    "thresholds_unchanged": {
+      "semantic_match_min": 0.78,
+      "pexels_filmability_min": 0.7,
+      "pexels_stock_searchability_min": 0.7,
+      "pexels_custom_composition_max": 0.3,
+      "diagram_clarity_advantage_min": 0.6,
+      "native_motion_semantic_value_min": 0.7
+    }
+  },
+  "prior_provider_evidence": {
+    "evidence_path": "var/mr1/runs/b932773c-4049-482a-8827-6933d924c34f/source_assets/pexels-search-ranking-failure-c91f13fab9d4-6a305fc90759e883.json",
+    "evidence_sha256": "1ebb69f9aece7a1ebcd375680d96738c517597a269c84d8b6d342a8caf86cba2",
+    "latest_scope": "pexels:SC-07:supplement:02",
+    "attempt_count_for_latest_scope": 1,
+    "state": "CONSUMED_FAILED",
+    "search_calls": 1,
+    "candidates_returned": 20,
+    "technically_valid_candidates": 19,
+    "best_semantic_score": 0.6,
+    "required_semantic_threshold": 0.78,
+    "downloads": 0,
+    "usable_outputs": 0,
+    "fallback_used": false,
+    "candidates": [
+      {"id": "7687893", "technical": "PASS", "semantic": 0.25, "description_tokens": ["documents", "his", "man", "showing", "workers"]},
+      {"id": "7687653", "technical": "PASS", "semantic": 0.4, "description_tokens": ["discussing", "ideas", "people"]},
+      {"id": "7100917", "technical": "PASS", "semantic": 0.25, "description_tokens": ["documents", "holding", "man", "woman"]},
+      {"id": "8266167", "technical": "PASS", "semantic": 0.25, "description_tokens": ["documents", "meeting", "people", "reading"]},
+      {"id": "8343941", "technical": "PASS", "semantic": 0.25, "description_tokens": ["business", "meeting", "people"]},
+      {"id": "5282125", "technical": "PASS", "semantic": 0.25, "description_tokens": ["business", "discussing", "men"]},
+      {"id": "8170595", "technical": "FAIL", "semantic": null, "reason": "DURATION_BELOW_REQUEST_MINIMUM", "duration_seconds": 7.0},
+      {"id": "7687894", "technical": "PASS", "semantic": 0.4, "description_tokens": ["colleagues", "discussing", "paperwork"]},
+      {"id": "7651535", "technical": "PASS", "semantic": 0.25, "description_tokens": ["clipboard", "holding", "man", "talking"]},
+      {"id": "8204850", "technical": "PASS", "semantic": 0.4, "description_tokens": ["office", "people", "working"]},
+      {"id": "8246438", "technical": "PASS", "semantic": 0.25, "description_tokens": ["holding", "papers", "people"]},
+      {"id": "6774845", "technical": "PASS", "semantic": 0.25, "description_tokens": ["business", "group", "people"]},
+      {"id": "7646442", "technical": "PASS", "semantic": 0.25, "description_tokens": ["documents", "looking", "man"]},
+      {"id": "6698949", "technical": "PASS", "semantic": 0.25, "description_tokens": ["boss", "employee", "talking"]},
+      {"id": "8371031", "technical": "PASS", "semantic": 0.25, "description_tokens": ["files", "men", "working"]},
+      {"id": "6774648", "technical": "PASS", "semantic": 0.25, "description_tokens": ["analytics", "business", "meeting"]},
+      {"id": "7597303", "technical": "PASS", "semantic": 0.25, "description_tokens": ["documents", "reviewing", "woman"]},
+      {"id": "5977261", "technical": "PASS", "semantic": 0.25, "description_tokens": ["discussing", "man", "talking", "woman"]},
+      {"id": "5941021", "technical": "PASS", "semantic": 0.6, "description_tokens": ["discussing", "man", "office", "paperwork", "woman"]},
+      {"id": "5977459", "technical": "PASS", "semantic": 0.25, "description_tokens": ["colleagues", "discussing", "documents", "talking"]}
+    ],
+    "failure_factors": [
+      "QUERY_MISREPRESENTS_SCENE_MEANING",
+      "STOCK_LIBRARY_CANNOT_EXPRESS_MECHANISM",
+      "CANDIDATES_MATCH_ENVIRONMENT_NOT_ACTION",
+      "CANDIDATES_MATCH_ACTION_NOT_NARRATIVE_PURPOSE",
+      "SCENE_REQUIRES_AUTHORED_COMPOSITION",
+      "SCENE_REQUIRES_NATIVE_DIAGRAM"
+    ],
+    "fitness_separation": {
+      "technical_candidate_quality": "19/20 PASS; chỉ 8170595 ngắn hơn 8 giây.",
+      "semantic_fitness": "FAIL; best 0.60 chỉ phủ discussing/office/paperwork, thiếu toàn bộ exception mechanism.",
+      "market_fitness": "REVIEW_REQUIRED; metadata không đủ chứng minh US small-business context.",
+      "niche_fitness": "FAIL; generic meeting/paperwork không phục vụ AI workflow operator education.",
+      "visual_continuity": "FAIL_FOR_SELECTION; evidence không có previous/next summary và không có candidate nào được chọn."
+    }
+  },
+  "route_decision": {
+    "verdict": "PEXELS_ROUTE_INVALID",
+    "preferred_source_route": "NATIVE_MOTION_GRAPHIC",
+    "fallback_class": "NATIVE_ONLY",
+    "policy_planning_alternative": "NATIVE_DIAGRAM",
+    "runtime_fallback_authorized": false,
+    "reason": "Native motion biểu diễn được branch, ownership, queue state và fallback; Pexels chỉ minh họa môi trường và đã thất bại semantic hai scope mà không tạo output.",
+    "requirements_hash": "429f9ca4890ff8e9d8375108e01492c64b97c23356cc5186728a6ffcb462b3c4",
+    "decision_hash": "0e08a51c6c594ca8cfe8d6eb7a816d639142da3c4978925c06534cb172003d40",
+    "native_structure": {
+      "phases": [
+        {"phase": "NORMAL_PATH", "behavior": "steady left-to-right flow"},
+        {"phase": "EXCEPTION_BRANCH", "nodes": ["MISSING_DATA", "DUPLICATE_REQUEST", "UNUSUAL_APPROVAL", "SYSTEM_OUTAGE"]},
+        {"phase": "CONTROL_QUEUE", "nodes": ["ORIGINAL_INPUT", "REASON_CODE", "NAMED_OWNER"]},
+        {"phase": "DECISION", "nodes": ["RESUME", "PAUSE_PILOT", "MANUAL_FALLBACK"]}
+      ],
+      "relationships": ["exception leaves normal path", "original input remains attached", "reason code precedes owner assignment", "threshold controls pause", "fallback is visible"],
+      "overlay_authority": "NATIVE_ONLY",
+      "timing": "0-8s establish normal path and first branch; 8-31s cycle four exception types into queue; 31-44s assign reason code/owner and preserve input; 44-53.31s reveal pause/manual fallback and close.",
+      "forbidden": ["stock layer", "fake UI", "provider-generated text", "provider-generated numbers", "logos", "runtime fallback"]
+    }
+  },
+  "offline_gate_rehearsal": {
+    "VisualRealizationCompletenessGate": "PASS",
+    "PexelsEligibilityGate": "PASS_PEXELS_PROHIBITED",
+    "DiagramSuitabilityGate": "PASS_NATIVE_MOTION_GRAPHIC",
+    "AIImageEligibilityGate": "PASS_NOT_SELECTED_PROVIDER_DISABLED",
+    "EvidenceTruthSourceGate": "PASS_NOT_REQUIRED",
+    "VisualNicheAlignmentGate": "PASS",
+    "VisualMarketAlignmentGate": "PASS",
+    "SemanticMatchGate": "PASS_SPEC_FIXTURE_NODE_COVERAGE",
+    "VisualContinuityGate": "PASS",
+    "RepetitiveProductionRiskGate": "PASS",
+    "RightsDisclosureCompletenessGate": "PASS",
+    "ProviderCostEstimateGate": "PASS_ZERO_PROVIDER_COST",
+    "SC07_REVISED_ROUTE_TECHNICAL_PREFLIGHT": "PASS",
+    "provider_calls": 0
+  },
+  "immutability_and_zero_call_proof": {
+    "run_state_sha256_before": "769091619bc6bcfeeec1ade185a0efb4262d61381b9e5126a43fb6b86dfcff59",
+    "provider_call_count_before": 4,
+    "provider_call_count_after": 4,
+    "render_call_count": 0,
+    "drive_call_count": 0,
+    "youtube_call_count": 0,
+    "old_attempt_ledgers_mutated": false,
+    "provider_submit_started": false,
+    "downloads": 0,
+    "runtime_fallback": false
+  },
+  "verdicts": {
+    "SC07_AUDIT_ENTRY": "PASS",
+    "SC07_PRIOR_EVIDENCE_INTEGRITY": "PASS",
+    "SC07_SEMANTIC_DECOMPOSITION": "PASS",
+    "SC07_FEATURE_REASSESSMENT": "PASS",
+    "SC07_PEXELS_FAILURE_CLASSIFICATION": "PASS",
+    "SC07_ROUTE_VERDICT": "PEXELS_ROUTE_INVALID",
+    "SC07_PREFERRED_SOURCE_ROUTE": "NATIVE_MOTION_GRAPHIC",
+    "SC07_REVISED_ROUTE_PREFLIGHT": "PASS"
+  }
+}

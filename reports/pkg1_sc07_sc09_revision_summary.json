@@ -1,0 +1,163 @@
+{
+  "schema_version": "pkg1.sc07-sc09-revision-summary.v1",
+  "date": "2026-07-27",
+  "technical_status": "PASS",
+  "repair_cycles": 3,
+  "identity": {
+    "project_type": "PKG1_SC07_SC09_REVISION",
+    "revision_id": "3b802f4b-44eb-51cd-8254-3cbce868de81",
+    "revision_version": 4,
+    "revision_hash": "1a0c369b6445d11b3ab0f18c1a24562cf1a3dcf1f04c298eb77daf914ced7271",
+    "revision_content_hash": "540bdcb987412de6be06489bca557d1d560bc92a0fc05b2630bf6f02d59cd1c1",
+    "bundle_hash": "55d415fb8d090093937bf4b26ddc83cbb2071e274054b0ceba78a867aaf6eb85"
+  },
+  "supersession": {
+    "source_revision_id": "88fa9f76-99e8-5ec5-8cdd-63c836031bac",
+    "source_revision_hash": "0115137e13399ccb627845347959b285c6622cd5a0df5b4a8f85850e0dde2410",
+    "source_package_artifact_version_id": "d8471bc0-7d58-4b39-a1f9-267d7b8a02b1",
+    "source_package_content_hash": "7d827b7b37a654639383f21c6b6e5cd634c64c68f87832b3b9907dbd4b1fa07c",
+    "new_package_artifact_version_id": "41c94795-b79e-593a-a065-c663ffca70f1",
+    "new_package_content_hash": "94cf5cca14f9ca60cf41714f324fa465c0aaa18cd7f28ea4f54756b148694eb0",
+    "marker": "SUPERSEDED_BY_SC07_SC09_REVISION",
+    "source_package_mutated": false,
+    "historical_approvals_deleted": false,
+    "historical_ledgers_mutated": false
+  },
+  "canonical_bindings": {
+    "channel_profile_version": {
+      "id": "d0d16fc5-0dc9-4022-bfd3-7f9a47c3a711",
+      "version": 3,
+      "content_hash": "1c96bd4dd254ae04f57ba3d7156eb4bc612aeeedc59d2c8e65dda369cd627640"
+    },
+    "compiled_channel_policy_snapshot": {
+      "id": "e6c33d80-f5d8-4f72-9abc-87de3601b89e",
+      "version": 4,
+      "profile_generation": "CHANNEL_PROFILE_V3",
+      "content_hash": "12b66551bd9bdfce1d59d1019ff50bc1c49756b6dc4ab505fde080630b4551bc"
+    },
+    "target_market_profile_hash": "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e",
+    "niche_alignment_dossier_version_id": "7f9381e8-0697-4b77-9f55-d25d72afd547",
+    "niche_alignment_dossier_hash": "d6d82fc26373f46e13c75d61068b18c3f23176bb21046ef193240e84bb29703d",
+    "market_alignment_dossier_version_id": "dba5a8cd-ca61-49e8-b662-c27ad7f02959",
+    "market_alignment_dossier_hash": "57b87274528a909db91417071aae687baa60d33ee9aac90731819cf5bbd4c969",
+    "destination_binding_hash": "411aae66418315da8e6a0bf2cd23e896e89e7cd4827a5b54c36c0437ad63efab",
+    "destination_status": "PENDING_PLATFORM_ID"
+  },
+  "scenes": {
+    "SC-07": {
+      "old_route": "PEXELS_VIDEO",
+      "new_route": "NATIVE_MOTION_GRAPHIC",
+      "fallback_class": "NATIVE_ONLY",
+      "fallback": false,
+      "provider_execution_required": false,
+      "estimated_cost_class": "COST_0_NATIVE",
+      "requirements_hash": "429f9ca4890ff8e9d8375108e01492c64b97c23356cc5186728a6ffcb462b3c4",
+      "decision_hash": "0e08a51c6c594ca8cfe8d6eb7a816d639142da3c4978925c06534cb172003d40",
+      "native_plan_artifact_version_id": "40d28d4c-23b4-5692-8843-bbae5aa3b72c",
+      "native_plan_hash": "0018bc4407e88f6cb0f3905794ae85eec07ab5ac76ccf6e1663767727bc58ba4",
+      "native_compilation": "PASS"
+    },
+    "SC-09": {
+      "old_route": "PEXELS_VIDEO",
+      "old_revised_query": "REJECTED_NOT_SUBMITTED",
+      "new_route": "NATIVE_DIAGRAM",
+      "fallback_class": "NATIVE_ONLY",
+      "fallback": false,
+      "provider_execution_required": false,
+      "estimated_cost_class": "COST_0_NATIVE",
+      "requirements_hash": "5fa06e281bfea2d5a3a35158620b134fbf264fe1844c5b6b14c026c0d3b6e947",
+      "decision_hash": "fc3c5cff852ff39e1c9948c63f1e18bf61c5292b4b2ffaefcb148996e9cd1e2d",
+      "native_plan_artifact_version_id": "7408e680-2bf3-5fdb-811a-7b818d383542",
+      "native_plan_hash": "822ca71e6bfc698015f9391b0de9089cd49dbe374e936f15d437ef399ad53ecf",
+      "native_compilation": "PASS"
+    }
+  },
+  "artifacts": {
+    "scene_visual_intent": {"artifact_version_id": "97e32aee-98f7-5e25-8e37-31fde3a44083", "content_hash": "c672ea6111159551f965271d6c69705fd1677ba7daec9a8781ce0351680b87a2"},
+    "visual_source_decision_set": {"artifact_version_id": "42b882f0-9d31-5386-a20e-64e166903674", "content_hash": "3d757fb5de1e6227f8e4b310a408d69f44687daeb7f2ddd9fa38cd80786e69a3"},
+    "visual_continuity_evidence": {"artifact_version_id": "9100c7f2-dbd9-58f4-9649-4a2fd27525fa", "content_hash": "a9dcddff3f4a3d9485565ce1d5c1de20c81a2992ab531918e31c7a704a258ee9"},
+    "visual_plan": {"artifact_version_id": "8d7f26fa-365c-59d4-832e-2272d24d5245", "content_hash": "ce4803b59097ae5a65f8a6f48cc1681a2e92c06b25e41294ca85bd92670edf21"},
+    "compiled_asset_request_plan": {"artifact_version_id": "a8d226da-b158-5849-a3a6-42999e5740c2", "content_hash": "98181d15f35e6afc37bedffdf353aa9a46f2562f1f06e4e89a732da8fc6c6491"},
+    "provider_execution_plan": {"artifact_version_id": "3323047c-cc35-5d29-940d-8f81f6b8cadb", "content_hash": "7f93ef44c1cab9d9125ce4e82aeddddd81247de683e984b8441bf65f4e3db391"},
+    "cost_estimate_snapshot": {"artifact_version_id": "b361f409-88f5-5810-98b7-9973158fcb95", "content_hash": "9f3fde6392cc03ecc4814415290e7dda195a4c4c391ae10a89a1339e51b1272a"},
+    "asset_provenance_plan": {"artifact_version_id": "c883094a-08fb-5263-a558-bba90c08ee0f", "content_hash": "ffba4058f842875418c3b38ec4168282535fd2925f1b627f4426868130184afc"},
+    "rights_disclosure_completeness_report": {"artifact_version_id": "5bca98a3-add8-5dfb-b243-bc9af39a97c1", "content_hash": "451438cc5b18a4c6f6bfb029e3f150987472e3bab1627cd81c6b3b0b86ee8281"},
+    "synthetic_media_disclosure_receipt": {"artifact_version_id": "a69523f8-f79e-5ab9-b61a-9be12a4f6278", "content_hash": "d452b7b2c6f11a801c79c76dc465f785b229b49b0aee2bafb39869d056baf112"},
+    "publish_risk_dossier": {"artifact_version_id": "a3436076-fe4d-51f7-91ba-8c7abd65d467", "content_hash": "8e1039495846e6ad307ac1051f33a253ca94d1de30be5bef46459fd7f83402b2"},
+    "approval_supersession_manifest": {"artifact_version_id": "c64c3600-dea3-5780-a75f-f8646c242160", "content_hash": "c3aad96486a9a5d95efadf6938fef136015550c89d96743046b0e58d75b41358"}
+  },
+  "native_rehearsal": {
+    "source_canonical_timeline_hash": "eada2c27cadb13eef03d6f160c064807dc63369b77b66192e127a9cbef2bd994",
+    "projected_timeline_hash": "1b1eeb6f475f1d126ec75aba24700e0f03d157dfa6d5089d32d7385e01c71b45",
+    "offline_projection_only": true,
+    "production_timing_authority_unchanged": true,
+    "native_render_plan_hash": "57573e4813eb22a8c6b625debf09920675dee44561e2215681f1fb47a5119526",
+    "compiled_manifest_hash": "558bb64759706587855cba02a011bf438a0d2c10ae3940a3fe0c57c10396b455",
+    "compiler_version": "native-motion-compiler/1.0.0",
+    "motion_pack_version": "NativeMotionPack_v1",
+    "renderer_input_eligible": true,
+    "SC07_NATIVE_MOTION_COMPILATION": "PASS",
+    "SC09_NATIVE_DIAGRAM_COMPILATION": "PASS",
+    "provider_calls": 0,
+    "render_calls": 0
+  },
+  "provider_plan_diff": {
+    "pexels:SC-07": "REMOVED_BY_REVISION",
+    "pexels:SC-09": "REMOVED_BY_REVISION",
+    "SC-07:new-external-provider-operation": "NOT_PRESENT",
+    "SC-09:new-external-provider-operation": "NOT_PRESENT",
+    "fallback": false,
+    "provider_substitution": false
+  },
+  "affected_gates": {
+    "VisualRealizationCompletenessGate": "PASS",
+    "PexelsEligibilityGate": "PASS_PROHIBITED_NOT_SELECTED",
+    "DiagramSuitabilityGate": "PASS",
+    "EvidenceTruthSourceGate": "PASS_NOT_REQUIRED",
+    "VisualNicheAlignmentGate": "PASS",
+    "VisualMarketAlignmentGate": "PASS",
+    "SemanticMatchGate": "PASS",
+    "VisualContinuityGate": "PASS",
+    "RepetitiveProductionRiskGate": "PASS",
+    "RightsDisclosureCompletenessGate": "PASS",
+    "ProviderCostEstimateGate": "PASS",
+    "PackageIntegrityGate": "PASS"
+  },
+  "review_packet": {
+    "artifact_version_id": "7cf37240-827d-560f-bae1-3be801b2ccf6",
+    "content_hash": "4b19d90cdbc694aeff8ca987d37c89c20816d2e5b3cbc2837c80e478490e0990",
+    "path": "reports/pkg1_sc07_sc09_revision_report.md"
+  },
+  "no_execution_proof": {
+    "mr1_provider_call_count_before": 4,
+    "mr1_provider_call_count_after": 4,
+    "provider_calls_during_task": 0,
+    "render_calls": 0,
+    "drive_calls": 0,
+    "youtube_calls": 0,
+    "old_consumed_ledgers_mutated": false,
+    "sc09_query_submitted": false
+  },
+  "verdicts": {
+    "PKG1_SC07_SC09_REVISION_ENTRY": "PASS",
+    "PKG1_SC07_SC09_REVISION_LINEAGE": "PASS",
+    "PKG1_SC07_NATIVE_MOTION_PLAN": "PASS",
+    "PKG1_SC09_NATIVE_DIAGRAM_PLAN": "PASS",
+    "PKG1_SC07_SC09_CONTINUITY": "PASS",
+    "PKG1_SC07_SC09_VISUAL_PLAN": "PASS",
+    "PKG1_SC07_SC09_ASSET_REQUEST_PLAN": "PASS",
+    "PKG1_SC07_SC09_PROVIDER_PLAN": "PASS",
+    "PKG1_SC07_SC09_COST_ESTIMATE": "PASS",
+    "PKG1_SC07_SC09_RIGHTS_PROVENANCE": "PASS",
+    "PKG1_SC07_SC09_PUBLISH_RISK": "PASS",
+    "PKG1_SC07_SC09_NATIVE_COMPILATION": "PASS",
+    "PKG1_SC07_SC09_AFFECTED_GATES": "PASS",
+    "PKG1_SC07_SC09_REVISION_TECHNICAL": "PASS",
+    "PKG1_SC07_SC09_REVISION_HUMAN_REVIEW": "PASS",
+    "PKG1_SC07_SC09_REVISION_FINAL": "PASS",
+    "PRODUCTION_PACKAGE_APPROVED": true,
+    "MR1_REAPPROVAL_FINAL": "PASS",
+    "MR1_EXECUTION": "NOT_STARTED",
+    "PROCEED_TO_MR1_REAPPROVAL": true
+  }
+}

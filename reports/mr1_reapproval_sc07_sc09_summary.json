@@ -1,0 +1,99 @@
+{
+  "schema_version": "mr1.sc07-sc09-reapproval-summary.v1",
+  "date": "2026-07-27",
+  "status": "PASS_NOT_EXECUTED",
+  "operator_id": "OPERATOR_INTERACTIVE_SESSION",
+  "approval_timestamp": "2026-07-27T14:10:19+00:00",
+  "target_revision": {
+    "revision_id": "3b802f4b-44eb-51cd-8254-3cbce868de81",
+    "revision_version": 4,
+    "revision_hash": "1a0c369b6445d11b3ab0f18c1a24562cf1a3dcf1f04c298eb77daf914ced7271",
+    "revision_content_hash": "540bdcb987412de6be06489bca557d1d560bc92a0fc05b2630bf6f02d59cd1c1",
+    "package_artifact_version_id": "41c94795-b79e-593a-a065-c663ffca70f1",
+    "package_content_hash": "94cf5cca14f9ca60cf41714f324fa465c0aaa18cd7f28ea4f54756b148694eb0"
+  },
+  "human_approval_receipt": {
+    "artifact_version_id": "b6c16961-1cd5-51b5-b262-d3b477bd6bbd",
+    "content_hash": "fe7a47b1e9afca813228c8da98e375ee4877238c77a13d0ba2e875fb5a3b0d77"
+  },
+  "fresh_mr1_approval": {
+    "approval_id": "de4edc50-23df-5065-b652-69e5978825b4",
+    "content_hash": "57bbc5964a5ba63bb115ec8bc82ca2db43a2b37ee79066127238dfab28aa13b5",
+    "approval_ref": "mr1-approval://small-team-ai/3b802f4b-44eb-51cd-8254-3cbce868de81/de4edc50-23df-5065-b652-69e5978825b4",
+    "approval_receipt_artifact_version_id": "e85366d4-fea4-5f4d-9d69-4241dc4102b3",
+    "approval_receipt_content_hash": "003bf3487d27421efa36f4b31555bfb11a1bfbe8b1212e8ce0ef1e38cc5bb933",
+    "task_wide_authorization_id": "41b9f1ac-9af0-5ae1-8a39-04cea2090913",
+    "production_render_authorized": true,
+    "publish_authorized": false,
+    "execution_started": false
+  },
+  "canonical_bindings": {
+    "channel_profile_version_hash": "1c96bd4dd254ae04f57ba3d7156eb4bc612aeeedc59d2c8e65dda369cd627640",
+    "compiled_policy_snapshot_hash": "12b66551bd9bdfce1d59d1019ff50bc1c49756b6dc4ab505fde080630b4551bc",
+    "target_market_profile_hash": "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e",
+    "niche_alignment_dossier_hash": "d6d82fc26373f46e13c75d61068b18c3f23176bb21046ef193240e84bb29703d",
+    "market_alignment_dossier_hash": "57b87274528a909db91417071aae687baa60d33ee9aac90731819cf5bbd4c969",
+    "destination_binding_hash": "411aae66418315da8e6a0bf2cd23e896e89e7cd4827a5b54c36c0437ad63efab"
+  },
+  "reuse_decision_manifest": {
+    "path": "reports/mr1_reuse_decision_manifest_sc07_sc09.json",
+    "artifact_version_id": "4ce06532-9b27-50a6-b0ae-4710cce1c053",
+    "content_hash": "10b6448dc603d982fa883bf6cfb9e8b5a59eefc360d07c55aa59af6da696426b"
+  },
+  "attempt_scope": {
+    "SC-07": {
+      "route": "NATIVE_MOTION_GRAPHIC",
+      "external_provider_attempts": 0,
+      "local_compilation_render_required": true
+    },
+    "SC-09": {
+      "route": "NATIVE_DIAGRAM",
+      "external_provider_attempts": 0,
+      "local_compilation_render_required": true
+    },
+    "fallback": false,
+    "provider_substitution": false
+  },
+  "cost_scope": {
+    "cost_estimate_snapshot_hash": "9f3fde6392cc03ecc4814415290e7dda195a4c4c391ae10a89a1339e51b1272a",
+    "SC-07": "COST_0_NATIVE",
+    "SC-09": "COST_0_NATIVE",
+    "actual_cost_invented": false
+  },
+  "idempotency_scope_inputs": [
+    "approval_content_hash",
+    "package_content_hash",
+    "run_id",
+    "scene_id",
+    "route",
+    "request_hash"
+  ],
+  "supersedes": [
+    "f21fb49d-6695-45f1-be2c-231908f3eb93",
+    "40193854-8633-45a5-97be-54b380a8c8e5"
+  ],
+  "old_task_authorizations_reused": false,
+  "old_sc07_sc09_pexels_ledgers_reused": false,
+  "counters": {
+    "MR1_PROVIDER_CALL_COUNT": 4,
+    "MR1_RENDER_CALL_COUNT": 0,
+    "MR1_DRIVE_CALL_COUNT": 0,
+    "MR1_YOUTUBE_CALL_COUNT": 0
+  },
+  "MR1_REAPPROVAL_ENTRY": "PASS",
+  "MR1_REAPPROVAL_EXACT_TARGET": "PASS",
+  "MR1_REAPPROVAL_PACKAGE_BINDING": "PASS",
+  "MR1_REAPPROVAL_NATIVE_ROUTE_BINDING": "PASS",
+  "MR1_REAPPROVAL_PROVIDER_PLAN": "PASS",
+  "MR1_REAPPROVAL_COST_SCOPE": "PASS",
+  "MR1_REAPPROVAL_REUSE_DECISIONS": "PASS",
+  "MR1_REAPPROVAL_APPROVAL_RECEIPT": "PASS",
+  "MR1_REAPPROVAL_FINAL": "PASS",
+  "MR1_EXECUTION": "NOT_STARTED",
+  "MR1_RENDER_STATUS": "NOT_STARTED",
+  "MR1_HUMAN_REVIEW": "PENDING",
+  "DESTINATION_STATUS": "PENDING_PLATFORM_ID",
+  "UPLOAD_READY": false,
+  "PUBLISH_EXECUTION_READY": false,
+  "PROCEED_TO_MR1": true
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": "sc07-sc09.audit-repair-cycles.v1",
+  "cycle_count": 2,
+  "cycles": [
+    {
+      "cycle": 1,
+      "classification": "ARTIFACT_LOOKUP_ENVIRONMENT",
+      "failure": "Docker daemon unavailable while probing optional local PostgreSQL artifact store.",
+      "root_cause": "The Docker socket existed but the desktop daemon was not running; DB-backed lookup was optional because exact immutable refs and scene authority were already durably serialized in repository reports.",
+      "smallest_correct_repair": "Use exact version/hash refs from mr1_reapproval_sc04_revision_summary.json, pkg1_sc04_visual_revision_summary.json and mr1_pexels_continuation_review.json; use pure VSR1 contract gates without PostgreSQL.",
+      "immutable_evidence_preserved": true,
+      "focused_rerun": "PASS_EXACT_ARTIFACT_REFS_RESOLVED_FROM_REPOSITORY",
+      "complete_two_phase_rerun": "SUPERSEDED_BY_CYCLE_2_FINAL_RERUN"
+    },
+    {
+      "cycle": 2,
+      "classification": "TEST_FIXTURE_BOUNDARY",
+      "failure": "Global tests/conftest.py forced PostgreSQL creation before collecting pure offline contract tests; local PostgreSQL was unavailable.",
+      "root_cause": "The three audit tests were initially placed under the DB-backed tests root, whose session hook unconditionally provisions PostgreSQL.",
+      "smallest_correct_repair": "Move the pure tests to tests/offline and run them with --confcutdir=tests/offline so no DB fixture is loaded; production code, global DB fixtures and assertions remain unchanged.",
+      "immutable_evidence_preserved": true,
+      "focused_rerun": "PASS_3_TESTS",
+      "complete_two_phase_rerun": "PASS_10_TESTS"
+    }
+  ],
+  "provider_calls_during_repairs": 0,
+  "thresholds_changed": false,
+  "tests_deleted_or_skipped": false,
+  "prior_evidence_mutated": false
+}
