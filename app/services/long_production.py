@@ -55,6 +55,10 @@ from app.contracts.visual_routing import (
     VisualSourceRoute,
 )
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
+from app.contracts.production_package import (
+    ProductionReadinessReceiptContentV2,
+)
+from app.contracts.vcos_v2 import DurationContractV2
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models import (
     Artifact,
@@ -82,6 +86,7 @@ from app.services.temporal_authority import (
     TemporalAuthorityGate,
 )
 from app.services.workflow import ArtifactService
+from app.services.production_package import ProductionPackageService
 
 
 ORCHESTRATOR_VERSION = "lpro1.long-production-orchestrator/1.0.0"
@@ -104,6 +109,8 @@ class _PackageAuthority:
     project_hash: str
     package_ref: str
     package_hash: str
+    production_package_schema_version: str | None
+    duration_contract: DurationContractV2 | None
     channel_profile_version_ref: str
     compiled_policy_snapshot_ref: str
     compiled_policy_snapshot_hash: str
@@ -391,6 +398,19 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             "created_at": datetime(2026, 7, 19, tzinfo=UTC),
             "created_by": "LPRO1_OFFLINE_FIXTURE_AUTHORITY",
         }
+        if authority.production_package_schema_version == "v2":
+            body.update(
+                {
+                    "production_package_schema_version": "v2",
+                    "production_package_artifact_version_id": authority.package_id,
+                    "production_package_hash": authority.package_hash,
+                    "duration_contract": authority.duration_contract.model_dump(
+                        mode="json"
+                    )
+                    if authority.duration_contract is not None
+                    else None,
+                }
+            )
         plan = NativeRenderPlan(**body)
         plan.content_hash = canonical_plan_hash(plan)
         return plan
@@ -463,10 +483,14 @@ class LongProductionOrchestrator:
         package_id: uuid.UUID | None = None,
         execution_mode: LongProductionExecutionMode = LongProductionExecutionMode.OFFLINE_FIXTURE,
         execution_envelope: ProductionRenderExecutionEnvelope | None = None,
+        actor_user_id: uuid.UUID | None = None,
     ) -> LongProductionOrchestrationReceipt:
         if self.session is None:
             raise RuntimeError("LPRO1_DB_SESSION_REQUIRED")
-        authority, actor_id = self._authority_from_db(project_id, package_id)
+        authority, fallback_actor_id = self._authority_from_db(
+            project_id,
+            package_id,
+        )
         if execution_mode == LongProductionExecutionMode.REAL_APPROVED_PRODUCTION:
             if execution_envelope is None:
                 raise ValidationFailureError("LPRO1_MR1_EXECUTION_ENVELOPE_REQUIRED")
@@ -474,7 +498,11 @@ class LongProductionOrchestrator:
                 raise ValidationFailureError("LPRO1_PRODUCTION_ENVELOPE_LINEAGE_MISMATCH")
             raise ValidationFailureError("LPRO1_REAL_PROVIDER_EXECUTION_REMAINS_MR1_ON_HOLD")
         receipt = self._run_authority(authority)
-        self._persist_receipt(project_id=project_id, actor_id=actor_id, receipt=receipt)
+        self._persist_receipt(
+            project_id=project_id,
+            actor_id=actor_user_id or fallback_actor_id,
+            receipt=receipt,
+        )
         return receipt
 
     def run_fixture(self) -> LongProductionOrchestrationReceipt:
@@ -492,6 +520,10 @@ class LongProductionOrchestrator:
             "renderer_policy": authority.native_render_policy_snapshot_hash,
             "orchestrator_version": ORCHESTRATOR_VERSION,
         }
+        if authority.duration_contract is not None:
+            lineage_seed["duration_contract_hash"] = (
+                authority.duration_contract.duration_contract_hash
+            )
         lineage_fingerprint = stable_hash(lineage_seed)
         run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, lineage_fingerprint))
         root = self.workspace_root / "runs" / run_id
@@ -516,6 +548,14 @@ class LongProductionOrchestrator:
             source_text=authority.source_text,
         )
         duration_ms = len(normalized.spoken_tokens) * 600
+        if authority.duration_contract is not None and not (
+            authority.duration_contract.minimum_duration_ms
+            <= duration_ms
+            <= authority.duration_contract.maximum_duration_ms
+        ):
+            raise ValidationFailureError(
+                "LPRO1_NARRATION_DURATION_OUTSIDE_CHANNEL_CONTRACT"
+            )
         audio_dir = root / "narration"
         audio_dir.mkdir(parents=True, exist_ok=True)
         audio_path = audio_dir / "fixture-narration.wav"
@@ -532,6 +572,10 @@ class LongProductionOrchestrator:
             "idempotency_key": stable_hash({"run": run_id, "stage": "narration"}),
             "execution_mode": LongProductionExecutionMode.OFFLINE_FIXTURE,
         }
+        if authority.duration_contract is not None:
+            narration_request_payload["duration_contract"] = (
+                authority.duration_contract.model_dump(mode="json")
+            )
         narration_request = NarrationRequest(
             **narration_request_payload,
             content_hash=stable_hash(narration_request_payload),
@@ -548,6 +592,10 @@ class LongProductionOrchestrator:
             "fixture_only": True,
             "provider_call_made": False,
         }
+        if authority.duration_contract is not None:
+            narration_result_payload["duration_contract"] = (
+                authority.duration_contract.model_dump(mode="json")
+            )
         narration_result = NarrationResult(
             **narration_result_payload,
             content_hash=stable_hash(narration_result_payload),
@@ -654,6 +702,7 @@ class LongProductionOrchestrator:
             normalized=normalized,
             alignment=alignment,
             segments=segments,
+            duration_contract=authority.duration_contract,
         )
         captioned = ReadableCaptionCompiler().compile(
             normalized=normalized,
@@ -744,6 +793,10 @@ class LongProductionOrchestrator:
             run_id=run_id,
             checks=technical_checks,
             required_checks=technical_checks.keys(),
+            duration_contract=authority.duration_contract,
+            measured_duration_ms=(
+                duration_ms if authority.duration_contract is not None else None
+            ),
         )
         if technical.result != "PASS":
             raise RuntimeError("LPRO1_TECHNICAL_MEDIA_QC_FAILED")
@@ -855,6 +908,18 @@ class LongProductionOrchestrator:
             "idempotency_refs": [lineage_fingerprint, command.run_key, command.command_hash],
             "target_duration_seconds": duration_ms / 1000.0,
         }
+        if authority.production_package_schema_version == "v2":
+            strict_payload.update(
+                {
+                    "production_package_schema_version": "v2",
+                    "production_package_artifact_version_id": authority.package_id,
+                    "duration_contract": authority.duration_contract.model_dump(
+                        mode="json"
+                    )
+                    if authority.duration_contract is not None
+                    else None,
+                }
+            )
         strict_contract = LongFormRenderPackageStrictContract(
             **strict_payload,
             content_hash=stable_hash(
@@ -1097,6 +1162,42 @@ class LongProductionOrchestrator:
         project = self.session.get(VideoProject, project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {project_id}")
+        if getattr(project, "schema_version", "v1") == "v2":
+            package_version, _ = ProductionPackageService(
+                self.session
+            ).require_ready_projection_authority(
+                project_id=project.id,
+                package_artifact_version_id=package_id,
+            )
+            return (
+                self._authority_from_production_package_v2(
+                    project=project,
+                    package_version=package_version,
+                ),
+                project.created_by_user_id,
+            )
+        if package_id is not None:
+            package_version = self.session.get(ArtifactVersion, package_id)
+            package_artifact = (
+                self.session.get(Artifact, package_version.artifact_id)
+                if package_version is not None
+                else None
+            )
+            if (
+                package_version is not None
+                and package_artifact is not None
+                and package_artifact.video_project_id == project.id
+                and package_artifact.artifact_type == "production_package"
+                and (package_version.content or {}).get("schema_version")
+                == "production.package.v2"
+            ):
+                return (
+                    self._authority_from_production_package_v2(
+                        project=project,
+                        package_version=package_version,
+                    ),
+                    project.created_by_user_id,
+                )
         query = select(FirstScriptedVideoPackage).where(
             FirstScriptedVideoPackage.video_project_id == project.id
         )
@@ -1154,6 +1255,8 @@ class LongProductionOrchestrator:
                 project_hash=stable_hash({"id": str(project.id), "profile": str(project.channel_profile_version_id), "policy": str(project.policy_snapshot_id), "effective": str(project.effective_context_snapshot_id)}),
                 package_ref=f"first-scripted-video-package://{package.id}",
                 package_hash=str(package_ref["content_hash"]),
+                production_package_schema_version=None,
+                duration_contract=None,
                 channel_profile_version_ref=f"channel-profile-version://{package.channel_profile_version_id}",
                 compiled_policy_snapshot_ref=f"compiled-policy-snapshot://{snapshot.id}",
                 compiled_policy_snapshot_hash=snapshot.content_hash,
@@ -1178,6 +1281,126 @@ class LongProductionOrchestrator:
                 approval_refs=(str((receipt.get("package_human_review_ref") or {}).get("approval_decision_id")),),
             ),
             project.created_by_user_id,
+        )
+
+    def _authority_from_production_package_v2(
+        self,
+        *,
+        project: VideoProject,
+        package_version: ArtifactVersion,
+    ) -> _PackageAuthority:
+        assert self.session is not None
+        package = ProductionPackageService(self.session).validate_for_readiness(
+            package_version.id
+        )
+        receipt_artifact = self.session.scalars(
+            select(Artifact)
+            .where(Artifact.video_project_id == project.id)
+            .where(Artifact.artifact_type == "production_readiness_receipt")
+            .order_by(Artifact.created_at.asc())
+        ).first()
+        receipt_version = (
+            self.session.get(ArtifactVersion, receipt_artifact.current_version_id)
+            if receipt_artifact is not None
+            and receipt_artifact.current_version_id is not None
+            else None
+        )
+        if receipt_version is None:
+            raise ValidationFailureError(
+                "LPRO1_PRODUCTION_READINESS_RECEIPT_REQUIRED"
+            )
+        try:
+            receipt = ProductionReadinessReceiptContentV2.model_validate(
+                receipt_version.content
+            )
+        except Exception as exc:
+            raise ValidationFailureError(
+                "LPRO1_PRODUCTION_READINESS_RECEIPT_INVALID"
+            ) from exc
+        if (
+            receipt.production_package_artifact_version_id != package_version.id
+            or receipt.production_package_hash != package_version.content_hash
+            or receipt.project_admission_decision_hash
+            != package.project_admission_decision_hash
+            or receipt.duration_contract_hash
+            != package.duration_contract.duration_contract_hash
+        ):
+            raise ValidationFailureError(
+                "LPRO1_PRODUCTION_READINESS_RECEIPT_MISMATCH"
+            )
+        if package.script_ref.artifact_version_id is None:
+            raise ValidationFailureError(
+                "LPRO1_V2_SCRIPT_ARTIFACT_VERSION_REQUIRED"
+            )
+        script_version = self.session.get(
+            ArtifactVersion, package.script_ref.artifact_version_id
+        )
+        if (
+            script_version is None
+            or script_version.content_hash != package.script_ref.content_hash
+        ):
+            raise ValidationFailureError("LPRO1_V2_SCRIPT_BINDING_MISMATCH")
+        source_text = self._extract_script_text(script_version.content)
+        if not source_text:
+            raise ValidationFailureError("LPRO1_STRICT_SCRIPT_ARTIFACT_MISSING")
+        niche_digest = package.niche_market_gate_refs[0]
+        niche_dossier = (
+            package.niche_market_gate_refs[1]
+            if len(package.niche_market_gate_refs) > 1
+            else niche_digest
+        )
+        return _PackageAuthority(
+            project_id=str(project.id),
+            package_id=str(package_version.id),
+            company_id=str(project.company_id),
+            channel_id=str(project.channel_workspace_id),
+            project_ref=f"video-project://{project.id}",
+            project_hash=stable_hash(
+                {
+                    "id": str(project.id),
+                    "profile": str(package.channel_profile_version_id),
+                    "policy": str(package.compiled_policy_snapshot_id),
+                    "effective": package.effective_context_ref.ref,
+                }
+            ),
+            package_ref=f"artifact-version://{package_version.id}",
+            package_hash=package_version.content_hash,
+            production_package_schema_version="v2",
+            duration_contract=package.duration_contract,
+            channel_profile_version_ref=(
+                f"channel-profile-version://{package.channel_profile_version_id}"
+            ),
+            compiled_policy_snapshot_ref=(
+                f"compiled-policy-snapshot://{package.compiled_policy_snapshot_id}"
+            ),
+            compiled_policy_snapshot_hash=package.compiled_policy_snapshot_hash,
+            channel_contract_hash=package.duration_contract.duration_contract_hash,
+            niche_contract_digest_ref=niche_digest.ref,
+            niche_contract_digest_hash=niche_digest.content_hash,
+            effective_context_ref=package.effective_context_ref.ref,
+            effective_context_hash=package.effective_context_ref.content_hash,
+            niche_alignment_dossier_ref=niche_dossier.ref,
+            niche_alignment_dossier_hash=niche_dossier.content_hash,
+            script_ref=package.script_ref.ref,
+            script_hash=package.script_ref.content_hash,
+            source_text=source_text,
+            visual_direction_contract_ref=package.visual_plan_ref.ref,
+            visual_direction_contract_hash=package.visual_plan_ref.content_hash,
+            provider_execution_plan_ref=package.provider_execution_plan_ref.ref,
+            provider_execution_plan_hash=package.provider_execution_plan_ref.content_hash,
+            cost_estimate_snapshot_ref=package.budget_scope_ref.ref,
+            cost_estimate_snapshot_hash=package.budget_scope_ref.content_hash,
+            native_render_policy_snapshot_ref=(
+                project.native_render_policy_snapshot_ref
+                or f"compiled-policy-snapshot://{package.compiled_policy_snapshot_id}#native-render"
+            ),
+            native_render_policy_snapshot_hash=(
+                project.native_render_policy_snapshot_hash
+                or package.compiled_policy_snapshot_hash
+            ),
+            approval_refs=(
+                f"production-readiness-receipt://{receipt_version.id}#{receipt_version.content_hash}",
+            ),
         )
 
     def _persist_receipt(
@@ -1269,6 +1492,8 @@ class LongProductionOrchestrator:
             project_hash=stable_hash({"fixture_project": "lpro1"}),
             package_ref="fixture://scripted-package/lpro1-approved",
             package_hash=package_hash,
+            production_package_schema_version=None,
+            duration_contract=None,
             channel_profile_version_ref="fixture://channel-profile/v2",
             compiled_policy_snapshot_ref="fixture://compiled-policy/v2",
             compiled_policy_snapshot_hash=stable_hash({"policy": "v2", "frozen": True}),

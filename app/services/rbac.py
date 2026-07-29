@@ -1,13 +1,27 @@
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.actor import ActorContext
 from app.db.models import Role, UserRole
-from app.db.session import get_db
 from app.services.config_registry import ConfigRegistryService
+
+
+OPERATOR_ROLE_TO_ROLE_KEY = {
+    "OWNER_ADMIN": "owner_admin",
+    "CHANNEL_MANAGER": "channel_manager",
+    "PRODUCER": "producer",
+    "REVIEWER": "reviewer",
+    "PUBLISHER": "publisher",
+    "ANALYST": "analyst",
+    "PROCUREMENT_OPERATOR": "procurement_operator",
+    "COMPLIANCE_REVIEWER": "compliance_reviewer",
+    "LEARNING_REVIEWER": "learning_reviewer",
+    "READ_ONLY": "read_only_observer",
+}
 
 
 class RBACService:
@@ -66,26 +80,44 @@ class RBACService:
         permission: str,
         company_id: uuid.UUID | None = None,
     ) -> bool:
+        permissions = self.permissions_for_user(user_id=user_id, company_id=company_id)
+        return "*" in permissions or permission in permissions
+
+    def permissions_for_user(
+        self,
+        *,
+        user_id: uuid.UUID,
+        company_id: uuid.UUID | None = None,
+    ) -> set[str]:
+        statement = (
+            select(Role.key)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+        )
+        if company_id is None:
+            statement = statement.where(UserRole.company_id.is_(None))
+        else:
+            statement = statement.where(
+                or_(UserRole.company_id == company_id, UserRole.company_id.is_(None))
+            )
+        assigned_role_keys = set(self.session.scalars(statement).all())
         mapping = self.role_catalog_mapping()
-        for role_key, permissions in mapping.items():
-            if permission in permissions and self.user_has_role(
-                user_id=user_id, role_key=role_key, company_id=company_id
-            ):
-                return True
-        return False
+        permissions: set[str] = set()
+        for role_key in assigned_role_keys:
+            permissions.update(mapping.get(role_key, set()))
+        return permissions
 
 
 def require_permission(permission: str):
-    def dependency(
-        user_id: uuid.UUID | None = None,
-        db: Session = Depends(get_db),
-    ) -> None:
-        if user_id is None:
+    def dependency(request: Request) -> ActorContext:
+        actor = getattr(request.state, "actor", None)
+        if not isinstance(actor, ActorContext):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="missing user_id for M0 RBAC dependency",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="authentication required",
             )
-        if not RBACService(db).user_has_permission(user_id=user_id, permission=permission):
+        if not actor.has_permission(permission):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+        return actor
 
     return dependency

@@ -988,14 +988,32 @@ class CrossPlatformFunnelPackageService:
 
     def build_upload_cards(self, *, package_id: uuid.UUID, data: BuildUploadCardsRequest) -> list[UploadCard]:
         package = self.require(package_id)
+        candidates = [
+            _require_short_candidate(self.session, uuid.UUID(str(candidate_id)))
+            for candidate_id in package.selected_short_candidate_ids
+        ]
+        project_ids = {
+            candidate.parent_video_project_id for candidate in candidates
+        }
+        if package.parent_video_project_id is not None:
+            project_ids.add(package.parent_video_project_id)
+        if any(
+            getattr(_require_project(self.session, project_id), "schema_version", "v1")
+            == "v2"
+            for project_id in project_ids
+        ):
+            # Phase 5 owns the exact final-video decision and upload handoff.
+            # Metadata/card generation must not become a v2 pre-render bypass.
+            raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
+
         cards: list[UploadCard] = []
-        for short_id_text in package.selected_short_candidate_ids:
-            candidate = _require_short_candidate(self.session, uuid.UUID(str(short_id_text)))
+        for candidate in candidates:
             for platform in data.platforms:
                 card = UploadCardService(self.session).create_for_short_candidate(candidate=candidate, platform=platform)
-                HumanUploadTaskService(self.session).create_for_card(card=card)
                 cards.append(card)
-        package.package_state = "READY_FOR_UPLOAD_TASKS" if cards else package.package_state
+        # A metadata card with no exact final-media input remains non-actionable.
+        # HumanUploadTask creation is deliberately deferred to the final-media
+        # decision boundary rather than inferred from card metadata.
         self.session.flush()
         return cards
 
@@ -1061,6 +1079,18 @@ class HumanUploadTaskService:
         self.session = session
 
     def create_for_card(self, *, card: UploadCard) -> HumanUploadTask:
+        project = (
+            _require_project(self.session, card.video_project_id)
+            if card.video_project_id is not None
+            else None
+        )
+        if (
+            project is not None
+            and getattr(project, "schema_version", "v1") == "v2"
+        ):
+            raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
+        if card.card_state != "READY" or not card.file_ref:
+            raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
         task = HumanUploadTask(
             company_id=card.company_id,
             channel_workspace_id=card.channel_workspace_id,

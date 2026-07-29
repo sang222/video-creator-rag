@@ -30,7 +30,6 @@ from app.contracts.m11 import (
 from app.core.errors import ForbiddenError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
-    AnalyticsSnapshot,
     ApprovedPlaybookEntry,
     ChannelDailyRun,
     ChannelLifecycleDecision,
@@ -38,7 +37,6 @@ from app.db.models import (
     ChannelWorkspace,
     CloudMediaRef,
     CostEvent,
-    CredentialHealthSnapshot,
     CredentialReference,
     FailureTraceReport,
     FirstScriptedVideoPackage,
@@ -51,13 +49,10 @@ from app.db.models import (
     LocalizedMetadataPackage,
     LocalizedSubtitlePackage,
     ManualAction,
-    MediaOffloadJob,
     OpsIncident,
     PackagingProposedPatch,
     PackagingReviewQueueItem,
     PlaybookCandidateDraft,
-    ProviderCapabilityMatrixEntry,
-    ProviderHealthSnapshot,
     ProviderRegistryEntry,
     PublishHandoffPackage,
     PublishTimingSuggestion,
@@ -73,20 +68,9 @@ from app.db.models import (
 from app.services.policy_snapshot import PolicySnapshotService
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
+from app.services.rbac import OPERATOR_ROLE_TO_ROLE_KEY, RBACService
 
 
-ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "OWNER_ADMIN": {"*"},
-    "CHANNEL_MANAGER": {"CHANNEL_LIFECYCLE", "RECOVERY_DECISION"},
-    "PRODUCER": {"PROJECT_READ"},
-    "REVIEWER": {"ARTIFACT_REVIEW"},
-    "PUBLISHER": {"PUBLISH_CONFIRM"},
-    "ANALYST": {"ANALYTICS_READ", "RECOVERY_DECISION"},
-    "PROCUREMENT_OPERATOR": {"ASSET_REVIEW"},
-    "COMPLIANCE_REVIEWER": {"GATE_REVIEW", "RIGHTS_REVIEW"},
-    "LEARNING_REVIEWER": {"LEARNING_REVIEW"},
-    "READ_ONLY_OBSERVER": set(),
-}
 LEARNING_ACTION_TO_CANDIDATE_STATE = {
     "APPROVE": "READY_FOR_HUMAN_REVIEW",
     "REJECT": "INELIGIBLE_LOW_EVIDENCE",
@@ -882,7 +866,7 @@ class M11ChannelLifecycleService:
         data: ChannelLifecycleDecisionCreate,
         correlation_id: str = "m11-channel-lifecycle",
     ) -> ChannelLifecycleDecision:
-        _require_permission(data.actor_role, "CHANNEL_LIFECYCLE")
+        _require_permission(self.session, data.actor_role, "channel.manage")
         channel = self.session.get(ChannelWorkspace, channel_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {channel_id}")
@@ -948,7 +932,7 @@ class M11LearningReviewService:
         data: LearningReviewDecisionCreate,
         correlation_id: str = "m11-learning-review",
     ) -> LearningReviewDecision:
-        _require_permission(data.actor_role, "LEARNING_REVIEW")
+        _require_permission(self.session, data.actor_role, "learning.review")
         candidate = self.session.get(LearningCandidate, candidate_id)
         if candidate is None:
             raise NotFoundError(f"learning candidate not found: {candidate_id}")
@@ -1453,8 +1437,15 @@ def _learning_next_action(action: str) -> str:
     }[action]
 
 
-def _require_permission(actor_role: str, permission: str) -> None:
-    permissions = ROLE_PERMISSIONS.get(actor_role, set())
+def _require_permission(
+    session: Session,
+    actor_role: str,
+    permission: str,
+) -> None:
+    role_key = OPERATOR_ROLE_TO_ROLE_KEY.get(actor_role)
+    if actor_role == "READ_ONLY_OBSERVER":
+        role_key = "read_only_observer"
+    permissions = RBACService(session).role_catalog_mapping().get(role_key or "", set())
     if "*" in permissions or permission in permissions:
         return
     raise ForbiddenError(f"role {actor_role} cannot perform {permission}")

@@ -5,6 +5,14 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.contracts.vcos_v2 import (
+    AssignmentMode,
+    ContentMode,
+    DurationContractV2,
+    PlanningSourceType,
+    ProductionLane,
+)
+
 
 SlotType = Literal["DAILY", "WEEKLY", "CAMPAIGN", "EVERGREEN", "EXPERIMENT", "MANUAL"]
 SlotStatus = Literal["OPEN", "ASSIGNED", "ADMITTED", "SKIPPED", "CANCELLED"]
@@ -40,6 +48,11 @@ class EditorialCalendarSlotCreate(BaseModel):
     slot_date: date
     slot_type: SlotType = "DAILY"
     status: SlotStatus = "OPEN"
+    schema_version: Literal["v1", "v2"] = "v1"
+    production_lane: ProductionLane | None = None
+    assignment_mode: AssignmentMode | None = None
+    preferred_series_plan_id: uuid.UUID | None = None
+    preferred_series_run_id: uuid.UUID | None = None
     production_goal: str | None = None
     target_platforms: list[str] = Field(default_factory=list)
     content_pillar: str | None = None
@@ -51,6 +64,26 @@ class EditorialCalendarSlotCreate(BaseModel):
     created_by_user_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_typed_assignment(self) -> "EditorialCalendarSlotCreate":
+        if self.schema_version == "v2":
+            if self.production_lane is None or self.assignment_mode is None:
+                raise ValueError(
+                    "v2 slot requires production_lane and assignment_mode"
+                )
+            if self.series_key is not None:
+                raise ValueError(
+                    "v2 slot forbids raw series_key; use preferred typed ids"
+                )
+        if (
+            self.preferred_series_run_id is not None
+            and self.preferred_series_plan_id is None
+        ):
+            raise ValueError(
+                "preferred_series_run_id requires preferred_series_plan_id"
+            )
+        return self
 
 
 class EditorialCalendarSlotRead(EditorialCalendarSlotCreate):
@@ -251,6 +284,7 @@ class AudienceTargetPackRead(AudienceTargetPackCreate):
 class IdeaMarketPreflightCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
+    editorial_calendar_slot_id: uuid.UUID | None = None
     channel_daily_run_id: uuid.UUID | None = None
     daily_idea_decision_id: uuid.UUID | None = None
     search_intent_map_id: uuid.UUID | None = None
@@ -285,12 +319,35 @@ class DailyIdeaDecisionCreate(BaseModel):
     channel_daily_run_id: uuid.UUID
     context_pack_snapshot_id: uuid.UUID
     channel_state_pack_snapshot_id: uuid.UUID | None = None
+    schema_version: Literal["v1", "v2"] = "v1"
+    production_lane: ProductionLane | None = None
+    assignment_input_ref: dict[str, Any] | None = None
     provider_key: str = "llm_router"
     quota_account_id: uuid.UUID | None = None
     budget_policy_key: str | None = None
     estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_typed_daily_input(self) -> "DailyIdeaDecisionCreate":
+        if self.schema_version == "v2":
+            if self.production_lane != ProductionLane.DAILY_SHORT:
+                raise ValueError(
+                    "v2 DailyIdeaDecision must freeze DAILY_SHORT"
+                )
+            if self.assignment_input_ref is None:
+                raise ValueError(
+                    "v2 DailyIdeaDecision requires assignment_input_ref"
+                )
+        elif (
+            self.production_lane is not None
+            or self.assignment_input_ref is not None
+        ):
+            raise ValueError(
+                "typed daily assignment fields require schema_version=v2"
+            )
+        return self
 
 
 class DailyIdeaDecisionRead(BaseModel):
@@ -302,6 +359,10 @@ class DailyIdeaDecisionRead(BaseModel):
     context_pack_snapshot_id: uuid.UUID
     channel_state_pack_snapshot_id: uuid.UUID | None
     llm_run_snapshot_id: uuid.UUID | None
+    schema_version: Literal["v1", "v2"] = "v1"
+    production_lane: ProductionLane | None = None
+    proposed_content_mode: ContentMode | None = None
+    assignment_input_ref: dict[str, Any] | None = None
     decision_status: IdeaDecisionStatus
     proposed_title: str
     proposed_angle: str | None
@@ -342,8 +403,17 @@ class ProjectAdmissionDecisionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ProjectAdmissionDecisionRead(ProjectAdmissionDecisionCreate):
+class ProjectAdmissionDecisionRead(BaseModel):
     id: uuid.UUID
+    channel_daily_run_id: uuid.UUID | None = None
+    daily_idea_decision_id: uuid.UUID | None = None
+    idea_market_preflight_id: uuid.UUID | None = None
+    category_id: uuid.UUID | None = None
+    character_binding_id: uuid.UUID | None = None
+    budget_policy_key: str | None = None
+    quota_account_id: uuid.UUID | None = None
+    estimated_cost: Decimal = Decimal("0")
+    created_by_user_id: uuid.UUID | None = None
     budget_gate_result: dict[str, Any]
     readiness_gate_refs: list[dict[str, Any]]
     decision: AdmissionDecision
@@ -351,7 +421,44 @@ class ProjectAdmissionDecisionRead(ProjectAdmissionDecisionCreate):
     evidence_refs: list[dict[str, Any]]
     admitted_video_project_id: uuid.UUID | None
     created_artifact_refs: list[dict[str, Any]]
+    schema_version: Literal["v1", "v2"] = "v1"
+    editorial_calendar_slot_id: uuid.UUID | None = None
+    company_id: uuid.UUID | None = None
+    channel_workspace_id: uuid.UUID | None = None
+    channel_profile_version_id: uuid.UUID | None = None
+    policy_snapshot_id: uuid.UUID | None = None
+    planning_source_type: PlanningSourceType | None = None
+    production_lane: ProductionLane | None = None
+    content_mode: ContentMode | None = None
+    assignment_mode: AssignmentMode | None = None
+    series_plan_id: uuid.UUID | None = None
+    series_run_id: uuid.UUID | None = None
+    episode_number: int | None = None
+    episode_role: str | None = None
+    standalone_reason_code: str | None = None
+    parent_video_project_id: uuid.UUID | None = None
+    parent_final_media_ref_id: uuid.UUID | None = None
+    canonical_timeline_ref: str | None = None
+    canonical_timeline_hash: str | None = None
+    resolver_version: str | None = None
+    resolver_input_hash: str | None = None
+    decision_hash: str | None = None
+    assignment_input_ref: dict[str, Any] | None = None
+    duration_contract: DurationContractV2 | None = None
     created_at: AwareDatetime
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def preserve_v1_daily_lineage(self) -> "ProjectAdmissionDecisionRead":
+        if self.schema_version == "v1" and (
+            self.channel_daily_run_id is None
+            or self.daily_idea_decision_id is None
+        ):
+            raise ValueError(
+                "v1 ProjectAdmissionDecision read requires daily lineage"
+            )
+        return self
 
 
 class MockAuthorityProposal(BaseModel):

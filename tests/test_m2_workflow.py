@@ -1,4 +1,6 @@
 import json
+import secrets
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -20,7 +22,15 @@ from app.contracts.workflow import (
     VideoProjectCreate,
 )
 from app.core.errors import ForbiddenError, ValidationFailureError
-from app.db.models import AuditEvent, DomainEvent, LLMRunSnapshot, User
+from app.core.time import utc_now
+from app.db.models import (
+    AuditEvent,
+    DomainEvent,
+    LLMRunSnapshot,
+    OperatorAuthSession,
+    OperatorUser,
+    User,
+)
 from app.main import create_app
 from app.services import (
     ApprovalService,
@@ -36,6 +46,7 @@ from app.services import (
     VideoProjectService,
 )
 from app.services.workflow import deterministic_artifact_content_hash
+from app.services.m11_1 import AUTH_COOKIE_NAME, hash_session_token
 
 ROOT = Path(__file__).resolve().parents[1]
 runner = CliRunner()
@@ -448,9 +459,28 @@ def test_m2_docs_cover_allowances_contracts_and_future_ownership() -> None:
 
 def test_m2_api_and_cli_smoke(db_session) -> None:
     company, channel, snapshot, creator, reviewer, _, _ = _base(db_session)
+    token = secrets.token_urlsafe(48)
+    operator_user = OperatorUser(
+        canonical_user_id=creator.id,
+        email=creator.email,
+        password_hash="not-used-by-session-auth",
+        display_name=creator.display_name,
+        role="OWNER_ADMIN",
+        status="ACTIVE",
+    )
+    db_session.add(operator_user)
+    db_session.flush()
+    db_session.add(
+        OperatorAuthSession(
+            user_id=operator_user.id,
+            session_token_hash=hash_session_token(token),
+            expires_at=utc_now() + timedelta(hours=1),
+        )
+    )
     db_session.commit()
     client = TestClient(create_app())
-    project = client.post(
+    client.cookies.set(AUTH_COOKIE_NAME, token)
+    legacy_write = client.post(
         "/video-projects",
         json={
             "company_id": str(company.id),
@@ -460,11 +490,22 @@ def test_m2_api_and_cli_smoke(db_session) -> None:
             "created_by_user_id": str(creator.id),
         },
     )
-    assert project.status_code == 200, project.text
+    assert legacy_write.status_code == 400, legacy_write.text
+    assert "V2_PROJECT_ADMISSION_REQUIRED" in legacy_write.text
+    project = VideoProjectService(db_session).create_project(
+        data=VideoProjectCreate(
+            company_id=company.id,
+            channel_workspace_id=channel.id,
+            policy_snapshot_id=snapshot.id,
+            title="M2 historical compatibility fixture",
+            created_by_user_id=creator.id,
+        )
+    )
+    db_session.commit()
     artifact = client.post(
         "/artifacts",
         json={
-            "video_project_id": project.json()["id"],
+            "video_project_id": str(project.id),
             "artifact_type": "script",
             "created_by_user_id": str(creator.id),
         },
@@ -482,7 +523,7 @@ def test_m2_api_and_cli_smoke(db_session) -> None:
     review = client.post(
         "/review-tasks",
         json={
-            "video_project_id": project.json()["id"],
+            "video_project_id": str(project.id),
             "target_type": "artifact_version",
             "target_id": version.json()["id"],
             "target_artifact_version_id": version.json()["id"],
@@ -508,8 +549,11 @@ def test_m2_api_and_cli_smoke(db_session) -> None:
             str(creator.id),
         ],
     )
-    assert cli_project.exit_code == 0, cli_project.output
-    cli_project_id = json.loads(cli_project.output)["id"]
-    inspected = runner.invoke(cli_app, ["workflow", "inspect", "--project-id", cli_project_id])
+    assert cli_project.exit_code != 0
+    assert "V2_PROJECT_ADMISSION_REQUIRED" in cli_project.output
+    inspected = runner.invoke(
+        cli_app,
+        ["workflow", "inspect", "--project-id", str(project.id)],
+    )
     assert inspected.exit_code == 0, inspected.output
-    assert json.loads(inspected.output)["project_id"] == cli_project_id
+    assert json.loads(inspected.output)["project_id"] == str(project.id)

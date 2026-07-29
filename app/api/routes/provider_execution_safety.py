@@ -26,6 +26,7 @@ from app.api.routes.imports import (
     RenderRevisionCreateRequest,
     RenderRevisionRead,
     RenderRevisionService,
+    Request,
     session_scope,
     uuid,
 )
@@ -33,6 +34,7 @@ from app.api.routes.imports import (
 from app.api.routes.serializers_publish_learning import (
     _as_http_error,
 )
+from app.services.security_boundary import actor_from_request
 
 
 
@@ -75,28 +77,67 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/paid-render-approvals/{approval_id}/approve", response_model=HumanPaidRenderApprovalRead)
-    def approve_paid_render(approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApprovalRead:
+    def approve_paid_render(
+        approval_id: uuid.UUID,
+        request: Request,
+        data: HumanPaidRenderApprovalDecisionRequest | None = None,
+    ) -> HumanPaidRenderApprovalRead:
         try:
+            actor = actor_from_request(request)
+            payload = (
+                data or HumanPaidRenderApprovalDecisionRequest()
+            ).model_copy(
+                update={"approved_by": str(actor.actor_id)}
+            )
             with session_scope() as session:
-                approval = HumanPaidRenderApprovalService(session).approve(approval_id, data or HumanPaidRenderApprovalDecisionRequest())
+                approval = HumanPaidRenderApprovalService(session).approve(
+                    approval_id,
+                    payload,
+                )
                 return HumanPaidRenderApprovalRead.model_validate(approval)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/paid-render-approvals/{approval_id}/reject", response_model=HumanPaidRenderApprovalRead)
-    def reject_paid_render(approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApprovalRead:
+    def reject_paid_render(
+        approval_id: uuid.UUID,
+        request: Request,
+        data: HumanPaidRenderApprovalDecisionRequest | None = None,
+    ) -> HumanPaidRenderApprovalRead:
         try:
+            actor = actor_from_request(request)
+            payload = (
+                data or HumanPaidRenderApprovalDecisionRequest()
+            ).model_copy(
+                update={"approved_by": str(actor.actor_id)}
+            )
             with session_scope() as session:
-                approval = HumanPaidRenderApprovalService(session).reject(approval_id, data)
+                approval = HumanPaidRenderApprovalService(session).reject(
+                    approval_id,
+                    payload,
+                )
                 return HumanPaidRenderApprovalRead.model_validate(approval)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/paid-render-approvals/{approval_id}/revoke", response_model=HumanPaidRenderApprovalRead)
-    def revoke_paid_render(approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApprovalRead:
+    def revoke_paid_render(
+        approval_id: uuid.UUID,
+        request: Request,
+        data: HumanPaidRenderApprovalDecisionRequest | None = None,
+    ) -> HumanPaidRenderApprovalRead:
         try:
+            actor = actor_from_request(request)
+            payload = (
+                data or HumanPaidRenderApprovalDecisionRequest()
+            ).model_copy(
+                update={"approved_by": str(actor.actor_id)}
+            )
             with session_scope() as session:
-                approval = HumanPaidRenderApprovalService(session).revoke(approval_id, data)
+                approval = HumanPaidRenderApprovalService(session).revoke(
+                    approval_id,
+                    payload,
+                )
                 return HumanPaidRenderApprovalRead.model_validate(approval)
         except Exception as exc:
             raise _as_http_error(exc) from exc

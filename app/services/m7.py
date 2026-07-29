@@ -46,6 +46,7 @@ from app.db.models import (
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 from app.services.geo_delivery import StrictMarketLineageService
+from app.services.production_package import ProductionPackageService
 
 
 SECRET_KEY_FRAGMENTS = {
@@ -85,6 +86,38 @@ class PublishHandoffService:
                 f"render package not found: {data.render_package_snapshot_id}"
             )
         project = _require_project(self.session, package.video_project_id)
+        production_package_version = None
+        production_package_content = None
+        if getattr(project, "schema_version", "v1") == "v2":
+            if (
+                package.production_package_artifact_version_id is None
+                or package.production_package_hash is None
+                or package.duration_contract is None
+            ):
+                raise ValidationFailureError(
+                    "PUBLISH_HANDOFF_PRODUCTION_PACKAGE_PROJECTION_REQUIRED"
+                )
+            (
+                production_package_version,
+                production_package_content,
+            ) = ProductionPackageService(
+                self.session
+            ).require_ready_projection_authority(
+                project_id=project.id,
+                package_artifact_version_id=(
+                    package.production_package_artifact_version_id
+                ),
+                package_hash=package.production_package_hash,
+            )
+            if (
+                package.duration_contract
+                != production_package_content.duration_contract.model_dump(
+                    mode="json"
+                )
+            ):
+                raise ValidationFailureError(
+                    "PUBLISH_HANDOFF_DURATION_CONTRACT_MISMATCH"
+                )
         run = (
             self.session.get(ProductionArtifactRun, package.production_artifact_run_id)
             if package.production_artifact_run_id
@@ -185,6 +218,23 @@ class PublishHandoffService:
             company_id=project.company_id,
             channel_workspace_id=project.channel_workspace_id,
             video_project_id=project.id,
+            production_package_artifact_version_id=(
+                production_package_version.id
+                if production_package_version is not None
+                else None
+            ),
+            production_package_hash=(
+                production_package_version.content_hash
+                if production_package_version is not None
+                else None
+            ),
+            duration_contract=(
+                production_package_content.duration_contract.model_dump(
+                    mode="json"
+                )
+                if production_package_content is not None
+                else None
+            ),
             policy_snapshot_id=project.policy_snapshot_id,
             production_artifact_run_id=package.production_artifact_run_id,
             render_package_snapshot_id=package.id,

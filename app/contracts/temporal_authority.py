@@ -10,6 +10,7 @@ from app.contracts.caption_voice_quality import (
     CaptionReadingMetrics,
     CreativeQualityGateResult,
 )
+from app.contracts.vcos_v2 import DurationContractV2
 
 
 VerificationStatus = Literal["PASS", "BLOCK"]
@@ -360,6 +361,10 @@ class CanonicalMediaTimeline(BaseModel):
     tts_request_id: str = Field(min_length=1)
     audio_asset_id: str = Field(min_length=1)
     audio_duration_ms: int = Field(gt=0)
+    duration_contract: DurationContractV2 | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     provider_timing_seed_ref: str = Field(min_length=1)
     forced_alignment_ref: str = Field(min_length=1)
     verified_alignment_ref: str = Field(min_length=1)
@@ -369,6 +374,16 @@ class CanonicalMediaTimeline(BaseModel):
     timeline_hash: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def duration_matches_frozen_contract(self) -> "CanonicalMediaTimeline":
+        if self.duration_contract is not None and not (
+            self.duration_contract.minimum_duration_ms
+            <= self.audio_duration_ms
+            <= self.duration_contract.maximum_duration_ms
+        ):
+            raise ValueError("TIMELINE_DURATION_OUTSIDE_CHANNEL_CONTRACT")
+        return self
 
 
 class EditorialSegmentInput(BaseModel):

@@ -25,9 +25,11 @@ from app.api.routes import (
     asset_acquisition,
     temporal_authority,
     pkg1,
+    vcos_v2,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.services.security_boundary import MutationSecurityMiddleware
 
 
 def _include_router_flat(application: FastAPI, router: APIRouter) -> None:
@@ -38,6 +40,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
     application = FastAPI(title=settings.app_name)
+    application.add_middleware(MutationSecurityMiddleware, settings=settings)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origin_list,
@@ -69,6 +72,7 @@ def create_app() -> FastAPI:
     _include_router_flat(application, asset_acquisition.create_router())
     _include_router_flat(application, temporal_authority.create_router())
     _include_router_flat(application, pkg1.create_router())
+    _include_router_flat(application, vcos_v2.create_router())
     return application
 
 

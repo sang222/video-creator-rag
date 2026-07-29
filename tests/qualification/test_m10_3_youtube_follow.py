@@ -10,10 +10,6 @@ from sqlalchemy import func, inspect, select, text
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
-
-pytestmark = pytest.mark.skip(
-    reason="Historical YouTube follow qualification depends on pre-M12 local render/upload fixture; M12.1R keeps upload/publish disabled."
-)
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.contracts.m10_3 import YouTubeOwnerAnalyticsProviderOutput, YouTubeOwnerAnalyticsSyncRequest, YouTubePublicProviderOutput
 from app.core.config import get_settings
@@ -32,8 +28,6 @@ from app.main import create_app
 from app.services import ManualPublishConfirmationService, PublishHandoffService
 from app.services.m10_3 import (
     ProviderFetchResult,
-    YouTubeCredentialHealthService,
-    YouTubeMetricMappingService,
     YouTubeMonitoringConfigService,
     YouTubeOAuthCredentialService,
     YouTubeOAuthSessionService,
@@ -43,6 +37,10 @@ from app.services.m10_3 import (
 
 from .helpers.git_checks import tag_exists
 from .helpers.repo_scanners import all_scope_violations
+
+pytestmark = pytest.mark.skip(
+    reason="Historical YouTube follow qualification depends on pre-M12 local render/upload fixture; M12.1R keeps upload/publish disabled."
+)
 
 
 runner = CliRunner()
@@ -242,7 +240,7 @@ def test_m10_3_preflight_migration_defaults_config_catalogs_and_scope(engine, db
     assert M10_3_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_4_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
         defaults = connection.execute(
             text(
                 """

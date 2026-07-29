@@ -653,7 +653,10 @@ def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(db_session
     assert db_session.query(HumanUploadTask).count() == 0
 
 
-def test_m12_2s_underlong_script_triggers_bounded_duration_expansion(db_session, qualification_factory) -> None:
+def test_m12_2s_underlong_script_blocks_without_padding(
+    db_session,
+    qualification_factory,
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -668,19 +671,20 @@ def test_m12_2s_underlong_script_triggers_bounded_duration_expansion(db_session,
         _request(scope.channel.id, video_project_id=project.id)
     )
 
-    assert package.package_status == "WAITING_PROVIDER_CONFIG"
+    assert package.package_status == "BLOCKED"
     repair = package.artifacts["script_duration_repair_attempt"]
     assert repair["attempted"] is True
-    assert repair["repair_type"] == "bounded_script_duration_expand"
-    assert repair["repaired"] is True
+    assert repair["repair_type"] == "editorial_depth_fail_closed"
+    assert repair["repaired"] is False
     assert repair["word_count_before"] < repair["minimum_word_count"]
-    assert repair["minimum_word_count"] <= repair["word_count_after"] <= repair["maximum_word_count"]
-    assert repair["hook_preserved"] is True
-    assert repair["payoff_location_preserved"] is True
-    assert repair["section_order_preserved"] is True
+    assert repair["word_count_after"] == repair["word_count_before"]
+    assert repair["padding_performed"] is False
+    assert "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH" in repair["reason_codes"]
     assert package.artifacts["narration_script"]["hook_spec"] == original_hook
-    assert "SCRIPT_DURATION_BELOW_MINIMUM" not in package.artifacts["deterministic_gate_report"]["fail_codes"]
-    assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
+    assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts[
+        "deterministic_gate_report"
+    ]["fail_codes"]
+    assert "provider_plan_dry_validation" not in package.artifacts
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
 
@@ -700,8 +704,10 @@ def test_m12_2s_duration_expansion_failure_keeps_package_blocked(db_session, qua
     assert package.package_status == "BLOCKED"
     repair = package.artifacts["script_duration_repair_attempt"]
     assert repair["attempted"] is True
-    assert repair["repair_type"] == "bounded_script_duration_expand"
+    assert repair["repair_type"] == "editorial_depth_fail_closed"
     assert repair["repaired"] is False
+    assert repair["padding_performed"] is False
+    assert "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH" in repair["reason_codes"]
     assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
     assert "visual_plan" not in package.artifacts
     assert "provider_plan_dry_validation" not in package.artifacts

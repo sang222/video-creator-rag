@@ -124,7 +124,12 @@ class VideoProjectService:
         *,
         data: VideoProjectCreate,
         correlation_id: str = "m2-project-create",
+        trusted_v2_admission: bool = False,
     ) -> VideoProject:
+        if data.schema_version == "v2" and not trusted_v2_admission:
+            raise ValidationFailureError(
+                "v2 projects must be created by typed ProjectAdmissionService"
+            )
         channel = self.session.get(ChannelWorkspace, data.channel_workspace_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {data.channel_workspace_id}")
@@ -186,6 +191,10 @@ class VideoProjectService:
             action="video_project.create",
         )
         project_values = data.model_dump()
+        if data.duration_contract is not None:
+            project_values["duration_contract"] = data.duration_contract.model_dump(
+                mode="json"
+            )
         project_values.update(self._freeze_policy_refs(data=data, snapshot=snapshot))
         project = VideoProject(**project_values)
         self.session.add(project)
@@ -401,6 +410,38 @@ class VideoProjectService:
         }
 
 
+_DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES = frozenset(
+    {
+        "production_package",
+        "production_readiness_receipt",
+    }
+)
+_V2_READINESS_SUPPORT_ARTIFACT_TYPES = frozenset(
+    {
+        "research_pack",
+        "source_pack",
+        "niche_alignment_dossier",
+        "market_alignment_dossier",
+        "market_gate_results",
+        "gate_results",
+        "script",
+        "visual_plan",
+        "thumbnail_brief",
+        "thumbnail_package",
+        "publishing_metadata_package",
+        "publish_package_draft",
+        "rights_disclosure_completeness_report",
+        "publish_risk_dossier",
+        "asset_provenance_plan",
+        "claim_evidence_ledger",
+        "provider_execution_plan",
+        "cost_estimate_snapshot",
+        "destination_binding",
+    }
+)
+_DOMAIN_AUTHORITY_METADATA_KEY = "_vcos_domain_authority"
+
+
 class ArtifactService:
     def __init__(self, session: Session):
         self.session = session
@@ -410,6 +451,8 @@ class ArtifactService:
         *,
         data: ArtifactCreate,
         correlation_id: str = "m2-artifact-create",
+        trusted_authority_write: bool = False,
+        public_write: bool = False,
     ) -> Artifact:
         project = self.session.get(VideoProject, data.video_project_id)
         if project is None:
@@ -418,6 +461,22 @@ class ArtifactService:
         _require_registry_key(
             self.session, ARTIFACT_TYPE_REGISTRY, data.artifact_type, "artifact_type"
         )
+        if (
+            data.artifact_type in _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES
+            and not trusted_authority_write
+        ):
+            raise ValidationFailureError(
+                "AUTHORITY_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
+            )
+        if (
+            public_write
+            and project.schema_version == "v2"
+            and data.artifact_type
+            in _V2_READINESS_SUPPORT_ARTIFACT_TYPES
+        ):
+            raise ValidationFailureError(
+                "V2_READINESS_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
+            )
         DecisionRightsService(self.session).require_capability(
             user_id=data.created_by_user_id,
             company_id=project.company_id,
@@ -449,13 +508,38 @@ class ArtifactService:
         data: ArtifactVersionCreate,
         set_current: bool = True,
         correlation_id: str = "m2-artifact-version-create",
+        trusted_authority_write: bool = False,
+        public_write: bool = False,
     ) -> ArtifactVersion:
         artifact = self.session.get(Artifact, data.artifact_id)
         if artifact is None:
             raise NotFoundError(f"artifact not found: {data.artifact_id}")
+        if (
+            artifact.artifact_type in _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES
+            and not trusted_authority_write
+        ):
+            raise ValidationFailureError(
+                "AUTHORITY_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
+            )
+        if (
+            _DOMAIN_AUTHORITY_METADATA_KEY in data.packaging_metadata
+            and not trusted_authority_write
+        ):
+            raise ValidationFailureError(
+                "DOMAIN_AUTHORITY_METADATA_RESERVED"
+            )
         project = self.session.get(VideoProject, artifact.video_project_id)
         if project is None:
             raise NotFoundError(f"project not found: {artifact.video_project_id}")
+        if (
+            public_write
+            and project.schema_version == "v2"
+            and artifact.artifact_type
+            in _V2_READINESS_SUPPORT_ARTIFACT_TYPES
+        ):
+            raise ValidationFailureError(
+                "V2_READINESS_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
+            )
         _require_user(self.session, data.created_by_user_id, "created_by_user_id")
         DecisionRightsService(self.session).require_capability(
             user_id=data.created_by_user_id,
@@ -488,6 +572,16 @@ class ArtifactService:
         payload = data.model_dump()
         payload["version_number"] = max_version + 1
         payload["content_hash"] = deterministic_artifact_content_hash(data.content)
+        if trusted_authority_write:
+            payload["packaging_metadata"] = {
+                **payload["packaging_metadata"],
+                _DOMAIN_AUTHORITY_METADATA_KEY: {
+                    "schema_version": "vcos.domain-authority.v1",
+                    "writer": "server_domain_service",
+                    "artifact_type": artifact.artifact_type,
+                    "content_hash": payload["content_hash"],
+                },
+            }
         version = ArtifactVersion(**payload)
         self.session.add(version)
         self.session.flush()

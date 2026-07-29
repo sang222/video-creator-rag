@@ -26,12 +26,15 @@ from app.core.config import Settings, get_settings
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
+    Artifact,
+    ArtifactVersion,
     ChannelWorkspace,
     FirstScriptedVideoPackage,
     HumanUploadTask,
     PublishHandoffPackage,
     UploadedVideo,
     UploadedVideoBackfillEvent,
+    VideoProject,
     YouTubeMonitoringCredential,
 )
 from app.services.audit import AuditService
@@ -123,9 +126,35 @@ class PublishHandoffLedgerService:
         )
 
     def create_upload_task_from_package(self, package_id: uuid.UUID) -> HumanUploadTaskLedgerRead:
+        candidate_version = self.session.get(ArtifactVersion, package_id)
+        if candidate_version is not None:
+            candidate_artifact = self.session.get(
+                Artifact, candidate_version.artifact_id
+            )
+            if (
+                candidate_artifact is not None
+                and candidate_artifact.artifact_type == "production_package"
+                and (candidate_version.content or {}).get("schema_version")
+                == "production.package.v2"
+            ):
+                raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
         package = self.session.get(FirstScriptedVideoPackage, package_id)
         if package is None:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
+        project = (
+            self.session.get(VideoProject, package.video_project_id)
+            if package.video_project_id is not None
+            else None
+        )
+        if (
+            (package.artifacts or {}).get("schema_version")
+            == "production.package.v2"
+            or (
+                project is not None
+                and getattr(project, "schema_version", "v1") == "v2"
+            )
+        ):
+            raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
         if package.package_status != "READY_FOR_HUMAN_REVIEW":
             raise ValidationFailureError("package must be READY_FOR_HUMAN_REVIEW before manual upload handoff")
         from app.services.r3d9_ux2 import PackagingReviewQueueService

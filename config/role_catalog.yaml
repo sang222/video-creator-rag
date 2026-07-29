@@ -1,5 +1,5 @@
 catalog_key: role_catalog
-catalog_version: "1.2.0"
+catalog_version: "1.4.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -13,6 +13,25 @@ items:
       - rbac:assign
       - workflow:read
       - workflow:approval:decide
+      - workflow:project:create
+      - workflow:artifact:create
+      - workflow:artifact_version:create
+      - workflow:review:create
+      - workflow:review:perform
+      - workflow:revision:create
+      - workflow:revision:resolve
+      - channel.manage
+      - editorial.manage
+      - production.start
+      - production.cancel
+      - provider.execute
+      - review.final_decide
+      - publish.prepare
+      - publish.confirm
+      - analytics.sync
+      - learning.review
+      - memory.promote
+      - ops.manage
   - key: operator
     name: Operator
     description: Runs operational checks and M2 artifact workflow actions.
@@ -27,6 +46,10 @@ items:
       - workflow:review:perform
       - workflow:revision:create
       - workflow:revision:resolve
+      - editorial.manage
+      - production.start
+      - provider.execute
+      - ops.manage
   - key: auditor
     name: Auditor
     description: Reads audit and source-of-truth records.
@@ -37,12 +60,28 @@ items:
     name: Owner/Admin
     description: Full M11 operator dashboard control.
     permissions:
+      - "*"
       - dashboard:read
       - dashboard:mutate
       - channel:lifecycle:decide
       - profile_policy:activate
       - provider:manage
       - learning:approve
+      - channel.manage
+      - editorial.manage
+      - production.start
+      - production.cancel
+      - provider.execute
+      - review.final_decide
+      - workflow:review:perform
+      - workflow:revision:create
+      - workflow:approval:decide
+      - publish.prepare
+      - publish.confirm
+      - analytics.sync
+      - learning.review
+      - memory.promote
+      - ops.manage
   - key: channel_manager
     name: Channel Manager
     description: Manages channel workspace, daily runs, lifecycle review, and recovery.
@@ -50,12 +89,31 @@ items:
       - dashboard:read
       - channel:lifecycle:decide
       - recovery:review
+      - channel.manage
+      - editorial.manage
+      - production.start
+      - production.cancel
+      - publish.prepare
+      - ops.manage
+      - workflow:project:create
+      - workflow:artifact:create
+      - workflow:artifact_version:create
+      - workflow:review:create
+      - workflow:revision:resolve
   - key: producer
     name: Producer
     description: Works project and artifact production state.
     permissions:
       - dashboard:read
       - project:produce
+      - editorial.manage
+      - production.start
+      - provider.execute
+      - workflow:project:create
+      - workflow:artifact:create
+      - workflow:artifact_version:create
+      - workflow:review:create
+      - workflow:revision:resolve
   - key: reviewer
     name: Reviewer
     description: Reviews artifacts, MediaQC, and AccessibilityQC.
@@ -63,6 +121,10 @@ items:
       - dashboard:read
       - artifact:review
       - media_qc:review
+      - review.final_decide
+      - workflow:review:perform
+      - workflow:revision:create
+      - workflow:approval:decide
   - key: publisher
     name: Publisher
     description: Performs manual publish handoff and paste-back confirmation.
@@ -70,6 +132,8 @@ items:
       - dashboard:read
       - publish:confirm_manual
       - media:open_drive_cta
+      - publish.prepare
+      - publish.confirm
   - key: analyst
     name: Analyst
     description: Reviews analytics, diagnostics, and evidence notes.
@@ -77,6 +141,7 @@ items:
       - dashboard:read
       - analytics:read
       - diagnostics:read
+      - analytics.sync
   - key: procurement_operator
     name: Procurement Operator
     description: Reviews asset, reuse, and license records.
@@ -84,6 +149,7 @@ items:
       - dashboard:read
       - asset:review
       - license:review
+      - editorial.manage
   - key: compliance_reviewer
     name: Compliance Reviewer
     description: Resolves policy, rights, and disclosure gates.
@@ -91,12 +157,15 @@ items:
       - dashboard:read
       - gate:review
       - rights:review
+      - review.final_decide
   - key: learning_reviewer
     name: Learning Reviewer
     description: Reviews learning candidates and approves playbook entries.
     permissions:
       - dashboard:read
       - learning:approve
+      - learning.review
+      - memory.promote
   - key: read_only_observer
     name: Read-only Observer
     description: Views M11 summaries without mutation permissions.

@@ -4,6 +4,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from app.contracts.vcos_v2 import DurationContractV2
 from app.contracts.creative_quality_canary import (
     HUMAN_CRITICAL_REASON_CODES,
     HUMAN_WATCHABILITY_DIMENSIONS,
@@ -118,6 +119,8 @@ class TechnicalMediaQC:
         run_id: str,
         checks: Mapping[str, Any],
         required_checks: Iterable[str] = REQUIRED_TECHNICAL_MEDIA_QC_CHECKS,
+        duration_contract: DurationContractV2 | None = None,
+        measured_duration_ms: int | None = None,
     ) -> TechnicalMediaQCReport:
         required = list(dict.fromkeys(required_checks))
         missing = [name for name in required if name not in checks]
@@ -134,10 +137,22 @@ class TechnicalMediaQC:
             "checks": dict(checks),
             "required_checks": required,
             "reason_codes": sorted(set(reasons)),
+            "duration_contract": (
+                duration_contract.model_dump(mode="json")
+                if duration_contract is not None
+                else None
+            ),
+            "measured_duration_ms": measured_duration_ms,
             "production_eligible": False,
             "not_publishable": True,
         }
-        return TechnicalMediaQCReport(**payload, content_hash=stable_hash(payload))
+        canonical_payload = {
+            key: value for key, value in payload.items() if value is not None
+        }
+        return TechnicalMediaQCReport(
+            **canonical_payload,
+            content_hash=stable_hash(canonical_payload),
+        )
 
     def from_native_media_qc(
         self,

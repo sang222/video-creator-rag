@@ -35,6 +35,7 @@ class AuthLoginRequest(BaseModel):
 
 class CurrentOperatorUserRead(BaseModel):
     id: uuid.UUID
+    canonical_user_id: uuid.UUID | None = None
     email: str
     display_name: str | None
     role: OperatorUserRole

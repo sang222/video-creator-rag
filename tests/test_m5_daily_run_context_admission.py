@@ -11,10 +11,6 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 import app.services.m5 as m5_service
-
-pytestmark = pytest.mark.skip(
-    reason="Historical pre-M12 runtime mock contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
-)
 from app.cli.main import app as cli_app
 from app.contracts import ChannelProfileVersionCreate, ChannelWorkspaceCreate
 from app.contracts.m5 import (
@@ -29,7 +25,7 @@ from app.contracts.m5 import (
     RetrievalPlanSnapshotCreate,
     SearchDemandEvidenceCreate,
 )
-from app.contracts.ops import ProviderHealthCheckRequest, QuotaAccountCreate
+from app.contracts.ops import QuotaAccountCreate
 from app.core.errors import ConflictError, ValidationFailureError
 from app.db.models import (
     Artifact,
@@ -61,6 +57,10 @@ from app.services import (
     RBACService,
     ResourceResolverService,
     SearchDemandEvidenceService,
+)
+
+pytestmark = pytest.mark.skip(
+    reason="Historical pre-M12 runtime mock contract; M12.1R cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -178,7 +178,7 @@ def test_m5_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert daily_run.metadata_ == {}
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0038_lpro1_daily_mode"
+    assert revision == "0043_vcos_phase123"
 
 
 def test_resource_resolver_enforces_scope_sources_and_deterministic_pack(db_session) -> None:

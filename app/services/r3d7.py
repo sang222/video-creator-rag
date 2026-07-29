@@ -629,12 +629,10 @@ class QualityDeltaAttributionService:
             if facet is None:
                 continue
             old_label = facet.confidence_label
-            new_label, ledger_delta, requires_review, reasons = _confidence_after_attribution(
+            new_label, ledger_delta, _requires_review, reasons = _confidence_after_attribution(
                 old_label=old_label,
                 result=attribution.confidence_result,
             )
-            if new_label != old_label:
-                facet.confidence_label = new_label
             if attribution.confidence_result in {"IMPROVED", "DEGRADED", "BLOCKED_BY_DATA_QUALITY"}:
                 ledger = MemoryConfidenceUpdateLedger(
                     memory_facet_id=facet.id,
@@ -642,8 +640,17 @@ class QualityDeltaAttributionService:
                     old_confidence_label=old_label,
                     new_confidence_label=new_label,
                     confidence_delta=ledger_delta,
-                    reason_codes_json=sorted(set([*attribution.reason_codes_json, *reasons])),
-                    requires_human_review=requires_review,
+                    reason_codes_json=sorted(
+                        set(
+                            [
+                                *attribution.reason_codes_json,
+                                *reasons,
+                                "ACTIVE_MEMORY_CONFIDENCE_UNCHANGED",
+                                "CONFIDENCE_CHANGE_PROPOSAL_ONLY",
+                            ]
+                        )
+                    ),
+                    requires_human_review=True,
                 )
                 self.session.add(ledger)
         self.session.flush()

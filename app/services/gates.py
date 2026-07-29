@@ -56,6 +56,17 @@ BUILTIN_GATE_KEYS = [
     "packaging_expectation_gate",
     "privacy_retention_gate",
     "publish_risk_gate",
+    "production_research_evidence_gate",
+    "production_assignment_integrity_gate",
+    "production_duration_contract_gate",
+    "production_editorial_depth_gate",
+    "production_anti_padding_gate",
+    "production_script_integrity_gate",
+    "production_visual_metadata_gate",
+    "production_rights_disclosure_gate",
+    "production_provider_budget_gate",
+    "production_materiality_gate",
+    "production_package_integrity_gate",
 ]
 
 REVIEW_TYPE_BY_GATE = {
@@ -774,7 +785,14 @@ def _builtin_definition_contracts() -> list[GateDefinitionVersionCreate]:
             status="active",
             input_schema_version="gate-input.m3.v1",
             output_schema_version="gate-output.m3.v1",
-            definition={"logic": gate_key, "review_required": gate_key != "publish_risk_gate", "review_type": REVIEW_TYPE_BY_GATE.get(gate_key)},
+            definition={
+                "logic": gate_key,
+                "review_required": (
+                    not gate_key.startswith("production_")
+                    and gate_key != "publish_risk_gate"
+                ),
+                "review_type": REVIEW_TYPE_BY_GATE.get(gate_key),
+            },
             reason_code_refs=_reason_refs_for_gate(gate_key),
         )
         for gate_key in BUILTIN_GATE_KEYS
@@ -798,11 +816,499 @@ def _evaluate_gate(gate_key: str, snapshot: dict[str, Any], session: Session) ->
         "packaging_expectation_gate": _packaging_expectation_gate,
         "privacy_retention_gate": _privacy_retention_gate,
         "publish_risk_gate": lambda item: _publish_risk_gate(item, session),
+        "production_research_evidence_gate": _production_research_evidence_gate,
+        "production_assignment_integrity_gate": _production_assignment_integrity_gate,
+        "production_duration_contract_gate": _production_duration_contract_gate,
+        "production_editorial_depth_gate": _production_editorial_depth_gate,
+        "production_anti_padding_gate": _production_anti_padding_gate,
+        "production_script_integrity_gate": _production_script_integrity_gate,
+        "production_visual_metadata_gate": _production_visual_metadata_gate,
+        "production_rights_disclosure_gate": _production_rights_disclosure_gate,
+        "production_provider_budget_gate": _production_provider_budget_gate,
+        "production_materiality_gate": _production_materiality_gate,
+        "production_package_integrity_gate": _production_package_integrity_gate,
     }
     handler = mapping.get(gate_key)
     if handler is None:
         return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, basis={"reason": "unknown_gate"})
     return handler(snapshot)
+
+
+def _production_research_evidence_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    exceptions = set(evidence.get("unresolved_exception_types") or [])
+    if "SECURITY" in exceptions:
+        return _production_block(snapshot, "SECURITY_EXCEPTION_BLOCKED")
+    research_refs = content.get("research_refs")
+    source_refs = content.get("source_refs")
+    niche_market_refs = content.get("niche_market_gate_refs")
+    structurally_complete = (
+        _exact_ref_list(research_refs)
+        and _exact_ref_list(source_refs)
+        and _exact_ref_list(niche_market_refs)
+        and evidence.get("niche_market_gates_pass") is True
+        and evidence.get("research_evidence_complete") is True
+    )
+    if "EVIDENCE" in exceptions or not structurally_complete:
+        return _production_block(snapshot, "EVIDENCE_EXCEPTION_BLOCKED")
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_RESEARCH_EVIDENCE_PASS",
+        evidence=[*research_refs, *source_refs, *niche_market_refs],
+        basis={
+            "research_ref_count": len(research_refs),
+            "source_ref_count": len(source_refs),
+            "niche_market_gate_ref_count": len(niche_market_refs),
+        },
+    )
+
+
+def _production_assignment_integrity_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    exceptions = set(evidence.get("unresolved_exception_types") or [])
+    if "SECURITY" in exceptions:
+        return _production_block(snapshot, "SECURITY_EXCEPTION_BLOCKED")
+    content_mode = content.get("content_mode")
+    series_values = (
+        content.get("series_plan_id"),
+        content.get("series_run_id"),
+        content.get("episode_number"),
+    )
+    series_valid = (
+        content_mode == "SERIES_EPISODE"
+        and all(value is not None for value in series_values)
+        and not content.get("standalone_reason_code")
+    )
+    standalone_valid = (
+        content_mode == "STANDALONE"
+        and all(value is None for value in series_values)
+        and not content.get("episode_role")
+        and bool(content.get("standalone_reason_code"))
+    )
+    derivative_valid = (
+        content.get("production_lane") != "LONG_DERIVED_SHORT"
+        or (
+            content_mode == "STANDALONE"
+            and _exact_ref(content.get("parent_derivative_lineage"))
+        )
+    )
+    exact_authority = (
+        _sha256(content.get("project_admission_decision_hash"))
+        and evidence.get("assignment_integrity_pass") is True
+        and (series_valid or standalone_valid)
+        and derivative_valid
+    )
+    if "POLICY" in exceptions or not exact_authority:
+        return _production_block(snapshot, "POLICY_EXCEPTION_BLOCKED")
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_ASSIGNMENT_INTEGRITY_PASS",
+        basis={
+            "production_lane": content.get("production_lane"),
+            "assignment_mode": content.get("assignment_mode"),
+            "content_mode": content_mode,
+        },
+    )
+
+
+def _production_duration_contract_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, _evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    raw = content.get("duration_contract")
+    if not isinstance(raw, dict):
+        return _production_block(snapshot, "DURATION_CONTRACT_MISSING")
+    try:
+        from app.contracts.vcos_v2 import DurationContractV2
+
+        contract = DurationContractV2.model_validate(raw)
+    except Exception:
+        return _production_block(snapshot, "DURATION_CONTRACT_INVALID")
+    try:
+        script_duration_ms = int(
+            (content.get("readiness_evidence") or {}).get("script_duration_ms")
+        )
+    except (TypeError, ValueError):
+        return _production_block(snapshot, "DURATION_CONTRACT_INVALID")
+    if (
+        str(contract.source_profile_version_id)
+        != str(content.get("channel_profile_version_id"))
+        or str(contract.source_policy_snapshot_id)
+        != str(content.get("compiled_policy_snapshot_id"))
+    ):
+        return _production_block(snapshot, "DURATION_CONTRACT_HASH_MISMATCH")
+    if not (
+        contract.minimum_duration_ms
+        <= script_duration_ms
+        <= contract.maximum_duration_ms
+    ):
+        return _production_block(
+            snapshot,
+            "SCRIPT_DURATION_OUTSIDE_CHANNEL_CONTRACT",
+            basis={
+                "minimum_duration_ms": contract.minimum_duration_ms,
+                "script_duration_ms": script_duration_ms,
+                "maximum_duration_ms": contract.maximum_duration_ms,
+            },
+        )
+    return _production_pass(
+        snapshot,
+        "DURATION_CONTRACT_PASS",
+        basis={
+            "duration_contract_hash": contract.duration_contract_hash,
+            "minimum_duration_ms": contract.minimum_duration_ms,
+            "target_duration_ms": contract.target_duration_ms,
+            "maximum_duration_ms": contract.maximum_duration_ms,
+            "script_duration_ms": script_duration_ms,
+        },
+    )
+
+
+def _production_editorial_depth_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    supported_claims = int(evidence.get("supported_claim_count") or 0)
+    sections = int(evidence.get("distinct_editorial_section_count") or 0)
+    coverage = float(evidence.get("research_coverage_ratio") or 0)
+    sufficient = bool(
+        evidence.get("editorial_depth_sufficient") is True
+        and supported_claims >= 3
+        and sections >= 3
+        and coverage >= 0.75
+        and _exact_ref(content.get("script_ref"))
+        and _exact_ref_list(content.get("research_refs"))
+    )
+    if not sufficient:
+        return _production_block(
+            snapshot,
+            "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH",
+            basis={
+                "supported_claim_count": supported_claims,
+                "distinct_editorial_section_count": sections,
+                "research_coverage_ratio": coverage,
+                "shorter_format_permitted": bool(
+                    evidence.get("shorter_format_permitted")
+                ),
+            },
+        )
+    return _production_pass(
+        snapshot,
+        "EDITORIAL_DEPTH_PASS",
+        basis={
+            "supported_claim_count": supported_claims,
+            "distinct_editorial_section_count": sections,
+            "research_coverage_ratio": coverage,
+        },
+    )
+
+
+def _production_anti_padding_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    _content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    phrase_hits = int(evidence.get("padding_phrase_hits") or 0)
+    repeated_ratio = float(evidence.get("repeated_sentence_ratio") or 0)
+    passed = bool(
+        evidence.get("anti_padding_pass") is True
+        and phrase_hits == 0
+        and repeated_ratio <= 0.20
+    )
+    if not passed:
+        return _production_block(
+            snapshot,
+            "SCRIPT_PADDING_DETECTED",
+            basis={
+                "padding_phrase_hits": phrase_hits,
+                "repeated_sentence_ratio": repeated_ratio,
+            },
+        )
+    return _production_pass(
+        snapshot,
+        "ANTI_PADDING_PASS",
+        basis={
+            "padding_phrase_hits": phrase_hits,
+            "repeated_sentence_ratio": repeated_ratio,
+        },
+    )
+
+
+def _production_script_integrity_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    script = content.get("script_ref")
+    if not _exact_ref(script) or evidence.get("script_gates_pass") is not True:
+        return _production_block(snapshot, "SCRIPT_ARTIFACT_BINDING_MISSING")
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_SCRIPT_INTEGRITY_PASS",
+        evidence=[script],
+    )
+
+
+def _production_visual_metadata_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    refs = [
+        content.get("visual_plan_ref"),
+        *(content.get("thumbnail_refs") or []),
+        content.get("metadata_ref"),
+        content.get("destination_binding_ref"),
+    ]
+    if (
+        not refs
+        or not all(_exact_ref(ref) for ref in refs)
+        or evidence.get("visual_thumbnail_metadata_gates_pass") is not True
+    ):
+        return _production_block(snapshot, "VISUAL_METADATA_BINDING_INCOMPLETE")
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_VISUAL_METADATA_PASS",
+        evidence=refs,
+    )
+
+
+def _production_rights_disclosure_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    exceptions = set(evidence.get("unresolved_exception_types") or [])
+    refs = content.get("rights_disclosure_refs")
+    if (
+        "RIGHTS" in exceptions
+        or not _exact_ref_list(refs)
+        or evidence.get("rights_disclosure_gates_pass") is not True
+    ):
+        return _production_block(snapshot, "RIGHTS_EXCEPTION_BLOCKED")
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_RIGHTS_DISCLOSURE_PASS",
+        evidence=refs,
+    )
+
+
+def _production_provider_budget_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    provider = content.get("provider_execution_plan_ref")
+    budget = content.get("budget_scope_ref")
+    if (
+        not _exact_ref(provider)
+        or not _exact_ref(budget)
+        or evidence.get("provider_plan_valid") is not True
+        or evidence.get("budget_scope_valid") is not True
+    ):
+        return _production_block(snapshot, "PROVIDER_OR_BUDGET_PLAN_INVALID")
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_PROVIDER_BUDGET_PASS",
+        evidence=[provider, budget],
+    )
+
+
+def _production_materiality_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    _content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    content = snapshot["artifact_version"]["content"]
+    revision = content.get("revision")
+    if not isinstance(revision, dict):
+        return _production_pass(snapshot, "PRODUCTION_MATERIALITY_PASS")
+    materiality = revision.get("materiality")
+    if materiality == "NON_MATERIAL_TECHNICAL_REPAIR":
+        if revision.get("policy_authorized_repair") is not True:
+            return _production_block(
+                snapshot, "NON_MATERIAL_REPAIR_POLICY_AUTHORIZATION_REQUIRED"
+            )
+        return _production_pass(
+            snapshot,
+            "PRODUCTION_MATERIALITY_PASS",
+            basis={
+                "materiality": materiality,
+                "affected_gate_keys": revision.get("affected_gate_keys") or [],
+            },
+        )
+    return _production_block(
+        snapshot,
+        "MATERIAL_CHANGE_REQUIRES_NEW_PLANNING_CYCLE",
+        basis={
+            "materiality": materiality,
+            "caller_claimed_new_planning_cycle": bool(
+                evidence.get("new_planning_cycle")
+            ),
+            "new_project_admission_required": True,
+        },
+    )
+
+
+def _production_package_integrity_gate(
+    snapshot: dict[str, Any],
+) -> GateEvaluation:
+    content, evidence, failure = _production_package_gate_input(snapshot)
+    if failure:
+        return _production_block(snapshot, failure)
+    exceptions = set(evidence.get("unresolved_exception_types") or [])
+    artifact_version = snapshot.get("artifact_version") or {}
+    required_refs = [
+        content.get("effective_context_ref"),
+        *(content.get("research_refs") or []),
+        *(content.get("source_refs") or []),
+        *(content.get("niche_market_gate_refs") or []),
+        content.get("script_ref"),
+        content.get("visual_plan_ref"),
+        *(content.get("thumbnail_refs") or []),
+        content.get("metadata_ref"),
+        *(content.get("rights_disclosure_refs") or []),
+        content.get("provider_execution_plan_ref"),
+        content.get("budget_scope_ref"),
+        content.get("destination_binding_ref"),
+    ]
+    exact_hash = content_hash(content) == artifact_version.get("content_hash")
+    scope_matches = (
+        str(content.get("video_project_id"))
+        == str((snapshot.get("project") or {}).get("id"))
+        and str(content.get("compiled_policy_snapshot_id"))
+        == str((snapshot.get("project") or {}).get("policy_snapshot_id"))
+    )
+    if (
+        "SECURITY" in exceptions
+        or evidence.get("package_integrity_inputs_complete") is not True
+        or not exact_hash
+        or not scope_matches
+        or not required_refs
+        or not all(_exact_ref(ref) for ref in required_refs)
+    ):
+        reason = (
+            "SECURITY_EXCEPTION_BLOCKED"
+            if "SECURITY" in exceptions
+            else "PRODUCTION_PACKAGE_INTEGRITY_BLOCKED"
+        )
+        return _production_block(
+            snapshot,
+            reason,
+            basis={
+                "canonical_hash_matches": exact_hash,
+                "project_scope_matches": scope_matches,
+                "required_ref_count": len(required_refs),
+            },
+        )
+    return _production_pass(
+        snapshot,
+        "PRODUCTION_PACKAGE_INTEGRITY_PASS",
+        evidence=required_refs,
+        basis={
+            "canonical_hash_matches": True,
+            "project_scope_matches": True,
+            "required_ref_count": len(required_refs),
+        },
+    )
+
+
+def _production_package_gate_input(
+    snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    artifact_version = snapshot.get("artifact_version")
+    if not isinstance(artifact_version, dict):
+        return {}, {}, "PRODUCTION_PACKAGE_V2_REQUIRED"
+    content = artifact_version.get("content")
+    if (
+        not isinstance(content, dict)
+        or content.get("schema_version") != "production.package.v2"
+        or content.get("authority_classification")
+        != "CANONICAL_V2_AUTHORITY"
+    ):
+        return {}, {}, "PRODUCTION_PACKAGE_V2_REQUIRED"
+    evidence = content.get("readiness_evidence")
+    if not isinstance(evidence, dict):
+        return content, {}, "PRODUCTION_READINESS_EVIDENCE_MISSING"
+    return content, evidence, None
+
+
+def _production_pass(
+    snapshot: dict[str, Any],
+    reason: str,
+    *,
+    evidence: list[dict[str, Any]] | None = None,
+    basis: dict[str, Any] | None = None,
+) -> GateEvaluation:
+    return _gate_result(
+        "PASS",
+        [reason],
+        snapshot,
+        evidence=evidence or [],
+        freshness="FRESH",
+        confidence="HIGH",
+        basis={"production_package_v2": True, **(basis or {})},
+    )
+
+
+def _production_block(
+    snapshot: dict[str, Any],
+    reason: str,
+    *,
+    basis: dict[str, Any] | None = None,
+) -> GateEvaluation:
+    return _gate_result(
+        "BLOCK",
+        [reason],
+        snapshot,
+        freshness="FRESH",
+        confidence="HIGH",
+        basis={
+            "production_package_v2": True,
+            "fail_closed": True,
+            **(basis or {}),
+        },
+    )
+
+
+def _exact_ref(value: Any) -> bool:
+    return bool(
+        isinstance(value, dict)
+        and str(value.get("type") or "").strip()
+        and str(value.get("ref") or "").strip()
+        and _sha256(value.get("content_hash"))
+    )
+
+
+def _exact_ref_list(value: Any) -> bool:
+    return bool(
+        isinstance(value, list)
+        and value
+        and all(_exact_ref(item) for item in value)
+    )
+
+
+def _sha256(value: Any) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
 
 
 def _ai_use_disclosure_gate(snapshot: dict[str, Any]) -> GateEvaluation:
@@ -1176,6 +1682,57 @@ def _reason_refs_for_gate(gate_key: str) -> list[str]:
         "packaging_expectation_gate": ["PACKAGING_PROMISE_MISMATCH"],
         "privacy_retention_gate": ["RAW_COMMENT_STORAGE_BLOCKED", "CONTEXT_SCOPE_MISSING"],
         "publish_risk_gate": ["MANUAL_REVIEW_REQUIRED", "SYSTEM_OK"],
+        "production_research_evidence_gate": [
+            "PRODUCTION_RESEARCH_EVIDENCE_PASS",
+            "EVIDENCE_EXCEPTION_BLOCKED",
+            "SECURITY_EXCEPTION_BLOCKED",
+        ],
+        "production_assignment_integrity_gate": [
+            "PRODUCTION_ASSIGNMENT_INTEGRITY_PASS",
+            "POLICY_EXCEPTION_BLOCKED",
+            "SECURITY_EXCEPTION_BLOCKED",
+        ],
+        "production_duration_contract_gate": [
+            "DURATION_CONTRACT_PASS",
+            "DURATION_CONTRACT_MISSING",
+            "DURATION_CONTRACT_INVALID",
+            "DURATION_CONTRACT_HASH_MISMATCH",
+            "SCRIPT_DURATION_OUTSIDE_CHANNEL_CONTRACT",
+        ],
+        "production_editorial_depth_gate": [
+            "EDITORIAL_DEPTH_PASS",
+            "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH",
+        ],
+        "production_anti_padding_gate": [
+            "ANTI_PADDING_PASS",
+            "SCRIPT_PADDING_DETECTED",
+        ],
+        "production_script_integrity_gate": [
+            "PRODUCTION_SCRIPT_INTEGRITY_PASS",
+            "SCRIPT_ARTIFACT_BINDING_MISSING",
+        ],
+        "production_visual_metadata_gate": [
+            "PRODUCTION_VISUAL_METADATA_PASS",
+            "VISUAL_METADATA_BINDING_INCOMPLETE",
+        ],
+        "production_rights_disclosure_gate": [
+            "PRODUCTION_RIGHTS_DISCLOSURE_PASS",
+            "RIGHTS_EXCEPTION_BLOCKED",
+        ],
+        "production_provider_budget_gate": [
+            "PRODUCTION_PROVIDER_BUDGET_PASS",
+            "PROVIDER_OR_BUDGET_PLAN_INVALID",
+        ],
+        "production_materiality_gate": [
+            "PRODUCTION_MATERIALITY_PASS",
+            "NON_MATERIAL_REPAIR_POLICY_AUTHORIZATION_REQUIRED",
+            "MATERIAL_CHANGE_REQUIRES_NEW_PLANNING_CYCLE",
+        ],
+        "production_package_integrity_gate": [
+            "PRODUCTION_PACKAGE_INTEGRITY_PASS",
+            "PRODUCTION_PACKAGE_INTEGRITY_BLOCKED",
+            "SECURITY_EXCEPTION_BLOCKED",
+        ],
     }
     return refs.get(gate_key, ["GATE_INPUT_INSUFFICIENT"])
 

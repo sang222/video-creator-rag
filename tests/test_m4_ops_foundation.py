@@ -31,9 +31,7 @@ from app.core.errors import ConflictError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
     AuditEvent,
-    CostEvent,
     CredentialHealthSnapshot,
-    DeadLetterJob,
     DomainEvent,
     LLMRunSnapshot,
     ProviderAttempt,
@@ -156,7 +154,7 @@ def test_m4_migration_tables_defaults_and_scope_guard(engine, db_session) -> Non
     assert isinstance(snapshot.metadata_, dict)
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0038_lpro1_daily_mode"
+    assert revision == "0043_vcos_phase123"
 
 
 def test_provider_registry_is_real_only_and_test_fakes_are_test_scoped(db_session) -> None:

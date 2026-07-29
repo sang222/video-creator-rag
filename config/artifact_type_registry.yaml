@@ -1,5 +1,5 @@
 catalog_key: artifact_type_registry
-catalog_version: "1.11.0"
+catalog_version: "1.12.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -155,3 +155,7 @@ items:
     description: Exact SC-04 repair evidence packet for final human package review without execution authority.
   - key: pkg1_sc04_revision_human_review_receipt
     description: Immutable exact-target human PASS receipt for the reviewed SC-04 revision package without execution authority.
+  - key: production_package
+    description: Immutable canonical ProductionPackage v2 authority with exact channel, admission, artifact, provider, budget, rights, and destination bindings.
+  - key: production_readiness_receipt
+    description: Immutable automated ProductionPackage v2 readiness receipt binding exact package, policy, duration, and GateRun hashes without a human ApprovalDecision.

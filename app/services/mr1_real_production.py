@@ -23,7 +23,13 @@ from app.contracts.mr1 import (
     MR1ProviderAttemptContinuationCommand,
     MR1ProviderAttemptContinuationReviewCommand,
     MR1StartCommand,
+    MR1V2AutomatedAdmissionRead,
+    MR1V2AutomatedAdmissionRequest,
 )
+from app.contracts.production_package import (
+    ProductionReadinessReceiptContentV2,
+)
+from app.contracts.vcos_v2 import DurationContractV2
 from app.contracts.workflow import (
     ApprovalDecisionCreate,
     ArtifactCreate,
@@ -69,6 +75,7 @@ from app.services.mr1_route_authority import (
     resolve_mr1_visual_route_authority,
 )
 from app.services.pkg1_market_revision import DRIVE_IDEMPOTENCY_PHASES
+from app.services.production_package import ProductionPackageService
 from app.services.workflow import ApprovalService, ArtifactService, ReviewService
 
 
@@ -224,12 +231,110 @@ class MR1RealProductionService:
             str(expected_snapshot_id) if expected_snapshot_id is not None else None
         )
 
+    def validate_v2_automated_admission(
+        self,
+        command: MR1V2AutomatedAdmissionRequest,
+    ) -> MR1V2AutomatedAdmissionRead:
+        """Validate Phase 3 authority without enabling provider execution."""
+
+        project = self.session.get(VideoProject, command.project_id)
+        if project is None:
+            raise ValidationFailureError("MR1_V2_PROJECT_NOT_FOUND")
+        if getattr(project, "schema_version", "v1") != "v2":
+            raise ValidationFailureError("MR1_V2_PROJECT_REQUIRED")
+        packages = ProductionPackageService(self.session)
+        package_version, package = packages.require_ready_projection_authority(
+            project_id=project.id,
+            package_artifact_version_id=(
+                command.production_package_artifact_version_id
+            ),
+        )
+        if package.production_lane.value != "LONG_FORM":
+            raise ValidationFailureError("MR1_V2_LONG_FORM_PACKAGE_REQUIRED")
+        if (
+            self.expected_profile_id is not None
+            and str(package.channel_profile_version_id)
+            != self.expected_profile_id
+        ) or (
+            self.expected_snapshot_id is not None
+            and str(package.compiled_policy_snapshot_id)
+            != self.expected_snapshot_id
+        ):
+            raise ValidationFailureError(
+                "MR1_PROFILE_SNAPSHOT_BINDING_MISMATCH"
+            )
+        receipt_version = packages._receipt_for_package(
+            package_version.id,
+            package_version.content_hash,
+        )
+        if receipt_version is None:
+            raise ValidationFailureError(
+                "MR1_V2_AUTOMATED_READINESS_RECEIPT_REQUIRED"
+            )
+        try:
+            receipt = ProductionReadinessReceiptContentV2.model_validate(
+                receipt_version.content
+            )
+            duration = DurationContractV2.model_validate(
+                package.duration_contract.model_dump(mode="json")
+            )
+        except Exception as exc:
+            raise ValidationFailureError(
+                "MR1_V2_AUTOMATED_AUTHORITY_INVALID"
+            ) from exc
+        if (
+            receipt.production_package_artifact_version_id
+            != package_version.id
+            or receipt.production_package_hash
+            != package_version.content_hash
+            or receipt.duration_contract_hash
+            != duration.duration_contract_hash
+        ):
+            raise ValidationFailureError(
+                "MR1_V2_AUTOMATED_AUTHORITY_MISMATCH"
+            )
+        return MR1V2AutomatedAdmissionRead(
+            project_id=project.id,
+            production_package_artifact_version_id=package_version.id,
+            production_package_version=package_version.version_number,
+            production_package_hash=package_version.content_hash,
+            production_readiness_receipt_artifact_version_id=(
+                receipt_version.id
+            ),
+            production_readiness_receipt_hash=receipt_version.content_hash,
+            duration_contract=duration,
+            provider_execution_plan_hash=(
+                package.provider_execution_plan_ref.content_hash
+            ),
+            budget_scope_hash=package.budget_scope_ref.content_hash,
+            reason_codes=[
+                "AUTOMATED_PRODUCTION_READINESS_ACCEPTED",
+                "MR1_V2_REAL_EXECUTION_DISABLED",
+            ],
+        )
+
     def start(
         self,
         command: MR1StartCommand,
         *,
         gateways: MR1ProviderGateways,
     ) -> dict[str, Any]:
+        project = self.session.get(VideoProject, command.project_id)
+        if (
+            project is not None
+            and getattr(project, "schema_version", "v1") == "v2"
+        ):
+            self.validate_v2_automated_admission(
+                MR1V2AutomatedAdmissionRequest(
+                    project_id=command.project_id,
+                    production_package_artifact_version_id=(
+                        command.package_artifact_version_id
+                    ),
+                )
+            )
+            raise ValidationFailureError(
+                "MR1_V2_REAL_EXECUTION_DISABLED"
+            )
         approval = self.session.scalar(
             select(ApprovalDecision)
             .where(ApprovalDecision.id == command.approval_id)
@@ -2635,28 +2740,32 @@ class MR1RealProductionService:
     def _narration_runtime_gate(
         authority: dict[str, Any], output: dict[str, Any]
     ) -> dict[str, Any]:
-        pacing = authority["resolved"]["narration_pacing_preflight_estimate"]["content"]
-        limits = pacing.get("target_runtime_minutes") or {}
-        minimum_ms = round(float(limits.get("minimum") or 0) * 60_000)
-        maximum_ms = round(float(limits.get("maximum") or 0) * 60_000)
+        bounds = MR1RealProductionService._approved_duration_bounds(
+            authority
+        )
+        minimum_ms = bounds["minimum_duration_ms"]
+        maximum_ms = bounds["maximum_duration_ms"]
         duration_ms = int(
             output.get("audio_duration_ms") or output.get("duration_ms") or 0
         )
-        exact_limits = minimum_ms == 360_000 and maximum_ms == 720_000
         passed = bool(
-            exact_limits
+            bounds["authority_valid"]
             and minimum_ms <= duration_ms <= maximum_ms
             and output.get("provider_call_made") is True
         )
         evidence = {
             "schema_version": "mr1.narration-runtime-hard-gate.v1",
             "timing_source": "ACTUAL_PROVIDER_AUDIO_DURATION",
-            "pacing_artifact_version_id": authority["resolved"][
-                "narration_pacing_preflight_estimate"
-            ]["artifact_version_id"],
-            "pacing_artifact_content_hash": authority["resolved"][
-                "narration_pacing_preflight_estimate"
-            ]["content_hash"],
+            "limit_source": bounds["limit_source"],
+            "pacing_artifact_version_id": bounds.get(
+                "pacing_artifact_version_id"
+            ),
+            "pacing_artifact_content_hash": bounds.get(
+                "pacing_artifact_content_hash"
+            ),
+            "duration_contract_hash": bounds.get(
+                "duration_contract_hash"
+            ),
             "minimum_duration_ms": minimum_ms,
             "maximum_duration_ms": maximum_ms,
             "actual_duration_ms": duration_ms,
@@ -2670,6 +2779,53 @@ class MR1RealProductionService:
         }
         evidence["content_hash"] = content_hash(evidence)
         return evidence
+
+    @staticmethod
+    def _approved_duration_bounds(
+        authority: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_contract = authority.get("duration_contract")
+        if raw_contract is not None:
+            try:
+                contract = DurationContractV2.model_validate(raw_contract)
+            except Exception as exc:
+                raise ValidationFailureError(
+                    "MR1_V2_DURATION_CONTRACT_INVALID"
+                ) from exc
+            return {
+                "minimum_duration_ms": contract.minimum_duration_ms,
+                "maximum_duration_ms": contract.maximum_duration_ms,
+                "duration_contract_hash": (
+                    contract.duration_contract_hash
+                ),
+                "limit_source": "CHANNEL_DURATION_CONTRACT_V2",
+                "authority_valid": True,
+            }
+        pacing_ref = (
+            (authority.get("resolved") or {}).get(
+                "narration_pacing_preflight_estimate"
+            )
+            or {}
+        )
+        pacing = pacing_ref.get("content") or {}
+        limits = pacing.get("target_runtime_minutes") or {}
+        minimum_ms = round(float(limits.get("minimum") or 0) * 60_000)
+        maximum_ms = round(float(limits.get("maximum") or 0) * 60_000)
+        return {
+            "minimum_duration_ms": minimum_ms,
+            "maximum_duration_ms": maximum_ms,
+            "pacing_artifact_version_id": pacing_ref.get(
+                "artifact_version_id"
+            ),
+            "pacing_artifact_content_hash": pacing_ref.get(
+                "content_hash"
+            ),
+            "duration_contract_hash": None,
+            "limit_source": "LEGACY_MR1_GLOBAL_DURATION",
+            "authority_valid": (
+                minimum_ms == 360_000 and maximum_ms == 720_000
+            ),
+        }
 
     def _with_service_archive_evidence(
         self,
@@ -5855,9 +6011,13 @@ class MR1RealProductionService:
         probe = probe_media(audio, ffprobe=ffprobe)
         duration_ms = round(media_duration_seconds(probe) * 1000)
         audio_sha256 = _sha256_file(audio)
+        duration_bounds = self._approved_duration_bounds(authority)
         if (
-            duration_ms < 360_000
-            or duration_ms > 720_000
+            not duration_bounds["authority_valid"]
+            or duration_ms
+            < duration_bounds["minimum_duration_ms"]
+            or duration_ms
+            > duration_bounds["maximum_duration_ms"]
             or probe.get("evidence_sha256") != audio_sha256
         ):
             raise ValidationFailureError("MR1_RECOVERED_NARRATION_AUDIO_NOT_USABLE")
@@ -8286,6 +8446,7 @@ class MR1RealProductionService:
                 created_by_user_id=actor_id,
             ),
             correlation_id=correlation_id,
+            trusted_authority_write=True,
         )
         version = service.create_artifact_version(
             data=ArtifactVersionCreate(
@@ -8295,6 +8456,7 @@ class MR1RealProductionService:
                 created_by_user_id=actor_id,
             ),
             correlation_id=f"{correlation_id}-version",
+            trusted_authority_write=True,
         )
         return artifact, version
 
@@ -8644,6 +8806,7 @@ class MR1RealProductionService:
                 parent_version_id=existing.id,
             ),
             correlation_id=correlation_id,
+            trusted_authority_write=True,
         )
 
     @staticmethod

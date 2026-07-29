@@ -13,6 +13,7 @@ from app.api.routes.imports import (
     status,
     uuid,
 )
+from app.core.actor import ActorContext
 
 
 def _publish_handoff(handoff: Any) -> dict[str, Any]:
@@ -670,12 +671,23 @@ def _learning_review_action(
     candidate_id: uuid.UUID,
     action: str,
     data: LearningReviewDecisionCreate | None,
+    actor: ActorContext,
 ) -> LearningReviewDecisionRead:
     try:
         request = (
-            data.model_copy(update={"action": action})
+            data.model_copy(
+                update={
+                    "action": action,
+                    "actor_role": actor.actor_role,
+                    "decided_by_user_id": actor.actor_id,
+                }
+            )
             if data is not None
-            else LearningReviewDecisionCreate(action=action)
+            else LearningReviewDecisionCreate(
+                action=action,
+                actor_role=actor.actor_role,
+                decided_by_user_id=actor.actor_id,
+            )
         )
         with session_scope() as session:
             decision = M11LearningReviewService(session).decide(

@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.vcos_v2 import DurationContractV2
 from app.contracts.visual_routing import ExactTextNativeOverlayContract, VisualSourceRoute
 
 
@@ -211,6 +212,20 @@ class NativeRenderPlan(BaseModel):
     plan_id: str
     plan_version: int = Field(ge=1)
     package_id: str
+    production_package_schema_version: Literal["v2"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    production_package_artifact_version_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    production_package_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        exclude_if=lambda value: value is None,
+    )
+    duration_contract: DurationContractV2 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     video_project_id: str
     company_id: str
     channel_id: str
@@ -269,6 +284,29 @@ class NativeRenderPlan(BaseModel):
             raise ValueError("VSR1_STRICT_AND_LEGACY_SCENE_MIX_PROHIBITED")
         if min(self.canvas_spec.width, self.canvas_spec.height) < 1080:
             raise ValueError("VSR1_OUTPUT_RESOLUTION_BELOW_1080P")
+        return self
+
+    @model_validator(mode="after")
+    def validate_v2_package_duration_authority(self) -> "NativeRenderPlan":
+        if self.production_package_schema_version != "v2":
+            return self
+        if (
+            not self.production_package_artifact_version_id
+            or not self.production_package_hash
+            or self.duration_contract is None
+            or self.package_id != self.production_package_artifact_version_id
+        ):
+            raise ValueError("NATIVE_RENDER_V2_PACKAGE_AUTHORITY_REQUIRED")
+        duration_ms = max(
+            (scene.narration_end_ms for scene in self.scenes),
+            default=0,
+        )
+        if not (
+            self.duration_contract.minimum_duration_ms
+            <= duration_ms
+            <= self.duration_contract.maximum_duration_ms
+        ):
+            raise ValueError("NATIVE_RENDER_DURATION_OUTSIDE_CHANNEL_CONTRACT")
         return self
 
 

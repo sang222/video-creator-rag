@@ -10,7 +10,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -59,7 +58,6 @@ from app.db.models import (
     RenderSpecSnapshot,
     SceneManifestSnapshot,
     SourceManifestSnapshot,
-    User,
     VideoProject,
     VisualPlanSnapshot,
     VoiceTimelineSnapshot,
@@ -67,6 +65,7 @@ from app.db.models import (
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
+from app.services.production_package import ProductionPackageService
 from app.services.workflow import ArtifactService
 
 
@@ -1004,6 +1003,31 @@ class LocalFixtureRendererService:
         if snapshot.validation_state != "PASS":
             raise ValidationFailureError("RenderSpec must validate before render job is created")
         render_spec = RenderSpecContract.model_validate(snapshot.render_spec_blob)
+        render_project = _require_project(
+            self.session, snapshot.video_project_id
+        )
+        production_package_version = None
+        production_package_content = None
+        if getattr(render_project, "schema_version", "v1") == "v2":
+            (
+                production_package_version,
+                production_package_content,
+            ) = ProductionPackageService(
+                self.session
+            ).require_ready_projection_authority(
+                project_id=render_project.id
+            )
+            declared_duration_ms = round(
+                render_spec.total_duration_seconds * 1000
+            )
+            if not (
+                production_package_content.duration_contract.minimum_duration_ms
+                <= declared_duration_ms
+                <= production_package_content.duration_contract.maximum_duration_ms
+            ):
+                raise ValidationFailureError(
+                    "RENDER_PACKAGE_DURATION_OUTSIDE_CHANNEL_CONTRACT"
+                )
         run = self.session.get(ProductionArtifactRun, snapshot.production_artifact_run_id)
         job = MediaRenderJob(
             production_artifact_run_id=snapshot.production_artifact_run_id,
@@ -1112,6 +1136,17 @@ class LocalFixtureRendererService:
             )
             return RenderResult(job=job, package=None)
         probed_duration = _ffprobe_duration(ffprobe, video_path)
+        if getattr(render_project, "schema_version", "v1") == "v2":
+            assert production_package_content is not None
+            measured_duration_ms = round(probed_duration * 1000)
+            if not (
+                production_package_content.duration_contract.minimum_duration_ms
+                <= measured_duration_ms
+                <= production_package_content.duration_contract.maximum_duration_ms
+            ):
+                raise ValidationFailureError(
+                    "RENDER_PACKAGE_DURATION_OUTSIDE_CHANNEL_CONTRACT"
+                )
         final_video_ref = _file_ref(
             video_path,
             mime_type="video/mp4",
@@ -1145,6 +1180,23 @@ class LocalFixtureRendererService:
         package = RenderPackageSnapshot(
             production_artifact_run_id=snapshot.production_artifact_run_id,
             video_project_id=snapshot.video_project_id,
+            production_package_artifact_version_id=(
+                production_package_version.id
+                if production_package_version is not None
+                else None
+            ),
+            production_package_hash=(
+                production_package_version.content_hash
+                if production_package_version is not None
+                else None
+            ),
+            duration_contract=(
+                production_package_content.duration_contract.model_dump(
+                    mode="json"
+                )
+                if production_package_content is not None
+                else None
+            ),
             media_render_job_id=job.id,
             render_spec_snapshot_id=snapshot.id,
             final_video_ref=final_video_ref,
@@ -1174,6 +1226,17 @@ class LocalFixtureRendererService:
             artifact_type="render_package",
             content={
                 "render_package_snapshot_id": str(package.id),
+                **(
+                    {
+                        "production_package_artifact_version_id": str(
+                            package.production_package_artifact_version_id
+                        ),
+                        "production_package_hash": package.production_package_hash,
+                        "duration_contract": package.duration_contract,
+                    }
+                    if package.production_package_artifact_version_id
+                    else {}
+                ),
                 "render_spec_snapshot_id": str(snapshot.id),
                 "file_manifest": package.file_manifest,
                 "checksum_manifest": package.checksum_manifest,

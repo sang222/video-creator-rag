@@ -10,16 +10,11 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
-
-pytestmark = pytest.mark.skip(
-    reason="Historical M8 mock analytics/local-render fixture contract; M12.1R analytics cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
-)
 from app.contracts import AnalyticsSyncRunCreate, AnalyticsSyncRunExecuteRequest, ManualAnalyticsImportContract
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.core.errors import ValidationFailureError
 from app.db.models import (
     AnalyticsSnapshot,
-    AnalyticsSyncRun,
     DomainEvent,
     EngagementSnapshot,
     MetricAvailabilitySnapshot,
@@ -28,13 +23,16 @@ from app.db.models import (
     RetentionCurveSnapshot,
     TrafficSourceSnapshot,
     UploadedVideo,
-    UploadedVideoMetricsSummary,
 )
 from app.main import create_app
 from app.services import AnalyticsSyncService, ManualPublishConfirmationService, PublishHandoffService
 
 from .helpers.git_checks import collect_git_status
 from .helpers.repo_scanners import all_scope_violations
+
+pytestmark = pytest.mark.skip(
+    reason="Historical M8 mock analytics/local-render fixture contract; M12.1R analytics cutover coverage lives in tests/test_m12_1r_mock_runtime_purge.py."
+)
 
 
 runner = CliRunner()
@@ -157,7 +155,7 @@ def test_m8_preflight_tags_migration_tables_defaults_and_metric_seed(engine, db_
     assert M8_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
         defaults = connection.execute(
             text(
                 """

@@ -34,6 +34,7 @@ from app.contracts.m5 import (
 )
 from app.contracts.nich1 import (
     ChannelFitEvaluation,
+    EditorialSlotValidationResult,
     NicheAlignmentDossier,
     NicheContractDigest,
     NicheCriterion,
@@ -72,6 +73,8 @@ from app.db.models import (
     ReviewTask,
     SearchDemandEvidence,
     SearchIntentMap,
+    SeriesPlan,
+    SeriesRun,
     User,
     VideoProject,
 )
@@ -177,6 +180,34 @@ class LLMWorkflowResult:
     budget_gate_result: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class _TypedSlotNicheAuthority:
+    """Read-only NICH1 view backed by a persisted typed slot and SeriesPlan."""
+
+    persisted_slot: EditorialCalendarSlot
+    series_key: str | None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.persisted_slot, name)
+
+
+def _typed_slot_niche_authority(
+    slot: EditorialCalendarSlot,
+    *,
+    preferred_plan: SeriesPlan | None,
+) -> EditorialCalendarSlot | _TypedSlotNicheAuthority:
+    if (
+        slot.schema_version == "v2"
+        and slot.series_key is None
+        and preferred_plan is not None
+    ):
+        return _TypedSlotNicheAuthority(
+            persisted_slot=slot,
+            series_key=preferred_plan.stable_series_key,
+        )
+    return slot
+
+
 class EditorialCalendarService:
     def __init__(self, session: Session):
         self.session = session
@@ -192,6 +223,10 @@ class EditorialCalendarService:
             company_id=data.company_id,
             channel_workspace_id=data.channel_workspace_id,
             policy_snapshot_id=data.policy_snapshot_id,
+        )
+        preferred_plan = _validate_typed_slot_series_preferences(
+            self.session,
+            data=data,
         )
         if data.created_by_user_id is not None:
             _require_user(self.session, data.created_by_user_id, "created_by_user_id")
@@ -212,7 +247,10 @@ class EditorialCalendarService:
                 policy_snapshot=snapshot,
                 channel_contract=(snapshot.compiled_payload or {}).get("channel_contract_json") or {},
                 category=category,
-                editorial_slot=slot,
+                editorial_slot=_typed_slot_niche_authority(
+                    slot,
+                    preferred_plan=preferred_plan,
+                ),
                 strict_production=True,
             )
             if validation.verdict != NicheGateVerdict.PASS:
@@ -874,33 +912,54 @@ class IdeaMarketPreflightService:
         correlation_id: str = "m5-idea-market-preflight",
     ) -> IdeaMarketPreflight:
         _require_channel_for_company(self.session, data.company_id, data.channel_workspace_id)
-        evidence_refs = _resolve_preflight_evidence_refs(self.session, data)
-        strict_result = _evaluate_nich1_preflight(self.session, data=data, evidence_refs=evidence_refs)
-        if strict_result is None:
-            decision, reasons, confidence, demand_score = _evaluate_preflight(data, evidence_refs)
-            channel_fit_score = data.channel_fit_score
-            policy_fit_state = data.policy_fit_state
-            evidence_blob = {**data.evidence_blob, "evidence_refs": evidence_refs}
+        long_form_result = _evaluate_v2_long_form_preflight(
+            self.session,
+            data=data,
+        )
+        if long_form_result is not None:
+            evidence_refs = long_form_result["evidence_refs"]
+            decision = long_form_result["decision"]
+            reasons = long_form_result["reason_codes"]
+            confidence = long_form_result["confidence"]
+            demand_score = long_form_result["demand_score"]
+            channel_fit_score = long_form_result["channel_fit_score"]
+            policy_fit_state = long_form_result["policy_fit_state"]
+            evidence_blob = long_form_result["evidence_blob"]
         else:
-            decision = strict_result["decision"]
-            reasons = strict_result["reason_codes"]
-            confidence = strict_result["confidence"]
-            demand_score = strict_result["demand_score"]
-            channel_fit_score = Decimal(str(strict_result["channel_fit_score"]))
-            policy_fit_state = strict_result["policy_fit_state"]
-            evidence_blob = {
-                **data.evidence_blob,
-                "evidence_refs": evidence_refs,
-                "niche_contract_digest_ref": strict_result["niche_contract_digest_ref"],
-                "topic_niche_alignment_gate": strict_result["topic_gate"],
-                "channel_fit_gate": strict_result["channel_fit_gate"],
-                "niche_alignment_dossier": strict_result["niche_alignment_dossier"],
-                "channel_fit_score": strict_result["channel_fit_score"],
-                "channel_fit_threshold": strict_result["channel_fit_threshold"],
-                "channel_fit_result": strict_result["channel_fit_result"],
-                "caller_policy_fit_state_ignored": data.policy_fit_state,
-            }
-        if data.target_market is not None:
+            evidence_refs = _resolve_preflight_evidence_refs(self.session, data)
+            strict_result = _evaluate_nich1_preflight(
+                self.session,
+                data=data,
+                evidence_refs=evidence_refs,
+            )
+            if strict_result is None:
+                decision, reasons, confidence, demand_score = _evaluate_preflight(
+                    data,
+                    evidence_refs,
+                )
+                channel_fit_score = data.channel_fit_score
+                policy_fit_state = data.policy_fit_state
+                evidence_blob = {**data.evidence_blob, "evidence_refs": evidence_refs}
+            else:
+                decision = strict_result["decision"]
+                reasons = strict_result["reason_codes"]
+                confidence = strict_result["confidence"]
+                demand_score = strict_result["demand_score"]
+                channel_fit_score = Decimal(str(strict_result["channel_fit_score"]))
+                policy_fit_state = strict_result["policy_fit_state"]
+                evidence_blob = {
+                    **data.evidence_blob,
+                    "evidence_refs": evidence_refs,
+                    "niche_contract_digest_ref": strict_result["niche_contract_digest_ref"],
+                    "topic_niche_alignment_gate": strict_result["topic_gate"],
+                    "channel_fit_gate": strict_result["channel_fit_gate"],
+                    "niche_alignment_dossier": strict_result["niche_alignment_dossier"],
+                    "channel_fit_score": strict_result["channel_fit_score"],
+                    "channel_fit_threshold": strict_result["channel_fit_threshold"],
+                    "channel_fit_result": strict_result["channel_fit_result"],
+                    "caller_policy_fit_state_ignored": data.policy_fit_state,
+                }
+        if long_form_result is None and data.target_market is not None:
             evidence_blob.update(
                 {
                     "niche_contract_digest_ref": data.niche_contract_digest_ref,
@@ -967,6 +1026,7 @@ class IdeaMarketPreflightService:
         item = IdeaMarketPreflight(
             company_id=data.company_id,
             channel_workspace_id=data.channel_workspace_id,
+            editorial_calendar_slot_id=data.editorial_calendar_slot_id,
             channel_daily_run_id=data.channel_daily_run_id,
             daily_idea_decision_id=data.daily_idea_decision_id,
             search_intent_map_id=data.search_intent_map_id,
@@ -1544,6 +1604,41 @@ class ChannelAuthorityService:
         correlation_id: str = "m5-channel-authority",
     ) -> DailyIdeaDecision:
         daily_run = _require_daily_run(self.session, data.channel_daily_run_id)
+        frozen_assignment_input_ref = data.assignment_input_ref
+        if data.schema_version == "v2":
+            slot = (
+                self.session.get(
+                    EditorialCalendarSlot,
+                    daily_run.editorial_calendar_slot_id,
+                )
+                if daily_run.editorial_calendar_slot_id is not None
+                else None
+            )
+            if (
+                slot is None
+                or slot.schema_version != "v2"
+                or slot.production_lane != "DAILY_SHORT"
+            ):
+                raise ValidationFailureError(
+                    "v2 daily authority requires a frozen v2 DAILY_SHORT slot"
+                )
+            frozen_assignment_input_ref = {
+                **(data.assignment_input_ref or {}),
+                "editorial_calendar_slot_id": str(slot.id),
+                "policy_snapshot_id": str(daily_run.policy_snapshot_id),
+                "production_lane": "DAILY_SHORT",
+                "assignment_mode": slot.assignment_mode,
+                "preferred_series_plan_id": (
+                    str(slot.preferred_series_plan_id)
+                    if slot.preferred_series_plan_id is not None
+                    else None
+                ),
+                "preferred_series_run_id": (
+                    str(slot.preferred_series_run_id)
+                    if slot.preferred_series_run_id is not None
+                    else None
+                ),
+            }
         context_pack = ResourceResolverService(self.session).require_context_pack(data.context_pack_snapshot_id)
         state_pack = (
             self.session.get(ChannelStatePackSnapshot, data.channel_state_pack_snapshot_id)
@@ -1576,6 +1671,17 @@ class ChannelAuthorityService:
             context_pack_snapshot_id=context_pack.id,
             channel_state_pack_snapshot_id=state_pack.id if state_pack else None,
             llm_run_snapshot_id=result.llm_run.id,
+            schema_version=data.schema_version,
+            production_lane=data.production_lane,
+            proposed_content_mode=(
+                "SERIES_EPISODE"
+                if data.schema_version == "v2"
+                and proposal.get("proposed_series_key")
+                else "STANDALONE"
+                if data.schema_version == "v2"
+                else None
+            ),
+            assignment_input_ref=frozen_assignment_input_ref,
             decision_status="PROPOSED",
             proposed_title=proposal["proposed_title"],
             proposed_angle=proposal.get("proposed_angle"),
@@ -1801,6 +1907,20 @@ class ChannelDailyRunService:
 class ProjectAdmissionService:
     def __init__(self, session: Session):
         self.session = session
+
+    def create_v2_decision(
+        self,
+        *,
+        data: Any,
+        correlation_id: str = "vcos-v2-project-admission",
+    ) -> ProjectAdmissionDecision:
+        """Typed Phase 2 entry kept adjacent to the stable v1 implementation."""
+        from app.services.vcos_v2 import ProjectAdmissionV2Service
+
+        return ProjectAdmissionV2Service(self.session).create_decision(
+            data=data,
+            correlation_id=correlation_id,
+        )
 
     def create_decision(
         self,
@@ -2106,6 +2226,58 @@ def _validate_channel_policy_scope(
         raise ValidationFailureError("policy snapshot does not belong to channel")
 
 
+def _validate_typed_slot_series_preferences(
+    session: Session,
+    *,
+    data: EditorialCalendarSlotCreate,
+) -> SeriesPlan | None:
+    if data.schema_version != "v2" or data.preferred_series_plan_id is None:
+        return None
+
+    snapshot = session.get(
+        CompiledChannelPolicySnapshot,
+        data.policy_snapshot_id,
+    )
+    plan = session.get(SeriesPlan, data.preferred_series_plan_id)
+    if plan is None:
+        raise NotFoundError(
+            f"preferred series plan not found: {data.preferred_series_plan_id}"
+        )
+    if (
+        snapshot is None
+        or plan.company_id != data.company_id
+        or plan.channel_workspace_id != data.channel_workspace_id
+        or plan.policy_snapshot_id != data.policy_snapshot_id
+        or plan.channel_profile_version_id
+        != snapshot.channel_profile_version_id
+    ):
+        raise ValidationFailureError("V2_SLOT_SERIES_PLAN_SCOPE_MISMATCH")
+    if (
+        data.production_lane is None
+        or data.production_lane.value not in set(plan.allowed_production_lanes or [])
+    ):
+        raise ValidationFailureError("V2_SLOT_SERIES_PLAN_LANE_MISMATCH")
+
+    if data.preferred_series_run_id is None:
+        return plan
+    run = session.get(SeriesRun, data.preferred_series_run_id)
+    if run is None:
+        raise NotFoundError(
+            f"preferred series run not found: {data.preferred_series_run_id}"
+        )
+    if run.series_plan_id != plan.id:
+        raise ValidationFailureError("V2_SLOT_SERIES_RUN_PLAN_MISMATCH")
+    if (
+        run.company_id != data.company_id
+        or run.channel_workspace_id != data.channel_workspace_id
+        or run.policy_snapshot_id != data.policy_snapshot_id
+        or run.channel_profile_version_id
+        != snapshot.channel_profile_version_id
+    ):
+        raise ValidationFailureError("V2_SLOT_SERIES_RUN_SCOPE_MISMATCH")
+    return plan
+
+
 def _require_company(session: Session, company_id: uuid.UUID) -> None:
     from app.db.models import Company
 
@@ -2284,6 +2456,265 @@ def _search_evidence_refs(session: Session, company_id: uuid.UUID, channel_works
         }
         for row in rows
     ]
+
+
+def _evaluate_v2_long_form_preflight(
+    session: Session,
+    *,
+    data: IdeaMarketPreflightCreate,
+) -> dict[str, Any] | None:
+    if data.editorial_calendar_slot_id is None:
+        return None
+    slot = session.get(
+        EditorialCalendarSlot,
+        data.editorial_calendar_slot_id,
+    )
+    if slot is None:
+        raise NotFoundError(
+            f"editorial slot not found: {data.editorial_calendar_slot_id}"
+        )
+    if slot.schema_version != "v2" or slot.production_lane != "LONG_FORM":
+        return None
+    if data.channel_daily_run_id is not None or data.daily_idea_decision_id is not None:
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_DAILY_SOURCE_FORBIDDEN"
+        )
+    if (
+        slot.company_id != data.company_id
+        or slot.channel_workspace_id != data.channel_workspace_id
+    ):
+        raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_SLOT_SCOPE_MISMATCH")
+
+    channel = session.get(ChannelWorkspace, slot.channel_workspace_id)
+    snapshot = session.get(
+        CompiledChannelPolicySnapshot,
+        slot.policy_snapshot_id,
+    )
+    category = (
+        session.get(ContentCategory, slot.category_id)
+        if slot.category_id is not None
+        else None
+    )
+    profile = (
+        session.get(
+            ChannelProfileVersion,
+            snapshot.channel_profile_version_id,
+        )
+        if snapshot is not None
+        else None
+    )
+    if any(item is None for item in (channel, snapshot, category, profile)):
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_SLOT_AUTHORITY_MISSING"
+        )
+    assert channel is not None
+    assert snapshot is not None
+    assert category is not None
+    assert profile is not None
+    if not _is_nich1_strict_snapshot(snapshot):
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_POLICY_NOT_STRICT"
+        )
+
+    preferred_plan: SeriesPlan | None = None
+    if slot.preferred_series_plan_id is not None:
+        preferred_plan = session.get(SeriesPlan, slot.preferred_series_plan_id)
+        if preferred_plan is None:
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_SERIES_PLAN_MISSING"
+            )
+        if (
+            preferred_plan.company_id != slot.company_id
+            or preferred_plan.channel_workspace_id != slot.channel_workspace_id
+            or preferred_plan.policy_snapshot_id != slot.policy_snapshot_id
+            or preferred_plan.channel_profile_version_id
+            != snapshot.channel_profile_version_id
+            or "LONG_FORM"
+            not in set(preferred_plan.allowed_production_lanes or [])
+        ):
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_SERIES_PLAN_SCOPE_MISMATCH"
+            )
+    if slot.preferred_series_run_id is not None:
+        preferred_run = session.get(SeriesRun, slot.preferred_series_run_id)
+        if (
+            preferred_plan is None
+            or preferred_run is None
+            or preferred_run.series_plan_id != preferred_plan.id
+        ):
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_SERIES_RUN_PLAN_MISMATCH"
+            )
+        if (
+            preferred_run.company_id != slot.company_id
+            or preferred_run.channel_workspace_id != slot.channel_workspace_id
+            or preferred_run.policy_snapshot_id != slot.policy_snapshot_id
+            or preferred_run.channel_profile_version_id
+            != snapshot.channel_profile_version_id
+        ):
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_SERIES_RUN_SCOPE_MISMATCH"
+            )
+
+    raw_validation = (slot.operational_envelope or {}).get(
+        "nich1_slot_validation"
+    )
+    if not isinstance(raw_validation, dict):
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_SLOT_VALIDATION_MISSING"
+        )
+    try:
+        stored_validation = EditorialSlotValidationResult.model_validate(
+            raw_validation
+        )
+    except ValidationError as exc:
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_SLOT_VALIDATION_INVALID"
+        ) from exc
+    current_validation = EditorialSlotValidator().validate(
+        channel=channel,
+        profile_version=profile,
+        policy_snapshot=snapshot,
+        channel_contract=(snapshot.compiled_payload or {}).get(
+            "channel_contract_json"
+        )
+        or {},
+        category=category,
+        editorial_slot=_typed_slot_niche_authority(
+            slot,
+            preferred_plan=preferred_plan,
+        ),
+        strict_production=True,
+    )
+    if (
+        stored_validation.verdict != NicheGateVerdict.PASS
+        or current_validation.verdict != NicheGateVerdict.PASS
+        or stored_validation.content_hash != current_validation.content_hash
+    ):
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_SLOT_VALIDATION_NOT_CURRENT_PASS"
+        )
+
+    raw_evidence_ids = (data.evidence_blob or {}).get(
+        "search_demand_evidence_ids"
+    )
+    if not isinstance(raw_evidence_ids, list) or not raw_evidence_ids:
+        raise ValidationFailureError(
+            "V2_LONG_FORM_PREFLIGHT_PERSISTED_DEMAND_REQUIRED"
+        )
+    evidence_ids: list[uuid.UUID] = []
+    evidence_refs: list[dict[str, Any]] = []
+    seen: set[uuid.UUID] = set()
+    for raw_id in raw_evidence_ids:
+        try:
+            evidence_id = uuid.UUID(str(raw_id))
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_DEMAND_ID_INVALID"
+            ) from exc
+        if evidence_id in seen:
+            continue
+        seen.add(evidence_id)
+        evidence = session.get(SearchDemandEvidence, evidence_id)
+        if evidence is None:
+            raise NotFoundError(
+                f"search demand evidence not found: {evidence_id}"
+            )
+        if (
+            evidence.company_id != slot.company_id
+            or evidence.channel_workspace_id != slot.channel_workspace_id
+        ):
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_DEMAND_SCOPE_MISMATCH"
+            )
+        if evidence.evidence_source_type not in SAFE_SEARCH_SOURCES:
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_DEMAND_SOURCE_FORBIDDEN"
+            )
+        evidence_ids.append(evidence_id)
+        evidence_refs.append(
+            {
+                "type": "search_demand_evidence",
+                "id": str(evidence.id),
+                "evidence_source_type": evidence.evidence_source_type,
+                "query": evidence.query,
+                "platform": evidence.platform,
+                "geo": evidence.geo,
+                "search_volume_30d": evidence.search_volume_30d,
+                "relative_interest_index": (
+                    str(evidence.relative_interest_index)
+                    if evidence.relative_interest_index is not None
+                    else None
+                ),
+                "competition_index": (
+                    str(evidence.competition_index)
+                    if evidence.competition_index is not None
+                    else None
+                ),
+                "confidence": evidence.evidence_confidence,
+                "captured_at": (
+                    evidence.captured_at.isoformat()
+                    if evidence.captured_at is not None
+                    else None
+                ),
+            }
+        )
+
+    demand_input = data.model_copy(
+        update={
+            "demand_score": None,
+            "channel_fit_score": None,
+            "policy_fit_state": "PASS",
+            "evidence_blob": {"search_led": True},
+        }
+    )
+    decision, reasons, confidence, demand_score = _evaluate_preflight(
+        demand_input,
+        evidence_refs,
+    )
+    return {
+        "decision": decision,
+        "reason_codes": list(
+            dict.fromkeys(
+                [
+                    *reasons,
+                    "V2_LONG_FORM_SLOT_AUTHORITY_PASS",
+                ]
+            )
+        ),
+        "confidence": "HIGH" if decision == "PASS" else confidence,
+        "demand_score": demand_score,
+        "channel_fit_score": Decimal("1"),
+        "policy_fit_state": "PASS",
+        "evidence_refs": evidence_refs,
+        "evidence_blob": {
+            "schema_version": "vcos.idea-market-preflight.v2",
+            "authority_source": "PERSISTED_LONG_FORM_SLOT",
+            "editorial_calendar_slot_id": str(slot.id),
+            "policy_snapshot_id": str(snapshot.id),
+            "policy_snapshot_hash": snapshot.content_hash,
+            "category_id": str(category.id),
+            "category_hash": category.content_hash,
+            "preferred_series_plan_id": (
+                str(preferred_plan.id)
+                if preferred_plan is not None
+                else None
+            ),
+            "slot_validation": current_validation.model_dump(mode="json"),
+            "slot_validation_hash": current_validation.content_hash,
+            "search_demand_evidence_ids": [
+                str(evidence_id) for evidence_id in evidence_ids
+            ],
+            "evidence_refs": evidence_refs,
+            "caller_fields_ignored": [
+                "demand_score",
+                "channel_fit_score",
+                "policy_fit_state",
+                "evidence_blob.evidence_refs",
+                "evidence_blob.search_led",
+            ],
+        },
+    }
 
 
 def _resolve_preflight_evidence_refs(session: Session, data: IdeaMarketPreflightCreate) -> list[dict[str, Any]]:

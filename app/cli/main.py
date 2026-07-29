@@ -11,6 +11,7 @@ from alembic.config import Config
 
 from app.core.config import get_settings
 from app.core.db import check_database
+from app.core.errors import ValidationFailureError
 from app.db.session import session_scope
 from app.contracts import (
     ApprovalDecisionCreate,
@@ -42,7 +43,6 @@ from app.contracts import (
     PolicyRevalidationBatchCreate,
     PolicySourceRefCreate,
     ProviderRegistryEntryCreate,
-    ProjectAdmissionDecisionCreate,
     ProductionArtifactRunCreate,
     PostPublishHealthRunCreate,
     PublishHandoffCreate,
@@ -52,9 +52,7 @@ from app.contracts import (
     ReviewFindingCreate,
     ReviewTaskCreate,
     RevisionRequestCreate,
-    RetryPolicyCreate,
     SearchDemandEvidenceCreate,
-    VideoProjectCreate,
     ChannelDailyRunCreate,
     ChannelStatePackSnapshotCreate,
     ContextPackSnapshotCreate,
@@ -85,9 +83,7 @@ from app.contracts import (
     RenderRevisionCreateRequest,
     RenderRevisionRead,
 )
-from app.contracts.m6 import QCRunRequest
 from app.services import (
-    AccessibilityQCService,
     AnalyticsSyncService,
     ApprovalService,
     ArtifactService,
@@ -120,7 +116,6 @@ from app.services import (
     PolicyRevalidationService,
     ProviderHealthService,
     ProviderRegistryService,
-    ProjectAdmissionService,
     ProductionArtifactRunService,
     PostPublishHealthMonitorService,
     PublishHandoffService,
@@ -787,18 +782,15 @@ def project_create(
     description: str | None = typer.Option(None, "--description"),
 ) -> None:
     try:
-        with session_scope() as session:
-            project = VideoProjectService(session).create_project(
-                data=VideoProjectCreate(
-                    company_id=company_id,
-                    channel_workspace_id=channel_id,
-                    policy_snapshot_id=policy_snapshot_id,
-                    title=title,
-                    description=description,
-                    created_by_user_id=created_by_user_id,
-                )
-            )
-            typer.echo(json.dumps({"id": str(project.id), "policy_snapshot_id": str(project.policy_snapshot_id)}))
+        del (
+            company_id,
+            channel_id,
+            policy_snapshot_id,
+            title,
+            created_by_user_id,
+            description,
+        )
+        raise ValidationFailureError("V2_PROJECT_ADMISSION_REQUIRED")
     except Exception as exc:
         _fail(f"project create failed: {exc}")
 
@@ -1732,19 +1724,16 @@ def project_admit(
     estimated_cost: str = typer.Option("0", "--estimated-cost"),
 ) -> None:
     try:
-        with session_scope() as session:
-            decision = ProjectAdmissionService(session).create_decision(
-                data=ProjectAdmissionDecisionCreate(
-                    channel_daily_run_id=daily_run_id,
-                    daily_idea_decision_id=daily_idea_decision_id,
-                    idea_market_preflight_id=idea_market_preflight_id,
-                    budget_policy_key=budget_policy_key,
-                    quota_account_id=quota_account_id,
-                    estimated_cost=Decimal(estimated_cost),
-                    created_by_user_id=created_by_user_id,
-                )
-            )
-            typer.echo(json.dumps(_project_admission_to_dict(decision)))
+        del (
+            daily_run_id,
+            daily_idea_decision_id,
+            created_by_user_id,
+            idea_market_preflight_id,
+            budget_policy_key,
+            quota_account_id,
+            estimated_cost,
+        )
+        raise ValidationFailureError("V2_PROJECT_ADMISSION_REQUIRED")
     except Exception as exc:
         _fail(f"project admit failed: {exc}")
 

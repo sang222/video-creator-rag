@@ -20,7 +20,6 @@ from app.db.models import (
     MemoryInfluenceManifest,
     OpsIncident,
     PostPublishHealthRun,
-    QualityDeltaAttribution,
     RecoveryProposal,
     UploadedVideo,
     UploadedVideoMetricsSummary,
@@ -444,7 +443,22 @@ def test_quality_delta_improved_degraded_inconclusive_and_confidence_ledger(db_s
     assert improved.confidence_result == "IMPROVED"
     assert degraded.confidence_result == "DEGRADED"
     assert inconclusive.confidence_result == "INCONCLUSIVE"
-    assert db_session.query(MemoryConfidenceUpdateLedger).count() >= 2
+    assert facet.confidence_label == "LOW"
+    ledgers = (
+        db_session.query(MemoryConfidenceUpdateLedger)
+        .filter(MemoryConfidenceUpdateLedger.memory_facet_id == facet.id)
+        .all()
+    )
+    assert len(ledgers) >= 2
+    assert {ledger.new_confidence_label for ledger in ledgers} >= {
+        "MEDIUM",
+        "UNPROVEN",
+    }
+    assert all(ledger.requires_human_review for ledger in ledgers)
+    assert all(
+        "CONFIDENCE_CHANGE_PROPOSAL_ONLY" in ledger.reason_codes_json
+        for ledger in ledgers
+    )
 
 
 def test_memory_confidence_does_not_auto_promote_to_high_from_one_weak_sample(db_session, qualification_factory, monkeypatch) -> None:
@@ -466,6 +480,8 @@ def test_memory_confidence_does_not_auto_promote_to_high_from_one_weak_sample(db
     assert facet.confidence_label == "MEDIUM"
     ledger = db_session.query(MemoryConfidenceUpdateLedger).order_by(MemoryConfidenceUpdateLedger.created_at.desc()).first()
     assert "ONE_SAMPLE_CONFIDENCE_CAP" in ledger.reason_codes_json
+    assert ledger.requires_human_review is True
+    assert "ACTIVE_MEMORY_CONFIDENCE_UNCHANGED" in ledger.reason_codes_json
 
 
 def test_unresolved_severe_enforcement_incident_freezes_learning_attribution(db_session, qualification_factory, monkeypatch) -> None:

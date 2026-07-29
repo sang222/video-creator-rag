@@ -1019,7 +1019,13 @@ class PackagingPatchApplyService:
     def __init__(self, session: Session):
         self.session = session
 
-    def apply(self, patch_id: uuid.UUID, *, rerun_gates: bool = True) -> PackagingPatchApplyRunRead:
+    def apply(
+        self,
+        patch_id: uuid.UUID,
+        *,
+        rerun_gates: bool = True,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> PackagingPatchApplyRunRead:
         patch = self.session.get(PackagingProposedPatch, patch_id)
         if patch is None:
             raise NotFoundError(f"packaging proposed patch not found: {patch_id}")
@@ -1042,6 +1048,7 @@ class PackagingPatchApplyService:
         project = self.session.get(VideoProject, package.video_project_id)
         if project is None:
             return PackagingPatchApplyRunRead.model_validate(self._blocked_run(patch, ["PROJECT_MISSING"]))
+        effective_actor_user_id = actor_user_id or project.created_by_user_id
 
         artifact_type = _artifact_type_for_patch(patch.patch_type)
         artifact = self.session.scalars(
@@ -1056,7 +1063,7 @@ class PackagingPatchApplyService:
                 artifact_type=artifact_type,
                 current_version_id=None,
                 status="approved",
-                created_by_user_id=project.created_by_user_id,
+                created_by_user_id=effective_actor_user_id,
             )
             self.session.add(artifact)
             self.session.flush()
@@ -1071,6 +1078,11 @@ class PackagingPatchApplyService:
             "patch_type": patch.patch_type,
             "proposed_patch": patch.proposed_patch_json,
             "after_preview": patch.after_preview_json,
+            "applied_by_user_id": (
+                str(effective_actor_user_id)
+                if effective_actor_user_id is not None
+                else None
+            ),
             "manual_approval_required": True,
             "no_provider_media_upload_execution": True,
             "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
@@ -1083,7 +1095,7 @@ class PackagingPatchApplyService:
             content=content,
             content_hash=version_hash,
             status="approved",
-            created_by_user_id=project.created_by_user_id,
+            created_by_user_id=effective_actor_user_id,
             external_entity_refs=[{"package_id": str(package.id), "proposed_patch_id": str(patch.id)}],
             packaging_metadata={"patch_type": patch.patch_type, "requires_gate_rerun": True},
             evidence_refs=patch.affected_artifact_refs_json,
@@ -1159,7 +1171,12 @@ class PackagingApprovedPatchApplyAndRecheckService:
     def __init__(self, session: Session):
         self.session = session
 
-    def apply_and_recheck(self, package_id: uuid.UUID) -> PackagingApprovedPatchApplyAndRecheckResultRead:
+    def apply_and_recheck(
+        self,
+        package_id: uuid.UUID,
+        *,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> PackagingApprovedPatchApplyAndRecheckResultRead:
         package = PackagingReviewQueueService(self.session)._require_package(package_id)
         queue_before = PackagingReviewQueueService(self.session).read(package.id)
         inventory = _patch_inventory_for_package(self.session, package.id)
@@ -1206,7 +1223,11 @@ class PackagingApprovedPatchApplyAndRecheckService:
         already_applied_patch_ids: list[uuid.UUID] = []
         failed_patch_ids: list[uuid.UUID] = []
         for state in approved_states:
-            run = PackagingPatchApplyService(self.session).apply(state.patch.id, rerun_gates=False)
+            run = PackagingPatchApplyService(self.session).apply(
+                state.patch.id,
+                rerun_gates=False,
+                actor_user_id=actor_user_id,
+            )
             if run.apply_status == "APPLIED":
                 applied_patch_ids.append(state.patch.id)
             elif run.apply_status == "ALREADY_APPLIED":

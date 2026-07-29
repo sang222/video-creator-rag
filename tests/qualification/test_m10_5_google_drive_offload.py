@@ -4,6 +4,7 @@ import os
 import stat
 import urllib.parse
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,7 @@ from app.cli.main import app as cli_app
 from app.contracts.m10_5 import MediaOffloadExecuteRequest, MediaOffloadJobCreate
 from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
-from app.db.models import CloudMediaRef, CredentialReference, LocalMediaRetentionPolicy, MediaOffloadJob
+from app.db.models import CloudMediaRef, CredentialReference, LocalMediaRetentionPolicy
 from app.main import create_app
 from app.services.m10_5 import (
     CloudMediaRefService,
@@ -30,7 +31,6 @@ from app.services.m10_5 import (
     _sha256_file,
 )
 
-from .helpers.git_checks import tag_exists
 
 runner = CliRunner()
 
@@ -159,7 +159,7 @@ def test_m10_5_preflight_schema_defaults_config_catalogs_and_scope(engine, db_se
     assert M10_5_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
         defaults = connection.execute(
             text(
                 """

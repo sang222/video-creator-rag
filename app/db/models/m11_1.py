@@ -14,6 +14,12 @@ class OperatorUser(Base):
     __tablename__ = "operator_users"
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    canonical_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
+        unique=True,
+    )
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str | None] = mapped_column(Text)
@@ -24,6 +30,7 @@ class OperatorUser(Base):
 
     __table_args__ = (
         UniqueConstraint("email", name="uq_operator_users_email"),
+        Index("ix_operator_users_canonical_user", "canonical_user_id"),
         Index("ix_operator_users_email", "email"),
         Index("ix_operator_users_role", "role"),
         Index("ix_operator_users_status", "status"),

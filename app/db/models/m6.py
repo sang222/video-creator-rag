@@ -3,7 +3,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -272,6 +280,13 @@ class RenderPackageSnapshot(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     production_artifact_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_artifact_runs.id"))
     video_project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False)
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
+    )
+    production_package_hash: Mapped[str | None] = mapped_column(String(64))
+    duration_contract: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     media_render_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("media_render_jobs.id"), nullable=False)
     render_spec_snapshot_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("render_spec_snapshots.id"), nullable=False
@@ -288,8 +303,22 @@ class RenderPackageSnapshot(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "(production_package_artifact_version_id is null "
+            "and production_package_hash is null "
+            "and duration_contract is null) or "
+            "(production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and duration_contract is not null "
+            "and jsonb_typeof(duration_contract) = 'object')",
+            name="ck_render_package_snapshots_production_package_binding",
+        ),
         Index("ix_render_package_snapshots_run_id", "production_artifact_run_id"),
         Index("ix_render_package_snapshots_video_project_id", "video_project_id"),
+        Index(
+            "ix_render_package_snapshots_production_package",
+            "production_package_artifact_version_id",
+        ),
         Index("ix_render_package_snapshots_render_spec_id", "render_spec_snapshot_id"),
         Index("ix_render_package_snapshots_created_at", "created_at"),
     )

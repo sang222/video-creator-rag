@@ -15,6 +15,27 @@ items:
         - saas_affiliate
     format_strategy:
       long_form_minutes: "6-12"
+      duration_contract:
+        minimum_duration_ms: 360000
+        target_duration_ms: 540000
+        maximum_duration_ms: 720000
+        duration_contract_version: channel-duration-contract.v2
+      duration_contracts:
+        DAILY_SHORT:
+          minimum_duration_ms: 15000
+          target_duration_ms: 45000
+          maximum_duration_ms: 60000
+          duration_contract_version: channel-duration-contract.v2
+        LONG_FORM:
+          minimum_duration_ms: 360000
+          target_duration_ms: 540000
+          maximum_duration_ms: 720000
+          duration_contract_version: channel-duration-contract.v2
+        LONG_DERIVED_SHORT:
+          minimum_duration_ms: 15000
+          target_duration_ms: 45000
+          maximum_duration_ms: 60000
+          duration_contract_version: channel-duration-contract.v2
       shorts_role: tofu
       cadence_bias: practical walkthroughs and concise explainers
     risk_tolerance: low_to_medium

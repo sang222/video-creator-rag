@@ -10,10 +10,6 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
-
-pytestmark = pytest.mark.skip(
-    reason="Historical publish handoff fixture depends on pre-M12 local render package; M12.1R removes that production-success path."
-)
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.db.models import DomainEvent, ManualPublishConfirmation, MediaQCReport, PublishHandoffPackage, UploadedVideo
@@ -21,6 +17,10 @@ from app.main import create_app
 from app.services import ManualPublishConfirmationService, PublishHandoffService
 
 from .helpers.repo_scanners import all_scope_violations
+
+pytestmark = pytest.mark.skip(
+    reason="Historical publish handoff fixture depends on pre-M12 local render package; M12.1R removes that production-success path."
+)
 
 
 runner = CliRunner()
@@ -96,7 +96,7 @@ def test_m7_migration_tables_defaults_unique_and_scope(engine, db_session, quali
     assert M7_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
 
     flow = qualification_factory.m6_full_flow(output_dir=tmp_path)
     handoff = PublishHandoffService(db_session).create_from_render_package(

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.vcos_v2 import DurationContractV2
 from app.contracts.visual_routing import SourceFallbackClass, VisualSourceRoute
 
 
@@ -46,6 +47,9 @@ class NarrationRequest(BaseModel):
     provider_execution_plan_ref: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
     execution_mode: LongProductionExecutionMode
+    duration_contract: DurationContractV2 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     content_hash: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
@@ -58,6 +62,9 @@ class NarrationResult(BaseModel):
     audio_asset_ref: str = Field(min_length=1)
     audio_sha256: str = Field(min_length=1)
     duration_ms: int = Field(gt=0)
+    duration_contract: DurationContractV2 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     sample_rate: int = Field(gt=0)
     channels: int = Field(gt=0)
     fixture_only: bool
@@ -65,6 +72,16 @@ class NarrationResult(BaseModel):
     content_hash: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def duration_matches_contract(self) -> "NarrationResult":
+        if self.duration_contract is not None and not (
+            self.duration_contract.minimum_duration_ms
+            <= self.duration_ms
+            <= self.duration_contract.maximum_duration_ms
+        ):
+            raise ValueError("NARRATION_DURATION_OUTSIDE_CHANNEL_CONTRACT")
+        return self
 
 
 class ForcedAlignmentRequest(BaseModel):
@@ -149,6 +166,15 @@ class LongFormRenderPackageStrictContract(BaseModel):
     contract_version: Literal["lpro1.long-form-render-package.v1"] = "lpro1.long-form-render-package.v1"
     scripted_package_ref: str = Field(min_length=1)
     scripted_package_hash: str = Field(min_length=1)
+    production_package_schema_version: Literal["v2"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    production_package_artifact_version_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    duration_contract: DurationContractV2 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     project_ref: str = Field(min_length=1)
     project_hash: str = Field(min_length=1)
     channel_profile_version_ref: str = Field(min_length=1)
@@ -216,6 +242,21 @@ class LongFormRenderPackageStrictContract(BaseModel):
                 or asset.actual_route != decision.preferred_route
             ):
                 raise ValueError("LPRO1_ASSET_DECISION_BINDING_MISMATCH")
+        if self.production_package_schema_version == "v2":
+            if (
+                not self.production_package_artifact_version_id
+                or self.duration_contract is None
+                or self.production_package_artifact_version_id
+                not in self.scripted_package_ref
+            ):
+                raise ValueError("LPRO1_V2_PACKAGE_DURATION_AUTHORITY_REQUIRED")
+            duration_ms = round(self.target_duration_seconds * 1000)
+            if not (
+                self.duration_contract.minimum_duration_ms
+                <= duration_ms
+                <= self.duration_contract.maximum_duration_ms
+            ):
+                raise ValueError("LPRO1_DURATION_OUTSIDE_CHANNEL_CONTRACT")
         return self
 
 

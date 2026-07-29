@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from decimal import Decimal
 
 import pytest
@@ -23,7 +22,6 @@ from app.db.models import (
     LLMRouteAttempt,
     LLMRunSnapshot,
     ProviderAttempt,
-    ShortCandidate,
     UploadCard,
     VideoProject,
 )
@@ -107,7 +105,7 @@ def test_m10_1_preflight_migration_catalog_defaults_and_scope(engine, db_session
     assert M10_1_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_2_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
         defaults = connection.execute(
             text(
                 """
@@ -319,7 +317,7 @@ def test_short_candidates_originality_graph_reuse_funnel_and_promotion(db_sessio
     )
     assert len(cards) == 3
     assert db_session.scalar(select(func.count()).select_from(UploadCard)) == 3
-    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 3
+    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
     assert set(inspect(db_session.bind).get_table_names()).isdisjoint({"external_post_records"})
     assert all(card.card_state == "UPLOAD_INPUT_MISSING" for card in cards)
     assert all(card.file_ref is None for card in cards)

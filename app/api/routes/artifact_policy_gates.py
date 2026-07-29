@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.routes.imports import (
     Any,
@@ -60,6 +60,7 @@ from app.api.routes.serializers_core import (
 from app.api.routes.serializers_publish_learning import (
     _as_http_error,
 )
+from app.services.security_boundary import actor_from_request
 
 
 
@@ -70,7 +71,10 @@ def create_router() -> APIRouter:
     def create_artifact(data: ArtifactCreate) -> ArtifactRead:
         try:
             with session_scope() as session:
-                artifact = ArtifactService(session).create_artifact(data=data)
+                artifact = ArtifactService(session).create_artifact(
+                    data=data,
+                    public_write=True,
+                )
                 return ArtifactRead.model_validate(_artifact(artifact))
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -79,7 +83,10 @@ def create_router() -> APIRouter:
     def create_artifact_version(data: ArtifactVersionCreate) -> ArtifactVersionRead:
         try:
             with session_scope() as session:
-                version = ArtifactService(session).create_artifact_version(data=data)
+                version = ArtifactService(session).create_artifact_version(
+                    data=data,
+                    public_write=True,
+                )
                 return ArtifactVersionRead.model_validate(_artifact_version(version))
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -115,20 +122,28 @@ def create_router() -> APIRouter:
     def resolve_revision_request(
         revision_request_id: uuid.UUID,
         data: RevisionResolveRequest,
+        request: Request,
     ) -> RevisionRequestRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 revision = ReviewService(session).resolve_revision_request(
                     revision_request_id=revision_request_id,
                     resolved_by_artifact_version_id=data.resolved_by_artifact_version_id,
+                    actor_user_id=actor.actor_id,
                 )
                 return RevisionRequestRead.model_validate(_revision_request(revision))
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/approval-decisions", response_model=ApprovalDecisionRead)
-    def create_approval_decision(data: ApprovalDecisionCreate) -> ApprovalDecisionRead:
+    def create_approval_decision(
+        data: ApprovalDecisionCreate,
+        request: Request,
+    ) -> ApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
+            data = data.model_copy(update={"decided_by_user_id": actor.actor_id})
             with session_scope() as session:
                 decision = ApprovalService(session).create_approval_decision(data=data)
                 return ApprovalDecisionRead.model_validate(_approval_decision(decision))

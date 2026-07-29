@@ -65,6 +65,7 @@ from app.db.models.m5 import (
     SearchDemandEvidence,
     SearchIntentMap,
 )
+from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.m6 import (
     AccessibilityQCReport,
     AssetManifestSnapshot,
@@ -319,6 +320,8 @@ __all__ = [
     "RetrievalPlanSnapshot",
     "SearchDemandEvidence",
     "SearchIntentMap",
+    "SeriesPlan",
+    "SeriesRun",
     "AccessibilityQCReport",
     "AssetManifestSnapshot",
     "CaptionTrackSnapshot",

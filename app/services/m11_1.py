@@ -29,6 +29,7 @@ from app.contracts.m11_1 import (
     VideoProjectLocalizationRead,
 )
 from app.contracts.profile import ChannelProfileInput
+from app.core.actor import ActorContext, authenticated_actor_context
 from app.core.config import Settings
 from app.core.errors import ForbiddenError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
@@ -43,12 +44,16 @@ from app.db.models import (
     OperatorUser,
     PublishHandoffPackage,
     PublishTimingSuggestion,
+    Role,
+    User,
+    UserRole,
     VideoProject,
 )
 from app.services.audit import AuditService
 from app.services.channel_profile import ChannelProfileService
 from app.services.domain_events import DomainEventBus
 from app.services.profile_compiler import ChannelProfileCompiler
+from app.services.rbac import OPERATOR_ROLE_TO_ROLE_KEY, RBACService
 
 
 AUTH_COOKIE_NAME = "vcos_operator_session"
@@ -121,6 +126,7 @@ class AuthService:
         )
         self.session.add(user)
         self.session.flush()
+        self._ensure_canonical_principal(user)
         _audit(
             self.session,
             action="auth.bootstrap_admin_created",
@@ -146,6 +152,7 @@ class AuthService:
                 payload={"email": email.lower()},
             )
             raise ForbiddenError("Email hoặc mật khẩu không đúng.")
+        self._ensure_canonical_principal(user)
         token = secrets.token_urlsafe(48)
         expires_at = utc_now() + timedelta(hours=self.settings.auth_session_ttl_hours)
         auth_session = OperatorAuthSession(user_id=user.id, session_token_hash=hash_session_token(token), expires_at=expires_at)
@@ -161,6 +168,18 @@ class AuthService:
         )
         return self._auth_read(user), token, expires_at
 
+    def record_failed_login(self, *, email: str) -> None:
+        """Persist a failed-login audit in a transaction that will commit."""
+
+        _audit(
+            self.session,
+            action="auth.login_failed",
+            target_type="operator_user",
+            target_id=None,
+            reason_code="LOGIN_FAILED",
+            payload={"email": email.lower()},
+        )
+
     def current_user(self, token: str | None) -> AuthSessionRead:
         if not self.settings.dashboard_auth_enabled:
             return AuthSessionRead(
@@ -170,6 +189,12 @@ class AuthService:
                 local_dev_note="Chế độ local/dev - auth dashboard đang tắt.",
                 user=None,
             )
+        user = self.authenticated_operator(token)
+        return self._auth_read(user)
+
+    def authenticated_operator(self, token: str | None) -> OperatorUser:
+        """Resolve a real session for protected mutations, independent of UI auth mode."""
+
         if not token:
             raise ForbiddenError("Phiên đăng nhập đã hết hạn.")
         auth_session = self.session.scalars(
@@ -180,7 +205,22 @@ class AuthService:
         user = self.session.get(OperatorUser, auth_session.user_id)
         if user is None or user.status != "ACTIVE":
             raise ForbiddenError("Bạn chưa có quyền thực hiện thao tác này.")
-        return self._auth_read(user)
+        self._ensure_canonical_principal(user)
+        return user
+
+    def actor_context(self, token: str | None) -> ActorContext:
+        user = self.authenticated_operator(token)
+        if user.canonical_user_id is None:
+            raise ForbiddenError("Tài khoản chưa được liên kết với định danh người dùng.")
+        permissions = RBACService(self.session).permissions_for_user(
+            user_id=user.canonical_user_id,
+        )
+        return authenticated_actor_context(
+            canonical_user_id=user.canonical_user_id,
+            operator_user_id=user.id,
+            actor_role=user.role,
+            permissions=permissions,
+        )
 
     def logout(self, token: str | None) -> None:
         if not token:
@@ -207,12 +247,77 @@ class AuthService:
             local_dev_note="Chế độ local/dev - chưa phải đăng nhập production",
             user=CurrentOperatorUserRead(
                 id=user.id,
+                canonical_user_id=user.canonical_user_id,
                 email=user.email,
                 display_name=user.display_name,
                 role=user.role,
                 status=user.status,
             ),
         )
+
+    def _ensure_canonical_principal(self, operator_user: OperatorUser) -> User:
+        canonical_user = (
+            self.session.get(User, operator_user.canonical_user_id)
+            if operator_user.canonical_user_id is not None
+            else None
+        )
+        if canonical_user is None:
+            canonical_user = self.session.scalars(
+                select(User).where(User.email == operator_user.email.lower()).limit(1)
+            ).one_or_none()
+        if canonical_user is None:
+            canonical_user = User(
+                email=operator_user.email.lower(),
+                display_name=operator_user.display_name or operator_user.email,
+                status="active",
+            )
+            self.session.add(canonical_user)
+            self.session.flush()
+        if canonical_user.status.lower() != "active":
+            raise ForbiddenError("Định danh người dùng đã bị vô hiệu hóa.")
+        operator_user.canonical_user_id = canonical_user.id
+
+        role_key = OPERATOR_ROLE_TO_ROLE_KEY.get(operator_user.role)
+        if role_key is None:
+            raise ForbiddenError("Vai trò tài khoản không hợp lệ.")
+        role = self.session.scalars(select(Role).where(Role.key == role_key).limit(1)).one_or_none()
+        if role is None:
+            role = Role(
+                key=role_key,
+                name=role_key.replace("_", " ").title(),
+                description="Canonical role synchronized from operator authentication.",
+            )
+            self.session.add(role)
+            self.session.flush()
+
+        managed_role_keys = set(OPERATOR_ROLE_TO_ROLE_KEY.values())
+        assignments = list(
+            self.session.scalars(
+                select(UserRole)
+                .join(Role, UserRole.role_id == Role.id)
+                .where(
+                    UserRole.user_id == canonical_user.id,
+                    UserRole.company_id.is_(None),
+                    Role.key.in_(managed_role_keys),
+                )
+            ).all()
+        )
+        current_assignment = None
+        for assignment in assignments:
+            if assignment.role_id == role.id:
+                current_assignment = assignment
+            else:
+                self.session.delete(assignment)
+        if current_assignment is None:
+            self.session.add(
+                UserRole(
+                    user_id=canonical_user.id,
+                    role_id=role.id,
+                    company_id=None,
+                )
+            )
+        self.session.flush()
+        return canonical_user
 
 
 class LocalizationConfigService:

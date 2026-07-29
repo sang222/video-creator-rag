@@ -20,6 +20,7 @@ from app.db.models import (
     EffectiveChannelRuntimeContextSnapshot,
     FinalMediaRef,
     FirstScriptedVideoPackage,
+    HumanPaidRenderApproval,
     HumanUploadTask,
     MediaRenderJob,
     OperatorAuthSession,
@@ -29,7 +30,6 @@ from app.db.models import (
     PackagingPatchApplyRun,
     PackagingPatchApprovalDecision,
     PackagingProposedPatch,
-    PackagingReviewQueueItem,
     ProviderJobSnapshot,
     ProviderAttempt,
     R3D4GateBatchRun,
@@ -278,13 +278,17 @@ def _patch_id_for_issue(queue, issue_code: str) -> uuid.UUID:
     return item.proposed_patch.id
 
 
-def _operator_session_token(db_session) -> str:
+def _operator_session_token(
+    db_session,
+    *,
+    role: str = "REVIEWER",
+) -> str:
     token = f"test-operator-{uuid.uuid4()}"
     user = OperatorUser(
         email=f"r3d9-ux4-{uuid.uuid4().hex[:12]}@example.com",
         password_hash=hash_password("unused"),
         display_name="R3D9 UX4 Reviewer",
-        role="REVIEWER",
+        role=role,
         status="ACTIVE",
     )
     db_session.add(user)
@@ -795,3 +799,229 @@ def test_packaging_review_queue_api_endpoints(db_session, qualification_factory)
     assert queue_payload["items"][0]["status"] == "CLOSED"
     assert queue_payload["review_verdict"] == "WAITING_FINAL_MEDIA_ASSET"
     assert queue_payload["upload_task_creation_allowed"] is False
+
+
+def test_bodyless_packaging_decisions_and_direct_apply_persist_session_actor(
+    db_session,
+    qualification_factory,
+) -> None:
+    fx = _package_fixture(
+        db_session,
+        qualification_factory,
+        publish_window=False,
+    )
+    _add_gate_issue(
+        db_session,
+        fx,
+        gate_key="HookTruthfulnessGate",
+        issue_code="HOOK_PROMISE_MISSING",
+        status="REVIEW_REQUIRED",
+    )
+    _add_gate_issue(
+        db_session,
+        fx,
+        gate_key="ThumbnailTruthfulnessGate",
+        issue_code="THUMBNAIL_BRIEF_MISSING",
+        status="REVIEW_REQUIRED",
+    )
+    _add_gate_issue(
+        db_session,
+        fx,
+        gate_key="DescriptionCompletenessGate",
+        issue_code="DESCRIPTION_MISSING",
+        status="REVIEW_REQUIRED",
+    )
+    queue = PackagingReviewQueueService(db_session).build_from_gates(
+        fx["package"].id
+    )
+    approve_id = _patch_id_for_issue(queue, "HOOK_PROMISE_MISSING")
+    reject_id = _patch_id_for_issue(queue, "THUMBNAIL_BRIEF_MISSING")
+    changes_id = _patch_id_for_issue(queue, "DESCRIPTION_MISSING")
+    token = _operator_session_token(db_session, role="OWNER_ADMIN")
+    db_session.commit()
+    client = TestClient(create_app())
+    client.cookies.set(AUTH_COOKIE_NAME, token)
+
+    approve = client.post(
+        f"/packaging-proposed-patches/{approve_id}/approve"
+    )
+    reject = client.post(
+        f"/packaging-proposed-patches/{reject_id}/reject"
+    )
+    request_changes = client.post(
+        f"/packaging-proposed-patches/{changes_id}/request-changes"
+    )
+    for response in (approve, reject, request_changes):
+        assert response.status_code == 200, response.text
+
+    db_session.expire_all()
+    operator = db_session.scalar(
+        select(OperatorUser).where(OperatorUser.role == "OWNER_ADMIN")
+    )
+    assert operator is not None
+    assert operator.canonical_user_id is not None
+    actor_id = operator.canonical_user_id
+    assert {
+        approve.json()["decided_by"],
+        reject.json()["decided_by"],
+        request_changes.json()["decided_by"],
+    } == {str(actor_id)}
+    decisions = db_session.scalars(
+        select(PackagingPatchApprovalDecision).where(
+            PackagingPatchApprovalDecision.proposed_patch_id.in_(
+                [approve_id, reject_id, changes_id]
+            )
+        )
+    ).all()
+    assert len(decisions) == 3
+    assert {decision.decided_by for decision in decisions} == {str(actor_id)}
+
+    apply = client.post(
+        f"/packaging-proposed-patches/{approve_id}/apply"
+    )
+    assert apply.status_code == 200, apply.text
+    assert apply.json()["apply_status"] == "APPLIED"
+    db_session.expire_all()
+    version = db_session.scalars(
+        select(ArtifactVersion)
+        .where(ArtifactVersion.created_by_user_id == actor_id)
+        .order_by(ArtifactVersion.created_at.desc())
+    ).first()
+    assert version is not None
+    assert version.content["applied_by_user_id"] == str(actor_id)
+    assert version.content["patch_id"] == str(approve_id)
+
+
+def test_bodyless_apply_and_recheck_persists_session_actor(
+    db_session,
+    qualification_factory,
+) -> None:
+    fx = _package_fixture(
+        db_session,
+        qualification_factory,
+        publish_window=False,
+    )
+    queue = PackagingReviewQueueService(db_session).build_from_gates(
+        fx["package"].id
+    )
+    patch_id = next(
+        item.proposed_patch.id
+        for item in queue.items
+        if item.proposed_patch is not None
+    )
+    token = _operator_session_token(db_session, role="OWNER_ADMIN")
+    db_session.commit()
+    client = TestClient(create_app())
+    client.cookies.set(AUTH_COOKIE_NAME, token)
+
+    approval = client.post(
+        f"/packaging-proposed-patches/{patch_id}/approve"
+    )
+    assert approval.status_code == 200, approval.text
+    result = client.post(
+        f"/video-packages/{fx['package'].id}/"
+        "apply-approved-changes-and-recheck"
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["status"] == "APPLIED_AND_RECHECKED"
+
+    db_session.expire_all()
+    operator = db_session.scalar(
+        select(OperatorUser).where(OperatorUser.role == "OWNER_ADMIN")
+    )
+    assert operator is not None
+    assert operator.canonical_user_id is not None
+    version = db_session.scalars(
+        select(ArtifactVersion)
+        .where(
+            ArtifactVersion.created_by_user_id
+            == operator.canonical_user_id
+        )
+        .order_by(ArtifactVersion.created_at.desc())
+    ).first()
+    assert version is not None
+    assert version.content["applied_by_user_id"] == str(
+        operator.canonical_user_id
+    )
+    assert version.content["patch_id"] == str(patch_id)
+
+
+def test_bodyless_paid_render_decisions_persist_session_actor(
+    db_session,
+    qualification_factory,
+) -> None:
+    fx = _package_fixture(
+        db_session,
+        qualification_factory,
+        publish_window=False,
+    )
+    revision = RenderRevision(
+        video_project_id=fx["project"].id,
+        package_id=fx["package"].id,
+        effective_context_snapshot_id=fx["effective"].id,
+        revision_no=1,
+        revision_status="READY_FOR_COST_ESTIMATE",
+        source_artifact_refs_json=[],
+        gate_batch_refs_json=[],
+        render_plan_hash=f"actor-provenance-{uuid.uuid4()}",
+        provider_plan_json={},
+        created_by="trusted-internal-fixture",
+    )
+    db_session.add(revision)
+    db_session.flush()
+    approvals = [
+        HumanPaidRenderApproval(
+            render_revision_id=revision.id,
+            approval_status="PENDING",
+            approved_by=None,
+            approved_at=None,
+            max_approved_cost=None,
+            approved_provider_stages_json=[],
+            rationale="Awaiting canonical decision actor.",
+            expires_at=None,
+        )
+        for _ in range(3)
+    ]
+    db_session.add_all(approvals)
+    db_session.flush()
+    approval_ids = [approval.id for approval in approvals]
+    token = _operator_session_token(db_session, role="OWNER_ADMIN")
+    db_session.commit()
+    client = TestClient(create_app())
+    client.cookies.set(AUTH_COOKIE_NAME, token)
+
+    responses = [
+        client.post(
+            f"/paid-render-approvals/{approval_ids[0]}/approve"
+        ),
+        client.post(
+            f"/paid-render-approvals/{approval_ids[1]}/reject"
+        ),
+        client.post(
+            f"/paid-render-approvals/{approval_ids[2]}/revoke"
+        ),
+    ]
+    for response in responses:
+        assert response.status_code == 200, response.text
+
+    db_session.expire_all()
+    operator = db_session.scalar(
+        select(OperatorUser).where(OperatorUser.role == "OWNER_ADMIN")
+    )
+    assert operator is not None
+    assert operator.canonical_user_id is not None
+    actor_text = str(operator.canonical_user_id)
+    persisted = [
+        db_session.get(HumanPaidRenderApproval, approval_id)
+        for approval_id in approval_ids
+    ]
+    assert all(item is not None for item in persisted)
+    assert [item.approval_status for item in persisted] == [
+        "APPROVED",
+        "REJECTED",
+        "REVOKED",
+    ]
+    assert {item.approved_by for item in persisted} == {actor_text}
+    assert {response.json()["approved_by"] for response in responses} == {
+        actor_text
+    }

@@ -1,14 +1,14 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, status
 
 from app.contracts.geo_market import (
     DestinationBinding,
     MinimalMarketChannelInit,
     TargetMarketDraftApproval,
     TargetMarketDraftPatch,
-    TargetMarketProfile,
     TargetMarketProfileDraft,
 )
 from app.services.geo_market import MarketChannelGovernanceService
+from app.services.security_boundary import actor_from_request
 
 from app.api.routes.imports import (
     Any,
@@ -148,18 +148,24 @@ def create_router() -> APIRouter:
 
     @router.post("/channels/{channel_id}/target-market-draft/approve")
     def approve_target_market_draft(
-        channel_id: uuid.UUID, data: TargetMarketDraftApproval
+        channel_id: uuid.UUID,
+        data: TargetMarketDraftApproval,
+        request: Request,
     ) -> dict[str, Any]:
         try:
+            actor = actor_from_request(request)
+            authoritative = data.model_copy(
+                update={"reviewer": str(actor.actor_id)}
+            )
             with session_scope() as session:
                 profile = MarketChannelGovernanceService(session).approve_market_draft(
-                    channel_id, data
+                    channel_id, authoritative
                 )
                 return {
-                    "decision": data.decision,
+                    "decision": authoritative.decision,
                     "profile": profile.model_dump(mode="json") if profile else None,
                     "profile_activation_allowed": False,
-                    "exact_approved_draft_hash": data.expected_draft_hash,
+                    "exact_approved_draft_hash": authoritative.expected_draft_hash,
                 }
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -269,10 +275,26 @@ def create_router() -> APIRouter:
     def review_channel_init_draft(
         draft_id: uuid.UUID,
         data: ChannelContractReviewRequest,
+        request: Request,
     ) -> ChannelContractDraftRead:
         try:
+            actor = actor_from_request(request)
+            authoritative = data.model_copy(
+                update={
+                    "decisions": [
+                        decision.model_copy(
+                            update={
+                                "reviewer_user_id": actor.actor_id,
+                            }
+                        )
+                        for decision in data.decisions
+                    ]
+                }
+            )
             with session_scope() as session:
-                contract_draft = ChannelContractReviewService(session).apply_review(draft_id, data)
+                contract_draft = ChannelContractReviewService(session).apply_review(
+                    draft_id, authoritative
+                )
                 return ChannelContractDraftRead.model_validate(_channel_contract_draft(contract_draft))
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -437,8 +459,16 @@ def create_router() -> APIRouter:
     def create_channel_lifecycle_decision(
         channel_id: uuid.UUID,
         data: ChannelLifecycleDecisionCreate,
+        request: Request,
     ) -> ChannelLifecycleDecisionRead:
         try:
+            actor = actor_from_request(request)
+            data = data.model_copy(
+                update={
+                    "decided_by_user_id": actor.actor_id,
+                    "actor_role": actor.actor_role,
+                }
+            )
             with session_scope() as session:
                 decision = M11ChannelLifecycleService(session).decide(channel_id=channel_id, data=data)
                 return channel_lifecycle_decision_read(decision)
@@ -457,8 +487,16 @@ def create_router() -> APIRouter:
     def update_channel_localization_config(
         channel_id: uuid.UUID,
         data: ChannelLocalizationConfigUpdate,
+        request: Request,
     ) -> ChannelLocalizationConfig:
         try:
+            actor = actor_from_request(request)
+            data = data.model_copy(
+                update={
+                    "actor_role": actor.actor_role,
+                    "edited_by_user_id": actor.actor_id,
+                }
+            )
             with session_scope() as session:
                 return LocalizationConfigService(session).update(channel_id, data)
         except Exception as exc:

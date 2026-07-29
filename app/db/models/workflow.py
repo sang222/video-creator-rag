@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -61,6 +63,42 @@ class VideoProject(Base):
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
     project_type: Mapped[str | None] = mapped_column(String(80))
+    schema_version: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="v1"
+    )
+    planning_source_type: Mapped[str | None] = mapped_column(String(40))
+    production_lane: Mapped[str | None] = mapped_column(String(40))
+    content_mode: Mapped[str | None] = mapped_column(String(40))
+    assignment_mode: Mapped[str | None] = mapped_column(String(40))
+    series_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_plans.id")
+    )
+    series_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_runs.id")
+    )
+    episode_number: Mapped[int | None] = mapped_column(Integer)
+    episode_role: Mapped[str | None] = mapped_column(String(120))
+    standalone_reason_code: Mapped[str | None] = mapped_column(String(160))
+    project_admission_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "project_admission_decisions.id",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+    parent_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id")
+    )
+    parent_final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
+    )
+    canonical_timeline_ref: Mapped[str | None] = mapped_column(Text)
+    canonical_timeline_hash: Mapped[str | None] = mapped_column(String(64))
+    duration_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    render_eligible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
     priority: Mapped[str | None] = mapped_column(String(40))
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
@@ -84,6 +122,53 @@ class VideoProject(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "schema_version in ('v1','v2')",
+            name="ck_video_projects_schema_version",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(schema_version = 'v2' "
+            "and channel_profile_version_id is not null "
+            "and project_admission_decision_id is not null "
+            "and planning_source_type in "
+            "('DAILY_IDEA','LONG_FORM_PLAN','DERIVED_SHORT') "
+            "and production_lane in "
+            "('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT') "
+            "and content_mode in ('SERIES_EPISODE','STANDALONE') "
+            "and assignment_mode in "
+            "('SERIES_REQUIRED','SERIES_PREFERRED',"
+            "'STANDALONE_REQUIRED','OPEN_MIX') "
+            "and duration_contract is not null "
+            "and ((content_mode = 'SERIES_EPISODE' "
+            "and series_plan_id is not null "
+            "and series_run_id is not null "
+            "and episode_number > 0 "
+            "and standalone_reason_code is null) "
+            "or (content_mode = 'STANDALONE' "
+            "and series_plan_id is null "
+            "and series_run_id is null "
+            "and episode_number is null "
+            "and episode_role is null "
+            "and standalone_reason_code is not null)))",
+            name="ck_video_projects_v2_assignment",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "((planning_source_type = 'DAILY_IDEA' "
+            "and production_lane = 'DAILY_SHORT') "
+            "or (planning_source_type = 'LONG_FORM_PLAN' "
+            "and production_lane = 'LONG_FORM') "
+            "or (planning_source_type = 'DERIVED_SHORT' "
+            "and production_lane = 'LONG_DERIVED_SHORT' "
+            "and content_mode = 'STANDALONE' "
+            "and assignment_mode = 'STANDALONE_REQUIRED' "
+            "and parent_video_project_id is not null "
+            "and canonical_timeline_ref is not null "
+            "and canonical_timeline_hash ~ '^[0-9a-f]{64}$' "
+            "and render_eligible = false))",
+            name="ck_video_projects_v2_lane_source",
+        ),
         Index("ix_video_projects_company_id", "company_id"),
         Index("ix_video_projects_channel_workspace_id", "channel_workspace_id"),
         Index("ix_video_projects_policy_snapshot_id", "policy_snapshot_id"),
@@ -98,6 +183,20 @@ class VideoProject(Base):
         Index(
             "ix_video_projects_effective_context_snapshot",
             "effective_context_snapshot_id",
+        ),
+        Index("ix_video_projects_production_lane", "production_lane"),
+        Index("ix_video_projects_series_plan_id", "series_plan_id"),
+        Index("ix_video_projects_series_run_id", "series_run_id"),
+        Index(
+            "ix_video_projects_project_admission_decision_id",
+            "project_admission_decision_id",
+            unique=True,
+        ),
+        Index("ix_video_projects_parent_video_project_id", "parent_video_project_id"),
+        UniqueConstraint(
+            "series_run_id",
+            "episode_number",
+            name="uq_video_projects_series_run_episode",
         ),
         Index("ix_video_projects_created_at", "created_at"),
     )
@@ -126,6 +225,16 @@ class Artifact(Base):
         Index("ix_artifacts_video_project_id", "video_project_id"),
         Index("ix_artifacts_current_version_id", "current_version_id"),
         Index("ix_artifacts_created_at", "created_at"),
+        Index(
+            "uq_artifacts_v2_authority_per_project",
+            "video_project_id",
+            "artifact_type",
+            unique=True,
+            postgresql_where=text(
+                "artifact_type in "
+                "('production_package','production_readiness_receipt')"
+            ),
+        ),
     )
 
 

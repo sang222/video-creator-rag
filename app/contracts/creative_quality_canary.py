@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.vcos_v2 import DurationContractV2
 
 CQR1_RUN_ID = "pa1r-cqr1-20260714-paid-canary-001"
 CQR1_PAID_CANARY_002_RUN_ID = "pa1r-cqr1-20260715-paid-canary-002"
@@ -87,11 +88,31 @@ class TechnicalMediaQCReport(BaseModel):
     checks: dict[str, Any]
     required_checks: list[str] = Field(min_length=1)
     reason_codes: list[str] = Field(default_factory=list)
+    duration_contract: DurationContractV2 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    measured_duration_ms: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
     production_eligible: Literal[False] = False
     not_publishable: Literal[True] = True
     content_hash: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def duration_matches_contract(self) -> "TechnicalMediaQCReport":
+        if self.duration_contract is None and self.measured_duration_ms is None:
+            return self
+        if self.duration_contract is None or self.measured_duration_ms is None:
+            raise ValueError("TECHNICAL_QC_DURATION_AUTHORITY_INCOMPLETE")
+        if not (
+            self.duration_contract.minimum_duration_ms
+            <= self.measured_duration_ms
+            <= self.duration_contract.maximum_duration_ms
+        ):
+            raise ValueError("TECHNICAL_QC_DURATION_OUTSIDE_CHANNEL_CONTRACT")
+        return self
 
 
 class CreativePerceptualMediaQCReport(BaseModel):

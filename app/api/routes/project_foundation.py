@@ -1,4 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+
+from app.core.errors import ForbiddenError
+from app.services.security_boundary import actor_from_request
 
 from app.api.routes.imports import (
     Any,
@@ -28,6 +31,7 @@ from app.api.routes.imports import (
     LocalizedSubtitlePackageService,
     NotFoundError,
     R3D1AdminService,
+    ValidationFailureError,
     VideoProjectCreate,
     VideoProjectLocalizationRead,
     VideoProjectRead,
@@ -36,10 +40,6 @@ from app.api.routes.imports import (
     VoiceProfileRead,
     session_scope,
     uuid,
-)
-
-from app.api.routes.serializers_core import (
-    _video_project,
 )
 
 from app.api.routes.serializers_publish_learning import (
@@ -54,9 +54,10 @@ def create_router() -> APIRouter:
     @router.post("/video-projects", response_model=VideoProjectRead)
     def create_video_project(data: VideoProjectCreate) -> VideoProjectRead:
         try:
-            with session_scope() as session:
-                project = VideoProjectService(session).create_project(data=data)
-                return VideoProjectRead.model_validate(_video_project(project))
+            del data
+            raise ValidationFailureError(
+                "V2_PROJECT_ADMISSION_REQUIRED"
+            )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -357,10 +358,28 @@ def create_router() -> APIRouter:
     def create_localized_subtitle_package(
         video_project_id: uuid.UUID,
         data: LocalizedSubtitlePackageCreate,
+        request: Request,
     ) -> LocalizedSubtitlePackageRead:
         try:
+            actor = actor_from_request(request)
+            final_review = (
+                data.translation_status == "APPROVED"
+                or data.human_review_status in {"APPROVED", "NOT_REQUIRED"}
+            )
+            required_permission = (
+                "review.final_decide" if final_review else "editorial.manage"
+            )
+            if not actor.has_permission(required_permission):
+                raise ForbiddenError("Bạn chưa có quyền hoàn tất duyệt localization.")
+            if actor.operator_user_id is None:
+                raise ForbiddenError("Phiên duyệt không có định danh operator.")
+            authoritative = data.model_copy(
+                update={"reviewer_id": actor.operator_user_id}
+            )
             with session_scope() as session:
-                return LocalizedSubtitlePackageService(session).create(video_project_id, data)
+                return LocalizedSubtitlePackageService(session).create(
+                    video_project_id, authoritative
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -368,10 +387,26 @@ def create_router() -> APIRouter:
     def create_localized_metadata_package(
         video_project_id: uuid.UUID,
         data: LocalizedMetadataPackageCreate,
+        request: Request,
     ) -> LocalizedMetadataPackageRead:
         try:
+            actor = actor_from_request(request)
+            required_permission = (
+                "review.final_decide"
+                if data.human_review_status == "APPROVED"
+                else "editorial.manage"
+            )
+            if not actor.has_permission(required_permission):
+                raise ForbiddenError("Bạn chưa có quyền hoàn tất duyệt localization.")
+            if actor.operator_user_id is None:
+                raise ForbiddenError("Phiên duyệt không có định danh operator.")
+            authoritative = data.model_copy(
+                update={"reviewer_id": actor.operator_user_id}
+            )
             with session_scope() as session:
-                return LocalizedMetadataPackageService(session).create(video_project_id, data)
+                return LocalizedMetadataPackageService(session).create(
+                    video_project_id, authoritative
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

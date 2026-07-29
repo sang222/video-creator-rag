@@ -165,6 +165,16 @@ class DailyToPackageOrchestrator:
         )
         if decision is None:
             raise NotFoundError(f"daily idea decision not found: {data.daily_idea_decision_id}")
+        if getattr(decision, "schema_version", "v1") == "v2":
+            return self._ephemeral_blocked(
+                decision.id,
+                "D2P1_V2_CANONICAL_PACKAGE_PATH_REQUIRED",
+                next_action=(
+                    "Use ProjectAdmissionDecision v2 and ProductionPackage v2 "
+                    "automated readiness; do not create legacy evidence or "
+                    "final_human ReviewTasks."
+                ),
+            )
 
         try:
             lineage = self._resolve_lineage(decision)

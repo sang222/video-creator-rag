@@ -23,7 +23,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0038_lpro1_daily_mode"
+EXPECTED_ALEMBIC_HEAD = "0043_vcos_phase123"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

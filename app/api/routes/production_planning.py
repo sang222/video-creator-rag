@@ -1,7 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pathlib import Path
 
-from app.contracts.d2p1 import DailyToPackageRequest, DailyToPackageRunRequest, DailyToPackageStatusRead
+from app.contracts.d2p1 import DailyToPackageRunRequest, DailyToPackageStatusRead
 from app.contracts.long_production import (
     LongProductionOrchestrationReceipt,
     LongProductionRunRequest,
@@ -9,6 +9,7 @@ from app.contracts.long_production import (
 )
 from app.services.d2p1 import DailyToPackageOrchestrator
 from app.services.long_production import LongProductionOrchestrator
+from app.services.security_boundary import actor_from_request
 from app.db.models import VideoProject
 
 from app.api.routes.imports import (
@@ -263,17 +264,13 @@ def create_router() -> APIRouter:
         decision_id: uuid.UUID,
         data: DailyToPackageRunRequest | None = None,
     ) -> DailyToPackageStatusRead:
-        """Run or resume D2P1 from immutable DailyIdeaDecision lineage."""
+        """Retained route name; new execution must use typed v2 admission."""
 
         try:
-            control = data or DailyToPackageRunRequest()
-            with session_scope() as session:
-                return DailyToPackageOrchestrator(session).run(
-                    DailyToPackageRequest(
-                        daily_idea_decision_id=decision_id,
-                        **control.model_dump(),
-                    )
-                )
+            del decision_id, data
+            raise ValidationFailureError(
+                "V2_PROJECT_ADMISSION_REQUIRED"
+            )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -296,11 +293,13 @@ def create_router() -> APIRouter:
     )
     def run_long_production(
         project_id: uuid.UUID,
+        request: Request,
         data: LongProductionRunRequest | None = None,
     ) -> LongProductionOrchestrationReceipt:
         """Run/resume LPRO1 from frozen package lineage; no creative overrides are accepted."""
 
         try:
+            actor = actor_from_request(request)
             control = data or LongProductionRunRequest()
             with session_scope() as session:
                 return LongProductionOrchestrator(
@@ -311,6 +310,7 @@ def create_router() -> APIRouter:
                     package_id=control.package_id,
                     execution_mode=control.execution_mode,
                     execution_envelope=control.execution_envelope,
+                    actor_user_id=actor.actor_id,
                 )
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -327,9 +327,10 @@ def create_router() -> APIRouter:
     @router.post("/project-admission-decisions", response_model=ProjectAdmissionDecisionRead)
     def create_project_admission_decision(data: ProjectAdmissionDecisionCreate) -> ProjectAdmissionDecisionRead:
         try:
-            with session_scope() as session:
-                decision = ProjectAdmissionService(session).create_decision(data=data)
-                return ProjectAdmissionDecisionRead.model_validate(_project_admission_decision(decision))
+            del data
+            raise ValidationFailureError(
+                "V2_PROJECT_ADMISSION_REQUIRED"
+            )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

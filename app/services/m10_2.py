@@ -43,6 +43,7 @@ from app.core.config import (
 from app.core.time import utc_now
 from app.services.config_registry import content_hash
 from app.services.native_render_plan import stable_hash
+from app.services.production_package import ProductionPackageService
 from app.services.google_veo_catalog import GoogleVeoModelPriceCatalog
 from app.db.models import (
     AIHeroAsset,
@@ -1121,6 +1122,39 @@ class LongFormRenderPackageService:
         self, *, video_project_id: uuid.UUID, data: LongFormRenderPackageCreate
     ) -> LongFormRenderPackage:
         project = _require_project(self.session, video_project_id)
+        production_package_version = None
+        production_package_content = None
+        if getattr(project, "schema_version", "v1") == "v2":
+            (
+                production_package_version,
+                production_package_content,
+            ) = ProductionPackageService(
+                self.session
+            ).require_ready_projection_authority(
+                project_id=project.id,
+                package_artifact_version_id=(
+                    data.production_package_artifact_version_id
+                ),
+                package_hash=data.production_package_hash,
+            )
+            if (
+                data.duration_contract is not None
+                and data.duration_contract
+                != production_package_content.duration_contract
+            ):
+                raise ValidationFailureError(
+                    "LONG_RENDER_DURATION_CONTRACT_MISMATCH"
+                )
+            if data.strict_contract is not None and (
+                data.strict_contract.production_package_schema_version != "v2"
+                or data.strict_contract.production_package_artifact_version_id
+                != str(production_package_version.id)
+                or data.strict_contract.duration_contract
+                != production_package_content.duration_contract
+            ):
+                raise ValidationFailureError(
+                    "LONG_RENDER_PRODUCTION_PACKAGE_PROJECTION_MISMATCH"
+                )
         decision = MediaRenderJobRouterService(self.session).decide(
             data=MediaRenderRoutingDecisionRequest(
                 company_id=project.company_id,
@@ -1161,6 +1195,23 @@ class LongFormRenderPackageService:
             company_id=project.company_id,
             channel_workspace_id=project.channel_workspace_id,
             video_project_id=project.id,
+            production_package_artifact_version_id=(
+                production_package_version.id
+                if production_package_version is not None
+                else None
+            ),
+            production_package_hash=(
+                production_package_version.content_hash
+                if production_package_version is not None
+                else None
+            ),
+            duration_contract=(
+                production_package_content.duration_contract.model_dump(
+                    mode="json"
+                )
+                if production_package_content is not None
+                else None
+            ),
             voice_timeline_id=data.voice_timeline_id,
             caption_track_id=data.caption_track_id,
             visual_plan_id=data.visual_plan_id,
@@ -1470,6 +1521,46 @@ class FinalMediaRefService:
             raise ValidationFailureError(
                 "FinalMediaRef requires an actual known file ref or explicit test fixture ref."
             )
+        projection_version = None
+        projection_content = None
+        project = (
+            self.session.get(VideoProject, data.video_project_id)
+            if data.video_project_id is not None
+            else None
+        )
+        if project is not None and getattr(project, "schema_version", "v1") == "v2":
+            (
+                projection_version,
+                projection_content,
+            ) = ProductionPackageService(
+                self.session
+            ).require_ready_projection_authority(
+                project_id=project.id,
+                package_artifact_version_id=(
+                    data.production_package_artifact_version_id
+                ),
+                package_hash=data.production_package_hash,
+            )
+            if (
+                data.duration_contract is not None
+                and data.duration_contract != projection_content.duration_contract
+            ):
+                raise ValidationFailureError(
+                    "FINAL_MEDIA_DURATION_CONTRACT_MISMATCH"
+                )
+            if data.duration_seconds is None:
+                raise ValidationFailureError(
+                    "FINAL_MEDIA_DURATION_REQUIRED_FOR_V2"
+                )
+            duration_ms = round(float(data.duration_seconds) * 1000)
+            if not (
+                projection_content.duration_contract.minimum_duration_ms
+                <= duration_ms
+                <= projection_content.duration_contract.maximum_duration_ms
+            ):
+                raise ValidationFailureError(
+                    "FINAL_MEDIA_DURATION_OUTSIDE_CHANNEL_CONTRACT"
+                )
         strict_native_final = bool(
             data.media_type == "LONG_FORM_FINAL"
             and data.provider_type == LOCAL_RENDERER_CAPABILITY
@@ -1512,7 +1603,20 @@ class FinalMediaRefService:
                 raise ValidationFailureError(
                     "FinalMediaRef immutable lineage authority is invalid."
                 )
-        ref = FinalMediaRef(**data.model_dump())
+        payload = data.model_dump(mode="python")
+        if projection_version is not None and projection_content is not None:
+            payload["production_package_artifact_version_id"] = (
+                projection_version.id
+            )
+            payload["production_package_hash"] = projection_version.content_hash
+            payload["duration_contract"] = (
+                projection_content.duration_contract.model_dump(mode="json")
+            )
+        elif payload.get("duration_contract") is not None:
+            payload["duration_contract"] = data.duration_contract.model_dump(
+                mode="json"
+            )
+        ref = FinalMediaRef(**payload)
         self.session.add(ref)
         self.session.flush()
         return ref

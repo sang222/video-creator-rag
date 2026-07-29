@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 from copy import deepcopy
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -38,6 +39,8 @@ from app.db.models import (
     EffectiveChannelRuntimeContextSnapshot,
     FirstScriptedVideoPackage,
     IdeaMarketPreflight,
+    OperatorAuthSession,
+    OperatorUser,
     ProjectAdmissionDecision,
     ProviderAttempt,
     RetrievalPlanSnapshot,
@@ -68,6 +71,7 @@ from app.services.m5 import (
     _hash_payload,
     _niche_evidence_ref,
 )
+from app.services.m11_1 import AUTH_COOKIE_NAME, hash_session_token
 from app.services.nich1 import (
     NicheAlignmentDossierBuilder,
     NicheContractDigestCompiler,
@@ -938,30 +942,40 @@ def test_resume_to_package_is_exact_version_idempotent_and_provider_free(db_sess
     assert resumed.receipt["artifact_version_id"] == promoted.receipt["artifact_version_id"]
 
 
-def test_daily_to_package_runtime_post_is_real_idempotent_application_wiring(db_session) -> None:
+def test_daily_to_package_runtime_post_requires_typed_v2_admission(
+    db_session,
+) -> None:
     scope = _d2p_scope(db_session)
+    token = secrets.token_urlsafe(48)
+    operator_user = OperatorUser(
+        canonical_user_id=scope.operator.id,
+        email=scope.operator.email,
+        password_hash="not-used-by-session-auth",
+        display_name=scope.operator.display_name,
+        role="OWNER_ADMIN",
+        status="ACTIVE",
+    )
+    db_session.add(operator_user)
+    db_session.flush()
+    db_session.add(
+        OperatorAuthSession(
+            user_id=operator_user.id,
+            session_token_hash=hash_session_token(token),
+            expires_at=utc_now() + timedelta(hours=1),
+        )
+    )
     db_session.commit()
     client = create_app()
     from fastapi.testclient import TestClient
 
     with TestClient(client) as api:
-        first = api.post(
+        api.cookies.set(AUTH_COOKIE_NAME, token)
+        response = api.post(
             f"/daily-idea-decisions/{scope.decision.id}/production-handoff/run",
             json={},
         )
-        second = api.post(
-            f"/daily-idea-decisions/{scope.decision.id}/production-handoff/run",
-            json={},
-        )
-        rejected_override = api.post(
-            f"/daily-idea-decisions/{scope.decision.id}/production-handoff/run",
-            json={"topic": "forbidden caller override"},
-        )
-    assert first.status_code == 200, first.text
-    assert second.status_code == 200, second.text
-    assert first.json()["current_state"] == "AWAITING_RESEARCH"
-    assert second.json()["receipt"]["artifact_version_id"] == first.json()["receipt"]["artifact_version_id"]
-    assert rejected_override.status_code == 422
+    assert response.status_code == 400, response.text
+    assert "V2_PROJECT_ADMISSION_REQUIRED" in response.text
 
 
 def test_failed_downstream_niche_gate_blocks_human_review(db_session) -> None:

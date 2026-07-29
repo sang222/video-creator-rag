@@ -66,6 +66,21 @@ class NativeRenderPlanValidator:
         ordered = sorted(plan.scenes, key=lambda s: s.narration_start_ms)
         overlap = any(a.narration_end_ms > b.narration_start_ms for a, b in zip(ordered, ordered[1:]))
         results.append(self._gate("SceneTimelineGate", not overlap, "SCENE_TIMELINE_OVERLAP"))
+        if plan.production_package_schema_version == "v2":
+            package_authority_ok = bool(
+                plan.production_package_artifact_version_id
+                and plan.production_package_hash
+                and plan.duration_contract is not None
+                and plan.package_id
+                == plan.production_package_artifact_version_id
+            )
+            results.append(
+                self._gate(
+                    "ProductionPackageV2AuthorityGate",
+                    package_authority_ok,
+                    "PRODUCTION_PACKAGE_V2_PROJECTION_AUTHORITY_REQUIRED",
+                )
+            )
         segments = [seg for scene in plan.scenes for seg in scene.source_segment_ids]
         results.append(self._gate("SegmentCoverageGate", bool(segments) and len(segments) == len(set(segments)), "SEGMENT_COVERAGE_INVALID"))
         canonical_cues = canonical_caption_cues(canonical_timeline)
@@ -107,6 +122,15 @@ class NativeRenderPlanValidator:
                 )
             )
             if canonical_timeline is not None:
+                if plan.production_package_schema_version == "v2":
+                    results.append(
+                        self._gate(
+                            "DurationContractLineageGate",
+                            plan.duration_contract
+                            == canonical_timeline.duration_contract,
+                            "DURATION_CONTRACT_LINEAGE_MISMATCH",
+                        )
+                    )
                 actual_hash = stable_hash(canonical_timeline.model_dump(mode="json", exclude={"timeline_hash"}))
                 hash_ok = (
                     canonical_timeline.timeline_hash == actual_hash

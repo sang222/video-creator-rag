@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -192,6 +193,13 @@ class LongFormRenderPackage(Base):
     video_project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
     )
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = (
+        mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    )
+    production_package_hash: Mapped[str | None] = mapped_column(String(64))
+    duration_contract: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     voice_timeline_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("voice_timeline_snapshots.id")
     )
@@ -228,8 +236,22 @@ class LongFormRenderPackage(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "(production_package_artifact_version_id is null "
+            "and production_package_hash is null "
+            "and duration_contract is null) or "
+            "(production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and duration_contract is not null "
+            "and jsonb_typeof(duration_contract) = 'object')",
+            name="ck_long_form_render_packages_production_package_binding",
+        ),
         Index("ix_long_form_render_packages_company", "company_id"),
         Index("ix_long_form_render_packages_project", "video_project_id"),
+        Index(
+            "ix_long_form_render_packages_production_package",
+            "production_package_artifact_version_id",
+        ),
         Index("ix_long_form_render_packages_state", "package_state"),
     )
 
@@ -364,6 +386,13 @@ class FinalMediaRef(Base):
     video_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id")
     )
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = (
+        mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    )
+    production_package_hash: Mapped[str | None] = mapped_column(String(64))
+    duration_contract: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     uploaded_video_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("uploaded_videos.id")
     )
@@ -387,8 +416,22 @@ class FinalMediaRef(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "(production_package_artifact_version_id is null "
+            "and production_package_hash is null "
+            "and duration_contract is null) or "
+            "(production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and duration_contract is not null "
+            "and jsonb_typeof(duration_contract) = 'object')",
+            name="ck_final_media_refs_production_package_binding",
+        ),
         Index("ix_final_media_refs_company", "company_id"),
         Index("ix_final_media_refs_project", "video_project_id"),
+        Index(
+            "ix_final_media_refs_production_package",
+            "production_package_artifact_version_id",
+        ),
         Index("ix_final_media_refs_type", "media_type"),
         Index("ix_final_media_refs_cloud_media_ref", "cloud_media_ref_id"),
         Index(

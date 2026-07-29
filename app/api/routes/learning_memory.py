@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.routes.imports import (
     ChannelMemoryItemRead,
@@ -51,6 +51,7 @@ from app.api.routes.serializers_publish_learning import (
     _post_publish_health_run,
     _recovery_proposal,
 )
+from app.services.security_boundary import actor_from_request
 
 
 
@@ -212,37 +213,55 @@ def create_router() -> APIRouter:
     @router.post("/learning-candidates/{candidate_id}/approve", response_model=LearningReviewDecisionRead)
     def approve_learning_candidate(
         candidate_id: uuid.UUID,
+        request: Request,
         data: LearningReviewDecisionCreate | None = None,
     ) -> LearningReviewDecisionRead:
-        return _learning_review_action(candidate_id, "APPROVE", data)
+        return _learning_review_action(
+            candidate_id, "APPROVE", data, actor_from_request(request)
+        )
 
     @router.post("/learning-candidates/{candidate_id}/reject", response_model=LearningReviewDecisionRead)
     def reject_learning_candidate(
         candidate_id: uuid.UUID,
+        request: Request,
         data: LearningReviewDecisionCreate | None = None,
     ) -> LearningReviewDecisionRead:
-        return _learning_review_action(candidate_id, "REJECT", data)
+        return _learning_review_action(
+            candidate_id, "REJECT", data, actor_from_request(request)
+        )
 
     @router.post("/learning-candidates/{candidate_id}/request-more-evidence", response_model=LearningReviewDecisionRead)
     def request_more_learning_evidence(
         candidate_id: uuid.UUID,
+        request: Request,
         data: LearningReviewDecisionCreate | None = None,
     ) -> LearningReviewDecisionRead:
-        return _learning_review_action(candidate_id, "REQUEST_MORE_EVIDENCE", data)
+        return _learning_review_action(
+            candidate_id,
+            "REQUEST_MORE_EVIDENCE",
+            data,
+            actor_from_request(request),
+        )
 
     @router.post("/learning-candidates/{candidate_id}/suppress", response_model=LearningReviewDecisionRead)
     def suppress_learning_candidate(
         candidate_id: uuid.UUID,
+        request: Request,
         data: LearningReviewDecisionCreate | None = None,
     ) -> LearningReviewDecisionRead:
-        return _learning_review_action(candidate_id, "SUPPRESS", data)
+        return _learning_review_action(
+            candidate_id, "SUPPRESS", data, actor_from_request(request)
+        )
 
     @router.post("/learning-candidates/{candidate_id}/expire", response_model=LearningReviewDecisionRead)
     def expire_learning_candidate(
         candidate_id: uuid.UUID,
+        request: Request,
         data: LearningReviewDecisionCreate | None = None,
     ) -> LearningReviewDecisionRead:
-        return _learning_review_action(candidate_id, "EXPIRE", data)
+        return _learning_review_action(
+            candidate_id, "EXPIRE", data, actor_from_request(request)
+        )
 
     @router.get("/learning-review-queue", response_model=list[LearningReviewQueueItemRead])
     def list_learning_review_queue(
@@ -317,36 +336,60 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/memory/items/{memory_item_id}/approve", response_model=MemoryApprovalDecisionRead)
-    def approve_memory_item(memory_item_id: uuid.UUID, data: MemoryApprovalRequest | None = None) -> MemoryApprovalDecisionRead:
+    def approve_memory_item(
+        memory_item_id: uuid.UUID,
+        request: Request,
+        data: MemoryApprovalRequest | None = None,
+    ) -> MemoryApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
+            payload = (data or MemoryApprovalRequest()).model_copy(
+                update={"decided_by": actor.actor_id}
+            )
             with session_scope() as session:
                 decision = ControlledMemoryService(session).approve(
                     memory_item_id=memory_item_id,
-                    data=data or MemoryApprovalRequest(),
+                    data=payload,
                 )
                 return MemoryApprovalDecisionRead.model_validate(decision)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/memory/items/{memory_item_id}/reject", response_model=MemoryApprovalDecisionRead)
-    def reject_memory_item(memory_item_id: uuid.UUID, data: MemoryApprovalRequest | None = None) -> MemoryApprovalDecisionRead:
+    def reject_memory_item(
+        memory_item_id: uuid.UUID,
+        request: Request,
+        data: MemoryApprovalRequest | None = None,
+    ) -> MemoryApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
+            payload = (data or MemoryApprovalRequest()).model_copy(
+                update={"decided_by": actor.actor_id}
+            )
             with session_scope() as session:
                 decision = ControlledMemoryService(session).reject(
                     memory_item_id=memory_item_id,
-                    data=data or MemoryApprovalRequest(),
+                    data=payload,
                 )
                 return MemoryApprovalDecisionRead.model_validate(decision)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/memory/items/{memory_item_id}/archive", response_model=MemoryApprovalDecisionRead)
-    def archive_memory_item(memory_item_id: uuid.UUID, data: MemoryApprovalRequest | None = None) -> MemoryApprovalDecisionRead:
+    def archive_memory_item(
+        memory_item_id: uuid.UUID,
+        request: Request,
+        data: MemoryApprovalRequest | None = None,
+    ) -> MemoryApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
+            payload = (data or MemoryApprovalRequest()).model_copy(
+                update={"decided_by": actor.actor_id}
+            )
             with session_scope() as session:
                 decision = ControlledMemoryService(session).archive(
                     memory_item_id=memory_item_id,
-                    data=data or MemoryApprovalRequest(),
+                    data=payload,
                 )
                 return MemoryApprovalDecisionRead.model_validate(decision)
         except Exception as exc:

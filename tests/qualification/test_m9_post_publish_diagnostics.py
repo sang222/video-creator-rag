@@ -9,10 +9,6 @@ from sqlalchemy import inspect, select, text
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
-
-pytestmark = pytest.mark.skip(
-    reason="Historical M9 qualification depends on pre-M12 local render/upload fixture; M12.1R keeps production mock/local success disabled."
-)
 from app.contracts import ManualAnalyticsImportContract, PostPublishHealthRunCreate
 from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.db.models import (
@@ -32,6 +28,10 @@ from app.services import AnalyticsSyncService, ManualPublishConfirmationService,
 
 from .helpers.git_checks import collect_git_status
 from .helpers.repo_scanners import all_scope_violations
+
+pytestmark = pytest.mark.skip(
+    reason="Historical M9 qualification depends on pre-M12 local render/upload fixture; M12.1R keeps production mock/local success disabled."
+)
 
 
 runner = CliRunner()
@@ -164,7 +164,7 @@ def test_m9_preflight_schema_catalogs_and_scope(engine, db_session, qualificatio
     assert M9_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_PLUS_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
         defaults = connection.execute(
             text(
                 """

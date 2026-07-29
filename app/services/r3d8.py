@@ -577,6 +577,8 @@ class HumanPaidRenderApprovalService:
     def reject(self, approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApproval:
         approval = self.require(approval_id)
         approval.approval_status = "REJECTED"
+        if data and data.approved_by:
+            approval.approved_by = data.approved_by
         if data and data.rationale:
             approval.rationale = data.rationale
         self.session.flush()
@@ -585,6 +587,8 @@ class HumanPaidRenderApprovalService:
     def revoke(self, approval_id: uuid.UUID, data: HumanPaidRenderApprovalDecisionRequest | None = None) -> HumanPaidRenderApproval:
         approval = self.require(approval_id)
         approval.approval_status = "REVOKED"
+        if data and data.approved_by:
+            approval.approved_by = data.approved_by
         if data and data.rationale:
             approval.rationale = data.rationale
         self.session.flush()

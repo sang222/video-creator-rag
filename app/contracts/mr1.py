@@ -5,6 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.contracts.vcos_v2 import DurationContractV2
+
 
 class MR1ReapprovalCommand(BaseModel):
     """Explicit operator authority for one exact MR1 production run."""
@@ -63,6 +65,54 @@ class MR1StartCommand(BaseModel):
         if any(character not in "0123456789abcdef" for character in value):
             raise ValueError("approval_content_hash must be lowercase SHA-256 hex")
         return value
+
+
+class MR1V2AutomatedAdmissionRequest(BaseModel):
+    """Provider-free validation of the current automated Phase 3 authority."""
+
+    schema_version: Literal["mr1.automated-admission.v2"] = (
+        "mr1.automated-admission.v2"
+    )
+    project_id: uuid.UUID
+    production_package_artifact_version_id: uuid.UUID
+    execution_mode: Literal["VALIDATION_ONLY"] = "VALIDATION_ONLY"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MR1V2AutomatedAdmissionRead(BaseModel):
+    schema_version: Literal["mr1.automated-admission.v2"] = (
+        "mr1.automated-admission.v2"
+    )
+    status: Literal["VALIDATED"] = "VALIDATED"
+    project_id: uuid.UUID
+    production_package_artifact_version_id: uuid.UUID
+    production_package_version: int = Field(gt=0)
+    production_package_hash: str = Field(
+        min_length=64,
+        max_length=64,
+    )
+    production_readiness_receipt_artifact_version_id: uuid.UUID
+    production_readiness_receipt_hash: str = Field(
+        min_length=64,
+        max_length=64,
+    )
+    duration_contract: DurationContractV2
+    provider_execution_plan_hash: str = Field(
+        min_length=64,
+        max_length=64,
+    )
+    budget_scope_hash: str = Field(min_length=64, max_length=64)
+    legacy_approval_required: Literal[False] = False
+    execution_authorized: Literal[False] = False
+    reason_codes: list[
+        Literal[
+            "AUTOMATED_PRODUCTION_READINESS_ACCEPTED",
+            "MR1_V2_REAL_EXECUTION_DISABLED",
+        ]
+    ]
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 MR1PexelsScene = Literal["SC-04", "SC-07", "SC-09"]

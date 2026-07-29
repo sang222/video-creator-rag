@@ -32,6 +32,7 @@ from app.contracts.temporal_authority import (
     VerifiedNarrationAlignment,
     VerifiedNarrationWord,
 )
+from app.contracts.vcos_v2 import DurationContractV2
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.config import Settings, get_settings
 from app.db.models import Artifact, ArtifactVersion, VideoProject
@@ -1422,6 +1423,7 @@ class CanonicalMediaTimelineCompiler:
         normalized: SpokenTextNormalized,
         alignment: VerifiedNarrationAlignment,
         segments: list[EditorialSegmentInput],
+        duration_contract: DurationContractV2 | None = None,
     ) -> CanonicalMediaTimeline:
         if alignment.verification_status != "PASS" or alignment.token_coverage != 1.0:
             raise ValueError("TEMPORAL_VERIFIED_ALIGNMENT_REQUIRED")
@@ -1519,6 +1521,8 @@ class CanonicalMediaTimelineCompiler:
             },
             "compilation_warnings": [],
         }
+        if duration_contract is not None:
+            payload["duration_contract"] = duration_contract.model_dump(mode="json")
         if (
             not payload["provider_timing_seed_ref"]
             or not payload["forced_alignment_ref"]

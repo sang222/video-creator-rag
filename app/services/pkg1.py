@@ -1856,6 +1856,7 @@ class PKG1PackageService:
                 created_by_user_id=created_by_user_id,
             ),
             correlation_id=f"pkg1-artifact-{artifact_type}",
+            trusted_authority_write=True,
         )
         return artifact_service.create_artifact_version(
             data=ArtifactVersionCreate(
@@ -1867,6 +1868,7 @@ class PKG1PackageService:
                 packaging_metadata={"pkg1": True, "provider_execution": "DISABLED"},
             ),
             correlation_id=f"pkg1-artifact-version-{artifact_type}",
+            trusted_authority_write=True,
         )
 
     def _evaluate_all_gates(

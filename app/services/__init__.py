@@ -388,8 +388,34 @@ from app.services.visual_source_routing import (
     VisualSourceRoutingPolicyCatalog,
     VisualSourceRoutingPreviewService,
 )
+from app.services.vcos_v2 import (
+    DerivativeLineageValidator,
+    DeterministicAssignmentResolver,
+    LegacySeriesReader,
+    LongFormPackageEligibilityService,
+    LongFormPlanningService,
+    ProjectAdmissionV2Service,
+    SeriesPlanService,
+    SeriesRunService,
+)
+from app.services.production_package import (
+    ChannelDurationContractResolver,
+    ProductionPackageService,
+    ProductionReadinessService,
+)
 
 __all__ = [
+    "DerivativeLineageValidator",
+    "DeterministicAssignmentResolver",
+    "LegacySeriesReader",
+    "LongFormPackageEligibilityService",
+    "LongFormPlanningService",
+    "ProjectAdmissionV2Service",
+    "SeriesPlanService",
+    "SeriesRunService",
+    "ChannelDurationContractResolver",
+    "ProductionPackageService",
+    "ProductionReadinessService",
     "IntegrationSettingsReadModel",
     "AuditService",
     "IdeaMarketPreflightEvaluator",

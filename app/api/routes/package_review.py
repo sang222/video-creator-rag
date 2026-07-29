@@ -39,6 +39,7 @@ from app.api.routes.imports import (
 from app.api.routes.serializers_publish_learning import (
     _as_http_error,
 )
+from app.services.security_boundary import actor_from_request
 
 
 
@@ -118,9 +119,15 @@ def create_router() -> APIRouter:
         request: Request,
     ) -> PackagingApprovedPatchApplyAndRecheckResultRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 _require_operator_review_action(session, request)
-                return PackagingApprovedPatchApplyAndRecheckService(session).apply_and_recheck(package_id)
+                return PackagingApprovedPatchApplyAndRecheckService(
+                    session
+                ).apply_and_recheck(
+                    package_id,
+                    actor_user_id=actor.actor_id,
+                )
         except ForbiddenError as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bạn chưa có quyền thực hiện thao tác này.") from exc
         except Exception as exc:
@@ -129,14 +136,16 @@ def create_router() -> APIRouter:
     @router.post("/packaging-proposed-patches/{patch_id}/approve", response_model=PackagingPatchApprovalDecisionRead)
     def approve_packaging_proposed_patch(
         patch_id: uuid.UUID,
+        request: Request,
         data: PackagingPatchDecisionRequest | None = None,
     ) -> PackagingPatchApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 payload = data or PackagingPatchDecisionRequest()
                 return PackagingPatchApprovalService(session).approve(
                     patch_id,
-                    decided_by=payload.decided_by,
+                    decided_by=str(actor.actor_id),
                     rationale=payload.rationale,
                 )
         except Exception as exc:
@@ -145,14 +154,16 @@ def create_router() -> APIRouter:
     @router.post("/packaging-proposed-patches/{patch_id}/reject", response_model=PackagingPatchApprovalDecisionRead)
     def reject_packaging_proposed_patch(
         patch_id: uuid.UUID,
+        request: Request,
         data: PackagingPatchDecisionRequest | None = None,
     ) -> PackagingPatchApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 payload = data or PackagingPatchDecisionRequest()
                 return PackagingPatchApprovalService(session).reject(
                     patch_id,
-                    decided_by=payload.decided_by,
+                    decided_by=str(actor.actor_id),
                     rationale=payload.rationale,
                 )
         except Exception as exc:
@@ -161,24 +172,33 @@ def create_router() -> APIRouter:
     @router.post("/packaging-proposed-patches/{patch_id}/request-changes", response_model=PackagingPatchApprovalDecisionRead)
     def request_changes_packaging_proposed_patch(
         patch_id: uuid.UUID,
+        request: Request,
         data: PackagingPatchDecisionRequest | None = None,
     ) -> PackagingPatchApprovalDecisionRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 payload = data or PackagingPatchDecisionRequest()
                 return PackagingPatchApprovalService(session).request_changes(
                     patch_id,
-                    decided_by=payload.decided_by,
+                    decided_by=str(actor.actor_id),
                     rationale=payload.rationale,
                 )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/packaging-proposed-patches/{patch_id}/apply", response_model=PackagingPatchApplyRunRead)
-    def apply_packaging_proposed_patch(patch_id: uuid.UUID) -> PackagingPatchApplyRunRead:
+    def apply_packaging_proposed_patch(
+        patch_id: uuid.UUID,
+        request: Request,
+    ) -> PackagingPatchApplyRunRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
-                return PackagingPatchApplyService(session).apply(patch_id)
+                return PackagingPatchApplyService(session).apply(
+                    patch_id,
+                    actor_user_id=actor.actor_id,
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 

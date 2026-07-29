@@ -1,7 +1,15 @@
 import uuid
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+
+from app.contracts.vcos_v2 import (
+    AssignmentMode,
+    ContentMode,
+    DurationContractV2,
+    PlanningSourceType,
+    ProductionLane,
+)
 
 ProjectStatus = Literal["draft", "in_review", "approved", "archived"]
 ArtifactStatus = Literal[
@@ -40,6 +48,25 @@ class VideoProjectCreate(BaseModel):
     description: str | None = None
     status: ProjectStatus = "draft"
     project_type: str | None = None
+    schema_version: Literal["v1", "v2"] = "v1"
+    planning_source_type: PlanningSourceType | None = None
+    production_lane: ProductionLane | None = None
+    content_mode: ContentMode | None = None
+    assignment_mode: AssignmentMode | None = None
+    series_plan_id: uuid.UUID | None = None
+    series_run_id: uuid.UUID | None = None
+    episode_number: int | None = Field(default=None, gt=0)
+    episode_role: str | None = None
+    standalone_reason_code: str | None = None
+    project_admission_decision_id: uuid.UUID | None = None
+    parent_video_project_id: uuid.UUID | None = None
+    parent_final_media_ref_id: uuid.UUID | None = None
+    canonical_timeline_ref: str | None = None
+    canonical_timeline_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    duration_contract: DurationContractV2 | None = None
+    render_eligible: bool = True
     priority: str | None = None
     owner_user_id: uuid.UUID | None = None
     created_by_user_id: uuid.UUID
@@ -49,6 +76,72 @@ class VideoProjectCreate(BaseModel):
     audience_delivery_summary: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_v2_assignment(self) -> "VideoProjectCreate":
+        if self.schema_version == "v1":
+            return self
+        if (
+            self.planning_source_type is None
+            or self.production_lane is None
+            or self.content_mode is None
+            or self.assignment_mode is None
+            or self.duration_contract is None
+            or self.project_admission_decision_id is None
+        ):
+            raise ValueError(
+                "v2 project requires planning source, lane, content mode, "
+                "assignment mode, duration contract, and admission decision"
+            )
+        if (
+            self.duration_contract.source_profile_version_id
+            != self.channel_profile_version_id
+            or self.duration_contract.source_policy_snapshot_id
+            != self.policy_snapshot_id
+        ):
+            raise ValueError(
+                "duration contract must bind the project profile/policy"
+            )
+        series_values = (
+            self.series_plan_id,
+            self.series_run_id,
+            self.episode_number,
+        )
+        if self.content_mode == ContentMode.SERIES_EPISODE:
+            if any(value is None for value in series_values):
+                raise ValueError(
+                    "series episode requires plan, run, and episode number"
+                )
+            if self.standalone_reason_code is not None:
+                raise ValueError(
+                    "series episode cannot have standalone_reason_code"
+                )
+        else:
+            if any(value is not None for value in series_values):
+                raise ValueError("standalone project cannot carry series fields")
+            if not self.standalone_reason_code:
+                raise ValueError(
+                    "standalone project requires standalone_reason_code"
+                )
+        if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
+            if self.content_mode != ContentMode.STANDALONE:
+                raise ValueError("long-derived short must be standalone")
+            if (
+                self.parent_video_project_id is None
+                or self.canonical_timeline_ref is None
+                or self.canonical_timeline_hash is None
+            ):
+                raise ValueError(
+                    "long-derived short requires exact parent and canonical timeline"
+                )
+            if self.render_eligible:
+                raise ValueError("long-derived short must not create a new render")
+        return self
+
+    @property
+    def standalone_reason(self) -> str | None:
+        """Read-only compatibility view for pre-v2 callers."""
+        return self.standalone_reason_code
 
 
 class VideoProjectRead(VideoProjectCreate):

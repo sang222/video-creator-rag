@@ -1,5 +1,14 @@
+import uuid
+from pathlib import Path
+
+import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 REQUIRED_TABLES = {
@@ -40,6 +49,8 @@ REQUIRED_TABLES = {
     "dead_letter_jobs",
     "ops_incidents",
     "manual_action_queue",
+    "series_plans",
+    "series_runs",
     "editorial_calendar_slots",
     "channel_daily_runs",
     "retrieval_plan_snapshots",
@@ -204,9 +215,102 @@ REQUIRED_TABLES = {
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
         revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert revision == "0036_hpr1_veo"
+        assert revision == "0043_vcos_phase123"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:
     tables = set(inspect(engine).get_table_names())
     assert REQUIRED_TABLES.issubset(tables)
+
+
+def _alembic_config() -> Config:
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "alembic"))
+    return config
+
+
+def test_0043_downgrade_round_trip_is_safe_without_authoritative_rows(
+    engine: Engine,
+) -> None:
+    config = _alembic_config()
+    try:
+        command.downgrade(config, "0042_mr1_final_lineage")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0042_mr1_final_lineage"
+            )
+            assert "series_plans" not in inspect(connection).get_table_names()
+    finally:
+        command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+            == "0043_vcos_phase123"
+        )
+
+
+def test_0043_downgrade_fails_closed_for_canonical_identity(
+    engine: Engine,
+) -> None:
+    canonical_user_id = uuid.uuid4()
+    operator_user_id = uuid.uuid4()
+    email = f"downgrade-guard-{uuid.uuid4()}@example.com"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO users (id, email, display_name, status)
+                VALUES (:id, :email, 'Downgrade Guard', 'active')
+                """
+            ),
+            {"id": canonical_user_id, "email": email},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO operator_users (
+                    id,
+                    canonical_user_id,
+                    email,
+                    password_hash,
+                    display_name,
+                    role,
+                    status
+                )
+                VALUES (
+                    :id,
+                    :canonical_user_id,
+                    :email,
+                    'not-used',
+                    'Downgrade Guard',
+                    'READ_ONLY',
+                    'ACTIVE'
+                )
+                """
+            ),
+            {
+                "id": operator_user_id,
+                "canonical_user_id": canonical_user_id,
+                "email": email,
+            },
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="authoritative Phase 1/v2 rows exist",
+    ):
+        command.downgrade(_alembic_config(), "0042_mr1_final_lineage")
+
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+            == "0043_vcos_phase123"
+        )

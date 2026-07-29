@@ -101,6 +101,8 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    series_runs,
+                    series_plans,
                     mr1_monthly_budget_reservations,
                     originality_gate_runs,
                     platform_native_package_plans,

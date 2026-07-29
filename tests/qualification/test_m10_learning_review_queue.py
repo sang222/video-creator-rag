@@ -8,11 +8,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select, text
 
 from app.contracts import LearningCandidateGenerationRunCreate, ManualAnalyticsImportContract, PostPublishHealthRunCreate
-
-pytestmark = pytest.mark.skip(
-    reason="Historical learning qualification depends on pre-M12 local render/upload fixture; M12.1R keeps auto-promote disabled."
-)
-from app.contracts.m7 import ManualPublishConfirmationCreate, PublishHandoffCreate
 from app.db.models import (
     DomainEvent,
     ApprovedPlaybookEntry,
@@ -29,13 +24,15 @@ from app.main import create_app
 from app.services import (
     AnalyticsSyncService,
     LearningCandidateGenerationService,
-    ManualPublishConfirmationService,
     PostPublishHealthMonitorService,
-    PublishHandoffService,
 )
 
 from .helpers.git_checks import collect_git_status
 from .helpers.repo_scanners import all_scope_violations
+
+pytestmark = pytest.mark.skip(
+    reason="Historical learning qualification depends on pre-M12 local render/upload fixture; M12.1R keeps auto-promote disabled."
+)
 
 
 M10_TABLES = {
@@ -205,7 +202,7 @@ def test_m10_preflight_schema_catalogs_defaults_and_scope(engine, db_session, qu
     assert M10_TABLES <= tables
     assert tables.isdisjoint(FORBIDDEN_M10_2_M11_TABLES)
     with engine.connect() as connection:
-        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_lpro1_daily_mode"
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0043_vcos_phase123"
         defaults = connection.execute(
             text(
                 """

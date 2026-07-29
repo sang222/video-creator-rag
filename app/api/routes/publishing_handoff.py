@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.routes.imports import (
     AnalyticsSnapshotRead,
@@ -52,6 +52,7 @@ from app.api.routes.serializers_publish_learning import (
     _uploaded_video_summary,
     _youtube_oauth_session,
 )
+from app.services.security_boundary import actor_from_request
 
 
 
@@ -118,8 +119,13 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/manual-publish-confirmations", response_model=ManualPublishConfirmationRead)
-    def create_manual_publish_confirmation(data: ManualPublishConfirmationCreate) -> ManualPublishConfirmationRead:
+    def create_manual_publish_confirmation(
+        data: ManualPublishConfirmationCreate,
+        request: Request,
+    ) -> ManualPublishConfirmationRead:
         try:
+            actor = actor_from_request(request)
+            data = data.model_copy(update={"confirmed_by_user_id": actor.actor_id})
             with session_scope() as session:
                 confirmation = ManualPublishConfirmationService(session).create_confirmation(data=data)
                 return ManualPublishConfirmationRead.model_validate(_manual_publish_confirmation(confirmation))

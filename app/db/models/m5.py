@@ -3,7 +3,19 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +41,17 @@ class EditorialCalendarSlot(Base):
     slot_date: Mapped[date] = mapped_column(Date, nullable=False)
     slot_type: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="OPEN")
+    schema_version: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="v1"
+    )
+    production_lane: Mapped[str | None] = mapped_column(String(40))
+    assignment_mode: Mapped[str | None] = mapped_column(String(40))
+    preferred_series_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_plans.id")
+    )
+    preferred_series_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_runs.id")
+    )
     production_goal: Mapped[str | None] = mapped_column(Text)
     target_platforms: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     content_pillar: Mapped[str | None] = mapped_column(Text)
@@ -42,12 +65,39 @@ class EditorialCalendarSlot(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "schema_version in ('v1','v2')",
+            name="ck_editorial_calendar_slots_schema_version",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(schema_version = 'v2' "
+            "and production_lane in "
+            "('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT') "
+            "and assignment_mode in "
+            "('SERIES_REQUIRED','SERIES_PREFERRED',"
+            "'STANDALONE_REQUIRED','OPEN_MIX') "
+            "and series_key is null "
+            "and (preferred_series_run_id is null "
+            "or preferred_series_plan_id is not null))",
+            name="ck_editorial_calendar_slots_v2_authority",
+        ),
         Index("ix_editorial_calendar_slots_company_id", "company_id"),
         Index("ix_editorial_calendar_slots_channel_workspace_id", "channel_workspace_id"),
         Index("ix_editorial_calendar_slots_policy_snapshot_id", "policy_snapshot_id"),
         Index("ix_editorial_calendar_slots_category_id", "category_id"),
         Index("ix_editorial_calendar_slots_slot_date", "slot_date"),
         Index("ix_editorial_calendar_slots_status", "status"),
+        Index("ix_editorial_calendar_slots_production_lane", "production_lane"),
+        Index("ix_editorial_calendar_slots_assignment_mode", "assignment_mode"),
+        Index(
+            "ix_editorial_calendar_slots_preferred_series_plan_id",
+            "preferred_series_plan_id",
+        ),
+        Index(
+            "ix_editorial_calendar_slots_preferred_series_run_id",
+            "preferred_series_run_id",
+        ),
         Index("ix_editorial_calendar_slots_created_at", "created_at"),
     )
 
@@ -324,6 +374,9 @@ class IdeaMarketPreflight(Base):
     channel_workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
     )
+    editorial_calendar_slot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("editorial_calendar_slots.id")
+    )
     channel_daily_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_daily_runs.id"))
     daily_idea_decision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("daily_idea_decisions.id"))
     search_intent_map_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("search_intent_maps.id"))
@@ -340,6 +393,10 @@ class IdeaMarketPreflight(Base):
     __table_args__ = (
         Index("ix_idea_market_preflights_company_id", "company_id"),
         Index("ix_idea_market_preflights_channel_workspace_id", "channel_workspace_id"),
+        Index(
+            "ix_idea_market_preflights_editorial_slot_id",
+            "editorial_calendar_slot_id",
+        ),
         Index("ix_idea_market_preflights_daily_run_id", "channel_daily_run_id"),
         Index("ix_idea_market_preflights_daily_idea_decision_id", "daily_idea_decision_id"),
         Index("ix_idea_market_preflights_decision", "decision"),
@@ -366,6 +423,12 @@ class DailyIdeaDecision(Base):
         UUID(as_uuid=True), ForeignKey("channel_state_pack_snapshots.id")
     )
     llm_run_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("llm_run_snapshots.id"))
+    schema_version: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="v1"
+    )
+    production_lane: Mapped[str | None] = mapped_column(String(40))
+    proposed_content_mode: Mapped[str | None] = mapped_column(String(40))
+    assignment_input_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     decision_status: Mapped[str] = mapped_column(String(40), nullable=False)
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
     proposed_angle: Mapped[str | None] = mapped_column(Text)
@@ -379,12 +442,25 @@ class DailyIdeaDecision(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "schema_version in ('v1','v2')",
+            name="ck_daily_idea_decisions_schema_version",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(schema_version = 'v2' and production_lane = 'DAILY_SHORT' "
+            "and (proposed_content_mode is null "
+            "or proposed_content_mode in ('SERIES_EPISODE','STANDALONE')) "
+            "and assignment_input_ref is not null)",
+            name="ck_daily_idea_decisions_v2_daily_short",
+        ),
         Index("ix_daily_idea_decisions_daily_run_id", "channel_daily_run_id"),
         Index("ix_daily_idea_decisions_company_id", "company_id"),
         Index("ix_daily_idea_decisions_channel_workspace_id", "channel_workspace_id"),
         Index("ix_daily_idea_decisions_policy_snapshot_id", "policy_snapshot_id"),
         Index("ix_daily_idea_decisions_context_pack_id", "context_pack_snapshot_id"),
         Index("ix_daily_idea_decisions_llm_run_id", "llm_run_snapshot_id"),
+        Index("ix_daily_idea_decisions_production_lane", "production_lane"),
         Index("ix_daily_idea_decisions_status", "decision_status"),
         Index("ix_daily_idea_decisions_created_at", "created_at"),
     )
@@ -394,11 +470,57 @@ class ProjectAdmissionDecision(Base):
     __tablename__ = "project_admission_decisions"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    channel_daily_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_daily_runs.id"), nullable=False)
-    daily_idea_decision_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("daily_idea_decisions.id"), nullable=False
+    schema_version: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="v1"
+    )
+    channel_daily_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_daily_runs.id")
+    )
+    daily_idea_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("daily_idea_decisions.id")
+    )
+    editorial_calendar_slot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("editorial_calendar_slots.id")
+    )
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id")
+    )
+    channel_workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_workspaces.id")
+    )
+    channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_profile_versions.id")
+    )
+    policy_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id")
     )
     idea_market_preflight_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("idea_market_preflights.id"))
+    planning_source_type: Mapped[str | None] = mapped_column(String(40))
+    production_lane: Mapped[str | None] = mapped_column(String(40))
+    content_mode: Mapped[str | None] = mapped_column(String(40))
+    assignment_mode: Mapped[str | None] = mapped_column(String(40))
+    series_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_plans.id")
+    )
+    series_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_runs.id")
+    )
+    episode_number: Mapped[int | None] = mapped_column(Integer)
+    episode_role: Mapped[str | None] = mapped_column(String(120))
+    standalone_reason_code: Mapped[str | None] = mapped_column(String(160))
+    parent_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id")
+    )
+    parent_final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
+    )
+    canonical_timeline_ref: Mapped[str | None] = mapped_column(Text)
+    canonical_timeline_hash: Mapped[str | None] = mapped_column(String(64))
+    resolver_version: Mapped[str | None] = mapped_column(String(80))
+    resolver_input_hash: Mapped[str | None] = mapped_column(String(64))
+    decision_hash: Mapped[str | None] = mapped_column(String(64))
+    assignment_input_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    duration_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     budget_gate_result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     readiness_gate_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     decision: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -410,10 +532,113 @@ class ProjectAdmissionDecision(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "schema_version in ('v1','v2')",
+            name="ck_project_admission_decisions_schema_version",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(schema_version = 'v2' "
+            "and company_id is not null "
+            "and channel_workspace_id is not null "
+            "and channel_profile_version_id is not null "
+            "and policy_snapshot_id is not null "
+            "and planning_source_type in "
+            "('DAILY_IDEA','LONG_FORM_PLAN','DERIVED_SHORT') "
+            "and production_lane in "
+            "('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT') "
+            "and assignment_mode in "
+            "('SERIES_REQUIRED','SERIES_PREFERRED',"
+            "'STANDALONE_REQUIRED','OPEN_MIX') "
+            "and resolver_version is not null "
+            "and resolver_input_hash ~ '^[0-9a-f]{64}$' "
+            "and decision_hash ~ '^[0-9a-f]{64}$' "
+            "and assignment_input_ref is not null "
+            "and ((decision = 'BLOCK') or "
+            "(decision = 'ADMIT' "
+            "and admitted_video_project_id is not null "
+            "and duration_contract is not null "
+            "and ((content_mode = 'SERIES_EPISODE' "
+            "and series_plan_id is not null "
+            "and series_run_id is not null "
+            "and episode_number > 0 "
+            "and standalone_reason_code is null) "
+            "or (content_mode = 'STANDALONE' "
+            "and series_plan_id is null "
+            "and series_run_id is null "
+            "and episode_number is null "
+            "and episode_role is null "
+            "and standalone_reason_code is not null)))))",
+            name="ck_project_admission_decisions_v2_authority",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or (decision = 'BLOCK') or "
+            "((planning_source_type = 'DAILY_IDEA' "
+            "and production_lane = 'DAILY_SHORT' "
+            "and channel_daily_run_id is not null "
+            "and daily_idea_decision_id is not null) "
+            "or (planning_source_type = 'LONG_FORM_PLAN' "
+            "and production_lane = 'LONG_FORM' "
+            "and editorial_calendar_slot_id is not null "
+            "and channel_daily_run_id is null "
+            "and daily_idea_decision_id is null) "
+            "or (planning_source_type = 'DERIVED_SHORT' "
+            "and production_lane = 'LONG_DERIVED_SHORT' "
+            "and content_mode = 'STANDALONE' "
+            "and assignment_mode = 'STANDALONE_REQUIRED' "
+            "and parent_video_project_id is not null "
+            "and canonical_timeline_ref is not null "
+            "and canonical_timeline_hash ~ '^[0-9a-f]{64}$'))",
+            name="ck_project_admission_decisions_v2_lane_source",
+        ),
         Index("ix_project_admission_decisions_daily_run_id", "channel_daily_run_id"),
         Index("ix_project_admission_decisions_daily_idea_id", "daily_idea_decision_id"),
+        Index(
+            "ix_project_admission_decisions_editorial_slot_id",
+            "editorial_calendar_slot_id",
+        ),
         Index("ix_project_admission_decisions_preflight_id", "idea_market_preflight_id"),
+        Index(
+            "ix_project_admission_decisions_planning_source_type",
+            "planning_source_type",
+        ),
+        Index("ix_project_admission_decisions_production_lane", "production_lane"),
+        Index("ix_project_admission_decisions_series_plan_id", "series_plan_id"),
+        Index("ix_project_admission_decisions_series_run_id", "series_run_id"),
         Index("ix_project_admission_decisions_decision", "decision"),
         Index("ix_project_admission_decisions_project_id", "admitted_video_project_id"),
+        Index(
+            "uq_project_admission_series_episode",
+            "series_run_id",
+            "episode_number",
+            unique=True,
+            postgresql_where=text(
+                "series_run_id is not null and episode_number is not null"
+            ),
+        ),
+        Index(
+            "uq_project_admission_v2_daily_source",
+            "daily_idea_decision_id",
+            unique=True,
+            postgresql_where=text(
+                "schema_version = 'v2' "
+                "and planning_source_type = 'DAILY_IDEA' "
+                "and daily_idea_decision_id is not null"
+            ),
+        ),
+        Index(
+            "uq_project_admission_v2_long_form_source",
+            "editorial_calendar_slot_id",
+            unique=True,
+            postgresql_where=text(
+                "schema_version = 'v2' "
+                "and planning_source_type = 'LONG_FORM_PLAN' "
+                "and editorial_calendar_slot_id is not null"
+            ),
+        ),
+        UniqueConstraint(
+            "decision_hash",
+            name="uq_project_admission_decisions_decision_hash",
+        ),
         Index("ix_project_admission_decisions_created_at", "created_at"),
     )

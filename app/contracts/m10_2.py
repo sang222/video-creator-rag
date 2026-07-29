@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from app.contracts.long_production import LongFormRenderPackageStrictContract
+from app.contracts.vcos_v2 import DurationContractV2
 
 
 MediaProviderType = Literal[
@@ -336,6 +337,11 @@ class YouTubeOnlyAnalyticsGateRead(BaseModel):
 
 
 class LongFormRenderPackageCreate(BaseModel):
+    production_package_artifact_version_id: uuid.UUID | None = None
+    production_package_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    duration_contract: DurationContractV2 | None = None
     voice_timeline_id: uuid.UUID | None = None
     caption_track_id: uuid.UUID | None = None
     visual_plan_id: uuid.UUID | None = None
@@ -364,6 +370,9 @@ class LongFormRenderPackageRead(_ReadModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID
+    production_package_artifact_version_id: uuid.UUID | None
+    production_package_hash: str | None
+    duration_contract: DurationContractV2 | None
     voice_timeline_id: uuid.UUID | None
     caption_track_id: uuid.UUID | None
     visual_plan_id: uuid.UUID | None
@@ -506,6 +515,11 @@ class FinalMediaRefCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID | None = None
+    production_package_artifact_version_id: uuid.UUID | None = None
+    production_package_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    duration_contract: DurationContractV2 | None = None
     uploaded_video_id: uuid.UUID | None = None
     media_type: FinalMediaType
     file_ref: str
@@ -527,6 +541,9 @@ class FinalMediaRefRead(_ReadModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID | None
+    production_package_artifact_version_id: uuid.UUID | None
+    production_package_hash: str | None
+    duration_contract: DurationContractV2 | None
     uploaded_video_id: uuid.UUID | None
     media_type: FinalMediaType
     file_ref: str

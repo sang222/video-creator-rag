@@ -51,6 +51,13 @@ def create_router(settings) -> APIRouter:
                 )
                 return auth_payload
         except ForbiddenError as exc:
+            # The login transaction is rolled back with the rejected
+            # credential attempt. Persist its audit in a separate,
+            # successful transaction so failures cannot disappear.
+            with session_scope() as audit_session:
+                AuthService(audit_session, settings).record_failed_login(
+                    email=data.email
+                )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email hoặc mật khẩu không đúng.") from exc
         except Exception as exc:
             raise _as_http_error(exc) from exc

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import secrets
 import subprocess
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -10,10 +12,18 @@ from sqlalchemy import func, select
 
 from app.contracts.d2p1 import DailyToPackageRequest
 from app.contracts.workflow import ApprovalDecisionCreate
-from app.db.models import FinalMediaRef, ProviderAttempt, ReviewTask
+from app.core.time import utc_now
+from app.db.models import (
+    FinalMediaRef,
+    OperatorAuthSession,
+    OperatorUser,
+    ProviderAttempt,
+    ReviewTask,
+)
 from app.main import create_app
 from app.services.d2p1 import DailyToPackageOrchestrator
 from app.services.workflow import ApprovalService
+from app.services.m11_1 import AUTH_COOKIE_NAME, hash_session_token
 from tests.test_d2p1_daily_to_package_bridge import (
     _OfflinePackageService,
     _approve_research,
@@ -63,9 +73,28 @@ def test_application_trigger_runs_real_local_fixture_to_reviewable_mp4_and_resum
     scope, promoted = _promote_package(db_session)
     project_id = promoted.project["id"]
     package_id = promoted.package["id"]
+    token = secrets.token_urlsafe(48)
+    operator_user = OperatorUser(
+        canonical_user_id=scope.operator.id,
+        email=scope.operator.email,
+        password_hash="not-used-by-session-auth",
+        display_name=scope.operator.display_name,
+        role="OWNER_ADMIN",
+        status="ACTIVE",
+    )
+    db_session.add(operator_user)
+    db_session.flush()
+    db_session.add(
+        OperatorAuthSession(
+            user_id=operator_user.id,
+            session_token_hash=hash_session_token(token),
+            expires_at=utc_now() + timedelta(hours=1),
+        )
+    )
     db_session.commit()
 
     with TestClient(create_app()) as client:
+        client.cookies.set(AUTH_COOKIE_NAME, token)
         gated = client.post(
             f"/video-projects/{project_id}/long-production/run",
             json={"package_id": package_id, "execution_mode": "REAL_APPROVED_PRODUCTION"},

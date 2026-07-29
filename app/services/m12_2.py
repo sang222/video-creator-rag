@@ -5,6 +5,7 @@ import hashlib
 import re
 import subprocess
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -2468,64 +2469,52 @@ class FirstScriptedVideoPackageService:
             "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
         }
         if "SCRIPT_DURATION_BELOW_MINIMUM" in fail_codes or "SCRIPT_WORD_BUDGET_BELOW_MINIMUM" in fail_codes:
-            repaired_script, sentence_patches = _expand_script_to_word_budget(script, duration_model, budget)
-            word_count_after = _script_word_count(repaired_script)
+            shorter_permitted = bool(
+                duration_model.get("shorter_format_permitted")
+                or _dict(artifacts.get("editorial_depth_policy")).get(
+                    "shorter_format_permitted"
+                )
+            )
+            depth_result = {
+                "status": (
+                    "SHORTER_FORMAT_REPLAN_REQUIRED"
+                    if shorter_permitted
+                    else "BLOCK"
+                ),
+                "reason_code": "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH",
+                "shorter_format_permitted": shorter_permitted,
+                "padding_performed": False,
+                "exact_next_action": (
+                    "Create an explicit shorter channel-approved planning result and a new package version."
+                    if shorter_permitted
+                    else "Expand research-backed topic scope or select a topic with sufficient editorial depth."
+                ),
+            }
             repair_record.update(
                 {
-                    "repair_type": "bounded_script_duration_expand",
-                    "repaired": bool(sentence_patches)
-                    and int(budget["minimum_word_count"]) <= word_count_after <= int(budget["maximum_word_count"]),
-                    "repair_status": (
-                        "EXPANDED_TO_WORD_BUDGET"
-                        if sentence_patches and int(budget["minimum_word_count"]) <= word_count_after <= int(budget["maximum_word_count"])
-                        else "NOT_SAFE_TO_EXPAND_WITHOUT_SUFFICIENT_SCRIPT_STRUCTURE"
+                    "repair_type": "editorial_depth_fail_closed",
+                    "repaired": False,
+                    "repair_status": depth_result["status"],
+                    "word_count_after": word_count_before,
+                    "sentence_patches": [],
+                    "reason_codes": sorted(
+                        {
+                            *repair_record["reason_codes"],
+                            "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH",
+                        }
                     ),
-                    "word_count_after": word_count_after,
-                    "sentence_patches": sentence_patches,
-                    "hook_preserved": repaired_script.get("hook_spec") == script.get("hook_spec"),
-                    "payoff_location_preserved": _dict(repaired_script.get("hook_spec")).get("payoff_location")
-                    == _dict(script.get("hook_spec")).get("payoff_location"),
-                    "section_order_preserved": True,
+                    "padding_performed": False,
                 }
             )
+            artifacts["editorial_depth_result"] = depth_result
             artifacts["script_duration_repair_attempt"] = repair_record
-            if not repair_record["repaired"]:
-                return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
-            _refresh_script_duration_self_check(repaired_script, duration_model)
-            artifacts["narration_script"] = repaired_script
-            niche_stop = self._run_niche_gate_after_agent(
-                package_id=package_id,
-                step=PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
-                artifacts=artifacts,
-                effective_context_snapshot=effective_context_snapshot,
-            )
-            if niche_stop is not None:
-                return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
-            rerun = self.deterministic_gates.run_after_agent(
-                package_id=package_id,
-                video_project_id=video_project_id,
-                effective_context=effective_context_snapshot,
-                agent_key="ScriptWriterAgent",
-                artifacts=artifacts,
-                provider_readiness_state=provider_readiness_snapshot,
-            )
-            if rerun is None:
-                return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
-            artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
-            if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
-                decision = self.package_status_reducer.resolve(
-                    current_status="READY_FOR_MEDIA_PROVIDERS",
-                    deterministic_batch=rerun,
-                )
-                artifacts["package_state_reducer"] = decision
-                return {
-                    "attempted": True,
-                    "repaired": True,
-                    "stop_status": decision["package_status"],
-                    "next_action": self._next_action_for_reducer_decision(decision),
-                    "gate_batch": rerun,
-                }
-            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+            return {
+                "attempted": True,
+                "repaired": False,
+                "stop_status": "BLOCKED",
+                "next_action": depth_result["exact_next_action"],
+                "gate_batch": batch,
+            }
         repaired_script, sentence_patches = _trim_script_to_word_budget(script, duration_model, budget)
         word_count_after = _script_word_count(repaired_script)
         repair_record.update(
@@ -2811,6 +2800,10 @@ class FirstScriptedVideoPackageService:
         project = self.session.get(VideoProject, video_project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {video_project_id}")
+        if getattr(project, "schema_version", "v1") == "v2":
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_V2_CANONICAL_AUTHORITY_REQUIRED"
+            )
         if project.channel_workspace_id != channel_id:
             raise ValidationFailureError("video project does not belong to selected channel")
         if project.policy_snapshot_id != snapshot.id:
@@ -4627,54 +4620,10 @@ def _expand_script_to_word_budget(
     duration_model: dict[str, Any],
     budget: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    minimum_words = int(budget["minimum_word_count"])
-    target_words = min(int(budget["target_word_count"]), int(budget["maximum_word_count"]) - 8)
-    wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
-    sentences = [dict(item) if isinstance(item, dict) else item for item in _list(script.get("sentences"))]
-    repaired = {**script, "sentences": sentences}
-    patches: list[dict[str, Any]] = []
-    current_words = _script_word_count(repaired)
-    if current_words >= minimum_words:
-        _refresh_script_duration_self_check(repaired, duration_model)
-        return repaired, patches
-    eligible = [item for item in sentences if isinstance(item, dict) and str(item.get("text") or "").strip()]
-    if current_words < max(1, int(minimum_words * 0.5)) or len(eligible) < 20:
-        _refresh_script_duration_self_check(repaired, duration_model)
-        return repaired, patches
-    expansion_clauses = [
-        "This keeps the claim tied to verified time savings before publication.",
-        "The workflow should reduce repeated handoffs while keeping human review in place.",
-        "Operators still verify the numbers and exceptions before any public use.",
-        "The team monitors edge cases instead of repeating the full task manually.",
-        "This adds practical detail without changing the original hook promise.",
-    ]
-    index = 0
-    max_iterations = max(1, len(eligible) * 4)
-    while current_words < target_words and index < max_iterations:
-        sentence = eligible[index % len(eligible)]
-        before = str(sentence.get("text") or "").strip()
-        before_words = len(before.split())
-        if before_words >= 34 and index < len(eligible) * 2:
-            index += 1
-            continue
-        clause = expansion_clauses[index % len(expansion_clauses)]
-        stem = before[:-1].rstrip() if before.endswith((".", "!", "?")) else before
-        after = f"{stem}; {clause}"
-        sentence["text"] = after
-        sentence["approx_seconds"] = round((len(after.split()) / wpm) * 60, 3)
-        patches.append(
-            {
-                "sentence_id": str(sentence.get("sentence_id") or len(patches) + 1),
-                "before_word_count": before_words,
-                "after_word_count": len(after.split()),
-                "added_words": max(0, len(after.split()) - before_words),
-                "repair_action": "expand_existing_sentence_to_word_budget",
-            }
-        )
-        current_words = _script_word_count(repaired)
-        index += 1
-    _refresh_script_duration_self_check(repaired, duration_model)
-    return repaired, patches
+    """Compatibility shim: below-minimum scripts are never padded at runtime."""
+
+    del duration_model, budget
+    return deepcopy(script), []
 
 
 def _repair_forbidden_style_terms(script: dict[str, Any], forbidden_terms: list[str]) -> tuple[dict[str, Any], list[dict[str, str]]]:

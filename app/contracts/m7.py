@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from app.contracts.vcos_v2 import DurationContractV2
+
 from app.contracts.geo_delivery import (
     ActualPublishDestination,
     DestinationRuntimeContract,
@@ -201,6 +203,9 @@ class PublishHandoffRead(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID
+    production_package_artifact_version_id: uuid.UUID | None
+    production_package_hash: str | None
+    duration_contract: DurationContractV2 | None
     policy_snapshot_id: uuid.UUID
     production_artifact_run_id: uuid.UUID | None
     render_package_snapshot_id: uuid.UUID

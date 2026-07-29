@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -30,6 +31,13 @@ class PublishHandoffPackage(Base):
     )
     video_project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
+    )
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = (
+        mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    )
+    production_package_hash: Mapped[str | None] = mapped_column(String(64))
+    duration_contract: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
     )
     policy_snapshot_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -106,11 +114,25 @@ class PublishHandoffPackage(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "(production_package_artifact_version_id is null "
+            "and production_package_hash is null "
+            "and duration_contract is null) or "
+            "(production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and duration_contract is not null "
+            "and jsonb_typeof(duration_contract) = 'object')",
+            name="ck_publish_handoff_packages_production_package_binding",
+        ),
         Index("ix_publish_handoff_packages_company_id", "company_id"),
         Index(
             "ix_publish_handoff_packages_channel_workspace_id", "channel_workspace_id"
         ),
         Index("ix_publish_handoff_packages_video_project_id", "video_project_id"),
+        Index(
+            "ix_publish_handoff_packages_production_package",
+            "production_package_artifact_version_id",
+        ),
         Index(
             "ix_publish_handoff_packages_render_package_id",
             "render_package_snapshot_id",
