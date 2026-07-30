@@ -25,6 +25,7 @@ from app.contracts.m7 import (
     PublishHandoffCreate,
     PublishMetadataDiffContract,
 )
+from app.core.actor import ActorContext
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.db.models import (
     AccessibilityQCReport,
@@ -44,6 +45,7 @@ from app.db.models import (
     VideoProject,
 )
 from app.services.audit import AuditService
+from app.services.company_access import require_company_permission
 from app.services.domain_events import DomainEventBus
 from app.services.geo_delivery import StrictMarketLineageService
 from app.services.production_package import ProductionPackageService
@@ -66,6 +68,19 @@ RAW_SECRET_MARKERS = (
     "xoxb-",
     "ghp_",
 )
+
+
+def _reject_canonical_v2_publish_scope(
+    session: Session,
+    *,
+    project_id: uuid.UUID,
+    schema_version: str = "v1",
+) -> None:
+    project = session.get(VideoProject, project_id)
+    if schema_version == "v2" or (
+        project is not None and getattr(project, "schema_version", "v1") == "v2"
+    ):
+        raise ValidationFailureError("CANONICAL_V2_MANUAL_PUBLISH_REQUIRED")
 
 
 class PublishHandoffService:
@@ -111,9 +126,7 @@ class PublishHandoffService:
             )
             if (
                 package.duration_contract
-                != production_package_content.duration_contract.model_dump(
-                    mode="json"
-                )
+                != production_package_content.duration_contract.model_dump(mode="json")
             ):
                 raise ValidationFailureError(
                     "PUBLISH_HANDOFF_DURATION_CONTRACT_MISMATCH"
@@ -229,9 +242,7 @@ class PublishHandoffService:
                 else None
             ),
             duration_contract=(
-                production_package_content.duration_contract.model_dump(
-                    mode="json"
-                )
+                production_package_content.duration_contract.model_dump(mode="json")
                 if production_package_content is not None
                 else None
             ),
@@ -741,9 +752,21 @@ class ManualPublishConfirmationService:
         *,
         data: ManualPublishConfirmationCreate,
         correlation_id: str = "m7-manual-publish-confirm",
+        actor: ActorContext | None = None,
     ) -> ManualPublishConfirmation:
         handoff = PublishHandoffService(self.session).require(
             data.publish_handoff_package_id
+        )
+        if actor is not None:
+            require_company_permission(
+                self.session,
+                actor=actor,
+                permission="publish.confirm",
+                company_id=handoff.company_id,
+            )
+        _reject_canonical_v2_publish_scope(
+            self.session,
+            project_id=handoff.video_project_id,
         )
         strict_envelope, _strict_destination = _strict_handoff_context(handoff)
         if (
@@ -940,8 +963,21 @@ class ManualPublishConfirmationService:
         *,
         confirmation_id: uuid.UUID,
         correlation_id: str = "m7-manual-publish-accept",
+        actor: ActorContext | None = None,
     ) -> UploadedVideo:
         confirmation = self.require_confirmation(confirmation_id)
+        if actor is not None:
+            require_company_permission(
+                self.session,
+                actor=actor,
+                permission="publish.confirm",
+                company_id=confirmation.company_id,
+            )
+        _reject_canonical_v2_publish_scope(
+            self.session,
+            project_id=confirmation.video_project_id,
+            schema_version=getattr(confirmation, "schema_version", "v1"),
+        )
         if confirmation.confirmation_state == "ACCEPTED":
             existing = self.session.scalars(
                 select(UploadedVideo).where(

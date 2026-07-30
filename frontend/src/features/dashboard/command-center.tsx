@@ -9,10 +9,16 @@ import { MetricCard } from "@/components/metric-card";
 import { ErrorState, LoadingState } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
-import { getCommandCenter, queryKeys } from "@/lib/api";
+import { ProductionCockpitCard } from "@/features/production/production-cockpit-card";
+import { getCommandCenter, getProductionCockpit, queryKeys } from "@/lib/api";
 
 export function CommandCenterView() {
   const query = useQuery({ queryKey: queryKeys.commandCenter, queryFn: getCommandCenter });
+  const cockpitQuery = useQuery({
+    queryKey: queryKeys.productionCockpit(),
+    queryFn: () => getProductionCockpit(),
+    retry: false
+  });
 
   if (query.isLoading) return <LoadingState label="Đang tải Trung tâm điều hành" />;
   if (query.isError) return <ErrorState message={query.error.message} />;
@@ -29,6 +35,20 @@ export function CommandCenterView() {
           subtitle="Xem việc cần xử lý trước, rồi hành động dựa trên bằng chứng. Bảng điều hành không tự publish/upload/reupload."
           meta={<span className="text-xs text-muted-foreground">Cập nhật lúc {new Date(data.generated_at).toLocaleTimeString("vi-VN")}</span>}
         />
+        <div className="mt-5">
+          {cockpitQuery.isLoading ? (
+            <LoadingState label="Đang xác định video tiếp theo" />
+          ) : cockpitQuery.isError ? (
+            <ActionHintCard
+              title="Chưa đọc được tiến độ sản xuất"
+              body="Read-model sản xuất chưa sẵn sàng trong phiên này. Các hàng chờ vận hành khác vẫn dùng bình thường; thử lại sau khi dịch vụ production hoạt động."
+              href="/projects"
+              actionLabel="Xem dự án"
+            />
+          ) : (
+            <ProductionCockpitCard nextVideo={cockpitQuery.data?.next_video} />
+          )}
+        </div>
         {data.cards.length ? (
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {data.cards.map((card) => (

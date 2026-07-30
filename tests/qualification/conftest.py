@@ -8,7 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.contracts import ArtifactCreate, ArtifactVersionCreate, ChannelProfileVersionCreate, ChannelWorkspaceCreate
+from app.contracts import (
+    ArtifactCreate,
+    ArtifactVersionCreate,
+    ChannelProfileVersionCreate,
+    ChannelWorkspaceCreate,
+)
 from app.contracts.m5 import (
     ChannelDailyRunCreate,
     DailyRunExecuteRequest,
@@ -72,14 +77,19 @@ class QualificationFactory:
                     provider_key="ollama",
                     provider_name="Ollama / LLMRouter",
                     provider_type="LLM",
-                    capability_blob={"llm_router_lane_bound": True, "guarded_real_execution": True},
+                    capability_blob={
+                        "llm_router_lane_bound": True,
+                        "guarded_real_execution": True,
+                    },
                     policy_fit_blob={"production_enabled_when_configured": True},
                     metadata={"readiness_provider_key": "ollama"},
                 )
             )
         GateDefinitionService(self.session).seed_definitions()
 
-    def user(self, *, role_key: str = "operator", company_id=None, email_prefix: str = "qual") -> User:
+    def user(
+        self, *, role_key: str = "operator", company_id=None, email_prefix: str = "qual"
+    ) -> User:
         user = User(
             email=f"{email_prefix}-{uuid.uuid4().hex[:10]}@example.com",
             display_name=email_prefix,
@@ -88,17 +98,25 @@ class QualificationFactory:
         self.session.add(user)
         self.session.flush()
         if company_id is not None:
-            RBACService(self.session).assign_role(user_id=user.id, role_key=role_key, company_id=company_id)
+            RBACService(self.session).assign_role(
+                user_id=user.id, role_key=role_key, company_id=company_id
+            )
         return user
 
     def channel_scope(self, *, name: str = "Pre-M7") -> SimpleNamespace:
         self.seed_all()
         company = CompanyService(self.session).create_company(name=f"{name} Co")
-        operator = self.user(role_key="operator", company_id=company.id, email_prefix="operator")
-        admin = self.user(role_key="company_admin", company_id=company.id, email_prefix="admin")
+        operator = self.user(
+            role_key="operator", company_id=company.id, email_prefix="operator"
+        )
+        admin = self.user(
+            role_key="company_admin", company_id=company.id, email_prefix="admin"
+        )
         channel = ChannelWorkspaceService(self.session).create_channel(
             company_id=company.id,
-            data=ChannelWorkspaceCreate(key=f"ch-{uuid.uuid4().hex[:8]}", name=f"{name} Channel"),
+            data=ChannelWorkspaceCreate(
+                key=f"ch-{uuid.uuid4().hex[:8]}", name=f"{name} Channel"
+            ),
         )
         profile = ChannelProfileService(self.session).create_profile_version(
             channel_id=channel.id,
@@ -108,7 +126,9 @@ class QualificationFactory:
             profile_version_id=profile.id,
             correlation_id=f"pre-m7-compile-{uuid.uuid4().hex[:8]}",
         )
-        snapshot = ChannelProfileService(self.session).activate_snapshot(snapshot_id=compiled.snapshot_id)
+        snapshot = ChannelProfileService(self.session).activate_snapshot(
+            snapshot_id=compiled.snapshot_id
+        )
         return SimpleNamespace(
             company=company,
             channel=channel,
@@ -119,8 +139,8 @@ class QualificationFactory:
             compiled=compiled,
         )
 
-    def m2_project(self) -> SimpleNamespace:
-        scope = self.channel_scope(name="M2")
+    def m2_project(self, *, scope_name: str = "M2") -> SimpleNamespace:
+        scope = self.channel_scope(name=scope_name)
         project = VideoProjectService(self.session).create_project(
             data=VideoProjectCreate(
                 company_id=scope.company.id,
@@ -132,7 +152,11 @@ class QualificationFactory:
             )
         )
         artifact = ArtifactService(self.session).create_artifact(
-            data=ArtifactCreate(video_project_id=project.id, artifact_type="script", created_by_user_id=scope.operator.id)
+            data=ArtifactCreate(
+                video_project_id=project.id,
+                artifact_type="script",
+                created_by_user_id=scope.operator.id,
+            )
         )
         version = ArtifactService(self.session).create_artifact_version(
             data=ArtifactVersionCreate(
@@ -148,7 +172,9 @@ class QualificationFactory:
                 claim_refs=[{"type": "claim", "id": "cl-1"}],
             )
         )
-        return SimpleNamespace(**scope.__dict__, project=project, artifact=artifact, version=version)
+        return SimpleNamespace(
+            **scope.__dict__, project=project, artifact=artifact, version=version
+        )
 
     def m5_admitted_project(
         self,
@@ -160,7 +186,9 @@ class QualificationFactory:
     ) -> SimpleNamespace:
         scope = self.channel_scope(name="M5")
         if provider_health_mode is not None:
-            ProviderHealthService(self.session).check_provider(provider_key="mock_llm", mode=provider_health_mode)
+            ProviderHealthService(self.session).check_provider(
+                provider_key="mock_llm", mode=provider_health_mode
+            )
         quota_account = None
         if quota_limit is not None:
             quota_account = QuotaService(self.session).create_account(
@@ -178,7 +206,8 @@ class QualificationFactory:
                 company_id=scope.company.id,
                 channel_workspace_id=scope.channel.id,
                 policy_snapshot_id=scope.snapshot.id,
-                category_id=R3D1AdminService(self.session).create_content_category(
+                category_id=R3D1AdminService(self.session)
+                .create_content_category(
                     ContentCategoryCreate(
                         company_id=scope.company.id,
                         channel_workspace_id=scope.channel.id,
@@ -187,7 +216,8 @@ class QualificationFactory:
                         character_policy_mode="NO_CHARACTER",
                         status="ACTIVE",
                     )
-                ).id,
+                )
+                .id,
                 slot_date=date(2026, 6, 24),
                 production_goal="Explain a budgeted VCOS workflow",
                 target_platforms=["YOUTUBE"],
@@ -250,7 +280,11 @@ class QualificationFactory:
                 channel_workspace_id=scope.channel.id,
                 channel_daily_run_id=executed.id,
                 daily_idea_decision_id=idea.id,
-                evidence_blob={"search_demand_evidence_ids": [str(evidence.id)] if evidence is not None else []},
+                evidence_blob={
+                    "search_demand_evidence_ids": [str(evidence.id)]
+                    if evidence is not None
+                    else []
+                },
                 policy_fit_state="PASS",
             )
         )
@@ -275,7 +309,9 @@ class QualificationFactory:
             project=project,
         )
 
-    def m6_full_flow(self, *, output_dir: Path | None = None, require_completed: bool = True) -> SimpleNamespace:
+    def m6_full_flow(
+        self, *, output_dir: Path | None = None, require_completed: bool = True
+    ) -> SimpleNamespace:
         flow = self.m5_admitted_project()
         run = ProductionArtifactRunService(self.session).create_run(
             data=ProductionArtifactRunCreate(
@@ -342,7 +378,10 @@ class QualificationFactory:
             caption_track_snapshot_id=captions.id,
             visual_plan_blob={
                 "scenes": [
-                    {"scene_id": f"scene-{index}", "narration_segment_id": segment["narration_segment_id"]}
+                    {
+                        "scene_id": f"scene-{index}",
+                        "narration_segment_id": segment["narration_segment_id"],
+                    }
                     for index, segment in enumerate(segments, start=1)
                 ]
             },

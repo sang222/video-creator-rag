@@ -34,6 +34,233 @@ export type CommandCenter = {
   technical_appendix: Record<string, unknown>;
 };
 
+export type OperatorAction =
+  | "NONE"
+  | "START_PRODUCTION"
+  | "RESUME_PRODUCTION"
+  | "FINAL_REVIEW"
+  | "START_MANUAL_UPLOAD"
+  | "CONFIRM_MANUAL_UPLOAD"
+  | "CORRECT_CONFIRMATION"
+  | "RESOLVE_INCIDENT";
+
+export type NextVideo = {
+  project_id: string;
+  workflow_run_id?: string | null;
+  lane: string;
+  content_mode: string;
+  assignment_mode: string;
+  title: string;
+  topic?: string | null;
+  series_title?: string | null;
+  run_label?: string | null;
+  episode_label?: string | null;
+  standalone_reason?: string | null;
+  why_selected: string;
+  production_state: string;
+  current_stage?: string | null;
+  blocker?: string | null;
+  next_action: string;
+  destination_label: string;
+  destination_handle?: string | null;
+  estimated_cost?: number | null;
+  actual_cost_so_far?: number | null;
+  currency: string;
+  provider_status: string;
+  render_status: string;
+  archive_status: string;
+  incident_status: string;
+  operator_action: OperatorAction;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type WorkflowStageProgress = {
+  stage: string;
+  state: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  retry_count: number;
+  next_retry_at?: string | null;
+  summary?: string | null;
+};
+
+export type ProductionProgress = {
+  workflow_run_id: string;
+  project_id: string;
+  state: string;
+  active_stage?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  retry_count: number;
+  next_retry_at?: string | null;
+  lease_health: string;
+  provider_status: string;
+  budget_status: string;
+  estimated_cost?: number | null;
+  reserved_cost?: number | null;
+  settled_cost?: number | null;
+  currency: string;
+  render_status: string;
+  render_progress_percent?: number | null;
+  qc_status: string;
+  archive_status: string;
+  blocking_incident?: string | null;
+  next_action: string;
+  operator_action: OperatorAction;
+  stages: WorkflowStageProgress[];
+  technical_appendix: Record<string, unknown>;
+};
+
+export type FinalReview = {
+  candidate_id: string;
+  project_id: string;
+  workflow_run_id: string;
+  state: string;
+  title: string;
+  description: string;
+  lane: string;
+  content_mode: string;
+  series_title?: string | null;
+  run_label?: string | null;
+  episode_label?: string | null;
+  standalone_reason?: string | null;
+  destination_label: string;
+  destination_handle?: string | null;
+  media: {
+    file_name: string;
+    player_url?: string | null;
+    drive_web_view_url?: string | null;
+    thumbnail_url?: string | null;
+    captions_label?: string | null;
+    checksum_sha256: string;
+    duration_seconds: number;
+  };
+  warnings: string[];
+  rights_disclosure_summary: string;
+  auto_repair_summary: string;
+  archive_status: string;
+  decision?: "UPLOAD" | "DO_NOT_UPLOAD" | null;
+  decision_recorded_at?: string | null;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type ManualPublish = {
+  task_id: string;
+  project_id: string;
+  final_review_candidate_id: string;
+  state: string;
+  exact_file_name: string;
+  drive_web_view_url?: string | null;
+  verified_file_download_url?: string | null;
+  reviewed_checksum_sha256: string;
+  target_platform: string;
+  destination_label: string;
+  destination_channel_id?: string | null;
+  destination_handle?: string | null;
+  platform_video_id?: string | null;
+  platform_video_url?: string | null;
+  actual_title?: string | null;
+  actual_description?: string | null;
+  actual_visibility?: string | null;
+  actual_published_at?: string | null;
+  actual_duration_seconds?: number | null;
+  mismatch_state: string;
+  correction_state: string;
+  uploaded_video_id?: string | null;
+  uploaded_video_status: string;
+  analytics_ready: boolean;
+  next_action: string;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type ProductionCockpit = {
+  generated_at: string;
+  next_video?: NextVideo | null;
+  progress?: ProductionProgress | null;
+  final_review?: FinalReview | null;
+  manual_publish?: ManualPublish | null;
+  safety_notice: string;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type OperatorPlanningOption = {
+  source_id: string;
+  source_type: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
+  lane: "DAILY_SHORT" | "LONG_FORM";
+  title: string;
+  company_label: string;
+  channel_label: string;
+  slot_label: string;
+  assignment_label: string;
+  duration_label?: string | null;
+  state: "READY" | "ALREADY_ADMITTED" | "WORKFLOW_STARTED" | "BLOCKED";
+  status_label: string;
+  launchable: boolean;
+  guidance: string;
+  project_id?: string | null;
+  workflow_run_id?: string | null;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type OperatorPlanningCatalog = {
+  generated_at: string;
+  daily_short_options: OperatorPlanningOption[];
+  long_form_options: OperatorPlanningOption[];
+  safety_notice: string;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type OperatorPlanningLaunch = {
+  lane: "DAILY_SHORT" | "LONG_FORM";
+  title: string;
+  admission_id: string;
+  project_id: string;
+  workflow_run_id: string;
+  workflow_state: string;
+  reused_admission: boolean;
+  reused_workflow: boolean;
+  next_action: string;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type OperatorPlanningPrepare = {
+  source_type: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
+  source_id: string;
+  lane: "DAILY_SHORT" | "LONG_FORM";
+  title: string;
+  admission_id: string;
+  project_id: string;
+  support_artifact_id: string;
+  support_artifact_version_id: string;
+  envelope_hash: string;
+  status: "APPROVED";
+  replayed: boolean;
+  approved_script_hash: string;
+  approved_script_word_count: number;
+  exact_source_refs: Array<Record<string, unknown>>;
+  reason_codes: string[];
+  next_action: string;
+  technical_appendix: Record<string, unknown>;
+};
+
+export type ManualPublishConfirmationInput = {
+  platform_video_id?: string;
+  platform_video_url?: string;
+  actual_title: string;
+  actual_description: string;
+  actual_visibility: string;
+  published_at: string;
+  duration_seconds: number;
+  thumbnail_matches: boolean;
+  captions_match: boolean;
+  ai_disclosure_confirmed: boolean;
+  rights_confirmed: boolean;
+  playlist_id?: string;
+  playlist_order?: number;
+  accept_non_material_variance: boolean;
+  operator_notes?: string;
+};
+
 export type Company = {
   id: string;
   name: string;

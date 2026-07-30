@@ -3,7 +3,18 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,12 +31,24 @@ class ProviderRegistryEntry(Base):
     provider_name: Mapped[str] = mapped_column(Text, nullable=False)
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="ACTIVE")
-    capability_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    policy_fit_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    cost_model_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    quota_model_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    retry_policy_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    capability_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    policy_fit_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    cost_model_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    quota_model_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    retry_policy_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -44,11 +67,15 @@ class CredentialReference(Base):
     credential_key: Mapped[str] = mapped_column(String(160), nullable=False)
     credential_type: Mapped[str] = mapped_column(String(40), nullable=False)
     secret_ref: Mapped[str | None] = mapped_column(Text)
-    scope_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    scope_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="UNKNOWN")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -69,14 +96,21 @@ class CredentialHealthSnapshot(Base):
     )
     provider_key: Mapped[str] = mapped_column(String(160), nullable=False)
     health_state: Mapped[str] = mapped_column(String(40), nullable=False)
-    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     next_action: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        Index("ix_credential_health_snapshots_credential_reference_id", "credential_reference_id"),
+        Index(
+            "ix_credential_health_snapshots_credential_reference_id",
+            "credential_reference_id",
+        ),
         Index("ix_credential_health_snapshots_provider_key", "provider_key"),
         Index("ix_credential_health_snapshots_checked_at", "checked_at"),
     )
@@ -91,12 +125,18 @@ class QuotaAccount(Base):
     quota_scope_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     quota_window: Mapped[str] = mapped_column(String(40), nullable=False)
     quota_limit: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
-    quota_used: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0"))
-    quota_reserved: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0"))
+    quota_used: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False, default=Decimal("0")
+    )
+    quota_reserved: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False, default=Decimal("0")
+    )
     unit: Mapped[str] = mapped_column(String(40), nullable=False)
     reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="ACTIVE")
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -116,7 +156,9 @@ class QuotaEvent(Base):
     __tablename__ = "quota_events"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    quota_account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("quota_accounts.id"))
+    quota_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quota_accounts.id")
+    )
     provider_key: Mapped[str] = mapped_column(String(160), nullable=False)
     event_type: Mapped[str] = mapped_column(String(40), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
@@ -124,7 +166,9 @@ class QuotaEvent(Base):
     target_type: Mapped[str | None] = mapped_column(String(80))
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     reason_code: Mapped[str | None] = mapped_column(String(160))
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -148,7 +192,9 @@ class CostEvent(Base):
     unit_count: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     unit_type: Mapped[str | None] = mapped_column(String(40))
     provider_run_ref: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -165,7 +211,9 @@ class BudgetPolicy(Base):
     policy_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
     scope_type: Mapped[str] = mapped_column(String(40), nullable=False)
     scope_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    policy_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    policy_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="DRAFT")
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
@@ -184,13 +232,17 @@ class ProviderHealthSnapshot(Base):
     provider_key: Mapped[str] = mapped_column(String(160), nullable=False)
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     health_state: Mapped[str] = mapped_column(String(40), nullable=False)
-    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     error_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 6))
     quota_state: Mapped[str | None] = mapped_column(String(40))
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     next_action: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -207,14 +259,20 @@ class ComponentHealthSnapshot(Base):
     component_type: Mapped[str] = mapped_column(String(40), nullable=False)
     component_key: Mapped[str] = mapped_column(String(160), nullable=False)
     health_state: Mapped[str] = mapped_column(String(40), nullable=False)
-    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     next_action: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        Index("ix_component_health_snapshots_component", "component_type", "component_key"),
+        Index(
+            "ix_component_health_snapshots_component", "component_type", "component_key"
+        ),
         Index("ix_component_health_snapshots_health_state", "health_state"),
         Index("ix_component_health_snapshots_checked_at", "checked_at"),
     )
@@ -224,14 +282,24 @@ class SystemHealthSnapshot(Base):
     __tablename__ = "system_health_snapshots"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
     overall_state: Mapped[str] = mapped_column(String(40), nullable=False)
-    component_counts: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    active_incident_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    action_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    component_counts: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    active_incident_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    action_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     next_action: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -247,7 +315,9 @@ class RetryPolicy(Base):
     policy_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
     provider_key: Mapped[str | None] = mapped_column(String(160))
     target_type: Mapped[str | None] = mapped_column(String(80))
-    policy_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    policy_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="DRAFT")
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
@@ -271,15 +341,25 @@ class ProviderAttempt(Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(160))
     error_message_redacted: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
-    cost_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cost_events.id"))
-    quota_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("quota_events.id"))
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    cost_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cost_events.id")
+    )
+    quota_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quota_events.id")
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
 
     __table_args__ = (
-        Index("ix_provider_attempts_provider_operation", "provider_key", "operation_key"),
+        Index(
+            "ix_provider_attempts_provider_operation", "provider_key", "operation_key"
+        ),
         Index("ix_provider_attempts_target", "target_type", "target_id"),
         Index("ix_provider_attempts_status", "status"),
         Index("ix_provider_attempts_started_at", "started_at"),
@@ -295,13 +375,29 @@ class DeadLetterJob(Base):
     payload_ref: Mapped[str | None] = mapped_column(Text)
     target_type: Mapped[str | None] = mapped_column(String(80))
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    domain_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domain_events.id")
+    )
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("production_workflow_runs.id")
+    )
+    command_id: Mapped[str | None] = mapped_column(String(160))
     fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    first_failed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
-    last_failed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
-    replay_state: Mapped[str] = mapped_column(String(40), nullable=False, default="REPLAYABLE")
+    first_failed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    last_failed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    replay_state: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="REPLAYABLE"
+    )
+    retry_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reason_code: Mapped[str | None] = mapped_column(String(160))
     next_action: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -309,6 +405,13 @@ class DeadLetterJob(Base):
         Index("ix_dead_letter_jobs_queue_name", "queue_name"),
         Index("ix_dead_letter_jobs_replay_state", "replay_state"),
         Index("ix_dead_letter_jobs_target", "target_type", "target_id"),
+        Index(
+            "uq_dead_letter_jobs_domain_event_id",
+            "domain_event_id",
+            unique=True,
+        ),
+        Index("ix_dead_letter_jobs_workflow_run_id", "workflow_run_id"),
+        Index("ix_dead_letter_jobs_command_id", "command_id"),
         Index("ix_dead_letter_jobs_created_at", "created_at"),
     )
 
@@ -320,21 +423,67 @@ class OpsIncident(Base):
     incident_type: Mapped[str] = mapped_column(String(60), nullable=False)
     severity: Mapped[str] = mapped_column(String(40), nullable=False)
     state: Mapped[str] = mapped_column(String(40), nullable=False, default="OPEN")
-    impacted_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id")
+    )
+    uploaded_video_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("uploaded_videos.id")
+    )
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("production_workflow_runs.id")
+    )
+    stage: Mapped[str | None] = mapped_column(String(80))
+    domain_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domain_events.id")
+    )
+    command_id: Mapped[str | None] = mapped_column(String(160))
+    retry_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    learning_excluded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    operator_visible_blocker: Mapped[str | None] = mapped_column(Text)
+    resolution_evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    impacted_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     next_action: Mapped[str] = mapped_column(Text, nullable=False)
-    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            "incident_type in ("
+            "'PROVIDER_OUTAGE','CREDENTIAL_MISSING','QUOTA_EXHAUSTED',"
+            "'COST_LIMIT_REACHED','DEAD_LETTER_JOB','HEALTH_DEGRADED',"
+            "'CONFIG_ERROR','WORKER_LEASE_EXPIRED','STAGE_RETRY_EXHAUSTED',"
+            "'PROVIDER_OUTCOME_UNCERTAIN','BUDGET_SETTLEMENT_UNCERTAIN',"
+            "'RENDER_FAILED','ARCHIVE_FAILED','INTEGRITY_MISMATCH',"
+            "'CANCELED_WITH_IN_FLIGHT_EFFECT','UNKNOWN')",
+            name="ck_ops_incidents_incident_type",
+        ),
         Index("ix_ops_incidents_type", "incident_type"),
         Index("ix_ops_incidents_state", "state"),
         Index("ix_ops_incidents_severity", "severity"),
+        Index("ix_ops_incidents_project_id", "project_id"),
+        Index("ix_ops_incidents_uploaded_video_id", "uploaded_video_id"),
+        Index("ix_ops_incidents_workflow_run_id", "workflow_run_id"),
+        Index("ix_ops_incidents_domain_event_id", "domain_event_id"),
+        Index("ix_ops_incidents_command_id", "command_id"),
+        Index("ix_ops_incidents_learning_excluded", "learning_excluded"),
         Index("ix_ops_incidents_created_at", "created_at"),
     )
 
@@ -350,7 +499,9 @@ class ManualAction(Base):
     state: Mapped[str] = mapped_column(String(40), nullable=False, default="OPEN")
     reason_code: Mapped[str | None] = mapped_column(String(160))
     next_action: Mapped[str] = mapped_column(Text, nullable=False)
-    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()

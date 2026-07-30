@@ -1,5 +1,5 @@
 catalog_key: role_catalog
-catalog_version: "1.4.0"
+catalog_version: "1.5.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -24,6 +24,7 @@ items:
       - editorial.manage
       - production.start
       - production.cancel
+      - production.read
       - provider.execute
       - review.final_decide
       - publish.prepare
@@ -48,6 +49,7 @@ items:
       - workflow:revision:resolve
       - editorial.manage
       - production.start
+      - production.read
       - provider.execute
       - ops.manage
   - key: auditor
@@ -71,6 +73,7 @@ items:
       - editorial.manage
       - production.start
       - production.cancel
+      - production.read
       - provider.execute
       - review.final_decide
       - workflow:review:perform
@@ -93,6 +96,7 @@ items:
       - editorial.manage
       - production.start
       - production.cancel
+      - production.read
       - publish.prepare
       - ops.manage
       - workflow:project:create
@@ -108,6 +112,7 @@ items:
       - project:produce
       - editorial.manage
       - production.start
+      - production.read
       - provider.execute
       - workflow:project:create
       - workflow:artifact:create
@@ -122,6 +127,7 @@ items:
       - artifact:review
       - media_qc:review
       - review.final_decide
+      - production.read
       - workflow:review:perform
       - workflow:revision:create
       - workflow:approval:decide
@@ -134,6 +140,7 @@ items:
       - media:open_drive_cta
       - publish.prepare
       - publish.confirm
+      - production.read
   - key: analyst
     name: Analyst
     description: Reviews analytics, diagnostics, and evidence notes.
@@ -171,3 +178,4 @@ items:
     description: Views M11 summaries without mutation permissions.
     permissions:
       - dashboard:read
+      - production.read

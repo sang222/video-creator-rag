@@ -161,6 +161,11 @@ def _scope(
         role_key="operator",
         company_id=company.id,
     )
+    RBACService(session).assign_role(
+        user_id=operator.id,
+        role_key="company_admin",
+        company_id=company.id,
+    )
     channel = ChannelWorkspaceService(session).create_channel(
         company_id=company.id,
         data=ChannelWorkspaceCreate(
@@ -406,8 +411,7 @@ def _content(
                 "sentences": [
                     {
                         "text": (
-                            f"Unique research-backed editorial sentence "
-                            f"{index + 1}."
+                            f"Unique research-backed editorial sentence {index + 1}."
                         )
                     }
                 ],
@@ -416,6 +420,20 @@ def _content(
         ],
         "research_coverage_ratio": float(evidence["research_coverage_ratio"]),
     }
+    parent_derivative_lineage = None
+    if scope.admission.production_lane == ProductionLane.LONG_DERIVED_SHORT:
+        parent_package = getattr(scope, "parent_package", None)
+        if parent_package is None:
+            raise AssertionError(
+                "derived Phase 3 fixture requires a ready parent package"
+            )
+        parent_derivative_lineage = ExactContentRefV2(
+            type="parent_derivative_lineage",
+            ref=f"artifact-version://{parent_package.artifact_version_id}",
+            artifact_version_id=parent_package.artifact_version_id,
+            version=parent_package.version_number,
+            content_hash=parent_package.canonical_hash,
+        )
     return ProductionPackageContentV2(
         company_id=scope.company.id,
         channel_workspace_id=scope.channel.id,
@@ -441,6 +459,7 @@ def _content(
         episode_number=scope.admission.episode_number,
         episode_role=scope.admission.episode_role,
         standalone_reason_code=scope.admission.standalone_reason_code,
+        parent_derivative_lineage=parent_derivative_lineage,
         duration_contract=ProductionDurationContractV2.model_validate(
             scope.duration.model_dump(mode="python")
         ),
@@ -544,11 +563,21 @@ def _content(
             scope,
             "destination",
             artifact_type="destination_binding",
-            content={"result": "PASS"},
+            content={
+                "result": "PASS",
+                "publish_execution_allowed": True,
+                "destination": {
+                    "channel_workspace_id": str(scope.channel.id),
+                    "platform": "YOUTUBE",
+                    "platform_account_ref": "youtube-account://phase3-fixture",
+                    "platform_channel_id": "channel-phase3-fixture",
+                    "status": "VERIFIED",
+                    "verified_at": utc_now().isoformat(),
+                    "verification_method": "DETERMINISTIC_TEST_FIXTURE",
+                },
+            },
         ),
-        readiness_evidence=ProductionReadinessEvidenceV2.model_validate(
-            evidence
-        ),
+        readiness_evidence=ProductionReadinessEvidenceV2.model_validate(evidence),
     )
 
 
@@ -558,7 +587,10 @@ def _create_package(
     *,
     evidence_updates: dict | None = None,
 ):
-    return ProductionPackageService(session).create_package(
+    return ProductionPackageService(
+        session,
+        allow_legacy_envelope_free_write=True,
+    ).create_package(
         ProductionPackageCreateV2(
             content=_content(
                 session,
@@ -597,10 +629,12 @@ def test_channel_scoped_duration_is_exact_and_missing_authority_blocks(
     assert first_contract.model_dump(mode="json") == first.duration.model_dump(
         mode="json"
     )
-    assert second_contract.model_dump(
+    assert second_contract.model_dump(mode="json") == second.duration.model_dump(
         mode="json"
-    ) == second.duration.model_dump(mode="json")
-    assert first_contract.duration_contract_hash != second_contract.duration_contract_hash
+    )
+    assert (
+        first_contract.duration_contract_hash != second_contract.duration_contract_hash
+    )
 
     with pytest.raises(ValidationFailureError, match="DURATION_CONTRACT_MISSING"):
         _scope(db_session, duration_in_authority=False)
@@ -613,7 +647,10 @@ def test_canonical_hash_and_automated_readiness_receipt_are_exact(
     before_approvals = db_session.scalar(
         select(func.count()).select_from(ApprovalDecision)
     )
-    package_service = ProductionPackageService(db_session)
+    package_service = ProductionPackageService(
+        db_session,
+        allow_legacy_envelope_free_write=True,
+    )
     package_request = ProductionPackageCreateV2(
         content=_content(db_session, scope),
         created_by_user_id=scope.operator.id,
@@ -638,12 +675,11 @@ def test_canonical_hash_and_automated_readiness_receipt_are_exact(
         .select_from(GateRun)
         .where(GateRun.target_id == package.artifact_version_id)
     ) == len(REQUIRED_PRODUCTION_GATE_KEYS)
-    assert db_session.scalar(
-        select(func.count()).select_from(ReviewTask)
-    ) == 0
-    assert db_session.scalar(
-        select(func.count()).select_from(ApprovalDecision)
-    ) == before_approvals
+    assert db_session.scalar(select(func.count()).select_from(ReviewTask)) == 0
+    assert (
+        db_session.scalar(select(func.count()).select_from(ApprovalDecision))
+        == before_approvals
+    )
 
     receipt = evaluation.receipt.content
     assert receipt.production_package_artifact_version_id == package.artifact_version_id
@@ -656,6 +692,22 @@ def test_canonical_hash_and_automated_readiness_receipt_are_exact(
         REQUIRED_PRODUCTION_GATE_KEYS
     )
     assert all(item.gate_run_hash for item in receipt.required_gate_runs)
+
+
+def test_new_v2_package_write_requires_frozen_support_envelope(
+    db_session: Session,
+) -> None:
+    scope = _scope(db_session)
+    request = ProductionPackageCreateV2(
+        content=_content(db_session, scope),
+        created_by_user_id=scope.operator.id,
+    )
+
+    with pytest.raises(
+        ValidationFailureError,
+        match="PRODUCTION_PACKAGE_SUPPORT_ENVELOPE_REQUIRED",
+    ):
+        ProductionPackageService(db_session).create_package(request)
 
 
 def test_authority_types_and_revision_entrypoints_are_fail_closed(
@@ -676,7 +728,10 @@ def test_authority_types_and_revision_entrypoints_are_fail_closed(
             )
         )
 
-    service = ProductionPackageService(db_session)
+    service = ProductionPackageService(
+        db_session,
+        allow_legacy_envelope_free_write=True,
+    )
     content = _content(db_session, scope)
     forged_initial_revision = content.model_copy(
         update={
@@ -760,21 +815,25 @@ def test_invalid_exact_refs_cannot_poison_canonical_package_slot(
         ValidationFailureError,
         match="PRODUCTION_PACKAGE_ARTIFACT_REF_MISMATCH:script_ref",
     ):
-        ProductionPackageService(db_session).create_package(
+        ProductionPackageService(
+            db_session,
+            allow_legacy_envelope_free_write=True,
+        ).create_package(
             ProductionPackageCreateV2(
-                content=content.model_copy(
-                    update={"script_ref": invalid_script_ref}
-                ),
+                content=content.model_copy(update={"script_ref": invalid_script_ref}),
                 created_by_user_id=scope.operator.id,
             )
         )
 
-    assert db_session.scalar(
-        select(func.count())
-        .select_from(Artifact)
-        .where(Artifact.video_project_id == scope.project.id)
-        .where(Artifact.artifact_type == "production_package")
-    ) == 0
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Artifact)
+            .where(Artifact.video_project_id == scope.project.id)
+            .where(Artifact.artifact_type == "production_package")
+        )
+        == 0
+    )
 
 
 def test_public_support_artifact_cannot_self_attest_readiness(
@@ -795,10 +854,7 @@ def test_public_support_artifact_cannot_self_attest_readiness(
             ),
             public_write=True,
         )
-    assert db_session.scalar(
-        select(func.count())
-        .select_from(GateRun)
-    ) == 0
+    assert db_session.scalar(select(func.count()).select_from(GateRun)) == 0
 
 
 def test_v2_long_production_resolves_only_current_ready_package(
@@ -883,9 +939,7 @@ def test_mr1_v2_admission_accepts_automated_receipt_validation_only(
     validation = service.validate_v2_automated_admission(
         MR1V2AutomatedAdmissionRequest(
             project_id=scope.project.id,
-            production_package_artifact_version_id=(
-                package.artifact_version_id
-            ),
+            production_package_artifact_version_id=(package.artifact_version_id),
         )
     )
     assert validation.status == "VALIDATED"
@@ -895,11 +949,7 @@ def test_mr1_v2_admission_accepts_automated_receipt_validation_only(
         mode="json"
     ) == scope.duration.model_dump(mode="json")
     bounds = service._approved_duration_bounds(
-        {
-            "duration_contract": validation.duration_contract.model_dump(
-                mode="json"
-            )
-        }
+        {"duration_contract": validation.duration_contract.model_dump(mode="json")}
     )
     assert bounds["minimum_duration_ms"] == 480_000
     assert bounds["maximum_duration_ms"] == 660_000
@@ -923,15 +973,19 @@ def test_mr1_v2_admission_accepts_automated_receipt_validation_only(
                 drive=None,
             ),
         )
-    assert db_session.scalar(
-        select(func.count()).select_from(ApprovalDecision)
-    ) == before_approvals
-    assert db_session.scalar(
-        select(func.count())
-        .select_from(Artifact)
-        .where(Artifact.video_project_id == scope.project.id)
-        .where(Artifact.artifact_type == "mr1_execution_run")
-    ) == 0
+    assert (
+        db_session.scalar(select(func.count()).select_from(ApprovalDecision))
+        == before_approvals
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Artifact)
+            .where(Artifact.video_project_id == scope.project.id)
+            .where(Artifact.artifact_type == "mr1_execution_run")
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize(
@@ -974,19 +1028,25 @@ def test_readiness_exceptions_depth_and_duration_fail_closed(
     assert evaluation.status == "BLOCKED"
     assert evaluation.receipt is None
     assert reason_code in evaluation.blocker_reason_codes
-    assert db_session.scalar(
-        select(func.count())
-        .select_from(Artifact)
-        .where(Artifact.video_project_id == scope.project.id)
-        .where(Artifact.artifact_type == "production_readiness_receipt")
-    ) == 0
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Artifact)
+            .where(Artifact.video_project_id == scope.project.id)
+            .where(Artifact.artifact_type == "production_readiness_receipt")
+        )
+        == 0
+    )
 
 
 def test_materiality_revision_hashes_and_automated_reruns(
     db_session: Session,
 ) -> None:
     scope = _scope(db_session)
-    service = ProductionPackageService(db_session)
+    service = ProductionPackageService(
+        db_session,
+        allow_legacy_envelope_free_write=True,
+    )
     original = _create_package(db_session, scope)
     ready = ProductionReadinessService(db_session).evaluate(
         package_artifact_version_id=original.artifact_version_id,
@@ -999,9 +1059,7 @@ def test_materiality_revision_hashes_and_automated_reruns(
         original.content.metadata_ref.artifact_version_id,
     )
     assert old_metadata_version is not None
-    repaired_metadata_version = ArtifactService(
-        db_session
-    ).create_artifact_version(
+    repaired_metadata_version = ArtifactService(db_session).create_artifact_version(
         data=ArtifactVersionCreate(
             artifact_id=old_metadata_version.artifact_id,
             parent_version_id=old_metadata_version.id,
@@ -1065,9 +1123,7 @@ def test_materiality_revision_hashes_and_automated_reruns(
         repaired.content.script_ref.artifact_version_id,
     )
     assert old_script_version is not None
-    changed_script_version = ArtifactService(
-        db_session
-    ).create_artifact_version(
+    changed_script_version = ArtifactService(db_session).create_artifact_version(
         data=ArtifactVersionCreate(
             artifact_id=old_script_version.artifact_id,
             parent_version_id=old_script_version.id,
@@ -1106,10 +1162,7 @@ def test_materiality_revision_hashes_and_automated_reruns(
         created_by_user_id=scope.operator.id,
     )
     assert blocked.status == "BLOCKED"
-    assert (
-        "MATERIAL_CHANGE_REQUIRES_NEW_PLANNING_CYCLE"
-        in blocked.blocker_reason_codes
-    )
+    assert "MATERIAL_CHANGE_REQUIRES_NEW_PLANNING_CYCLE" in blocked.blocker_reason_codes
 
 
 def test_padding_is_neutralized_and_v2_upload_bypass_is_blocked(
@@ -1177,16 +1230,11 @@ def test_padding_is_neutralized_and_v2_upload_bypass_is_blocked(
             data=BuildUploadCardsRequest(),
         )
     assert (
-        db_session.scalar(
-            select(func.count()).select_from(CrossPlatformFunnelPackage)
-        )
+        db_session.scalar(select(func.count()).select_from(CrossPlatformFunnelPackage))
         == 1
     )
     assert db_session.scalar(select(func.count()).select_from(UploadCard)) == 0
-    assert (
-        db_session.scalar(select(func.count()).select_from(HumanUploadTask))
-        == 0
-    )
+    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
 
 
 def test_v2_local_renderer_checks_readiness_before_side_effects() -> None:

@@ -10,6 +10,7 @@ import type {
   IntegrationReadiness,
   LearningDecisionPayload,
   ProviderOps,
+  ProductionCockpit,
   RealSmokeRun,
   UploadedVideoDashboard,
   UploadedVideoListItem,
@@ -19,7 +20,12 @@ import type {
   HumanUploadTask,
   HumanUploadTaskList,
   MemoryInfluenceOps,
+  ManualPublish,
+  ManualPublishConfirmationInput,
   OpsQueue,
+  OperatorPlanningCatalog,
+  OperatorPlanningLaunch,
+  OperatorPlanningPrepare,
   PackagingApplyApprovedChangesResult,
   PackagingPatchApplyRun,
   PackagingPatchApprovalDecision,
@@ -43,6 +49,29 @@ import type {
 } from "./types";
 
 export const apiBaseUrl = process.env.NEXT_PUBLIC_VCOS_API_BASE_URL ?? "http://localhost:8000";
+
+export function safeReviewMediaUrl(value?: string | null) {
+  if (!value) return null;
+  try {
+    if (value.startsWith("/")) {
+      const base = new URL(apiBaseUrl);
+      const resolved = new URL(value, base);
+      const mediaPath =
+        /^\/final-review-candidates\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:media|thumbnail)$/;
+      const allowedQuery =
+        resolved.search === "" || resolved.search === "?download=1";
+      return resolved.origin === base.origin &&
+        mediaPath.test(resolved.pathname) &&
+        allowedQuery
+        ? resolved.toString()
+        : null;
+    }
+    const resolved = new URL(value);
+    return resolved.protocol === "https:" ? resolved.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -92,7 +121,12 @@ export const queryKeys = {
   retrievalManifestOps: (manifestId: string) => ["retrieval-manifest-ops", manifestId],
   memoryInfluenceOps: (manifestId: string) => ["memory-influence-ops", manifestId],
   qualityDeltaOps: (qualityDeltaId: string) => ["quality-delta-ops", qualityDeltaId],
-  providerCostOps: (packageId: string) => ["provider-cost-ops", packageId]
+  providerCostOps: (packageId: string) => ["provider-cost-ops", packageId],
+  productionCockpit: (projectId?: string) => [
+    "production-cockpit",
+    projectId ?? "next"
+  ],
+  operatorPlanning: ["operator-planning"]
 } as const;
 
 export function getCurrentUser() {
@@ -114,8 +148,336 @@ export function getCommandCenter() {
   return request<CommandCenter>("/dashboard/command-center");
 }
 
+export function getProductionCockpit(projectId?: string) {
+  return request<ProductionCockpit>(
+    projectId
+      ? `/video-projects/${projectId}/operator-cockpit`
+      : "/operator-cockpit"
+  );
+}
+
+export function getOperatorPlanningCatalog() {
+  return request<OperatorPlanningCatalog>("/operator-planning/catalog");
+}
+
+export function prepareOperatorPlanningSource(input: {
+  sourceType: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
+  sourceId: string;
+  maxBudgetUsd?: number;
+}) {
+  return request<OperatorPlanningPrepare>("/operator-planning/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      source_type: input.sourceType,
+      source_id: input.sourceId,
+      max_budget_usd: input.maxBudgetUsd ?? 0
+    })
+  });
+}
+
+export function prepareAndLaunchOperatorPlanningSource(input: {
+  sourceType: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
+  sourceId: string;
+  maxBudgetUsd?: number;
+}) {
+  return request<OperatorPlanningLaunch>("/operator-planning/launch", {
+    method: "POST",
+    body: JSON.stringify({
+      source_type: input.sourceType,
+      source_id: input.sourceId,
+      max_budget_usd: input.maxBudgetUsd ?? 0,
+      idempotency_key: operatorPlanningIdempotencyKey(
+        input.sourceType,
+        input.sourceId
+      )
+    })
+  });
+}
+
+function operatorPlanningIdempotencyKey(
+  sourceType: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN",
+  sourceId: string
+) {
+  return `operator-planning:${sourceType}:${sourceId}`;
+}
+
+export function launchDailyShortPlanning(
+  dailyIdeaDecisionId: string,
+  maxBudgetUsd = 0
+) {
+  return request<OperatorPlanningLaunch>(
+    "/operator-planning/daily-short/launch",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        daily_idea_decision_id: dailyIdeaDecisionId,
+        max_budget_usd: maxBudgetUsd,
+        idempotency_key: operatorPlanningIdempotencyKey(
+          "DAILY_IDEA",
+          dailyIdeaDecisionId
+        )
+      })
+    }
+  );
+}
+
+export function launchLongFormPlanning(input: {
+  editorialCalendarSlotId: string;
+  maxBudgetUsd?: number;
+}) {
+  return request<OperatorPlanningLaunch>(
+    "/operator-planning/long-form/launch",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        editorial_calendar_slot_id: input.editorialCalendarSlotId,
+        max_budget_usd: input.maxBudgetUsd ?? 0,
+        idempotency_key: operatorPlanningIdempotencyKey(
+          "LONG_FORM_PLAN",
+          input.editorialCalendarSlotId
+        )
+      })
+    }
+  );
+}
+
+export function startProjectProduction(projectId: string, companyId: string) {
+  return request<Record<string, unknown>>(
+    `/video-projects/${projectId}/production-workflow/start?company_id=${encodeURIComponent(companyId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({})
+    }
+  );
+}
+
+export function resumeProductionWorkflow(workflowRunId: string, companyId: string) {
+  return request<Record<string, unknown>>(
+    `/production-workflows/${workflowRunId}/resume?company_id=${encodeURIComponent(companyId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason_code: "OPERATOR_RESUME" })
+    }
+  );
+}
+
+export function cancelProductionWorkflow(workflowRunId: string, companyId: string) {
+  return request<Record<string, unknown>>(
+    `/production-workflows/${workflowRunId}/cancel?company_id=${encodeURIComponent(companyId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        reason: "Người vận hành yêu cầu dừng an toàn từ buồng lái."
+      })
+    }
+  );
+}
+
+export function decideFinalVideo(
+  candidateId: string,
+  decision: "UPLOAD" | "DO_NOT_UPLOAD",
+  warningsAcknowledged: string[] = []
+) {
+  return request<Record<string, unknown>>(
+    `/final-review-candidates/${candidateId}/decisions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        command_id: newCommandId(),
+        decision,
+        warnings_acknowledged: warningsAcknowledged
+      })
+    }
+  );
+}
+
+export function startManualUpload(taskId: string, publish: ManualPublish) {
+  const archiveObjectRef = technicalString(
+    publish.technical_appendix,
+    "archive_object_ref"
+  );
+  if (!archiveObjectRef) {
+    return Promise.reject(
+      new Error(
+        "File lưu trữ chưa có reference an toàn. Không thể bắt đầu upload thủ công."
+      )
+    );
+  }
+  return request<Record<string, unknown>>(
+    `/human-upload-tasks/${taskId}/start`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        selected_file_name: publish.exact_file_name,
+        selected_file_ref: archiveObjectRef,
+        selected_file_checksum: publish.reviewed_checksum_sha256,
+        archive_object_ref: archiveObjectRef
+      })
+    }
+  );
+}
+
+export function submitManualPublishConfirmation(
+  taskId: string,
+  publish: ManualPublish,
+  input: ManualPublishConfirmationInput
+) {
+  return request<Record<string, unknown>>(
+    `/human-upload-tasks/${taskId}/manual-publish-confirmations`,
+    {
+      method: "POST",
+      body: JSON.stringify(manualConfirmationPayload(publish, input))
+    }
+  );
+}
+
+export function correctManualPublishConfirmation(
+  publish: ManualPublish,
+  input: ManualPublishConfirmationInput
+) {
+  const confirmationId = technicalString(
+    publish.technical_appendix,
+    "confirmation_id"
+  );
+  if (!confirmationId) {
+    return Promise.reject(
+      new Error("Chưa có xác nhận gốc để lưu correction.")
+    );
+  }
+  return request<Record<string, unknown>>(
+    `/manual-publish-confirmations/${confirmationId}/corrections`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...manualConfirmationPayload(publish, input),
+        command_id: undefined,
+        correction_command_id: newCommandId()
+      })
+    }
+  );
+}
+
+export async function verifyManualPublishConfirmation(
+  publish: ManualPublish
+) {
+  const confirmationId = technicalString(
+    publish.technical_appendix,
+    "confirmation_id"
+  );
+  const destinationIdentity = technicalString(
+    publish.technical_appendix,
+    "destination_account_identity"
+  );
+  if (
+    !confirmationId ||
+    !publish.destination_channel_id ||
+    !destinationIdentity ||
+    !publish.platform_video_id ||
+    !publish.platform_video_url ||
+    !publish.actual_title ||
+    !publish.actual_visibility ||
+    !publish.actual_published_at ||
+    !publish.actual_duration_seconds
+  ) {
+    throw new Error(
+      "Xác nhận chưa đủ dữ liệu quan sát để tạo UploadedVideo đã xác minh."
+    );
+  }
+  const observation = {
+    observed_platform: publish.target_platform,
+    observed_platform_channel_id: publish.destination_channel_id,
+    observed_destination_account_identity: destinationIdentity,
+    observed_platform_video_id: publish.platform_video_id,
+    observed_video_url: publish.platform_video_url,
+    observed_title: publish.actual_title,
+    observed_description: publish.actual_description ?? null,
+    observed_privacy_status: publish.actual_visibility,
+    observed_published_at: publish.actual_published_at,
+    observed_duration_seconds: publish.actual_duration_seconds
+  };
+  return request<Record<string, unknown>>(
+    `/manual-publish-confirmations/${confirmationId}/verification`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        verification_command_id: newCommandId(),
+        verification_evidence_ref:
+          `operator-observation://manual-publish/${confirmationId}`,
+        ...observation
+      })
+    }
+  );
+}
+
 export function getQueues(queueType?: string) {
   return request<DashboardQueues>(queueType ? `/dashboard/queues/${queueType}` : "/dashboard/queues");
+}
+
+function manualConfirmationPayload(
+  publish: ManualPublish,
+  input: ManualPublishConfirmationInput
+) {
+  const destinationBindingId = technicalString(
+    publish.technical_appendix,
+    "destination_binding_id"
+  );
+  const destinationBindingFingerprint = technicalString(
+    publish.technical_appendix,
+    "destination_binding_fingerprint"
+  );
+  const destinationIdentity =
+    publish.destination_handle ??
+    technicalString(
+      publish.technical_appendix,
+      "destination_account_identity"
+    );
+  if (
+    !destinationBindingId ||
+    !destinationBindingFingerprint ||
+    !publish.destination_channel_id ||
+    !destinationIdentity
+  ) {
+    throw new Error(
+      "Đích publish chưa đủ lineage để ghi xác nhận. Hãy kiểm tra cấu hình kênh."
+    );
+  }
+  return {
+    command_id: newCommandId(),
+    platform: publish.target_platform,
+    platform_channel_id: publish.destination_channel_id,
+    destination_binding_id: destinationBindingId,
+    destination_binding_fingerprint: destinationBindingFingerprint,
+    destination_account_identity: destinationIdentity,
+    platform_video_id: input.platform_video_id,
+    video_url: input.platform_video_url,
+    title: input.actual_title,
+    description: input.actual_description,
+    privacy_status: input.actual_visibility,
+    published_at: input.published_at,
+    duration_seconds: input.duration_seconds,
+    thumbnail_confirmed: input.thumbnail_matches,
+    caption_confirmed: input.captions_match,
+    playlist_id: input.playlist_id || null,
+    playlist_order: input.playlist_order,
+    disclosures: {
+      ai_disclosure_confirmed: input.ai_disclosure_confirmed,
+      rights_confirmed: input.rights_confirmed
+    },
+    accept_non_material_variance: input.accept_non_material_variance,
+    operator_notes: input.operator_notes || null
+  };
+}
+
+function technicalString(
+  appendix: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = appendix[key];
+  return typeof value === "string" && value.length ? value : null;
+}
+
+function newCommandId() {
+  return crypto.randomUUID();
 }
 
 export function getChannels() {

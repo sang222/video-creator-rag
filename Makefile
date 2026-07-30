@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: install db-up db-down api-up frontend-up frontend-logs docker-build docker-migrate docker-seed ollama-up ollama-logs ollama-health ollama-pull-cloud-models migrate seed test run health
+.PHONY: install db-up db-down api-up worker-up frontend-up frontend-logs docker-build docker-migrate docker-seed ollama-up ollama-logs ollama-health ollama-pull-cloud-models migrate seed test run health
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -16,7 +16,10 @@ db-down:
 	docker-compose down
 
 api-up:
-	docker compose up -d --build --wait postgres api
+	docker compose up -d --build --wait postgres api production-workflow-worker
+
+worker-up:
+	docker compose up -d --build production-workflow-worker
 
 frontend-up:
 	docker-compose up -d frontend

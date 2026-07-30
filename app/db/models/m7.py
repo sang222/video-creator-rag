@@ -8,6 +8,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -32,8 +34,8 @@ class PublishHandoffPackage(Base):
     video_project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
     )
-    production_package_artifact_version_id: Mapped[uuid.UUID | None] = (
-        mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
     )
     production_package_hash: Mapped[str | None] = mapped_column(String(64))
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(
@@ -147,8 +149,8 @@ class ManualPublishConfirmation(Base):
     __tablename__ = "manual_publish_confirmations"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    publish_handoff_package_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("publish_handoff_packages.id"), nullable=False
+    publish_handoff_package_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("publish_handoff_packages.id")
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
@@ -199,10 +201,146 @@ class ManualPublishConfirmation(Base):
     )
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     next_action: Mapped[str | None] = mapped_column(Text)
+    schema_version: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="v1"
+    )
+    command_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    confirmation_hash: Mapped[str | None] = mapped_column(String(64))
+    human_upload_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("human_upload_tasks.id")
+    )
+    final_review_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_review_candidates.id")
+    )
+    final_video_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_video_decisions.id")
+    )
+    final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
+    )
+    reviewed_checksum: Mapped[str | None] = mapped_column(String(64))
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
+    )
+    production_package_hash: Mapped[str | None] = mapped_column(String(64))
+    channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_profile_versions.id")
+    )
+    platform_channel_id: Mapped[str | None] = mapped_column(Text)
+    destination_account_identity: Mapped[str | None] = mapped_column(Text)
+    actual_duration_seconds: Mapped[Any | None] = mapped_column(Numeric(18, 6))
+    thumbnail_confirmed: Mapped[bool | None] = mapped_column(Boolean)
+    caption_confirmed: Mapped[bool | None] = mapped_column(Boolean)
+    playlist_id: Mapped[str | None] = mapped_column(Text)
+    playlist_order: Mapped[int | None] = mapped_column(Integer)
+    materiality_policy_hash: Mapped[str | None] = mapped_column(String(64))
+    variance_attested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    variance_attested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    corrected_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    corrected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    correction_history: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verification_command_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True)
+    )
+    verification_evidence_ref: Mapped[str | None] = mapped_column(Text)
+    verification_evidence_hash: Mapped[str | None] = mapped_column(String(64))
+    canceled_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        UniqueConstraint(
+            "command_id",
+            name="uq_manual_publish_confirmations_command_id",
+        ),
+        UniqueConstraint(
+            "human_upload_task_id",
+            name="uq_manual_publish_confirmations_human_upload_task_id",
+        ),
+        UniqueConstraint(
+            "final_video_decision_id",
+            name="uq_manual_publish_confirmations_final_video_decision_id",
+        ),
+        UniqueConstraint(
+            "verification_command_id",
+            name="uq_manual_publish_confirmations_verification_command_id",
+        ),
+        CheckConstraint(
+            "schema_version in ('v1','v2')",
+            name="ck_manual_publish_confirmations_schema_version",
+        ),
+        CheckConstraint(
+            "confirmation_state in "
+            "('DRAFT','SUBMITTED','ACCEPTED','REVIEW_REQUIRED','REJECTED',"
+            "'CANCELLED','VERIFIED','REJECTED_MISMATCH',"
+            "'BLOCKED_DESTINATION','CORRECTION_REQUIRED',"
+            "'VARIANCE_ACCEPTED','CANCELED')",
+            name="ck_manual_publish_confirmations_state",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1' and publish_handoff_package_id is not null) "
+            "or (schema_version = 'v2' "
+            "and publish_handoff_package_id is null "
+            "and human_upload_task_id is not null "
+            "and final_review_candidate_id is not null "
+            "and final_video_decision_id is not null "
+            "and final_media_ref_id is not null "
+            "and reviewed_checksum ~ '^[0-9a-f]{64}$' "
+            "and production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and channel_profile_version_id is not null "
+            "and destination_binding_id is not null "
+            "and destination_binding_fingerprint ~ '^[0-9a-f]{64}$' "
+            "and platform_channel_id is not null "
+            "and destination_account_identity is not null "
+            "and confirmed_by_user_id is not null "
+            "and command_id is not null "
+            "and confirmation_hash ~ '^[0-9a-f]{64}$' "
+            "and actual_video_id is not null "
+            "and actual_video_url is not null "
+            "and actual_published_at is not null "
+            "and actual_duration_seconds > 0 "
+            "and thumbnail_confirmed is not null "
+            "and caption_confirmed is not null "
+            "and materiality_policy_hash ~ '^[0-9a-f]{64}$' "
+            "and confirmation_state in "
+            "('SUBMITTED','VERIFIED','REJECTED_MISMATCH',"
+            "'BLOCKED_DESTINATION','CORRECTION_REQUIRED',"
+            "'VARIANCE_ACCEPTED','CANCELED'))",
+            name="ck_manual_publish_confirmations_v2_binding",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(confirmation_state <> 'VARIANCE_ACCEPTED') or "
+            "(variance_attested_by_user_id is not null "
+            "and variance_attested_at is not null)",
+            name="ck_manual_publish_confirmations_v2_variance_attestation",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(confirmation_state <> 'VERIFIED') or "
+            "(verified_by_user_id is not null "
+            "and verified_at is not null "
+            "and verification_command_id is not null "
+            "and verification_evidence_ref is not null "
+            "and verification_evidence_hash ~ '^[0-9a-f]{64}$')",
+            name="ck_manual_publish_confirmations_v2_verified",
+        ),
         Index(
             "ix_manual_publish_confirmations_handoff_id", "publish_handoff_package_id"
         ),
@@ -211,6 +349,10 @@ class ManualPublishConfirmation(Base):
             "channel_workspace_id",
         ),
         Index("ix_manual_publish_confirmations_video_project_id", "video_project_id"),
+        Index(
+            "ix_manual_publish_confirmations_final_media_ref_id",
+            "final_media_ref_id",
+        ),
         Index("ix_manual_publish_confirmations_state", "confirmation_state"),
         Index(
             "ix_manual_publish_confirmations_platform_video_id",
@@ -311,6 +453,53 @@ class UploadedVideo(Base):
         DateTime(timezone=True)
     )
     operator_note: Mapped[str | None] = mapped_column(Text)
+    schema_version: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="v1"
+    )
+    final_review_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_review_candidates.id")
+    )
+    final_video_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_video_decisions.id")
+    )
+    final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
+    )
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
+    )
+    production_package_hash: Mapped[str | None] = mapped_column(String(64))
+    channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_profile_versions.id")
+    )
+    reviewed_checksum: Mapped[str | None] = mapped_column(String(64))
+    production_lane: Mapped[str | None] = mapped_column(String(40))
+    content_mode: Mapped[str | None] = mapped_column(String(40))
+    series_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_plans.id")
+    )
+    series_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_runs.id")
+    )
+    episode_number: Mapped[int | None] = mapped_column(Integer)
+    standalone_reason_code: Mapped[str | None] = mapped_column(String(160))
+    parent_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id")
+    )
+    parent_final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
+    )
+    target_market_lineage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    archive_supplement: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    archive_supplement_ref: Mapped[str | None] = mapped_column(Text)
+    archive_supplement_hash: Mapped[str | None] = mapped_column(String(64))
+    verified_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domain_events.id")
+    )
+    analytics_ready_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domain_events.id")
+    )
+    analytics_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -321,11 +510,91 @@ class UploadedVideo(Base):
             "platform_video_id",
             name="uq_uploaded_videos_channel_platform_video",
         ),
+        UniqueConstraint(
+            "manual_publish_confirmation_id",
+            name="uq_uploaded_videos_manual_publish_confirmation_id",
+        ),
+        UniqueConstraint(
+            "final_video_decision_id",
+            name="uq_uploaded_videos_final_video_decision_id",
+        ),
+        UniqueConstraint(
+            "final_media_ref_id",
+            name="uq_uploaded_videos_final_media_ref_id",
+        ),
+        UniqueConstraint(
+            "verified_event_id",
+            name="uq_uploaded_videos_verified_event_id",
+        ),
+        UniqueConstraint(
+            "analytics_ready_event_id",
+            name="uq_uploaded_videos_analytics_ready_event_id",
+        ),
+        CheckConstraint(
+            "schema_version in ('v1','v2')",
+            name="ck_uploaded_videos_schema_version",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(video_project_id is not null "
+            "and policy_snapshot_id is not null "
+            "and manual_publish_confirmation_id is not null "
+            "and human_upload_task_id is not null "
+            "and final_review_candidate_id is not null "
+            "and final_video_decision_id is not null "
+            "and final_media_ref_id is not null "
+            "and production_package_artifact_version_id is not null "
+            "and production_package_hash ~ '^[0-9a-f]{64}$' "
+            "and channel_profile_version_id is not null "
+            "and reviewed_checksum ~ '^[0-9a-f]{64}$' "
+            "and destination_binding_id is not null "
+            "and destination_binding_fingerprint ~ '^[0-9a-f]{64}$' "
+            "and production_lane in "
+            "('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT') "
+            "and content_mode in ('SERIES_EPISODE','STANDALONE') "
+            "and target_market_lineage is not null "
+            "and archive_supplement is not null "
+            "and archive_supplement_ref is not null "
+            "and archive_supplement_hash ~ '^[0-9a-f]{64}$' "
+            "and verification_status = 'VERIFIED' "
+            "and analytics_sync_status = 'READY' "
+            "and verified_event_id is not null "
+            "and analytics_ready_event_id is not null "
+            "and analytics_ready_at is not null)",
+            name="ck_uploaded_videos_v2_binding",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "((content_mode = 'SERIES_EPISODE' "
+            "and series_plan_id is not null "
+            "and series_run_id is not null "
+            "and episode_number > 0 "
+            "and standalone_reason_code is null) "
+            "or (content_mode = 'STANDALONE' "
+            "and series_plan_id is null "
+            "and series_run_id is null "
+            "and episode_number is null "
+            "and standalone_reason_code is not null))",
+            name="ck_uploaded_videos_v2_assignment",
+        ),
+        CheckConstraint(
+            "(schema_version = 'v1') or "
+            "(production_lane <> 'LONG_DERIVED_SHORT') or "
+            "(parent_video_project_id is not null "
+            "and parent_final_media_ref_id is not null)",
+            name="ck_uploaded_videos_v2_parent_lineage",
+        ),
         Index("ix_uploaded_videos_company_id", "company_id"),
         Index("ix_uploaded_videos_channel_workspace_id", "channel_workspace_id"),
         Index("ix_uploaded_videos_video_project_id", "video_project_id"),
         Index("ix_uploaded_videos_first_package_id", "first_scripted_video_package_id"),
         Index("ix_uploaded_videos_human_upload_task_id", "human_upload_task_id"),
+        Index("ix_uploaded_videos_final_media_ref_id", "final_media_ref_id"),
+        Index(
+            "ix_uploaded_videos_production_package",
+            "production_package_artifact_version_id",
+        ),
+        Index("ix_uploaded_videos_series_run_id", "series_run_id"),
         Index("ix_uploaded_videos_destination", "destination"),
         Index("ix_uploaded_videos_platform", "platform"),
         Index("ix_uploaded_videos_published_at", "published_at"),

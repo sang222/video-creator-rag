@@ -1,5 +1,5 @@
 catalog_key: media_provider_routing_policy_catalog
-catalog_version: "1.0.0"
+catalog_version: "1.0.1"
 schema_version: catalog.v1
 status: active
 items:
@@ -71,6 +71,10 @@ items:
     job_type: SHORT_RENDER
     provider_key: native_ffmpeg_renderer
     reason_code: NATIVE_FFMPEG_RENDER_ROUTED
+  - key: LONG_FORM_FINAL_RENDER
+    job_type: LONG_FORM_FINAL_RENDER
+    provider_key: native_ffmpeg_renderer
+    reason_code: NATIVE_FFMPEG_RENDER_AUTHORITY
   - key: TITLE_CARD_RENDER
     job_type: TITLE_CARD_RENDER
     provider_key: native_ffmpeg_renderer

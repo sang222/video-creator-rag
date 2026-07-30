@@ -257,6 +257,16 @@ from app.db.models.ofv0 import (
     PlatformNativePackagePlan,
     SyntheticMediaDisclosureReceipt,
 )
+from app.db.models.production_workflow import (
+    ProductionWorkflowRun,
+    WorkflowCommandReceipt,
+)
+from app.db.models.production_publish import (
+    FinalReviewCandidate,
+    FinalVideoDecision,
+    SeriesEpisodePublication,
+)
+from app.db.models.v2_effect import V2ProductionEffectLedger
 
 __all__ = [
     "ClaimEvidenceLedger",
@@ -470,4 +480,10 @@ __all__ = [
     "PackagingPatchApplyRun",
     "PackagingGateRerunRecord",
     "PackageRuntimeDisposition",
+    "ProductionWorkflowRun",
+    "WorkflowCommandReceipt",
+    "FinalReviewCandidate",
+    "FinalVideoDecision",
+    "SeriesEpisodePublication",
+    "V2ProductionEffectLedger",
 ]

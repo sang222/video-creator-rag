@@ -101,6 +101,12 @@ def clean_database(engine: Engine) -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    series_episode_publications,
+                    v2_production_effect_ledger,
+                    workflow_command_receipts,
+                    final_video_decisions,
+                    final_review_candidates,
+                    production_workflow_runs,
                     series_runs,
                     series_plans,
                     mr1_monthly_budget_reservations,

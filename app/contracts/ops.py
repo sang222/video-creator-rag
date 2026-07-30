@@ -5,28 +5,96 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
-ProviderType = Literal["LLM", "TTS", "MEDIA", "IMAGE", "VIDEO", "STORAGE", "ANALYTICS", "PLATFORM", "AFFILIATE", "OTHER"]
+ProviderType = Literal[
+    "LLM",
+    "TTS",
+    "MEDIA",
+    "IMAGE",
+    "VIDEO",
+    "STORAGE",
+    "ANALYTICS",
+    "PLATFORM",
+    "AFFILIATE",
+    "OTHER",
+]
 ProviderStatus = Literal["ACTIVE", "DISABLED", "DEPRECATED", "EXPERIMENTAL"]
-CredentialType = Literal["API_KEY", "OAUTH_CLIENT", "OAUTH_TOKEN", "SERVICE_ACCOUNT", "MANUAL", "NONE"]
-CredentialStatus = Literal["CONFIGURED", "MISSING", "DISABLED", "EXPIRED", "REVOKED", "UNKNOWN"]
-CredentialHealthState = Literal["HEALTHY", "MISSING", "EXPIRED", "REVOKED", "MISCONFIGURED", "UNKNOWN"]
+CredentialType = Literal[
+    "API_KEY", "OAUTH_CLIENT", "OAUTH_TOKEN", "SERVICE_ACCOUNT", "MANUAL", "NONE"
+]
+CredentialStatus = Literal[
+    "CONFIGURED", "MISSING", "DISABLED", "EXPIRED", "REVOKED", "UNKNOWN"
+]
+CredentialHealthState = Literal[
+    "HEALTHY", "MISSING", "EXPIRED", "REVOKED", "MISCONFIGURED", "UNKNOWN"
+]
 QuotaScopeType = Literal["COMPANY", "CHANNEL", "PROJECT", "GLOBAL"]
 QuotaWindow = Literal["DAILY", "WEEKLY", "MONTHLY", "CUSTOM"]
 QuotaUnit = Literal["TOKENS", "REQUESTS", "SECONDS", "CREDITS", "BYTES", "USD", "OTHER"]
 QuotaStatus = Literal["ACTIVE", "EXHAUSTED", "DISABLED", "UNKNOWN"]
 QuotaEventType = Literal["RESERVE", "CONSUME", "RELEASE", "ADJUST", "RESET", "REJECT"]
-CostScopeType = Literal["COMPANY", "CHANNEL", "PROJECT", "ARTIFACT", "GATE_RUN", "PROVIDER_TEST", "GLOBAL"]
+CostScopeType = Literal[
+    "COMPANY", "CHANNEL", "PROJECT", "ARTIFACT", "GATE_RUN", "PROVIDER_TEST", "GLOBAL"
+]
 CostEventType = Literal["ESTIMATED", "RESERVED", "ACTUAL", "ADJUSTED", "REFUNDED"]
 BudgetPolicyStatus = Literal["ACTIVE", "DISABLED", "DRAFT"]
 BudgetGateDecision = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
-ProviderHealthState = Literal["HEALTHY", "DEGRADED", "UNAVAILABLE", "RATE_LIMITED", "QUOTA_EXHAUSTED", "CREDENTIAL_MISSING", "UNKNOWN"]
-ComponentType = Literal["PROVIDER", "CREDENTIAL", "QUOTA", "DATABASE", "QUEUE", "STORAGE", "API", "CLI", "CONFIG", "OTHER"]
+ProviderHealthState = Literal[
+    "HEALTHY",
+    "DEGRADED",
+    "UNAVAILABLE",
+    "RATE_LIMITED",
+    "QUOTA_EXHAUSTED",
+    "CREDENTIAL_MISSING",
+    "UNKNOWN",
+]
+ComponentType = Literal[
+    "PROVIDER",
+    "CREDENTIAL",
+    "QUOTA",
+    "DATABASE",
+    "QUEUE",
+    "STORAGE",
+    "API",
+    "CLI",
+    "CONFIG",
+    "OTHER",
+]
 ComponentHealthState = Literal["HEALTHY", "DEGRADED", "UNAVAILABLE", "UNKNOWN"]
 SystemHealthState = Literal["HEALTHY", "DEGRADED", "BLOCKED", "UNKNOWN"]
 RetryPolicyStatus = Literal["ACTIVE", "DISABLED", "DRAFT"]
-ProviderAttemptStatus = Literal["SUCCESS", "RETRYABLE_FAILURE", "NON_RETRYABLE_FAILURE", "QUOTA_REJECTED", "CIRCUIT_OPEN", "CANCELLED"]
-DeadLetterReplayState = Literal["NOT_REPLAYABLE", "REPLAYABLE", "REPLAYED", "DISCARDED"]
-OpsIncidentType = Literal["PROVIDER_OUTAGE", "CREDENTIAL_MISSING", "QUOTA_EXHAUSTED", "COST_LIMIT_REACHED", "DEAD_LETTER_JOB", "HEALTH_DEGRADED", "CONFIG_ERROR", "UNKNOWN"]
+ProviderAttemptStatus = Literal[
+    "SUCCESS",
+    "RETRYABLE_FAILURE",
+    "NON_RETRYABLE_FAILURE",
+    "QUOTA_REJECTED",
+    "CIRCUIT_OPEN",
+    "CANCELLED",
+]
+DeadLetterReplayState = Literal[
+    "NOT_REPLAYABLE",
+    "REPLAYABLE",
+    "REPLAY_SCHEDULED",
+    "REPLAYED",
+    "DISCARDED",
+]
+OpsIncidentType = Literal[
+    "PROVIDER_OUTAGE",
+    "CREDENTIAL_MISSING",
+    "QUOTA_EXHAUSTED",
+    "COST_LIMIT_REACHED",
+    "DEAD_LETTER_JOB",
+    "HEALTH_DEGRADED",
+    "CONFIG_ERROR",
+    "WORKER_LEASE_EXPIRED",
+    "STAGE_RETRY_EXHAUSTED",
+    "PROVIDER_OUTCOME_UNCERTAIN",
+    "BUDGET_SETTLEMENT_UNCERTAIN",
+    "RENDER_FAILED",
+    "ARCHIVE_FAILED",
+    "INTEGRITY_MISMATCH",
+    "CANCELED_WITH_IN_FLIGHT_EFFECT",
+    "UNKNOWN",
+]
 OpsSeverity = Literal["INFO", "WARNING", "ERROR", "CRITICAL"]
 OpsIncidentState = Literal["OPEN", "ACKNOWLEDGED", "RESOLVED", "DISMISSED"]
 ManualActionType = Literal[
@@ -331,8 +399,12 @@ class DeadLetterJobCreate(BaseModel):
     payload_ref: str | None = None
     target_type: str | None = None
     target_id: uuid.UUID | None = None
+    domain_event_id: uuid.UUID | None = None
+    workflow_run_id: uuid.UUID | None = None
+    command_id: str | None = None
     fail_count: int = Field(default=0, ge=0)
     replay_state: DeadLetterReplayState = "REPLAYABLE"
+    retry_eligible: bool = False
     reason_code: str | None = None
     next_action: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -352,6 +424,16 @@ class OpsIncidentCreate(BaseModel):
     incident_type: OpsIncidentType
     severity: OpsSeverity
     state: OpsIncidentState = "OPEN"
+    project_id: uuid.UUID | None = None
+    uploaded_video_id: uuid.UUID | None = None
+    workflow_run_id: uuid.UUID | None = None
+    stage: str | None = None
+    domain_event_id: uuid.UUID | None = None
+    command_id: str | None = None
+    retry_eligible: bool = False
+    learning_excluded: bool = False
+    operator_visible_blocker: str | None = None
+    resolution_evidence: dict[str, Any] = Field(default_factory=dict)
     impacted_refs: list[dict[str, Any]] = Field(default_factory=list)
     reason_codes: list[str] = Field(default_factory=list)
     next_action: str = Field(min_length=1)

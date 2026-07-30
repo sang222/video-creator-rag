@@ -3,7 +3,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,7 +42,9 @@ class Company(Base):
     slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
-    default_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    default_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="USD"
+    )
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -92,10 +103,16 @@ class AuditEvent(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     event_type: Mapped[str] = mapped_column(String(160), nullable=False)
     actor_type: Mapped[str] = mapped_column(String(80), nullable=False)
-    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     target_type: Mapped[str] = mapped_column(String(120), nullable=False)
-    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     correlation_id: Mapped[str] = mapped_column(String(160), nullable=False)
     reason_code: Mapped[str] = mapped_column(String(160), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -120,11 +137,35 @@ class DomainEvent(Base):
     event_version: Mapped[int] = mapped_column(nullable=False)
     aggregate_type: Mapped[str] = mapped_column(String(120), nullable=False)
     aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    channel_workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=True
+    )
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("production_workflow_runs.id"), nullable=True
+    )
     correlation_id: Mapped[str] = mapped_column(String(160), nullable=False)
-    causation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    causation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    command_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_owner: Mapped[str | None] = mapped_column(String(160))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(160))
+    last_error_summary: Mapped[str | None] = mapped_column(Text)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
@@ -135,8 +176,18 @@ class DomainEvent(Base):
         Index("ix_domain_events_event_type", "event_type"),
         Index("ix_domain_events_correlation_id", "correlation_id"),
         Index("ix_domain_events_company_id", "company_id"),
+        Index("ix_domain_events_channel_workspace_id", "channel_workspace_id"),
+        Index("ix_domain_events_workflow_run_id", "workflow_run_id"),
+        Index("ix_domain_events_command_id", "command_id", unique=True),
         Index("ix_domain_events_created_at", "created_at"),
         Index("ix_domain_events_published_at", "published_at"),
+        Index(
+            "ix_domain_events_outbox_claim",
+            "delivered_at",
+            "dead_lettered_at",
+            "next_attempt_at",
+            "lease_expires_at",
+        ),
     )
 
 
@@ -159,8 +210,12 @@ class LLMRunSnapshot(Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False)
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     token_estimate: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
-    quota_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("quota_events.id"))
-    cost_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cost_events.id"))
+    quota_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("quota_events.id")
+    )
+    cost_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cost_events.id")
+    )
     cost_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     correlation_id: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = utc_created_at()

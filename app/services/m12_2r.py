@@ -22,6 +22,7 @@ from app.contracts.m12_2r import (
     UploadedVideoListRead,
     UploadedVideoVerificationResult,
 )
+from app.core.actor import ActorContext
 from app.core.config import Settings, get_settings
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
@@ -38,6 +39,7 @@ from app.db.models import (
     YouTubeMonitoringCredential,
 )
 from app.services.audit import AuditService
+from app.services.company_access import require_company_permission
 from app.services.domain_events import DomainEventBus
 from app.services.m1 import PackagingHandoffReadService
 from app.services.m10_3 import YouTubePublicStatsProvider
@@ -55,7 +57,11 @@ OPEN_UPLOAD_TASK_STATES = {
 TERMINAL_UPLOAD_TASK_STATES = {"UPLOADED_VERIFIED", "CANCELLED"}
 WAITING_BACKFILL_STATES = {"HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"}
 VERIFIED_STATUSES = {"VERIFIED_PUBLIC", "VERIFIED_OWNER"}
-WAITING_VERIFICATION_STATUSES = {"NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "VERIFICATION_FAILED"}
+WAITING_VERIFICATION_STATUSES = {
+    "NOT_VERIFIED",
+    "VERIFICATION_UNAVAILABLE",
+    "VERIFICATION_FAILED",
+}
 YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 
 
@@ -105,19 +111,29 @@ class PublishHandoffLedgerService:
         package_id: uuid.UUID | None = None,
     ) -> HumanUploadTaskListRead:
         self._require_channel(channel_id)
-        statement = select(HumanUploadTask).where(HumanUploadTask.channel_workspace_id == channel_id)
+        statement = select(HumanUploadTask).where(
+            HumanUploadTask.channel_workspace_id == channel_id
+        )
         if status:
             statement = statement.where(HumanUploadTask.task_state == status)
         if destination:
             statement = statement.where(HumanUploadTask.destination == destination)
         if video_project_id:
-            statement = statement.where(HumanUploadTask.video_project_id == video_project_id)
+            statement = statement.where(
+                HumanUploadTask.video_project_id == video_project_id
+            )
         if package_id:
             statement = statement.where(
                 (HumanUploadTask.first_scripted_video_package_id == package_id)
                 | (HumanUploadTask.publish_package_id == package_id)
             )
-        tasks = list(self.session.scalars(statement.order_by(desc(HumanUploadTask.created_at), desc(HumanUploadTask.id))).all())
+        tasks = list(
+            self.session.scalars(
+                statement.order_by(
+                    desc(HumanUploadTask.created_at), desc(HumanUploadTask.id)
+                )
+            ).all()
+        )
         counts = self._ledger_counts(channel_id)
         return HumanUploadTaskListRead(
             channel_id=channel_id,
@@ -125,7 +141,12 @@ class PublishHandoffLedgerService:
             **counts,
         )
 
-    def create_upload_task_from_package(self, package_id: uuid.UUID) -> HumanUploadTaskLedgerRead:
+    def create_upload_task_from_package(
+        self,
+        package_id: uuid.UUID,
+        *,
+        actor: ActorContext | None = None,
+    ) -> HumanUploadTaskLedgerRead:
         candidate_version = self.session.get(ArtifactVersion, package_id)
         if candidate_version is not None:
             candidate_artifact = self.session.get(
@@ -141,22 +162,29 @@ class PublishHandoffLedgerService:
         package = self.session.get(FirstScriptedVideoPackage, package_id)
         if package is None:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
+        channel = self._require_channel(package.channel_id)
+        if actor is not None:
+            require_company_permission(
+                self.session,
+                actor=actor,
+                permission="publish.prepare",
+                company_id=channel.company_id,
+            )
         project = (
             self.session.get(VideoProject, package.video_project_id)
             if package.video_project_id is not None
             else None
         )
-        if (
-            (package.artifacts or {}).get("schema_version")
-            == "production.package.v2"
-            or (
-                project is not None
-                and getattr(project, "schema_version", "v1") == "v2"
-            )
+        if (package.artifacts or {}).get(
+            "schema_version"
+        ) == "production.package.v2" or (
+            project is not None and getattr(project, "schema_version", "v1") == "v2"
         ):
             raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
         if package.package_status != "READY_FOR_HUMAN_REVIEW":
-            raise ValidationFailureError("package must be READY_FOR_HUMAN_REVIEW before manual upload handoff")
+            raise ValidationFailureError(
+                "package must be READY_FOR_HUMAN_REVIEW before manual upload handoff"
+            )
         from app.services.r3d9_ux2 import PackagingReviewQueueService
 
         PackagingReviewQueueService(self.session).assert_upload_task_allowed(package.id)
@@ -170,7 +198,6 @@ class PublishHandoffLedgerService:
         ).one_or_none()
         if existing is not None:
             return self._read_task(existing)
-        channel = self._require_channel(package.channel_id)
         handoff = PackagingHandoffReadService(self.session).build(package.id)
         snapshot = _package_task_snapshot(package, handoff.model_dump(mode="json"))
         task = HumanUploadTask(
@@ -191,7 +218,9 @@ class PublishHandoffLedgerService:
             required_assets=snapshot["required_assets"],
             checklist=snapshot["checklist"],
             required_checklist=snapshot["checklist"],
-            scheduled_time_suggestion=_coerce_datetime(snapshot.get("scheduled_time_suggestion")),
+            scheduled_time_suggestion=_coerce_datetime(
+                snapshot.get("scheduled_time_suggestion")
+            ),
             actual_uploaded_video_id=None,
         )
         self.session.add(task)
@@ -215,10 +244,21 @@ class PublishHandoffLedgerService:
         )
         return self._read_task(task)
 
-    def start_upload_task(self, task_id: uuid.UUID) -> HumanUploadTaskLedgerRead:
-        task = self._require_task(task_id)
+    def start_upload_task(
+        self,
+        task_id: uuid.UUID,
+        *,
+        actor: ActorContext | None = None,
+    ) -> HumanUploadTaskLedgerRead:
+        task = self._require_task(
+            task_id,
+            actor=actor,
+            permission="publish.prepare",
+        )
         if task.task_state != "READY_FOR_HUMAN_UPLOAD":
-            raise ValidationFailureError("only READY_FOR_HUMAN_UPLOAD tasks can be started")
+            raise ValidationFailureError(
+                "only READY_FOR_HUMAN_UPLOAD tasks can be started"
+            )
         task.task_state = "HUMAN_UPLOAD_IN_PROGRESS"
         self.session.flush()
         self._record_event(
@@ -229,7 +269,11 @@ class PublishHandoffLedgerService:
             target_id=task.id,
             company_id=task.company_id,
             reason_code="HUMAN_UPLOAD_ONLY",
-            payload={"status": task.task_state, "manual_only": True, "no_upload_api_by_policy": True},
+            payload={
+                "status": task.task_state,
+                "manual_only": True,
+                "no_upload_api_by_policy": True,
+            },
         )
         return self._read_task(task)
 
@@ -238,8 +282,9 @@ class PublishHandoffLedgerService:
         *,
         task_id: uuid.UUID,
         data: BackfillUploadedVideoRequest,
+        actor: ActorContext | None = None,
     ) -> BackfillUploadedVideoResult:
-        task = self._require_task(task_id)
+        task = self._require_task(task_id, actor=actor)
         previous_status = task.task_state
         try:
             parsed_video_id = parse_youtube_video_id(data.youtube_url_or_video_id)
@@ -264,7 +309,9 @@ class PublishHandoffLedgerService:
                 payload={"parse_status": event.parse_status, "manual_only": True},
             )
             raise ValidationFailureError("INVALID_YOUTUBE_VIDEO_ID")
-        duplicate = self._duplicate_uploaded_video(task.channel_workspace_id, parsed_video_id, exclude_task_id=task.id)
+        duplicate = self._duplicate_uploaded_video(
+            task.channel_workspace_id, parsed_video_id, exclude_task_id=task.id
+        )
         if duplicate is not None:
             task.task_state = "BLOCKED"
             task.blocked_reason = "DUPLICATE_YOUTUBE_VIDEO_ID"
@@ -288,15 +335,22 @@ class PublishHandoffLedgerService:
                 target_id=duplicate.id,
                 company_id=task.company_id,
                 reason_code="DUPLICATE_YOUTUBE_VIDEO_ID",
-                payload={"parsed_video_id": parsed_video_id, "existing_uploaded_video_id": str(duplicate.id)},
+                payload={
+                    "parsed_video_id": parsed_video_id,
+                    "existing_uploaded_video_id": str(duplicate.id),
+                },
             )
             raise ConflictError(f"DUPLICATE_YOUTUBE_VIDEO_ID: {event.id}")
 
-        uploaded = self._upsert_uploaded_video(task, parsed_video_id=parsed_video_id, data=data)
+        uploaded = self._upsert_uploaded_video(
+            task, parsed_video_id=parsed_video_id, data=data
+        )
         verification_available = self._public_verification_configured()
         if verification_available:
             uploaded.verification_status = "NOT_VERIFIED"
-            uploaded.analytics_sync_status = "PENDING" if self._owner_analytics_connected() else "NOT_CONFIGURED"
+            uploaded.analytics_sync_status = (
+                "PENDING" if self._owner_analytics_connected() else "NOT_CONFIGURED"
+            )
             task.task_state = "BACKFILLED_WAITING_VERIFICATION"
         else:
             uploaded.verification_status = "VERIFICATION_UNAVAILABLE"
@@ -339,7 +393,9 @@ class PublishHandoffLedgerService:
             payload={
                 "channel_id": str(uploaded.channel_workspace_id),
                 "human_upload_task_id": str(task.id),
-                "first_scripted_video_package_id": str(task.first_scripted_video_package_id)
+                "first_scripted_video_package_id": str(
+                    task.first_scripted_video_package_id
+                )
                 if task.first_scripted_video_package_id
                 else None,
                 "verification_status": uploaded.verification_status,
@@ -356,7 +412,10 @@ class PublishHandoffLedgerService:
                 target_id=uploaded.id,
                 company_id=uploaded.company_id,
                 reason_code="YOUTUBE_VERIFICATION_NOT_CONFIGURED",
-                payload={"verification_status": uploaded.verification_status, "analytics_sync_status": uploaded.analytics_sync_status},
+                payload={
+                    "verification_status": uploaded.verification_status,
+                    "analytics_sync_status": uploaded.analytics_sync_status,
+                },
             )
         next_action = self._uploaded_next_action(uploaded)
         return BackfillUploadedVideoResult(
@@ -376,27 +435,78 @@ class PublishHandoffLedgerService:
         actual_visibility: str | None = None,
     ) -> UploadedVideoListRead:
         self._require_channel(channel_id)
-        statement = select(UploadedVideo).where(UploadedVideo.channel_workspace_id == channel_id)
+        statement = select(UploadedVideo).where(
+            UploadedVideo.channel_workspace_id == channel_id
+        )
         if verification_status:
-            statement = statement.where(UploadedVideo.verification_status == verification_status)
+            statement = statement.where(
+                UploadedVideo.verification_status == verification_status
+            )
         if analytics_sync_status:
-            statement = statement.where(UploadedVideo.analytics_sync_status == analytics_sync_status)
+            statement = statement.where(
+                UploadedVideo.analytics_sync_status == analytics_sync_status
+            )
         if actual_visibility:
-            statement = statement.where(UploadedVideo.actual_visibility == actual_visibility)
-        uploaded = list(self.session.scalars(statement.order_by(desc(UploadedVideo.created_at), desc(UploadedVideo.id))).all())
-        return UploadedVideoListRead(channel_id=channel_id, uploaded_videos=[self._read_uploaded_video(item) for item in uploaded])
+            statement = statement.where(
+                UploadedVideo.actual_visibility == actual_visibility
+            )
+        uploaded = list(
+            self.session.scalars(
+                statement.order_by(
+                    desc(UploadedVideo.created_at), desc(UploadedVideo.id)
+                )
+            ).all()
+        )
+        return UploadedVideoListRead(
+            channel_id=channel_id,
+            uploaded_videos=[self._read_uploaded_video(item) for item in uploaded],
+        )
 
-    def get_uploaded_video(self, uploaded_video_id: uuid.UUID) -> UploadedVideoLedgerRead:
+    def get_uploaded_video(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoLedgerRead:
         uploaded = self.session.get(UploadedVideo, uploaded_video_id)
         if uploaded is None:
             raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
         return self._read_uploaded_video(uploaded)
 
-    def verify_uploaded_video(self, uploaded_video_id: uuid.UUID) -> UploadedVideoVerificationResult:
+    def verify_uploaded_video(
+        self,
+        uploaded_video_id: uuid.UUID,
+        *,
+        actor: ActorContext | None = None,
+    ) -> UploadedVideoVerificationResult:
         uploaded = self.session.get(UploadedVideo, uploaded_video_id)
         if uploaded is None:
             raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
-        task = self.session.get(HumanUploadTask, uploaded.human_upload_task_id) if uploaded.human_upload_task_id else None
+        if actor is not None:
+            require_company_permission(
+                self.session,
+                actor=actor,
+                permission="publish.confirm",
+                company_id=uploaded.company_id,
+            )
+        task = (
+            self.session.get(HumanUploadTask, uploaded.human_upload_task_id)
+            if uploaded.human_upload_task_id
+            else None
+        )
+        project = (
+            self.session.get(VideoProject, uploaded.video_project_id)
+            if uploaded.video_project_id is not None
+            else None
+        )
+        if (
+            uploaded.schema_version == "v2"
+            or uploaded.final_review_candidate_id is not None
+            or uploaded.final_video_decision_id is not None
+            or uploaded.final_media_ref_id is not None
+            or (task is not None and task.schema_version == "v2")
+            or (
+                project is not None and getattr(project, "schema_version", "v1") == "v2"
+            )
+        ):
+            raise ValidationFailureError("CANONICAL_V2_MANUAL_PUBLISH_REQUIRED")
         if not self._public_verification_configured():
             uploaded.verification_status = "VERIFICATION_UNAVAILABLE"
             uploaded.analytics_sync_status = "NOT_CONFIGURED"
@@ -413,18 +523,33 @@ class PublishHandoffLedgerService:
                 target_id=uploaded.id,
                 company_id=uploaded.company_id,
                 reason_code="YOUTUBE_VERIFICATION_NOT_CONFIGURED",
-                payload={"verification_status": uploaded.verification_status, "analytics_sync_status": uploaded.analytics_sync_status},
+                payload={
+                    "verification_status": uploaded.verification_status,
+                    "analytics_sync_status": uploaded.analytics_sync_status,
+                },
             )
             return UploadedVideoVerificationResult(
                 uploaded_video=self._read_uploaded_video(uploaded),
                 verification_status="VERIFICATION_UNAVAILABLE",
                 analytics_sync_status="NOT_CONFIGURED",
                 next_action=self._uploaded_next_action(uploaded),
-                reason_codes=["YOUTUBE_VERIFICATION_NOT_CONFIGURED", "ANALYTICS_SYNC_NOT_CONFIGURED"],
-                technical_appendix={"provider_calls_made": False, "no_metrics_invented": True},
+                reason_codes=[
+                    "YOUTUBE_VERIFICATION_NOT_CONFIGURED",
+                    "ANALYTICS_SYNC_NOT_CONFIGURED",
+                ],
+                technical_appendix={
+                    "provider_calls_made": False,
+                    "no_metrics_invented": True,
+                },
             )
-        api_key = self.settings.youtube_data_api_key.get_secret_value() if self.settings.youtube_data_api_key else ""
-        result = self.public_provider.fetch(platform_video_id=uploaded.platform_video_id, api_key=api_key)
+        api_key = (
+            self.settings.youtube_data_api_key.get_secret_value()
+            if self.settings.youtube_data_api_key
+            else ""
+        )
+        result = self.public_provider.fetch(
+            platform_video_id=uploaded.platform_video_id, api_key=api_key
+        )
         uploaded.last_verified_at = utc_now()
         if not result.ok:
             uploaded.verification_status = "VERIFICATION_FAILED"
@@ -439,7 +564,11 @@ class PublishHandoffLedgerService:
                 target_id=uploaded.id,
                 company_id=uploaded.company_id,
                 reason_code=result.error_code or "YOUTUBE_VERIFICATION_FAILED",
-                payload={"error_code": result.error_code, "http_status": result.http_status, "no_metrics_invented": True},
+                payload={
+                    "error_code": result.error_code,
+                    "http_status": result.http_status,
+                    "no_metrics_invented": True,
+                },
             )
             return UploadedVideoVerificationResult(
                 uploaded_video=self._read_uploaded_video(uploaded),
@@ -447,14 +576,25 @@ class PublishHandoffLedgerService:
                 analytics_sync_status=uploaded.analytics_sync_status,  # type: ignore[arg-type]
                 next_action=self._uploaded_next_action(uploaded),
                 reason_codes=[result.error_code or "YOUTUBE_VERIFICATION_FAILED"],
-                technical_appendix={"provider_calls_made": True, "read_only": True, "no_metrics_invented": True},
+                technical_appendix={
+                    "provider_calls_made": True,
+                    "read_only": True,
+                    "no_metrics_invented": True,
+                },
             )
         output = result.output or {}
         uploaded.verification_status = "VERIFIED_PUBLIC"
         uploaded.actual_title = output.get("youtube_title") or uploaded.actual_title
-        uploaded.actual_visibility = _visibility(output.get("privacy_status") or uploaded.actual_visibility)
-        uploaded.actual_publish_time = _coerce_datetime(output.get("youtube_published_at")) or uploaded.actual_publish_time
-        uploaded.analytics_sync_status = "PENDING" if self._owner_analytics_connected() else "NOT_CONFIGURED"
+        uploaded.actual_visibility = _visibility(
+            output.get("privacy_status") or uploaded.actual_visibility
+        )
+        uploaded.actual_publish_time = (
+            _coerce_datetime(output.get("youtube_published_at"))
+            or uploaded.actual_publish_time
+        )
+        uploaded.analytics_sync_status = (
+            "PENDING" if self._owner_analytics_connected() else "NOT_CONFIGURED"
+        )
         if task is not None:
             task.task_state = "UPLOADED_VERIFIED"
             task.completed_at = utc_now()
@@ -467,7 +607,11 @@ class PublishHandoffLedgerService:
             target_id=uploaded.id,
             company_id=uploaded.company_id,
             reason_code="UPLOADED_VIDEO_RECORDED",
-            payload={"verification_status": uploaded.verification_status, "read_only": True, "no_metrics_invented": True},
+            payload={
+                "verification_status": uploaded.verification_status,
+                "read_only": True,
+                "no_metrics_invented": True,
+            },
         )
         return UploadedVideoVerificationResult(
             uploaded_video=self._read_uploaded_video(uploaded),
@@ -475,7 +619,11 @@ class PublishHandoffLedgerService:
             analytics_sync_status=uploaded.analytics_sync_status,  # type: ignore[arg-type]
             next_action=self._uploaded_next_action(uploaded),
             reason_codes=["UPLOADED_VIDEO_RECORDED"],
-            technical_appendix={"provider_calls_made": True, "read_only": True, "no_metrics_invented": True},
+            technical_appendix={
+                "provider_calls_made": True,
+                "read_only": True,
+                "no_metrics_invented": True,
+            },
         )
 
     def publish_ledger(self, channel_id: uuid.UUID) -> PublishLedgerRead:
@@ -500,7 +648,9 @@ class PublishHandoffLedgerService:
         return PublishLedgerRead(
             channel_id=channel_id,
             latest_tasks=[self._read_task(task) for task in latest_tasks],
-            latest_uploaded_videos=[self._read_uploaded_video(uploaded) for uploaded in latest_uploaded],
+            latest_uploaded_videos=[
+                self._read_uploaded_video(uploaded) for uploaded in latest_uploaded
+            ],
             operator_summary_vi="VCOS chỉ ghi nhận upload thủ công và xác minh YouTube khi đã kết nối read-only.",
             **counts,
         )
@@ -512,9 +662,23 @@ class PublishHandoffLedgerService:
         parsed_video_id: str,
         data: BackfillUploadedVideoRequest,
     ) -> UploadedVideo:
-        uploaded = self.session.get(UploadedVideo, task.actual_uploaded_video_id) if task.actual_uploaded_video_id else None
-        package = self.session.get(FirstScriptedVideoPackage, task.first_scripted_video_package_id) if task.first_scripted_video_package_id else None
-        publish_package = self.session.get(PublishHandoffPackage, task.publish_package_id) if task.publish_package_id else None
+        uploaded = (
+            self.session.get(UploadedVideo, task.actual_uploaded_video_id)
+            if task.actual_uploaded_video_id
+            else None
+        )
+        package = (
+            self.session.get(
+                FirstScriptedVideoPackage, task.first_scripted_video_package_id
+            )
+            if task.first_scripted_video_package_id
+            else None
+        )
+        publish_package = (
+            self.session.get(PublishHandoffPackage, task.publish_package_id)
+            if task.publish_package_id
+            else None
+        )
         external_url = data.youtube_url_or_video_id.strip()
         if not external_url.startswith(("http://", "https://")):
             external_url = YOUTUBE_WATCH_URL.format(video_id=parsed_video_id)
@@ -531,10 +695,14 @@ class PublishHandoffLedgerService:
                 company_id=task.company_id,
                 channel_workspace_id=task.channel_workspace_id,
                 video_project_id=task.video_project_id,
-                policy_snapshot_id=package.compiled_policy_snapshot_id if package else None,
+                policy_snapshot_id=package.compiled_policy_snapshot_id
+                if package
+                else None,
                 publish_handoff_package_id=task.publish_package_id,
                 manual_publish_confirmation_id=None,
-                render_package_snapshot_id=publish_package.render_package_snapshot_id if publish_package else None,
+                render_package_snapshot_id=publish_package.render_package_snapshot_id
+                if publish_package
+                else None,
                 first_scripted_video_package_id=task.first_scripted_video_package_id,
                 human_upload_task_id=task.id,
                 destination="YOUTUBE",
@@ -566,7 +734,9 @@ class PublishHandoffLedgerService:
         uploaded.playlist_id = data.playlist_id
         uploaded.thumbnail_uploaded = data.thumbnail_uploaded
         uploaded.subtitles_uploaded = data.subtitles_uploaded
-        uploaded.description_modified_from_package = data.description_modified_from_package
+        uploaded.description_modified_from_package = (
+            data.description_modified_from_package
+        )
         uploaded.package_metadata_diff = package_diff
         uploaded.operator_note = data.operator_note
         uploaded.human_upload_task_id = task.id
@@ -588,7 +758,10 @@ class PublishHandoffLedgerService:
             .where(UploadedVideo.channel_workspace_id == channel_id)
             .where(UploadedVideo.platform == "YOUTUBE")
             .where(UploadedVideo.platform_video_id == parsed_video_id)
-            .where((UploadedVideo.human_upload_task_id.is_(None)) | (UploadedVideo.human_upload_task_id != exclude_task_id))
+            .where(
+                (UploadedVideo.human_upload_task_id.is_(None))
+                | (UploadedVideo.human_upload_task_id != exclude_task_id)
+            )
             .limit(1)
         ).one_or_none()
 
@@ -623,28 +796,67 @@ class PublishHandoffLedgerService:
         return event
 
     def _ledger_counts(self, channel_id: uuid.UUID) -> dict[str, int]:
-        tasks = list(self.session.scalars(select(HumanUploadTask).where(HumanUploadTask.channel_workspace_id == channel_id)).all())
-        uploaded = list(self.session.scalars(select(UploadedVideo).where(UploadedVideo.channel_workspace_id == channel_id)).all())
+        tasks = list(
+            self.session.scalars(
+                select(HumanUploadTask).where(
+                    HumanUploadTask.channel_workspace_id == channel_id
+                )
+            ).all()
+        )
+        uploaded = list(
+            self.session.scalars(
+                select(UploadedVideo).where(
+                    UploadedVideo.channel_workspace_id == channel_id
+                )
+            ).all()
+        )
         return {
-            "need_upload_count": sum(1 for task in tasks if task.task_state == "READY_FOR_HUMAN_UPLOAD" and task.actual_uploaded_video_id is None),
-            "waiting_backfill_count": sum(1 for task in tasks if task.task_state in WAITING_BACKFILL_STATES and task.actual_uploaded_video_id is None),
-            "uploaded_count": sum(1 for item in uploaded if item.platform_video_id or item.video_url),
-            "waiting_verification_count": sum(1 for item in uploaded if item.verification_status in WAITING_VERIFICATION_STATUSES),
-            "verified_count": sum(1 for item in uploaded if item.verification_status in VERIFIED_STATUSES),
-            "analytics_not_configured_count": sum(1 for item in uploaded if item.analytics_sync_status == "NOT_CONFIGURED"),
+            "need_upload_count": sum(
+                1
+                for task in tasks
+                if task.task_state == "READY_FOR_HUMAN_UPLOAD"
+                and task.actual_uploaded_video_id is None
+            ),
+            "waiting_backfill_count": sum(
+                1
+                for task in tasks
+                if task.task_state in WAITING_BACKFILL_STATES
+                and task.actual_uploaded_video_id is None
+            ),
+            "uploaded_count": sum(
+                1 for item in uploaded if item.platform_video_id or item.video_url
+            ),
+            "waiting_verification_count": sum(
+                1
+                for item in uploaded
+                if item.verification_status in WAITING_VERIFICATION_STATUSES
+            ),
+            "verified_count": sum(
+                1 for item in uploaded if item.verification_status in VERIFIED_STATUSES
+            ),
+            "analytics_not_configured_count": sum(
+                1 for item in uploaded if item.analytics_sync_status == "NOT_CONFIGURED"
+            ),
             "blocked_count": sum(1 for task in tasks if task.task_state == "BLOCKED"),
-            "unverified_count": sum(1 for task in tasks if task.task_state == "UPLOADED_UNVERIFIED"),
+            "unverified_count": sum(
+                1 for task in tasks if task.task_state == "UPLOADED_UNVERIFIED"
+            ),
         }
 
     def _public_verification_configured(self) -> bool:
-        return bool(self.settings.youtube_public_monitor_enabled and self.settings.youtube_data_api_key)
+        return bool(
+            self.settings.youtube_public_monitor_enabled
+            and self.settings.youtube_data_api_key
+        )
 
     def _owner_analytics_connected(self) -> bool:
         return (
             self.session.scalar(
                 select(func.count())
                 .select_from(YouTubeMonitoringCredential)
-                .where(YouTubeMonitoringCredential.provider_key == "YOUTUBE_ANALYTICS_API")
+                .where(
+                    YouTubeMonitoringCredential.provider_key == "YOUTUBE_ANALYTICS_API"
+                )
                 .where(YouTubeMonitoringCredential.connection_state == "CONNECTED")
             )
             or 0
@@ -656,10 +868,38 @@ class PublishHandoffLedgerService:
             raise NotFoundError(f"channel not found: {channel_id}")
         return channel
 
-    def _require_task(self, task_id: uuid.UUID) -> HumanUploadTask:
+    def _require_task(
+        self,
+        task_id: uuid.UUID,
+        *,
+        actor: ActorContext | None = None,
+        permission: str = "publish.confirm",
+    ) -> HumanUploadTask:
         task = self.session.get(HumanUploadTask, task_id)
         if task is None:
             raise NotFoundError(f"human upload task not found: {task_id}")
+        if actor is not None:
+            require_company_permission(
+                self.session,
+                actor=actor,
+                permission=permission,
+                company_id=task.company_id,
+            )
+        project = (
+            self.session.get(VideoProject, task.video_project_id)
+            if task.video_project_id is not None
+            else None
+        )
+        if (
+            task.schema_version == "v2"
+            or task.final_review_candidate_id is not None
+            or task.final_video_decision_id is not None
+            or task.final_media_ref_id is not None
+            or (
+                project is not None and getattr(project, "schema_version", "v1") == "v2"
+            )
+        ):
+            raise ValidationFailureError("CANONICAL_V2_MANUAL_PUBLISH_REQUIRED")
         return task
 
     def _read_task(self, task: HumanUploadTask) -> HumanUploadTaskLedgerRead:
@@ -699,7 +939,8 @@ class PublishHandoffLedgerService:
             destination="YOUTUBE",
             external_video_id=uploaded.platform_video_id,
             external_url=uploaded.video_url,
-            actual_title=uploaded.actual_title or uploaded.actual_metadata.get("actual_title"),
+            actual_title=uploaded.actual_title
+            or uploaded.actual_metadata.get("actual_title"),
             actual_visibility=_visibility(uploaded.actual_visibility),
             actual_publish_time=uploaded.actual_publish_time,
             actual_upload_time=uploaded.actual_upload_time,
@@ -718,7 +959,9 @@ class PublishHandoffLedgerService:
             updated_at=uploaded.updated_at,
         )
 
-    def _read_backfill_event(self, event: UploadedVideoBackfillEvent) -> UploadedVideoBackfillEventRead:
+    def _read_backfill_event(
+        self, event: UploadedVideoBackfillEvent
+    ) -> UploadedVideoBackfillEventRead:
         return UploadedVideoBackfillEventRead(
             id=event.id,
             uploaded_video_id=event.uploaded_video_id,
@@ -786,7 +1029,11 @@ class PublishHandoffLedgerService:
 def _task_status(value: str) -> str:
     if value == "READY":
         return "READY_FOR_HUMAN_UPLOAD"
-    return value if value in OPEN_UPLOAD_TASK_STATES or value in TERMINAL_UPLOAD_TASK_STATES else "BLOCKED"
+    return (
+        value
+        if value in OPEN_UPLOAD_TASK_STATES or value in TERMINAL_UPLOAD_TASK_STATES
+        else "BLOCKED"
+    )
 
 
 def _task_next_action(status: str) -> str:
@@ -802,30 +1049,68 @@ def _task_next_action(status: str) -> str:
     }.get(status, "Kiểm tra task upload thủ công.")
 
 
-def _package_task_snapshot(package: FirstScriptedVideoPackage, handoff: dict[str, Any] | None = None) -> dict[str, Any]:
+def _package_task_snapshot(
+    package: FirstScriptedVideoPackage, handoff: dict[str, Any] | None = None
+) -> dict[str, Any]:
     artifacts = package.artifacts or {}
     upload_handoff = _dict((handoff or {}).get("upload_handoff_copy"))
     thumbnail_handoff = _dict((handoff or {}).get("thumbnail_handoff"))
     timing = _dict((handoff or {}).get("publish_timing_recommendation"))
-    upload_copy = artifacts.get("upload_card_copy") if isinstance(artifacts.get("upload_card_copy"), dict) else {}
-    metadata = artifacts.get("metadata_package") if isinstance(artifacts.get("metadata_package"), dict) else {}
-    visual = artifacts.get("visual_plan") if isinstance(artifacts.get("visual_plan"), dict) else {}
-    title = str(upload_handoff.get("title") or upload_copy.get("title") or metadata.get("title") or f"First scripted package {package.id}")
-    description = upload_handoff.get("description") or upload_copy.get("description") or metadata.get("description")
-    checklist_blob = artifacts.get("human_review_checklist") if isinstance(artifacts.get("human_review_checklist"), dict) else {}
-    checklist = _json_list(upload_handoff.get("checklist_items_json")) or [{"item": key, "state": value} for key, value in sorted(checklist_blob.items())]
+    upload_copy = (
+        artifacts.get("upload_card_copy")
+        if isinstance(artifacts.get("upload_card_copy"), dict)
+        else {}
+    )
+    metadata = (
+        artifacts.get("metadata_package")
+        if isinstance(artifacts.get("metadata_package"), dict)
+        else {}
+    )
+    visual = (
+        artifacts.get("visual_plan")
+        if isinstance(artifacts.get("visual_plan"), dict)
+        else {}
+    )
+    title = str(
+        upload_handoff.get("title")
+        or upload_copy.get("title")
+        or metadata.get("title")
+        or f"First scripted package {package.id}"
+    )
+    description = (
+        upload_handoff.get("description")
+        or upload_copy.get("description")
+        or metadata.get("description")
+    )
+    checklist_blob = (
+        artifacts.get("human_review_checklist")
+        if isinstance(artifacts.get("human_review_checklist"), dict)
+        else {}
+    )
+    checklist = _json_list(upload_handoff.get("checklist_items_json")) or [
+        {"item": key, "state": value} for key, value in sorted(checklist_blob.items())
+    ]
     if handoff:
         checklist.append(
             {
                 "item": "packaging_gate_status",
-                "state": _dict(handoff.get("packaging_gate_summary")).get("overall_status", "REVIEW_REQUIRED"),
+                "state": _dict(handoff.get("packaging_gate_summary")).get(
+                    "overall_status", "REVIEW_REQUIRED"
+                ),
             }
         )
     return {
         "title": title,
         "description": str(description) if description else None,
-        "thumbnail_ref": thumbnail_handoff.get("drive_ref") or thumbnail_handoff.get("thumbnail_ref") or metadata.get("thumbnail_ref") or metadata.get("planned_thumbnail_ref"),
-        "subtitle_refs": _json_list(upload_handoff.get("subtitle_refs_json") or metadata.get("subtitle_refs") or metadata.get("caption_refs")),
+        "thumbnail_ref": thumbnail_handoff.get("drive_ref")
+        or thumbnail_handoff.get("thumbnail_ref")
+        or metadata.get("thumbnail_ref")
+        or metadata.get("planned_thumbnail_ref"),
+        "subtitle_refs": _json_list(
+            upload_handoff.get("subtitle_refs_json")
+            or metadata.get("subtitle_refs")
+            or metadata.get("caption_refs")
+        ),
         "required_assets": [
             {"type": "metadata_package", "ready": bool(metadata)},
             {"type": "visual_plan", "ready": bool(visual)},
@@ -841,8 +1126,14 @@ def _package_task_snapshot(package: FirstScriptedVideoPackage, handoff: dict[str
     }
 
 
-def _package_metadata_diff(task: HumanUploadTask, data: BackfillUploadedVideoRequest) -> dict[str, Any]:
-    title_changed = bool(data.actual_title and task.title_snapshot and data.actual_title != task.title_snapshot)
+def _package_metadata_diff(
+    task: HumanUploadTask, data: BackfillUploadedVideoRequest
+) -> dict[str, Any]:
+    title_changed = bool(
+        data.actual_title
+        and task.title_snapshot
+        and data.actual_title != task.title_snapshot
+    )
     description_changed = bool(data.description_modified_from_package)
     changed = []
     if title_changed:
@@ -853,7 +1144,9 @@ def _package_metadata_diff(task: HumanUploadTask, data: BackfillUploadedVideoReq
         "title_changed": title_changed,
         "description_changed": description_changed,
         "changed_fields": changed,
-        "operator_summary_vi": "Metadata thực tế khác package gốc." if changed else "Metadata thực tế khớp hoặc chưa đủ dữ liệu để so sánh.",
+        "operator_summary_vi": "Metadata thực tế khác package gốc."
+        if changed
+        else "Metadata thực tế khớp hoặc chưa đủ dữ liệu để so sánh.",
     }
 
 
@@ -865,7 +1158,9 @@ def _lineage_refs(task: HumanUploadTask) -> dict[str, Any]:
         "no_upload_api_by_policy": True,
     }
     if task.first_scripted_video_package_id:
-        refs["first_scripted_video_package_id"] = str(task.first_scripted_video_package_id)
+        refs["first_scripted_video_package_id"] = str(
+            task.first_scripted_video_package_id
+        )
     if task.publish_package_id:
         refs["publish_package_id"] = str(task.publish_package_id)
     if task.video_project_id:
@@ -875,7 +1170,11 @@ def _lineage_refs(task: HumanUploadTask) -> dict[str, Any]:
 
 def _visibility(value: Any) -> str:
     normalized = str(value or "UNKNOWN").upper()
-    return normalized if normalized in {"PUBLIC", "UNLISTED", "PRIVATE", "SCHEDULED", "UNKNOWN"} else "UNKNOWN"
+    return (
+        normalized
+        if normalized in {"PUBLIC", "UNLISTED", "PRIVATE", "SCHEDULED", "UNKNOWN"}
+        else "UNKNOWN"
+    )
 
 
 def _coerce_datetime(value: Any) -> datetime | None:

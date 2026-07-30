@@ -1,3 +1,4 @@
+import runpy
 import uuid
 from pathlib import Path
 
@@ -209,13 +210,21 @@ REQUIRED_TABLES = {
     "packaging_patch_apply_runs",
     "packaging_gate_rerun_records",
     "package_runtime_dispositions",
+    "production_workflow_runs",
+    "workflow_command_receipts",
+    "final_review_candidates",
+    "final_video_decisions",
+    "series_episode_publications",
+    "v2_production_effect_ledger",
 }
 
 
 def test_alembic_migration_applies_on_empty_postgres(engine: Engine) -> None:
     with engine.connect() as connection:
-        revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert revision == "0043_vcos_phase123"
+        revision = connection.execute(
+            text("select version_num from alembic_version")
+        ).scalar_one()
+        assert revision == "0046_vcos_v2_effect_ledger"
 
 
 def test_core_tables_exist_after_migration(engine: Engine) -> None:
@@ -229,7 +238,7 @@ def _alembic_config() -> Config:
     return config
 
 
-def test_0043_downgrade_round_trip_is_safe_without_authoritative_rows(
+def test_0043_through_0046_downgrade_round_trip_is_safe_without_authoritative_rows(
     engine: Engine,
 ) -> None:
     config = _alembic_config()
@@ -251,7 +260,481 @@ def test_0043_downgrade_round_trip_is_safe_without_authoritative_rows(
             connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-            == "0043_vcos_phase123"
+            == "0046_vcos_v2_effect_ledger"
+        )
+
+
+def test_0046_downgrade_fails_closed_then_immediately_reupgrades(
+    engine: Engine,
+    db_session,
+) -> None:
+    from app.db.models.production_workflow import ProductionWorkflowRun
+    from app.db.models.v2_effect import V2ProductionEffectLedger
+    from app.core.time import utc_now
+
+    phase3 = runpy.run_path(str(ROOT / "tests/test_phase3_production_package_v2.py"))
+    scope = phase3["_scope"](db_session)
+    package = phase3["_create_package"](db_session, scope)
+    run = ProductionWorkflowRun(
+        company_id=scope.company.id,
+        channel_workspace_id=scope.channel.id,
+        video_project_id=scope.project.id,
+        production_lane=scope.project.production_lane,
+        planning_source_type=scope.project.planning_source_type,
+        planning_source_id=scope.project.id,
+        planning_source_hash="1" * 64,
+        workflow_key=uuid.uuid4().hex.ljust(64, "0"),
+        start_input_hash="2" * 64,
+        state="MEDIA_RUNNING",
+        current_stage="MEDIA",
+        production_package_artifact_version_id=package.artifact_version_id,
+        production_package_hash=package.canonical_hash,
+    )
+    db_session.add(run)
+    db_session.flush()
+    now = utc_now()
+    db_session.add(
+        V2ProductionEffectLedger(
+            workflow_run_id=run.id,
+            video_project_id=scope.project.id,
+            production_package_artifact_version_id=package.artifact_version_id,
+            production_package_hash=package.canonical_hash,
+            command_id=str(uuid.uuid4()),
+            stage="MEDIA",
+            operation_id=f"v2:{scope.project.id}:media",
+            adapter_key="v2-local-native",
+            input_hash="3" * 64,
+            state="VERIFIED",
+            effect_invocation_count=1,
+            result_type="V2_CANONICAL_MEDIA_TIMELINE",
+            result_ref="v2-effect://migration/timeline",
+            result_hash="4" * 64,
+            result_payload={"migration_guard": True},
+            authority_refs={},
+            effect_journal={"state": "VERIFIED"},
+            started_at=now,
+            completed_at=now,
+        )
+    )
+    db_session.commit()
+
+    config = _alembic_config()
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="authoritative V2 production effect rows exist",
+        ):
+            command.downgrade(config, "0045_vcos_final_publish")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0046_vcos_v2_effect_ledger"
+            )
+            assert (
+                "v2_production_effect_ledger" in inspect(connection).get_table_names()
+            )
+
+        with engine.begin() as connection:
+            connection.execute(text("TRUNCATE TABLE v2_production_effect_ledger"))
+        command.downgrade(config, "0045_vcos_final_publish")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0045_vcos_final_publish"
+            )
+            assert (
+                "v2_production_effect_ledger"
+                not in inspect(connection).get_table_names()
+            )
+    finally:
+        command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+            == "0046_vcos_v2_effect_ledger"
+        )
+        assert "v2_production_effect_ledger" in inspect(connection).get_table_names()
+
+
+def test_0046_widens_local_renderer_and_frozen_support_authority_with_guarded_downgrade(
+    engine: Engine,
+) -> None:
+    provider_id = uuid.uuid4()
+    capability_id = uuid.uuid4()
+    provider_key = f"v2-native-{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        role_constraint = connection.execute(
+            text(
+                """
+                SELECT pg_get_constraintdef(constraint_row.oid)
+                FROM pg_constraint AS constraint_row
+                WHERE constraint_row.conrelid =
+                    'media_provider_role_profiles'::regclass
+                  AND constraint_row.contype = 'c'
+                  AND pg_get_constraintdef(constraint_row.oid)
+                    ILIKE '%provider_type%'
+                """
+            )
+        ).scalar_one()
+        capability_constraint = connection.execute(
+            text(
+                """
+                SELECT pg_get_constraintdef(constraint_row.oid)
+                FROM pg_constraint AS constraint_row
+                WHERE constraint_row.conrelid =
+                    'provider_capability_matrix_entries'::regclass
+                  AND constraint_row.contype = 'c'
+                  AND pg_get_constraintdef(constraint_row.oid)
+                    ILIKE '%provider_type%'
+                """
+            )
+        ).scalar_one()
+        storage_constraint = connection.execute(
+            text(
+                """
+                SELECT pg_get_constraintdef(constraint_row.oid)
+                FROM pg_constraint AS constraint_row
+                WHERE constraint_row.conrelid = 'cloud_media_refs'::regclass
+                  AND constraint_row.contype = 'c'
+                  AND pg_get_constraintdef(constraint_row.oid)
+                    ILIKE '%storage_provider%'
+                """
+            )
+        ).scalar_one()
+        authority_index = connection.execute(
+            text(
+                """
+                SELECT indexdef
+                FROM pg_indexes
+                WHERE indexname = 'uq_artifacts_v2_authority_per_project'
+                """
+            )
+        ).scalar_one()
+        assert "LOCAL_RENDERER_CAPABILITY" in role_constraint
+        assert "LOCAL_RENDERER_CAPABILITY" in capability_constraint
+        assert "VCOS_LOCAL_ARCHIVE" in storage_constraint
+        assert "v2_frozen_support_envelope" in authority_index
+        connection.execute(
+            text(
+                """
+                INSERT INTO media_provider_role_profiles (
+                    id, provider_key, provider_name, provider_type,
+                    role_description, recommendation
+                ) VALUES (
+                    :id, :provider_key, 'V2 native renderer',
+                    'LOCAL_RENDERER_CAPABILITY',
+                    'Package-authorized local FFmpeg production renderer',
+                    'CORE'
+                )
+                """
+            ),
+            {"id": provider_id, "provider_key": provider_key},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO provider_capability_matrix_entries (
+                    id, provider_key, provider_type, job_type,
+                    capability, capability_reason
+                ) VALUES (
+                    :id, :provider_key, 'LOCAL_RENDERER_CAPABILITY',
+                    'FINAL_RENDER', 'SUPPORTED',
+                    'Native FFmpeg capability is present'
+                )
+                """
+            ),
+            {"id": capability_id, "provider_key": provider_key},
+        )
+
+    config = _alembic_config()
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="LOCAL_RENDERER_CAPABILITY or frozen V2 support authority",
+        ):
+            command.downgrade(config, "0045_vcos_final_publish")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0046_vcos_v2_effect_ledger"
+            )
+    finally:
+        command.upgrade(config, "head")
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM provider_capability_matrix_entries WHERE id = :id"),
+                {"id": capability_id},
+            )
+            connection.execute(
+                text("DELETE FROM media_provider_role_profiles WHERE id = :id"),
+                {"id": provider_id},
+            )
+
+
+def test_0046_downgrade_fails_closed_for_local_archive_authority(
+    engine: Engine,
+) -> None:
+    cloud_media_ref_id = uuid.uuid4()
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO cloud_media_refs (
+                    id, media_type, storage_provider, drive_file_id,
+                    web_view_link
+                ) VALUES (
+                    :id, 'LONG_FORM_FINAL', 'VCOS_LOCAL_ARCHIVE',
+                    :drive_file_id, :web_view_link
+                )
+                """
+            ),
+            {
+                "id": cloud_media_ref_id,
+                "drive_file_id": f"vcos-local:{cloud_media_ref_id}",
+                "web_view_link": f"vcos-local://archive/{cloud_media_ref_id}",
+            },
+        )
+
+    config = _alembic_config()
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="VCOS_LOCAL_ARCHIVE cloud archive",
+        ):
+            command.downgrade(config, "0045_vcos_final_publish")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0046_vcos_v2_effect_ledger"
+            )
+    finally:
+        command.upgrade(config, "head")
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM cloud_media_refs WHERE id = :id"),
+                {"id": cloud_media_ref_id},
+            )
+
+
+def test_0045_downgrade_fails_closed_for_final_publish_authority(
+    engine: Engine,
+    db_session,
+) -> None:
+    phase5 = runpy.run_path(str(ROOT / "tests/test_phase5_final_publish.py"))
+    ready = phase5["_ready_final"](db_session)
+    assert ready.candidate is not None
+    db_session.commit()
+
+    config = _alembic_config()
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="authoritative final-review/publish v2 rows exist",
+        ):
+            command.downgrade(config, "0044_vcos_orchestration")
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0046_vcos_v2_effect_ledger"
+            )
+
+        # Immutable authority rows are intentionally undeletable in production.
+        # TRUNCATE is scoped to this disposable test database so the migration's
+        # no-authority downgrade and immediate recovery path can also be proven.
+        with engine.begin() as connection:
+            connection.execute(text("TRUNCATE TABLE final_review_candidates CASCADE"))
+
+        command.downgrade(config, "0044_vcos_orchestration")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0044_vcos_orchestration"
+            )
+    finally:
+        command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+            == "0046_vcos_v2_effect_ledger"
+        )
+
+
+def test_0044_downgrade_fails_closed_for_durable_workflow_authority(
+    engine: Engine,
+) -> None:
+    config = _alembic_config()
+    company_id = uuid.uuid4()
+    channel_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    command.downgrade(config, "0044_vcos_orchestration")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO companies (
+                        id, name, slug, description, status, default_currency,
+                        created_at, updated_at
+                    )
+                    VALUES (
+                        :id, '0044 Guard', :slug, '', 'active', 'USD',
+                        now(), now()
+                    )
+                    """
+                ),
+                {
+                    "id": company_id,
+                    "slug": f"migration-0044-{company_id.hex[:12]}",
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO channel_workspaces (
+                        id,
+                        company_id,
+                        key,
+                        name,
+                        status,
+                        primary_language,
+                        default_timezone
+                    )
+                    VALUES (
+                        :id,
+                        :company_id,
+                        :key,
+                        '0044 Guard Channel',
+                        'active',
+                        'en',
+                        'UTC'
+                    )
+                    """
+                ),
+                {
+                    "id": channel_id,
+                    "company_id": company_id,
+                    "key": f"migration-0044-{channel_id.hex[:12]}",
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO production_workflow_runs (
+                        id,
+                        company_id,
+                        channel_workspace_id,
+                        production_lane,
+                        planning_source_type,
+                        planning_source_id,
+                        planning_source_hash,
+                        workflow_key,
+                        start_input_hash,
+                        state,
+                        current_stage
+                    )
+                    VALUES (
+                        :id,
+                        :company_id,
+                        :channel_id,
+                        'LONG_FORM',
+                        'LONG_FORM_PLAN',
+                        :source_id,
+                        :planning_hash,
+                        :workflow_key,
+                        :start_hash,
+                        'PLANNING_PENDING',
+                        'PLANNING'
+                    )
+                    """
+                ),
+                {
+                    "id": workflow_id,
+                    "company_id": company_id,
+                    "channel_id": channel_id,
+                    "source_id": uuid.uuid4(),
+                    "planning_hash": "a" * 64,
+                    "workflow_key": "b" * 64,
+                    "start_hash": "c" * 64,
+                },
+            )
+
+        with pytest.raises(
+            RuntimeError,
+            match="authoritative durable orchestration rows exist",
+        ):
+            command.downgrade(config, "0043_vcos_phase123")
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0044_vcos_orchestration"
+            )
+
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM production_workflow_runs WHERE id = :id"),
+                {"id": workflow_id},
+            )
+            connection.execute(
+                text("DELETE FROM channel_workspaces WHERE id = :id"),
+                {"id": channel_id},
+            )
+            connection.execute(
+                text("DELETE FROM companies WHERE id = :id"),
+                {"id": company_id},
+            )
+
+        command.downgrade(config, "0043_vcos_phase123")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0043_vcos_phase123"
+            )
+            assert (
+                "production_workflow_runs" not in inspect(connection).get_table_names()
+            )
+
+        command.upgrade(config, "0044_vcos_orchestration")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0044_vcos_orchestration"
+            )
+            assert "production_workflow_runs" in inspect(connection).get_table_names()
+    finally:
+        command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+            == "0046_vcos_v2_effect_ledger"
         )
 
 
@@ -301,16 +784,19 @@ def test_0043_downgrade_fails_closed_for_canonical_identity(
             },
         )
 
-    with pytest.raises(
-        RuntimeError,
-        match="authoritative Phase 1/v2 rows exist",
-    ):
-        command.downgrade(_alembic_config(), "0042_mr1_final_lineage")
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="authoritative Phase 1/v2 rows exist",
+        ):
+            command.downgrade(_alembic_config(), "0042_mr1_final_lineage")
 
-    with engine.connect() as connection:
-        assert (
-            connection.execute(
-                text("select version_num from alembic_version")
-            ).scalar_one()
-            == "0043_vcos_phase123"
-        )
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("select version_num from alembic_version")
+                ).scalar_one()
+                == "0046_vcos_v2_effect_ledger"
+            )
+    finally:
+        command.upgrade(_alembic_config(), "head")

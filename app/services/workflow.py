@@ -412,8 +412,10 @@ class VideoProjectService:
 
 _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES = frozenset(
     {
+        "mr1_final_media_lineage_receipt",
         "production_package",
         "production_readiness_receipt",
+        "v2_frozen_support_envelope",
     }
 )
 _V2_READINESS_SUPPORT_ARTIFACT_TYPES = frozenset(
@@ -465,14 +467,11 @@ class ArtifactService:
             data.artifact_type in _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES
             and not trusted_authority_write
         ):
-            raise ValidationFailureError(
-                "AUTHORITY_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
-            )
+            raise ValidationFailureError("AUTHORITY_ARTIFACT_DOMAIN_SERVICE_REQUIRED")
         if (
             public_write
             and project.schema_version == "v2"
-            and data.artifact_type
-            in _V2_READINESS_SUPPORT_ARTIFACT_TYPES
+            and data.artifact_type in _V2_READINESS_SUPPORT_ARTIFACT_TYPES
         ):
             raise ValidationFailureError(
                 "V2_READINESS_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
@@ -518,24 +517,19 @@ class ArtifactService:
             artifact.artifact_type in _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES
             and not trusted_authority_write
         ):
-            raise ValidationFailureError(
-                "AUTHORITY_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
-            )
+            raise ValidationFailureError("AUTHORITY_ARTIFACT_DOMAIN_SERVICE_REQUIRED")
         if (
             _DOMAIN_AUTHORITY_METADATA_KEY in data.packaging_metadata
             and not trusted_authority_write
         ):
-            raise ValidationFailureError(
-                "DOMAIN_AUTHORITY_METADATA_RESERVED"
-            )
+            raise ValidationFailureError("DOMAIN_AUTHORITY_METADATA_RESERVED")
         project = self.session.get(VideoProject, artifact.video_project_id)
         if project is None:
             raise NotFoundError(f"project not found: {artifact.video_project_id}")
         if (
             public_write
             and project.schema_version == "v2"
-            and artifact.artifact_type
-            in _V2_READINESS_SUPPORT_ARTIFACT_TYPES
+            and artifact.artifact_type in _V2_READINESS_SUPPORT_ARTIFACT_TYPES
         ):
             raise ValidationFailureError(
                 "V2_READINESS_ARTIFACT_DOMAIN_SERVICE_REQUIRED"
@@ -1167,14 +1161,11 @@ class ApprovalService:
             or metadata.get("operator_review_manifest_content_hash")
             != version.content_hash
             or metadata.get("operator_review_task_id") != str(review_task_id)
-            or decision_basis.get(
-                "operator_review_manifest_artifact_version_id"
-            )
+            or decision_basis.get("operator_review_manifest_artifact_version_id")
             != str(version.id)
             or decision_basis.get("operator_review_manifest_content_hash")
             != version.content_hash
-            or decision_basis.get("operator_review_task_id")
-            != str(review_task_id)
+            or decision_basis.get("operator_review_task_id") != str(review_task_id)
         ):
             raise ValidationFailureError(
                 "continuation approval is not bound to the exact operator review"
@@ -1196,9 +1187,7 @@ class ApprovalService:
             "type": "mr1_prior_consumed_pexels_attempt",
             "artifact_version_id": prior_snapshot.get("artifact_version_id"),
             "content_hash": prior_snapshot.get("content_hash"),
-            "snapshot_content_hash": prior_snapshot.get(
-                "snapshot_content_hash"
-            ),
+            "snapshot_content_hash": prior_snapshot.get("snapshot_content_hash"),
         }
         evidence_refs = list(review_task.evidence_refs or [])
         if (

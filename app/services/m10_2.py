@@ -1142,9 +1142,7 @@ class LongFormRenderPackageService:
                 and data.duration_contract
                 != production_package_content.duration_contract
             ):
-                raise ValidationFailureError(
-                    "LONG_RENDER_DURATION_CONTRACT_MISMATCH"
-                )
+                raise ValidationFailureError("LONG_RENDER_DURATION_CONTRACT_MISMATCH")
             if data.strict_contract is not None and (
                 data.strict_contract.production_package_schema_version != "v2"
                 or data.strict_contract.production_package_artifact_version_id
@@ -1206,9 +1204,7 @@ class LongFormRenderPackageService:
                 else None
             ),
             duration_contract=(
-                production_package_content.duration_contract.model_dump(
-                    mode="json"
-                )
+                production_package_content.duration_contract.model_dump(mode="json")
                 if production_package_content is not None
                 else None
             ),
@@ -1545,13 +1541,9 @@ class FinalMediaRefService:
                 data.duration_contract is not None
                 and data.duration_contract != projection_content.duration_contract
             ):
-                raise ValidationFailureError(
-                    "FINAL_MEDIA_DURATION_CONTRACT_MISMATCH"
-                )
+                raise ValidationFailureError("FINAL_MEDIA_DURATION_CONTRACT_MISMATCH")
             if data.duration_seconds is None:
-                raise ValidationFailureError(
-                    "FINAL_MEDIA_DURATION_REQUIRED_FOR_V2"
-                )
+                raise ValidationFailureError("FINAL_MEDIA_DURATION_REQUIRED_FOR_V2")
             duration_ms = round(float(data.duration_seconds) * 1000)
             if not (
                 projection_content.duration_contract.minimum_duration_ms
@@ -1599,15 +1591,20 @@ class FinalMediaRefService:
                     strict_native_final
                     and artifact.artifact_type != "mr1_final_media_lineage_receipt"
                 )
+                or (
+                    strict_native_final
+                    and project is not None
+                    and getattr(project, "schema_version", "v1") == "v2"
+                    and (lineage.content or {}).get("schema_version")
+                    != "vcos.native-final-media-lineage.v2"
+                )
             ):
                 raise ValidationFailureError(
                     "FinalMediaRef immutable lineage authority is invalid."
                 )
         payload = data.model_dump(mode="python")
         if projection_version is not None and projection_content is not None:
-            payload["production_package_artifact_version_id"] = (
-                projection_version.id
-            )
+            payload["production_package_artifact_version_id"] = projection_version.id
             payload["production_package_hash"] = projection_version.content_hash
             payload["duration_contract"] = (
                 projection_content.duration_contract.model_dump(mode="json")

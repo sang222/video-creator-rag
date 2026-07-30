@@ -22,6 +22,18 @@ from app.db.base import Base
 from app.db.models.foundation import utc_created_at, utc_updated_at, uuid_pk
 
 
+_PROVIDER_TYPE_CHECK = (
+    "provider_type in ("
+    "'WORKFLOW_ORCHESTRATOR','LLM_SCRIPT_ENGINE','API_NATIVE_TTS',"
+    "'CAPTION_TIMELINE_ENGINE','AI_VIDEO_HERO_PROVIDER',"
+    "'CLOUD_TEMPLATE_RENDERER_LIGHT','CLOUD_FINAL_ASSEMBLY_RENDERER',"
+    "'MEDIA_STORAGE','MEDIA_QC_ENGINE','PUBLISH_PACKAGE_BUILDER',"
+    "'API_NATIVE_STOCK_PROVIDER','FREE_FALLBACK_PROVIDER','MOCK_PROVIDER',"
+    "'DEFERRED_MANUAL_LIBRARY','LOCAL_RENDERER_CAPABILITY'"
+    ")"
+)
+
+
 class MediaProviderRoleProfile(Base):
     __tablename__ = "media_provider_role_profiles"
 
@@ -46,6 +58,10 @@ class MediaProviderRoleProfile(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            _PROVIDER_TYPE_CHECK,
+            name="ck_media_provider_roles_type",
+        ),
         Index("ix_media_provider_roles_type", "provider_type"),
         Index("ix_media_provider_roles_recommendation", "recommendation"),
     )
@@ -76,6 +92,10 @@ class ProviderCapabilityMatrixEntry(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
+        CheckConstraint(
+            _PROVIDER_TYPE_CHECK,
+            name="ck_provider_capability_entries_type",
+        ),
         UniqueConstraint(
             "provider_key", "job_type", name="uq_provider_capability_provider_job"
         ),
@@ -193,8 +213,8 @@ class LongFormRenderPackage(Base):
     video_project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id"), nullable=False
     )
-    production_package_artifact_version_id: Mapped[uuid.UUID | None] = (
-        mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
     )
     production_package_hash: Mapped[str | None] = mapped_column(String(64))
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(
@@ -386,8 +406,8 @@ class FinalMediaRef(Base):
     video_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id")
     )
-    production_package_artifact_version_id: Mapped[uuid.UUID | None] = (
-        mapped_column(UUID(as_uuid=True), ForeignKey("artifact_versions.id"))
+    production_package_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id")
     )
     production_package_hash: Mapped[str | None] = mapped_column(String(64))
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(

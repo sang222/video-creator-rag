@@ -1,5 +1,5 @@
-import { QueuesView } from "@/features/queues/queues-view";
+import { ProductionPublishingView } from "@/features/publishing/production-publishing-view";
 
 export default function Page() {
-  return <QueuesView queueType="publish" />;
+  return <ProductionPublishingView />;
 }

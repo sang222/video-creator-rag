@@ -30,9 +30,7 @@ DURATION_CONTRACT_VERSION_V2 = "channel-duration-contract.v2"
 class ProductionPackageMateriality(StrEnum):
     NON_MATERIAL_TECHNICAL_REPAIR = "NON_MATERIAL_TECHNICAL_REPAIR"
     MATERIAL_EDITORIAL_CHANGE = "MATERIAL_EDITORIAL_CHANGE"
-    MATERIAL_MARKET_OR_DESTINATION_CHANGE = (
-        "MATERIAL_MARKET_OR_DESTINATION_CHANGE"
-    )
+    MATERIAL_MARKET_OR_DESTINATION_CHANGE = "MATERIAL_MARKET_OR_DESTINATION_CHANGE"
     MATERIAL_PROVIDER_OR_COST_CHANGE = "MATERIAL_PROVIDER_OR_COST_CHANGE"
     MATERIAL_RIGHTS_OR_EVIDENCE_CHANGE = "MATERIAL_RIGHTS_OR_EVIDENCE_CHANGE"
 
@@ -123,6 +121,9 @@ class ProductionPackageContentV2(BaseModel):
     standalone_reason_code: str | None = None
     parent_derivative_lineage: ExactContentRefV2 | None = None
     duration_contract: ProductionDurationContractV2
+    # Optional only so already-sealed Phase 3 package payloads remain readable.
+    # The canonical Phase 4+ compiler always binds this exact authority.
+    support_envelope_ref: ExactContentRefV2 | None = None
     research_refs: list[ExactContentRefV2] = Field(min_length=1)
     source_refs: list[ExactContentRefV2] = Field(min_length=1)
     niche_market_gate_refs: list[ExactContentRefV2] = Field(min_length=1)
@@ -166,9 +167,7 @@ class ProductionPackageContentV2(BaseModel):
             ):
                 raise ValueError("STANDALONE package cannot carry series bindings")
             if not self.standalone_reason_code:
-                raise ValueError(
-                    "STANDALONE package requires standalone_reason_code"
-                )
+                raise ValueError("STANDALONE package requires standalone_reason_code")
         if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
             if self.parent_derivative_lineage is None:
                 raise ValueError(
@@ -181,6 +180,11 @@ class ProductionPackageContentV2(BaseModel):
                 "parent derivative lineage is only valid for LONG_DERIVED_SHORT"
             )
         artifact_refs = [
+            *(
+                [self.support_envelope_ref]
+                if self.support_envelope_ref is not None
+                else []
+            ),
             *self.research_refs,
             *self.source_refs,
             *self.niche_market_gate_refs,
@@ -201,9 +205,7 @@ class ProductionPackageContentV2(BaseModel):
             self.parent_derivative_lineage is not None
             and self.parent_derivative_lineage.artifact_version_id is None
         ):
-            raise ValueError(
-                "parent derivative lineage requires artifact_version_id"
-            )
+            raise ValueError("parent derivative lineage requires artifact_version_id")
         return self
 
 
@@ -245,6 +247,8 @@ class ProductionReadinessReceiptContentV2(BaseModel):
     production_package_artifact_version_id: uuid.UUID
     production_package_version: int = Field(gt=0)
     production_package_hash: str = Field(pattern=SHA256_PATTERN)
+    # Mirrors the package binding for direct, hash-stable readiness authority.
+    support_envelope_ref: ExactContentRefV2 | None = None
     project_admission_decision_id: uuid.UUID
     project_admission_decision_hash: str = Field(pattern=SHA256_PATTERN)
     channel_profile_version_id: uuid.UUID

@@ -18,7 +18,7 @@ const nav = [
   { href: "/publishing", label: "Gói publish", icon: CirclePlay },
   { href: "/uploaded-videos", label: "Video đã upload", icon: Video },
   { href: "/learning", label: "Bài học", icon: Activity },
-  { href: "/media", label: "Tệp Drive", icon: Database },
+  { href: "/drive-media", label: "Tệp Drive", icon: Database },
   { href: "/ops", label: "Vận hành", icon: Gauge },
   { href: "/settings", label: "Cài đặt", icon: Settings }
 ];

@@ -26,6 +26,10 @@ from app.api.routes import (
     temporal_authority,
     pkg1,
     vcos_v2,
+    production_workflow,
+    production_publish,
+    operator_cockpit,
+    operator_planning,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -73,6 +77,10 @@ def create_app() -> FastAPI:
     _include_router_flat(application, temporal_authority.create_router())
     _include_router_flat(application, pkg1.create_router())
     _include_router_flat(application, vcos_v2.create_router())
+    _include_router_flat(application, production_workflow.create_router())
+    _include_router_flat(application, production_publish.create_router())
+    _include_router_flat(application, operator_cockpit.create_router())
+    _include_router_flat(application, operator_planning.create_router())
     return application
 
 

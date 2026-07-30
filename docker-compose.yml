@@ -44,6 +44,28 @@ services:
       timeout: 5s
       retries: 12
 
+  production-workflow-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.workers"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VCOS_DATABASE_URL: ${VCOS_DOCKER_DATABASE_URL:-postgresql+psycopg://vcos:vcos@postgres:5432/vcos}
+      VCOS_WORKFLOW_LEASE_SECONDS: ${VCOS_WORKFLOW_LEASE_SECONDS:-60}
+      VCOS_WORKFLOW_MAX_EXECUTION_SECONDS: ${VCOS_WORKFLOW_MAX_EXECUTION_SECONDS:-3600}
+      VCOS_WORKFLOW_POLL_INTERVAL_SECONDS: ${VCOS_WORKFLOW_POLL_INTERVAL_SECONDS:-1}
+      VCOS_POST_READINESS_GATEWAY_FACTORY: ${VCOS_POST_READINESS_GATEWAY_FACTORY:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./var:/app/var
+    restart: unless-stopped
+    stop_grace_period: 30s
+
   frontend:
     build:
       context: ./frontend

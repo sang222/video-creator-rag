@@ -53,9 +53,8 @@ class PermissionRule:
 
     def matches(self, method: str, route_path: str) -> bool:
         return (
-            (self.methods is None or method in self.methods)
-            and self.path_pattern.search(route_path) is not None
-        )
+            self.methods is None or method in self.methods
+        ) and self.path_pattern.search(route_path) is not None
 
 
 def _rule(
@@ -71,18 +70,56 @@ def _rule(
     )
 
 
+PROTECTED_READ_RULES = (
+    _rule("production.read", r"^/production-workflows(?:/|$)", methods={"GET"}),
+    _rule(
+        "production.read",
+        r"^/operator-planning/catalog$",
+        methods={"GET"},
+    ),
+    _rule(
+        "production.read",
+        r"^/(?:operator-cockpit|video-projects/[^/]+/operator-cockpit|"
+        r"channels/[^/]+/operator-cockpit)$",
+        methods={"GET"},
+    ),
+    _rule(
+        "production.read",
+        r"^/(?:final-review-candidates/[^/]+(?:/(?:media|thumbnail))?|"
+        r"final-video-decisions/[^/]+|"
+        r"human-upload-tasks/[^/]+/v2|"
+        r"manual-publish-confirmations/[^/]+/v2|"
+        r"uploaded-videos/[^/]+/v2)$",
+        methods={"GET"},
+    ),
+)
+
+
 # First match wins. Domain-specific approval and execution paths intentionally
 # precede broad resource families.
 PERMISSION_RULES = (
     _rule(
         "production.cancel",
-        r"^/(?:production-runs|channel-daily-runs)/[^/]+/(?:cancel|abort|stop)$",
+        r"^/(?:production-runs|channel-daily-runs|production-workflows)/"
+        r"[^/]+/(?:cancel|abort|stop)$",
     ),
-    _rule("memory.promote", r"^/(?:memory(?:/|$)|learning-loop/promotions(?:/|$)|quality-delta-attributions/run$)"),
-    _rule("learning.review", r"^/(?:learning(?:-|/|$)|post-publish-health-runs(?:/|$)|recovery-proposals(?:/|$))"),
+    _rule(
+        "ops.manage",
+        r"^/production-workflows/dead-letters/[^/]+/retry$",
+    ),
+    _rule(
+        "memory.promote",
+        r"^/(?:memory(?:/|$)|learning-loop/promotions(?:/|$)|quality-delta-attributions/run$)",
+    ),
+    _rule(
+        "learning.review",
+        r"^/(?:learning(?:-|/|$)|post-publish-health-runs(?:/|$)|recovery-proposals(?:/|$))",
+    ),
     _rule(
         "publish.confirm",
-        r"^/(?:manual-publish-confirmations(?:/|$)|upload-tasks(?:/|$)|uploaded-videos/[^/]+/verify$)",
+        r"^/(?:manual-publish-confirmations(?:/|$)|upload-tasks(?:/|$)|"
+        r"human-upload-tasks/[^/]+/(?:manual-publish-confirmations|cancel)$|"
+        r"uploaded-videos/[^/]+/verify$)",
     ),
     _rule(
         "publish.prepare",
@@ -95,6 +132,7 @@ PERMISSION_RULES = (
     _rule(
         "review.final_decide",
         r"(?:^/(?:approval-decisions|review-findings|revision-requests)$|"
+        r"^/final-review-candidates/[^/]+/decisions$|"
         r"^/channels/[^/]+/target-market-draft/approve$|"
         r"^/originality/format-identities/[^/]+/(?:approve|reject)$|"
         r"^/packaging-proposed-patches/[^/]+/(?:approve|reject|request-changes|apply)$|"
@@ -121,9 +159,11 @@ PERMISSION_RULES = (
     ),
     _rule(
         "production.start",
-        r"^/(?:channel-daily-runs(?:/|$)|production-runs(?:/|$)|render-revisions(?:/|$)|"
+        r"^/(?:operator-planning/(?:prepare|launch|(?:daily-short|long-form)/launch)$|"
+        r"channel-daily-runs(?:/|$)|production-runs(?:/|$)|render-revisions(?:/|$)|"
+        r"production-workflows/[^/]+/resume$|"
         r"video-packages(?:/|$)|production-packages(?:/|$)|"
-        r"video-projects/[^/]+/(?:long-production(?:/run)?|long-form-render-package|"
+        r"video-projects/[^/]+/(?:production-workflow/start|long-production(?:/run)?|long-form-render-package|"
         r"short-candidates/extract|ai-hero-assets/plan|thumbnail-variants/plan)$|"
         r"revision-requests/[^/]+/resolve$|"
         r"short-candidates/[^/]+/(?:rank|short-render-package)$|media-qc/run$|accessibility-qc/run$|"
@@ -151,13 +191,13 @@ PERMISSION_RULES = (
 def is_protected_route(method: str, route_path: str) -> bool:
     method = method.upper()
     return (
-        (method in UNSAFE_METHODS and (method, route_path) not in PUBLIC_MUTATIONS)
-        or (
-            method == "GET"
-            and (
-                route_path in SIDE_EFFECT_GET_PERMISSIONS
-                or route_path in PROTECTED_READ_PERMISSIONS
-            )
+        method in UNSAFE_METHODS and (method, route_path) not in PUBLIC_MUTATIONS
+    ) or (
+        method == "GET"
+        and (
+            route_path in SIDE_EFFECT_GET_PERMISSIONS
+            or route_path in PROTECTED_READ_PERMISSIONS
+            or any(rule.matches(method, route_path) for rule in PROTECTED_READ_RULES)
         )
     )
 
@@ -169,10 +209,15 @@ def permission_for_route(method: str, route_path: str) -> str | None:
     if method == "POST" and route_path == "/auth/logout":
         return AUTHENTICATED_ONLY_PERMISSION
     if method == "GET":
-        return (
-            SIDE_EFFECT_GET_PERMISSIONS.get(route_path)
-            or PROTECTED_READ_PERMISSIONS.get(route_path)
-        )
+        exact = SIDE_EFFECT_GET_PERMISSIONS.get(
+            route_path
+        ) or PROTECTED_READ_PERMISSIONS.get(route_path)
+        if exact is not None:
+            return exact
+        for rule in PROTECTED_READ_RULES:
+            if rule.matches(method, route_path):
+                return rule.permission
+        return None
     for rule in PERMISSION_RULES:
         if rule.matches(method, route_path):
             return rule.permission
@@ -186,7 +231,10 @@ def uncovered_protected_routes(application: FastAPI) -> list[tuple[str, str]]:
         if route_path is None:
             continue
         for method in getattr(route, "methods", set()) or set():
-            if is_protected_route(method, route_path) and permission_for_route(method, route_path) is None:
+            if (
+                is_protected_route(method, route_path)
+                and permission_for_route(method, route_path) is None
+            ):
                 uncovered.append((method, route_path))
     return sorted(uncovered)
 
@@ -230,9 +278,8 @@ class MutationSecurityMiddleware(BaseHTTPMiddleware):
             route_path=route_path,
             default_permission=permission,
         )
-        if (
-            permission != AUTHENTICATED_ONLY_PERMISSION
-            and not actor.has_permission(permission)
+        if permission != AUTHENTICATED_ONLY_PERMISSION and not actor.has_permission(
+            permission
         ):
             return JSONResponse(status_code=403, content={"detail": "forbidden"})
 
@@ -250,7 +297,9 @@ class MutationSecurityMiddleware(BaseHTTPMiddleware):
         except PublicSystemWorkerForgeryError:
             return JSONResponse(
                 status_code=403,
-                content={"detail": "system worker identity cannot be supplied publicly"},
+                content={
+                    "detail": "system worker identity cannot be supplied publicly"
+                },
             )
         if replacement is not None:
             request._body = replacement
@@ -275,14 +324,10 @@ class MutationSecurityMiddleware(BaseHTTPMiddleware):
                 status_code=None,
             )
         except Exception:
-            logger.exception(
-                "failed to persist authenticated mutation authorization"
-            )
+            logger.exception("failed to persist authenticated mutation authorization")
             return JSONResponse(
                 status_code=500,
-                content={
-                    "detail": "mutation authorization audit persistence failed"
-                },
+                content={"detail": "mutation authorization audit persistence failed"},
                 headers={"X-Request-ID": request_id},
             )
 
@@ -326,7 +371,9 @@ async def _effective_mutation_permission(
 
     if route_path not in LOCALIZATION_PACKAGE_CREATE_ROUTES:
         return default_permission
-    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    content_type = (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    )
     if content_type != "application/json":
         return default_permission
     raw_body = await request.body()
@@ -339,11 +386,10 @@ async def _effective_mutation_permission(
     if not isinstance(payload, dict):
         return default_permission
     if route_path.endswith("/localized-subtitles"):
-        final_review = (
-            payload.get("translation_status") in {"APPROVED", "PASS"}
-            or payload.get("human_review_status")
-            in {"APPROVED", "NOT_REQUIRED", "PASS"}
-        )
+        final_review = payload.get("translation_status") in {
+            "APPROVED",
+            "PASS",
+        } or payload.get("human_review_status") in {"APPROVED", "NOT_REQUIRED", "PASS"}
     else:
         final_review = payload.get("human_review_status") in {"APPROVED", "PASS"}
     return "review.final_decide" if final_review else default_permission
@@ -369,7 +415,9 @@ async def _authoritative_actor_body(
     *,
     declared_fields: set[str],
 ) -> bytes | None:
-    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    content_type = (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    )
     if content_type != "application/json":
         return None
     raw_body = await request.body()
@@ -415,7 +463,9 @@ def _declared_body_fields(route: Any | None) -> set[str]:
     declared: set[str] = set()
     dependant = getattr(route, "dependant", None)
     for body_param in getattr(dependant, "body_params", ()) or ():
-        annotation = getattr(getattr(body_param, "field_info", None), "annotation", None)
+        annotation = getattr(
+            getattr(body_param, "field_info", None), "annotation", None
+        )
         for model_type in _pydantic_model_types(annotation):
             declared.update(model_type.model_fields)
     return declared
@@ -467,10 +517,7 @@ def _replace_actor_claims(
         return False
     changed = False
     actor_type = value.get("actor_type")
-    if (
-        isinstance(actor_type, str)
-        and actor_type.upper() == "SYSTEM_WORKER"
-    ):
+    if isinstance(actor_type, str) and actor_type.upper() == "SYSTEM_WORKER":
         raise PublicSystemWorkerForgeryError
     if value.get("actor_role") is not None:
         if value["actor_role"] != actor.actor_role:
@@ -510,7 +557,11 @@ def _append_authenticated_audit(
         None,
     )
     target_type = next(
-        (segment for segment in route_path.split("/") if segment and not segment.startswith("{")),
+        (
+            segment
+            for segment in route_path.split("/")
+            if segment and not segment.startswith("{")
+        ),
         "http_mutation",
     ).replace("-", "_")
     with session_scope() as session:
@@ -543,7 +594,9 @@ def _append_authenticated_audit(
                     "request_id": request_id,
                     "method": method,
                     "route": route_path,
-                    "path_params": {key: str(value) for key, value in path_params.items()},
+                    "path_params": {
+                        key: str(value) for key, value in path_params.items()
+                    },
                     "old_state": None,
                     "new_state": (
                         {"http_status": status_code}

@@ -52,6 +52,7 @@ from app.services.workflow import ArtifactService
 
 PRODUCTION_PACKAGE_ARTIFACT_TYPE = "production_package"
 PRODUCTION_READINESS_ARTIFACT_TYPE = "production_readiness_receipt"
+V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE = "v2_frozen_support_envelope"
 READINESS_EVALUATOR_VERSION = "production-readiness-evaluator.v2.0.0"
 
 REQUIRED_PRODUCTION_GATE_KEYS = (
@@ -117,9 +118,7 @@ class ChannelDurationContractResolver:
         profile = self.session.get(ChannelProfileVersion, profile_version_id)
         if profile is None:
             raise ValidationFailureError("DURATION_SOURCE_PROFILE_NOT_FOUND")
-        snapshot = self.session.get(
-            CompiledChannelPolicySnapshot, policy_snapshot_id
-        )
+        snapshot = self.session.get(CompiledChannelPolicySnapshot, policy_snapshot_id)
         if snapshot is None:
             raise ValidationFailureError("DURATION_SOURCE_POLICY_NOT_FOUND")
         if profile.status not in {"approved", "active"}:
@@ -149,18 +148,13 @@ class ChannelDurationContractResolver:
         if profile_values != snapshot_values:
             raise ValidationFailureError("DURATION_PROFILE_POLICY_MISMATCH")
 
-        if (
-            profile_values["duration_contract_version"]
-            != DURATION_CONTRACT_VERSION_V2
-        ):
+        if profile_values["duration_contract_version"] != DURATION_CONTRACT_VERSION_V2:
             raise ValidationFailureError("DURATION_CONTRACT_VERSION_INVALID")
         duration_hash = DurationContractV2.calculate_hash(
             minimum_duration_ms=profile_values["minimum_duration_ms"],
             target_duration_ms=profile_values["target_duration_ms"],
             maximum_duration_ms=profile_values["maximum_duration_ms"],
-            duration_contract_version=profile_values[
-                "duration_contract_version"
-            ],
+            duration_contract_version=profile_values["duration_contract_version"],
             source_profile_version_id=profile.id,
             source_policy_snapshot_id=snapshot.id,
         )
@@ -173,8 +167,14 @@ class ChannelDurationContractResolver:
 
 
 class ProductionPackageService:
-    def __init__(self, session: Session):
+    def __init__(
+        self,
+        session: Session,
+        *,
+        allow_legacy_envelope_free_write: bool = False,
+    ):
         self.session = session
+        self.allow_legacy_envelope_free_write = allow_legacy_envelope_free_write
         self.duration_resolver = ChannelDurationContractResolver(session)
 
     def create_package(
@@ -186,14 +186,18 @@ class ProductionPackageService:
         self._validate_exact_content_refs(canonical)
         artifact = self._package_artifact(canonical.video_project_id)
         current = self._current_version(artifact) if artifact is not None else None
-        canonical_payload = canonical.model_dump(mode="json")
+        canonical_payload = _package_semantic_payload(canonical)
         expected_hash = semantic_hash(canonical_payload)
         if current is not None and current.content_hash == expected_hash:
             return self.read_package(current.id)
+        if (
+            canonical.support_envelope_ref is None
+            and canonical.production_lane != ProductionLane.LONG_DERIVED_SHORT
+            and not self.allow_legacy_envelope_free_write
+        ):
+            raise ValidationFailureError("PRODUCTION_PACKAGE_SUPPORT_ENVELOPE_REQUIRED")
         if current is not None:
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_REVISION_SERVICE_REQUIRED"
-            )
+            raise ValidationFailureError("PRODUCTION_PACKAGE_REVISION_SERVICE_REQUIRED")
         if canonical.revision is not None:
             raise ValidationFailureError(
                 "PRODUCTION_PACKAGE_INITIAL_REVISION_FORBIDDEN"
@@ -228,14 +232,12 @@ class ProductionPackageService:
                 trusted_authority_write=True,
             )
         elif parent is not None and parent.artifact_id != artifact.id:
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_REVISION_PARENT_MISMATCH"
-            )
+            raise ValidationFailureError("PRODUCTION_PACKAGE_REVISION_PARENT_MISMATCH")
         elif parent is None and artifact.current_version_id is not None:
             raise ValidationFailureError(
                 "PRODUCTION_PACKAGE_INITIAL_ARTIFACT_NOT_EMPTY"
             )
-        canonical_payload = canonical.model_dump(mode="json")
+        canonical_payload = _package_semantic_payload(canonical)
         version = ArtifactService(self.session).create_artifact_version(
             data=ArtifactVersionCreate(
                 artifact_id=artifact.id,
@@ -245,10 +247,12 @@ class ProductionPackageService:
                 created_by_user_id=created_by_user_id,
                 external_entity_refs=_external_refs(canonical),
                 evidence_refs=[
-                    *[
-                        item.model_dump(mode="json")
-                        for item in canonical.research_refs
-                    ],
+                    *(
+                        [canonical.support_envelope_ref.model_dump(mode="json")]
+                        if canonical.support_envelope_ref is not None
+                        else []
+                    ),
+                    *[item.model_dump(mode="json") for item in canonical.research_refs],
                     *[
                         item.model_dump(mode="json")
                         for item in canonical.rights_disclosure_refs
@@ -256,6 +260,11 @@ class ProductionPackageService:
                 ],
                 context_refs=[
                     canonical.effective_context_ref.model_dump(mode="json"),
+                    *(
+                        [canonical.support_envelope_ref.model_dump(mode="json")]
+                        if canonical.support_envelope_ref is not None
+                        else []
+                    ),
                     {
                         "type": "channel_profile_version",
                         "id": str(canonical.channel_profile_version_id),
@@ -280,9 +289,7 @@ class ProductionPackageService:
     def revise_package(
         self, request: ProductionPackageRevisionRequestV2
     ) -> ProductionPackageReadV2:
-        parent = self._require_package_version(
-            request.package_artifact_version_id
-        )
+        parent = self._require_package_version(request.package_artifact_version_id)
         base = ProductionPackageContentV2.model_validate(parent.content)
         self._lock_package_scope(base.video_project_id)
         artifact = self.session.get(Artifact, parent.artifact_id)
@@ -323,7 +330,7 @@ class ProductionPackageService:
             raise ValidationFailureError(
                 "NON_MATERIAL_REPAIR_POLICY_AUTHORIZATION_REQUIRED"
             )
-        if semantic_hash(candidate.model_dump(mode="json")) == parent.content_hash:
+        if semantic_hash(_package_semantic_payload(candidate)) == parent.content_hash:
             raise ValidationFailureError("PRODUCTION_PACKAGE_REVISION_NO_CHANGE")
         self._validate_live_authority(candidate)
         self._validate_exact_content_refs(candidate)
@@ -359,10 +366,8 @@ class ProductionPackageService:
         content = ProductionPackageContentV2.model_validate(version.content)
         artifact = self.session.get(Artifact, version.artifact_id)
         if artifact is None or artifact.current_version_id != version.id:
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_CURRENT_VERSION_REQUIRED"
-            )
-        if semantic_hash(content.model_dump(mode="json")) != version.content_hash:
+            raise ValidationFailureError("PRODUCTION_PACKAGE_CURRENT_VERSION_REQUIRED")
+        if semantic_hash(_package_semantic_payload(content)) != version.content_hash:
             raise ValidationFailureError("PRODUCTION_PACKAGE_HASH_MISMATCH")
         self._validate_live_authority(content)
         self._validate_exact_content_refs(content)
@@ -396,24 +401,17 @@ class ProductionPackageService:
             )
         content = self.validate_for_readiness(current.id)
         if self._receipt_for_package(current.id, current.content_hash) is None:
-            raise ValidationFailureError(
-                "PRODUCTION_READINESS_RECEIPT_REQUIRED"
-            )
+            raise ValidationFailureError("PRODUCTION_READINESS_RECEIPT_REQUIRED")
         return current, content
 
-    def _validate_live_authority(
-        self, content: ProductionPackageContentV2
-    ) -> None:
+    def _validate_live_authority(self, content: ProductionPackageContentV2) -> None:
         project = self.session.get(VideoProject, content.video_project_id)
         if project is None:
-            raise NotFoundError(
-                f"video project not found: {content.video_project_id}"
-            )
+            raise NotFoundError(f"video project not found: {content.video_project_id}")
         if (
             project.company_id != content.company_id
             or project.channel_workspace_id != content.channel_workspace_id
-            or project.channel_profile_version_id
-            != content.channel_profile_version_id
+            or project.channel_profile_version_id != content.channel_profile_version_id
             or project.policy_snapshot_id != content.compiled_policy_snapshot_id
             or getattr(project, "schema_version", "v1") != "v2"
             or getattr(project, "project_admission_decision_id", None)
@@ -471,13 +469,9 @@ class ProductionPackageService:
             or admission.decision != "ADMIT"
             or admission.admitted_video_project_id != project.id
         ):
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_ADMISSION_NOT_ADMITTED"
-            )
+            raise ValidationFailureError("PRODUCTION_PACKAGE_ADMISSION_NOT_ADMITTED")
         if _admission_hash(admission) != content.project_admission_decision_hash:
-            raise ValidationFailureError(
-                "PRODUCTION_PACKAGE_ADMISSION_HASH_MISMATCH"
-            )
+            raise ValidationFailureError("PRODUCTION_PACKAGE_ADMISSION_HASH_MISMATCH")
         exact_duration = self.duration_resolver.resolve(
             profile_version_id=content.channel_profile_version_id,
             policy_snapshot_id=content.compiled_policy_snapshot_id,
@@ -525,9 +519,7 @@ class ProductionPackageService:
                 "PRODUCTION_PACKAGE_EFFECTIVE_CONTEXT_MISMATCH"
             )
 
-    def _validate_exact_content_refs(
-        self, content: ProductionPackageContentV2
-    ) -> None:
+    def _validate_exact_content_refs(self, content: ProductionPackageContentV2) -> None:
         resolved: dict[str, list[ArtifactVersion]] = {}
         for field_name, ref, allowed_types, same_project in _artifact_ref_bindings(
             content
@@ -556,8 +548,7 @@ class ProductionPackageService:
                 field_name == "parent_derivative_lineage"
                 and version is not None
                 and artifact is not None
-                and artifact.artifact_type
-                == PRODUCTION_PACKAGE_ARTIFACT_TYPE
+                and artifact.artifact_type == PRODUCTION_PACKAGE_ARTIFACT_TYPE
                 and self._receipt_for_package(
                     version.id,
                     version.content_hash,
@@ -578,30 +569,22 @@ class ProductionPackageService:
                 raise ValidationFailureError(
                     f"PRODUCTION_PACKAGE_ARTIFACT_REF_MISMATCH:{field_name}"
                 )
-            if (
-                not ready_parent_package
-                and (
-                    artifact.status != "approved"
-                    or version.status != "approved"
-                )
+            if not ready_parent_package and (
+                artifact.status != "approved" or version.status != "approved"
             ):
                 raise ValidationFailureError(
                     f"PRODUCTION_PACKAGE_ARTIFACT_NOT_APPROVED:{field_name}"
                 )
-            if (
-                artifact.artifact_type
-                in {
-                    PRODUCTION_PACKAGE_ARTIFACT_TYPE,
-                    PRODUCTION_READINESS_ARTIFACT_TYPE,
-                }
-                and not _has_trusted_domain_authority(
-                    version,
-                    artifact.artifact_type,
-                )
+            if artifact.artifact_type in {
+                PRODUCTION_PACKAGE_ARTIFACT_TYPE,
+                PRODUCTION_READINESS_ARTIFACT_TYPE,
+                V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
+            } and not _has_trusted_domain_authority(
+                version,
+                artifact.artifact_type,
             ):
                 raise ValidationFailureError(
-                    "PRODUCTION_PACKAGE_DOMAIN_AUTHORITY_REQUIRED:"
-                    f"{field_name}"
+                    f"PRODUCTION_PACKAGE_DOMAIN_AUTHORITY_REQUIRED:{field_name}"
                 )
             if ref.version is not None and str(ref.version) != str(
                 version.version_number
@@ -610,6 +593,11 @@ class ProductionPackageService:
                     f"PRODUCTION_PACKAGE_ARTIFACT_VERSION_MISMATCH:{field_name}"
                 )
             resolved.setdefault(field_name, []).append(version)
+        if content.support_envelope_ref is not None:
+            _validate_support_envelope_package_binding(
+                content,
+                resolved["support_envelope_ref"][0],
+            )
         _validate_derived_readiness_evidence(content, resolved)
 
     def _package_artifact(self, project_id: uuid.UUID) -> Artifact | None:
@@ -631,9 +619,7 @@ class ProductionPackageService:
             raise NotFoundError(f"video project not found: {project_id}")
         return project
 
-    def _require_package_version(
-        self, version_id: uuid.UUID
-    ) -> ArtifactVersion:
+    def _require_package_version(self, version_id: uuid.UUID) -> ArtifactVersion:
         version = self.session.get(ArtifactVersion, version_id)
         if version is None:
             raise NotFoundError(f"production package version not found: {version_id}")
@@ -665,8 +651,7 @@ class ProductionPackageService:
         package_artifact = self.session.get(Artifact, package.artifact_id)
         if (
             package_artifact is None
-            or package_artifact.artifact_type
-            != PRODUCTION_PACKAGE_ARTIFACT_TYPE
+            or package_artifact.artifact_type != PRODUCTION_PACKAGE_ARTIFACT_TYPE
             or package_artifact.current_version_id != package.id
             or package.content_hash != package_hash
             or not _has_trusted_domain_authority(
@@ -678,12 +663,9 @@ class ProductionPackageService:
         artifact = self.session.scalars(
             select(Artifact)
             .where(
-                Artifact.video_project_id
-                == _package_project_id(self.session, package)
+                Artifact.video_project_id == _package_project_id(self.session, package)
             )
-            .where(
-                Artifact.artifact_type == PRODUCTION_READINESS_ARTIFACT_TYPE
-            )
+            .where(Artifact.artifact_type == PRODUCTION_READINESS_ARTIFACT_TYPE)
             .order_by(Artifact.created_at.asc())
         ).first()
         current = self._current_version(artifact)
@@ -703,24 +685,21 @@ class ProductionPackageService:
             payload = ProductionReadinessReceiptContentV2.model_validate(
                 current.content
             )
-            package_content = ProductionPackageContentV2.model_validate(
-                package.content
-            )
+            package_content = ProductionPackageContentV2.model_validate(package.content)
         except Exception:
             return None
         if (
-            payload.production_package_artifact_version_id
-            != package_version_id
+            payload.production_package_artifact_version_id != package_version_id
             or payload.production_package_version != package.version_number
             or payload.production_package_hash != package_hash
+            or payload.support_envelope_ref != package_content.support_envelope_ref
             or payload.project_admission_decision_id
             != package_content.project_admission_decision_id
             or payload.project_admission_decision_hash
             != package_content.project_admission_decision_hash
             or payload.channel_profile_version_id
             != package_content.channel_profile_version_id
-            or payload.channel_profile_hash
-            != package_content.channel_profile_hash
+            or payload.channel_profile_hash != package_content.channel_profile_hash
             or payload.compiled_policy_snapshot_id
             != package_content.compiled_policy_snapshot_id
             or payload.compiled_policy_snapshot_hash
@@ -731,19 +710,15 @@ class ProductionPackageService:
             != package_content.provider_execution_plan_ref.content_hash
             or payload.budget_scope_hash
             != package_content.budget_scope_ref.content_hash
-            or payload.readiness_evaluator_version
-            != READINESS_EVALUATOR_VERSION
-            or payload.research_evidence_refs
-            != package_content.research_refs
-            or payload.rights_evidence_refs
-            != package_content.rights_disclosure_refs
+            or payload.readiness_evaluator_version != READINESS_EVALUATOR_VERSION
+            or payload.research_evidence_refs != package_content.research_refs
+            or payload.rights_evidence_refs != package_content.rights_disclosure_refs
         ):
             return None
         gate_keys = [item.gate_key for item in payload.required_gate_runs]
-        if (
-            len(gate_keys) != len(REQUIRED_PRODUCTION_GATE_KEYS)
-            or set(gate_keys) != set(REQUIRED_PRODUCTION_GATE_KEYS)
-        ):
+        if len(gate_keys) != len(REQUIRED_PRODUCTION_GATE_KEYS) or set(
+            gate_keys
+        ) != set(REQUIRED_PRODUCTION_GATE_KEYS):
             return None
         for binding in payload.required_gate_runs:
             run = self.session.get(GateRun, binding.gate_run_id)
@@ -777,15 +752,11 @@ class ProductionReadinessService:
         package_content = self.packages.validate_for_readiness(
             package_artifact_version_id
         )
-        self.packages._lock_package_scope(
-            package_content.video_project_id
-        )
+        self.packages._lock_package_scope(package_content.video_project_id)
         package_content = self.packages.validate_for_readiness(
             package_artifact_version_id
         )
-        package_version = self.session.get(
-            ArtifactVersion, package_artifact_version_id
-        )
+        package_version = self.session.get(ArtifactVersion, package_artifact_version_id)
         assert package_version is not None
         existing = self.packages._receipt_for_package(
             package_version.id, package_version.content_hash
@@ -826,11 +797,7 @@ class ProductionReadinessService:
                 package=package_read,
                 gate_run_ids=[run.id for run in runs],
                 blocker_reason_codes=sorted(
-                    {
-                        reason
-                        for run in blocked
-                        for reason in (run.reason_codes or [])
-                    }
+                    {reason for run in blocked for reason in (run.reason_codes or [])}
                 ),
             )
 
@@ -839,6 +806,7 @@ class ProductionReadinessService:
             production_package_artifact_version_id=package_version.id,
             production_package_version=package_version.version_number,
             production_package_hash=package_version.content_hash,
+            support_envelope_ref=package_content.support_envelope_ref,
             project_admission_decision_id=package_content.project_admission_decision_id,
             project_admission_decision_hash=package_content.project_admission_decision_hash,
             channel_profile_version_id=package_content.channel_profile_version_id,
@@ -862,8 +830,7 @@ class ProductionReadinessService:
             status="READY_FOR_PRODUCTION",
             package=self.packages.read_package(package_version.id),
             gate_run_ids=[
-                item.gate_run_id
-                for item in receipt.content.required_gate_runs
+                item.gate_run_id for item in receipt.content.required_gate_runs
             ],
             receipt=receipt,
         )
@@ -875,9 +842,7 @@ class ProductionReadinessService:
         receipt_content: ProductionReadinessReceiptContentV2,
         created_by_user_id: uuid.UUID,
     ) -> ProductionReadinessReceiptReadV2:
-        self.packages._lock_package_scope(
-            package_content.video_project_id
-        )
+        self.packages._lock_package_scope(package_content.video_project_id)
         existing = self.packages._receipt_for_package(
             receipt_content.production_package_artifact_version_id,
             receipt_content.production_package_hash,
@@ -886,16 +851,12 @@ class ProductionReadinessService:
             return _read_receipt(existing)
         artifact = self.session.scalars(
             select(Artifact)
-            .where(
-                Artifact.video_project_id == package_content.video_project_id
-            )
-            .where(
-                Artifact.artifact_type == PRODUCTION_READINESS_ARTIFACT_TYPE
-            )
+            .where(Artifact.video_project_id == package_content.video_project_id)
+            .where(Artifact.artifact_type == PRODUCTION_READINESS_ARTIFACT_TYPE)
             .order_by(Artifact.created_at.asc())
         ).first()
         current = self.packages._current_version(artifact)
-        payload = receipt_content.model_dump(mode="json")
+        payload = _readiness_receipt_semantic_payload(receipt_content)
         if current is not None and current.content_hash == semantic_hash(payload):
             return _read_receipt(current)
         if artifact is None:
@@ -916,6 +877,11 @@ class ProductionReadinessService:
                 status="approved",
                 created_by_user_id=created_by_user_id,
                 evidence_refs=[
+                    *(
+                        [receipt_content.support_envelope_ref.model_dump(mode="json")]
+                        if receipt_content.support_envelope_ref is not None
+                        else []
+                    ),
                     *[
                         item.model_dump(mode="json")
                         for item in receipt_content.research_evidence_refs
@@ -940,7 +906,12 @@ class ProductionReadinessService:
                             receipt_content.production_package_artifact_version_id
                         ),
                         "content_hash": receipt_content.production_package_hash,
-                    }
+                    },
+                    *(
+                        [receipt_content.support_envelope_ref.model_dump(mode="json")]
+                        if receipt_content.support_envelope_ref is not None
+                        else []
+                    ),
                 ],
             ),
             correlation_id="phase3-production-readiness-receipt-version",
@@ -1024,6 +995,28 @@ def _canonical_package_content(
     return ProductionPackageContentV2.model_validate(payload)
 
 
+def _package_semantic_payload(
+    content: ProductionPackageContentV2,
+) -> dict[str, Any]:
+    """Serialize without changing hashes of pre-envelope v2 authorities."""
+
+    payload = content.model_dump(mode="json")
+    if content.support_envelope_ref is None:
+        payload.pop("support_envelope_ref", None)
+    return payload
+
+
+def _readiness_receipt_semantic_payload(
+    content: ProductionReadinessReceiptContentV2,
+) -> dict[str, Any]:
+    """Preserve the semantic shape of legacy envelope-free receipts."""
+
+    payload = content.model_dump(mode="json")
+    if content.support_envelope_ref is None:
+        payload.pop("support_envelope_ref", None)
+    return payload
+
+
 def _profile_duration_values(
     payload: dict[str, Any],
     *,
@@ -1057,16 +1050,8 @@ def _snapshot_duration_values(
     format_lane_contracts = _dict(format_policy.get("duration_contracts"))
     strategy_lane_contracts = _dict(strategy.get("duration_contracts"))
     candidates = (
-        (
-            format_lane_contracts.get(production_lane)
-            if production_lane
-            else None
-        ),
-        (
-            strategy_lane_contracts.get(production_lane)
-            if production_lane
-            else None
-        ),
+        (format_lane_contracts.get(production_lane) if production_lane else None),
+        (strategy_lane_contracts.get(production_lane) if production_lane else None),
         payload.get("duration_contract_v2"),
         payload.get("duration_contract"),
         format_policy.get("duration_contract_v2"),
@@ -1089,18 +1074,12 @@ def _normalize_duration_values(
             minimum_duration_ms = int(candidate["minimum_duration_ms"])
             target_duration_ms = int(candidate["target_duration_ms"])
             maximum_duration_ms = int(candidate["maximum_duration_ms"])
-            duration_contract_version = str(
-                candidate["duration_contract_version"]
-            )
+            duration_contract_version = str(candidate["duration_contract_version"])
         except (KeyError, TypeError, ValueError):
             continue
         if (
             minimum_duration_ms <= 0
-            or not (
-                minimum_duration_ms
-                <= target_duration_ms
-                <= maximum_duration_ms
-            )
+            or not (minimum_duration_ms <= target_duration_ms <= maximum_duration_ms)
             or not duration_contract_version
         ):
             continue
@@ -1168,9 +1147,7 @@ def _has_trusted_domain_authority(
 def _artifact_ref_bindings(
     content: ProductionPackageContentV2,
 ) -> list[tuple[str, ExactContentRefV2, frozenset[str], bool]]:
-    bindings: list[
-        tuple[str, ExactContentRefV2, frozenset[str], bool]
-    ] = []
+    bindings: list[tuple[str, ExactContentRefV2, frozenset[str], bool]] = []
 
     def add(
         field_name: str,
@@ -1190,6 +1167,12 @@ def _artifact_ref_bindings(
         )
 
     add("research_refs", content.research_refs, {"research_pack"})
+    if content.support_envelope_ref is not None:
+        add(
+            "support_envelope_ref",
+            [content.support_envelope_ref],
+            {V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE},
+        )
     add("source_refs", content.source_refs, {"source_pack"})
     add(
         "niche_market_gate_refs",
@@ -1248,6 +1231,39 @@ def _artifact_ref_bindings(
     return bindings
 
 
+def _validate_support_envelope_package_binding(
+    content: ProductionPackageContentV2,
+    version: ArtifactVersion,
+) -> None:
+    envelope = version.content if isinstance(version.content, dict) else {}
+    project_ref = _dict(envelope.get("project_ref"))
+    admission_ref = _dict(envelope.get("admission_ref"))
+    profile_ref = _dict(envelope.get("profile_ref"))
+    policy_ref = _dict(envelope.get("compiled_policy_ref"))
+    effective_ref = _dict(envelope.get("effective_context_ref"))
+    if (
+        envelope.get("schema_version") != "vcos.frozen-support-envelope.v2"
+        or envelope.get("approval_state") != "APPROVED"
+        or envelope.get("authority_classification") != "DOMAIN_ONLY_CANONICAL_V2"
+        or str(project_ref.get("id")) != str(content.video_project_id)
+        or str(admission_ref.get("id")) != str(content.project_admission_decision_id)
+        or admission_ref.get("content_hash") != content.project_admission_decision_hash
+        or str(profile_ref.get("id")) != str(content.channel_profile_version_id)
+        or profile_ref.get("content_hash") != content.channel_profile_hash
+        or str(policy_ref.get("id")) != str(content.compiled_policy_snapshot_id)
+        or policy_ref.get("content_hash") != content.compiled_policy_snapshot_hash
+        or str(effective_ref.get("id")) != str(content.effective_context_ref.id)
+        or effective_ref.get("content_hash")
+        != content.effective_context_ref.content_hash
+        or envelope.get("production_lane") != content.production_lane.value
+        or envelope.get("duration_contract")
+        != content.duration_contract.model_dump(mode="json")
+    ):
+        raise ValidationFailureError(
+            "PRODUCTION_PACKAGE_SUPPORT_ENVELOPE_BINDING_MISMATCH"
+        )
+
+
 def _validate_derived_readiness_evidence(
     content: ProductionPackageContentV2,
     resolved: dict[str, list[ArtifactVersion]],
@@ -1280,12 +1296,8 @@ def _validate_derived_readiness_evidence(
         _artifact_passes(version.content)
         for version in resolved["rights_disclosure_refs"]
     )
-    provider_pass = _artifact_passes(
-        resolved["provider_execution_plan_ref"][0].content
-    )
-    budget_pass = _artifact_passes(
-        resolved["budget_scope_ref"][0].content
-    )
+    provider_pass = _artifact_passes(resolved["provider_execution_plan_ref"][0].content)
+    budget_pass = _artifact_passes(resolved["budget_scope_ref"][0].content)
     checks = (
         (
             evidence.research_evidence_complete,
@@ -1409,8 +1421,7 @@ def _artifact_passes(payload: Any) -> bool:
     ):
         return False
     return any(
-        str(payload.get(key) or "").upper()
-        in {"PASS", "PASSED", "VALID", "READY"}
+        str(payload.get(key) or "").upper() in {"PASS", "PASSED", "VALID", "READY"}
         for key in (
             "result",
             "status",
@@ -1427,10 +1438,7 @@ def _artifact_evidence_complete(payload: Any) -> bool:
         isinstance(payload, dict)
         and (
             payload.get("evidence_complete") is True
-            or (
-                _artifact_passes(payload)
-                and bool(payload.get("evidence_refs"))
-            )
+            or (_artifact_passes(payload) and bool(payload.get("evidence_refs")))
         )
     )
 
@@ -1439,10 +1447,7 @@ def _source_evidence_complete(payload: Any) -> bool:
     return bool(
         isinstance(payload, dict)
         and _artifact_passes(payload)
-        and (
-            int(payload.get("source_count") or 0) > 0
-            or bool(payload.get("sources"))
-        )
+        and (int(payload.get("source_count") or 0) > 0 or bool(payload.get("sources")))
     )
 
 
@@ -1453,9 +1458,7 @@ def _script_readiness_facts(payload: Any) -> dict[str, Any]:
         script_duration_ms = int(payload["estimated_duration_ms"])
         research_coverage_ratio = float(payload["research_coverage_ratio"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValidationFailureError(
-            "SCRIPT_READINESS_FACTS_MISSING"
-        ) from exc
+        raise ValidationFailureError("SCRIPT_READINESS_FACTS_MISSING") from exc
     supported_claims = payload.get("supported_claims")
     sections = payload.get("sections")
     if not isinstance(supported_claims, list) or not isinstance(sections, list):
@@ -1476,9 +1479,7 @@ def _script_readiness_facts(payload: Any) -> dict[str, Any]:
         for text in texts
     ]
     repeated_count = len(normalized) - len(set(normalized))
-    repeated_ratio = (
-        round(repeated_count / len(normalized), 6) if normalized else 0.0
-    )
+    repeated_ratio = round(repeated_count / len(normalized), 6) if normalized else 0.0
     canned_phrases = (
         "this keeps the claim tied to verified time savings before publication",
         "the workflow should reduce repeated handoffs while keeping human review in place",
@@ -1491,9 +1492,7 @@ def _script_readiness_facts(payload: Any) -> dict[str, Any]:
     claim_count = len(supported_claims)
     section_count = len(sections)
     editorial_depth_sufficient = bool(
-        claim_count >= 3
-        and section_count >= 3
-        and research_coverage_ratio >= 0.75
+        claim_count >= 3 and section_count >= 3 and research_coverage_ratio >= 0.75
     )
     anti_padding_pass = padding_phrase_hits == 0 and repeated_ratio <= 0.20
     return {
@@ -1513,6 +1512,11 @@ def _all_bound_refs(
 ) -> list[ExactContentRefV2]:
     return [
         content.effective_context_ref,
+        *(
+            [content.support_envelope_ref]
+            if content.support_envelope_ref is not None
+            else []
+        ),
         *content.research_refs,
         *content.source_refs,
         *content.niche_market_gate_refs,
@@ -1606,18 +1610,15 @@ def _classify_revision_materiality(
         "compiled_policy_snapshot_hash",
         "effective_context_ref",
     }:
-        return (
-            ProductionPackageMateriality.MATERIAL_MARKET_OR_DESTINATION_CHANGE
-        )
+        return ProductionPackageMateriality.MATERIAL_MARKET_OR_DESTINATION_CHANGE
     if changed & {
+        "support_envelope_ref",
         "research_refs",
         "source_refs",
         "niche_market_gate_refs",
         "rights_disclosure_refs",
     }:
-        return (
-            ProductionPackageMateriality.MATERIAL_RIGHTS_OR_EVIDENCE_CHANGE
-        )
+        return ProductionPackageMateriality.MATERIAL_RIGHTS_OR_EVIDENCE_CHANGE
     if changed:
         return ProductionPackageMateriality.MATERIAL_EDITORIAL_CHANGE
     raise ValidationFailureError("PRODUCTION_PACKAGE_REVISION_NO_CHANGE")
@@ -1625,11 +1626,7 @@ def _classify_revision_materiality(
 
 def _ref_hashes(value: Any) -> list[str]:
     refs = value if isinstance(value, list) else [value]
-    return sorted(
-        str(ref.get("content_hash"))
-        for ref in refs
-        if isinstance(ref, dict)
-    )
+    return sorted(str(ref.get("content_hash")) for ref in refs if isinstance(ref, dict))
 
 
 def _jsonable(value: Any) -> Any:

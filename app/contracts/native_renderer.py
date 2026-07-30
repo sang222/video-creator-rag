@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.contracts.vcos_v2 import DurationContractV2
-from app.contracts.visual_routing import ExactTextNativeOverlayContract, VisualSourceRoute
+from app.contracts.visual_routing import (
+    ExactTextNativeOverlayContract,
+    VisualSourceRoute,
+)
 
 
-PlanStatus = Literal["DRAFT", "VALIDATED", "REVIEW_REQUIRED", "BLOCKED", "APPROVED", "COMPILED", "SUPERSEDED"]
+PlanStatus = Literal[
+    "DRAFT",
+    "VALIDATED",
+    "REVIEW_REQUIRED",
+    "BLOCKED",
+    "APPROVED",
+    "COMPILED",
+    "SUPERSEDED",
+]
 GateVerdict = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
 
 
@@ -73,7 +85,10 @@ class NativeOverlayPlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_route_aware_overlay(self) -> "NativeOverlayPlan":
-        region_ids = [region.id for region in self.text_safe_regions + self.reserved_overlay_regions]
+        region_ids = [
+            region.id
+            for region in self.text_safe_regions + self.reserved_overlay_regions
+        ]
         if len(region_ids) != len(set(region_ids)):
             raise ValueError("VSR1_DUPLICATE_OVERLAY_REGION_ID")
         if len(self.overlay_content_refs) != len(set(self.overlay_content_refs)) or any(
@@ -93,7 +108,9 @@ class NativeOverlayPlan(BaseModel):
             raise ValueError("VSR1_OVERLAY_AUTHORITATIVE_CONTENT_BINDING_MISMATCH")
         if not exact.native_overlay_required:
             raise ValueError("VSR1_NATIVE_OVERLAY_PLAN_WITHOUT_NATIVE_AUTHORITY")
-        if (exact.exact_text_required or exact.exact_number_required) and not self.text_safe_regions:
+        if (
+            exact.exact_text_required or exact.exact_number_required
+        ) and not self.text_safe_regions:
             raise ValueError("VSR1_EXACT_CONTENT_TEXT_SAFE_REGION_REQUIRED")
         return self
 
@@ -104,7 +121,19 @@ class NativeRenderScene(BaseModel):
     narration_start_ms: int = Field(ge=0)
     narration_end_ms: int = Field(gt=0)
     duration_ms: int = Field(gt=0)
-    visual_treatment: Literal["NATIVE_SLIDE", "DIAGRAM", "UI_SIMULATION", "KINETIC_TYPOGRAPHY", "DATA_CARD", "QUOTE_SLIDE", "COMPARISON_SLIDE", "TIMELINE", "STATIC_COMPOSITION", "STOCK_VIDEO", "AI_HERO_VIDEO"]
+    visual_treatment: Literal[
+        "NATIVE_SLIDE",
+        "DIAGRAM",
+        "UI_SIMULATION",
+        "KINETIC_TYPOGRAPHY",
+        "DATA_CARD",
+        "QUOTE_SLIDE",
+        "COMPARISON_SLIDE",
+        "TIMELINE",
+        "STATIC_COMPOSITION",
+        "STOCK_VIDEO",
+        "AI_HERO_VIDEO",
+    ]
     layout_type: str
     asset_requirements: list[AssetRequirement] = Field(default_factory=list)
     resolved_asset_refs: list[ResolvedAssetRef] = Field(default_factory=list)
@@ -122,23 +151,47 @@ class NativeRenderScene(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
-    source_decision_ref: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
-    source_decision_hash: str | None = Field(default=None, min_length=1, exclude_if=lambda value: value is None)
-    preferred_source_route: VisualSourceRoute | None = Field(default=None, exclude_if=lambda value: value is None)
-    exact_text_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
-    exact_number_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
-    forbidden_generated_text: bool | None = Field(default=None, exclude_if=lambda value: value is None)
-    forbidden_generated_logo: bool | None = Field(default=None, exclude_if=lambda value: value is None)
-    forbidden_generated_fake_ui: bool | None = Field(default=None, exclude_if=lambda value: value is None)
-    text_safe_regions: list[TextSafeRegion] | None = Field(default=None, exclude_if=lambda value: value is None)
-    reserved_overlay_regions: list[TextSafeRegion] | None = Field(default=None, exclude_if=lambda value: value is None)
+    source_decision_ref: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    source_decision_hash: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    preferred_source_route: VisualSourceRoute | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    exact_text_required: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    exact_number_required: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    forbidden_generated_text: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    forbidden_generated_logo: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    forbidden_generated_fake_ui: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    text_safe_regions: list[TextSafeRegion] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reserved_overlay_regions: list[TextSafeRegion] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     eligibility_gate_refs: list[str] | None = Field(
         default=None,
         min_length=1,
         exclude_if=lambda value: value is None,
     )
-    native_overlay_required: bool | None = Field(default=None, exclude_if=lambda value: value is None)
-    native_overlay_plan: NativeOverlayPlan | None = Field(default=None, exclude_if=lambda value: value is None)
+    native_overlay_required: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    native_overlay_plan: NativeOverlayPlan | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
@@ -160,17 +213,22 @@ class NativeRenderScene(BaseModel):
             self.native_overlay_required,
             self.native_overlay_plan,
         )
-        if self.visual_routing_mode is None and all(value is None for value in route_aware_values):
+        if self.visual_routing_mode is None and all(
+            value is None for value in route_aware_values
+        ):
             return self
         if self.visual_routing_mode != "VSR1_STRICT":
             raise ValueError("VSR1_STRICT_ROUTING_MODE_REQUIRED")
         if any(value is None for value in route_aware_values[:-1]):
             raise ValueError("VSR1_ROUTE_AWARE_NATIVE_FIELDS_INCOMPLETE")
-        if not self.source_decision_ref.strip() or not self.source_decision_hash.strip():
-            raise ValueError("VSR1_SOURCE_DECISION_BINDING_EMPTY")
-        if len(self.eligibility_gate_refs) != len(set(self.eligibility_gate_refs)) or any(
-            not ref.strip() for ref in self.eligibility_gate_refs
+        if (
+            not self.source_decision_ref.strip()
+            or not self.source_decision_hash.strip()
         ):
+            raise ValueError("VSR1_SOURCE_DECISION_BINDING_EMPTY")
+        if len(self.eligibility_gate_refs) != len(
+            set(self.eligibility_gate_refs)
+        ) or any(not ref.strip() for ref in self.eligibility_gate_refs):
             raise ValueError("VSR1_ELIGIBILITY_GATE_REF_INVALID")
         if not all(
             (
@@ -180,7 +238,9 @@ class NativeRenderScene(BaseModel):
             )
         ):
             raise ValueError("VSR1_GENERATED_TEXT_LOGO_FAKE_UI_MUST_BE_FORBIDDEN")
-        if (self.exact_text_required or self.exact_number_required) and not self.native_overlay_required:
+        if (
+            self.exact_text_required or self.exact_number_required
+        ) and not self.native_overlay_required:
             raise ValueError("VSR1_EXACT_CONTENT_REQUIRES_NATIVE_OVERLAY")
         if self.native_overlay_required and self.native_overlay_plan is None:
             raise ValueError("VSR1_NATIVE_OVERLAY_PLAN_REQUIRED")
@@ -245,7 +305,9 @@ class NativeRenderPlan(BaseModel):
     srt_ref: str
     srt_hash: str
     audio_timeline_ref: str | None = None
-    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = "LEGACY_HISTORICAL"
+    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = (
+        "LEGACY_HISTORICAL"
+    )
     canonical_media_timeline_ref: str | None = None
     canonical_media_timeline_hash: str | None = None
     canonical_audio_asset_ref: str | None = None
@@ -277,7 +339,9 @@ class NativeRenderPlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_vsr1_scene_set(self) -> "NativeRenderPlan":
-        strict_scenes = [scene for scene in self.scenes if scene.visual_routing_mode == "VSR1_STRICT"]
+        strict_scenes = [
+            scene for scene in self.scenes if scene.visual_routing_mode == "VSR1_STRICT"
+        ]
         if not strict_scenes:
             return self
         if len(strict_scenes) != len(self.scenes):
@@ -339,7 +403,9 @@ class CompiledNativeRenderManifest(BaseModel):
     compilation_warnings: list[str]
     compilation_reason_codes: list[str]
     production_eligible: bool
-    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = "LEGACY_HISTORICAL"
+    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = (
+        "LEGACY_HISTORICAL"
+    )
     canonical_media_timeline_ref: str | None = None
     canonical_media_timeline_hash: str | None = None
     canonical_audio_asset_ref: str | None = None
@@ -373,7 +439,9 @@ class FFmpegCommandManifest(BaseModel):
     sanitized_argv: list[str]
     working_directory: str
     expected_qc: dict[str, Any]
-    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = "LEGACY_HISTORICAL"
+    temporal_authority_mode: Literal["LEGACY_HISTORICAL", "CANONICAL_STRICT"] = (
+        "LEGACY_HISTORICAL"
+    )
     canonical_media_timeline_ref: str | None = None
     canonical_media_timeline_hash: str | None = None
     canonical_audio_asset_ref: str | None = None
@@ -383,6 +451,32 @@ class FFmpegCommandManifest(BaseModel):
     canonical_caption_render_payload_hash: str | None = None
     command_hash: str
     created_at: datetime
+
+
+class V2ProductionRenderExecutionEnvelope(BaseModel):
+    """Package/budget-bound authorization for the non-MR1 V2 renderer."""
+
+    envelope_version: Literal["vcos.v2-native-render-envelope.v1"] = (
+        "vcos.v2-native-render-envelope.v1"
+    )
+    workflow_run_id: uuid.UUID
+    command_id: str = Field(min_length=1, max_length=160)
+    render_run_key: str = Field(min_length=1, max_length=160)
+    production_package_artifact_version_id: uuid.UUID
+    production_package_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider_execution_plan_ref: str = Field(min_length=1)
+    provider_execution_plan_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    budget_scope_ref: str = Field(min_length=1)
+    budget_scope_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    operation_id: str = Field(min_length=1, max_length=160)
+    adapter_key: Literal["v2-local-native"] = "v2-local-native"
+    plan_ref: str = Field(min_length=1)
+    plan_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    production_eligible: Literal[True] = True
+    paid_provider_call: Literal[False] = False
+    authorization_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class MediaQCReport(BaseModel):

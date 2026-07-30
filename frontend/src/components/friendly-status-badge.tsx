@@ -2,6 +2,10 @@ import { Badge } from "@/components/ui/badge";
 
 const labels: Record<string, string> = {
   READY_FOR_HUMAN_REVIEW: "Chờ người duyệt",
+  READY_FOR_FINAL_REVIEW: "Sẵn sàng xem video cuối",
+  FINAL_REVIEW_READY: "Sẵn sàng xem video cuối",
+  DECIDED: "Đã có quyết định",
+  READY_FOR_OPERATOR: "Sẵn sàng upload thủ công",
   READY_FOR_MANUAL_UPLOAD: "Sẵn sàng upload thủ công",
   WAITING_FINAL_MEDIA_ASSET: "Chờ video final",
   NEEDS_MORE_EVIDENCE: "Cần thêm bằng chứng",
@@ -22,6 +26,51 @@ const labels: Record<string, string> = {
   WARNING: "Cần cấu hình",
   PENDING: "Đang chờ",
   QUEUED: "Đang chờ",
+  RUNNING: "Đang sản xuất",
+  PLANNING_PENDING: "Chờ lập kế hoạch",
+  PLANNING_RUNNING: "Đang lập kế hoạch",
+  ASSIGNMENT_READY: "Đã phân công",
+  RESEARCH_PENDING: "Chờ nghiên cứu",
+  RESEARCH_RUNNING: "Đang nghiên cứu",
+  PACKAGE_PENDING: "Chờ chuẩn bị nội dung",
+  PACKAGE_RUNNING: "Đang chuẩn bị nội dung",
+  READY_FOR_PRODUCTION: "Sẵn sàng sản xuất",
+  MEDIA_PENDING: "Chờ tạo media",
+  MEDIA_RUNNING: "Đang tạo media",
+  RENDER_PENDING: "Chờ render",
+  RENDER_RUNNING: "Đang render",
+  QC_PENDING: "Chờ kiểm tra chất lượng",
+  QC_RUNNING: "Đang kiểm tra chất lượng",
+  ARCHIVE_PENDING: "Chờ lưu trữ",
+  ARCHIVE_RUNNING: "Đang lưu trữ",
+  WAITING_RETRY: "Đang chờ thử lại",
+  RETRY_SCHEDULED: "Đã lên lịch thử lại",
+  CANCELLING: "Đang dừng an toàn",
+  CANCEL_REQUESTED: "Đã yêu cầu dừng",
+  CANCELLED: "Đã dừng",
+  CANCELED: "Đã dừng",
+  FAILED_TERMINAL: "Đã dừng vì lỗi",
+  DEAD_LETTERED: "Cần xử lý sự cố",
+  NOT_STARTED: "Chưa bắt đầu",
+  INACTIVE: "Không cần worker",
+  WAITING: "Đang chờ worker",
+  SETTLED: "Đã đối soát",
+  RESERVED: "Đã giữ ngân sách",
+  AWAITING_CONFIRMATION: "Chờ xác nhận kết quả",
+  CONFIRMED: "Đã xác nhận",
+  MATCHED: "Thông tin khớp",
+  MISMATCH: "Thông tin chưa khớp",
+  CORRECTION_REQUIRED: "Cần sửa xác nhận",
+  CORRECTED: "Đã sửa xác nhận",
+  SUBMITTED: "Đã gửi xác nhận",
+  REJECTED_MISMATCH: "Xác nhận chưa khớp",
+  BLOCKED_DESTINATION: "Sai đích publish",
+  VARIANCE_ACCEPTED: "Đã ghi nhận sai khác nhỏ",
+  NOT_REQUIRED: "Không cần xử lý",
+  NOT_CHECKED: "Chưa đối chiếu",
+  NOT_RECORDED: "Chưa ghi nhận",
+  ANALYTICS_READY: "Sẵn sàng phân tích",
+  ARCHIVE_VERIFIED: "Đã lưu và xác minh",
   IN_PROGRESS: "Đang xử lý",
   COMPLETED: "Hoàn tất",
   DONE: "Hoàn tất",
@@ -138,14 +187,26 @@ const labels: Record<string, string> = {
   PRIVATE: "Riêng tư",
   UNLISTED: "Không công khai",
   SCHEDULED: "Đã lên lịch",
-  YOUTUBE: "YouTube"
+  YOUTUBE: "YouTube",
+  DAILY_SHORT: "Video ngắn hằng ngày",
+  LONG_FORM: "Video dài",
+  LONG_DERIVED_SHORT: "Video ngắn từ video dài",
+  STANDALONE: "Video độc lập",
+  SERIES_EPISODE: "Tập trong chuỗi",
+  DETERMINISTIC: "Hệ thống phân công theo quy tắc",
+  SERIES_REQUIRED: "Bắt buộc thuộc chuỗi",
+  SERIES_PREFERRED: "Ưu tiên thuộc chuỗi",
+  STANDALONE_REQUIRED: "Bắt buộc độc lập",
+  OPEN_MIX: "Theo phương án phù hợp nhất",
+  NO_INCIDENT: "Không có sự cố",
+  NONE: "Không cần thao tác"
 };
 
 function toneFor(value: string) {
   const normalized = value.toUpperCase();
-  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "VERIFIED_PUBLIC", "VERIFIED_OWNER", "UPLOADED_VERIFIED", "SYNCED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "READY_FOR_MANUAL_UPLOAD", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED", "COMPLETE", "MATURE", "IMPROVED"].includes(normalized)) return "success";
-  if (["PAUSED", "PARTIAL", "WARNING", "SKIPPED", "SMOKE_SKIPPED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_CREDENTIAL", "NEEDS_CONFIG", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW", "WAITING_FINAL_MEDIA_ASSET", "PENDING", "QUEUED", "IN_PROGRESS", "UPLOAD_PENDING", "READY_FOR_HUMAN_UPLOAD", "HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL", "BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED", "MANUAL_CONFIRMATION_PENDING", "NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "NOT_CONFIGURED", "TOO_EARLY", "LOW_CONFIDENCE", "INCONCLUSIVE", "WAIT_HUMAN_PAID_APPROVAL"].includes(normalized)) return "warning";
-  if (["BLOCKED", "BLOCK", "FAILED", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH", "VERIFICATION_FAILED", "MISSING", "CONTRADICTORY", "CONFLICTED", "BLOCKED_BY_DATA_QUALITY", "DEGRADED", "BLOCKED_BY_PROVIDER_BOUNDARY", "RESOLVE_PROVIDER_CREDENTIALS"].includes(normalized)) return "danger";
+  if (["ACTIVE", "READY", "HEALTHY", "CONNECTED", "VERIFIED", "VERIFIED_PUBLIC", "VERIFIED_OWNER", "UPLOADED_VERIFIED", "SYNCED", "CURRENT", "FRESH", "APPROVED", "OK", "PASS", "SMOKE_PASS", "INSIDE", "READY_FOR_SMOKE", "READY_FOR_MANUAL_UPLOAD", "READY_FOR_OPERATOR", "READY_FOR_FINAL_REVIEW", "FINAL_REVIEW_READY", "DECIDED", "COMPLETED", "DONE", "SUCCESS", "PUBLISHED", "SIZE_VERIFIED", "COMPLETE", "MATURE", "IMPROVED", "SETTLED", "ARCHIVE_VERIFIED", "MATCHED", "CORRECTED", "ANALYTICS_READY"].includes(normalized)) return "success";
+  if (["PAUSED", "PARTIAL", "WARNING", "SKIPPED", "SMOKE_SKIPPED", "WATCHLIST", "STALE", "UNKNOWN", "NEEDS_AUTH", "NEEDS_CREDENTIAL", "NEEDS_CONFIG", "NEEDS_MORE_EVIDENCE", "REVIEW", "REVIEW_REQUIRED", "NEEDS_HUMAN_REVIEW", "WAITING_FINAL_MEDIA_ASSET", "PENDING", "QUEUED", "IN_PROGRESS", "PLANNING_PENDING", "PLANNING_RUNNING", "RESEARCH_PENDING", "RESEARCH_RUNNING", "PACKAGE_PENDING", "PACKAGE_RUNNING", "MEDIA_PENDING", "MEDIA_RUNNING", "RENDER_PENDING", "RENDER_RUNNING", "QC_PENDING", "QC_RUNNING", "ARCHIVE_PENDING", "ARCHIVE_RUNNING", "RETRY_SCHEDULED", "WAITING", "UPLOAD_PENDING", "READY_FOR_HUMAN_UPLOAD", "HUMAN_UPLOAD_IN_PROGRESS", "AWAITING_CONFIRMATION", "UPLOADED_WAITING_BACKFILL", "BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED", "MANUAL_CONFIRMATION_PENDING", "NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "NOT_CONFIGURED", "NOT_STARTED", "TOO_EARLY", "LOW_CONFIDENCE", "INCONCLUSIVE", "WAIT_HUMAN_PAID_APPROVAL", "SUBMITTED"].includes(normalized)) return "warning";
+  if (["BLOCKED", "BLOCK", "FAILED", "FAILED_TERMINAL", "DEAD_LETTERED", "REJECTED_MISMATCH", "BLOCKED_DESTINATION", "CORRECTION_REQUIRED", "MISMATCH", "SMOKE_FAILED", "DEACTIVATED", "ARCHIVED", "MISSING_REQUIRED_GAP", "REQUIRED_GAP", "HIGH", "CRITICAL", "OUTSIDE", "ERROR", "SIZE_MISMATCH", "VERIFICATION_FAILED", "MISSING", "CONTRADICTORY", "CONFLICTED", "BLOCKED_BY_DATA_QUALITY", "DEGRADED", "BLOCKED_BY_PROVIDER_BOUNDARY", "RESOLVE_PROVIDER_CREDENTIALS"].includes(normalized)) return "danger";
   if (["WEAK", "STRONG", "OBSERVING", "CONFIGURED", "READ_ONLY"].includes(normalized)) return "info";
   return "neutral";
 }

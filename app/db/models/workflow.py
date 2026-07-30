@@ -96,9 +96,7 @@ class VideoProject(Base):
     canonical_timeline_ref: Mapped[str | None] = mapped_column(Text)
     canonical_timeline_hash: Mapped[str | None] = mapped_column(String(64))
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    render_eligible: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True
-    )
+    render_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     priority: Mapped[str | None] = mapped_column(String(40))
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
@@ -232,7 +230,8 @@ class Artifact(Base):
             unique=True,
             postgresql_where=text(
                 "artifact_type in "
-                "('production_package','production_readiness_receipt')"
+                "('production_package','production_readiness_receipt',"
+                "'v2_frozen_support_envelope')"
             ),
         ),
     )
