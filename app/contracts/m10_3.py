@@ -12,7 +12,18 @@ YouTubeOAuthSessionStatus = Literal["STARTED", "CALLBACK_RECEIVED", "TOKEN_EXCHA
 YouTubePublicSyncRunState = Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED"]
 YouTubeOwnerSyncRunState = Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED", "NEEDS_AUTH"]
 YouTubeSyncSource = Literal["YOUTUBE_DATA_API", "YOUTUBE_ANALYTICS_API"]
-YouTubeMetricAvailability = Literal["AVAILABLE", "UNKNOWN", "NOT_AVAILABLE"]
+YouTubeMetricAvailability = Literal[
+    "AVAILABLE",
+    "ZERO_AVAILABLE",
+    "NOT_YET_SYNCED",
+    "PRIVACY_LIMITED",
+    "INSUFFICIENT_SAMPLE",
+    "AUTH_REQUIRED",
+    "PROVIDER_ERROR",
+    "UNSUPPORTED_BY_PROVIDER",
+    "UNKNOWN",
+    "NOT_AVAILABLE",
+]
 YouTubeFollowFreshnessState = Literal["FRESH", "STALE", "UNKNOWN"]
 YouTubePublicSyncStatus = Literal["OK", "FAILED", "PARTIAL", "NOT_CONFIGURED", "NOT_FOUND", "UNAVAILABLE"]
 YouTubeOwnerSyncStatus = Literal["OK", "FAILED", "PARTIAL", "NEEDS_AUTH", "NOT_CONFIGURED", "NOT_FOUND", "UNAVAILABLE"]

@@ -29,6 +29,7 @@ from app.api.routes import (
     operator_cockpit,
     operator_planning,
     launch_cadence,
+    long_form_analytics,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     _include_router_flat(application, operator_cockpit.create_router())
     _include_router_flat(application, operator_planning.create_router())
     _include_router_flat(application, launch_cadence.create_router())
+    _include_router_flat(application, long_form_analytics.create_router())
     return application
 
 

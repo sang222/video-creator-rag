@@ -312,6 +312,33 @@ export type LaunchCadenceDashboard = {
   technical_appendix: Record<string, unknown>;
 };
 
+export type LongFormAnalyticsMetric = {
+  value: number | null;
+  availability: {
+    state?: string;
+    reason_code?: string | null;
+    unit?: string;
+  };
+  window_type: "H24" | "H72" | "D7" | "D30";
+  captured_at: string;
+  analytics_snapshot_id: string;
+};
+
+export type LaunchAnalyticsDashboard = {
+  channel_workspace_id: string;
+  launch_day: number | null;
+  published_videos: number;
+  active_series_count: number;
+  next_evidence_milestone: string | null;
+  windows_by_state: Record<string, number>;
+  windows_by_type: Partial<Record<"H24" | "H72" | "D7" | "D30", string>>;
+  analytics_freshness: string;
+  incidents_or_exclusions: number;
+  metrics: Record<string, LongFormAnalyticsMetric>;
+  unavailable_metrics: string[];
+  advanced_details: Record<string, unknown>;
+};
+
 export type ManualPublishConfirmationInput = {
   platform_video_id?: string;
   platform_video_url?: string;

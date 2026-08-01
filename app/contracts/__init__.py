@@ -6,6 +6,11 @@ from app.contracts.channel import (
     ChannelWorkspaceRead,
 )
 from app.contracts.events import AuditEnvelope, EventEnvelope
+from app.contracts.long_form_analytics import (
+    AnalyticsWindowRetryRequest,
+    LaunchAnalyticsDashboardRead,
+    LongFormAnalyticsWindowRead,
+)
 from app.contracts.geo_market import (
     MARKET_GATE_STRICT_ORDER,
     DestinationBinding,

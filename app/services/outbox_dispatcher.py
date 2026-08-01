@@ -33,6 +33,10 @@ from app.services.cadence_events import (
     CADENCE_AGGREGATE_TYPE,
     CADENCE_EVALUATION_EVENT_TYPE,
 )
+from app.services.long_form_analytics import (
+    ANALYTICS_WINDOW_AGGREGATE_TYPE,
+    ANALYTICS_WINDOW_EVENT_TYPE,
+)
 from app.services.production_workflow import (
     WORKFLOW_EVENT_TYPE,
     WorkflowStageError,
@@ -139,6 +143,12 @@ class DurableOutboxDispatcher:
                             DomainEvent.aggregate_type == CADENCE_AGGREGATE_TYPE,
                             DomainEvent.workflow_run_id.is_(None),
                         ),
+                        and_(
+                            DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
+                            DomainEvent.aggregate_type
+                            == ANALYTICS_WINDOW_AGGREGATE_TYPE,
+                            DomainEvent.workflow_run_id.is_(None),
+                        ),
                     ),
                     DomainEvent.delivered_at.is_(None),
                     DomainEvent.published_at.is_(None),
@@ -164,21 +174,30 @@ class DurableOutboxDispatcher:
             if event is None:
                 return None
             cadence_event = event.event_type == CADENCE_EVALUATION_EVENT_TYPE
-            if cadence_event:
+            analytics_event = event.event_type == ANALYTICS_WINDOW_EVENT_TYPE
+            if cadence_event or analytics_event:
                 if event.command_id is None or not isinstance(event.payload, dict):
                     self._dead_letter_cadence_event(
                         event,
                         now=now,
-                        error_code="CADENCE_EVENT_IDENTITY_INVALID",
-                        summary="cadence command identity or payload is invalid",
+                        error_code=(
+                            "CADENCE_EVENT_IDENTITY_INVALID"
+                            if cadence_event
+                            else "ANALYTICS_EVENT_IDENTITY_INVALID"
+                        ),
+                        summary="scheduler command identity or payload is invalid",
                     )
                     continue
                 if event.attempt_count >= event.max_attempts:
                     self._dead_letter_cadence_event(
                         event,
                         now=now,
-                        error_code="CADENCE_RETRY_EXHAUSTED",
-                        summary="cadence event reached its bounded attempt limit",
+                        error_code=(
+                            "CADENCE_RETRY_EXHAUSTED"
+                            if cadence_event
+                            else "ANALYTICS_RETRY_EXHAUSTED"
+                        ),
+                        summary="scheduler event reached its bounded attempt limit",
                     )
                     continue
                 run = None
@@ -208,7 +227,7 @@ class DurableOutboxDispatcher:
             previous_owner = event.lease_owner
             previous_expiry = event.lease_expires_at
             if (
-                not cadence_event
+                run is not None
                 and previous_owner is not None
                 and previous_expiry is not None
                 and previous_expiry <= now
@@ -356,7 +375,10 @@ class DurableOutboxDispatcher:
             # it; row locking plus owner identity preserves that race boundary.
             allow_expired=True,
         )
-        if event.event_type == CADENCE_EVALUATION_EVENT_TYPE:
+        if event.event_type in {
+            CADENCE_EVALUATION_EVENT_TYPE,
+            ANALYTICS_WINDOW_EVENT_TYPE,
+        }:
             return self._record_cadence_failure(
                 event=event,
                 error=error,

@@ -4,7 +4,10 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
-PostPublishObservationWindowName = Literal["T_PLUS_1H", "T_PLUS_6H", "T_PLUS_24H", "T_PLUS_48H", "T_PLUS_7D", "CUSTOM"]
+PostPublishObservationWindowName = Literal[
+    "H24", "H72", "D7", "D30",
+    "T_PLUS_1H", "T_PLUS_6H", "T_PLUS_24H", "T_PLUS_48H", "T_PLUS_7D", "CUSTOM",
+]
 ObservationWindowState = Literal["PENDING", "READY", "COMPLETED", "SKIPPED", "BLOCKED"]
 PostPublishHealthRunState = Literal["PENDING", "COMPLETED", "BLOCKED", "INSUFFICIENT_DATA", "FAILED"]
 PostPublishHealthState = Literal[
@@ -49,6 +52,9 @@ RecoveryRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
 class PostPublishHealthRunCreate(BaseModel):
     uploaded_video_id: uuid.UUID
     observation_window: PostPublishObservationWindowName = "T_PLUS_24H"
+    # Phase E supplies the exact immutable snapshot captured for its due window.
+    # M9 must not substitute the newest snapshot for a different observation window.
+    analytics_snapshot_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
 

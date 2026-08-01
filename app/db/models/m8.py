@@ -121,6 +121,9 @@ class AnalyticsSnapshot(Base):
     observed_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     observed_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     observation_window: Mapped[str] = mapped_column(String(40), nullable=False, default="UNKNOWN")
+    long_form_analytics_window_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("long_form_analytics_windows.id")
+    )
     metrics_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     normalized_metrics_blob: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     metric_availability: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -139,6 +142,12 @@ class AnalyticsSnapshot(Base):
         Index("ix_analytics_snapshots_platform", "platform"),
         Index("ix_analytics_snapshots_captured_at", "captured_at"),
         Index("ix_analytics_snapshots_created_at", "created_at"),
+        Index(
+            "uq_analytics_snapshots_long_form_window",
+            "long_form_analytics_window_id",
+            unique=True,
+            postgresql_where="long_form_analytics_window_id is not null",
+        ),
     )
 
 

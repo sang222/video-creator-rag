@@ -60,6 +60,7 @@ from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.company_access import require_company_permission
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
+from app.services.long_form_analytics import LongFormAnalyticsScheduler
 
 
 PUBLISH_SERVICE_VERSION = "vcos.production-publish.v2"
@@ -1110,6 +1111,7 @@ class ProductionPublishService:
         )
         self.session.add(uploaded)
         self.session.flush()
+        LongFormAnalyticsScheduler(self.session).schedule_uploaded_video(uploaded.id)
         task.actual_uploaded_video_id = uploaded.id
         task.task_state = "VERIFIED"
         task.completed_at = now

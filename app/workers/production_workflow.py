@@ -26,6 +26,10 @@ from app.services.outbox_dispatcher import (
     OutboxLeaseLostError,
 )
 from app.services.cadence_events import CADENCE_EVALUATION_EVENT_TYPE
+from app.services.long_form_analytics import (
+    ANALYTICS_WINDOW_EVENT_TYPE,
+    LongFormAnalyticsScheduler,
+)
 from app.services.production_workflow import (
     PreReadinessProductionGateway,
     PostReadinessProductionGateway,
@@ -118,6 +122,7 @@ class ProductionWorkflowWorker:
 
     def run_once(self) -> WorkerRunResult:
         self._enqueue_due_cadence_evaluations()
+        self._enqueue_due_analytics_windows()
         claim = self._claim()
         if claim is None:
             return WorkerRunResult(status="IDLE")
@@ -155,6 +160,10 @@ class ProductionWorkflowWorker:
                         evaluation_key=str(event.payload["evaluation_key"])
                     ),
                     actor=self._actor,
+                )
+            elif event.event_type == ANALYTICS_WINDOW_EVENT_TYPE:
+                LongFormAnalyticsScheduler(session, now=self.now).execute_window(
+                    uuid.UUID(str(event.payload["analytics_window_id"]))
                 )
             else:
                 coordinator = ProductionWorkflowCoordinator(
@@ -276,6 +285,20 @@ class ProductionWorkflowWorker:
                 seconds=self.cadence_scan_interval_seconds
             )
             return len(launch_runs)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _enqueue_due_analytics_windows(self) -> int:
+        session = self.session_factory()
+        try:
+            count = LongFormAnalyticsScheduler(
+                session, now=self.now
+            ).enqueue_due_windows()
+            session.commit()
+            return count
         except Exception:
             session.rollback()
             raise

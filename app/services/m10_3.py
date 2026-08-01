@@ -36,6 +36,7 @@ from app.db.models import (
     CredentialReference,
     MetricAvailabilitySnapshot,
     RenderPackageSnapshot,
+    LongFormAnalyticsWindow,
     UploadedVideo,
     UploadedVideoMetricsSummary,
     UploadedVideoYouTubeOwnerAnalyticsSnapshot,
@@ -397,7 +398,7 @@ class YouTubeOwnerAnalyticsProvider:
         end_date: date,
     ) -> ProviderFetchResult:
         metrics = (
-            "views,likes,comments,averageViewDuration,averageViewPercentage,"
+            "views,likes,comments,impressions,averageViewDuration,averageViewPercentage,"
             "estimatedMinutesWatched,subscribersGained,subscribersLost"
         )
         query = urllib.parse.urlencode(
@@ -1158,12 +1159,26 @@ class YouTubeOwnerAnalyticsSyncService:
         *,
         uploaded_video_id: uuid.UUID,
         request: YouTubeOwnerAnalyticsSyncRequest | None = None,
+        long_form_analytics_window_id: uuid.UUID | None = None,
     ) -> YouTubeOwnerAnalyticsSyncRun:
         uploaded = _require_uploaded_video(self.session, uploaded_video_id)
         _validate_youtube_uploaded(uploaded)
+        analytics_window = (
+            self.session.get(LongFormAnalyticsWindow, long_form_analytics_window_id)
+            if long_form_analytics_window_id
+            else None
+        )
+        if analytics_window is not None and analytics_window.uploaded_video_id != uploaded.id:
+            raise ValidationFailureError("LONG_FORM_ANALYTICS_WINDOW_UPLOADED_VIDEO_MISMATCH")
+        if long_form_analytics_window_id is not None and analytics_window is None:
+            raise ValidationFailureError("LONG_FORM_ANALYTICS_WINDOW_NOT_FOUND")
         sync_request = request or YouTubeOwnerAnalyticsSyncRequest()
         start_date = sync_request.start_date or uploaded.published_at.date()
-        end_date = sync_request.end_date or utc_now().date()
+        end_date = sync_request.end_date or (
+            analytics_window.minimum_maturity_at.date()
+            if analytics_window is not None
+            else utc_now().date()
+        )
         run = YouTubeOwnerAnalyticsSyncRun(
             uploaded_video_id=uploaded.id,
             company_id=uploaded.company_id,
@@ -1237,6 +1252,10 @@ class YouTubeOwnerAnalyticsSyncService:
                 "YOUTUBE_OWNER_ANALYTICS_SYNC_COMPLETED",
                 "OWNER_ANALYTICS_STRONG_AUTHORITY",
             ],
+            long_form_analytics_window_id=long_form_analytics_window_id,
+            observation_window=(analytics_window.window_type if analytics_window else "UNKNOWN"),
+            observed_from=(uploaded.published_at if analytics_window else None),
+            observed_to=(analytics_window.minimum_maturity_at if analytics_window else None),
         )
         run.run_state = "COMPLETED"
         run.completed_at = utc_now()
@@ -1457,6 +1476,10 @@ def _create_m8_snapshot(
     freshness_state: str,
     confidence_level: str,
     reason_codes: list[str],
+    long_form_analytics_window_id: uuid.UUID | None = None,
+    observation_window: str = "UNKNOWN",
+    observed_from: datetime | None = None,
+    observed_to: datetime | None = None,
 ) -> AnalyticsSnapshot:
     now = utc_now()
     clean_metrics = {key: value for key, value in metrics.items() if value is not None}
@@ -1478,6 +1501,8 @@ def _create_m8_snapshot(
         sync_state="COMPLETED",
         started_at=now,
         completed_at=now,
+        observed_from=observed_from,
+        observed_to=observed_to or now,
         provider_key=provider_key,
         reason_codes=reason_codes,
         next_action="Use YouTube follow summary for dashboard-ready monitoring.",
@@ -1514,9 +1539,10 @@ def _create_m8_snapshot(
         platform=uploaded.platform,
         platform_video_id=uploaded.platform_video_id,
         captured_at=now,
-        observed_from=None,
-        observed_to=now,
-        observation_window="UNKNOWN",
+        observed_from=observed_from,
+        observed_to=observed_to or now,
+        observation_window=observation_window,
+        long_form_analytics_window_id=long_form_analytics_window_id,
         metrics_blob=clean_metrics,
         normalized_metrics_blob=normalized,
         metric_availability=availability,
@@ -1643,9 +1669,13 @@ def _build_youtube_metric_availability(
     for metric_key in sorted(KNOWN_ANALYTICS_METRICS):
         explicit = explicit_availability.get(metric_key)
         if metric_key in metrics:
-            state = "AVAILABLE"
+            state = "ZERO_AVAILABLE" if metrics[metric_key] == 0 else "AVAILABLE"
             reason_code = None
-        elif explicit in {"AVAILABLE", "UNKNOWN", "NOT_AVAILABLE"}:
+        elif explicit in {
+            "AVAILABLE", "ZERO_AVAILABLE", "NOT_YET_SYNCED", "PRIVACY_LIMITED",
+            "INSUFFICIENT_SAMPLE", "AUTH_REQUIRED", "PROVIDER_ERROR", "UNSUPPORTED_BY_PROVIDER",
+            "UNKNOWN", "NOT_AVAILABLE",
+        }:
             state = explicit
             reason_code = (
                 "YOUTUBE_METRIC_UNKNOWN"
@@ -1668,9 +1698,9 @@ def _build_youtube_metric_availability(
             "provider_key": provider_key,
             "source": source,
         }
-        if state == "UNKNOWN":
+        if state in {"UNKNOWN", "NOT_YET_SYNCED", "INSUFFICIENT_SAMPLE", "AUTH_REQUIRED", "PROVIDER_ERROR"}:
             unknown.append(metric_key)
-        elif state == "NOT_AVAILABLE":
+        elif state in {"NOT_AVAILABLE", "PRIVACY_LIMITED", "UNSUPPORTED_BY_PROVIDER"}:
             unavailable.append(metric_key)
     return availability, unknown, unavailable
 

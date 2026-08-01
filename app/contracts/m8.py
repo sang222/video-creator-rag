@@ -24,6 +24,10 @@ AnalyticsSyncState = Literal[
     "PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"
 ]
 AnalyticsObservationWindow = Literal[
+    "H24",
+    "H72",
+    "D7",
+    "D30",
     "T_PLUS_1H",
     "T_PLUS_6H",
     "T_PLUS_24H",
@@ -50,7 +54,18 @@ MetricConfidenceLevel = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 UploadedVideoAnalyticsMonitoringState = Literal[
     "READY_FOR_ANALYTICS", "SYNCED", "PARTIAL_DATA", "NO_DATA_YET", "STALE", "BLOCKED"
 ]
-MetricAvailabilityState = Literal["AVAILABLE", "UNKNOWN", "NOT_AVAILABLE"]
+MetricAvailabilityState = Literal[
+    "AVAILABLE",
+    "ZERO_AVAILABLE",
+    "NOT_YET_SYNCED",
+    "PRIVACY_LIMITED",
+    "INSUFFICIENT_SAMPLE",
+    "AUTH_REQUIRED",
+    "PROVIDER_ERROR",
+    "UNSUPPORTED_BY_PROVIDER",
+    "UNKNOWN",
+    "NOT_AVAILABLE",
+]
 
 
 KNOWN_ANALYTICS_METRICS = {

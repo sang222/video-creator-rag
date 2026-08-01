@@ -25,6 +25,7 @@ import type {
   OpsQueue,
   CadenceEvaluation,
   LaunchCadenceDashboard,
+  LaunchAnalyticsDashboard,
   PackagingApplyApprovedChangesResult,
   PackagingPatchApplyRun,
   PackagingPatchApprovalDecision,
@@ -125,7 +126,8 @@ export const queryKeys = {
     "production-cockpit",
     projectId ?? "next"
   ],
-  launchCadence: (channelId: string) => ["launch-cadence", channelId]
+  launchCadence: (channelId: string) => ["launch-cadence", channelId],
+  launchAnalytics: (channelId: string) => ["launch-analytics", channelId]
 } as const;
 
 export function getCurrentUser() {
@@ -158,6 +160,12 @@ export function getProductionCockpit(projectId?: string) {
 export function getLaunchCadenceDashboard(channelId: string) {
   return request<LaunchCadenceDashboard>(
     `/channels/${channelId}/launch-cadence`
+  );
+}
+
+export function getLaunchAnalyticsDashboard(channelId: string) {
+  return request<LaunchAnalyticsDashboard>(
+    `/channels/${channelId}/launch-analytics-dashboard`
   );
 }
 

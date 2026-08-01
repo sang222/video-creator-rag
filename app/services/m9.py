@@ -41,6 +41,10 @@ from app.services.ops import ManualActionService
 
 
 WINDOW_DELTAS = {
+    "H24": timedelta(hours=24),
+    "H72": timedelta(hours=72),
+    "D7": timedelta(days=7),
+    "D30": timedelta(days=30),
     "T_PLUS_1H": timedelta(hours=1),
     "T_PLUS_6H": timedelta(hours=6),
     "T_PLUS_24H": timedelta(hours=24),
@@ -48,6 +52,10 @@ WINDOW_DELTAS = {
     "T_PLUS_7D": timedelta(days=7),
 }
 WINDOW_MIN_IMPRESSIONS = {
+    "H24": 100,
+    "H72": 150,
+    "D7": 300,
+    "D30": 500,
     "T_PLUS_1H": 20,
     "T_PLUS_6H": 50,
     "T_PLUS_24H": 100,
@@ -261,7 +269,10 @@ class PostPublishHealthMonitorService:
     ) -> PostPublishHealthRun:
         self.seed_taxonomy_versions()
         context = _load_context(
-            self.session, data.uploaded_video_id, data.observation_window
+            self.session,
+            data.uploaded_video_id,
+            data.observation_window,
+            analytics_snapshot_id=data.analytics_snapshot_id,
         )
         window = ObservationWindowService(self.session).require_window(
             context.uploaded.id, data.observation_window
@@ -342,7 +353,10 @@ class PostPublishHealthMonitorService:
         if run.run_state in {"COMPLETED", "BLOCKED", "INSUFFICIENT_DATA", "FAILED"}:
             return run
         context = _load_context(
-            self.session, run.uploaded_video_id, run.observation_window
+            self.session,
+            run.uploaded_video_id,
+            run.observation_window,
+            analytics_snapshot_id=run.analytics_snapshot_id,
         )
         window = ObservationWindowService(self.session).require_window(
             context.uploaded.id, run.observation_window
@@ -1247,7 +1261,11 @@ class PolicyRightsDiagnosticService:
 
 
 def _load_context(
-    session: Session, uploaded_video_id: uuid.UUID, observation_window: str
+    session: Session,
+    uploaded_video_id: uuid.UUID,
+    observation_window: str,
+    *,
+    analytics_snapshot_id: uuid.UUID | None = None,
 ) -> DiagnosticContext:
     uploaded = _require_uploaded(session, uploaded_video_id)
     summary = session.scalars(
@@ -1256,11 +1274,19 @@ def _load_context(
         )
     ).one_or_none()
     analytics = (
-        session.get(AnalyticsSnapshot, summary.latest_analytics_snapshot_id)
-        if summary and summary.latest_analytics_snapshot_id
-        else None
+        session.get(AnalyticsSnapshot, analytics_snapshot_id)
+        if analytics_snapshot_id
+        else (
+            session.get(AnalyticsSnapshot, summary.latest_analytics_snapshot_id)
+            if summary and summary.latest_analytics_snapshot_id
+            else None
+        )
     )
-    if analytics is None:
+    if analytics is not None and analytics.uploaded_video_id != uploaded.id:
+        raise ValidationFailureError("ANALYTICS_SNAPSHOT_UPLOADED_VIDEO_MISMATCH")
+    if analytics is None and analytics_snapshot_id is not None:
+        raise ValidationFailureError("ANALYTICS_SNAPSHOT_NOT_FOUND")
+    if analytics is None and analytics_snapshot_id is None:
         analytics = session.scalars(
             select(AnalyticsSnapshot)
             .where(AnalyticsSnapshot.uploaded_video_id == uploaded.id)

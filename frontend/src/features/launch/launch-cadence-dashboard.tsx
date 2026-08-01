@@ -24,6 +24,7 @@ import { Panel } from "@/components/ui/panel";
 import {
   evaluateCadence,
   getChannels,
+  getLaunchAnalyticsDashboard,
   getLaunchCadenceDashboard,
   pauseLaunchCadence,
   queryKeys,
@@ -356,20 +357,7 @@ export function LaunchCadenceDashboardView({
           </p>
         </Panel>
 
-        <Panel>
-          <h2 className="text-base font-semibold">
-            Analytics kiếm tiền · Phase E
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Phase E chưa khả dụng. Dashboard không suy diễn số liệu khi chưa có
-            nguồn dữ liệu đã xác minh.
-          </p>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-            <PlaceholderMetric label="Subscribers" />
-            <PlaceholderMetric label="Watch hours công khai / 12 tháng" />
-            <PlaceholderMetric label="Ngày dự kiến đủ YPP" />
-          </dl>
-        </Panel>
+        <LongFormAnalyticsPanel channelId={channelId} />
       </div>
 
       <TechnicalAppendix>
@@ -390,6 +378,81 @@ export function LaunchCadenceDashboardView({
         </pre>
       </TechnicalAppendix>
     </div>
+  );
+}
+
+const metricLabels: Record<string, string> = {
+  views: "Lượt xem",
+  impressions: "Lượt hiển thị",
+  click_through_rate: "Tỷ lệ nhấp",
+  average_view_duration_seconds: "Thời lượng xem trung bình",
+  average_view_percentage: "Tỷ lệ xem trung bình",
+  watch_time_minutes: "Thời gian xem",
+  likes: "Lượt thích",
+  comments: "Bình luận",
+  subscribers_gained: "Người đăng ký tăng",
+  subscribers_lost: "Người đăng ký giảm"
+};
+
+function LongFormAnalyticsPanel({ channelId }: { channelId: string }) {
+  const query = useQuery({
+    queryKey: queryKeys.launchAnalytics(channelId),
+    queryFn: () => getLaunchAnalyticsDashboard(channelId),
+    enabled: Boolean(channelId),
+    retry: false
+  });
+
+  if (query.isLoading) {
+    return <Panel><p className="text-sm text-muted-foreground">Đang tải các mốc học sau upload.</p></Panel>;
+  }
+  if (query.isError || !query.data) {
+    return (
+      <Panel>
+        <h2 className="text-base font-semibold">Học sau upload long-form</h2>
+        <p className="mt-2 text-sm text-muted-foreground">Chưa có video long-form đã xác nhận upload để lập các mốc 24 giờ, 72 giờ, 7 ngày và 30 ngày.</p>
+      </Panel>
+    );
+  }
+
+  const dashboard = query.data;
+  const metricEntries = Object.entries(dashboard.metrics).slice(0, 6);
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">Học sau upload long-form</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Chỉ dùng số liệu owner analytics đã gắn với từng mốc quan sát; dữ liệu thiếu được hiển thị là thiếu, không thay bằng ước lượng.</p>
+        </div>
+        <FriendlyStatusBadge value={dashboard.analytics_freshness} />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {(["H24", "H72", "D7", "D30"] as const).map((windowType) => (
+          <div key={windowType} className="rounded-md border border-border bg-muted/25 p-3">
+            <p className="text-sm font-medium">{windowType === "H24" ? "24 giờ" : windowType === "H72" ? "72 giờ" : windowType === "D7" ? "7 ngày" : "30 ngày"}</p>
+            <div className="mt-2"><FriendlyStatusBadge value={dashboard.windows_by_type[windowType] ?? "NOT_YET_SYNCED"} /></div>
+          </div>
+        ))}
+      </div>
+      {metricEntries.length ? (
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {metricEntries.map(([key, metric]) => (
+            <div key={key} className="rounded-md border border-border p-3">
+              <dt className="text-sm text-muted-foreground">{metricLabels[key] ?? key}</dt>
+              <dd className="mt-1 text-xl font-semibold">{metric.value ?? "Chưa có"}</dd>
+              <div className="mt-2"><FriendlyStatusBadge value={metric.availability.state ?? "UNKNOWN"} /></div>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-4 text-sm text-muted-foreground">Chưa có metric owner analytics đủ điều kiện hiển thị. Hệ thống vẫn giữ các mốc theo lịch và báo rõ khi cần kết nối lại quyền truy cập.</p>
+      )}
+      {dashboard.incidents_or_exclusions ? <p className="mt-4 text-sm text-amber-700 dark:text-amber-300">Có {dashboard.incidents_or_exclusions} sự cố hoặc ngoại lệ liên quan; các dữ liệu đó không được dùng làm bài học tự động.</p> : null}
+      <TechnicalAppendix>
+        <div>Video đã publish: {dashboard.published_videos}</div>
+        <div>Mốc bằng chứng tiếp theo: {dashboard.next_evidence_milestone ? new Date(dashboard.next_evidence_milestone).toLocaleString("vi-VN") : "Chưa có"}</div>
+        <div>Metric không khả dụng: {dashboard.unavailable_metrics.length ? dashboard.unavailable_metrics.join(", ") : "Không có"}</div>
+      </TechnicalAppendix>
+    </Panel>
   );
 }
 
@@ -487,15 +550,6 @@ function InfoRow({
         <div className="text-muted-foreground">{label}</div>
         <div className="mt-1">{value}</div>
       </div>
-    </div>
-  );
-}
-
-function PlaceholderMetric({ label }: { label: string }) {
-  return (
-    <div className="rounded-md border border-dashed border-border p-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-2 text-sm font-medium">Chưa khả dụng</dd>
     </div>
   );
 }

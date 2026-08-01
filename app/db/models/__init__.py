@@ -115,6 +115,7 @@ from app.db.models.m9 import (
     RecoveryProposal,
     RetentionDiagnosticRun,
 )
+from app.db.models.long_form_analytics import LongFormAnalyticsWindow
 from app.db.models.m10 import (
     LearningCandidate,
     LearningCandidateGenerationRun,
