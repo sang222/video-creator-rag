@@ -628,6 +628,26 @@ class EditorialIdeaCandidate(Base):
     )
     experiment_phase: Mapped[str | None] = mapped_column(String(40))
     primary_variable_under_test: Mapped[str | None] = mapped_column(String(160))
+    audience_promise: Mapped[str | None] = mapped_column(Text)
+    audience_promise_version: Mapped[str | None] = mapped_column(String(120))
+    audience_promise_hash: Mapped[str | None] = mapped_column(String(64))
+    target_audience_definition: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    audience_drift_guard_version: Mapped[str | None] = mapped_column(String(120))
+    strategic_intent: Mapped[str | None] = mapped_column(String(40))
+    intent_success_criteria: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    intent_success_criteria_version: Mapped[str | None] = mapped_column(String(120))
+    intent_success_criteria_hash: Mapped[str | None] = mapped_column(String(64))
+    experiment_hypothesis: Mapped[str | None] = mapped_column(Text)
+    decision_reversibility: Mapped[str | None] = mapped_column(String(32))
+    active_launch_policy_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_channel_launch_policy_versions.id"),
+    )
+    active_launch_policy_hash: Mapped[str | None] = mapped_column(String(64))
+    active_launch_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("launch_runs.id")
+    )
+    active_launch_run_hash: Mapped[str | None] = mapped_column(String(64))
     baseline_refs: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list
     )
@@ -673,6 +693,14 @@ class EditorialIdeaCandidate(Base):
             "ix_editorial_idea_candidates_context_pack_id", "context_pack_snapshot_id"
         ),
         Index("ix_editorial_idea_candidates_stage", "stage"),
+        Index(
+            "ix_editorial_idea_candidates_active_launch_policy",
+            "active_launch_policy_version_id",
+        ),
+        Index(
+            "ix_editorial_idea_candidates_active_launch_run",
+            "active_launch_run_id",
+        ),
         Index("ix_editorial_idea_candidates_created_at", "created_at"),
     )
 
@@ -726,6 +754,27 @@ class ProjectAdmissionDecision(Base):
     decision_hash: Mapped[str | None] = mapped_column(String(64))
     assignment_input_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    audience_promise: Mapped[str | None] = mapped_column(Text)
+    audience_promise_version: Mapped[str | None] = mapped_column(String(120))
+    audience_promise_hash: Mapped[str | None] = mapped_column(String(64))
+    target_audience_definition: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    audience_drift_guard_version: Mapped[str | None] = mapped_column(String(120))
+    strategic_intent: Mapped[str | None] = mapped_column(String(40))
+    intent_success_criteria: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    intent_success_criteria_version: Mapped[str | None] = mapped_column(String(120))
+    intent_success_criteria_hash: Mapped[str | None] = mapped_column(String(64))
+    experiment_hypothesis: Mapped[str | None] = mapped_column(Text)
+    primary_variable_under_test: Mapped[str | None] = mapped_column(String(160))
+    decision_reversibility: Mapped[str | None] = mapped_column(String(32))
+    active_launch_policy_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_channel_launch_policy_versions.id"),
+    )
+    active_launch_policy_hash: Mapped[str | None] = mapped_column(String(64))
+    active_launch_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("launch_runs.id")
+    )
+    active_launch_run_hash: Mapped[str | None] = mapped_column(String(64))
     budget_gate_result: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict
     )
@@ -794,6 +843,35 @@ class ProjectAdmissionDecision(Base):
             ")",
             name="ck_project_admission_decisions_v2_lane_source",
         ),
+        CheckConstraint(
+            "(schema_version = 'v1') or ("
+            "audience_promise is not null and btrim(audience_promise) <> '' "
+            "and audience_promise_version is not null "
+            "and audience_promise_hash ~ '^[0-9a-f]{64}$' "
+            "and target_audience_definition is not null "
+            "and jsonb_typeof(target_audience_definition) = 'object' "
+            "and target_audience_definition <> '{}'::jsonb "
+            "and audience_drift_guard_version is not null "
+            "and strategic_intent in ("
+            "'ACQUISITION','AUDIENCE_DEPTH','AUTHORITY',"
+            "'SERIES_CONTINUITY','CONTROLLED_EXPERIMENT') "
+            "and intent_success_criteria is not null "
+            "and jsonb_typeof(intent_success_criteria) = 'object' "
+            "and intent_success_criteria <> '{}'::jsonb "
+            "and intent_success_criteria_version is not null "
+            "and intent_success_criteria_hash ~ '^[0-9a-f]{64}$' "
+            "and primary_variable_under_test is not null "
+            "and btrim(primary_variable_under_test) <> '' "
+            "and decision_reversibility in ('TWO_WAY_DOOR','ONE_WAY_DOOR') "
+            "and active_launch_policy_version_id is not null "
+            "and active_launch_policy_hash ~ '^[0-9a-f]{64}$' "
+            "and active_launch_run_id is not null "
+            "and active_launch_run_hash ~ '^[0-9a-f]{64}$' "
+            "and (strategic_intent <> 'CONTROLLED_EXPERIMENT' "
+            "or (experiment_hypothesis is not null "
+            "and btrim(experiment_hypothesis) <> '')))",
+            name="ck_project_admission_decisions_v2_strategic_lineage",
+        ),
         Index(
             "ix_project_admission_decisions_editorial_research_run_id",
             "editorial_research_run_id",
@@ -816,6 +894,14 @@ class ProjectAdmissionDecision(Base):
         Index("ix_project_admission_decisions_production_lane", "production_lane"),
         Index("ix_project_admission_decisions_series_plan_id", "series_plan_id"),
         Index("ix_project_admission_decisions_series_run_id", "series_run_id"),
+        Index(
+            "ix_project_admission_decisions_active_launch_policy",
+            "active_launch_policy_version_id",
+        ),
+        Index(
+            "ix_project_admission_decisions_active_launch_run",
+            "active_launch_run_id",
+        ),
         Index("ix_project_admission_decisions_decision", "decision"),
         Index("ix_project_admission_decisions_project_id", "admitted_video_project_id"),
         Index(

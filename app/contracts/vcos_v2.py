@@ -88,6 +88,176 @@ class PlanningSourceType(StrEnum):
     LONG_FORM_PLAN = "LONG_FORM_PLAN"
 
 
+class StrategicIntent(StrEnum):
+    """The bounded reason a launch-era long-form video exists."""
+
+    ACQUISITION = "ACQUISITION"
+    AUDIENCE_DEPTH = "AUDIENCE_DEPTH"
+    AUTHORITY = "AUTHORITY"
+    SERIES_CONTINUITY = "SERIES_CONTINUITY"
+    CONTROLLED_EXPERIMENT = "CONTROLLED_EXPERIMENT"
+
+
+class DecisionReversibility(StrEnum):
+    """Whether a strategic choice can safely be revisited after evidence."""
+
+    TWO_WAY_DOOR = "TWO_WAY_DOOR"
+    ONE_WAY_DOOR = "ONE_WAY_DOOR"
+
+
+class StrategicLineageClaimV2(BaseModel):
+    """Optional, untrusted strategic-lineage claims accepted by planning APIs.
+
+    Values may be omitted because the admission service resolves the exact
+    active channel/launch authority itself.  Any supplied value is reconciled
+    against that server-derived result before persistence.
+    """
+
+    audience_promise: str | None = Field(default=None, min_length=1, max_length=4_000)
+    audience_promise_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    audience_promise_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    target_audience_definition: dict[str, Any] | None = None
+    audience_drift_guard_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    strategic_intent: StrategicIntent | None = None
+    intent_success_criteria: dict[str, Any] | None = None
+    intent_success_criteria_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    intent_success_criteria_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    experiment_hypothesis: str | None = Field(default=None, max_length=4_000)
+    primary_variable_under_test: str | None = Field(
+        default=None, min_length=1, max_length=160
+    )
+    decision_reversibility: DecisionReversibility | None = None
+    active_launch_policy_version_id: uuid.UUID | None = None
+    active_launch_policy_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    active_launch_run_id: uuid.UUID | None = None
+    active_launch_run_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StrategicLineageV2(BaseModel):
+    """Frozen audience, intent, and active-launch authority for a v2 admission.
+
+    These values are deliberately explicit rather than being regenerated from
+    mutable channel configuration at a later workflow stage.  The admission
+    service remains responsible for deriving them from the active authorities
+    and rejecting any request whose claimed values do not match those sources.
+    """
+
+    audience_promise: str = Field(min_length=1, max_length=4_000)
+    audience_promise_version: str = Field(min_length=1, max_length=120)
+    audience_promise_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_audience_definition: dict[str, Any] = Field(min_length=1)
+    audience_drift_guard_version: str = Field(min_length=1, max_length=120)
+    strategic_intent: StrategicIntent = StrategicIntent.ACQUISITION
+    intent_success_criteria: dict[str, Any] = Field(min_length=1)
+    intent_success_criteria_version: str = Field(min_length=1, max_length=120)
+    intent_success_criteria_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    experiment_hypothesis: str | None = Field(default=None, max_length=4_000)
+    primary_variable_under_test: str = Field(min_length=1, max_length=160)
+    decision_reversibility: DecisionReversibility = DecisionReversibility.TWO_WAY_DOOR
+    active_launch_policy_version_id: uuid.UUID
+    active_launch_policy_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    active_launch_run_id: uuid.UUID
+    active_launch_run_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @staticmethod
+    def _canonical_hash(payload: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @classmethod
+    def calculate_audience_promise_hash(
+        cls,
+        *,
+        audience_promise: str,
+        audience_promise_version: str,
+        target_audience_definition: dict[str, Any],
+        audience_drift_guard_version: str,
+    ) -> str:
+        return cls._canonical_hash(
+            {
+                "audience_drift_guard_version": audience_drift_guard_version,
+                "audience_promise": audience_promise,
+                "audience_promise_version": audience_promise_version,
+                "target_audience_definition": target_audience_definition,
+            }
+        )
+
+    @classmethod
+    def calculate_intent_success_criteria_hash(
+        cls,
+        *,
+        strategic_intent: StrategicIntent,
+        intent_success_criteria: dict[str, Any],
+        intent_success_criteria_version: str,
+        experiment_hypothesis: str | None,
+        primary_variable_under_test: str,
+        decision_reversibility: DecisionReversibility,
+    ) -> str:
+        return cls._canonical_hash(
+            {
+                "decision_reversibility": decision_reversibility.value,
+                "experiment_hypothesis": experiment_hypothesis,
+                "intent_success_criteria": intent_success_criteria,
+                "intent_success_criteria_version": intent_success_criteria_version,
+                "primary_variable_under_test": primary_variable_under_test,
+                "strategic_intent": strategic_intent.value,
+            }
+        )
+
+    @model_validator(mode="after")
+    def validate_frozen_lineage(self) -> Self:
+        if not self.audience_promise.strip():
+            raise ValueError("audience_promise must not be blank")
+        if not self.primary_variable_under_test.strip():
+            raise ValueError("primary_variable_under_test must not be blank")
+        if (
+            self.strategic_intent == StrategicIntent.CONTROLLED_EXPERIMENT
+            and not (self.experiment_hypothesis or "").strip()
+        ):
+            raise ValueError("CONTROLLED_EXPERIMENT requires experiment_hypothesis")
+        expected_audience_hash = self.calculate_audience_promise_hash(
+            audience_promise=self.audience_promise,
+            audience_promise_version=self.audience_promise_version,
+            target_audience_definition=self.target_audience_definition,
+            audience_drift_guard_version=self.audience_drift_guard_version,
+        )
+        if self.audience_promise_hash != expected_audience_hash:
+            raise ValueError("audience_promise_hash does not match frozen authority")
+        expected_intent_hash = self.calculate_intent_success_criteria_hash(
+            strategic_intent=self.strategic_intent,
+            intent_success_criteria=self.intent_success_criteria,
+            intent_success_criteria_version=self.intent_success_criteria_version,
+            experiment_hypothesis=self.experiment_hypothesis,
+            primary_variable_under_test=self.primary_variable_under_test,
+            decision_reversibility=self.decision_reversibility,
+        )
+        if self.intent_success_criteria_hash != expected_intent_hash:
+            raise ValueError(
+                "intent_success_criteria_hash does not match frozen authority"
+            )
+        return self
+
+
 class DurationContractV2(BaseModel):
     """Frozen duration envelope shared by planning and production phases."""
 
@@ -362,7 +532,7 @@ class AssignmentResolution(BaseModel):
         return self.standalone_reason_code
 
 
-class ProjectAdmissionV2Request(BaseModel):
+class ProjectAdmissionV2Request(StrategicLineageClaimV2):
     schema_version: Literal["v2"] = "v2"
     planning_source_type: PlanningSourceType
     company_id: uuid.UUID
@@ -415,7 +585,7 @@ class ProjectAdmissionV2Request(BaseModel):
         return self
 
 
-class ProjectAdmissionV2Read(BaseModel):
+class ProjectAdmissionV2Read(StrategicLineageV2):
     id: uuid.UUID
     schema_version: Literal["v2"]
     decision: Literal["ADMIT", "BLOCK"]
@@ -440,7 +610,7 @@ class ProjectAdmissionV2Read(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
 
-class LongFormPlanningRequest(BaseModel):
+class LongFormPlanningRequest(StrategicLineageClaimV2):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     channel_profile_version_id: uuid.UUID

@@ -55,7 +55,7 @@ def _pre_lts_package(db_session, scope) -> FirstScriptedVideoPackage:
         prompt_audit_snapshot_refs=[],
         artifacts={
             "runtime_guard": {
-                "real_ollama_agent_run": True,
+                "real_openai_agent_run": True,
                 "llm_router_only": True,
                 "no_media_provider_calls": True,
                 "no_upload_or_publish": True,

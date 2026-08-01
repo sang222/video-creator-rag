@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -9,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -26,7 +28,7 @@ class LLMRouterProfile(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     profile_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
     provider_key: Mapped[str] = mapped_column(
-        String(80), nullable=False, default="OLLAMA"
+        String(80), nullable=False, default="OPENAI"
     )
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     real_execution_enabled: Mapped[bool] = mapped_column(
@@ -54,6 +56,9 @@ class LLMRouterLane(Base):
         JSONB, nullable=False, default=list
     )
     primary_model: Mapped[str] = mapped_column(String(160), nullable=False)
+    reasoning_effort: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="low"
+    )
     fallback_models: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list
     )
@@ -91,7 +96,7 @@ class LLMModelProfile(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     provider_key: Mapped[str] = mapped_column(
-        String(80), nullable=False, default="OLLAMA"
+        String(80), nullable=False, default="OPENAI"
     )
     model_id: Mapped[str] = mapped_column(String(160), nullable=False)
     model_role: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -100,6 +105,10 @@ class LLMModelProfile(Base):
     critical_path_allowed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    capability_blob: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    pricing_snapshot_version: Mapped[str | None] = mapped_column(String(160))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
@@ -124,6 +133,9 @@ class LLMRouteAttempt(Base):
     requested_task_type: Mapped[str | None] = mapped_column(String(160))
     selected_model: Mapped[str] = mapped_column(String(160), nullable=False)
     fallback_level: Mapped[str] = mapped_column(String(40), nullable=False)
+    reasoning_effort: Mapped[str | None] = mapped_column(String(40))
+    provider_request_id: Mapped[str | None] = mapped_column(String(160))
+    actual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
     request_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     response_hash: Mapped[str | None] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(40), nullable=False)

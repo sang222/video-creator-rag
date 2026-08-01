@@ -48,7 +48,7 @@ FORBIDDEN_M10_2_M11_TABLES = {
     "content_derivative_graphs",
     "reusable_artifact_stores",
     "derivative_originality_gates",
-    "ollama_llm_providers",
+    "legacy_llm_provider_tables",
     "media_provider_routers",
     "provider_capability_matrices",
     "dashboard_widgets",
@@ -472,6 +472,6 @@ def test_m10_payloads_do_not_include_config_or_deferred_scope_fields(db_session,
     ).lower()
     for field in FORBIDDEN_LEARNING_PAYLOAD_FIELDS:
         assert field not in payload_text
-    assert "ollama" not in payload_text
+    assert "expired_local_llm" not in payload_text
     assert "elevenlabs" not in payload_text
     assert "auto publish" not in payload_text

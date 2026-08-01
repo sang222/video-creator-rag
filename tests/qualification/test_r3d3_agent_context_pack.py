@@ -62,11 +62,11 @@ def _settings() -> Settings:
         _env_file=None,
         production_prompt_activation_enabled=True,
         real_llm_package_run_enabled=True,
-        real_ollama_agent_run_enabled=True,
+        real_openai_agent_run_enabled=True,
         media_provider_calls_disabled=True,
         upload_and_publish_disabled=True,
         old_provider_smoke_disabled=True,
-        llm_provider="ollama",
+        llm_provider="openai",
         llm_real_execution_enabled=True,
         llm_router_real_smoke=False,
     )

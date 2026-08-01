@@ -78,7 +78,7 @@ def test_readiness_excludes_mock_providers(db_session) -> None:
 
     assert not any(key.startswith("mock_") for key in provider_keys)
     assert provider_keys == {
-        "ollama",
+        "openai",
         "youtube-public",
         "youtube-owner",
         "google-drive",

@@ -285,7 +285,11 @@ def build_channel_contract(
         ),
     }
     missing_fields = _missing_fields(contract)
-    contradiction_reasons = _contradiction_reasons(contract)
+    contradiction_reasons = _contradiction_reasons(
+        contract,
+        profile_input=profile_input,
+        source=source,
+    )
     market_status = (
         "KNOWN"
         if not any(field.startswith("market_locale.") for field in missing_fields)
@@ -422,11 +426,37 @@ def _missing_fields(contract: dict[str, Any]) -> list[str]:
     return sorted(set(missing))
 
 
-def _contradiction_reasons(contract: dict[str, Any]) -> list[str]:
+def _contradiction_reasons(
+    contract: dict[str, Any],
+    *,
+    profile_input: dict[str, Any] | None = None,
+    source: dict[str, Any] | None = None,
+) -> list[str]:
     reasons: list[str] = []
     platform = contract["platform_strategy"]
     learning = contract["learning_policy"]
     media = contract["media_policy"]
+    raw_profile = profile_input or {}
+    raw_source = source or {}
+    if _contains_shorts_authority(raw_profile):
+        reasons.append("CHANNEL_CONTRACT_SHORTS_AUTHORITY_FORBIDDEN")
+    primary_platforms = [
+        contract["channel_identity"].get("primary_platform"),
+        platform.get("primary_platform"),
+        *_declared_primary_platforms(raw_profile, raw_source),
+    ]
+    if any(
+        value is not None and not _is_youtube_primary_platform(value)
+        for value in primary_platforms
+    ):
+        reasons.append("CHANNEL_CONTRACT_PRIMARY_PLATFORM_MUST_BE_YOUTUBE")
+    if _contains_auto_publish(raw_profile):
+        reasons.append("CHANNEL_CONTRACT_AUTO_PUBLISH_FORBIDDEN")
+    if any(
+        not _is_native_ffmpeg_renderer(renderer)
+        for renderer in _declared_renderers(raw_profile)
+    ):
+        reasons.append("CHANNEL_CONTRACT_RENDERER_MUST_BE_NATIVE_FFMPEG")
     if platform.get("auto_publish_allowed") is True:
         reasons.append("platform_strategy.auto_publish_allowed must be false")
     if platform.get("studio_scraping_allowed") is True:
@@ -452,7 +482,104 @@ def _contradiction_reasons(contract: dict[str, Any]) -> list[str]:
     )
     if missing_forbidden:
         reasons.append(f"forbidden_behavior missing locked rules: {missing_forbidden}")
-    return reasons
+    return sorted(set(reasons))
+
+
+def _contains_shorts_authority(value: Any) -> bool:
+    """Detect retired Shorts machine authority without matching ordinary prose."""
+
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_token = _machine_token(key)
+            if key_token in {
+                "shorts",
+                "youtubeshorts",
+                "shortform",
+                "shorts916",
+            }:
+                return True
+            if _contains_shorts_authority(child):
+                return True
+        return False
+    if isinstance(value, list | tuple | set):
+        return any(_contains_shorts_authority(item) for item in value)
+    if isinstance(value, str):
+        return _machine_token(value) in {
+            "shorts",
+            "youtubeshorts",
+            "shortform",
+            "shorts916",
+            "longformandshorts",
+        }
+    return False
+
+
+def _declared_primary_platforms(
+    profile_input: dict[str, Any], source: dict[str, Any]
+) -> list[Any]:
+    values: list[Any] = []
+    for mapping in (
+        _dict(profile_input.get("platform_strategy")),
+        _dict(source.get("channel_identity")),
+        _dict(source.get("platform_strategy")),
+    ):
+        for key in ("primary_platform", "primary", "platform"):
+            if mapping.get(key) is not None:
+                values.append(mapping[key])
+    return values
+
+
+def _is_youtube_primary_platform(value: Any) -> bool:
+    return _machine_token(value) in {
+        "youtube",
+        "youtubelongform",
+        "youtubelongformonly",
+    }
+
+
+def _contains_auto_publish(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_token = _machine_token(key)
+            if key_token in {"autopublishallowed", "autopublish"} and child is True:
+                return True
+            if key_token == "publishmode" and _machine_token(child) in {
+                "auto",
+                "automatic",
+                "autopublish",
+            }:
+                return True
+            if _contains_auto_publish(child):
+                return True
+        return False
+    if isinstance(value, list | tuple | set):
+        return any(_contains_auto_publish(item) for item in value)
+    return False
+
+
+def _declared_renderers(value: Any) -> list[Any]:
+    renderers: list[Any] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if _machine_token(key) in {
+                "renderer",
+                "finalrenderauthority",
+                "productionrendererplanned",
+            }:
+                renderers.append(child)
+            renderers.extend(_declared_renderers(child))
+    elif isinstance(value, list | tuple | set):
+        for item in value:
+            renderers.extend(_declared_renderers(item))
+    return renderers
+
+
+def _is_native_ffmpeg_renderer(value: Any) -> bool:
+    return _machine_token(value) == "nativeffmpegrenderer"
+
+
+def _machine_token(value: Any) -> str:
+    return "".join(char for char in str(value).lower() if char.isalnum())
 
 
 def _legacy_market(value: Any) -> str | None:

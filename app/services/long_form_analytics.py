@@ -18,6 +18,7 @@ from app.contracts.events import EventEnvelope
 from app.contracts.long_form_analytics import (
     LaunchAnalyticsDashboardRead,
 )
+from app.contracts.vcos_v2 import StrategicLineageV2
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -27,10 +28,13 @@ from app.db.models import (
     OpsIncident,
     UploadedVideo,
 )
+from app.db.models.m5 import ProjectAdmissionDecision
+from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
 from app.services.m10_3 import YouTubeOwnerAnalyticsSyncService
 from app.services.m9 import PostPublishHealthMonitorService
+from app.services.production_package import strategic_lineage_from_record
 from app.contracts.m9 import PostPublishHealthRunCreate
 
 
@@ -75,7 +79,8 @@ class LongFormAnalyticsScheduler:
             for row in self.session.scalars(
                 select(LongFormAnalyticsWindow).where(
                     LongFormAnalyticsWindow.uploaded_video_id == uploaded.id,
-                    LongFormAnalyticsWindow.metric_authority == PRIMARY_METRIC_AUTHORITY,
+                    LongFormAnalyticsWindow.metric_authority
+                    == PRIMARY_METRIC_AUTHORITY,
                 )
             ).all()
         }
@@ -135,7 +140,12 @@ class LongFormAnalyticsScheduler:
             select(LongFormAnalyticsWindow)
             .where(
                 LongFormAnalyticsWindow.state.in_(
-                    ["SCHEDULED", "WAITING_FOR_MATURITY", "READY_TO_SYNC", "RETRY_SCHEDULED"]
+                    [
+                        "SCHEDULED",
+                        "WAITING_FOR_MATURITY",
+                        "READY_TO_SYNC",
+                        "RETRY_SCHEDULED",
+                    ]
                 ),
                 LongFormAnalyticsWindow.scheduled_for <= now,
                 or_(
@@ -165,7 +175,9 @@ class LongFormAnalyticsScheduler:
                 ),
                 company_id=window.company_id,
             )
-            event.command_id = f"analytics-window:{window.id}:{window.attempt_count + 1}"
+            event.command_id = (
+                f"analytics-window:{window.id}:{window.attempt_count + 1}"
+            )
             event.max_attempts = window.max_attempts
             count += 1
         self.session.flush()
@@ -205,9 +217,7 @@ class LongFormAnalyticsScheduler:
                 if sync_run.run_state in {"NEEDS_AUTH", "SKIPPED"}:
                     window.state = "BLOCKED_AUTH"
                     window.next_attempt_at = None
-                    reason_code = str(
-                        sync_run.error_code or "ANALYTICS_AUTH_REQUIRED"
-                    )
+                    reason_code = str(sync_run.error_code or "ANALYTICS_AUTH_REQUIRED")
                     window.reason_codes = _dedupe(
                         [
                             *window.reason_codes,
@@ -282,7 +292,9 @@ class LongFormAnalyticsScheduler:
         self.session.flush()
         return window
 
-    def list_windows(self, uploaded_video_id: uuid.UUID) -> list[LongFormAnalyticsWindow]:
+    def list_windows(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[LongFormAnalyticsWindow]:
         return list(
             self.session.scalars(
                 select(LongFormAnalyticsWindow)
@@ -311,11 +323,15 @@ class LongFormAnalyticsScheduler:
         self.session.flush()
         return window
 
-    def dashboard(self, channel_workspace_id: uuid.UUID) -> LaunchAnalyticsDashboardRead:
+    def dashboard(
+        self, channel_workspace_id: uuid.UUID
+    ) -> LaunchAnalyticsDashboardRead:
         windows = list(
             self.session.scalars(
                 select(LongFormAnalyticsWindow)
-                .where(LongFormAnalyticsWindow.channel_workspace_id == channel_workspace_id)
+                .where(
+                    LongFormAnalyticsWindow.channel_workspace_id == channel_workspace_id
+                )
                 .order_by(
                     LongFormAnalyticsWindow.scheduled_for.desc(),
                     LongFormAnalyticsWindow.id.desc(),
@@ -337,7 +353,9 @@ class LongFormAnalyticsScheduler:
             for metric_key, detail in (snapshot.metric_availability or {}).items():
                 if metric_key in metrics:
                     continue
-                normalized = (snapshot.normalized_metrics_blob or {}).get(metric_key, {})
+                normalized = (snapshot.normalized_metrics_blob or {}).get(
+                    metric_key, {}
+                )
                 metrics[metric_key] = {
                     "value": normalized.get("value"),
                     "availability": detail,
@@ -372,12 +390,18 @@ class LongFormAnalyticsScheduler:
             channel_workspace_id=channel_workspace_id,
             launch_day=None,
             published_videos=len(uploaded_ids),
-            active_series_count=len({row.series_run_id for row in windows if row.series_run_id}),
+            active_series_count=len(
+                {row.series_run_id for row in windows if row.series_run_id}
+            ),
             next_evidence_milestone=next_milestone,
             windows_by_state=by_state,
             windows_by_type=by_type,
             analytics_freshness=(
-                "UNAVAILABLE" if unavailable else "FRESH" if metrics else "NOT_YET_SYNCED"
+                "UNAVAILABLE"
+                if unavailable
+                else "FRESH"
+                if metrics
+                else "NOT_YET_SYNCED"
             ),
             incidents_or_exclusions=incident_count,
             metrics=metrics,
@@ -385,9 +409,7 @@ class LongFormAnalyticsScheduler:
             advanced_details={"window_ids": [str(row.id) for row in windows]},
         )
 
-    def _sync_owner(
-        self, uploaded_video_id: uuid.UUID, window_id: uuid.UUID
-    ) -> Any:
+    def _sync_owner(self, uploaded_video_id: uuid.UUID, window_id: uuid.UUID) -> Any:
         return YouTubeOwnerAnalyticsSyncService(self.session).sync_uploaded_video(
             uploaded_video_id=uploaded_video_id,
             long_form_analytics_window_id=window_id,
@@ -436,7 +458,10 @@ class LongFormAnalyticsScheduler:
                     "until this incident is resolved."
                 ),
                 reason_codes=_dedupe(
-                    [reason_code, *( [provider_reason_code] if provider_reason_code else [])]
+                    [
+                        reason_code,
+                        *([provider_reason_code] if provider_reason_code else []),
+                    ]
                 ),
                 next_action=next_action,
                 resolution_evidence={},
@@ -466,7 +491,9 @@ class LongFormAnalyticsScheduler:
             seconds=min(900, 5 * (2 ** max(0, window.attempt_count - 1)))
         )
 
-    def _require_long_form_uploaded(self, uploaded_video_id: uuid.UUID) -> UploadedVideo:
+    def _require_long_form_uploaded(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideo:
         uploaded = self.session.get(UploadedVideo, uploaded_video_id)
         if uploaded is None:
             raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
@@ -484,7 +511,40 @@ class LongFormAnalyticsScheduler:
             or uploaded.content_mode not in {"SERIES_EPISODE", "STANDALONE"}
             or any(value is None for value in required)
         ):
-            raise ValidationFailureError("LONG_FORM_ANALYTICS_UPLOADED_VIDEO_AUTHORITY_INVALID")
+            raise ValidationFailureError(
+                "LONG_FORM_ANALYTICS_UPLOADED_VIDEO_AUTHORITY_INVALID"
+            )
+        uploaded_lineage = self._uploaded_strategic_lineage(uploaded)
+        project = self.session.get(VideoProject, uploaded.video_project_id)
+        admission = (
+            self.session.get(
+                ProjectAdmissionDecision,
+                project.project_admission_decision_id,
+            )
+            if project is not None and project.project_admission_decision_id is not None
+            else None
+        )
+        if project is None or admission is None:
+            raise ValidationFailureError(
+                "LONG_FORM_ANALYTICS_STRATEGIC_AUTHORITY_MISSING"
+            )
+        project_lineage = strategic_lineage_from_record(
+            project,
+            invalid_reason_code="VIDEO_PROJECT_STRATEGIC_LINEAGE_INVALID",
+        )
+        admission_lineage = strategic_lineage_from_record(
+            admission,
+            invalid_reason_code="PROJECT_ADMISSION_STRATEGIC_LINEAGE_INVALID",
+        )
+        if (
+            project_lineage is None
+            or admission_lineage is None
+            or project_lineage != admission_lineage
+            or uploaded_lineage != project_lineage
+        ):
+            raise ValidationFailureError(
+                "LONG_FORM_ANALYTICS_STRATEGIC_LINEAGE_MISMATCH"
+            )
         return uploaded
 
     @staticmethod
@@ -496,11 +556,31 @@ class LongFormAnalyticsScheduler:
             "destination_binding_id": str(uploaded.destination_binding_id),
             "destination_binding_fingerprint": uploaded.destination_binding_fingerprint,
             "target_market_lineage": dict(uploaded.target_market_lineage or {}),
+            "strategic_lineage": LongFormAnalyticsScheduler._uploaded_strategic_lineage(
+                uploaded
+            ).model_dump(mode="json"),
         }
+
+    @staticmethod
+    def _uploaded_strategic_lineage(uploaded: UploadedVideo) -> StrategicLineageV2:
+        refs = uploaded.lineage_refs if isinstance(uploaded.lineage_refs, dict) else {}
+        raw = refs.get("strategic_lineage")
+        if not isinstance(raw, dict):
+            raise ValidationFailureError(
+                "LONG_FORM_ANALYTICS_STRATEGIC_LINEAGE_REQUIRED"
+            )
+        try:
+            return StrategicLineageV2.model_validate(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "LONG_FORM_ANALYTICS_STRATEGIC_LINEAGE_INVALID"
+            ) from exc
 
 
 def _event_id(window_id: uuid.UUID, attempt: int) -> uuid.UUID:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"vcos/analytics-window/{window_id}/{attempt}")
+    return uuid.uuid5(
+        uuid.NAMESPACE_URL, f"vcos/analytics-window/{window_id}/{attempt}"
+    )
 
 
 def _dedupe(values: list[str]) -> list[str]:

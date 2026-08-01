@@ -139,6 +139,21 @@ export function FinalReviewSurface({
         />
       </div>
 
+      {review.audience_promise || review.strategic_intent ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ReviewSummary
+            icon={<ShieldCheck size={18} aria-hidden="true" />}
+            title="Cam kết với khán giả"
+            body={review.audience_promise ?? "Chưa có cam kết khán giả đã niêm phong."}
+          />
+          <ReviewSummary
+            icon={<CheckCircle2 size={18} aria-hidden="true" />}
+            title="Ý đồ chiến lược"
+            body={formatStrategicIntent(review.strategic_intent)}
+          />
+        </div>
+      ) : null}
+
       {review.warnings.length ? (
         <Panel className="border-amber-500/35 bg-amber-500/5">
           <h3 className="text-base font-semibold">Điểm cần lưu ý trước khi quyết định</h3>
@@ -252,6 +267,17 @@ function formatDuration(value: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")} phút`;
+}
+
+function formatStrategicIntent(value?: string | null) {
+  const labels: Record<string, string> = {
+    ACQUISITION: "Thu hút đúng khán giả mục tiêu",
+    AUDIENCE_DEPTH: "Đào sâu mức độ gắn kết của khán giả",
+    AUTHORITY: "Xây dựng uy tín và năng lực chuyên môn",
+    SERIES_CONTINUITY: "Duy trì mạch nội dung của series",
+    CONTROLLED_EXPERIMENT: "Thử nghiệm có kiểm soát"
+  };
+  return value ? labels[value] ?? value : "Chưa có ý đồ chiến lược đã niêm phong.";
 }
 
 function formatDateTime(value: string) {

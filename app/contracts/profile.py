@@ -6,7 +6,15 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from app.contracts.channel_policy import ChannelScopedPolicy
 
 
-ProfileStatus = Literal["draft", "compiled", "pending_approval", "approved", "active", "archived", "rejected"]
+ProfileStatus = Literal[
+    "draft",
+    "compiled",
+    "pending_approval",
+    "approved",
+    "active",
+    "archived",
+    "rejected",
+]
 CompileStatus = Literal["started", "succeeded", "failed"]
 
 
@@ -25,7 +33,10 @@ class ChannelProfileInput(BaseModel):
     platform_strategy: dict[str, Any]
     human_review_strictness: str
     content_pillars: list[str] = Field(min_length=1)
-    series_plan: list[dict[str, Any]] = Field(min_length=1)
+    # A first-channel launch may deliberately begin as STANDALONE while the
+    # audience promise is validated.  An empty list is therefore an explicit
+    # authority state, not a missing profile field.
+    series_plan: list[dict[str, Any]] = Field(default_factory=list)
     initial_content_runway: list[dict[str, Any]] = Field(min_length=1)
     policies: dict[str, Any]
     channel_policy: ChannelScopedPolicy | None = None

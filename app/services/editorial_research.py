@@ -15,6 +15,11 @@ from app.contracts.m5 import (
     EditorialIdeaCandidateTransition,
     EditorialResearchRunCreate,
 )
+from app.contracts.vcos_v2 import (
+    DecisionReversibility,
+    StrategicIntent,
+    StrategicLineageV2,
+)
 from app.core.actor import ActorContext
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
@@ -29,8 +34,9 @@ from app.db.models.m5 import (
     IdeaMarketPreflight,
 )
 from app.db.models.m7 import UploadedVideo
-from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion
+from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion, LaunchRun
 from app.services.company_access import require_company_permission
+from app.services.config_registry import content_hash
 
 
 _CANDIDATE_TRANSITIONS = {
@@ -135,14 +141,9 @@ class EditorialResearchService:
             )
         if data.stage != "RESEARCHED":
             raise ValidationFailureError("EDITORIAL_CANDIDATE_MUST_START_RESEARCHED")
-        launch_policy = self.session.scalar(
-            select(FirstChannelLaunchPolicyVersion).where(
-                FirstChannelLaunchPolicyVersion.channel_workspace_id
-                == run.channel_workspace_id,
-                FirstChannelLaunchPolicyVersion.policy_snapshot_id
-                == run.policy_snapshot_id,
-                FirstChannelLaunchPolicyVersion.state == "APPROVED",
-            )
+        launch_authority = self._active_launch_authority(run)
+        launch_policy, launch_run = (
+            launch_authority if launch_authority is not None else (None, None)
         )
         if data.suggested_series_plan_id is not None:
             from app.db.models.vcos_v2 import SeriesPlan
@@ -207,11 +208,36 @@ class EditorialResearchService:
             raise ValidationFailureError(
                 "EXPERIMENT_VARIABLE_REQUIRES_BASELINE_AND_COMPARISON"
             )
+        server_lineage: StrategicLineageV2 | None = None
+        if launch_policy is not None and launch_run is not None:
+            server_lineage = self._resolve_server_lineage(
+                data=data,
+                run=run,
+                launch_policy=launch_policy,
+                launch_run=launch_run,
+                expected_phase=expected_phase,
+                published_count=published_count,
+            )
+        elif any(
+            value is not None
+            for value in data.model_dump(
+                mode="python",
+                include=set(StrategicLineageV2.model_fields),
+            ).values()
+        ):
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_STRATEGIC_LINEAGE_REQUIRES_ACTIVE_LAUNCH"
+            )
         normalized_candidate = data.model_copy(
             update={
                 "budget_readiness": "UNKNOWN",
                 "rights_policy_state": "UNKNOWN",
                 "quality_state": "UNKNOWN",
+                **(
+                    server_lineage.model_dump(mode="python")
+                    if server_lineage is not None
+                    else {}
+                ),
             }
         )
         semantic = {
@@ -242,6 +268,256 @@ class EditorialResearchService:
         run.candidate_count += 1
         self.session.flush()
         return record
+
+    def _active_launch_authority(
+        self,
+        run: EditorialResearchRun,
+    ) -> tuple[FirstChannelLaunchPolicyVersion, LaunchRun] | None:
+        """Lock the active launch authority when this is a launch-era candidate."""
+
+        launch_policy = self.session.scalar(
+            select(FirstChannelLaunchPolicyVersion)
+            .where(
+                FirstChannelLaunchPolicyVersion.company_id == run.company_id,
+                FirstChannelLaunchPolicyVersion.channel_workspace_id
+                == run.channel_workspace_id,
+                FirstChannelLaunchPolicyVersion.channel_profile_version_id
+                == run.channel_profile_version_id,
+                FirstChannelLaunchPolicyVersion.policy_snapshot_id
+                == run.policy_snapshot_id,
+                FirstChannelLaunchPolicyVersion.state == "APPROVED",
+            )
+            .with_for_update()
+        )
+        if launch_policy is None:
+            return None
+        launch_run = self.session.scalar(
+            select(LaunchRun)
+            .where(
+                LaunchRun.launch_policy_version_id == launch_policy.id,
+                LaunchRun.company_id == run.company_id,
+                LaunchRun.channel_workspace_id == run.channel_workspace_id,
+                LaunchRun.state == "ACTIVE",
+            )
+            .with_for_update()
+        )
+        if launch_run is None:
+            return None
+        return launch_policy, launch_run
+
+    @staticmethod
+    def _launch_run_authority_hash(
+        *,
+        launch_policy: FirstChannelLaunchPolicyVersion,
+        launch_run: LaunchRun,
+    ) -> str:
+        return content_hash(
+            {
+                "launch_key": launch_run.launch_key,
+                "launch_policy_hash": launch_policy.canonical_hash,
+                "launch_policy_version_id": str(launch_policy.id),
+                "launch_run_id": str(launch_run.id),
+                "launch_started_at": (
+                    launch_run.launch_started_at.isoformat()
+                    if launch_run.launch_started_at is not None
+                    else None
+                ),
+                "preparation_started_on": launch_run.preparation_started_on.isoformat(),
+                "reason_codes": list(launch_run.reason_codes or []),
+                "state": launch_run.state,
+            }
+        )
+
+    @staticmethod
+    def _audience_authority(
+        *,
+        policy: CompiledChannelPolicySnapshot,
+    ) -> dict[str, Any]:
+        compiled = policy.compiled_payload or {}
+        contract = compiled.get("channel_contract_json")
+        if not isinstance(contract, dict):
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_AUDIENCE_CONTRACT_REQUIRED"
+            )
+        identity = contract.get("channel_identity")
+        target = contract.get("target_audience")
+        market = contract.get("market_locale")
+        if not isinstance(identity, dict) or not isinstance(target, dict):
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_AUDIENCE_CONTRACT_REQUIRED"
+            )
+        audience_promise = identity.get("brand_promise")
+        primary_persona = target.get("primary_persona")
+        if not isinstance(audience_promise, str) or not audience_promise.strip():
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_AUDIENCE_PROMISE_REQUIRED"
+            )
+        if not isinstance(primary_persona, str) or not primary_persona.strip():
+            raise ValidationFailureError("EDITORIAL_CANDIDATE_TARGET_AUDIENCE_REQUIRED")
+        target_definition = {
+            "audience_level": target.get("audience_level"),
+            "audience_notes": target.get("audience_notes"),
+            "desired_outcome": target.get("desired_outcome"),
+            "market_locale": {
+                "audience_locale": (
+                    market.get("audience_locale") if isinstance(market, dict) else None
+                ),
+                "content_language": (
+                    market.get("content_language") if isinstance(market, dict) else None
+                ),
+                "primary_market": (
+                    market.get("primary_market") if isinstance(market, dict) else None
+                ),
+            },
+            "pain_points": list(target.get("pain_points") or []),
+            "primary_persona": primary_persona.strip(),
+        }
+        audience_promise_version = (
+            f"channel-contract-snapshot-{policy.snapshot_version}"
+        )
+        audience_drift_guard_version = (
+            f"channel-contract-drift-guard-{policy.snapshot_version}"
+        )
+        return {
+            "audience_promise": audience_promise.strip(),
+            "audience_promise_version": audience_promise_version,
+            "audience_promise_hash": StrategicLineageV2.calculate_audience_promise_hash(
+                audience_promise=audience_promise.strip(),
+                audience_promise_version=audience_promise_version,
+                target_audience_definition=target_definition,
+                audience_drift_guard_version=audience_drift_guard_version,
+            ),
+            "target_audience_definition": target_definition,
+            "audience_drift_guard_version": audience_drift_guard_version,
+        }
+
+    def _resolve_server_lineage(
+        self,
+        *,
+        data: EditorialIdeaCandidateCreate,
+        run: EditorialResearchRun,
+        launch_policy: FirstChannelLaunchPolicyVersion,
+        launch_run: LaunchRun,
+        expected_phase: str,
+        published_count: int,
+    ) -> StrategicLineageV2:
+        """Derive candidate strategy from active launch authority, not payload."""
+
+        policy = self.session.get(CompiledChannelPolicySnapshot, run.policy_snapshot_id)
+        if (
+            policy is None
+            or policy.channel_workspace_id != run.channel_workspace_id
+            or policy.channel_profile_version_id != run.channel_profile_version_id
+            or policy.status not in {"approved", "active"}
+        ):
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_POLICY_AUTHORITY_MISMATCH"
+            )
+        existing_candidate_count = int(
+            self.session.scalar(
+                select(func.count(EditorialIdeaCandidate.id)).where(
+                    EditorialIdeaCandidate.channel_workspace_id
+                    == run.channel_workspace_id,
+                    EditorialIdeaCandidate.active_launch_policy_version_id
+                    == launch_policy.id,
+                    EditorialIdeaCandidate.active_launch_run_id == launch_run.id,
+                )
+            )
+            or 0
+        )
+        first_launch_candidate = published_count == 0 and existing_candidate_count == 0
+        if first_launch_candidate:
+            intent = StrategicIntent.ACQUISITION
+            primary_variable = "audience_promise_validation"
+            criteria_key = "AUDIENCE_PROMISE_VALIDATION"
+            hypothesis = (
+                "The approved audience promise can acquire the declared target "
+                "audience through one bounded launch candidate."
+            )
+        elif expected_phase == "AUDIENCE_PROMISE":
+            intent = StrategicIntent.AUDIENCE_DEPTH
+            primary_variable = "audience_problem_depth"
+            criteria_key = "AUDIENCE_PROBLEM_DEPTH"
+            hypothesis = (
+                "A deeper, policy-aligned audience problem explanation can improve "
+                "qualified viewer relevance without changing the frozen promise."
+            )
+        elif expected_phase == "SERIES_PACKAGING":
+            intent = StrategicIntent.SERIES_CONTINUITY
+            primary_variable = "series_continuity"
+            criteria_key = "SERIES_CONTINUITY"
+            hypothesis = (
+                "A bounded series continuation can strengthen return-viewer context "
+                "while preserving the approved audience promise."
+            )
+        elif expected_phase == "ALLOCATION_PREPARATION":
+            intent = StrategicIntent.CONTROLLED_EXPERIMENT
+            primary_variable = "controlled_allocation"
+            criteria_key = "CONTROLLED_ALLOCATION"
+            hypothesis = (
+                "One reversible allocation variable can be measured without changing "
+                "the channel promise or launch policy."
+            )
+        else:
+            intent = StrategicIntent.AUTHORITY
+            primary_variable = "evidence_backed_authority"
+            criteria_key = "EVIDENCE_BACKED_AUTHORITY"
+            hypothesis = (
+                "Evidence-backed instruction can build channel authority for the "
+                "approved target audience."
+            )
+        reversibility = DecisionReversibility.TWO_WAY_DOOR
+        criteria = {
+            "criterion": criteria_key,
+            "launch_policy_hash": launch_policy.canonical_hash,
+            "measurement_scope": "LAUNCH_CANDIDATE",
+            "experiment_phase": expected_phase,
+            "first_launch_candidate": first_launch_candidate,
+        }
+        criteria_version = "launch-candidate-strategy-v1"
+        lineage = {
+            **self._audience_authority(policy=policy),
+            "strategic_intent": intent,
+            "intent_success_criteria": criteria,
+            "intent_success_criteria_version": criteria_version,
+            "intent_success_criteria_hash": (
+                StrategicLineageV2.calculate_intent_success_criteria_hash(
+                    strategic_intent=intent,
+                    intent_success_criteria=criteria,
+                    intent_success_criteria_version=criteria_version,
+                    experiment_hypothesis=hypothesis,
+                    primary_variable_under_test=primary_variable,
+                    decision_reversibility=reversibility,
+                )
+            ),
+            "experiment_hypothesis": hypothesis,
+            "primary_variable_under_test": primary_variable,
+            "decision_reversibility": reversibility,
+            "active_launch_policy_version_id": launch_policy.id,
+            "active_launch_policy_hash": launch_policy.canonical_hash,
+            "active_launch_run_id": launch_run.id,
+            "active_launch_run_hash": self._launch_run_authority_hash(
+                launch_policy=launch_policy,
+                launch_run=launch_run,
+            ),
+        }
+        try:
+            resolved = StrategicLineageV2.model_validate(lineage)
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_STRATEGIC_LINEAGE_INVALID"
+            ) from exc
+        claimed = data.model_dump(
+            mode="python",
+            include=set(resolved.model_fields),
+            exclude_none=True,
+        )
+        expected = resolved.model_dump(mode="python")
+        if any(expected[key] != value for key, value in claimed.items()):
+            raise ValidationFailureError(
+                "EDITORIAL_CANDIDATE_STRATEGIC_LINEAGE_MISMATCH"
+            )
+        return resolved
 
     def complete_run(
         self, *, run_id: uuid.UUID, actor: ActorContext

@@ -8,6 +8,8 @@ from app.contracts.r3d9 import PackagingReviewQueueRead
 
 
 FirstVideoPackageStatus = Literal[
+    # Backward-compatible read support for packages written before the V2
+    # automatic-progression cutover. New M12.2 writes do not emit this state.
     "READY_FOR_HUMAN_REVIEW",
     "REVIEW_REQUIRED",
     "BLOCKED",
@@ -45,7 +47,9 @@ class FirstScriptedVideoPackageRequest(BaseModel):
     target_video_type: Literal["long_form"] = "long_form"
     package_title_seed: str | None = None
     no_media: bool = True
-    human_review_only: bool = True
+    # Kept only so older API/CLI clients can still submit their historical
+    # request shape. It is no longer an execution authority.
+    human_review_only: bool = Field(default=False, deprecated=True)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -93,7 +97,15 @@ class FirstScriptedVideoPackageReviewRead(BaseModel):
     effective_context: dict[str, Any] = Field(default_factory=dict)
     packaging_handoff: PackagingHandoffSnapshotRead | None = None
     packaging_review_queue: PackagingReviewQueueRead | None = None
-    human_review_checklist: dict[str, Any] = Field(default_factory=dict)
+    # Deprecated compatibility field. Active V2 packages use the automated
+    # progression receipt below; no pre-media human approval is required.
+    human_review_checklist: dict[str, Any] = Field(
+        default_factory=dict, deprecated=True
+    )
+    automated_progression_receipt: dict[str, Any] = Field(default_factory=dict)
+    final_video_decision_boundary: Literal["UPLOAD_OR_DO_NOT_UPLOAD"] = (
+        "UPLOAD_OR_DO_NOT_UPLOAD"
+    )
     agent_outputs: dict[str, Any] = Field(default_factory=dict)
     prompt_snapshots: dict[str, Any] = Field(default_factory=dict)
     provider_readiness_snapshot_ref: uuid.UUID | None = None

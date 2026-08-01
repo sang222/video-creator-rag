@@ -37,8 +37,8 @@ items:
     description: No automatic learning promotion is allowed in M10.
   - code: M11_APPROVAL_REQUIRED
     description: M11 human approval is required.
-  - code: REAL_OLLAMA_ROUTER_DEFERRED_TO_M10_1
-    description: Real Ollama router scope is deferred to M10.1.
+  - code: OPENAI_ROUTER_GUARDED_BY_M10_1
+    description: OpenAI Responses routing is guarded by M10.1 authority.
   - code: MEDIA_PROVIDER_ROUTING_DEFERRED_TO_M10_2
     description: Media provider routing is deferred to M10.2.
   - code: CONFIG_EDITING_DEFERRED_TO_M11

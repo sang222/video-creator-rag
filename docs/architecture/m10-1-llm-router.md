@@ -5,18 +5,18 @@ research, planning, scripting, metadata, visual, quality, and learning agents.
 
 ## LLMRouter
 
-Real execution is disabled by default. VCOS calls local Ollama only when `VCOS_LLM_REAL_EXECUTION_ENABLED=true`, `VCOS_LLM_PROVIDER=ollama`, and the router profile/lane are enabled. The real smoke test is skipped unless `VCOS_LLM_ROUTER_REAL_SMOKE=true`.
+Real execution is disabled by default. VCOS calls the OpenAI Responses API only when `OPENAI_API_KEY` is available, `VCOS_LLM_REAL_EXECUTION_ENABLED=true`, `VCOS_LLM_PROVIDER=openai`, and the router profile/lane are enabled. The bounded Luna/Terra smoke is skipped unless `VCOS_LLM_ROUTER_REAL_SMOKE=true`.
 
 Router lanes:
 
-- `cheap_structured`: primary `gpt-oss:20b-cloud`, fallback `qwen3.5:cloud`
-- `default_multimodal`: primary `qwen3.5:cloud`, fallback `gemma4:31b-cloud`
-- `visual_creative_review`: primary `minimax-m3:cloud`, fallback `qwen3.5:cloud`, emergency `gemma4:31b-cloud`
-- `long_context_text`: primary `deepseek-v4-flash:cloud`, fallback `nemotron-3-super:cloud`, premium `deepseek-v4-flash:cloud`
-- `engineering_architect`: primary `qwen3-coder:480b-cloud`, fallback `kimi-k2.7-code:cloud`, backup `deepseek-v4-flash:cloud`
-- `gatekeeper_soft_review`: primary `nemotron-3-super:cloud`, fallback `deepseek-v4-flash:cloud`, premium `deepseek-v4-flash:cloud`
+- `cheap_structured`: `gpt-5.6-luna`, reasoning `none`
+- `default_multimodal`: `gpt-5.6-terra`, reasoning `low`
+- `visual_creative_review`: `gpt-5.6-terra`, reasoning `medium`
+- `long_context_text`: `gpt-5.6-terra`, reasoning `medium`
+- `engineering_architect`: `gpt-5.6-terra`, reasoning `high`
+- `gatekeeper_soft_review`: `gpt-5.6-terra`, reasoning `medium`
 
-No route may use the excluded model family. Business services route by lane name, not by hardcoded runtime model. Model configuration is explicit by lane role through `VCOS_LLM_MODEL_<LANE>_<ROLE>` environment variables. Agents map to lanes only; they do not own separate model defaults.
+The mapping is source-controlled and admits only Luna and Terra. Each lane has one model, with no automatic model/provider fallback, premium override, emergency route, or backup route. Business services route by lane name, not by hardcoded runtime model. Agents map to lanes only; they do not own separate model defaults.
 
 ## Agent Mapping
 

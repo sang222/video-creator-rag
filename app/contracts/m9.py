@@ -5,11 +5,21 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 PostPublishObservationWindowName = Literal[
-    "H24", "H72", "D7", "D30",
-    "T_PLUS_1H", "T_PLUS_6H", "T_PLUS_24H", "T_PLUS_48H", "T_PLUS_7D", "CUSTOM",
+    "H24",
+    "H72",
+    "D7",
+    "D30",
+    "T_PLUS_1H",
+    "T_PLUS_6H",
+    "T_PLUS_24H",
+    "T_PLUS_48H",
+    "T_PLUS_7D",
+    "CUSTOM",
 ]
 ObservationWindowState = Literal["PENDING", "READY", "COMPLETED", "SKIPPED", "BLOCKED"]
-PostPublishHealthRunState = Literal["PENDING", "COMPLETED", "BLOCKED", "INSUFFICIENT_DATA", "FAILED"]
+PostPublishHealthRunState = Literal[
+    "PENDING", "COMPLETED", "BLOCKED", "INSUFFICIENT_DATA", "FAILED"
+]
 PostPublishHealthState = Literal[
     "HEALTHY",
     "WATCH",
@@ -31,10 +41,29 @@ NoViewDiagnosticState = Literal[
     "HEALTHY",
     "UNKNOWN",
 ]
-PackagingDiagnosticState = Literal["NOT_APPLICABLE", "INSUFFICIENT_DATA", "LOW_CTR", "WATCH", "HEALTHY", "UNKNOWN"]
-RetentionDiagnosticState = Literal["NOT_APPLICABLE", "INSUFFICIENT_DATA", "EARLY_DROP", "MID_VIDEO_DROP", "WATCH", "HEALTHY", "UNKNOWN"]
-EngagementDiagnosticState = Literal["NOT_APPLICABLE", "INSUFFICIENT_DATA", "LOW_ENGAGEMENT", "WATCH", "HEALTHY", "UNKNOWN"]
-PolicyRightsDiagnosticState = Literal["NOT_APPLICABLE", "REVIEW_REQUIRED", "BLOCKED", "PASS", "UNKNOWN"]
+PackagingDiagnosticState = Literal[
+    "NOT_APPLICABLE", "INSUFFICIENT_DATA", "LOW_CTR", "WATCH", "HEALTHY", "UNKNOWN"
+]
+RetentionDiagnosticState = Literal[
+    "NOT_APPLICABLE",
+    "INSUFFICIENT_DATA",
+    "EARLY_DROP",
+    "MID_VIDEO_DROP",
+    "WATCH",
+    "HEALTHY",
+    "UNKNOWN",
+]
+EngagementDiagnosticState = Literal[
+    "NOT_APPLICABLE",
+    "INSUFFICIENT_DATA",
+    "LOW_ENGAGEMENT",
+    "WATCH",
+    "HEALTHY",
+    "UNKNOWN",
+]
+PolicyRightsDiagnosticState = Literal[
+    "NOT_APPLICABLE", "REVIEW_REQUIRED", "BLOCKED", "PASS", "UNKNOWN"
+]
 RecoveryProposalType = Literal[
     "WAIT_AND_MONITOR",
     "REVIEW_TITLE_THUMBNAIL",
@@ -45,7 +74,9 @@ RecoveryProposalType = Literal[
     "CREATE_FUTURE_VARIANT",
     "NO_ACTION",
 ]
-RecoveryProposalState = Literal["PROPOSED", "ACCEPTED", "REJECTED", "SUPERSEDED", "CANCELLED"]
+RecoveryProposalState = Literal[
+    "PROPOSED", "ACCEPTED", "REJECTED", "SUPERSEDED", "CANCELLED"
+]
 RecoveryRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
 
 
@@ -113,6 +144,7 @@ class PostPublishHealthRunRead(BaseModel):
     next_action: str | None
     do_not_do: list[str]
     technical_appendix: dict[str, Any]
+    strategic_lineage: dict[str, Any] | None = None
     created_at: AwareDatetime
 
     model_config = ConfigDict(extra="forbid")
@@ -237,6 +269,7 @@ class FailureTraceReportRead(BaseModel):
     next_action: str | None
     do_not_do: list[str]
     technical_appendix: dict[str, Any]
+    strategic_lineage: dict[str, Any] | None = None
     created_at: AwareDatetime
 
     model_config = ConfigDict(extra="forbid")

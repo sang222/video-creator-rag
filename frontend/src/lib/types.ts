@@ -119,6 +119,8 @@ export type FinalReview = {
   description: string;
   lane: string;
   content_mode: string;
+  audience_promise?: string | null;
+  strategic_intent?: string | null;
   series_title?: string | null;
   run_label?: string | null;
   episode_label?: string | null;

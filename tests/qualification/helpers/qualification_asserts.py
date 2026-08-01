@@ -21,7 +21,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0049_vcos_long_form_cadence"
+EXPECTED_ALEMBIC_HEAD = "0052_vcos_strategic_lineage"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",

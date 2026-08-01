@@ -32,15 +32,6 @@ make test
 make health
 ```
 
-Optional local Ollama container:
-
-```bash
-make ollama-up
-make ollama-health
-make ollama-pull-cloud-models
-make ollama-logs
-```
-
 Dockerized dashboard/API:
 
 ```bash
@@ -52,9 +43,9 @@ make frontend-up
 
 The dashboard runs at `http://localhost:3000` and calls the API at `http://localhost:8000` by default. Keep both URLs on the same hostname so the local httpOnly auth cookie survives refresh. Override `VCOS_FRONTEND_PORT`, `VCOS_API_PORT`, or `NEXT_PUBLIC_VCOS_API_BASE_URL` in `.env` before building the frontend image when needed.
 
-The Docker Ollama service exposes `http://localhost:11434` and keeps model data in the `vcos-ollama-data` volume. The M10.1 router uses that local endpoint by default. `VCOS_LLM_MODEL_<LANE>_<ROLE>` values are env-driven. Ollama cloud auth is handled by your local/container Ollama sign-in state, not by a VCOS-tracked API key or image override. `make ollama-pull-cloud-models` pulls the unique M10.1 router cloud models from the lane-role env vars into the Docker Ollama volume before real router smoke is enabled.
+VCOS uses the OpenAI Responses API with `gpt-5.6-luna` for the structured lane and `gpt-5.6-terra` for every other LLM lane. Configure `OPENAI_API_KEY` only in local environment/secret management; the router persists redacted request identity, usage, pricing version, and actual token-based cost receipts. The lane mapping is source-controlled, OpenAI-only, and has no automatic model fallback.
 
-Provider API keys are env-driven. `.env.example` declares `ELEVENLABS_API_KEY`, `GEMINI_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. NativeFFmpegRenderer is the local final assembly authority. Credential references should point to env handles such as `env://ELEVENLABS_API_KEY`, never raw secret values.
+Provider API keys are env-driven. `.env.example` declares `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `GEMINI_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. NativeFFmpegRenderer is the local final assembly authority. Credential references should point to env handles such as `env://OPENAI_API_KEY`, never raw secret values.
 
 Google Veo uses the native Gemini API and exactly one credential, `GEMINI_API_KEY`. Model and pricing truth live in the versioned Veo catalog. `VCOS_VEO_REAL_GENERATION_ENABLED=false` and `VCOS_PA1R_VEO_SMOKE_ENABLED=false` keep execution disabled by default.
 
@@ -73,7 +64,7 @@ M12 dashboard routes are `/settings`, `/settings/integrations`, and `/providers/
 ```bash
 vcos integrations readiness
 vcos integrations readiness --run-snapshot
-vcos integrations smoke --provider ollama
+vcos integrations smoke --provider openai
 vcos integrations smoke --provider youtube-public
 vcos integrations smoke --provider youtube-owner
 vcos integrations smoke --provider google-drive
@@ -258,10 +249,10 @@ GET /human-upload-tasks
 GET /human-upload-tasks/{task_id}
 ```
 
-M10.1 adds guarded Ollama LLMRouter lanes, route attempts, and
-ProviderAttempt/LLMRunSnapshot logging. Real Ollama execution is disabled by
-default and real smoke is skipped unless explicitly enabled. `UploadedVideo`
-remains canonical published video truth.
+M10.1 adds guarded OpenAI Luna/Terra LLMRouter lanes, route attempts, and
+ProviderAttempt/LLMRunSnapshot logging. Real execution is disabled by default
+and the bounded Responses smoke is skipped unless explicitly enabled.
+`UploadedVideo` remains canonical published video truth.
 
 ## M10.2 API
 

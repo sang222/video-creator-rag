@@ -118,7 +118,7 @@ describe("LaunchCadenceDashboardView", () => {
     );
   }
 
-  it("shows runway, buffer, slot, experiment, reason codes and truthful Phase E placeholders", async () => {
+  it("shows runway, buffer, slot, experiment, reason codes and post-upload analytics fallback", async () => {
     renderDashboard();
 
     expect(await screen.findByText("Evidence Lab")).toBeInTheDocument();
@@ -129,8 +129,14 @@ describe("LaunchCadenceDashboardView", () => {
     expect(
       screen.getByText("ACTIVE_PRODUCTION_LIMIT_REACHED")
     ).toBeInTheDocument();
-    expect(screen.getByText("Analytics kiếm tiền · Phase E")).toBeInTheDocument();
-    expect(screen.getAllByText("Chưa khả dụng")).toHaveLength(3);
+    expect(
+      await screen.findByText("Học sau upload long-form")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Chưa có video long-form đã xác nhận upload để lập các mốc 24 giờ, 72 giờ, 7 ngày và 30 ngày."
+      )
+    ).toBeInTheDocument();
   });
 
   it("only sends channel-scoped pause and evaluate actions", async () => {

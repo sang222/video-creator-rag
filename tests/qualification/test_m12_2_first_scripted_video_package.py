@@ -66,7 +66,7 @@ def _settings(**overrides) -> Settings:
         "media_provider_calls_disabled": True,
         "upload_and_publish_disabled": True,
         "old_provider_smoke_disabled": True,
-        "llm_provider": "ollama",
+        "llm_provider": "openai",
         "llm_real_execution_enabled": True,
         "llm_router_real_smoke": False,
     }
@@ -130,7 +130,7 @@ def _request(
         channel_id=channel_id,
         video_project_id=video_project_id,
         topic="Cách dựng workflow sản xuất video không dùng mock fallback",
-        research_pack_text="Source notes: VCOS uses prompt registry, channel contract, human review, and no upload in M12.2.",
+        research_pack_text="Source notes: VCOS uses prompt registry, channel contract, automated V2 progression, and no upload in M12.2.",
         research_pack_ref="operator_research_pack:m12_2",
     )
 
@@ -142,8 +142,8 @@ def _envelope(agent_key: str, artifact: dict, *, status: str = "OK") -> dict:
         "status": status,
         "confidence_label": "HIGH",
         "evidence_refs": [{"type": "operator_research_pack", "id": "m12_2"}],
-        "limitations": ["Human review required."],
-        "next_action": "Human review required.",
+        "limitations": ["Automatic V2 progression continues after package readiness."],
+        "next_action": "Continue automatically to V2 production after readiness.",
         "operator_summary_vi": f"{agent_key} hoàn tất.",
         "technical_appendix": {"test_output": True},
         "artifact": artifact,
@@ -152,13 +152,13 @@ def _envelope(agent_key: str, artifact: dict, *, status: str = "OK") -> dict:
 
 def _long_script_sentences(count: int = 32) -> list[dict]:
     base_text = (
-        "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
+        "This qualification narration sentence keeps the package evidence bound, describes the automated V2 boundary, "
         "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
         "for deterministic duration validation without adding claims or media."
     )
     hook_text = (
         "M12.2 starts with a real channel contract. "
-        "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
+        "This qualification narration sentence keeps the package evidence bound, describes the automated V2 boundary, "
         "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
         "for deterministic duration validation without adding claims or media."
     )
@@ -195,7 +195,7 @@ def _outputs(
             "risk_assessment": {"risk_level": "LOW"},
         },
         "ResearchPackSummarizer": {
-            "summary": "M12.2 activates production prompts for a human-review package.",
+            "summary": "M12.2 activates production prompts for automatic V2 progression.",
             "source_notes": ["operator research pack"],
             "evidence_refs": [{"id": "m12_2"}],
         },
@@ -217,7 +217,7 @@ def _outputs(
                 "hook_type": "DIRECT",
                 "first_3_seconds_script": "M12.2 starts with a real channel contract.",
                 "first_3_seconds_visual": "Diagram of contract to package boundary.",
-                "promise_made": "M12.2 stops at human review",
+                "promise_made": "M12.2 advances automatically to V2 production",
                 "payoff_location": "S2",
                 "clickbait_risk": "LOW",
                 "visual_hook_relevance": "Visual shows the contract boundary discussed in S1.",
@@ -229,7 +229,7 @@ def _outputs(
                 "hook_type": "DIRECT",
                 "first_3_seconds_script": "M12.2 starts with a real channel contract.",
                 "first_3_seconds_visual": "Diagram of contract to package boundary.",
-                "promise_made": "M12.2 stops at human review",
+                "promise_made": "M12.2 advances automatically to V2 production",
                 "payoff_location": "S2",
                 "clickbait_risk": "LOW",
                 "visual_hook_relevance": "Visual shows the contract boundary discussed in S1.",
@@ -250,10 +250,10 @@ def _outputs(
         },
         "PublishingMetadataAgent": {
             "title": "VCOS M12.2: Production Prompt Activation",
-            "description": "Human-review package only.",
+            "description": "Automated V2 production package only.",
             "chapters": [{"time": "00:00", "title": "Hook"}],
             "tags": ["VCOS"],
-            "pinned_comment": "Review before publishing.",
+            "pinned_comment": "Final decision is UPLOAD or DO_NOT_UPLOAD after final media QC and archive verification.",
             "disclosure_notes": ["AI-assisted script draft."],
         },
         "VisualPlanningAgent": {
@@ -358,18 +358,19 @@ def test_m12_2_missing_llm_readiness_returns_not_configured_no_fallback(
     assert router.calls == []
 
 
-def test_m12_2_first_package_uses_prompt_registry_and_reaches_human_review(
+def test_m12_2_first_package_uses_prompt_registry_and_advances_to_v2_production(
     db_session, qualification_factory
 ) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     router = FakeRouter(_outputs())
 
-    package = FirstScriptedVideoPackageService(
+    service = FirstScriptedVideoPackageService(
         db_session, settings=_settings(), llm_router=router
-    ).create(_request(scope.channel.id, video_project_id=project.id))
+    )
+    package = service.create(_request(scope.channel.id, video_project_id=project.id))
 
-    assert package.package_status == "READY_FOR_HUMAN_REVIEW", package.artifacts.get(
+    assert package.package_status == "READY_FOR_MEDIA_PROVIDERS", package.artifacts.get(
         "deterministic_gate_report"
     )
     assert len(router.calls) == len(PACKAGE_AGENT_CHAIN)
@@ -383,11 +384,22 @@ def test_m12_2_first_package_uses_prompt_registry_and_reaches_human_review(
     assert package.artifacts["admission_decision"]["decision"] == "ADMIT"
     assert package.artifacts["narration_script"]["sentences"][0]["sentence_id"] == "S1"
     assert package.artifacts["metadata_package"]["title"].startswith("VCOS M12.2")
-    assert package.artifacts["human_review_checklist"]["final_statement"].startswith(
-        "Human final approval required"
+    receipt = package.artifacts["automated_progression_receipt"]
+    assert receipt["pre_media_human_approval_required"] is False
+    assert receipt["automated_v2_progression_allowed"] is True
+    assert receipt["final_video_decision_boundary"] == "UPLOAD_OR_DO_NOT_UPLOAD"
+    assert receipt["final_video_decision"] == (
+        "PENDING_UPLOAD_OR_DO_NOT_UPLOAD_AFTER_FINAL_MEDIA_QC_ARCHIVE"
     )
+    review = service.review(package.id)
+    assert review.model_dump()["human_review_checklist"] == {}
+    assert review.automated_progression_receipt == receipt
+    assert review.final_video_decision_boundary == "UPLOAD_OR_DO_NOT_UPLOAD"
     assert package.risk_limitations_summary["media_provider_calls_made"] is False
     assert package.risk_limitations_summary["upload_or_publish_calls_made"] is False
+    assert (
+        package.risk_limitations_summary["pre_media_human_approval_required"] is False
+    )
     assert db_session.query(RealSmokeRun).count() == 0
     assert db_session.query(MediaRenderJob).count() == 0
 
@@ -459,12 +471,16 @@ def test_m12_2_gatekeeper_result_controls_final_status(
     assert blocked.package_status == "BLOCKED"
 
 
-def test_m12_2_api_routes_exist_and_no_forbidden_package_paths(db_session) -> None:
+def test_m12_2_legacy_api_routes_are_not_active_and_no_forbidden_package_paths(
+    db_session,
+) -> None:
     paths = TestClient(create_app()).get("/openapi.json").json()["paths"]
 
-    assert "/video-packages/first-scripted" in paths
-    assert "/video-packages/{package_id}" in paths
-    assert "/video-packages/{package_id}/review" in paths
+    assert "/video-packages/first-scripted" not in paths
+    assert "/video-packages/{package_id}" not in paths
+    assert "/video-packages/{package_id}/review" not in paths
+    assert "/production-packages" in paths
+    assert "/production-packages/{package_artifact_version_id}/readiness" in paths
     source = Path("app/services/m12_2.py").read_text(encoding="utf-8")
     forbidden = [
         "app.providers.mock",

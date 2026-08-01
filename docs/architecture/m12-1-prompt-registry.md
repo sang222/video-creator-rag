@@ -92,9 +92,10 @@ agents still require Effective Context. After admission, ScriptContractDigest
 also carries the frozen niche/category/pillar/audience fields and digest
 ref/hash.
 
-## Ollama Messages
+## OpenAI Responses Input
 
-Production prompt runs use chat messages:
+Production prompt runs preserve role-tagged messages and normalize them into
+OpenAI Responses input:
 
 ```json
 [

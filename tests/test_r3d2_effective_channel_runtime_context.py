@@ -66,7 +66,7 @@ def _settings() -> Settings:
         media_provider_calls_disabled=True,
         upload_and_publish_disabled=True,
         old_provider_smoke_disabled=True,
-        llm_provider="ollama",
+        llm_provider="openai",
         llm_real_execution_enabled=True,
         llm_router_real_smoke=False,
     )

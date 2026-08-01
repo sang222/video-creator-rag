@@ -52,7 +52,7 @@ class CompiledChannelPolicyPayload(BaseModel):
     channel_constitution: ChannelConstitution
     operating_blueprint: dict[str, Any]
     content_pillars: list[str] = Field(min_length=1)
-    series_plan: list[dict[str, Any]] = Field(min_length=1)
+    series_plan: list[dict[str, Any]] = Field(default_factory=list)
     editorial_calendar_defaults: dict[str, Any]
     initial_content_runway: list[dict[str, Any]] = Field(min_length=1)
     default_playbook: dict[str, Any]

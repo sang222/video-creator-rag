@@ -173,6 +173,30 @@ class ChannelProfileCompiler:
         raw["budget_policy"]["derivation_refs"] = derivation_refs
         return ChannelScopedPolicy.model_validate(raw)
 
+    def refresh_qualified_visual_source_binding(
+        self,
+        *,
+        active_policy: ChannelScopedPolicy | dict[str, Any],
+    ) -> ChannelScopedPolicy:
+        """Renew only catalog-bound visual evidence for a new immutable profile.
+
+        This is intentionally not an in-place update of an active policy.  It
+        lets a successor profile carry the currently validated catalog refs
+        while preserving every other channel-scoped decision.
+        """
+
+        policy = ChannelScopedPolicy.model_validate(active_policy)
+        if policy.visual_source_policy_binding is None:
+            return policy
+        raw = deepcopy(policy.model_dump(mode="json"))
+        raw["visual_source_policy_binding"] = self._qualified_visual_source_binding().model_dump(
+            mode="json"
+        )
+        raw["provider_usage_policy"]["google_gemini_image"] = (
+            GeminiImageUsagePolicy().model_dump(mode="json")
+        )
+        return ChannelScopedPolicy.model_validate(raw)
+
     def build_ch1_market_v3_profile_input(
         self,
         *,

@@ -15,9 +15,12 @@ from pydantic import (
 from app.contracts.vcos_v2 import (
     AssignmentMode,
     ContentMode,
+    DecisionReversibility,
     DurationContractV2,
     PlanningSourceType,
     ProductionLane,
+    StrategicIntent,
+    StrategicLineageV2,
 )
 
 
@@ -373,6 +376,31 @@ class EditorialIdeaCandidateCreate(BaseModel):
         | None
     ) = None
     primary_variable_under_test: str | None = None
+    audience_promise: str | None = Field(default=None, min_length=1, max_length=4_000)
+    audience_promise_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    audience_promise_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    target_audience_definition: dict[str, Any] | None = None
+    audience_drift_guard_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    strategic_intent: StrategicIntent | None = None
+    intent_success_criteria: dict[str, Any] | None = None
+    intent_success_criteria_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    intent_success_criteria_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    experiment_hypothesis: str | None = Field(default=None, max_length=4_000)
+    decision_reversibility: DecisionReversibility | None = None
+    active_launch_policy_version_id: uuid.UUID | None = None
+    active_launch_policy_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    active_launch_run_id: uuid.UUID | None = None
+    active_launch_run_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     baseline_refs: list[dict[str, Any]] = Field(default_factory=list)
     comparison_group: str | None = None
 
@@ -382,6 +410,36 @@ class EditorialIdeaCandidateCreate(BaseModel):
     def validate_experiment(self) -> "EditorialIdeaCandidateCreate":
         if self.primary_variable_under_test and self.experiment_phase is None:
             raise ValueError("primary experiment variable requires experiment_phase")
+        strategic_lineage = {
+            "audience_promise": self.audience_promise,
+            "audience_promise_version": self.audience_promise_version,
+            "audience_promise_hash": self.audience_promise_hash,
+            "target_audience_definition": self.target_audience_definition,
+            "audience_drift_guard_version": self.audience_drift_guard_version,
+            "strategic_intent": self.strategic_intent,
+            "intent_success_criteria": self.intent_success_criteria,
+            "intent_success_criteria_version": self.intent_success_criteria_version,
+            "intent_success_criteria_hash": self.intent_success_criteria_hash,
+            "experiment_hypothesis": self.experiment_hypothesis,
+            "primary_variable_under_test": self.primary_variable_under_test,
+            "decision_reversibility": self.decision_reversibility,
+            "active_launch_policy_version_id": self.active_launch_policy_version_id,
+            "active_launch_policy_hash": self.active_launch_policy_hash,
+            "active_launch_run_id": self.active_launch_run_id,
+            "active_launch_run_hash": self.active_launch_run_hash,
+        }
+        if any(value is not None for value in strategic_lineage.values()):
+            missing = [
+                key
+                for key, value in strategic_lineage.items()
+                if value is None and key != "experiment_hypothesis"
+            ]
+            if missing:
+                raise ValueError(
+                    "strategic lineage must be complete when supplied: "
+                    + ", ".join(missing)
+                )
+            StrategicLineageV2.model_validate(strategic_lineage)
         return self
 
 
@@ -409,6 +467,21 @@ class EditorialIdeaCandidateRead(BaseModel):
     quality_state: Literal["PASS", "BLOCK", "UNKNOWN"]
     experiment_phase: str | None
     primary_variable_under_test: str | None
+    audience_promise: str | None
+    audience_promise_version: str | None
+    audience_promise_hash: str | None
+    target_audience_definition: dict[str, Any] | None
+    audience_drift_guard_version: str | None
+    strategic_intent: StrategicIntent | None
+    intent_success_criteria: dict[str, Any] | None
+    intent_success_criteria_version: str | None
+    intent_success_criteria_hash: str | None
+    experiment_hypothesis: str | None
+    decision_reversibility: DecisionReversibility | None
+    active_launch_policy_version_id: uuid.UUID | None
+    active_launch_policy_hash: str | None
+    active_launch_run_id: uuid.UUID | None
+    active_launch_run_hash: str | None
     baseline_refs: list[dict[str, Any]]
     comparison_group: str | None
     canonical_hash: str
@@ -477,6 +550,22 @@ class ProjectAdmissionDecisionRead(BaseModel):
     decision_hash: str | None = None
     assignment_input_ref: dict[str, Any] | None = None
     duration_contract: DurationContractV2 | None = None
+    audience_promise: str | None = None
+    audience_promise_version: str | None = None
+    audience_promise_hash: str | None = None
+    target_audience_definition: dict[str, Any] | None = None
+    audience_drift_guard_version: str | None = None
+    strategic_intent: StrategicIntent | None = None
+    intent_success_criteria: dict[str, Any] | None = None
+    intent_success_criteria_version: str | None = None
+    intent_success_criteria_hash: str | None = None
+    experiment_hypothesis: str | None = None
+    primary_variable_under_test: str | None = None
+    decision_reversibility: DecisionReversibility | None = None
+    active_launch_policy_version_id: uuid.UUID | None = None
+    active_launch_policy_hash: str | None = None
+    active_launch_run_id: uuid.UUID | None = None
+    active_launch_run_hash: str | None = None
     created_at: AwareDatetime
 
     model_config = ConfigDict(extra="forbid")

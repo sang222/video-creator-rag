@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -53,6 +53,7 @@ class LongFormAnalyticsWindowRead(BaseModel):
     post_publish_health_run_id: uuid.UUID | None
     canonical_input_hash: str
     reason_codes: list[str]
+    strategic_lineage: dict[str, Any] | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 

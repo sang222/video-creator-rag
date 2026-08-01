@@ -64,7 +64,7 @@ from tests.fakes.providers import (
 
 ROOT = Path(__file__).resolve().parents[1]
 runner = CliRunner()
-REAL_PROVIDER_KEY = "ollama"
+REAL_PROVIDER_KEY = "openai"
 
 M4_TABLES = {
     "provider_registry_entries",
@@ -109,7 +109,7 @@ def _seed(db_session) -> ProviderRegistryEntry:
         entry = service.create_entry(
             data=ProviderRegistryEntryCreate(
                 provider_key=REAL_PROVIDER_KEY,
-                provider_name="Ollama / LLMRouter",
+                provider_name="OpenAI Responses Router",
                 provider_type="LLM",
                 capability_blob={"llm_router_lane_bound": True, "guarded_real_execution": True},
                 policy_fit_blob={"production_enabled_when_configured": True},
@@ -186,12 +186,12 @@ def test_credential_references_redact_and_health_is_history(db_session) -> None:
             provider_key=REAL_PROVIDER_KEY,
             credential_key="primary",
             credential_type="API_KEY",
-            secret_ref="env://OLLAMA_BASE_URL",
+            secret_ref="env://OPENAI_API_KEY",
             status="EXPIRED",
             scope_blob={"scopes": ["contract_test"]},
         )
     )
-    assert reference.secret_ref == "env://OLLAMA_BASE_URL"
+    assert reference.secret_ref == "env://OPENAI_API_KEY"
     with pytest.raises(ValidationFailureError):
         service.create_reference(
             data=CredentialReferenceCreate(
@@ -212,7 +212,7 @@ def test_credential_references_redact_and_health_is_history(db_session) -> None:
         + [event.payload for event in db_session.scalars(select(DomainEvent)).all()]
     )
     assert "sk-this-is-raw" not in event_text
-    assert "env://OLLAMA_BASE_URL" not in event_text
+    assert "env://OPENAI_API_KEY" not in event_text
 
 
 def test_quota_ledger_deterministic_and_budget_gate(db_session) -> None:
@@ -395,7 +395,7 @@ def test_m4_api_and_cli_smoke(db_session) -> None:
             "--provider-key",
             REAL_PROVIDER_KEY,
             "--provider-name",
-            "Ollama / LLMRouter",
+            "OpenAI Responses Router",
             "--provider-type",
             "LLM",
             "--capability-json",
@@ -416,7 +416,7 @@ def test_m4_api_and_cli_smoke(db_session) -> None:
             "provider_key": REAL_PROVIDER_KEY,
             "credential_key": "api",
             "credential_type": "API_KEY",
-            "secret_ref": "env://OLLAMA_BASE_URL",
+            "secret_ref": "env://OPENAI_API_KEY",
             "status": "MISSING",
         },
     )

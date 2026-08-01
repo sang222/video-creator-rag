@@ -545,6 +545,22 @@ class BudgetGateService:
                 reasons = ["QUOTA_EXHAUSTED"]
                 next_action = "Release quota, raise quota, or choose another provider."
         estimated_cost = _decimal(data.estimated_cost or 0)
+        monthly_hard_cap = _optional_decimal(blob.get("monthly_hard_cap_usd"))
+        if monthly_hard_cap is not None and data.scope_type is not None:
+            current = utc_now()
+            month_start = current.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
+            actual_monthly = CostService(self.session).actual_cash_total(
+                cost_scope_type=data.scope_type,
+                cost_scope_id=data.scope_id,
+                currency="USD",
+                created_at_from=month_start,
+            )
+            if actual_monthly + estimated_cost > monthly_hard_cap:
+                decision = "BLOCK"
+                reasons = ["MONTHLY_COST_HARD_CAP_REACHED"]
+                next_action = "Raise the approved monthly cap or wait for the next month."
         manual_threshold = _optional_decimal(
             blob.get("require_manual_approval_above_usd")
         )

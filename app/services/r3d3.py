@@ -2423,7 +2423,7 @@ def _provider_readiness_summary(
             continue
         key = str(item["provider_key"])
         if key not in {
-            "ollama",
+            "openai",
             "elevenlabs",
             "google_veo",
             "pexels_api",

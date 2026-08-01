@@ -37,6 +37,7 @@ from app.services import (
     VideoProjectService,
 )
 from app.services.ofv0 import FormatIdentityContractService
+from app.services.runtime_bootstrap import _automated_v4_channel_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -298,3 +299,34 @@ def test_v3_contract_blocks_missing_market_binding_wrong_locale_and_auto_publish
     auto_publish["publish_policy"]["manual_upload_only"] = False
     with pytest.raises(ValueError):
         ChannelScopedPolicy.model_validate(auto_publish)
+
+
+def test_runtime_successor_v4_removes_only_pre_render_human_gates(db_session) -> None:
+    _company, _operator, channel, _service, _profile_v2, snapshot_v2 = _active_v2_scope(
+        db_session
+    )
+    profile, digest, destination = _market_bindings(channel)
+    v3 = ChannelProfileCompiler(db_session).build_ch1_market_v3_policy(
+        active_policy=snapshot_v2.compiled_payload["channel_scoped_policy"],
+        target_market_profile=profile,
+        target_market_digest=digest,
+        destination_binding=destination,
+        approval_ref=V3_APPROVAL,
+    )
+
+    raw_v4 = _automated_v4_channel_policy(v3.model_dump(mode="json"))
+    assert raw_v4 is not None
+    v4 = ChannelScopedPolicy.model_validate(raw_v4)
+
+    assert v4.policy_version == "small-team-ai.channel-policy.v4"
+    assert v4.publish_policy.human_final_approval_required is True
+    assert v4.voice_policy.retry_requires_new_approval is False
+    assert v4.voice_policy.unavailable_behavior == "BLOCK_EXTERNAL_FAILURE"
+    assert v4.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval is False
+    assert v4.budget_policy.cost_overrun_review_required is False
+    assert v4.market_package_freeze_policy.exact_package_human_approval_required is False
+    assert v4.market_package_freeze_policy.post_approval_integrity_required is False
+    assert all(
+        "human" not in item.lower() and "approval" not in item.lower()
+        for item in v4.market_package_freeze_policy.required_preconditions
+    )

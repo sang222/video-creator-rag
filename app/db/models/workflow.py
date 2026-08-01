@@ -88,6 +88,27 @@ class VideoProject(Base):
         ),
     )
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    audience_promise: Mapped[str | None] = mapped_column(Text)
+    audience_promise_version: Mapped[str | None] = mapped_column(String(120))
+    audience_promise_hash: Mapped[str | None] = mapped_column(String(64))
+    target_audience_definition: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    audience_drift_guard_version: Mapped[str | None] = mapped_column(String(120))
+    strategic_intent: Mapped[str | None] = mapped_column(String(40))
+    intent_success_criteria: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    intent_success_criteria_version: Mapped[str | None] = mapped_column(String(120))
+    intent_success_criteria_hash: Mapped[str | None] = mapped_column(String(64))
+    experiment_hypothesis: Mapped[str | None] = mapped_column(Text)
+    primary_variable_under_test: Mapped[str | None] = mapped_column(String(160))
+    decision_reversibility: Mapped[str | None] = mapped_column(String(32))
+    active_launch_policy_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_channel_launch_policy_versions.id"),
+    )
+    active_launch_policy_hash: Mapped[str | None] = mapped_column(String(64))
+    active_launch_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("launch_runs.id")
+    )
+    active_launch_run_hash: Mapped[str | None] = mapped_column(String(64))
     render_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     priority: Mapped[str | None] = mapped_column(String(40))
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -147,6 +168,35 @@ class VideoProject(Base):
             "and production_lane = 'LONG_FORM')",
             name="ck_video_projects_v2_lane_source",
         ),
+        CheckConstraint(
+            "(schema_version = 'v1') or ("
+            "audience_promise is not null and btrim(audience_promise) <> '' "
+            "and audience_promise_version is not null "
+            "and audience_promise_hash ~ '^[0-9a-f]{64}$' "
+            "and target_audience_definition is not null "
+            "and jsonb_typeof(target_audience_definition) = 'object' "
+            "and target_audience_definition <> '{}'::jsonb "
+            "and audience_drift_guard_version is not null "
+            "and strategic_intent in ("
+            "'ACQUISITION','AUDIENCE_DEPTH','AUTHORITY',"
+            "'SERIES_CONTINUITY','CONTROLLED_EXPERIMENT') "
+            "and intent_success_criteria is not null "
+            "and jsonb_typeof(intent_success_criteria) = 'object' "
+            "and intent_success_criteria <> '{}'::jsonb "
+            "and intent_success_criteria_version is not null "
+            "and intent_success_criteria_hash ~ '^[0-9a-f]{64}$' "
+            "and primary_variable_under_test is not null "
+            "and btrim(primary_variable_under_test) <> '' "
+            "and decision_reversibility in ('TWO_WAY_DOOR','ONE_WAY_DOOR') "
+            "and active_launch_policy_version_id is not null "
+            "and active_launch_policy_hash ~ '^[0-9a-f]{64}$' "
+            "and active_launch_run_id is not null "
+            "and active_launch_run_hash ~ '^[0-9a-f]{64}$' "
+            "and (strategic_intent <> 'CONTROLLED_EXPERIMENT' "
+            "or (experiment_hypothesis is not null "
+            "and btrim(experiment_hypothesis) <> '')))",
+            name="ck_video_projects_v2_strategic_lineage",
+        ),
         Index("ix_video_projects_company_id", "company_id"),
         Index("ix_video_projects_channel_workspace_id", "channel_workspace_id"),
         Index("ix_video_projects_policy_snapshot_id", "policy_snapshot_id"),
@@ -165,6 +215,11 @@ class VideoProject(Base):
         Index("ix_video_projects_production_lane", "production_lane"),
         Index("ix_video_projects_series_plan_id", "series_plan_id"),
         Index("ix_video_projects_series_run_id", "series_run_id"),
+        Index(
+            "ix_video_projects_active_launch_policy",
+            "active_launch_policy_version_id",
+        ),
+        Index("ix_video_projects_active_launch_run", "active_launch_run_id"),
         Index(
             "ix_video_projects_project_admission_decision_id",
             "project_admission_decision_id",

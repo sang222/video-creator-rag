@@ -18,6 +18,7 @@ from app.contracts.vcos_v2 import (
     ContentMode,
     DurationContractV2,
     ProductionLane,
+    StrategicLineageV2,
 )
 
 
@@ -109,6 +110,10 @@ class ProductionPackageContentV2(BaseModel):
     channel_profile_hash: str = Field(pattern=SHA256_PATTERN)
     compiled_policy_snapshot_id: uuid.UUID
     compiled_policy_snapshot_hash: str = Field(pattern=SHA256_PATTERN)
+    # The first compatible v2 package version predates strategic lineage.  Keep
+    # it optional for immutable historical reads; every current v2 project is
+    # required by the package service to bind the exact project/admission copy.
+    strategic_lineage: StrategicLineageV2 | None = None
     effective_context_ref: ExactContentRefV2
     production_lane: Literal[ProductionLane.LONG_FORM]
     assignment_mode: AssignmentMode
@@ -237,6 +242,8 @@ class ProductionReadinessReceiptContentV2(BaseModel):
     channel_profile_hash: str = Field(pattern=SHA256_PATTERN)
     compiled_policy_snapshot_id: uuid.UUID
     compiled_policy_snapshot_hash: str = Field(pattern=SHA256_PATTERN)
+    # Mirrors the package's immutable audience/intent/launch authority.
+    strategic_lineage: StrategicLineageV2 | None = None
     duration_contract_hash: str = Field(pattern=SHA256_PATTERN)
     required_gate_runs: list[GateRunBindingV2] = Field(min_length=1)
     research_evidence_refs: list[ExactContentRefV2] = Field(min_length=1)

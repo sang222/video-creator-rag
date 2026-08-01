@@ -103,8 +103,6 @@ FORBIDDEN_IMPORT_PATTERNS = {
     r"^\s*from\s+openai\b",
     r"^\s*import\s+anthropic\b",
     r"^\s*from\s+anthropic\b",
-    r"^\s*import\s+ollama\b",
-    r"^\s*from\s+ollama\b",
     r"^\s*import\s+requests\b",
     r"^\s*from\s+requests\b",
     r"^\s*import\s+httpx\b",

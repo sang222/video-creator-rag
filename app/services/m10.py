@@ -99,7 +99,7 @@ class LearningCandidateGenerationService:
         next_action = "Execute the learning candidate generation run."
         if data.run_mode == "REAL_DISABLED":
             run_state = "BLOCKED"
-            reason_codes = ["REAL_OLLAMA_ROUTER_DEFERRED_TO_M10_1", "NO_AUTO_PROMOTION"]
+            reason_codes = ["OPENAI_ROUTER_GUARDED_BY_M10_1", "NO_AUTO_PROMOTION"]
             next_action = "Use RULE_BASED mode in M10; real LLM routing is deferred."
         run = LearningCandidateGenerationRun(
             company_id=uploaded.company_id,
@@ -153,7 +153,7 @@ class LearningCandidateGenerationService:
                 target_id=run.id,
                 company_id=run.company_id,
                 correlation_id=correlation_id,
-                reason_code="REAL_OLLAMA_ROUTER_DEFERRED_TO_M10_1",
+                reason_code="OPENAI_ROUTER_GUARDED_BY_M10_1",
                 payload={"run_mode": run.run_mode, "next_action": run.next_action},
             )
         return run

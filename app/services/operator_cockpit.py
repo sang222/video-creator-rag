@@ -21,14 +21,16 @@ from app.contracts.operator_cockpit import (
     ProductionProgressRead,
     WorkflowStageProgressRead,
 )
+from app.contracts.vcos_v2 import StrategicLineageV2
 from app.core.actor import ActorContext
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.channel import ChannelWorkspace
 from app.db.models.foundation import DomainEvent
 from app.db.models.m10_1 import HumanUploadTask
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
+from app.db.models.m5 import ProjectAdmissionDecision
 from app.db.models.m7 import ManualPublishConfirmation, UploadedVideo
 from app.db.models.ops import CostEvent, OpsIncident, ProviderAttempt
 from app.db.models.production_publish import FinalReviewCandidate, FinalVideoDecision
@@ -37,10 +39,14 @@ from app.db.models.production_workflow import (
     WorkflowCommandReceipt,
 )
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
-from app.db.models.workflow import VideoProject
+from app.db.models.workflow import ArtifactVersion, VideoProject
 from app.services.company_access import (
     accessible_company_ids,
     require_company_permission,
+)
+from app.services.production_package import (
+    ProductionPackageService,
+    strategic_lineage_from_record,
 )
 
 
@@ -485,7 +491,30 @@ class OperatorCockpitService:
         series_plan: SeriesPlan | None,
         series_run: SeriesRun | None,
     ) -> FinalReviewRead:
+        strategic_lineage = self._require_final_review_strategic_lineage(
+            project=project,
+            run=run,
+            candidate=candidate,
+        )
         final_media = self.session.get(FinalMediaRef, candidate.final_media_ref_id)
+        if (
+            final_media is not None
+            and final_media.provider_key == "v2-google-drive-archive"
+        ):
+            # Re-resolve the non-MR1 Drive authority at the human boundary.
+            # The helper is database-only; it never fetches or proxies Drive
+            # bytes into the cockpit.
+            from app.services.v2_drive_archive import (
+                require_v2_google_drive_final_media,
+            )
+
+            require_v2_google_drive_final_media(
+                self.session,
+                project_id=project.id,
+                final_media_id=final_media.id,
+                expected_checksum=candidate.render_output_checksum,
+                expected_archive_hash=candidate.archive_receipt_hash,
+            )
         cloud_media = (
             self.session.get(CloudMediaRef, final_media.cloud_media_ref_id)
             if final_media is not None and final_media.cloud_media_ref_id
@@ -535,6 +564,16 @@ class OperatorCockpitService:
             description=description,
             lane="LONG_FORM",
             content_mode=candidate.content_mode,
+            audience_promise=(
+                strategic_lineage.audience_promise
+                if strategic_lineage is not None
+                else None
+            ),
+            strategic_intent=(
+                strategic_lineage.strategic_intent.value
+                if strategic_lineage is not None
+                else None
+            ),
             series_title=series_plan.display_name if series_plan is not None else None,
             run_label=(
                 f"Đợt {series_run.run_number}" if series_run is not None else None
@@ -606,6 +645,98 @@ class OperatorCockpitService:
                 "decision_hash": decision.decision_hash if decision else None,
             },
         )
+
+    def _require_final_review_strategic_lineage(
+        self,
+        *,
+        project: VideoProject,
+        run: ProductionWorkflowRun,
+        candidate: FinalReviewCandidate,
+    ) -> StrategicLineageV2 | None:
+        """Return only package-sealed strategy authority for a V2 review.
+
+        The cockpit is a read model, but it must not turn a stale or spliced
+        package into operator-facing strategy claims.  Pre-lineage immutable V2
+        artifacts can remain readable only when every source is absent; current
+        V2 authority requires all three copies to be exact.
+        """
+
+        if (
+            project.schema_version != "v2"
+            or project.production_lane != "LONG_FORM"
+            or candidate.company_id != project.company_id
+            or candidate.channel_workspace_id != project.channel_workspace_id
+            or candidate.video_project_id != project.id
+            or run.company_id != project.company_id
+            or run.channel_workspace_id != project.channel_workspace_id
+            or run.video_project_id != project.id
+            or run.production_package_artifact_version_id
+            != candidate.production_package_artifact_version_id
+            or run.production_package_hash != candidate.production_package_hash
+        ):
+            raise ValidationFailureError(
+                "FINAL_REVIEW_STRATEGIC_LINEAGE_SCOPE_MISMATCH"
+            )
+        package = ProductionPackageService(self.session).validate_for_readiness(
+            candidate.production_package_artifact_version_id
+        )
+        package_version = self.session.get(
+            ArtifactVersion,
+            candidate.production_package_artifact_version_id,
+        )
+        if (
+            package_version is None
+            or package_version.content_hash != candidate.production_package_hash
+            or package.company_id != project.company_id
+            or package.channel_workspace_id != project.channel_workspace_id
+            or package.video_project_id != project.id
+            or package.production_lane.value != "LONG_FORM"
+            or project.project_admission_decision_id
+            != package.project_admission_decision_id
+        ):
+            raise ValidationFailureError(
+                "FINAL_REVIEW_STRATEGIC_LINEAGE_PACKAGE_MISMATCH"
+            )
+        admission = self.session.get(
+            ProjectAdmissionDecision,
+            package.project_admission_decision_id,
+        )
+        if (
+            admission is None
+            or admission.schema_version != "v2"
+            or admission.company_id != project.company_id
+            or admission.channel_workspace_id != project.channel_workspace_id
+            or admission.decision != "ADMIT"
+            or admission.admitted_video_project_id != project.id
+            or admission.decision_hash != package.project_admission_decision_hash
+        ):
+            raise ValidationFailureError(
+                "FINAL_REVIEW_STRATEGIC_LINEAGE_ADMISSION_MISMATCH"
+            )
+        project_lineage = strategic_lineage_from_record(
+            project,
+            invalid_reason_code="FINAL_REVIEW_PROJECT_STRATEGIC_LINEAGE_INVALID",
+        )
+        admission_lineage = strategic_lineage_from_record(
+            admission,
+            invalid_reason_code="FINAL_REVIEW_ADMISSION_STRATEGIC_LINEAGE_INVALID",
+        )
+        package_lineage = package.strategic_lineage
+        if (
+            package_lineage is None
+            and project_lineage is None
+            and admission_lineage is None
+        ):
+            return None
+        if (
+            package_lineage is None
+            or project_lineage is None
+            or admission_lineage is None
+        ):
+            raise ValidationFailureError("FINAL_REVIEW_STRATEGIC_LINEAGE_REQUIRED")
+        if package_lineage != project_lineage or package_lineage != admission_lineage:
+            raise ValidationFailureError("FINAL_REVIEW_STRATEGIC_LINEAGE_MISMATCH")
+        return package_lineage
 
     def _manual_publish(
         self,

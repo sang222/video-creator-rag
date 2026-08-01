@@ -58,7 +58,7 @@ def test_cli_integrations_smoke_respects_env_guards(db_session, monkeypatch) -> 
     monkeypatch.setenv("VCOS_LLM_ROUTER_REAL_SMOKE", "false")
     get_settings.cache_clear()
 
-    result = runner.invoke(app, ["integrations", "smoke", "--provider", "ollama"])
+    result = runner.invoke(app, ["integrations", "smoke", "--provider", "openai"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)

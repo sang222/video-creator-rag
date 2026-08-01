@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import uuid
-from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -24,12 +23,8 @@ from app.db.models import (
     ProviderAttempt,
 )
 from app.providers.base import ProviderResponse
-from app.providers.ollama import OllamaChatRequest, OllamaLLMProvider
+from app.providers.openai import OpenAIResponsesProvider, OpenAIResponsesRequest
 from app.services.domain_events import DomainEventBus
-
-
-def _model_from_env(env_var: str, default: str) -> str:
-    return os.getenv(env_var, default)
 
 
 FINAL_LANES: list[dict[str, Any]] = [
@@ -43,12 +38,8 @@ FINAL_LANES: list[dict[str, Any]] = [
             "repair_validation",
             "editorial_idea_research",
         ],
-        "primary_model": _model_from_env(
-            "VCOS_LLM_MODEL_CHEAP_STRUCTURED_PRIMARY", "gpt-oss:20b-cloud"
-        ),
-        "fallback_models": [
-            _model_from_env("VCOS_LLM_MODEL_CHEAP_STRUCTURED_FALLBACK", "qwen3.5:cloud")
-        ],
+        "primary_model": "gpt-5.6-luna",
+        "reasoning_effort": "none",
         "cost_tier": "LOW",
         "latency_tier": "FAST",
         "route_priority": 10,
@@ -57,14 +48,8 @@ FINAL_LANES: list[dict[str, Any]] = [
         "lane_name": "default_multimodal",
         "lane_description": "General multimodal reasoning and non-critical creative checks.",
         "allowed_task_types": ["multimodal_reasoning", "creative_check"],
-        "primary_model": _model_from_env(
-            "VCOS_LLM_MODEL_DEFAULT_MULTIMODAL_PRIMARY", "qwen3.5:cloud"
-        ),
-        "fallback_models": [
-            _model_from_env(
-                "VCOS_LLM_MODEL_DEFAULT_MULTIMODAL_FALLBACK", "gemma4:31b-cloud"
-            )
-        ],
+        "primary_model": "gpt-5.6-terra",
+        "reasoning_effort": "low",
         "cost_tier": "MEDIUM",
         "latency_tier": "NORMAL",
         "route_priority": 20,
@@ -77,17 +62,8 @@ FINAL_LANES: list[dict[str, Any]] = [
             "scene_concept_review",
             "thumbnail_direction_review",
         ],
-        "primary_model": _model_from_env(
-            "VCOS_LLM_MODEL_VISUAL_CREATIVE_REVIEW_PRIMARY", "minimax-m3:cloud"
-        ),
-        "fallback_models": [
-            _model_from_env(
-                "VCOS_LLM_MODEL_VISUAL_CREATIVE_REVIEW_FALLBACK", "qwen3.5:cloud"
-            )
-        ],
-        "emergency_model": _model_from_env(
-            "VCOS_LLM_MODEL_VISUAL_CREATIVE_REVIEW_EMERGENCY", "gemma4:31b-cloud"
-        ),
+        "primary_model": "gpt-5.6-terra",
+        "reasoning_effort": "medium",
         "cost_tier": "MEDIUM",
         "latency_tier": "NORMAL",
         "route_priority": 30,
@@ -101,17 +77,8 @@ FINAL_LANES: list[dict[str, Any]] = [
             "research_pack_to_script",
             "deep_rewrite",
         ],
-        "primary_model": _model_from_env(
-            "VCOS_LLM_MODEL_LONG_CONTEXT_TEXT_PRIMARY", "deepseek-v4-flash:cloud"
-        ),
-        "fallback_models": [
-            _model_from_env(
-                "VCOS_LLM_MODEL_LONG_CONTEXT_TEXT_FALLBACK", "nemotron-3-super:cloud"
-            )
-        ],
-        "premium_model": _model_from_env(
-            "VCOS_LLM_MODEL_LONG_CONTEXT_TEXT_PREMIUM", "deepseek-v4-flash:cloud"
-        ),
+        "primary_model": "gpt-5.6-terra",
+        "reasoning_effort": "medium",
         "cost_tier": "MEDIUM",
         "latency_tier": "NORMAL",
         "route_priority": 40,
@@ -125,17 +92,8 @@ FINAL_LANES: list[dict[str, Any]] = [
             "test_planning",
             "implementation_prompt",
         ],
-        "primary_model": _model_from_env(
-            "VCOS_LLM_MODEL_ENGINEERING_ARCHITECT_PRIMARY", "qwen3-coder:480b-cloud"
-        ),
-        "fallback_models": [
-            _model_from_env(
-                "VCOS_LLM_MODEL_ENGINEERING_ARCHITECT_FALLBACK", "kimi-k2.7-code:cloud"
-            )
-        ],
-        "backup_model": _model_from_env(
-            "VCOS_LLM_MODEL_ENGINEERING_ARCHITECT_BACKUP", "deepseek-v4-flash:cloud"
-        ),
+        "primary_model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
         "cost_tier": "HIGH",
         "latency_tier": "SLOW",
         "critical_path_allowed": False,
@@ -150,23 +108,29 @@ FINAL_LANES: list[dict[str, Any]] = [
             "script_risk_review",
             "factuality_review",
         ],
-        "primary_model": _model_from_env(
-            "VCOS_LLM_MODEL_GATEKEEPER_SOFT_REVIEW_PRIMARY", "nemotron-3-super:cloud"
-        ),
-        "fallback_models": [
-            _model_from_env(
-                "VCOS_LLM_MODEL_GATEKEEPER_SOFT_REVIEW_FALLBACK",
-                "deepseek-v4-flash:cloud",
-            )
-        ],
-        "premium_model": _model_from_env(
-            "VCOS_LLM_MODEL_GATEKEEPER_SOFT_REVIEW_PREMIUM", "deepseek-v4-flash:cloud"
-        ),
+        "primary_model": "gpt-5.6-terra",
+        "reasoning_effort": "medium",
         "cost_tier": "HIGH",
         "latency_tier": "NORMAL",
         "route_priority": 60,
     },
 ]
+
+# Versioned against the OpenAI model-pricing page on the cutover date.  This
+# is intentionally a pinned receipt, not a live scrape during a production run.
+OPENAI_PRICING_VERSION = "openai-api-pricing-2026-08-01"
+OPENAI_STANDARD_PRICING_PER_MILLION: dict[str, dict[str, Decimal]] = {
+    "gpt-5.6-luna": {
+        "input": Decimal("1.00"),
+        "cached_input": Decimal("0.10"),
+        "output": Decimal("6.00"),
+    },
+    "gpt-5.6-terra": {
+        "input": Decimal("2.50"),
+        "cached_input": Decimal("0.25"),
+        "output": Decimal("15.00"),
+    },
+}
 
 AGENT_ROUTER_MAPPING: dict[str, list[str]] = {
     "ChannelAuthorityAgent": ["cheap_structured", "long_context_text"],
@@ -198,25 +162,12 @@ def configured_router_models() -> list[str]:
     models: list[str] = []
     seen: set[str] = set()
     for lane in FINAL_LANES:
-        lane_models = [
-            lane["primary_model"],
-            *lane.get("fallback_models", []),
-            lane.get("premium_model"),
-            lane.get("emergency_model"),
-            lane.get("backup_model"),
-        ]
-        for model_id in lane_models:
+        for model_id in [lane["primary_model"]]:
             if model_id and model_id not in seen:
                 seen.add(model_id)
                 models.append(model_id)
-    _assert_no_forbidden_model(models)
+    _assert_allowed_models(models)
     return models
-
-
-@dataclass(frozen=True)
-class _ModelChoice:
-    model_id: str
-    fallback_level: str
 
 
 class LLMRouterConfigLoader:
@@ -228,19 +179,18 @@ class LLMRouterConfigLoader:
     ) -> LLMRouterProfile:
         profile_key = profile_key or os.getenv("VCOS_LLM_ROUTER_PROFILE", "default")
         settings = get_settings()
-        base_url = settings.ollama_base_url
-        timeout_seconds = max(1, int(settings.ollama_timeout_seconds))
-        real_enabled = _env_bool("VCOS_LLM_REAL_EXECUTION_ENABLED", False)
-        provider = os.getenv("VCOS_LLM_PROVIDER", "ollama").lower()
-        if provider != "ollama":
-            raise ValidationFailureError("M10.1 only allows the Ollama LLM provider.")
+        base_url = settings.openai_base_url
+        timeout_seconds = max(1, int(settings.openai_timeout_seconds))
+        real_enabled = settings.llm_real_execution_enabled
+        if settings.llm_provider != "openai":
+            raise ValidationFailureError("M10.1 only allows the OpenAI LLM provider.")
         profile = self.session.scalars(
             select(LLMRouterProfile).where(LLMRouterProfile.profile_key == profile_key)
         ).one_or_none()
         if profile is None:
             profile = LLMRouterProfile(
                 profile_key=profile_key,
-                provider_key="OLLAMA",
+                provider_key="OPENAI",
                 base_url=base_url,
                 real_execution_enabled=real_enabled,
                 default_timeout_seconds=timeout_seconds,
@@ -261,6 +211,7 @@ class LLMRouterConfigLoader:
                 },
             )
         else:
+            profile.provider_key = "OPENAI"
             profile.base_url = base_url
             profile.real_execution_enabled = real_enabled
             profile.default_timeout_seconds = timeout_seconds
@@ -307,15 +258,7 @@ class LLMRouterConfigLoader:
         ).one_or_none()
         if lane is None:
             raise NotFoundError(f"LLM router lane not found: {lane_name}")
-        _assert_no_forbidden_model(
-            [
-                lane.primary_model,
-                *lane.fallback_models,
-                lane.premium_model,
-                lane.emergency_model,
-                lane.backup_model,
-            ]
-        )
+        _assert_allowed_models([lane.primary_model])
         return profile, lane
 
     def _ensure_lanes(self, profile: LLMRouterProfile, *, real_enabled: bool) -> None:
@@ -332,32 +275,23 @@ class LLMRouterConfigLoader:
             if stale_name not in expected_names:
                 self.session.delete(stale_lane)
         for lane_def in FINAL_LANES:
-            _assert_no_forbidden_model(
-                [
-                    lane_def["primary_model"],
-                    *lane_def.get("fallback_models", []),
-                    lane_def.get("premium_model"),
-                    lane_def.get("emergency_model"),
-                    lane_def.get("backup_model"),
-                ]
-            )
+            _assert_allowed_models([lane_def["primary_model"]])
             lane = existing.get(lane_def["lane_name"])
             values = {
                 "lane_description": lane_def["lane_description"],
                 "allowed_task_types": lane_def["allowed_task_types"],
                 "primary_model": lane_def["primary_model"],
-                "fallback_models": lane_def.get("fallback_models", []),
-                "premium_model": lane_def.get("premium_model"),
-                "emergency_model": lane_def.get("emergency_model"),
-                "backup_model": lane_def.get("backup_model"),
+                "reasoning_effort": lane_def["reasoning_effort"],
+                "fallback_models": [],
+                "premium_model": None,
+                "emergency_model": None,
+                "backup_model": None,
                 "max_input_tokens": lane_def.get("max_input_tokens"),
                 "max_output_tokens": lane_def.get("max_output_tokens"),
                 "cost_tier": lane_def["cost_tier"],
                 "latency_tier": lane_def["latency_tier"],
                 "critical_path_allowed": lane_def.get("critical_path_allowed", False),
-                "requires_human_approval_for_premium": lane_def.get(
-                    "requires_human_approval_for_premium", True
-                ),
+                "requires_human_approval_for_premium": False,
                 "route_priority": lane_def["route_priority"],
                 "real_execution_enabled": real_enabled,
             }
@@ -394,19 +328,11 @@ class LLMRouterConfigLoader:
             lane_by_model.setdefault(lane["primary_model"], set()).add(
                 lane["lane_name"]
             )
-            for model in lane.get("fallback_models", []):
-                roles.setdefault(model, "FALLBACK")
-                lane_by_model.setdefault(model, set()).add(lane["lane_name"])
-            for role_key in ["premium_model", "emergency_model", "backup_model"]:
-                model = lane.get(role_key)
-                if model:
-                    roles.setdefault(model, role_key.replace("_model", "").upper())
-                    lane_by_model.setdefault(model, set()).add(lane["lane_name"])
         for model_id, lane_names in sorted(lane_by_model.items()):
-            _assert_no_forbidden_model([model_id])
+            _assert_allowed_models([model_id])
             profile = self.session.scalars(
                 select(LLMModelProfile)
-                .where(LLMModelProfile.provider_key == "OLLAMA")
+                .where(LLMModelProfile.provider_key == "OPENAI")
                 .where(LLMModelProfile.model_id == model_id)
             ).one_or_none()
             values = {
@@ -414,11 +340,13 @@ class LLMRouterConfigLoader:
                 "lane_names": sorted(lane_names),
                 "is_enabled": True,
                 "critical_path_allowed": False,
-                "notes": "M10.1 router catalog model profile.",
+                "capability_blob": _model_capability_blob(model_id),
+                "pricing_snapshot_version": OPENAI_PRICING_VERSION,
+                "notes": "OpenAI-only VCOS router catalog model profile.",
             }
             if profile is None:
                 self.session.add(
-                    LLMModelProfile(provider_key="OLLAMA", model_id=model_id, **values)
+                    LLMModelProfile(provider_key="OPENAI", model_id=model_id, **values)
                 )
             else:
                 for key, value in values.items():
@@ -426,7 +354,9 @@ class LLMRouterConfigLoader:
 
 
 class LLMRouterService:
-    def __init__(self, session: Session, provider: OllamaLLMProvider | None = None):
+    def __init__(
+        self, session: Session, provider: OpenAIResponsesProvider | None = None
+    ):
         self.session = session
         self.provider = provider
 
@@ -436,6 +366,7 @@ class LLMRouterService:
         lane_name: str,
         prompt: str | None = None,
         messages: list[dict[str, str]] | None = None,
+        image_inputs: list[dict[str, str]] | None = None,
         requested_task_type: str | None = None,
         response_format: str = "text",
         profile_key: str = "default",
@@ -453,6 +384,7 @@ class LLMRouterService:
             "requested_task_type": requested_task_type,
             "prompt": prompt,
             "messages": messages,
+            "image_inputs": image_inputs,
             "response_format": response_format,
             "profile_key": profile.profile_key,
         }
@@ -466,7 +398,7 @@ class LLMRouterService:
                 request_payload=request_payload,
                 output_payload={
                     "skipped": True,
-                    "reason_code": "OLLAMA_REAL_EXECUTION_DISABLED",
+                    "reason_code": "OPENAI_REAL_EXECUTION_DISABLED",
                 },
                 status="SKIPPED",
                 run_mode="REAL_DISABLED",
@@ -484,8 +416,8 @@ class LLMRouterService:
                 requested_task_type=requested_task_type,
                 provider_attempt=None,
                 llm_run=llm_run,
-                error_code="OLLAMA_REAL_EXECUTION_DISABLED",
-                error_message="Real Ollama execution is disabled by environment/profile/lane guard.",
+                error_code="OPENAI_REAL_EXECUTION_DISABLED",
+                error_message="Real OpenAI execution is disabled by environment/profile/lane guard.",
             )
             return LLMRouteResponse(
                 status="SKIPPED",
@@ -497,121 +429,90 @@ class LLMRouterService:
                 route_attempt_id=route_attempt.id,
                 provider_attempt_id=None,
                 llm_run_snapshot_id=llm_run.id,
-                reason_codes=["OLLAMA_REAL_EXECUTION_DISABLED"],
+                reason_codes=["OPENAI_REAL_EXECUTION_DISABLED"],
             )
 
-        provider = self.provider or OllamaLLMProvider(
-            base_url=profile.base_url, timeout_seconds=profile.default_timeout_seconds
+        provider = self.provider or OpenAIResponsesProvider(
+            api_key=_openai_api_key(),
+            base_url=profile.base_url,
+            timeout_seconds=profile.default_timeout_seconds,
         )
-        last_response: ProviderResponse | None = None
-        for choice in _model_choices(lane):
-            response = provider.chat(
-                request=OllamaChatRequest(
-                    model=choice.model_id,
-                    prompt=prompt,
-                    messages=messages,
-                    response_format=response_format,
-                )
+        response = provider.respond(
+            request=OpenAIResponsesRequest(
+                model=lane.primary_model,
+                reasoning_effort=_reasoning_effort_for_lane(lane.lane_name),
+                prompt=prompt,
+                messages=messages,
+                image_inputs=image_inputs,
+                response_format=response_format,
             )
-            status = "SUCCESS" if response.ok else "FAILED"
-            provider_attempt = _create_provider_attempt(
-                self.session,
-                provider_key="OLLAMA",
-                operation_key="llm_router.chat",
-                target_type="llm_router_lane",
-                target_id=lane.id,
-                response=response,
-                model_id=choice.model_id,
-                correlation_id=correlation_id,
-                router_lane=lane.lane_name,
-                request_hash=request_hash,
-            )
-            llm_run = _create_llm_run_snapshot(
-                self.session,
-                profile=profile,
-                lane=lane,
-                selected_model=choice.model_id,
-                request_payload=request_payload,
-                output_payload=response.output
-                if response.ok
-                else {"error_code": response.error_code},
-                status=status,
-                run_mode="REAL",
-                correlation_id=correlation_id,
-                provider_attempt=provider_attempt,
-            )
-            route_attempt = _create_route_attempt(
-                self.session,
-                profile=profile,
-                lane=lane,
-                selected_model=choice.model_id,
-                fallback_level=choice.fallback_level,
-                request_hash=request_hash,
-                response_payload=response.output if response.ok else None,
-                status=status,
-                requested_task_type=requested_task_type,
-                provider_attempt=provider_attempt,
-                llm_run=llm_run,
-                error_code=response.error_code,
-                error_message=response.error_message,
-            )
-            last_response = response
-            if response.ok:
-                reason_codes = ["LLM_ROUTE_ATTEMPT_CREATED"]
-                if choice.fallback_level != "PRIMARY":
-                    reason_codes.append("LLM_ROUTE_FALLBACK_USED")
-                return LLMRouteResponse(
-                    status="SUCCESS",
-                    lane_name=lane.lane_name,
-                    selected_model=choice.model_id,
-                    fallback_level=choice.fallback_level,
-                    content=response.output.get("content"),
-                    structured_output=response.output.get("json"),
-                    route_attempt_id=route_attempt.id,
-                    provider_attempt_id=provider_attempt.id,
-                    llm_run_snapshot_id=llm_run.id,
-                    reason_codes=reason_codes,
-                )
-        assert last_response is not None
+        )
+        status = "SUCCESS" if response.ok else "FAILED"
+        provider_attempt = _create_provider_attempt(
+            self.session,
+            provider_key="OPENAI",
+            operation_key="llm_router.responses",
+            target_type="llm_router_lane",
+            target_id=lane.id,
+            response=response,
+            model_id=lane.primary_model,
+            reasoning_effort=_reasoning_effort_for_lane(lane.lane_name),
+            correlation_id=correlation_id,
+            router_lane=lane.lane_name,
+            request_hash=request_hash,
+        )
+        llm_run = _create_llm_run_snapshot(
+            self.session,
+            profile=profile,
+            lane=lane,
+            selected_model=lane.primary_model,
+            request_payload=request_payload,
+            output_payload=response.output
+            if response.ok
+            else {"error_code": response.error_code},
+            status=status,
+            run_mode="REAL",
+            correlation_id=correlation_id,
+            provider_attempt=provider_attempt,
+        )
+        route_attempt = _create_route_attempt(
+            self.session,
+            profile=profile,
+            lane=lane,
+            selected_model=lane.primary_model,
+            fallback_level="PRIMARY",
+            request_hash=request_hash,
+            response_payload=response.output if response.ok else None,
+            status=status,
+            requested_task_type=requested_task_type,
+            provider_attempt=provider_attempt,
+            llm_run=llm_run,
+            error_code=response.error_code,
+            error_message=response.error_message,
+        )
         return LLMRouteResponse(
-            status="FAILED",
+            status=status,
             lane_name=lane.lane_name,
-            selected_model=choice.model_id,
-            fallback_level=choice.fallback_level,
-            content=None,
-            structured_output=None,
+            selected_model=lane.primary_model,
+            fallback_level="PRIMARY",
+            content=response.output.get("content") if response.ok else None,
+            structured_output=response.output.get("json") if response.ok else None,
             route_attempt_id=route_attempt.id,
             provider_attempt_id=provider_attempt.id,
             llm_run_snapshot_id=llm_run.id,
-            reason_codes=["LLM_ROUTE_ATTEMPT_CREATED"],
+            reason_codes=["LLM_ROUTE_ATTEMPT_CREATED", "NO_MODEL_FALLBACK"],
         )
 
     def run_smoke_test(self, *, profile_key: str = "default") -> dict[str, Any]:
-        profile = LLMRouterConfigLoader(self.session).ensure_default_profile(
+        LLMRouterConfigLoader(self.session).ensure_default_profile(
             profile_key=profile_key
         )
-        if not _env_bool("VCOS_LLM_ROUTER_REAL_SMOKE", False):
+        if not get_settings().llm_router_real_smoke:
             return {
                 "status": "SKIPPED",
                 "real_smoke_enabled": False,
-                "reason_codes": ["OLLAMA_REAL_EXECUTION_DISABLED"],
-                "next_action": "Set VCOS_LLM_ROUTER_REAL_SMOKE=true and VCOS_LLM_REAL_EXECUTION_ENABLED=true to run local Ollama smoke.",
-            }
-        provider = self.provider or OllamaLLMProvider(
-            base_url=profile.base_url, timeout_seconds=profile.default_timeout_seconds
-        )
-        health = provider.list_models()
-        if not health.ok:
-            return {
-                "status": "BLOCKED",
-                "real_smoke_enabled": True,
-                "health_check": {
-                    "ok": False,
-                    "error_code": health.error_code,
-                    "error_message": health.error_message,
-                },
-                "reason_codes": ["OLLAMA_REAL_SMOKE_BLOCKED"],
-                "next_action": "Start local Ollama and ensure required models are available. VCOS does not auto-pull models.",
+                "reason_codes": ["OPENAI_REAL_EXECUTION_DISABLED"],
+                "next_action": "Set VCOS_LLM_ROUTER_REAL_SMOKE=true and VCOS_LLM_REAL_EXECUTION_ENABLED=true to run the bounded OpenAI smoke.",
             }
         cheap = self.route(
             lane_name="cheap_structured",
@@ -619,7 +520,7 @@ class LLMRouterService:
             prompt='Return JSON exactly like {"ok": true, "lane": "cheap_structured"}.',
             response_format="json",
             profile_key=profile_key,
-            correlation_id="m10-1-ollama-smoke-cheap",
+            correlation_id="m10-1-openai-smoke-luna",
         )
         long_context = self.route(
             lane_name="long_context_text",
@@ -627,7 +528,7 @@ class LLMRouterService:
             prompt="Reply with one short sentence confirming the long context lane is reachable.",
             response_format="text",
             profile_key=profile_key,
-            correlation_id="m10-1-ollama-smoke-long-context",
+            correlation_id="m10-1-openai-smoke-terra",
         )
         route_attempt_ids = [cheap.route_attempt_id, long_context.route_attempt_id]
         status = (
@@ -638,27 +539,24 @@ class LLMRouterService:
         return {
             "status": status,
             "real_smoke_enabled": True,
-            "health_check": {
-                "ok": True,
-                "model_count": len(health.output.get("models", [])),
-            },
+            "health_check": {"ok": status == "SUCCESS"},
             "cheap_structured": cheap.model_dump(mode="json"),
             "long_context_text": long_context.model_dump(mode="json"),
-            "fallback_probe": {"covered_by_unit_test": True},
+            "fallback_probe": {"automatic_model_fallback": False},
             "route_attempt_ids": route_attempt_ids,
-            "reason_codes": ["OLLAMA_REAL_SMOKE_PASSED"]
+            "reason_codes": ["OPENAI_REAL_SMOKE_PASSED"]
             if status == "SUCCESS"
-            else ["OLLAMA_REAL_SMOKE_BLOCKED"],
+            else ["OPENAI_REAL_SMOKE_BLOCKED"],
         }
 
     def _real_execution_allowed(
         self, profile: LLMRouterProfile, lane: LLMRouterLane
     ) -> bool:
         return (
-            _env_bool("VCOS_LLM_REAL_EXECUTION_ENABLED", False)
+            get_settings().llm_real_execution_enabled
             and profile.real_execution_enabled
             and lane.real_execution_enabled
-            and os.getenv("VCOS_LLM_PROVIDER", "ollama").lower() == "ollama"
+            and get_settings().llm_provider == "openai"
         )
 
 
@@ -685,6 +583,11 @@ def _create_route_attempt(
         requested_task_type=requested_task_type,
         selected_model=selected_model,
         fallback_level=fallback_level,
+        reasoning_effort=_reasoning_effort_for_lane(lane.lane_name),
+        provider_request_id=(
+            response_payload.get("request_id") if response_payload is not None else None
+        ),
+        actual_cost_usd=_actual_cost_usd(selected_model, response_payload),
         request_hash=request_hash,
         response_hash=_hash_payload(response_payload)
         if response_payload is not None
@@ -692,12 +595,12 @@ def _create_route_attempt(
         status=status,
         error_code=error_code,
         error_message=error_message,
-        prompt_eval_count=usage.get("prompt_eval_count"),
-        eval_count=usage.get("eval_count"),
-        total_duration_ms=usage.get("total_duration_ms"),
-        load_duration_ms=usage.get("load_duration_ms"),
-        prompt_eval_duration_ms=usage.get("prompt_eval_duration_ms"),
-        eval_duration_ms=usage.get("eval_duration_ms"),
+        prompt_eval_count=usage.get("input_tokens"),
+        eval_count=usage.get("output_tokens"),
+        total_duration_ms=None,
+        load_duration_ms=None,
+        prompt_eval_duration_ms=None,
+        eval_duration_ms=None,
         provider_attempt_id=provider_attempt.id if provider_attempt else None,
         llm_run_snapshot_id=llm_run.id if llm_run else None,
     )
@@ -730,6 +633,7 @@ def _create_provider_attempt(
     target_id: uuid.UUID,
     response: ProviderResponse,
     model_id: str,
+    reasoning_effort: str,
     correlation_id: str,
     router_lane: str,
     request_hash: str,
@@ -752,10 +656,16 @@ def _create_provider_attempt(
         metadata_={
             "model_id": model_id,
             "router_lane": router_lane,
+            "reasoning_effort": reasoning_effort,
             "request_hash": request_hash,
             "response_hash": response_hash,
-            "ollama_local_endpoint": True,
-            "no_dollar_cost_reported": True,
+            "openai_request_id": response.output.get("request_id")
+            if response.ok
+            else None,
+            "pricing_version": OPENAI_PRICING_VERSION,
+            "actual_cost_usd": _serialized_cost(model_id, response.output)
+            if response.ok
+            else None,
             "response_usage": response.output.get("usage") if response.ok else {},
             "validation_outcome": "VCOS_VALIDATION_PENDING",
             "repair_outcome": "NOT_ATTEMPTED",
@@ -796,16 +706,13 @@ def _create_llm_run_snapshot(
 ) -> LLMRunSnapshot:
     usage = _usage_from_payload(output_payload)
     token_total = None
-    if (
-        usage.get("prompt_eval_count") is not None
-        or usage.get("eval_count") is not None
-    ):
+    if usage.get("input_tokens") is not None or usage.get("output_tokens") is not None:
         token_total = Decimal(
-            str((usage.get("prompt_eval_count") or 0) + (usage.get("eval_count") or 0))
+            str((usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0))
         )
     snapshot = LLMRunSnapshot(
         run_type=f"M10_1_LLM_ROUTER_{lane.lane_name.upper()}",
-        provider="ollama",
+        provider="openai",
         model_name=selected_model,
         provider_key=profile.provider_key,
         model_key=selected_model,
@@ -819,13 +726,17 @@ def _create_llm_run_snapshot(
         if output_payload is not None
         else None,
         status=status,
-        estimated_cost=None,
+        estimated_cost=_actual_cost_usd(selected_model, output_payload),
         token_estimate=token_total,
         quota_event_id=None,
         cost_event_id=None,
         cost_payload={
-            "provider_price_unavailable": True,
-            "no_dollar_cost_invented": True,
+            "pricing_version": OPENAI_PRICING_VERSION,
+            "actual_cost_usd": _serialized_cost(selected_model, output_payload),
+            "openai_request_id": output_payload.get("request_id")
+            if output_payload
+            else None,
+            "reasoning_effort": _reasoning_effort_for_lane(lane.lane_name),
             "validation_outcome": "VCOS_VALIDATION_PENDING",
             "repair_outcome": "NOT_ATTEMPTED",
             "router_lane": lane.lane_name,
@@ -837,25 +748,6 @@ def _create_llm_run_snapshot(
     session.add(snapshot)
     session.flush()
     return snapshot
-
-
-def _model_choices(lane: LLMRouterLane) -> list[_ModelChoice]:
-    choices: list[_ModelChoice] = []
-    seen: set[str] = set()
-
-    def add_choice(model_id: str | None, fallback_level: str) -> None:
-        if model_id and model_id not in seen:
-            seen.add(model_id)
-            choices.append(_ModelChoice(model_id, fallback_level))
-
-    add_choice(lane.primary_model, "PRIMARY")
-    for model in lane.fallback_models:
-        add_choice(model, "FALLBACK")
-    add_choice(lane.premium_model, "PREMIUM")
-    add_choice(lane.emergency_model, "EMERGENCY")
-    add_choice(lane.backup_model, "BACKUP")
-    _assert_no_forbidden_model([choice.model_id for choice in choices])
-    return choices
 
 
 def _provider_attempt_status(response: ProviderResponse) -> str:
@@ -875,26 +767,81 @@ def _usage_from_payload(payload: dict[str, Any] | None) -> dict[str, int | None]
         return {}
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
     return {
-        "prompt_eval_count": _maybe_int(usage.get("prompt_eval_count")),
-        "eval_count": _maybe_int(usage.get("eval_count")),
-        "total_duration_ms": _maybe_int(usage.get("total_duration_ms")),
-        "load_duration_ms": _maybe_int(usage.get("load_duration_ms")),
-        "prompt_eval_duration_ms": _maybe_int(usage.get("prompt_eval_duration_ms")),
-        "eval_duration_ms": _maybe_int(usage.get("eval_duration_ms")),
+        "input_tokens": _maybe_int(usage.get("input_tokens")),
+        "cached_input_tokens": _maybe_int(usage.get("cached_input_tokens")),
+        "output_tokens": _maybe_int(usage.get("output_tokens")),
+        "reasoning_tokens": _maybe_int(usage.get("reasoning_tokens")),
     }
 
 
-def _assert_no_forbidden_model(models: list[str | None]) -> None:
-    forbidden = [model for model in models if model and "glm" in model.lower()]
-    if forbidden:
-        raise ValidationFailureError("GLM_MODEL_FORBIDDEN")
+def _assert_allowed_models(models: list[str | None]) -> None:
+    invalid = [
+        model
+        for model in models
+        if model and model not in {"gpt-5.6-luna", "gpt-5.6-terra"}
+    ]
+    if invalid:
+        raise ValidationFailureError("OPENAI_LUNA_TERRA_MODELS_REQUIRED")
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+def _reasoning_effort_for_lane(lane_name: str) -> str:
+    for lane in FINAL_LANES:
+        if lane["lane_name"] == lane_name:
+            return str(lane["reasoning_effort"])
+    raise NotFoundError(f"LLM router lane not found: {lane_name}")
+
+
+def _model_capability_blob(model_id: str) -> dict[str, Any]:
+    _assert_allowed_models([model_id])
+    return {
+        "model_id": model_id,
+        "provider_id": "openai",
+        "reasoning_effort": sorted(
+            {
+                str(lane["reasoning_effort"])
+                for lane in FINAL_LANES
+                if lane["primary_model"] == model_id
+            }
+        ),
+        "structured_outputs": True,
+        "function_calling": True,
+        "image_input": True,
+        "context_limit_tokens": 1_050_000,
+        "output_limit_tokens": 128_000,
+        "service_tier": "standard",
+        "pricing_version": OPENAI_PRICING_VERSION,
+        "pricing_evidence_ref": "https://developers.openai.com/api/docs/models/compare",
+    }
+
+
+def _openai_api_key() -> str | None:
+    secret = get_settings().openai_api_key
+    return secret.get_secret_value() if secret is not None else None
+
+
+def _actual_cost_usd(model_id: str, payload: dict[str, Any] | None) -> Decimal | None:
+    if not payload:
+        return None
+    usage = _usage_from_payload(payload)
+    if usage.get("input_tokens") is None and usage.get("output_tokens") is None:
+        return None
+    pricing = OPENAI_STANDARD_PRICING_PER_MILLION.get(model_id)
+    if pricing is None:
+        return None
+    cached = Decimal(str(usage.get("cached_input_tokens") or 0))
+    input_tokens = Decimal(str(usage.get("input_tokens") or 0))
+    non_cached = max(Decimal("0"), input_tokens - cached)
+    output_tokens = Decimal(str(usage.get("output_tokens") or 0))
+    return (
+        (non_cached * pricing["input"])
+        + (cached * pricing["cached_input"])
+        + (output_tokens * pricing["output"])
+    ) / Decimal("1000000")
+
+
+def _serialized_cost(model_id: str, payload: dict[str, Any] | None) -> str | None:
+    value = _actual_cost_usd(model_id, payload)
+    return str(value) if value is not None else None
 
 
 def _hash_payload(payload: Any) -> str:

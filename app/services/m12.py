@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # Compatibility note: semantic facade `provider_readiness` re-exports this implementation; phase-coded import kept for reports/tests/backward compatibility.
-import os
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -23,17 +22,19 @@ from app.contracts.m12 import (
     RealSmokeRunRead,
 )
 from app.core.config import Settings, get_settings
-from app.core.errors import NotFoundError, ValidationFailureError
+from app.core.errors import NotFoundError
 from app.core.time import utc_now
 from app.db.models import (
     GoogleDriveMediaCredential,
+    LLMModelProfile,
+    LLMRouterLane,
+    LLMRouterProfile,
     ProviderReadinessCheck,
     ProviderReadinessSnapshot,
     RealSmokeRun,
     YouTubeMonitoringCredential,
 )
-from app.providers.ollama import OllamaLLMProvider
-from app.services.m10_1 import LLMRouterConfigLoader, LLMRouterService
+from app.providers.openai import OpenAIResponsesProvider, OpenAIResponsesRequest
 from app.services.m10_2 import GoogleVeoConfigService
 from app.services.m10_3 import (
     YouTubeMonitoringConfigService,
@@ -41,27 +42,56 @@ from app.services.m10_3 import (
     YouTubeOwnerAnalyticsProvider,
     YouTubePublicStatsProvider,
 )
-from app.services.m10_5 import GoogleDriveConfigService, GoogleDriveOAuthCredentialService, GoogleDriveUploadService
+from app.services.m10_5 import (
+    GoogleDriveConfigService,
+    GoogleDriveOAuthCredentialService,
+    GoogleDriveUploadService,
+)
 from app.services.m2 import ProviderReadinessM2Service
 
 
 ROOT = Path(__file__).resolve().parents[2]
-REQUIRED_OLLAMA_SMOKE_LANES = ("cheap_structured", "long_context_text", "visual_creative_review", "gatekeeper_soft_review")
+REQUIRED_OPENAI_LANE_MODELS = {
+    "cheap_structured": "gpt-5.6-luna",
+    "default_multimodal": "gpt-5.6-terra",
+    "visual_creative_review": "gpt-5.6-terra",
+    "long_context_text": "gpt-5.6-terra",
+    "engineering_architect": "gpt-5.6-terra",
+    "gatekeeper_soft_review": "gpt-5.6-terra",
+}
+ALLOWED_OPENAI_ROUTER_MODELS = frozenset(REQUIRED_OPENAI_LANE_MODELS.values())
 REQUIRED_YOUTUBE_SCOPES = {
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 }
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 PROVIDER_ORDER = (
-    "ollama",
+    "openai",
     "youtube-public",
     "youtube-owner",
     "google-drive",
     "elevenlabs",
     "google_veo",
 )
-SECRET_KEY_FRAGMENTS = ("secret", "token", "api_key", "apikey", "password", "private", "credential", "authorization")
-RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "ya29.", "ghp_", "xoxb-", "client_secret")
+SECRET_KEY_FRAGMENTS = (
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "password",
+    "private",
+    "credential",
+    "authorization",
+)
+RAW_SECRET_MARKERS = (
+    "sk-",
+    "pk_live_",
+    "BEGIN PRIVATE KEY",
+    "ya29.",
+    "ghp_",
+    "xoxb-",
+    "client_secret",
+)
 BUDGET_NOTE = "Đây là budget cấu hình cứng từ env, chưa phải chi phí thực tế đã tiêu."
 
 
@@ -82,9 +112,13 @@ class SecurityRedactionService:
         lowered = key.lower()
         if any(fragment in lowered for fragment in SECRET_KEY_FRAGMENTS):
             return _redacted_presence(value)
-        if isinstance(value, str) and any(marker in value for marker in RAW_SECRET_MARKERS):
+        if isinstance(value, str) and any(
+            marker in value for marker in RAW_SECRET_MARKERS
+        ):
             return "[REDACTED]"
-        if isinstance(value, str) and ("service_account" in value.lower() or value.endswith(".json")):
+        if isinstance(value, str) and (
+            "service_account" in value.lower() or value.endswith(".json")
+        ):
             return "[REDACTED_PATH]" if value else None
         return value
 
@@ -94,7 +128,12 @@ class SecurityRedactionService:
             if isinstance(value, dict):
                 redacted[key] = self.redact_dict(value)
             elif isinstance(value, list):
-                redacted[key] = [self.redact_dict(item) if isinstance(item, dict) else self.redact_value(key, item) for item in value]
+                redacted[key] = [
+                    self.redact_dict(item)
+                    if isinstance(item, dict)
+                    else self.redact_value(key, item)
+                    for item in value
+                ]
             else:
                 redacted[key] = self.redact_value(key, value)
         return redacted
@@ -109,7 +148,11 @@ class SecurityRedactionService:
 
 
 class EnvConfigAuditService:
-    def __init__(self, settings: Settings | None = None, redactor: SecurityRedactionService | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        redactor: SecurityRedactionService | None = None,
+    ):
         self.settings = settings or get_settings()
         self.redactor = redactor or SecurityRedactionService()
 
@@ -137,8 +180,13 @@ class EnvConfigAuditService:
             return None
         return f"{value:,} {unit}"
 
-    def budget_cards(self, provider_summaries: list[ProviderSummaryRead]) -> list[ProviderBudgetCardRead]:
-        readiness = {summary.provider_key: summary.readiness_state for summary in provider_summaries}
+    def budget_cards(
+        self, provider_summaries: list[ProviderSummaryRead]
+    ) -> list[ProviderBudgetCardRead]:
+        readiness = {
+            summary.provider_key: summary.readiness_state
+            for summary in provider_summaries
+        }
         settings = self.settings
         return [
             self._budget_card(
@@ -148,21 +196,32 @@ class EnvConfigAuditService:
                 configured_plan=settings.budget_mode,
                 configured_monthly_cap=self.money(settings.monthly_ai_budget_usd),
                 budget_basis="hard_env",
-                readiness_state="PASS" if settings.budget_mode == "hard_env" and settings.monthly_ai_budget_usd is not None else "WARNING",
+                readiness_state="PASS"
+                if settings.budget_mode == "hard_env"
+                and settings.monthly_ai_budget_usd is not None
+                else "WARNING",
                 missing_env_keys=_missing(
                     ("VCOS_BUDGET_MODE", settings.budget_mode == "hard_env"),
-                    ("VCOS_MONTHLY_AI_BUDGET_USD", settings.monthly_ai_budget_usd is not None),
+                    (
+                        "VCOS_MONTHLY_AI_BUDGET_USD",
+                        settings.monthly_ai_budget_usd is not None,
+                    ),
                 ),
             ),
             self._budget_card(
-                key="ollama-llm",
-                provider_name="Ollama LLMRouter",
+                key="openai-llm",
+                provider_name="OpenAI Responses LLMRouter",
                 role="LLM script/review/router lanes",
                 configured_plan=settings.llm_budget_note,
                 configured_monthly_cap=self.money(settings.llm_monthly_budget_usd),
                 budget_basis="hard_env_usd",
-                readiness_state=readiness.get("ollama", "UNKNOWN"),
-                missing_env_keys=_missing(("VCOS_LLM_MONTHLY_BUDGET_USD", settings.llm_monthly_budget_usd is not None)),
+                readiness_state=readiness.get("openai", "UNKNOWN"),
+                missing_env_keys=_missing(
+                    (
+                        "VCOS_LLM_MONTHLY_BUDGET_USD",
+                        settings.llm_monthly_budget_usd is not None,
+                    )
+                ),
             ),
             self._budget_card(
                 key="elevenlabs",
@@ -173,12 +232,28 @@ class EnvConfigAuditService:
                 budget_basis=settings.elevenlabs_budget_basis or "credits/characters",
                 readiness_state=readiness.get("elevenlabs", "UNKNOWN"),
                 missing_env_keys=_missing(
-                    ("VCOS_ELEVENLABS_PLAN", self.string_configured(settings.elevenlabs_plan)),
-                    ("VCOS_ELEVENLABS_MONTHLY_CAP_USD", settings.elevenlabs_monthly_cap_usd is not None),
-                    ("VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP", settings.elevenlabs_monthly_credit_cap is not None),
-                    ("VCOS_ELEVENLABS_BUDGET_BASIS", self.string_configured(settings.elevenlabs_budget_basis)),
+                    (
+                        "VCOS_ELEVENLABS_PLAN",
+                        self.string_configured(settings.elevenlabs_plan),
+                    ),
+                    (
+                        "VCOS_ELEVENLABS_MONTHLY_CAP_USD",
+                        settings.elevenlabs_monthly_cap_usd is not None,
+                    ),
+                    (
+                        "VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP",
+                        settings.elevenlabs_monthly_credit_cap is not None,
+                    ),
+                    (
+                        "VCOS_ELEVENLABS_BUDGET_BASIS",
+                        self.string_configured(settings.elevenlabs_budget_basis),
+                    ),
                 ),
-                appendix={"credit_cap": self.integer(settings.elevenlabs_monthly_credit_cap, "credits/chars")},
+                appendix={
+                    "credit_cap": self.integer(
+                        settings.elevenlabs_monthly_credit_cap, "credits/chars"
+                    )
+                },
             ),
             self._budget_card(
                 key="google_veo",
@@ -189,7 +264,10 @@ class EnvConfigAuditService:
                 budget_basis="versioned_price_catalog_2026-07-12",
                 readiness_state=readiness.get("google_veo", "UNKNOWN"),
                 missing_env_keys=_missing(
-                    ("VCOS_AI_VIDEO_HERO_PROVIDER", _normalized(settings.ai_video_hero_provider) == "google_veo"),
+                    (
+                        "VCOS_AI_VIDEO_HERO_PROVIDER",
+                        _normalized(settings.ai_video_hero_provider) == "google_veo",
+                    ),
                     ("GEMINI_API_KEY", self.secret_configured(settings.gemini_api_key)),
                     ("VEO_MODEL_ID", self.string_configured(settings.veo_model_id)),
                 ),
@@ -215,9 +293,18 @@ class EnvConfigAuditService:
                 and settings.extra_ai_image_monthly_budget_usd == 0
                 else "WARNING",
                 missing_env_keys=_missing(
-                    ("VCOS_STOCK_MONTHLY_BUDGET_USD", settings.stock_monthly_budget_usd is not None),
-                    ("VCOS_MUSIC_SFX_MONTHLY_BUDGET_USD", settings.music_sfx_monthly_budget_usd is not None),
-                    ("VCOS_EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD", settings.extra_ai_image_monthly_budget_usd is not None),
+                    (
+                        "VCOS_STOCK_MONTHLY_BUDGET_USD",
+                        settings.stock_monthly_budget_usd is not None,
+                    ),
+                    (
+                        "VCOS_MUSIC_SFX_MONTHLY_BUDGET_USD",
+                        settings.music_sfx_monthly_budget_usd is not None,
+                    ),
+                    (
+                        "VCOS_EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD",
+                        settings.extra_ai_image_monthly_budget_usd is not None,
+                    ),
                 ),
             ),
         ]
@@ -245,13 +332,17 @@ class EnvConfigAuditService:
             readiness_state=readiness_state,  # type: ignore[arg-type]
             missing_env_keys=missing_env_keys,
             note=BUDGET_NOTE,
-            technical_appendix=self.redactor.redact_dict({"no_actual_spend_calculation": True, **(appendix or {})}),
+            technical_appendix=self.redactor.redact_dict(
+                {"no_actual_spend_calculation": True, **(appendix or {})}
+            ),
         )
 
 
 class ProviderNextActionService:
     def for_checks(self, provider_key: str, checks: list[ProviderCheckDraft]) -> str:
-        readiness_checks = [check for check in checks if _counts_for_readiness(check)] or checks
+        readiness_checks = [
+            check for check in checks if _counts_for_readiness(check)
+        ] or checks
         for state in ("BLOCKED", "FAILED", "WARNING", "UNKNOWN", "SKIPPED"):
             for check in readiness_checks:
                 if check.check_state == state and check.next_action:
@@ -264,7 +355,12 @@ class _BaseReadinessCheck:
     provider_name: str
     provider_type: str
 
-    def __init__(self, session: Session, settings: Settings | None = None, redactor: SecurityRedactionService | None = None):
+    def __init__(
+        self,
+        session: Session,
+        settings: Settings | None = None,
+        redactor: SecurityRedactionService | None = None,
+    ):
         self.session = session
         self.settings = settings or get_settings()
         self.redactor = redactor or SecurityRedactionService()
@@ -282,12 +378,19 @@ class _BaseReadinessCheck:
             readiness_state=state,  # type: ignore[arg-type]
             status_label=_status_label(state),
             operator_summary=_summary_for_state(self.provider_name, state),
-            next_action=ProviderNextActionService().for_checks(self.provider_key, checks),
+            next_action=ProviderNextActionService().for_checks(
+                self.provider_key, checks
+            ),
             smoke_state=_smoke_state(checks),
             safe_config=self.safe_config(),
             missing_env_keys=sorted(set(_missing_from_checks(checks))),
-            reason_codes=sorted(set(reason for check in checks for reason in check.reason_codes)),
-            technical_appendix={"check_count": len(checks), "raw_status_in_appendix_only": True},
+            reason_codes=sorted(
+                set(reason for check in checks for reason in check.reason_codes)
+            ),
+            technical_appendix={
+                "check_count": len(checks),
+                "raw_status_in_appendix_only": True,
+            },
         )
 
     def safe_config(self) -> dict[str, Any]:
@@ -315,74 +418,109 @@ class _BaseReadinessCheck:
         )
 
 
-class OllamaReadinessCheck(_BaseReadinessCheck):
-    provider_key = "ollama"
-    provider_name = "Ollama Router"
+class OpenAIReadinessCheck(_BaseReadinessCheck):
+    """Read the OpenAI router configuration without issuing a provider request.
+
+    A readiness read is intentionally distinct from the separately authorized
+    canary workflow.  In particular, it must never consume OpenAI tokens just
+    to decide whether the router is configured.
+    """
+
+    provider_key = "openai"
+    provider_name = "OpenAI Responses Router"
     provider_type = "LLM_SCRIPT_ENGINE"
 
     def evaluate(self) -> list[ProviderCheckDraft]:
-        checks: list[ProviderCheckDraft] = []
-        provider_ok = self.settings.llm_provider.lower() == "ollama"
-        checks.append(
+        credential_configured = self.env.secret_configured(self.settings.openai_api_key)
+        provider_ok = _normalized(self.settings.llm_provider) == "openai"
+        base_url_configured = self.env.string_configured(self.settings.openai_base_url)
+        adapter = OpenAIResponsesProvider(
+            api_key=None,
+            base_url=self.settings.openai_base_url,
+            timeout_seconds=self.settings.openai_timeout_seconds,
+        )
+        profile, lanes, model_profiles = _openai_router_configuration(self.session)
+        lane_evidence = _openai_lane_evidence(profile, lanes, model_profiles)
+
+        checks: list[ProviderCheckDraft] = [
             self._check(
                 "CONFIG",
-                "PASS" if provider_ok and self.settings.ollama_base_url else "BLOCKED",
-                "Ollama Router dùng provider ollama và base URL đã có." if provider_ok else "LLM provider không phải Ollama.",
-                next_action=None if provider_ok else "Đặt VCOS_LLM_PROVIDER=ollama.",
-                reason_codes=("OLLAMA_CONFIG_READY",) if provider_ok else ("OLLAMA_PROVIDER_NOT_SELECTED",),
+                "PASS" if provider_ok and base_url_configured else "BLOCKED",
+                "OpenAI Responses Router đã chọn provider openai và có base URL."
+                if provider_ok and base_url_configured
+                else "LLM router chưa được cấu hình độc quyền cho OpenAI Responses.",
+                next_action=None
+                if provider_ok and base_url_configured
+                else "Đặt VCOS_LLM_PROVIDER=openai và VCOS_OPENAI_BASE_URL hợp lệ.",
+                reason_codes=("OPENAI_ROUTER_CONFIG_READY",)
+                if provider_ok and base_url_configured
+                else ("OPENAI_ROUTER_CONFIG_INVALID",),
                 technical_appendix={
-                    "OLLAMA_BASE_URL": self.settings.ollama_base_url,
+                    "provider_adapter_key": adapter.provider_key,
+                    "OPENAI_BASE_URL": self.settings.openai_base_url,
                     "VCOS_LLM_PROVIDER": self.settings.llm_provider,
                     "VCOS_LLM_REAL_EXECUTION_ENABLED": self.settings.llm_real_execution_enabled,
+                    "provider_call_made": False,
                 },
-            )
-        )
-        lanes = LLMRouterConfigLoader(self.session).list_lanes(profile_key="default")
-        lane_names = {lane.lane_name for lane in lanes}
-        missing_lanes = [lane for lane in REQUIRED_OLLAMA_SMOKE_LANES if lane not in lane_names]
-        configured_models = _ollama_models_from_lanes(lanes)
-        glm_models = [model for model in configured_models if "glm" in model.lower()]
-        checks.append(
+            ),
+            self._check(
+                "CREDENTIAL",
+                "PASS" if credential_configured else "BLOCKED",
+                "OPENAI_API_KEY đã được cấu hình."
+                if credential_configured
+                else "Thiếu OPENAI_API_KEY; readiness dừng fail-closed.",
+                next_action=None
+                if credential_configured
+                else "Cấp OPENAI_API_KEY qua secret manager hoặc runtime environment rồi chạy lại readiness.",
+                reason_codes=("OPENAI_CREDENTIAL_CONFIGURED",)
+                if credential_configured
+                else ("OPENAI_CREDENTIAL_MISSING",),
+                technical_appendix={
+                    "OPENAI_API_KEY": _redacted_presence(credential_configured),
+                    "provider_call_made": False,
+                },
+            ),
             self._check(
                 "CAPABILITY",
-                "PASS" if not missing_lanes else "BLOCKED",
-                "Các lane smoke bắt buộc đã có trong LLMRouter." if not missing_lanes else "Thiếu lane smoke bắt buộc trong LLMRouter.",
-                next_action=None if not missing_lanes else "Chạy lại config/seed LLMRouter M10.1.",
-                reason_codes=("OLLAMA_LANES_READY",) if not missing_lanes else ("OLLAMA_LANE_MISSING",),
-                technical_appendix={"available_lanes": sorted(lane_names), "missing_lanes": missing_lanes, "model_count": len(configured_models)},
-            )
-        )
-        checks.append(
-            self._check(
-                "SECURITY",
-                "PASS" if not glm_models else "BLOCKED",
-                "Không có GLM trong lane/model Ollama." if not glm_models else "Phát hiện model GLM bị cấm.",
-                next_action=None if not glm_models else "Gỡ model GLM khỏi lane router.",
-                reason_codes=("NO_GLM_MODEL_CONFIGURED",) if not glm_models else ("GLM_MODEL_FORBIDDEN",),
-                technical_appendix={"glm_model_count": len(glm_models)},
-            )
-        )
-        smoke_enabled = self.settings.llm_router_real_smoke and self.settings.llm_real_execution_enabled
-        checks.append(
+                "PASS" if lane_evidence["valid"] else "BLOCKED",
+                "Tất cả lane OpenAI chỉ dùng Luna/Terra theo authority đã chốt, không có fallback."
+                if lane_evidence["valid"]
+                else "LLM router không khớp authority OpenAI Luna/Terra không-fallback.",
+                next_action=None
+                if lane_evidence["valid"]
+                else "Áp dụng migration/cutover LLMRouter rồi seed lại đúng sáu lane Luna/Terra, không cấu hình fallback.",
+                reason_codes=("OPENAI_LANES_EXACT",)
+                if lane_evidence["valid"]
+                else ("OPENAI_LANES_INVALID",),
+                technical_appendix=lane_evidence,
+            ),
             self._check(
                 "REAL_SMOKE",
-                "SKIPPED" if not smoke_enabled else "UNKNOWN",
-                "Ollama real smoke đang tắt theo env guard." if not smoke_enabled else "Ollama real smoke đã bật; chạy endpoint smoke để kiểm tra model.",
-                next_action="Chỉ bật VCOS_LLM_ROUTER_REAL_SMOKE=true và VCOS_LLM_REAL_EXECUTION_ENABLED=true khi muốn gọi Ollama thật."
-                if not smoke_enabled
-                else "Chạy smoke Ollama để xác minh model callable.",
-                reason_codes=("OLLAMA_REAL_SMOKE_SKIPPED",) if not smoke_enabled else ("OLLAMA_REAL_SMOKE_READY_TO_RUN",),
-                technical_appendix={"real_smoke_enabled": smoke_enabled, "no_provider_call_in_readiness_read": True},
-            )
-        )
+                "SKIPPED",
+                "Readiness OpenAI không gọi provider và không phát sinh token/cost.",
+                next_action="Chạy canary OpenAI đã được budget-authorize và lưu receipt riêng khi cần xác minh callable.",
+                reason_codes=("OPENAI_PAID_CALLS_EXCLUDED_FROM_READINESS",),
+                technical_appendix={
+                    "provider_call_made": False,
+                    "real_smoke_env_requested": self.settings.llm_router_real_smoke,
+                    "dedicated_canary_required": True,
+                },
+            ),
+        ]
         return checks
 
     def safe_config(self) -> dict[str, Any]:
         return {
-            "base_url": self.settings.ollama_base_url,
+            "base_url": self.settings.openai_base_url,
             "provider": self.settings.llm_provider,
+            "api_key_configured": self.env.secret_configured(
+                self.settings.openai_api_key
+            ),
+            "required_lane_models": REQUIRED_OPENAI_LANE_MODELS,
+            "fallback_allowed": False,
             "real_execution_enabled": self.settings.llm_real_execution_enabled,
             "router_real_smoke": self.settings.llm_router_real_smoke,
+            "provider_calls_in_readiness": False,
         }
 
 
@@ -394,23 +532,42 @@ class YouTubePublicReadinessCheck(_BaseReadinessCheck):
     def evaluate(self) -> list[ProviderCheckDraft]:
         enabled = self.settings.youtube_public_monitor_enabled
         key_configured = self.env.secret_configured(self.settings.youtube_data_api_key)
-        test_video_configured = self.env.string_configured(self.settings.youtube_test_video_id)
+        test_video_configured = self.env.string_configured(
+            self.settings.youtube_test_video_id
+        )
         return [
             self._check(
                 "CONFIG",
                 "PASS" if enabled else "WARNING",
-                "YouTube public monitor đã bật." if enabled else "YouTube public monitor đang tắt.",
-                next_action=None if enabled else "Đặt YOUTUBE_PUBLIC_MONITOR_ENABLED=true khi muốn theo dõi public stats.",
-                reason_codes=("YOUTUBE_PUBLIC_ENABLED",) if enabled else ("YOUTUBE_PUBLIC_DISABLED",),
+                "YouTube public monitor đã bật."
+                if enabled
+                else "YouTube public monitor đang tắt.",
+                next_action=None
+                if enabled
+                else "Đặt YOUTUBE_PUBLIC_MONITOR_ENABLED=true khi muốn theo dõi public stats.",
+                reason_codes=("YOUTUBE_PUBLIC_ENABLED",)
+                if enabled
+                else ("YOUTUBE_PUBLIC_DISABLED",),
                 technical_appendix={"YOUTUBE_PUBLIC_MONITOR_ENABLED": enabled},
             ),
             self._check(
                 "CREDENTIAL",
                 "PASS" if key_configured else "BLOCKED",
-                "YouTube Data API key đã cấu hình." if key_configured else "Thiếu YouTube Data API key.",
-                next_action=None if key_configured else "Thêm YOUTUBE_DATA_API_KEY vào .env/secret manager.",
-                reason_codes=("YOUTUBE_DATA_API_KEY_CONFIGURED",) if key_configured else ("YOUTUBE_DATA_API_KEY_MISSING",),
-                technical_appendix={"YOUTUBE_DATA_API_KEY": _redacted_presence(key_configured), "missing_env_keys": [] if key_configured else ["YOUTUBE_DATA_API_KEY"]},
+                "YouTube Data API key đã cấu hình."
+                if key_configured
+                else "Thiếu YouTube Data API key.",
+                next_action=None
+                if key_configured
+                else "Thêm YOUTUBE_DATA_API_KEY vào .env/secret manager.",
+                reason_codes=("YOUTUBE_DATA_API_KEY_CONFIGURED",)
+                if key_configured
+                else ("YOUTUBE_DATA_API_KEY_MISSING",),
+                technical_appendix={
+                    "YOUTUBE_DATA_API_KEY": _redacted_presence(key_configured),
+                    "missing_env_keys": []
+                    if key_configured
+                    else ["YOUTUBE_DATA_API_KEY"],
+                },
             ),
             self._check(
                 "REAL_SMOKE",
@@ -420,15 +577,22 @@ class YouTubePublicReadinessCheck(_BaseReadinessCheck):
                 if not test_video_configured
                 else "Bật VCOS_YOUTUBE_REAL_PUBLIC_SMOKE=true nếu muốn gọi YouTube Data API thật.",
                 reason_codes=("YOUTUBE_PUBLIC_SMOKE_SKIPPED",),
-                technical_appendix={"VCOS_YOUTUBE_REAL_PUBLIC_SMOKE": self.settings.youtube_real_public_smoke, "YOUTUBE_TEST_VIDEO_ID_CONFIGURED": test_video_configured},
+                technical_appendix={
+                    "VCOS_YOUTUBE_REAL_PUBLIC_SMOKE": self.settings.youtube_real_public_smoke,
+                    "YOUTUBE_TEST_VIDEO_ID_CONFIGURED": test_video_configured,
+                },
             ),
         ]
 
     def safe_config(self) -> dict[str, Any]:
         return {
             "public_monitor_enabled": self.settings.youtube_public_monitor_enabled,
-            "api_key_configured": self.env.secret_configured(self.settings.youtube_data_api_key),
-            "test_video_id_configured": self.env.string_configured(self.settings.youtube_test_video_id),
+            "api_key_configured": self.env.secret_configured(
+                self.settings.youtube_data_api_key
+            ),
+            "test_video_id_configured": self.env.string_configured(
+                self.settings.youtube_test_video_id
+            ),
             "learning_authority": "WEAK",
         }
 
@@ -450,33 +614,60 @@ class YouTubeOwnerAnalyticsReadinessCheck(_BaseReadinessCheck):
             self._check(
                 "CONFIG",
                 "PASS" if enabled and oauth_configured else "WARNING",
-                "YouTube owner analytics config đã có." if enabled and oauth_configured else "YouTube owner analytics thiếu config hoặc đang tắt.",
-                next_action=None if enabled and oauth_configured else "Bật YOUTUBE_OWNER_ANALYTICS_ENABLED và cấu hình OAuth client JSON/id/secret.",
-                reason_codes=("YOUTUBE_OWNER_CONFIG_READY",) if enabled and oauth_configured else ("YOUTUBE_OWNER_CONFIG_INCOMPLETE",),
+                "YouTube owner analytics config đã có."
+                if enabled and oauth_configured
+                else "YouTube owner analytics thiếu config hoặc đang tắt.",
+                next_action=None
+                if enabled and oauth_configured
+                else "Bật YOUTUBE_OWNER_ANALYTICS_ENABLED và cấu hình OAuth client JSON/id/secret.",
+                reason_codes=("YOUTUBE_OWNER_CONFIG_READY",)
+                if enabled and oauth_configured
+                else ("YOUTUBE_OWNER_CONFIG_INCOMPLETE",),
                 technical_appendix={
                     "YOUTUBE_OWNER_ANALYTICS_ENABLED": enabled,
                     "oauth_client_configured": oauth_configured,
                     "missing_env_keys": _missing(
                         ("YOUTUBE_OWNER_ANALYTICS_ENABLED", enabled),
-                        ("YOUTUBE_OAUTH_CLIENT_SECRETS_FILE_OR_CLIENT_FIELDS", oauth_configured),
+                        (
+                            "YOUTUBE_OAUTH_CLIENT_SECRETS_FILE_OR_CLIENT_FIELDS",
+                            oauth_configured,
+                        ),
                     ),
                 },
             ),
             self._check(
                 "CREDENTIAL",
                 "PASS" if connected else "BLOCKED",
-                "YouTube OAuth token đã kết nối." if connected else "YouTube owner analytics cần OAuth token.",
-                next_action=None if connected else "Bấm Kết nối YouTube để cấp quyền youtube.readonly và yt-analytics.readonly.",
-                reason_codes=("YOUTUBE_OAUTH_TOKEN_CONNECTED",) if connected else ("YOUTUBE_OWNER_NEEDS_AUTH",),
-                technical_appendix={"token_connected": connected, "credential_reference_present": token is not None},
+                "YouTube OAuth token đã kết nối."
+                if connected
+                else "YouTube owner analytics cần OAuth token.",
+                next_action=None
+                if connected
+                else "Bấm Kết nối YouTube để cấp quyền youtube.readonly và yt-analytics.readonly.",
+                reason_codes=("YOUTUBE_OAUTH_TOKEN_CONNECTED",)
+                if connected
+                else ("YOUTUBE_OWNER_NEEDS_AUTH",),
+                technical_appendix={
+                    "token_connected": connected,
+                    "credential_reference_present": token is not None,
+                },
             ),
             self._check(
                 "SECURITY",
                 "PASS" if scopes_ok else "BLOCKED",
-                "Scopes YouTube đúng mức readonly." if scopes_ok else "Thiếu scope readonly bắt buộc.",
-                next_action=None if scopes_ok else "Cấu hình scopes youtube.readonly và yt-analytics.readonly, không thêm upload scope.",
-                reason_codes=("YOUTUBE_SCOPES_READY",) if scopes_ok else ("YOUTUBE_SCOPE_MISSING",),
-                technical_appendix={"scopes": sorted(scopes), "required_scopes": sorted(REQUIRED_YOUTUBE_SCOPES)},
+                "Scopes YouTube đúng mức readonly."
+                if scopes_ok
+                else "Thiếu scope readonly bắt buộc.",
+                next_action=None
+                if scopes_ok
+                else "Cấu hình scopes youtube.readonly và yt-analytics.readonly, không thêm upload scope.",
+                reason_codes=("YOUTUBE_SCOPES_READY",)
+                if scopes_ok
+                else ("YOUTUBE_SCOPE_MISSING",),
+                technical_appendix={
+                    "scopes": sorted(scopes),
+                    "required_scopes": sorted(REQUIRED_YOUTUBE_SCOPES),
+                },
             ),
             self._check(
                 "REAL_SMOKE",
@@ -484,7 +675,10 @@ class YouTubeOwnerAnalyticsReadinessCheck(_BaseReadinessCheck):
                 "Owner analytics smoke mặc định bỏ qua; thiếu token sẽ trả NEEDS_AUTH, không fake metric.",
                 next_action="Bật VCOS_YOUTUBE_REAL_OWNER_SMOKE=true sau khi OAuth token đã kết nối.",
                 reason_codes=("YOUTUBE_OWNER_SMOKE_SKIPPED",),
-                technical_appendix={"VCOS_YOUTUBE_REAL_OWNER_SMOKE": self.settings.youtube_real_owner_smoke, "no_fake_metrics": True},
+                technical_appendix={
+                    "VCOS_YOUTUBE_REAL_OWNER_SMOKE": self.settings.youtube_real_owner_smoke,
+                    "no_fake_metrics": True,
+                },
             ),
         ]
 
@@ -493,7 +687,8 @@ class YouTubeOwnerAnalyticsReadinessCheck(_BaseReadinessCheck):
         token = self._latest_token()
         return {
             "owner_analytics_enabled": self.settings.youtube_owner_analytics_enabled,
-            "oauth_client_configured": config._oauth_client_config_or_none() is not None,  # noqa: SLF001
+            "oauth_client_configured": config._oauth_client_config_or_none()
+            is not None,  # noqa: SLF001
             "connected": token is not None and token.connection_state == "CONNECTED",
             "scopes": config.scopes,
             "learning_authority": "STRONG",
@@ -519,37 +714,66 @@ class GoogleDriveReadinessCheck(_BaseReadinessCheck):
         oauth_configured = config.oauth_configured()
         root_configured = bool(config.root_folder_id())
         credential = self._latest_credential()
-        connected = credential is not None and credential.connection_state == "CONNECTED"
+        connected = (
+            credential is not None and credential.connection_state == "CONNECTED"
+        )
         scopes = set(config.scopes if oauth_configured else [])
         scope_ok = DRIVE_SCOPE in scopes
         return [
             self._check(
                 "CONFIG",
                 "PASS" if offload_enabled and root_configured else "BLOCKED",
-                "Google Drive offload và root folder đã cấu hình." if offload_enabled and root_configured else "Google Drive thiếu offload flag hoặc root folder.",
-                next_action=None if offload_enabled and root_configured else "Bật GOOGLE_DRIVE_OFFLOAD_ENABLED và thêm GOOGLE_DRIVE_ROOT_FOLDER_ID.",
-                reason_codes=("GOOGLE_DRIVE_CONFIG_READY",) if offload_enabled and root_configured else ("GOOGLE_DRIVE_CONFIG_MISSING",),
+                "Google Drive offload và root folder đã cấu hình."
+                if offload_enabled and root_configured
+                else "Google Drive thiếu offload flag hoặc root folder.",
+                next_action=None
+                if offload_enabled and root_configured
+                else "Bật GOOGLE_DRIVE_OFFLOAD_ENABLED và thêm GOOGLE_DRIVE_ROOT_FOLDER_ID.",
+                reason_codes=("GOOGLE_DRIVE_CONFIG_READY",)
+                if offload_enabled and root_configured
+                else ("GOOGLE_DRIVE_CONFIG_MISSING",),
                 technical_appendix={
                     "GOOGLE_DRIVE_OFFLOAD_ENABLED": offload_enabled,
                     "GOOGLE_DRIVE_ROOT_FOLDER_ID": _redacted_presence(root_configured),
-                    "missing_env_keys": _missing(("GOOGLE_DRIVE_OFFLOAD_ENABLED", offload_enabled), ("GOOGLE_DRIVE_ROOT_FOLDER_ID", root_configured)),
+                    "missing_env_keys": _missing(
+                        ("GOOGLE_DRIVE_OFFLOAD_ENABLED", offload_enabled),
+                        ("GOOGLE_DRIVE_ROOT_FOLDER_ID", root_configured),
+                    ),
                 },
             ),
             self._check(
                 "CREDENTIAL",
                 "PASS" if oauth_configured and connected else "BLOCKED",
-                "Google Drive OAuth token đã kết nối." if oauth_configured and connected else "Google Drive cần OAuth client/token.",
-                next_action=None if oauth_configured and connected else "Bấm Kết nối Google Drive để cấp quyền drive.file.",
-                reason_codes=("GOOGLE_DRIVE_CONNECTED",) if oauth_configured and connected else ("GOOGLE_DRIVE_NEEDS_AUTH",),
-                technical_appendix={"oauth_client_configured": oauth_configured, "token_connected": connected},
+                "Google Drive OAuth token đã kết nối."
+                if oauth_configured and connected
+                else "Google Drive cần OAuth client/token.",
+                next_action=None
+                if oauth_configured and connected
+                else "Bấm Kết nối Google Drive để cấp quyền drive.file.",
+                reason_codes=("GOOGLE_DRIVE_CONNECTED",)
+                if oauth_configured and connected
+                else ("GOOGLE_DRIVE_NEEDS_AUTH",),
+                technical_appendix={
+                    "oauth_client_configured": oauth_configured,
+                    "token_connected": connected,
+                },
             ),
             self._check(
                 "SECURITY",
                 "PASS" if scope_ok else "BLOCKED",
-                "Google Drive chỉ dùng scope drive.file." if scope_ok else "Thiếu scope drive.file hoặc dùng scope rộng.",
-                next_action=None if scope_ok else "Cấu hình GOOGLE_DRIVE_OAUTH_SCOPES=https://www.googleapis.com/auth/drive.file.",
-                reason_codes=("GOOGLE_DRIVE_SCOPE_READY",) if scope_ok else ("GOOGLE_DRIVE_SCOPE_MISSING",),
-                technical_appendix={"scopes": sorted(scopes), "required_scope": DRIVE_SCOPE},
+                "Google Drive chỉ dùng scope drive.file."
+                if scope_ok
+                else "Thiếu scope drive.file hoặc dùng scope rộng.",
+                next_action=None
+                if scope_ok
+                else "Cấu hình GOOGLE_DRIVE_OAUTH_SCOPES=https://www.googleapis.com/auth/drive.file.",
+                reason_codes=("GOOGLE_DRIVE_SCOPE_READY",)
+                if scope_ok
+                else ("GOOGLE_DRIVE_SCOPE_MISSING",),
+                technical_appendix={
+                    "scopes": sorted(scopes),
+                    "required_scope": DRIVE_SCOPE,
+                },
             ),
             self._check(
                 "REAL_SMOKE",
@@ -557,7 +781,9 @@ class GoogleDriveReadinessCheck(_BaseReadinessCheck):
                 "Drive upload smoke mặc định bỏ qua để tránh upload thật ngoài ý muốn.",
                 next_action="Chỉ bật VCOS_DRIVE_REAL_UPLOAD_SMOKE=true trong test folder/root folder an toàn.",
                 reason_codes=("GOOGLE_DRIVE_SMOKE_SKIPPED",),
-                technical_appendix={"VCOS_DRIVE_REAL_UPLOAD_SMOKE": self.settings.drive_real_upload_smoke},
+                technical_appendix={
+                    "VCOS_DRIVE_REAL_UPLOAD_SMOKE": self.settings.drive_real_upload_smoke
+                },
             ),
         ]
 
@@ -565,13 +791,18 @@ class GoogleDriveReadinessCheck(_BaseReadinessCheck):
         credential = self._latest_credential()
         return {
             "offload_enabled": self.settings.google_drive_offload_enabled,
-            "connected": credential is not None and credential.connection_state == "CONNECTED",
+            "connected": credential is not None
+            and credential.connection_state == "CONNECTED",
             "root_folder_configured": bool(self.settings.google_drive_root_folder_id),
             "scope": DRIVE_SCOPE,
         }
 
     def _latest_credential(self) -> GoogleDriveMediaCredential | None:
-        return self.session.scalars(select(GoogleDriveMediaCredential).order_by(desc(GoogleDriveMediaCredential.updated_at)).limit(1)).one_or_none()
+        return self.session.scalars(
+            select(GoogleDriveMediaCredential)
+            .order_by(desc(GoogleDriveMediaCredential.updated_at))
+            .limit(1)
+        ).one_or_none()
 
 
 class GoogleVeoReadinessCheck(_BaseReadinessCheck):
@@ -586,8 +817,12 @@ class GoogleVeoReadinessCheck(_BaseReadinessCheck):
         except Exception as exc:
             config = None
             config_error = str(exc)
-        configured = config is not None and list(config.allowed_duration_seconds) == [Decimal("8")]
-        provider_selected = _normalized(self.settings.ai_video_hero_provider) == "google_veo"
+        configured = config is not None and list(config.allowed_duration_seconds) == [
+            Decimal("8")
+        ]
+        provider_selected = (
+            _normalized(self.settings.ai_video_hero_provider) == "google_veo"
+        )
         credential_ok = self.env.secret_configured(self.settings.gemini_api_key)
         audio_ok = config is not None and config.audio_enabled is True
         max_ok = config is not None and config.max_duration_seconds == Decimal("8")
@@ -595,15 +830,44 @@ class GoogleVeoReadinessCheck(_BaseReadinessCheck):
         return [
             self._check(
                 "CONFIG",
-                "PASS" if configured and provider_selected and credential_ok and audio_ok and max_ok and model_ok else "BLOCKED",
-                "Google Veo đã sẵn sàng về catalog/credential nhưng execution vẫn tắt." if configured and provider_selected and credential_ok and audio_ok and max_ok and model_ok else "Google Veo thiếu GEMINI_API_KEY hoặc catalog/model không hợp lệ.",
-                next_action=None if credential_ok else "Cấu hình duy nhất GEMINI_API_KEY; không bật execution/smoke trong HPR1.",
-                reason_codes=("VEO_CONFIG_READY",) if configured and provider_selected and credential_ok and audio_ok and max_ok and model_ok else ("VEO_CONFIG_MISSING_OR_INVALID",),
+                "PASS"
+                if configured
+                and provider_selected
+                and credential_ok
+                and audio_ok
+                and max_ok
+                and model_ok
+                else "BLOCKED",
+                "Google Veo đã sẵn sàng về catalog/credential nhưng execution vẫn tắt."
+                if configured
+                and provider_selected
+                and credential_ok
+                and audio_ok
+                and max_ok
+                and model_ok
+                else "Google Veo thiếu GEMINI_API_KEY hoặc catalog/model không hợp lệ.",
+                next_action=None
+                if credential_ok
+                else "Cấu hình duy nhất GEMINI_API_KEY; không bật execution/smoke trong HPR1.",
+                reason_codes=("VEO_CONFIG_READY",)
+                if configured
+                and provider_selected
+                and credential_ok
+                and audio_ok
+                and max_ok
+                and model_ok
+                else ("VEO_CONFIG_MISSING_OR_INVALID",),
                 technical_appendix={
                     "config_error": config_error,
                     "model_id": config.model_id if config else None,
-                    "allowed_durations": [str(item) for item in config.allowed_duration_seconds] if config else [],
-                    "max_duration_seconds": str(config.max_duration_seconds) if config else None,
+                    "allowed_durations": [
+                        str(item) for item in config.allowed_duration_seconds
+                    ]
+                    if config
+                    else [],
+                    "max_duration_seconds": str(config.max_duration_seconds)
+                    if config
+                    else None,
                     "audio_enabled": config.audio_enabled if config else None,
                     "credential_configured": credential_ok,
                     "credential_value_redacted": True,
@@ -615,7 +879,12 @@ class GoogleVeoReadinessCheck(_BaseReadinessCheck):
                 "PASS",
                 "Google Veo chỉ là AI hero provider; clip 8 giây, một output, audio sẽ bị loại khi normalize.",
                 reason_codes=("VEO_AI_HERO_8S_OUTPUT_ONE_AUDIO_DISCARD",),
-                technical_appendix={"allowed_durations": [8], "max_duration_seconds": 8, "provider_audio_policy": "DISCARD", "no_ai_video_call": True},
+                technical_appendix={
+                    "allowed_durations": [8],
+                    "max_duration_seconds": 8,
+                    "provider_audio_policy": "DISCARD",
+                    "no_ai_video_call": True,
+                },
             ),
             self._check(
                 "REAL_SMOKE",
@@ -623,7 +892,12 @@ class GoogleVeoReadinessCheck(_BaseReadinessCheck):
                 "Google Veo generation smoke bị bỏ qua; DX2/R3D9-P0 không gọi Google Veo.",
                 next_action="Không bật Google Veo generation trong DX2/R3D9-P0.",
                 reason_codes=("VEO_SMOKE_SKIPPED_NO_GENERATION",),
-                technical_appendix={"real_execution_enabled": bool(config and config.real_execution_enabled), "no_ai_video_generation": True},
+                technical_appendix={
+                    "real_execution_enabled": bool(
+                        config and config.real_execution_enabled
+                    ),
+                    "no_ai_video_generation": True,
+                },
             ),
         ]
 
@@ -639,7 +913,9 @@ class GoogleVeoReadinessCheck(_BaseReadinessCheck):
             "provider_audio_policy": "DISCARD",
             "real_execution_enabled": config.real_execution_enabled,
             "real_smoke": config.real_smoke_enabled,
-            "credential_configured": self.env.secret_configured(self.settings.gemini_api_key),
+            "credential_configured": self.env.secret_configured(
+                self.settings.gemini_api_key
+            ),
             "credential_value_redacted": True,
             "no_ai_video_generation": True,
         }
@@ -654,33 +930,65 @@ class ElevenLabsReadinessCheck(_BaseReadinessCheck):
         key_configured = self.env.secret_configured(self.settings.elevenlabs_api_key)
         budget_missing = _missing(
             ("VCOS_ELEVENLABS_PLAN", bool(self.settings.elevenlabs_plan)),
-            ("VCOS_ELEVENLABS_MONTHLY_CAP_USD", self.settings.elevenlabs_monthly_cap_usd is not None),
-            ("VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP", self.settings.elevenlabs_monthly_credit_cap is not None),
-            ("VCOS_ELEVENLABS_BUDGET_BASIS", bool(self.settings.elevenlabs_budget_basis)),
+            (
+                "VCOS_ELEVENLABS_MONTHLY_CAP_USD",
+                self.settings.elevenlabs_monthly_cap_usd is not None,
+            ),
+            (
+                "VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP",
+                self.settings.elevenlabs_monthly_credit_cap is not None,
+            ),
+            (
+                "VCOS_ELEVENLABS_BUDGET_BASIS",
+                bool(self.settings.elevenlabs_budget_basis),
+            ),
         )
         return [
             self._check(
                 "CREDENTIAL",
                 "PASS" if key_configured else "BLOCKED",
-                "ElevenLabs API key đã cấu hình." if key_configured else "Thiếu ElevenLabs API key.",
-                next_action=None if key_configured else "Thêm ELEVENLABS_API_KEY vào secret manager/.env.",
-                reason_codes=("ELEVENLABS_API_KEY_CONFIGURED",) if key_configured else ("ELEVENLABS_API_KEY_MISSING",),
-                technical_appendix={"ELEVENLABS_API_KEY": _redacted_presence(key_configured), "missing_env_keys": [] if key_configured else ["ELEVENLABS_API_KEY"]},
+                "ElevenLabs API key đã cấu hình."
+                if key_configured
+                else "Thiếu ElevenLabs API key.",
+                next_action=None
+                if key_configured
+                else "Thêm ELEVENLABS_API_KEY vào secret manager/.env.",
+                reason_codes=("ELEVENLABS_API_KEY_CONFIGURED",)
+                if key_configured
+                else ("ELEVENLABS_API_KEY_MISSING",),
+                technical_appendix={
+                    "ELEVENLABS_API_KEY": _redacted_presence(key_configured),
+                    "missing_env_keys": []
+                    if key_configured
+                    else ["ELEVENLABS_API_KEY"],
+                },
             ),
             self._check(
                 "CAPABILITY",
                 "PASS",
                 "ElevenLabs chỉ được dùng vai trò voice-only trong M12.",
                 reason_codes=("ELEVENLABS_VOICE_ONLY_ROLE",),
-                technical_appendix={"no_paid_voice_generation_by_default": True, "provider_role": "voice-only"},
+                technical_appendix={
+                    "no_paid_voice_generation_by_default": True,
+                    "provider_role": "voice-only",
+                },
             ),
             self._check(
                 "BUDGET",
                 "PASS" if not budget_missing else "WARNING",
-                "Budget ElevenLabs hard-env đã có." if not budget_missing else "Budget ElevenLabs hard-env chưa đủ.",
-                next_action=None if not budget_missing else "Thêm plan/cap/credit/basis ElevenLabs vào .env.",
-                reason_codes=("ELEVENLABS_BUDGET_CONFIGURED",) if not budget_missing else ("ELEVENLABS_BUDGET_MISSING",),
-                technical_appendix={"missing_env_keys": budget_missing, "no_actual_spend_calculation": True},
+                "Budget ElevenLabs hard-env đã có."
+                if not budget_missing
+                else "Budget ElevenLabs hard-env chưa đủ.",
+                next_action=None
+                if not budget_missing
+                else "Thêm plan/cap/credit/basis ElevenLabs vào .env.",
+                reason_codes=("ELEVENLABS_BUDGET_CONFIGURED",)
+                if not budget_missing
+                else ("ELEVENLABS_BUDGET_MISSING",),
+                technical_appendix={
+                    "missing_env_keys": budget_missing,
+                    "no_actual_spend_calculation": True,
+                },
             ),
             self._check(
                 "REAL_SMOKE",
@@ -688,15 +996,21 @@ class ElevenLabsReadinessCheck(_BaseReadinessCheck):
                 "ElevenLabs smoke mặc định bỏ qua; M12 không sinh voice trả phí.",
                 next_action="Chỉ dùng account/voice availability check khi có adapter an toàn ở milestone sau.",
                 reason_codes=("ELEVENLABS_SMOKE_SKIPPED_NO_TTS",),
-                technical_appendix={"adapter_exists": False, "real_tts_generation_added": False},
+                technical_appendix={
+                    "adapter_exists": False,
+                    "real_tts_generation_added": False,
+                },
             ),
         ]
 
     def safe_config(self) -> dict[str, Any]:
         return {
-            "api_key_configured": self.env.secret_configured(self.settings.elevenlabs_api_key),
+            "api_key_configured": self.env.secret_configured(
+                self.settings.elevenlabs_api_key
+            ),
             "plan_baseline": self.settings.elevenlabs_plan or "Creator",
-            "budget_basis": self.settings.elevenlabs_budget_basis or "credits/characters",
+            "budget_basis": self.settings.elevenlabs_budget_basis
+            or "credits/characters",
             "role": "voice-only",
         }
 
@@ -709,9 +1023,15 @@ class ProviderReadinessService:
 
     def readiness(self) -> IntegrationReadinessRead:
         checks, summaries = self._evaluate(persist=False)
-        latest = self.session.scalars(select(ProviderReadinessSnapshot).order_by(desc(ProviderReadinessSnapshot.created_at)).limit(1)).one_or_none()
+        latest = self.session.scalars(
+            select(ProviderReadinessSnapshot)
+            .order_by(desc(ProviderReadinessSnapshot.created_at))
+            .limit(1)
+        ).one_or_none()
         state, blocking, warning, actions = _snapshot_parts(summaries, checks)
-        budget_cards = EnvConfigAuditService(self.settings, self.redactor).budget_cards(summaries)
+        budget_cards = EnvConfigAuditService(self.settings, self.redactor).budget_cards(
+            summaries
+        )
         return IntegrationReadinessRead(
             generated_at=utc_now(),
             snapshot_state=state,  # type: ignore[arg-type]
@@ -731,7 +1051,9 @@ class ProviderReadinessService:
             technical_appendix={
                 "source": "M12 ProviderReadinessService",
                 "no_provider_calls_on_get": True,
-                "m2_provider_wiring": ProviderReadinessM2Service(self.settings).snapshot().model_dump(mode="json"),
+                "m2_provider_wiring": ProviderReadinessM2Service(self.settings)
+                .snapshot()
+                .model_dump(mode="json"),
             },
         )
 
@@ -740,7 +1062,9 @@ class ProviderReadinessService:
         state, blocking, warning, actions = _snapshot_parts(summaries, checks)
         snapshot = ProviderReadinessSnapshot(
             snapshot_state=state,
-            provider_summaries=[summary.model_dump(mode="json") for summary in summaries],
+            provider_summaries=[
+                summary.model_dump(mode="json") for summary in summaries
+            ],
             blocking_items=blocking,
             warning_items=warning,
             next_actions=actions,
@@ -761,7 +1085,9 @@ class ProviderReadinessService:
             raise NotFoundError(f"provider readiness not found: {provider_key}")
         all_checks, all_summaries = self._evaluate(persist=False)
         checks = [check for check in all_checks if check.provider_key == normalized]
-        summaries = [summary for summary in all_summaries if summary.provider_key == normalized]
+        summaries = [
+            summary for summary in all_summaries if summary.provider_key == normalized
+        ]
         state, blocking, warning, actions = _snapshot_parts(summaries, checks)
         return IntegrationReadinessRead(
             generated_at=utc_now(),
@@ -776,11 +1102,15 @@ class ProviderReadinessService:
             technical_appendix={
                 "source": "M12 provider scoped readiness",
                 "no_provider_calls_on_get": True,
-                "m2_provider_wiring": ProviderReadinessM2Service(self.settings).snapshot().model_dump(mode="json"),
+                "m2_provider_wiring": ProviderReadinessM2Service(self.settings)
+                .snapshot()
+                .model_dump(mode="json"),
             },
         )
 
-    def _evaluate(self, *, persist: bool) -> tuple[list[ProviderCheckDraft], list[ProviderSummaryRead]]:
+    def _evaluate(
+        self, *, persist: bool
+    ) -> tuple[list[ProviderCheckDraft], list[ProviderSummaryRead]]:
         checks: list[ProviderCheckDraft] = []
         summaries: list[ProviderSummaryRead] = []
         for helper in self._helpers():
@@ -798,7 +1128,9 @@ class ProviderReadinessService:
                         operator_summary=check.operator_summary,
                         next_action=check.next_action,
                         reason_codes=list(check.reason_codes),
-                        technical_appendix=self.redactor.redact_dict(check.technical_appendix or {}),
+                        technical_appendix=self.redactor.redact_dict(
+                            check.technical_appendix or {}
+                        ),
                     )
                 )
             self.session.flush()
@@ -806,9 +1138,11 @@ class ProviderReadinessService:
 
     def _helpers(self) -> list[_BaseReadinessCheck]:
         return [
-            OllamaReadinessCheck(self.session, self.settings, self.redactor),
+            OpenAIReadinessCheck(self.session, self.settings, self.redactor),
             YouTubePublicReadinessCheck(self.session, self.settings, self.redactor),
-            YouTubeOwnerAnalyticsReadinessCheck(self.session, self.settings, self.redactor),
+            YouTubeOwnerAnalyticsReadinessCheck(
+                self.session, self.settings, self.redactor
+            ),
             GoogleDriveReadinessCheck(self.session, self.settings, self.redactor),
             ElevenLabsReadinessCheck(self.session, self.settings, self.redactor),
             GoogleVeoReadinessCheck(self.session, self.settings, self.redactor),
@@ -830,7 +1164,9 @@ class RealSmokeOrchestratorService:
         self.redactor = SecurityRedactionService()
         self.env = EnvConfigAuditService(self.settings, self.redactor)
 
-    def run_provider(self, provider_key: str, data: ProviderSmokeRequest | None = None) -> RealSmokeRunRead:
+    def run_provider(
+        self, provider_key: str, data: ProviderSmokeRequest | None = None
+    ) -> RealSmokeRunRead:
         normalized = _provider_key(provider_key)
         if normalized not in PROVIDER_ORDER:
             raise NotFoundError(f"provider smoke not found: {provider_key}")
@@ -852,7 +1188,9 @@ class RealSmokeOrchestratorService:
             run.error_code = result.get("error_code")
             run.error_message = self.redactor.safe_error(result.get("error_message"))
             run.result_summary = result.get("summary")
-            run.technical_appendix = self.redactor.redact_dict(result.get("technical_appendix", {}))
+            run.technical_appendix = self.redactor.redact_dict(
+                result.get("technical_appendix", {})
+            )
         except Exception as exc:
             run.run_state = "FAILED"
             run.error_code = "M12_SMOKE_ORCHESTRATOR_FAILED"
@@ -870,7 +1208,7 @@ class RealSmokeOrchestratorService:
 
     def _dispatch(self, provider_key: str) -> dict[str, Any]:
         return {
-            "ollama": self._ollama,
+            "openai": self._openai,
             "youtube-public": self._youtube_public,
             "youtube-owner": self._youtube_owner,
             "google-drive": self._google_drive,
@@ -878,72 +1216,123 @@ class RealSmokeOrchestratorService:
             "google_veo": self._google_veo,
         }[provider_key]()
 
-    def _ollama(self) -> dict[str, Any]:
-        enabled = self.settings.llm_real_execution_enabled and self.settings.llm_router_real_smoke
+    def _openai(self) -> dict[str, Any]:
+        """Validate the adapter contract only; paid canaries have their own gate.
+
+        The historical endpoint remains useful to expose a clear operator status,
+        but it cannot be permitted to turn an ordinary readiness request into an
+        unbudgeted OpenAI call.
+        """
+
+        credential_configured = self.env.secret_configured(self.settings.openai_api_key)
         flags = {
             "VCOS_LLM_REAL_EXECUTION_ENABLED": self.settings.llm_real_execution_enabled,
             "VCOS_LLM_ROUTER_REAL_SMOKE": self.settings.llm_router_real_smoke,
-            "VCOS_LLM_PROVIDER_IS_OLLAMA": self.settings.llm_provider.lower() == "ollama",
+            "VCOS_LLM_PROVIDER_IS_OPENAI": _normalized(self.settings.llm_provider)
+            == "openai",
+            "OPENAI_API_KEY_CONFIGURED": credential_configured,
         }
-        if not enabled:
-            return _smoke_result("SKIPPED", "Ollama smoke bị bỏ qua vì env guard đang tắt.", env_flags=flags, reason="OLLAMA_REAL_SMOKE_SKIPPED")
-        lanes = LLMRouterConfigLoader(self.session).list_lanes(profile_key="default")
-        configured_models = _ollama_models_from_lanes(lanes)
-        health = OllamaLLMProvider(base_url=self.settings.ollama_base_url).list_models()
-        if not health.ok:
-            return _smoke_result("BLOCKED", "Không kết nối được Ollama để list model.", env_flags=flags, error_code=health.error_code, error_message=health.error_message)
-        available = {str(item.get("name") or item.get("model")) for item in health.output.get("models", []) if isinstance(item, dict)}
-        missing = sorted(model for model in configured_models if model not in available)
-        if missing:
+        # A disabled smoke is a no-op, even when a credential is intentionally
+        # absent or currently revoked.  Checking credential readiness first
+        # would turn a guard-only CLI invocation into a misleading blocker.
+        if (
+            not self.settings.llm_real_execution_enabled
+            or not self.settings.llm_router_real_smoke
+        ):
+            return _smoke_result(
+                "SKIPPED",
+                "OpenAI smoke bị bỏ qua vì real-execution hoặc smoke flag đang tắt.",
+                env_flags=flags,
+                reason="OPENAI_REAL_EXECUTION_DISABLED",
+                technical_appendix={"provider_call_made": False},
+            )
+        if not credential_configured:
             return _smoke_result(
                 "BLOCKED",
-                "Một số model Ollama được cấu hình chưa callable.",
+                "OpenAI canary không thể được authorize vì thiếu OPENAI_API_KEY.",
                 env_flags=flags,
-                error_code="OLLAMA_CONFIGURED_MODEL_MISSING",
-                technical_appendix={"missing_model_count": len(missing), "available_model_count": len(available)},
+                error_code="OPENAI_CREDENTIAL_MISSING",
             )
-        prompts = {
-            "cheap_structured": ('Return JSON exactly like {"ok": true, "marker": "cheap_structured"}.', "json"),
-            "long_context_text": ("Reply with marker long_context_text in one short sentence.", "text"),
-            "visual_creative_review": ("Reply with marker visual_creative_review only.", "text"),
-            "gatekeeper_soft_review": ("Reply with marker gatekeeper_soft_review only.", "text"),
-        }
-        route_results = []
-        for lane, (prompt, response_format) in prompts.items():
-            route_results.append(
-                LLMRouterService(self.session).route(
-                    lane_name=lane,
-                    prompt=prompt,
-                    requested_task_type="m12_readiness_smoke",
-                    response_format=response_format,
-                    correlation_id=f"m12-ollama-{lane}",
-                )
+
+        profile, lanes, model_profiles = _openai_router_configuration(self.session)
+        lane_evidence = _openai_lane_evidence(profile, lanes, model_profiles)
+        if not lane_evidence["valid"]:
+            return _smoke_result(
+                "BLOCKED",
+                "OpenAI canary bị chặn vì lane authority Luna/Terra không hợp lệ.",
+                env_flags=flags,
+                error_code="OPENAI_LANES_INVALID",
+                technical_appendix=lane_evidence,
             )
-        passed = all(result.status == "SUCCESS" for result in route_results)
+
+        adapter = OpenAIResponsesProvider(
+            api_key=None,
+            base_url=self.settings.openai_base_url,
+            timeout_seconds=self.settings.openai_timeout_seconds,
+        )
+        payload = adapter.build_responses_payload(
+            request=OpenAIResponsesRequest(
+                model="gpt-5.6-luna",
+                reasoning_effort="none",
+                prompt="OpenAI readiness adapter contract validation only.",
+                response_format="json",
+            )
+        )
         return _smoke_result(
-            "PASS" if passed else "FAILED",
-            "Ollama smoke 4 lane thành công." if passed else "Ollama smoke có lane thất bại.",
+            "SKIPPED",
+            "M12 không gọi OpenAI; canary trả phí phải chạy qua workflow budget-authorized riêng.",
             env_flags=flags,
-            technical_appendix={"lanes": [result.lane_name for result in route_results], "statuses": [result.status for result in route_results]},
+            reason="OPENAI_CANARY_DEFERRED_TO_AUTHORIZED_WORKFLOW",
+            technical_appendix={
+                "provider_call_made": False,
+                "adapter_provider_key": adapter.provider_key,
+                "adapter_payload_model": payload["model"],
+                "adapter_payload_reasoning_effort": payload["reasoning"]["effort"],
+                "dedicated_canary_required": True,
+            },
         )
 
     def _youtube_public(self) -> dict[str, Any]:
         flags = {
             "VCOS_YOUTUBE_REAL_PUBLIC_SMOKE": self.settings.youtube_real_public_smoke,
             "YOUTUBE_PUBLIC_MONITOR_ENABLED": self.settings.youtube_public_monitor_enabled,
-            "YOUTUBE_DATA_API_KEY_CONFIGURED": self.env.secret_configured(self.settings.youtube_data_api_key),
-            "YOUTUBE_TEST_VIDEO_ID_CONFIGURED": bool(self.settings.youtube_test_video_id),
+            "YOUTUBE_DATA_API_KEY_CONFIGURED": self.env.secret_configured(
+                self.settings.youtube_data_api_key
+            ),
+            "YOUTUBE_TEST_VIDEO_ID_CONFIGURED": bool(
+                self.settings.youtube_test_video_id
+            ),
         }
         if not self.settings.youtube_real_public_smoke:
-            return _smoke_result("SKIPPED", "YouTube public smoke bị bỏ qua vì flag thật đang tắt.", env_flags=flags, reason="YOUTUBE_PUBLIC_SMOKE_SKIPPED")
-        if not self.settings.youtube_public_monitor_enabled or not self.settings.youtube_data_api_key or not self.settings.youtube_test_video_id:
-            return _smoke_result("BLOCKED", "Thiếu config/API key/test video cho YouTube public smoke.", env_flags=flags, error_code="YOUTUBE_PUBLIC_SMOKE_CONFIG_MISSING")
+            return _smoke_result(
+                "SKIPPED",
+                "YouTube public smoke bị bỏ qua vì flag thật đang tắt.",
+                env_flags=flags,
+                reason="YOUTUBE_PUBLIC_SMOKE_SKIPPED",
+            )
+        if (
+            not self.settings.youtube_public_monitor_enabled
+            or not self.settings.youtube_data_api_key
+            or not self.settings.youtube_test_video_id
+        ):
+            return _smoke_result(
+                "BLOCKED",
+                "Thiếu config/API key/test video cho YouTube public smoke.",
+                env_flags=flags,
+                error_code="YOUTUBE_PUBLIC_SMOKE_CONFIG_MISSING",
+            )
         result = YouTubePublicStatsProvider().fetch(
             platform_video_id=self.settings.youtube_test_video_id,
             api_key=self.settings.youtube_data_api_key.get_secret_value(),
         )
         if not result.ok:
-            return _smoke_result("FAILED", "YouTube Data API smoke thất bại.", env_flags=flags, error_code=result.error_code, error_message=result.error_message)
+            return _smoke_result(
+                "FAILED",
+                "YouTube Data API smoke thất bại.",
+                env_flags=flags,
+                error_code=result.error_code,
+                error_message=result.error_message,
+            )
         output = result.output or {}
         return _smoke_result(
             "PASS",
@@ -961,17 +1350,36 @@ class RealSmokeOrchestratorService:
         flags = {
             "VCOS_YOUTUBE_REAL_OWNER_SMOKE": self.settings.youtube_real_owner_smoke,
             "YOUTUBE_OWNER_ANALYTICS_ENABLED": self.settings.youtube_owner_analytics_enabled,
-            "YOUTUBE_TEST_VIDEO_ID_CONFIGURED": bool(self.settings.youtube_test_video_id),
+            "YOUTUBE_TEST_VIDEO_ID_CONFIGURED": bool(
+                self.settings.youtube_test_video_id
+            ),
         }
         if not self.settings.youtube_real_owner_smoke:
-            return _smoke_result("SKIPPED", "YouTube owner smoke bị bỏ qua vì flag thật đang tắt.", env_flags=flags, reason="YOUTUBE_OWNER_SMOKE_SKIPPED")
-        credential_service = YouTubeOAuthCredentialService(self.session, config_service=YouTubeMonitoringConfigService(self.settings))
+            return _smoke_result(
+                "SKIPPED",
+                "YouTube owner smoke bị bỏ qua vì flag thật đang tắt.",
+                env_flags=flags,
+                reason="YOUTUBE_OWNER_SMOKE_SKIPPED",
+            )
+        credential_service = YouTubeOAuthCredentialService(
+            self.session, config_service=YouTubeMonitoringConfigService(self.settings)
+        )
         reference = credential_service.get_connected_owner_reference()
         if reference is None:
-            return _smoke_result("BLOCKED", "YouTube owner smoke cần OAuth token.", env_flags={**flags, "token_connected": False}, error_code="NEEDS_AUTH")
+            return _smoke_result(
+                "BLOCKED",
+                "YouTube owner smoke cần OAuth token.",
+                env_flags={**flags, "token_connected": False},
+                error_code="NEEDS_AUTH",
+            )
         access_token = credential_service.get_valid_access_token(reference)
         if not access_token or not self.settings.youtube_test_video_id:
-            return _smoke_result("BLOCKED", "YouTube owner smoke thiếu token hợp lệ hoặc test video.", env_flags={**flags, "token_connected": bool(access_token)}, error_code="YOUTUBE_OWNER_SMOKE_CONFIG_MISSING")
+            return _smoke_result(
+                "BLOCKED",
+                "YouTube owner smoke thiếu token hợp lệ hoặc test video.",
+                env_flags={**flags, "token_connected": bool(access_token)},
+                error_code="YOUTUBE_OWNER_SMOKE_CONFIG_MISSING",
+            )
         end_date = date.today()
         start_date = end_date - timedelta(days=7)
         result = YouTubeOwnerAnalyticsProvider().fetch(
@@ -981,28 +1389,66 @@ class RealSmokeOrchestratorService:
             end_date=end_date,
         )
         if not result.ok:
-            return _smoke_result("FAILED", "YouTube owner analytics smoke thất bại; không tạo fake metric.", env_flags={**flags, "token_connected": True}, error_code=result.error_code, error_message=result.error_message)
-        return _smoke_result("PASS", "YouTube owner analytics smoke thành công.", env_flags={**flags, "token_connected": True}, technical_appendix={"no_fake_metrics": True})
+            return _smoke_result(
+                "FAILED",
+                "YouTube owner analytics smoke thất bại; không tạo fake metric.",
+                env_flags={**flags, "token_connected": True},
+                error_code=result.error_code,
+                error_message=result.error_message,
+            )
+        return _smoke_result(
+            "PASS",
+            "YouTube owner analytics smoke thành công.",
+            env_flags={**flags, "token_connected": True},
+            technical_appendix={"no_fake_metrics": True},
+        )
 
     def _google_drive(self) -> dict[str, Any]:
         flags = {
             "VCOS_DRIVE_REAL_UPLOAD_SMOKE": self.settings.drive_real_upload_smoke,
             "GOOGLE_DRIVE_OFFLOAD_ENABLED": self.settings.google_drive_offload_enabled,
-            "GOOGLE_DRIVE_ROOT_FOLDER_ID_CONFIGURED": bool(self.settings.google_drive_root_folder_id),
+            "GOOGLE_DRIVE_ROOT_FOLDER_ID_CONFIGURED": bool(
+                self.settings.google_drive_root_folder_id
+            ),
         }
         if not self.settings.drive_real_upload_smoke:
-            return _smoke_result("SKIPPED", "Google Drive upload smoke bị bỏ qua vì flag thật đang tắt.", env_flags=flags, reason="GOOGLE_DRIVE_SMOKE_SKIPPED")
-        credential_service = GoogleDriveOAuthCredentialService(self.session, config_service=GoogleDriveConfigService(self.settings))
+            return _smoke_result(
+                "SKIPPED",
+                "Google Drive upload smoke bị bỏ qua vì flag thật đang tắt.",
+                env_flags=flags,
+                reason="GOOGLE_DRIVE_SMOKE_SKIPPED",
+            )
+        credential_service = GoogleDriveOAuthCredentialService(
+            self.session, config_service=GoogleDriveConfigService(self.settings)
+        )
         reference = credential_service.get_connected_reference()
-        if not self.settings.google_drive_offload_enabled or not self.settings.google_drive_root_folder_id or reference is None:
-            return _smoke_result("BLOCKED", "Drive smoke thiếu offload/root folder/OAuth token.", env_flags={**flags, "token_connected": reference is not None}, error_code="GOOGLE_DRIVE_SMOKE_CONFIG_MISSING")
+        if (
+            not self.settings.google_drive_offload_enabled
+            or not self.settings.google_drive_root_folder_id
+            or reference is None
+        ):
+            return _smoke_result(
+                "BLOCKED",
+                "Drive smoke thiếu offload/root folder/OAuth token.",
+                env_flags={**flags, "token_connected": reference is not None},
+                error_code="GOOGLE_DRIVE_SMOKE_CONFIG_MISSING",
+            )
         smoke_dir = ROOT / "var" / "tmp" / "readiness-smoke"
         smoke_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", prefix="m12-drive-", dir=smoke_dir, delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            suffix=".txt",
+            prefix="m12-drive-",
+            dir=smoke_dir,
+            delete=False,
+        ) as handle:
             handle.write("vcos m12 google drive readiness smoke\n")
             local_path = Path(handle.name)
         try:
-            cloud_ref, verification = GoogleDriveUploadService(self.session).upload_verified(
+            cloud_ref, verification = GoogleDriveUploadService(
+                self.session
+            ).upload_verified(
                 local_path=local_path,
                 media_type="OTHER",
                 company_id=None,
@@ -1031,11 +1477,19 @@ class RealSmokeOrchestratorService:
         try:
             config = GoogleVeoConfigService(self.session).resolve()
         except Exception as exc:
-            return _smoke_result("BLOCKED", "Google Veo config invalid nên không chạy smoke.", env_flags={}, error_code="VEO_CONFIG_INVALID", error_message=str(exc))
+            return _smoke_result(
+                "BLOCKED",
+                "Google Veo config invalid nên không chạy smoke.",
+                env_flags={},
+                error_code="VEO_CONFIG_INVALID",
+                error_message=str(exc),
+            )
         flags = {
             "VCOS_VEO_REAL_GENERATION_ENABLED": config.real_execution_enabled,
             "VCOS_PA1R_VEO_SMOKE_ENABLED": config.real_smoke_enabled,
-            "GEMINI_API_KEY_CONFIGURED": self.env.secret_configured(self.settings.gemini_api_key),
+            "GEMINI_API_KEY_CONFIGURED": self.env.secret_configured(
+                self.settings.gemini_api_key
+            ),
             "GEMINI_API_KEY_VALUE_REDACTED": True,
             "VEO_MODEL_ID_CONFIGURED": bool(config.model_id),
         }
@@ -1050,13 +1504,31 @@ class RealSmokeOrchestratorService:
     def _elevenlabs(self) -> dict[str, Any]:
         flags = {
             "VCOS_ELEVENLABS_REAL_ACCOUNT_SMOKE": self.settings.elevenlabs_real_account_smoke,
-            "ELEVENLABS_API_KEY_CONFIGURED": self.env.secret_configured(self.settings.elevenlabs_api_key),
+            "ELEVENLABS_API_KEY_CONFIGURED": self.env.secret_configured(
+                self.settings.elevenlabs_api_key
+            ),
         }
         if not self.settings.elevenlabs_real_account_smoke:
-            return _smoke_result("SKIPPED", "ElevenLabs smoke bị bỏ qua; không sinh voice mặc định.", env_flags=flags, reason="ELEVENLABS_SMOKE_SKIPPED")
+            return _smoke_result(
+                "SKIPPED",
+                "ElevenLabs smoke bị bỏ qua; không sinh voice mặc định.",
+                env_flags=flags,
+                reason="ELEVENLABS_SMOKE_SKIPPED",
+            )
         if not self.env.secret_configured(self.settings.elevenlabs_api_key):
-            return _smoke_result("BLOCKED", "Thiếu ElevenLabs API key.", env_flags=flags, error_code="ELEVENLABS_API_KEY_MISSING")
-        return _smoke_result("SKIPPED", "Chưa có adapter account-check an toàn; M12 không thêm real TTS.", env_flags=flags, reason="ELEVENLABS_ADAPTER_NOT_AVAILABLE")
+            return _smoke_result(
+                "BLOCKED",
+                "Thiếu ElevenLabs API key.",
+                env_flags=flags,
+                error_code="ELEVENLABS_API_KEY_MISSING",
+            )
+        return _smoke_result(
+            "SKIPPED",
+            "Chưa có adapter account-check an toàn; M12 không thêm real TTS.",
+            env_flags=flags,
+            reason="ELEVENLABS_ADAPTER_NOT_AVAILABLE",
+        )
+
 
 def _smoke_result(
     state: str,
@@ -1084,7 +1556,8 @@ def _smoke_result(
 def _provider_key(value: str) -> str:
     normalized = value.strip().lower().replace("_", "-")
     aliases = {
-        "ollama-router": "ollama",
+        "openai-router": "openai",
+        "openai-responses": "openai",
         "youtube-public-monitor": "youtube-public",
         "youtube-owner-analytics": "youtube-owner",
         "drive": "google-drive",
@@ -1108,20 +1581,119 @@ def _missing(*items: tuple[str, bool]) -> list[str]:
     return [key for key, configured in items if not configured]
 
 
-def _ollama_models_from_lanes(lanes: list[Any]) -> list[str]:
-    models: list[str] = []
-    seen: set[str] = set()
-    for lane in lanes:
-        candidates = [lane.primary_model, *lane.fallback_models, lane.premium_model, lane.emergency_model, lane.backup_model]
-        for model in candidates:
-            if model and model not in seen:
-                seen.add(model)
-                models.append(model)
-    return models
+def _router_model_choices(lane: LLMRouterLane) -> list[str]:
+    """Return every selectable route model so fallback cannot be hidden."""
+
+    candidates = [
+        lane.primary_model,
+        *(lane.fallback_models or []),
+        lane.premium_model,
+        lane.emergency_model,
+        lane.backup_model,
+    ]
+    return [str(model) for model in candidates if model]
+
+
+def _openai_router_configuration(
+    session: Session,
+) -> tuple[LLMRouterProfile | None, list[LLMRouterLane], list[LLMModelProfile]]:
+    """Read router state directly, avoiding bootstrap writes during readiness."""
+
+    profile = session.scalars(
+        select(LLMRouterProfile).where(LLMRouterProfile.profile_key == "default")
+    ).one_or_none()
+    if profile is None:
+        return None, [], []
+    lanes = list(
+        session.scalars(
+            select(LLMRouterLane)
+            .where(LLMRouterLane.router_profile_id == profile.id)
+            .order_by(LLMRouterLane.route_priority)
+        ).all()
+    )
+    model_profiles = list(
+        session.scalars(
+            select(LLMModelProfile)
+            .where(LLMModelProfile.is_enabled.is_(True))
+            .order_by(LLMModelProfile.model_id)
+        ).all()
+    )
+    return profile, lanes, model_profiles
+
+
+def _openai_lane_evidence(
+    profile: LLMRouterProfile | None,
+    lanes: list[LLMRouterLane],
+    model_profiles: list[LLMModelProfile],
+) -> dict[str, Any]:
+    """Return safe evidence that the router contains only its fixed authority."""
+
+    lanes_by_name = {lane.lane_name: lane for lane in lanes}
+    required_lane_names = set(REQUIRED_OPENAI_LANE_MODELS)
+    available_lane_names = set(lanes_by_name)
+    missing_lanes = sorted(required_lane_names - available_lane_names)
+    unexpected_lanes = sorted(available_lane_names - required_lane_names)
+    wrong_primary_models = {
+        lane_name: lanes_by_name[lane_name].primary_model
+        for lane_name, expected_model in REQUIRED_OPENAI_LANE_MODELS.items()
+        if lane_name in lanes_by_name
+        and lanes_by_name[lane_name].primary_model != expected_model
+    }
+    fallback_lanes = sorted(
+        lane.lane_name
+        for lane in lanes
+        if lane.fallback_models
+        or lane.premium_model
+        or lane.emergency_model
+        or lane.backup_model
+    )
+    configured_models = sorted(
+        {model for lane in lanes for model in _router_model_choices(lane)}
+    )
+    unexpected_models = sorted(set(configured_models) - ALLOWED_OPENAI_ROUTER_MODELS)
+    invalid_model_profiles = sorted(
+        {
+            f"{model_profile.provider_key}:{model_profile.model_id}"
+            for model_profile in model_profiles
+            if model_profile.provider_key.upper() != "OPENAI"
+            or model_profile.model_id not in ALLOWED_OPENAI_ROUTER_MODELS
+        }
+    )
+    profile_provider = profile.provider_key if profile is not None else None
+    profile_is_openai = (
+        profile_provider is not None and profile_provider.upper() == "OPENAI"
+    )
+    valid = (
+        profile_is_openai
+        and not missing_lanes
+        and not unexpected_lanes
+        and not wrong_primary_models
+        and not fallback_lanes
+        and not unexpected_models
+        and not invalid_model_profiles
+    )
+    return {
+        "valid": valid,
+        "profile_present": profile is not None,
+        "profile_provider": profile_provider,
+        "required_lane_models": REQUIRED_OPENAI_LANE_MODELS,
+        "available_lanes": sorted(available_lane_names),
+        "missing_lanes": missing_lanes,
+        "unexpected_lanes": unexpected_lanes,
+        "wrong_primary_models": wrong_primary_models,
+        "fallback_lanes": fallback_lanes,
+        "configured_models": configured_models,
+        "unexpected_models": unexpected_models,
+        "invalid_enabled_model_profiles": invalid_model_profiles,
+        "fallback_allowed": False,
+        "provider_call_made": False,
+    }
 
 
 def _provider_state(checks: list[ProviderCheckDraft]) -> str:
-    readiness_checks = [check for check in checks if _counts_for_readiness(check)] or checks
+    readiness_checks = [
+        check for check in checks if _counts_for_readiness(check)
+    ] or checks
     states = [check.check_state for check in readiness_checks]
     if any(state in {"BLOCKED", "FAILED"} for state in states):
         return "BLOCKED"
@@ -1133,7 +1705,9 @@ def _provider_state(checks: list[ProviderCheckDraft]) -> str:
 
 
 def _counts_for_readiness(check: ProviderCheckDraft) -> bool:
-    return not (check.provider_key == "google-drive" and check.check_type == "REAL_SMOKE")
+    return not (
+        check.provider_key == "google-drive" and check.check_type == "REAL_SMOKE"
+    )
 
 
 def _smoke_state(checks: list[ProviderCheckDraft]) -> str | None:
@@ -1213,7 +1787,11 @@ def _snapshot_parts(
         if check.check_state in {"WARNING", "UNKNOWN", "SKIPPED"}
     ]
     actions = [
-        {"provider_key": summary.provider_key, "next_action": summary.next_action, "readiness_state": summary.readiness_state}
+        {
+            "provider_key": summary.provider_key,
+            "next_action": summary.next_action,
+            "readiness_state": summary.readiness_state,
+        }
         for summary in summaries
         if summary.next_action
     ]

@@ -69,6 +69,14 @@ _LOCAL_PROVIDER_BY_STAGE = {
     "QC": "vcos_media_qc",
     "ARCHIVE": "vcos_storage",
 }
+_V2_ADAPTER_BY_STAGE = {
+    "MEDIA": "v2-local-native",
+    "RENDER": "v2-local-native",
+    "QC": "v2-local-native",
+    # Archive is deliberately remote-artifact resolution, not a local-copy
+    # completion.  The adapter itself remains network-free and fail-closed.
+    "ARCHIVE": "v2-google-drive-archive",
+}
 _JOB_TYPES_BY_LANE = {
     "LONG_FORM": {
         "MEDIA": "LONG_CAPTION_TIMELINE",
@@ -446,7 +454,7 @@ class V2LocalGeneratedCardRights(_StrictFrozenModel):
 class V2NativeRouteReceipt(_StrictFrozenModel):
     stage: Literal["MEDIA", "RENDER", "QC", "ARCHIVE"]
     operation_id: str = Field(min_length=1, max_length=200)
-    adapter_key: Literal["v2-local-native"] = "v2-local-native"
+    adapter_key: Literal["v2-local-native", "v2-google-drive-archive"]
     provider_role_id: uuid.UUID
     provider_key: str = Field(min_length=1)
     provider_type: str = Field(min_length=1)
@@ -461,6 +469,8 @@ class V2NativeRouteReceipt(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def validate_hash(self) -> Self:
+        if self.adapter_key != _V2_ADAPTER_BY_STAGE[self.stage]:
+            raise ValueError("V2_NATIVE_ROUTE_ADAPTER_STAGE_MISMATCH")
         expected = semantic_hash(self.model_dump(mode="json", exclude={"route_hash"}))
         if self.route_hash != expected:
             raise ValueError("NATIVE_ROUTE_HASH_MISMATCH")
@@ -1802,12 +1812,13 @@ def _route_receipt(
     routing_policy_ref: str,
     routing_policy_hash: str,
 ) -> V2NativeRouteReceipt:
+    adapter_key = _V2_ADAPTER_BY_STAGE[stage]
     payload = {
         "stage": stage,
         "operation_id": (
-            f"v2-local-native:{project_id}:{stage.lower()}:{input_fingerprint[:20]}"
+            f"{adapter_key}:{project_id}:{stage.lower()}:{input_fingerprint[:20]}"
         ),
-        "adapter_key": "v2-local-native",
+        "adapter_key": adapter_key,
         "provider_role_id": str(role.id),
         "provider_key": role.provider_key,
         "provider_type": role.provider_type,

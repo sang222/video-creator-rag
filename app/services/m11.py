@@ -764,9 +764,9 @@ class M11DashboardService:
             incidents=incidents,
             manual_actions=manual_actions,
             integrations={
-                "ollama_router": {
+                "openai_router": {
                     "state": _state_from_count(
-                        self._count_provider_key_like("ollama"),
+                        self._count_provider_key_like("openai"),
                         "DISABLED",
                         "CONFIGURED",
                     )

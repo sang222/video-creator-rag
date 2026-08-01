@@ -48,6 +48,7 @@ from app.services.v2_provider_production import (
     _require_verified_final_media,
     build_v2_provider_production_gateway,
 )
+import app.services.v2_support_authority as v2_support_authority
 from app.services.v2_support_authority import (
     V2GeneratedCitation,
     V2GeneratedClaim,
@@ -251,6 +252,15 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
     scope = support_scope(db_session, base)
     _configure_verified_destination(scope)
     assert scope.admission.editorial_calendar_slot_id is not None
+    # This is the native-effects qualification, not the production Drive
+    # archive flow.  Seal the one local archive route into this test's frozen
+    # support envelope before the package exists; production keeps the Drive
+    # resolver as its default, and no gateway fallback is introduced.
+    monkeypatch.setitem(
+        v2_support_authority._V2_ADAPTER_BY_STAGE,
+        "ARCHIVE",
+        V2_LOCAL_ADAPTER_KEY,
+    )
     V2SupportAuthorityService(
         db_session,
         producer=_QualificationTrustedProducer(),

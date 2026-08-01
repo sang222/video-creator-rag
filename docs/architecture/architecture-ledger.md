@@ -24,8 +24,8 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M8 builds analytics sync runs, local mock/manual/import analytics snapshots, metric definitions/availability, traffic/retention/engagement snapshots, and uploaded video metrics summaries only.
 - M9 builds deterministic post-publish observation windows, no-view/packaging/retention/engagement/policy diagnostics, failure trace reports, recovery proposals, and manual review actions only.
 - M10 builds evidence-backed learning candidates, evidence bundles, deterministic promotion eligibility runs, M11-ready learning review queue items, and playbook candidate drafts only.
-- M10.1 builds guarded real Ollama LLMRouter lanes and immutable route-attempt
-  evidence only.
+- M10.1 builds guarded OpenAI Luna/Terra LLMRouter lanes and immutable
+  route-attempt evidence only.
 - M10.2 builds the Quality-First $250 media provider role matrix, provider capability matrix, render routing decisions, media provider gates, and render package planning only.
 - M10.3 builds YouTube PublicMonitorMode, OAuth-backed OwnerAnalyticsMode, safe credential references, YouTube sync runs/snapshots, M8 truth-layer integration, and dashboard-ready UploadedVideo follow read models only.
 - M10.4 binds Google Veo as the only AI hero provider and externalizes media/provider routing, capability, budget, and Veo defaults into config/env only.
@@ -116,7 +116,7 @@ M11.1 does not build production SSO/2FA/password reset, auto translation publish
 M12 adds `provider_readiness_checks`, `provider_readiness_snapshots`, `real_smoke_runs`, `/integrations/readiness`, provider-scoped readiness/smoke endpoints, `vcos integrations readiness`, `vcos integrations smoke`, and Vietnamese integrations dashboard routes `/settings`, `/settings/integrations`, and `/providers/readiness`.
 
 
-M12.1 adds repo-first prompt authoring under `app/prompts/`, DB-backed prompt template/profile/contract/schema records, prompt render runs, prompt audit snapshots, prompt evaluation cases/runs, frozen channel contract binding, common VCOS skills, agent-specific deltas for required production roles, BaseEnvelope JSON output validation, safe syntax-only JSON repair, and Ollama chat message support.
+M12.1 adds repo-first prompt authoring under `app/prompts/`, DB-backed prompt template/profile/contract/schema records, prompt render runs, prompt audit snapshots, prompt evaluation cases/runs, frozen channel contract binding, common VCOS skills, agent-specific deltas for required production roles, BaseEnvelope JSON output validation, safe syntax-only JSON repair, and OpenAI Responses role-message support.
 
 M12.1 does not build real provider calls, provider strategy changes, YouTube upload/publish/reupload APIs, channel config mutation, prompt self-mutation, DB-only canonical prompt blobs, dashboard scraping/browser automation, fake traffic, bot engagement, platform evasion, auto learning promotion, or TikTok/Facebook analytics learning loops.
 
@@ -146,8 +146,8 @@ text/number authority.
 - M8 complete means UploadedVideo has local analytics snapshots, metric availability, freshness/confidence, traffic/retention/engagement snapshots, and a latest metrics read model.
 - M9 complete means VCOS can diagnose uploaded video health and propose human-approved actions without automatic recovery.
 - M10 complete means VCOS can create evidence-backed learning candidates and queue them for M11 review without approval or promotion.
-- M10.1 complete means VCOS can real-smoke guarded local Ollama routing and
-  persist route/run evidence without media provider routing or publishing.
+- M10.1 complete means VCOS can real-smoke guarded OpenAI Luna/Terra routing
+  and persist route/run evidence without media provider routing or publishing.
 - M10.2 complete means VCOS can route media production jobs by provider role and safely block unsupported long-form final rendering when no final assembly renderer is configured.
 - M10.3 complete means VCOS can follow uploaded YouTube videos through public stats and owner analytics when OAuth is connected, then expose dashboard-ready UploadedVideo follow payloads.
 - M10.4 complete means VCOS routes AI hero/metaphor jobs only to Google Veo, keeps real execution guarded, and has provider config externalized/audited.

@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.contracts.vcos_v2 import (
@@ -22,6 +22,7 @@ from app.contracts.vcos_v2 import (
     AssignmentResolution,
     AssignmentResolverInput,
     ContentMode,
+    DecisionReversibility,
     LegacySeriesClassification,
     LongFormPlanningRequest,
     PlanningSourceType,
@@ -33,6 +34,8 @@ from app.contracts.vcos_v2 import (
     SeriesRunCreate,
     SeriesRunState,
     SeriesRunTransitionRequest,
+    StrategicIntent,
+    StrategicLineageV2,
 )
 from app.contracts.workflow import VideoProjectCreate
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
@@ -42,7 +45,7 @@ from app.db.models.channel import (
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
 )
-from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion
+from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion, LaunchRun
 from app.db.models.m5 import (
     EditorialCalendarSlot,
     EditorialIdeaCandidate,
@@ -50,6 +53,7 @@ from app.db.models.m5 import (
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
 )
+from app.db.models.m7 import UploadedVideo
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
@@ -134,6 +138,8 @@ class _AdmissionContext:
     candidate: EditorialIdeaCandidate | None
     research_run: EditorialResearchRun | None
     preflight: IdeaMarketPreflight
+    launch_policy: FirstChannelLaunchPolicyVersion
+    launch_run: LaunchRun
 
 
 class DeterministicAssignmentResolver:
@@ -655,6 +661,7 @@ class ProjectAdmissionV2Service:
     ) -> ProjectAdmissionDecision:
         del correlation_id
         context = self._load_context(data)
+        data = self._resolve_server_lineage(data=data, context=context)
         existing = self._lock_source_and_existing(data)
         if existing is not None:
             return existing
@@ -703,6 +710,294 @@ class ProjectAdmissionV2Service:
             resolution=resolution,
         )
 
+    def _active_launch_authority(
+        self,
+        *,
+        data: ProjectAdmissionV2Request,
+    ) -> tuple[FirstChannelLaunchPolicyVersion, LaunchRun]:
+        """Lock the one active launch authority before an admission can proceed."""
+
+        launch_policy = _approved_launch_policy_for_channel(
+            self.session,
+            company_id=data.company_id,
+            channel_workspace_id=data.channel_workspace_id,
+            lock=True,
+        )
+        if (
+            launch_policy is None
+            or launch_policy.channel_profile_version_id
+            != data.channel_profile_version_id
+            or launch_policy.policy_snapshot_id != data.policy_snapshot_id
+        ):
+            raise ValidationFailureError("ACTIVE_LAUNCH_POLICY_REQUIRED")
+        launch_run = self.session.scalar(
+            select(LaunchRun)
+            .where(
+                LaunchRun.launch_policy_version_id == launch_policy.id,
+                LaunchRun.company_id == data.company_id,
+                LaunchRun.channel_workspace_id == data.channel_workspace_id,
+                LaunchRun.state == "ACTIVE",
+            )
+            .with_for_update()
+        )
+        if launch_run is None:
+            raise ValidationFailureError("ACTIVE_LAUNCH_RUN_REQUIRED")
+        return launch_policy, launch_run
+
+    @staticmethod
+    def _launch_run_authority_hash(
+        *,
+        launch_policy: FirstChannelLaunchPolicyVersion,
+        launch_run: LaunchRun,
+    ) -> str:
+        """Hash the active-run snapshot that an immutable admission binds."""
+
+        return content_hash(
+            {
+                "launch_key": launch_run.launch_key,
+                "launch_policy_hash": launch_policy.canonical_hash,
+                "launch_policy_version_id": str(launch_policy.id),
+                "launch_run_id": str(launch_run.id),
+                "launch_started_at": (
+                    launch_run.launch_started_at.isoformat()
+                    if launch_run.launch_started_at is not None
+                    else None
+                ),
+                "preparation_started_on": launch_run.preparation_started_on.isoformat(),
+                "reason_codes": list(launch_run.reason_codes or []),
+                "state": launch_run.state,
+            }
+        )
+
+    @staticmethod
+    def _audience_authority(
+        *,
+        context: _AdmissionContext,
+    ) -> dict[str, Any]:
+        """Extract the exact promise from the approved compiled contract."""
+
+        payload = context.policy.compiled_payload or {}
+        contract = payload.get("channel_contract_json")
+        if not isinstance(contract, dict):
+            raise ValidationFailureError("ADMISSION_AUDIENCE_CONTRACT_REQUIRED")
+        identity = contract.get("channel_identity")
+        target = contract.get("target_audience")
+        market = contract.get("market_locale")
+        if not isinstance(identity, dict) or not isinstance(target, dict):
+            raise ValidationFailureError("ADMISSION_AUDIENCE_CONTRACT_REQUIRED")
+        audience_promise = identity.get("brand_promise")
+        primary_persona = target.get("primary_persona")
+        if not isinstance(audience_promise, str) or not audience_promise.strip():
+            raise ValidationFailureError("ADMISSION_AUDIENCE_PROMISE_REQUIRED")
+        if not isinstance(primary_persona, str) or not primary_persona.strip():
+            raise ValidationFailureError("ADMISSION_TARGET_AUDIENCE_REQUIRED")
+        target_definition = {
+            "audience_level": target.get("audience_level"),
+            "audience_notes": target.get("audience_notes"),
+            "desired_outcome": target.get("desired_outcome"),
+            "market_locale": {
+                "audience_locale": (
+                    market.get("audience_locale") if isinstance(market, dict) else None
+                ),
+                "content_language": (
+                    market.get("content_language") if isinstance(market, dict) else None
+                ),
+                "primary_market": (
+                    market.get("primary_market") if isinstance(market, dict) else None
+                ),
+            },
+            "pain_points": list(target.get("pain_points") or []),
+            "primary_persona": primary_persona,
+        }
+        audience_promise_version = (
+            f"channel-contract-snapshot-{context.policy.snapshot_version}"
+        )
+        audience_drift_guard_version = (
+            f"channel-contract-drift-guard-{context.policy.snapshot_version}"
+        )
+        return {
+            "audience_promise": audience_promise.strip(),
+            "audience_promise_version": audience_promise_version,
+            "audience_promise_hash": StrategicLineageV2.calculate_audience_promise_hash(
+                audience_promise=audience_promise.strip(),
+                audience_promise_version=audience_promise_version,
+                target_audience_definition=target_definition,
+                audience_drift_guard_version=audience_drift_guard_version,
+            ),
+            "target_audience_definition": target_definition,
+            "audience_drift_guard_version": audience_drift_guard_version,
+        }
+
+    def _is_first_public_video(self, *, context: _AdmissionContext) -> bool:
+        return (
+            self.session.scalar(
+                select(func.count(UploadedVideo.id)).where(
+                    UploadedVideo.channel_workspace_id == context.workspace.id,
+                    UploadedVideo.verification_status == "VERIFIED",
+                )
+            )
+            or 0
+        ) == 0
+
+    def _resolve_server_lineage(
+        self,
+        *,
+        data: ProjectAdmissionV2Request,
+        context: _AdmissionContext,
+    ) -> ProjectAdmissionV2Request:
+        """Derive and reconcile immutable lineage; never persist caller claims.
+
+        The request is only a claimed view.  Audience and launch values are
+        rebuilt from the active policy/run and intent comes from the frozen
+        candidate when it exists.  The first public video receives the bounded
+        ACQUISITION default only if no candidate-specific intent overrides it.
+        """
+
+        lineage = self._audience_authority(context=context)
+        launch_run_hash = self._launch_run_authority_hash(
+            launch_policy=context.launch_policy,
+            launch_run=context.launch_run,
+        )
+        lineage.update(
+            {
+                "active_launch_policy_version_id": context.launch_policy.id,
+                "active_launch_policy_hash": context.launch_policy.canonical_hash,
+                "active_launch_run_id": context.launch_run.id,
+                "active_launch_run_hash": launch_run_hash,
+            }
+        )
+        candidate = context.candidate
+        candidate_has_lineage = bool(
+            candidate is not None and candidate.audience_promise_hash
+        )
+        if candidate_has_lineage:
+            assert candidate is not None
+            candidate_lineage = {
+                **lineage,
+                "audience_promise": candidate.audience_promise,
+                "audience_promise_version": candidate.audience_promise_version,
+                "audience_promise_hash": candidate.audience_promise_hash,
+                "target_audience_definition": candidate.target_audience_definition,
+                "audience_drift_guard_version": candidate.audience_drift_guard_version,
+                "strategic_intent": candidate.strategic_intent,
+                "intent_success_criteria": candidate.intent_success_criteria,
+                "intent_success_criteria_version": candidate.intent_success_criteria_version,
+                "intent_success_criteria_hash": candidate.intent_success_criteria_hash,
+                "experiment_hypothesis": candidate.experiment_hypothesis,
+                "primary_variable_under_test": candidate.primary_variable_under_test,
+                "decision_reversibility": candidate.decision_reversibility,
+                "active_launch_policy_version_id": candidate.active_launch_policy_version_id,
+                "active_launch_policy_hash": candidate.active_launch_policy_hash,
+                "active_launch_run_id": candidate.active_launch_run_id,
+                "active_launch_run_hash": candidate.active_launch_run_hash,
+            }
+            try:
+                validated_candidate = StrategicLineageV2.model_validate(
+                    candidate_lineage
+                )
+            except ValueError as exc:
+                raise ValidationFailureError(
+                    "EDITORIAL_CANDIDATE_STRATEGIC_LINEAGE_INVALID"
+                ) from exc
+            resolved = validated_candidate.model_dump(mode="python")
+            for key in (
+                "audience_promise",
+                "audience_promise_version",
+                "audience_promise_hash",
+                "target_audience_definition",
+                "audience_drift_guard_version",
+                "active_launch_policy_version_id",
+                "active_launch_policy_hash",
+                "active_launch_run_id",
+                "active_launch_run_hash",
+            ):
+                if resolved[key] != lineage[key]:
+                    raise ValidationFailureError(
+                        "EDITORIAL_CANDIDATE_STRATEGIC_AUTHORITY_MISMATCH"
+                    )
+            lineage = resolved
+        else:
+            if not self._is_first_public_video(context=context):
+                raise ValidationFailureError(
+                    "EDITORIAL_CANDIDATE_STRATEGIC_LINEAGE_REQUIRED"
+                )
+            if candidate is not None and candidate.experiment_phase not in {
+                None,
+                "AUDIENCE_PROMISE",
+            }:
+                raise ValidationFailureError(
+                    "FIRST_VIDEO_AUDIENCE_PROMISE_PHASE_REQUIRED"
+                )
+            strategic_intent = StrategicIntent.ACQUISITION
+            primary_variable = "audience_promise_validation"
+            experiment_hypothesis = (
+                "The frozen channel promise is relevant to the approved target "
+                "audience when demonstrated through one bounded long-form video: "
+                f"{lineage['audience_promise']}"
+            )
+            criteria = {
+                "criterion": "AUDIENCE_PROMISE_VALIDATION",
+                "launch_policy_hash": context.launch_policy.canonical_hash,
+                "measurement_scope": "FIRST_PUBLIC_VIDEO",
+                "required_candidate_phase": "AUDIENCE_PROMISE",
+            }
+            criteria_version = "launch-audience-promise-v1"
+            decision_reversibility = DecisionReversibility.TWO_WAY_DOOR
+            lineage.update(
+                {
+                    "strategic_intent": strategic_intent,
+                    "intent_success_criteria": criteria,
+                    "intent_success_criteria_version": criteria_version,
+                    "intent_success_criteria_hash": (
+                        StrategicLineageV2.calculate_intent_success_criteria_hash(
+                            strategic_intent=strategic_intent,
+                            intent_success_criteria=criteria,
+                            intent_success_criteria_version=criteria_version,
+                            experiment_hypothesis=experiment_hypothesis,
+                            primary_variable_under_test=primary_variable,
+                            decision_reversibility=decision_reversibility,
+                        )
+                    ),
+                    "experiment_hypothesis": experiment_hypothesis,
+                    "primary_variable_under_test": primary_variable,
+                    "decision_reversibility": decision_reversibility,
+                }
+            )
+        try:
+            resolved_lineage = StrategicLineageV2.model_validate(lineage)
+        except ValueError as exc:
+            raise ValidationFailureError("ADMISSION_STRATEGIC_LINEAGE_INVALID") from exc
+        claimed = data.model_dump(
+            mode="python", include=set(lineage), exclude_none=True
+        )
+        expected = resolved_lineage.model_dump(mode="python")
+        if any(expected[key] != value for key, value in claimed.items()):
+            raise ValidationFailureError("ADMISSION_STRATEGIC_LINEAGE_MISMATCH")
+        return data.model_copy(update=expected)
+
+    @staticmethod
+    def _lineage_values(data: ProjectAdmissionV2Request) -> dict[str, Any]:
+        """Serialize one identical immutable lineage into each downstream row."""
+
+        return {
+            "audience_promise": data.audience_promise,
+            "audience_promise_version": data.audience_promise_version,
+            "audience_promise_hash": data.audience_promise_hash,
+            "target_audience_definition": data.target_audience_definition,
+            "audience_drift_guard_version": data.audience_drift_guard_version,
+            "strategic_intent": data.strategic_intent.value,
+            "intent_success_criteria": data.intent_success_criteria,
+            "intent_success_criteria_version": data.intent_success_criteria_version,
+            "intent_success_criteria_hash": data.intent_success_criteria_hash,
+            "experiment_hypothesis": data.experiment_hypothesis,
+            "primary_variable_under_test": data.primary_variable_under_test,
+            "decision_reversibility": data.decision_reversibility.value,
+            "active_launch_policy_version_id": data.active_launch_policy_version_id,
+            "active_launch_policy_hash": data.active_launch_policy_hash,
+            "active_launch_run_id": data.active_launch_run_id,
+            "active_launch_run_hash": data.active_launch_run_hash,
+        }
+
     def _load_context(
         self,
         data: ProjectAdmissionV2Request,
@@ -736,6 +1031,7 @@ class ProjectAdmissionV2Service:
             or workspace.active_policy_snapshot_id != policy.id
         ):
             raise ValidationFailureError("LONG_FORM_ADMISSION_PROFILE_POLICY_MISMATCH")
+        launch_policy, launch_run = self._active_launch_authority(data=data)
         from app.services.production_package import (
             ChannelDurationContractResolver,
         )
@@ -836,6 +1132,8 @@ class ProjectAdmissionV2Service:
             candidate=candidate,
             research_run=research_run,
             preflight=preflight,
+            launch_policy=launch_policy,
+            launch_run=launch_run,
         )
 
     @staticmethod
@@ -1192,10 +1490,19 @@ class ProjectAdmissionV2Service:
                 ),
                 project_admission_decision_id=receipt_id,
                 duration_contract=data.duration_contract,
+                **self._lineage_values(data),
                 render_eligible=True,
                 created_by_user_id=data.created_by_user_id,
                 audience_delivery_summary={
+                    "active_launch_policy_hash": data.active_launch_policy_hash,
+                    "active_launch_policy_version_id": str(
+                        data.active_launch_policy_version_id
+                    ),
+                    "active_launch_run_hash": data.active_launch_run_hash,
+                    "active_launch_run_id": str(data.active_launch_run_id),
+                    "audience_promise_hash": data.audience_promise_hash,
                     "planning_source_type": "LONG_FORM_PLAN",
+                    "strategic_intent": data.strategic_intent.value,
                     "editorial_calendar_slot_id": str(context.slot.id),
                     "editorial_idea_candidate_id": (
                         str(context.candidate.id)
@@ -1247,6 +1554,7 @@ class ProjectAdmissionV2Service:
             decision_hash=decision_hash,
             assignment_input_ref=resolver_input.model_dump(mode="json"),
             duration_contract=data.duration_contract.model_dump(mode="json"),
+            **self._lineage_values(data),
             budget_gate_result=data.budget_gate_result,
             readiness_gate_refs=self._readiness_refs(context),
             decision="ADMIT",
@@ -1325,6 +1633,7 @@ class ProjectAdmissionV2Service:
                 decision_hash=decision_hash,
                 assignment_input_ref=resolver_input.model_dump(mode="json"),
                 duration_contract=data.duration_contract.model_dump(mode="json"),
+                **self._lineage_values(data),
                 budget_gate_result=(
                     data.budget_gate_result
                     or {
@@ -1446,6 +1755,22 @@ class LongFormPlanningService:
                 evidence_refs=data.evidence_refs,
                 budget_gate_result=data.budget_gate_result,
                 duration_contract=data.duration_contract,
+                audience_promise=data.audience_promise,
+                audience_promise_version=data.audience_promise_version,
+                audience_promise_hash=data.audience_promise_hash,
+                target_audience_definition=data.target_audience_definition,
+                audience_drift_guard_version=data.audience_drift_guard_version,
+                strategic_intent=data.strategic_intent,
+                intent_success_criteria=data.intent_success_criteria,
+                intent_success_criteria_version=data.intent_success_criteria_version,
+                intent_success_criteria_hash=data.intent_success_criteria_hash,
+                experiment_hypothesis=data.experiment_hypothesis,
+                primary_variable_under_test=data.primary_variable_under_test,
+                decision_reversibility=data.decision_reversibility,
+                active_launch_policy_version_id=data.active_launch_policy_version_id,
+                active_launch_policy_hash=data.active_launch_policy_hash,
+                active_launch_run_id=data.active_launch_run_id,
+                active_launch_run_hash=data.active_launch_run_hash,
                 created_by_user_id=data.created_by_user_id,
             )
         )

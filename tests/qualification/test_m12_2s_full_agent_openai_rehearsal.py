@@ -28,7 +28,8 @@ from app.db.models import (
     VideoProject,
 )
 from app.main import create_app
-from app.providers.ollama import OllamaLLMProvider
+from app.providers.openai import OpenAIResponsesProvider
+from app.core.config import get_settings
 from app.services import R3D1AdminService, VideoProjectService
 from app.services.m10_1 import LLMRouterService
 from app.services.m12_2 import (
@@ -67,11 +68,11 @@ def _settings(**overrides) -> Settings:
         "_env_file": None,
         "production_prompt_activation_enabled": True,
         "real_llm_package_run_enabled": True,
-        "real_ollama_agent_run_enabled": True,
+        "real_openai_agent_run_enabled": True,
         "media_provider_calls_disabled": True,
         "upload_and_publish_disabled": True,
         "old_provider_smoke_disabled": True,
-        "llm_provider": "ollama",
+        "llm_provider": "openai",
         "llm_real_execution_enabled": True,
         "llm_router_real_smoke": False,
         "elevenlabs_api_key": None,
@@ -141,7 +142,7 @@ def _request(
         video_project_id=video_project_id,
         topic="Cách kiểm soát agent video AI không gọi provider media khi chưa cấu hình",
         research_pack_text=(
-            "Operator note: VCOS đã có channel contract COMPLETE, prompt registry, LLMRouter Ollama, "
+            "Operator note: VCOS đã có channel contract COMPLETE, prompt registry, OpenAI LLMRouter, "
             "manual publish handoff, và provider media chưa được cấu hình."
         ),
         research_pack_ref="operator_research_pack:m12_2s",
@@ -159,9 +160,9 @@ def _envelope(
         "status": status,
         "confidence_label": "HIGH",
         "evidence_refs": [{"type": "operator_research_pack", "id": "m12_2s"}],
-        "limitations": ["Human review required before media generation."],
-        "next_action": "Review package before media provider setup.",
-        "operator_summary_vi": f"{agent_key} đã chạy bằng Ollama.",
+        "limitations": ["Automatic V2 progression continues after package readiness."],
+        "next_action": "Continue automatically to V2 production after readiness.",
+        "operator_summary_vi": f"{agent_key} đã chạy bằng OpenAI Luna/Terra.",
         "technical_appendix": {"test_output": True},
         "artifact": artifact,
     }
@@ -169,7 +170,7 @@ def _envelope(
 
 def _long_script_sentences(count: int = 36) -> list[dict[str, Any]]:
     text = (
-        "This qualification narration sentence keeps the package evidence bound, describes the manual review boundary, "
+        "This qualification narration sentence keeps the package evidence bound, describes the automated V2 boundary, "
         "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
         "for deterministic duration validation without adding claims or media."
     )
@@ -180,7 +181,7 @@ def _long_script_sentences(count: int = 36) -> list[dict[str, Any]]:
 
 
 def _underlong_script_sentences(count: int = 42) -> list[dict[str, Any]]:
-    text = "This narration keeps review boundaries clear, preserves the hook promise, and avoids provider execution today."
+    text = "This narration keeps automated gate boundaries clear, preserves the hook promise, and avoids provider execution today."
     return [
         {"sentence_id": f"S{index}", "text": text, "approx_seconds": 4.7}
         for index in range(1, count + 1)
@@ -217,7 +218,7 @@ def _outputs(
             "hook": "Agent đã chạy thật nhưng dừng đúng chỗ.",
             "problem": "Provider media chưa cấu hình.",
             "mechanism": "LLMRouter + prompt snapshots + boundary.",
-            "result": "Text package ready for review.",
+            "result": "Text package ready for automatic V2 progression.",
             "takeaway": "Không fake media QC.",
             "duration_model": {
                 "target_format": "long_form",
@@ -234,11 +235,11 @@ def _outputs(
             "hook_spec": {
                 "hook_type": "DIRECT",
                 "first_3_seconds_script": "VCOS bắt đầu từ channel contract đã COMPLETE.",
-                "first_3_seconds_visual": "Operator cockpit shows contract, Ollama, and provider boundary.",
-                "promise_made": "Agent chạy qua Ollama nhưng không gọi provider media",
+                "first_3_seconds_visual": "Operator cockpit shows contract, OpenAI routing, and provider boundary.",
+                "promise_made": "Agent chạy qua OpenAI nhưng không gọi provider media",
                 "payoff_location": "S2",
                 "clickbait_risk": "LOW",
-                "visual_hook_relevance": "Visual shows the same Ollama and boundary flow.",
+                "visual_hook_relevance": "Visual shows the same OpenAI routing and boundary flow.",
                 "title_hook_alignment": "Title promises a rehearsal to media boundary.",
             },
         },
@@ -246,11 +247,11 @@ def _outputs(
             "hook_spec": {
                 "hook_type": "DIRECT",
                 "first_3_seconds_script": "VCOS bắt đầu từ channel contract đã COMPLETE.",
-                "first_3_seconds_visual": "Operator cockpit shows contract, Ollama, and provider boundary.",
-                "promise_made": "Agent chạy qua Ollama nhưng không gọi provider media",
+                "first_3_seconds_visual": "Operator cockpit shows contract, OpenAI routing, and provider boundary.",
+                "promise_made": "Agent chạy qua OpenAI nhưng không gọi provider media",
                 "payoff_location": "S2",
                 "clickbait_risk": "LOW",
-                "visual_hook_relevance": "Visual shows the same Ollama and boundary flow.",
+                "visual_hook_relevance": "Visual shows the same OpenAI routing and boundary flow.",
                 "title_hook_alignment": "Title promises a rehearsal to media boundary.",
             },
             "sentences": _long_script_sentences(),
@@ -270,8 +271,8 @@ def _outputs(
             "title": "VCOS M12.2S: rehearsal tới media boundary",
             "description": "Paste-ready metadata, no upload.",
             "chapters": [{"time": "00:00", "title": "Hook"}],
-            "tags": ["VCOS", "Ollama"],
-            "pinned_comment": "Review trước khi cấu hình provider.",
+            "tags": ["VCOS", "OpenAI"],
+            "pinned_comment": "Continue automatically when provider readiness and budget authority PASS.",
             "disclosure_notes": ["AI-assisted draft."],
         },
         "VisualPlanningAgent": {
@@ -293,7 +294,7 @@ def _outputs(
             "source_manifest_status": "OPERATOR_NOTES_ONLY",
             "ai_disclosure_needed": True,
             "rights_risk": "MEDIUM",
-            "disclosure_notes": "Future generated media still needs source/provider manifest review.",
+            "disclosure_notes": "Future generated media still needs source/provider manifest validation.",
         },
         "GatekeeperSoftReviewAgent": {"result": gatekeeper_result, "findings": []},
         "ProviderReadinessSummaryAgent": {
@@ -315,6 +316,13 @@ def _outputs(
             envelope["unexpected"] = True
         outputs.append(envelope)
     return outputs
+
+
+def _output_for_agent(outputs: list[dict[str, Any]], agent_key: str) -> dict[str, Any]:
+    for output in outputs:
+        if output["agent_key"] == agent_key:
+            return output
+    raise AssertionError(f"missing test output for agent: {agent_key}")
 
 
 def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(
@@ -392,6 +400,13 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(
     assert package.risk_limitations_summary["dry_run_success_used"] is False
     assert package.risk_limitations_summary["media_provider_calls_made"] is False
     assert package.risk_limitations_summary["upload_or_publish_calls_made"] is False
+    assert (
+        package.risk_limitations_summary["pre_media_human_approval_required"] is False
+    )
+    receipt = package.artifacts["automated_progression_receipt"]
+    assert receipt["pre_media_human_approval_required"] is False
+    assert receipt["automated_v2_progression_allowed"] is False
+    assert receipt["final_video_decision_boundary"] == "UPLOAD_OR_DO_NOT_UPLOAD"
     assert db_session.query(AgentContextPackSnapshot).count() == len(
         FULL_REHEARSAL_AGENT_CHAIN
     )
@@ -419,9 +434,7 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(
         "NOT_CONFIGURED",
     }
     assert boundary.provider_readiness["google_veo"]["required"] is False
-    assert boundary.operator_summary_vi == (
-        "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
-    )
+    assert "readiness/budget authority PASS" in boundary.operator_summary_vi
     assert (
         "ElevenLabs" in boundary.next_action and "NativeFFmpeg" in boundary.next_action
     )
@@ -436,14 +449,18 @@ def test_m12_2s_rights_disclosure_conditional_wording_repair_reaches_provider_bo
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
-    outputs[5]["artifact"].pop("disclosure_notes", None)
-    outputs[5]["artifact"]["description"] = (
+    _output_for_agent(outputs, "PublishingMetadataAgent")["artifact"].pop(
+        "disclosure_notes", None
+    )
+    _output_for_agent(outputs, "PublishingMetadataAgent")["artifact"]["description"] = (
         "Paste-ready metadata, no upload. Content is generated using AI tools."
     )
-    outputs[8]["artifact"]["ai_disclosure_needed"] = True
-    outputs[8]["artifact"]["disclosure_notes"] = (
-        "Future generated media still needs source/provider manifest review."
-    )
+    _output_for_agent(outputs, "RightsDisclosureReviewer")["artifact"][
+        "ai_disclosure_needed"
+    ] = True
+    _output_for_agent(outputs, "RightsDisclosureReviewer")["artifact"][
+        "disclosure_notes"
+    ] = "Future generated media still needs source/provider manifest validation."
 
     package = FirstScriptedVideoPackageService(
         db_session, settings=_settings(), llm_router=FakeRouter(outputs)
@@ -525,7 +542,7 @@ def test_m12_2s_missing_topic_blocks_before_llm(
     assert router.calls == []
 
 
-def test_m12_2s_real_ollama_disabled_returns_not_configured(
+def test_m12_2s_real_openai_disabled_returns_not_configured(
     db_session, qualification_factory
 ) -> None:
     scope = _complete_scope(qualification_factory)
@@ -535,14 +552,14 @@ def test_m12_2s_real_ollama_disabled_returns_not_configured(
     package = FirstScriptedVideoPackageService(
         db_session,
         settings=_settings(
-            real_ollama_agent_run_enabled=False, llm_real_execution_enabled=False
+            real_openai_agent_run_enabled=False, llm_real_execution_enabled=False
         ),
         llm_router=router,
     ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "NOT_CONFIGURED"
     missing = package.artifacts["llm_readiness"]["missing_or_invalid_flags"]
-    assert "VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN" in missing
+    assert "VCOS_ENABLE_REAL_OPENAI_AGENT_RUN" in missing
     assert "VCOS_LLM_REAL_EXECUTION_ENABLED" in missing
     assert router.calls == []
 
@@ -555,26 +572,37 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(
     outputs = _outputs()
 
     monkeypatch.setenv("VCOS_LLM_REAL_EXECUTION_ENABLED", "true")
-    monkeypatch.setenv("VCOS_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("VCOS_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    get_settings.cache_clear()
 
     def transport(
-        method: str, url: str, payload: dict[str, Any] | None, timeout_seconds: int
+        method: str,
+        url: str,
+        payload: dict[str, Any] | None,
+        headers: dict[str, str],
+        timeout_seconds: int,
     ) -> tuple[int, dict[str, Any]]:
         assert method == "POST"
-        assert url.endswith("/api/chat")
+        assert url.endswith("/responses")
         assert payload is not None
-        assert payload["messages"][0]["role"] == "system"
-        assert payload["messages"][1]["role"] == "user"
+        assert headers["Authorization"] == "Bearer test-openai-key"
+        assert payload["input"][0]["role"] == "system"
+        assert payload["input"][1]["role"] == "user"
+        assert payload["reasoning"]["effort"] in {"none", "medium"}
         output = outputs.pop(0)
         return 200, {
+            "id": f"resp-{len(outputs)}",
             "model": payload["model"],
-            "message": {"content": json.dumps(output)},
-            "prompt_eval_count": 12,
-            "eval_count": 34,
-            "total_duration": 3_000_000,
+            "output": [
+                {"content": [{"type": "output_text", "text": json.dumps(output)}]}
+            ],
+            "usage": {"input_tokens": 12, "output_tokens": 34, "total_tokens": 46},
         }
 
-    provider = OllamaLLMProvider(base_url="http://ollama.test", transport=transport)
+    provider = OpenAIResponsesProvider(
+        api_key="test-openai-key", base_url="http://openai.test/v1", transport=transport
+    )
     router = LLMRouterService(db_session, provider=provider)
 
     package = FirstScriptedVideoPackageService(
@@ -583,10 +611,10 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert db_session.query(ProviderAttempt).filter(
-        ProviderAttempt.provider_key == "OLLAMA"
+        ProviderAttempt.provider_key == "OPENAI"
     ).count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert db_session.query(LLMRunSnapshot).filter(
-        LLMRunSnapshot.provider == "ollama"
+        LLMRunSnapshot.provider == "openai"
     ).count() == len(FULL_REHEARSAL_AGENT_CHAIN)
     forbidden_attempts = (
         db_session.query(ProviderAttempt)
@@ -737,8 +765,8 @@ def test_m12_2s_duration_gate_blocks_before_visual_or_provider_plan(
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[4]["artifact"]["sentences"] = [
-        {"sentence_id": "S1", "text": "Short opening.", "approx_seconds": 35},
-        {"sentence_id": "S2", "text": "Short payoff.", "approx_seconds": 36},
+        {"sentence_id": "S1", "text": "Brief opening.", "approx_seconds": 35},
+        {"sentence_id": "S2", "text": "Brief payoff.", "approx_seconds": 36},
     ]
     outputs[4]["artifact"]["total_approx_seconds"] = 71
     router = FakeRouter(outputs)
@@ -773,7 +801,9 @@ def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(
         {"sentence_id": f"S{index}", "text": overlong_text, "approx_seconds": 9.0}
         for index in range(1, 96)
     ]
-    outputs[6]["artifact"]["scenes"] = _visual_scenes(95)
+    _output_for_agent(outputs, "VisualPlanningAgent")["artifact"]["scenes"] = (
+        _visual_scenes(95)
+    )
     original_hook = dict(outputs[4]["artifact"]["hook_spec"])
     router = FakeRouter(outputs)
 
@@ -810,7 +840,9 @@ def test_m12_2s_underlong_script_blocks_without_padding(
     outputs[4]["artifact"]["total_approx_seconds"] = 276
     outputs[4]["artifact"]["duration_self_check"]["actual_total_seconds"] = 276
     outputs[4]["artifact"]["duration_self_check"]["narration_word_count"] = 420
-    outputs[6]["artifact"]["scenes"] = _visual_scenes(42)
+    _output_for_agent(outputs, "VisualPlanningAgent")["artifact"]["scenes"] = (
+        _visual_scenes(42)
+    )
     original_hook = dict(outputs[4]["artifact"]["hook_spec"])
 
     package = FirstScriptedVideoPackageService(
@@ -1115,7 +1147,9 @@ def test_m12_2s_thumbnail_and_media_qc_schema_guards(
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
-    outputs[7]["artifact"]["image_url"] = "https://example.invalid/rendered.png"
+    _output_for_agent(outputs, "ThumbnailBriefAgent")["artifact"]["image_url"] = (
+        "https://example.invalid/rendered.png"
+    )
 
     package = FirstScriptedVideoPackageService(
         db_session, settings=_settings(), llm_router=FakeRouter(outputs)
@@ -1152,13 +1186,17 @@ def test_m12_2s_package_retrieval_agent_runs_and_boundary(
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
 
 
-def test_m12_2s_api_routes_exist_and_no_old_provider_smoke_path(db_session) -> None:
+def test_m12_2s_legacy_api_routes_are_not_active_and_no_old_provider_smoke_path(
+    db_session,
+) -> None:
     paths = TestClient(create_app()).get("/openapi.json").json()["paths"]
 
-    assert "/video-packages/rehearse-full" in paths
-    assert "/video-packages/{package_id}" in paths
-    assert "/video-packages/{package_id}/agent-runs" in paths
-    assert "/video-packages/{package_id}/generation-boundary" in paths
+    assert "/video-packages/rehearse-full" not in paths
+    assert "/video-packages/{package_id}" not in paths
+    assert "/video-packages/{package_id}/agent-runs" not in paths
+    assert "/video-packages/{package_id}/generation-boundary" not in paths
+    assert "/production-packages" in paths
+    assert "/production-packages/{package_artifact_version_id}" in paths
     source = Path("app/services/m12_2.py").read_text(encoding="utf-8")
     forbidden = [
         "app.providers.mock",

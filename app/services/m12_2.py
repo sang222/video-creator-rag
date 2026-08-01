@@ -100,10 +100,25 @@ M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION = (
 NEEDS_RESEARCH_PACK_NEXT_ACTION = (
     "Bổ sung research pack/source notes trước khi chạy video package production."
 )
-HUMAN_APPROVAL_REQUIRED = "Human final approval required before any media generation, upload, publish, or reupload."
-MEDIA_PROVIDER_BOUNDARY_SUMMARY = "Gói nội dung đã sẵn sàng tới bước tạo media; NativeFFmpeg là render authority và provider ngoài vẫn bị khóa."
-MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = "Cấu hình ElevenLabs khi được phê duyệt; Google Veo/Pexels là asset provider giới hạn và NativeFFmpeg vẫn bị khóa production."
-FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + Real Ollama Rehearsal"
+AUTOMATED_V2_PRODUCTION_NEXT_ACTION = (
+    "Tiếp tục tự động sang V2 production sau readiness và budget authority. "
+    "Quyết định nội dung của con người duy nhất là UPLOAD hoặc DO_NOT_UPLOAD "
+    "sau final media, technical QC, automated creative QC, Drive archive VERIFIED, "
+    "FinalMediaRef và FinalReviewCandidate."
+)
+AUTOMATED_REPAIR_NEXT_ACTION = (
+    "Tự động sửa hoặc chạy lại artifact/gate bị chặn theo policy trước khi tiếp tục; "
+    "không tạo human approval trước media."
+)
+MEDIA_PROVIDER_BOUNDARY_SUMMARY = (
+    "Gói nội dung đã sẵn sàng tới bước tạo media; NativeFFmpeg là render authority "
+    "và provider ngoài chỉ chạy khi readiness/budget authority PASS."
+)
+MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = (
+    "Hoàn tất ElevenLabs readiness/budget authority; Google Veo/Pexels là nguồn asset "
+    "giới hạn và NativeFFmpeg vẫn là render authority."
+)
+FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + OpenAI Luna/Terra Rehearsal"
 
 VISUAL_SOURCE_ALLOWLIST = {
     "DIAGRAM",
@@ -1203,7 +1218,7 @@ class FirstScriptedVideoPackageService:
                     limitations=[
                         "Thiếu topic; VCOS không tự bịa đề tài để chạy agent production."
                     ],
-                    next_action="Bổ sung topic trước khi chạy full Ollama rehearsal.",
+                    next_action="Bổ sung topic trước khi chạy full OpenAI rehearsal.",
                 )
             )
 
@@ -1405,13 +1420,13 @@ class FirstScriptedVideoPackageService:
                 contract_status=str(
                     channel_contract.get("contract_status") or "COMPLETE"
                 ),
-                reason_codes=["OLLAMA_OR_LLM_ROUTER_NOT_READY"],
+                reason_codes=["OPENAI_OR_LLM_ROUTER_NOT_READY"],
                 details={"llm_readiness": llm_block},
             )
 
         return M122SPreflightRead(
             status="READY",
-            next_action="Có thể chạy M12.2S full agent rehearsal bằng Ollama.",
+            next_action="Có thể chạy M12.2S full agent rehearsal bằng OpenAI Luna/Terra.",
             company_id=channel.company_id,
             channel_id=channel.id,
             channel_profile_version_id=profile_version.id,
@@ -1502,11 +1517,18 @@ class FirstScriptedVideoPackageService:
             packaging_review_queue=PackagingReviewQueueService(self.session).read(
                 package.id
             ),
-            human_review_checklist=package.artifacts.get("human_review_checklist", {}),
+            # The endpoint shape remains compatible, but active V2 packages do
+            # not create a pre-media human review queue.
+            human_review_checklist={},
+            automated_progression_receipt=package.artifacts.get(
+                "automated_progression_receipt", {}
+            ),
+            final_video_decision_boundary="UPLOAD_OR_DO_NOT_UPLOAD",
             agent_outputs={
                 key: value
                 for key, value in package.artifacts.items()
-                if key not in {"human_review_checklist"}
+                if key
+                not in {"human_review_checklist", "automated_progression_receipt"}
             },
             prompt_snapshots={
                 "prompt_render_run_refs": package.prompt_render_run_refs,
@@ -1562,8 +1584,12 @@ class FirstScriptedVideoPackageService:
                 "reason_codes": niche_seed_errors,
                 "provider_calls_made": False,
             }
-            artifacts["human_review_checklist"] = self._human_review_checklist(
-                artifacts, provider_readiness_snapshot_id
+            artifacts["automated_progression_receipt"] = (
+                self._automated_progression_receipt(
+                    artifacts,
+                    provider_readiness_snapshot_id,
+                    package_status="BLOCKED",
+                )
             )
             return {
                 "id": package_id,
@@ -1593,8 +1619,8 @@ class FirstScriptedVideoPackageService:
         prompt_render_run_refs: list[str] = []
         prompt_audit_snapshot_refs: list[str] = []
         context_pack_refs: list[dict[str, Any]] = []
-        status = "READY_FOR_HUMAN_REVIEW"
-        next_action = HUMAN_APPROVAL_REQUIRED
+        status = "READY_FOR_MEDIA_PROVIDERS"
+        next_action = AUTOMATED_V2_PRODUCTION_NEXT_ACTION
         pre_gatekeeper_batch = None
         limitations: list[str] = [
             "M12.2 chỉ tạo scripted video package; không render video, không TTS, không upload/publish.",
@@ -1710,7 +1736,7 @@ class FirstScriptedVideoPackageService:
                 }
                 status = "NOT_CONFIGURED" if route.status == "SKIPPED" else "ERROR"
                 next_action = (
-                    "Cấu hình real LLMRouter/Ollama trước khi chạy package production."
+                    "Cấu hình OpenAI LLMRouter trước khi chạy package production."
                 )
                 break
 
@@ -1896,7 +1922,7 @@ class FirstScriptedVideoPackageService:
             if step.agent_key == "GatekeeperSoftReviewAgent":
                 gatekeeper_result = self._gatekeeper_result(output)
                 reducer_decision = self.package_status_reducer.resolve(
-                    current_status="READY_FOR_HUMAN_REVIEW",
+                    current_status="READY_FOR_MEDIA_PROVIDERS",
                     deterministic_batch=pre_gatekeeper_batch,
                     gatekeeper_result=gatekeeper_result,
                 )
@@ -1908,9 +1934,12 @@ class FirstScriptedVideoPackageService:
                     "BLOCK",
                     "REVIEW_REQUIRED",
                 }:
-                    next_action = output.get(
-                        "next_action"
-                    ) or self._next_action_for_reducer_decision(reducer_decision)
+                    next_action = self._automated_next_action(
+                        output.get("next_action"),
+                        default=self._next_action_for_reducer_decision(
+                            reducer_decision
+                        ),
+                    )
                 else:
                     next_action = self._next_action_for_reducer_decision(
                         reducer_decision
@@ -1918,21 +1947,25 @@ class FirstScriptedVideoPackageService:
                 break
             if envelope_status == "BLOCK":
                 status = "BLOCKED"
-                next_action = (
-                    output.get("next_action")
-                    or "Agent upstream trả BLOCK; không tiếp tục downstream."
+                next_action = self._automated_next_action(
+                    output.get("next_action"),
+                    default="Tự động sửa blocker từ agent upstream trước khi tiếp tục downstream.",
                 )
                 break
             if envelope_status == "REVIEW_REQUIRED":
                 status = "REVIEW_REQUIRED"
-                next_action = (
-                    output.get("next_action")
-                    or "Agent upstream cần human review; không tiếp tục downstream."
+                next_action = self._automated_next_action(
+                    output.get("next_action"),
+                    default=AUTOMATED_REPAIR_NEXT_ACTION,
                 )
                 break
 
-        artifacts["human_review_checklist"] = self._human_review_checklist(
-            artifacts, provider_readiness_snapshot_id
+        artifacts["automated_progression_receipt"] = (
+            self._automated_progression_receipt(
+                artifacts,
+                provider_readiness_snapshot_id,
+                package_status=status,
+            )
         )
         risk_summary = self._risk_summary(artifacts, status)
         return {
@@ -1980,8 +2013,11 @@ class FirstScriptedVideoPackageService:
                 "compiled_policy_content_hash": snapshot.content_hash,
             },
             "runtime_guard": {
-                "real_ollama_agent_run": True,
+                "real_openai_agent_run": True,
                 "llm_router_only": True,
+                "automated_v2_progression": True,
+                "pre_media_human_approval_required": False,
+                "final_video_decision_only": "UPLOAD_OR_DO_NOT_UPLOAD",
                 "no_media_provider_calls": True,
                 "no_upload_or_publish": True,
                 "old_provider_smoke_disabled": True,
@@ -2008,8 +2044,12 @@ class FirstScriptedVideoPackageService:
             }
             readiness_id = provider_readiness_snapshot.get("id")
             provider_id = uuid.UUID(str(readiness_id)) if readiness_id else None
-            artifacts["human_review_checklist"] = self._human_review_checklist(
-                artifacts, provider_id
+            artifacts["automated_progression_receipt"] = (
+                self._automated_progression_receipt(
+                    artifacts,
+                    provider_id,
+                    package_status="BLOCKED",
+                )
             )
             return {
                 "id": package_id,
@@ -2040,10 +2080,10 @@ class FirstScriptedVideoPackageService:
         prompt_audit_snapshot_refs: list[str] = []
         context_pack_refs: list[dict[str, Any]] = []
         status = "READY_FOR_MEDIA_PROVIDERS"
-        next_action = HUMAN_APPROVAL_REQUIRED
+        next_action = AUTOMATED_V2_PRODUCTION_NEXT_ACTION
         pre_gatekeeper_batch = None
         limitations: list[str] = [
-            "M12.2S chỉ chạy agent text/review bằng Ollama; không generate media, không TTS, không upload/publish.",
+            "M12.2S chỉ chạy agent text/review bằng OpenAI Luna/Terra; không generate media, không TTS, không upload/publish.",
             "ElevenLabs/Google Veo API/Pexels API chỉ xuất hiện trong readiness/boundary, không được gọi runtime.",
         ]
 
@@ -2166,8 +2206,7 @@ class FirstScriptedVideoPackageService:
                     if rewrite["ran"]:
                         status = rewrite["stop_status"] or "REVIEW_REQUIRED"
                         next_action = (
-                            rewrite["next_action"]
-                            or "Review script rewrite trước khi chạy lại gatekeeper."
+                            rewrite["next_action"] or AUTOMATED_REPAIR_NEXT_ACTION
                         )
                 break
             if step.agent_key == "GatekeeperSoftReviewAgent":
@@ -2202,9 +2241,14 @@ class FirstScriptedVideoPackageService:
                 status = reducer_decision["package_status"]
                 next_action = self._next_action_for_reducer_decision(reducer_decision)
 
-        artifacts["human_review_checklist"] = self._human_review_checklist(
-            artifacts,
-            provider_readiness_snapshot_id=uuid.UUID(provider_readiness_snapshot["id"]),
+        artifacts["automated_progression_receipt"] = (
+            self._automated_progression_receipt(
+                artifacts,
+                provider_readiness_snapshot_id=uuid.UUID(
+                    provider_readiness_snapshot["id"]
+                ),
+                package_status=status,
+            )
         )
         risk_summary = self._risk_summary(artifacts, status)
         return {
@@ -2365,7 +2409,7 @@ class FirstScriptedVideoPackageService:
                 "stop_status": "NOT_CONFIGURED"
                 if route.status == "SKIPPED"
                 else "ERROR",
-                "next_action": "Cấu hình real Ollama/LLMRouter trước khi chạy full agent rehearsal.",
+                "next_action": "Cấu hình OpenAI LLMRouter trước khi chạy full agent rehearsal.",
                 "parsed_output": None,
             }
 
@@ -2732,14 +2776,19 @@ class FirstScriptedVideoPackageService:
             if gatekeeper_result == "BLOCK":
                 return {
                     "stop_status": "BLOCKED",
-                    "next_action": output.get("next_action")
-                    or "Sửa rủi ro gatekeeper trước khi tới media boundary.",
+                    "next_action": self._automated_next_action(
+                        output.get("next_action"),
+                        default="Tự động sửa rủi ro gatekeeper trước khi tới media boundary.",
+                    ),
                     "parsed_output": output,
                 }
             if gatekeeper_result == "REVIEW_REQUIRED":
                 return {
                     "stop_status": "REVIEW_REQUIRED",
-                    "next_action": output.get("next_action") or HUMAN_APPROVAL_REQUIRED,
+                    "next_action": self._automated_next_action(
+                        output.get("next_action"),
+                        default=AUTOMATED_REPAIR_NEXT_ACTION,
+                    ),
                     "parsed_output": output,
                 }
             return {"stop_status": None, "next_action": None, "parsed_output": output}
@@ -2755,7 +2804,10 @@ class FirstScriptedVideoPackageService:
                     "reason_codes": [
                         "PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"
                     ],
-                    "next_action": output.get("next_action"),
+                    "next_action": self._automated_next_action(
+                        output.get("next_action"),
+                        default=MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION,
+                    ),
                 }
                 return {
                     "stop_status": None,
@@ -2764,8 +2816,10 @@ class FirstScriptedVideoPackageService:
                 }
             return {
                 "stop_status": "BLOCKED",
-                "next_action": output.get("next_action")
-                or "Agent upstream trả BLOCK; không tiếp tục downstream.",
+                "next_action": self._automated_next_action(
+                    output.get("next_action"),
+                    default="Tự động sửa blocker từ agent upstream trước khi tiếp tục downstream.",
+                ),
                 "parsed_output": output,
             }
         if envelope_status == "REVIEW_REQUIRED":
@@ -2773,7 +2827,9 @@ class FirstScriptedVideoPackageService:
                 "status": "REVIEW_REQUIRED",
                 "source": "agent_envelope",
                 "agent_key": step.agent_key,
-                "next_action": output.get("next_action"),
+                "next_action": self._automated_next_action(
+                    output.get("next_action"), default=AUTOMATED_REPAIR_NEXT_ACTION
+                ),
             }
             return {
                 "stop_status": None,
@@ -2905,7 +2961,9 @@ class FirstScriptedVideoPackageService:
         return {
             "providers": providers,
             "summary_status": output.get("status"),
-            "next_action": output.get("next_action"),
+            "next_action": self._automated_next_action(
+                output.get("next_action"), default=MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
+            ),
             "operator_summary_vi": output.get("operator_summary_vi"),
         }
 
@@ -3418,7 +3476,7 @@ class FirstScriptedVideoPackageService:
         )
         if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
-                current_status="READY_FOR_HUMAN_REVIEW",
+                current_status="READY_FOR_MEDIA_PROVIDERS",
                 deterministic_batch=rerun,
             )
             artifacts["package_state_reducer"] = decision
@@ -3543,7 +3601,7 @@ class FirstScriptedVideoPackageService:
         )
         if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
-                current_status="READY_FOR_HUMAN_REVIEW",
+                current_status="READY_FOR_MEDIA_PROVIDERS",
                 deterministic_batch=rerun,
             )
             artifacts["package_state_reducer"] = decision
@@ -3800,7 +3858,7 @@ class FirstScriptedVideoPackageService:
             failures.append("VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION")
         if not self.settings.media_provider_calls_disabled or not data.no_media:
             failures.append("VCOS_DISABLE_MEDIA_PROVIDER_CALLS")
-        if not self.settings.upload_and_publish_disabled or not data.human_review_only:
+        if not self.settings.upload_and_publish_disabled:
             failures.append("VCOS_DISABLE_UPLOAD_AND_PUBLISH")
         if not self.settings.old_provider_smoke_disabled:
             failures.append("VCOS_DISABLE_OLD_PROVIDER_SMOKE")
@@ -3818,11 +3876,11 @@ class FirstScriptedVideoPackageService:
         failures: list[str] = []
         if not self.settings.real_llm_package_run_enabled:
             failures.append("VCOS_ENABLE_REAL_LLM_PACKAGE_RUN")
-        if full_rehearsal and not self.settings.real_ollama_agent_run_enabled:
-            failures.append("VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN")
+        if full_rehearsal and not self.settings.real_openai_agent_run_enabled:
+            failures.append("VCOS_ENABLE_REAL_OPENAI_AGENT_RUN")
         if not self.settings.llm_real_execution_enabled:
             failures.append("VCOS_LLM_REAL_EXECUTION_ENABLED")
-        if self.settings.llm_provider.lower() != "ollama":
+        if self.settings.llm_provider.lower() != "openai":
             failures.append("VCOS_LLM_PROVIDER")
         lanes = LLMRouterConfigLoader(self.session).list_lanes(profile_key="default")
         lane_names = {lane.lane_name for lane in lanes}
@@ -3839,7 +3897,7 @@ class FirstScriptedVideoPackageService:
             "status": "NOT_CONFIGURED",
             "reason_codes": ["LLM_PROVIDER_NOT_CONFIGURED"],
             "missing_or_invalid_flags": sorted(set(failures)),
-            "next_action": "Cấu hình Ollama/LLMRouter real execution trước khi chạy video package production.",
+            "next_action": "Cấu hình OpenAI LLMRouter real execution trước khi chạy video package production.",
         }
 
     def _build_agent_context_pack(
@@ -3866,7 +3924,9 @@ class FirstScriptedVideoPackageService:
             "required_stop_at": required_stop_at,
         }
         runtime_guard_state = {
-            "human_review_only": True,
+            "automated_v2_progression": True,
+            "pre_media_human_approval_required": False,
+            "final_video_decision_only": "UPLOAD_OR_DO_NOT_UPLOAD",
             "llm_router_only": True,
             "no_media_provider_calls": True,
             "no_elevenlabs_call": True,
@@ -3882,7 +3942,7 @@ class FirstScriptedVideoPackageService:
             "no_prompt_self_mutation": True,
             "no_channel_config_mutation": True,
             "google_drive_archive_only": True,
-            "media_boundary_state": "BLOCKED_UNTIL_HUMAN_APPROVED_PROVIDER_STAGE",
+            "media_boundary_state": "AUTOMATED_V2_PROGRESSION_AFTER_READINESS",
         }
         return AgentContextPackBuilder(self.session).build(
             package_id=package_id,
@@ -4096,7 +4156,9 @@ class FirstScriptedVideoPackageService:
                 "context_pack_hash": context_pack["context_pack_hash"],
             },
             "runtime_constraints": {
-                "human_review_only": True,
+                "automated_v2_progression": True,
+                "pre_media_human_approval_required": False,
+                "final_video_decision_only": "UPLOAD_OR_DO_NOT_UPLOAD",
                 "no_media_provider_calls": True,
                 "no_upload": True,
                 "no_publish": True,
@@ -4135,8 +4197,10 @@ class FirstScriptedVideoPackageService:
             },
             "required_stop_at": "video_generation",
             "runtime_constraints": {
-                "real_ollama_via_llm_router_only": True,
-                "human_review_only": True,
+                "real_openai_via_llm_router_only": True,
+                "automated_v2_progression": True,
+                "pre_media_human_approval_required": False,
+                "final_video_decision_only": "UPLOAD_OR_DO_NOT_UPLOAD",
                 "no_media_provider_calls": True,
                 "no_elevenlabs_call": True,
                 "no_google_veo_call": True,
@@ -4399,7 +4463,7 @@ class FirstScriptedVideoPackageService:
         )
         if batch.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
-                current_status="READY_FOR_HUMAN_REVIEW",
+                current_status="READY_FOR_MEDIA_PROVIDERS",
                 deterministic_batch=batch,
             )
             artifacts["package_state_reducer"] = decision
@@ -4464,7 +4528,7 @@ class FirstScriptedVideoPackageService:
         )
         if batch.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
-                current_status="READY_FOR_HUMAN_REVIEW",
+                current_status="READY_FOR_MEDIA_PROVIDERS",
                 deterministic_batch=batch,
             )
             artifacts["package_state_reducer"] = decision
@@ -4481,12 +4545,33 @@ class FirstScriptedVideoPackageService:
         if status == "WAITING_PROVIDER_CONFIG":
             return MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
         if source == "deterministic_gates":
-            return (
-                "Sửa deterministic gate blockers trước khi chuyển trạng thái package."
-            )
+            return "Tự động sửa deterministic gate blockers trước khi tiếp tục package."
         if source == "gatekeeper_soft_review":
-            return "Review kết quả GatekeeperSoftReviewAgent trước khi tiếp tục."
-        return HUMAN_APPROVAL_REQUIRED
+            return (
+                "Tự động sửa hoặc chạy lại finding của GatekeeperSoftReviewAgent "
+                "trước khi tiếp tục."
+            )
+        return AUTOMATED_V2_PRODUCTION_NEXT_ACTION
+
+    def _automated_next_action(self, candidate: Any, *, default: str) -> str:
+        """Reject agent wording that would recreate a pre-media human gate."""
+
+        text = str(candidate or "").strip()
+        if not text:
+            return default
+        lowered = text.lower()
+        human_gate_markers = (
+            "human review",
+            "human approval",
+            "manual review",
+            "operator approval",
+            "operator phê duyệt",
+            "review package",
+            "review kết quả",
+        )
+        return (
+            default if any(marker in lowered for marker in human_gate_markers) else text
+        )
 
     def _agent_ref(
         self,
@@ -4646,10 +4731,8 @@ class FirstScriptedVideoPackageService:
         elif package.package_status == "REVIEW_REQUIRED":
             blocked_reasons.append("PACKAGE_REVIEW_REQUIRED")
             boundary_status = "REVIEW_REQUIRED"
-            operator_summary = (
-                "Package cần human review trước khi chuyển tới provider media."
-            )
-            next_action = HUMAN_APPROVAL_REQUIRED
+            operator_summary = "Package cần automatic repair/retry trước khi chuyển tới provider media."
+            next_action = AUTOMATED_REPAIR_NEXT_ACTION
         elif missing_required:
             blocked_reasons.extend(
                 f"{provider.upper()}_NOT_CONFIGURED" for provider in missing_required
@@ -4659,8 +4742,11 @@ class FirstScriptedVideoPackageService:
             next_action = MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
         else:
             boundary_status = "READY_FOR_MEDIA_PROVIDERS"
-            operator_summary = "Gói nội dung đã sẵn sàng chuyển tới media providers khi operator phê duyệt."
-            next_action = HUMAN_APPROVAL_REQUIRED
+            operator_summary = (
+                "Gói nội dung đã sẵn sàng tự động chuyển tới V2 media production "
+                "khi readiness và budget authority PASS."
+            )
+            next_action = AUTOMATED_V2_PRODUCTION_NEXT_ACTION
 
         boundary = VideoGenerationBoundary(
             package_id=package.id,
@@ -4680,7 +4766,7 @@ class FirstScriptedVideoPackageService:
                 },
                 {
                     "provider_key": "pexels_api",
-                    "role": "optional Pexels API visual fallback",
+                    "role": "optional Pexels API visual source",
                     "required": False,
                 },
             ],
@@ -4791,34 +4877,62 @@ class FirstScriptedVideoPackageService:
             "no_provider_calls_confirmed": True,
         }
 
-    def _human_review_checklist(
-        self, artifacts: dict[str, Any], provider_readiness_snapshot_id: uuid.UUID
+    def _automated_progression_receipt(
+        self,
+        artifacts: dict[str, Any],
+        provider_readiness_snapshot_id: uuid.UUID | None,
+        *,
+        package_status: str,
     ) -> dict[str, Any]:
         narration = artifacts.get("narration_script") or {}
         research = artifacts.get("research_notes") or {}
         metadata = artifacts.get("metadata_package") or {}
         visual_plan = artifacts.get("visual_plan") or {}
+        required_text_artifacts_present = all(
+            bool(artifacts.get(key))
+            for key in (
+                "narration_script",
+                "metadata_package",
+                "visual_plan",
+                "thumbnail_brief",
+            )
+        )
         return {
-            "facts_claims_need_review": True,
+            "receipt_version": "m12_2_v2_automated_progression_v1",
+            "pre_media_human_approval_required": False,
+            "automated_v2_progression_allowed": (
+                package_status == "READY_FOR_MEDIA_PROVIDERS"
+                and required_text_artifacts_present
+            ),
+            "package_status": package_status,
             "evidence_refs_missing": not bool(
                 research.get("evidence_refs")
                 or research.get("sources")
                 or research.get("source_notes")
             ),
-            "title_thumbnail_accuracy": "REVIEW_REQUIRED",
-            "rights_source_manifest": "REVIEW_REQUIRED",
-            "ai_disclosure_needed": True,
-            "market_locale_fit": "REVIEW_REQUIRED",
-            "content_language_check": "REVIEW_REQUIRED",
-            "reused_content_risk": "REVIEW_REQUIRED",
+            "required_text_artifacts_present": required_text_artifacts_present,
             "publishing_metadata_ready": bool(artifacts.get("metadata_package")),
-            "provider_readiness_gaps_ref": str(provider_readiness_snapshot_id),
+            "provider_readiness_gaps_ref": str(provider_readiness_snapshot_id)
+            if provider_readiness_snapshot_id
+            else None,
             "narration_sentence_ids_present": bool(
                 narration.get("sentences") or narration.get("sentence_ids")
             ),
             "metadata_present": bool(metadata),
             "visual_plan_present": bool(visual_plan),
-            "final_statement": HUMAN_APPROVAL_REQUIRED,
+            "final_video_decision_boundary": "UPLOAD_OR_DO_NOT_UPLOAD",
+            "final_video_decision": (
+                "PENDING_UPLOAD_OR_DO_NOT_UPLOAD_AFTER_FINAL_MEDIA_QC_ARCHIVE"
+            ),
+            "final_decision_prerequisites": [
+                "render",
+                "technical_qc",
+                "automated_creative_qc",
+                "drive_archive_verified",
+                "final_media_ref",
+                "final_review_candidate",
+            ],
+            "final_statement": AUTOMATED_V2_PRODUCTION_NEXT_ACTION,
         }
 
     def _risk_summary(self, artifacts: dict[str, Any], status: str) -> dict[str, Any]:
@@ -4833,8 +4947,10 @@ class FirstScriptedVideoPackageService:
             "local_fixture_success_used": False,
             "channel_config_mutated": False,
             "learning_auto_promotion": False,
+            "pre_media_human_approval_required": False,
+            "final_video_decision_boundary": "UPLOAD_OR_DO_NOT_UPLOAD",
             "limitations": [
-                "Gatekeeper soft review không thay thế human approval.",
+                "Gatekeeper soft review là input deterministic repair, không tạo pre-media human decision.",
                 "Visual plan là brief/candidate-only, chưa tạo Google Veo output.",
             ]
             if artifacts.get("visual_plan")

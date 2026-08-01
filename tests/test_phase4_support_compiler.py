@@ -166,6 +166,10 @@ def _new_long_scope_with_approved_script(
         editorial_calendar_slot_id=slot.id,
     )
     assert effective.compile_status == "PASS"
+    # The active run is required while admission freezes its strategic lineage.
+    # Pause it before this fixture exercises a workflow worker so an unrelated
+    # cadence scan cannot consume one of the deterministic workflow events.
+    base.pause_active_launch_run(session)
     return SimpleNamespace(
         company=base.company,
         operator=base.operator,

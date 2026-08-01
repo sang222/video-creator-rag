@@ -12,7 +12,7 @@ import { apiBaseUrl, getIntegrationsReadiness, queryKeys, runIntegrationsReadine
 import type { IntegrationReadiness, ProviderReadinessCheck, ProviderSummary } from "@/lib/types";
 
 const providerOrder = [
-  "ollama",
+  "openai",
   "youtube-public",
   "youtube-owner",
   "google-drive",
@@ -332,7 +332,7 @@ function checkTypeLabel(value: string) {
 
 function roleCopy(summary: ProviderSummary) {
   const role: Record<string, string> = {
-    ollama: "Router LLM theo lane, không dùng GLM",
+    openai: "Router Luna/Terra theo lane, không có model fallback tự động",
     "youtube-public": "Theo dõi thống kê công khai, độ tin cậy học yếu",
     "youtube-owner": "Analytics chủ sở hữu qua OAuth, độ tin cậy học mạnh",
     "google-drive": "Offload media qua quyền drive.file",
@@ -346,8 +346,9 @@ function safeFields(summary: ProviderSummary) {
   const config = summary.safe_config;
   const yesNo = (value: unknown) => (value ? "Có" : "Chưa");
   const fields: Record<string, Array<{ label: string; value: string }>> = {
-    ollama: [
+    openai: [
       { label: "Base URL", value: String(config.base_url ?? "Chưa cấu hình") },
+      { label: "Khóa API", value: yesNo(config.api_key_configured) },
       { label: "Cờ chạy thật", value: yesNo(config.real_execution_enabled) }
     ],
     "youtube-public": [

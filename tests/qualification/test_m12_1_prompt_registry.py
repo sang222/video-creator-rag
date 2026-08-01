@@ -12,19 +12,19 @@ from app.db.models import (
     ProviderAttempt,
 )
 from app.providers.base import ProviderResponse
-from app.providers.ollama import OllamaChatRequest, OllamaLLMProvider
+from app.providers.openai import OpenAIResponsesProvider, OpenAIResponsesRequest
 from app.services import LLMRouterService, PromptRegistryService
 from app.services.m12_1 import REQUIRED_AGENT_KEYS
 
 
 class SequenceProvider:
-    provider_key = "OLLAMA"
+    provider_key = "OPENAI"
 
     def __init__(self, responses: list[ProviderResponse]):
         self.responses = responses
-        self.calls: list[OllamaChatRequest] = []
+        self.calls: list[OpenAIResponsesRequest] = []
 
-    def chat(self, *, request: OllamaChatRequest) -> ProviderResponse:
+    def respond(self, *, request: OpenAIResponsesRequest) -> ProviderResponse:
         self.calls.append(request)
         return self.responses.pop(0)
 
@@ -1493,12 +1493,13 @@ def test_research_pack_summarizer_prompt_keeps_artifact_compact(db_session) -> N
     assert "summarize them as a small digest" in bundle.system_prompt
 
 
-def test_ollama_and_router_transmit_system_user_messages(
+def test_openai_responses_and_router_transmit_system_user_messages(
     db_session, monkeypatch
 ) -> None:
-    payload = OllamaLLMProvider().build_chat_payload(
-        request=OllamaChatRequest(
-            model="gpt-oss:20b-cloud",
+    payload = OpenAIResponsesProvider(api_key="test-key").build_responses_payload(
+        request=OpenAIResponsesRequest(
+            model="gpt-5.6-luna",
+            reasoning_effort="none",
             messages=[
                 {"role": "system", "content": "system contract"},
                 {"role": "user", "content": "task payload"},
@@ -1506,14 +1507,23 @@ def test_ollama_and_router_transmit_system_user_messages(
             response_format="json",
         )
     )
-    assert payload["messages"] == [
-        {"role": "system", "content": "system contract"},
-        {"role": "user", "content": "task payload"},
+    assert payload["input"] == [
+        {
+            "role": "system",
+            "content": [{"type": "input_text", "text": "system contract"}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "task payload"}],
+        },
     ]
-    assert payload["format"] == "json"
+    assert payload["text"]["format"]["type"] == "json_schema"
 
     monkeypatch.setenv("VCOS_LLM_REAL_EXECUTION_ENABLED", "true")
-    monkeypatch.setenv("VCOS_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("VCOS_LLM_PROVIDER", "openai")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
     provider = SequenceProvider(
         [
             ProviderResponse(
@@ -1521,7 +1531,7 @@ def test_ollama_and_router_transmit_system_user_messages(
                 output={
                     "content": '{"ok":true}',
                     "json": {"ok": True},
-                    "usage": {"prompt_eval_count": 2},
+                    "usage": {"input_tokens": 2, "output_tokens": 1},
                 },
                 latency_ms=2,
             )

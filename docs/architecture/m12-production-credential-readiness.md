@@ -43,7 +43,7 @@ CLI:
 ```bash
 vcos integrations readiness
 vcos integrations readiness --run-snapshot
-vcos integrations smoke --provider ollama
+vcos integrations smoke --provider openai
 vcos integrations smoke --provider youtube-public
 vcos integrations smoke --provider youtube-owner
 vcos integrations smoke --provider google-drive
@@ -55,7 +55,7 @@ vcos integrations smoke --provider elevenlabs
 
 Default behavior is `SKIPPED`. Real calls require explicit env flags:
 
-- Ollama: `VCOS_LLM_REAL_EXECUTION_ENABLED=true` and `VCOS_LLM_ROUTER_REAL_SMOKE=true`.
+- OpenAI Responses: `OPENAI_API_KEY`, `VCOS_LLM_PROVIDER=openai`, `VCOS_LLM_REAL_EXECUTION_ENABLED=true`, and `VCOS_LLM_ROUTER_REAL_SMOKE=true`.
 - YouTube public: `VCOS_YOUTUBE_REAL_PUBLIC_SMOKE=true`.
 - YouTube owner analytics: `VCOS_YOUTUBE_REAL_OWNER_SMOKE=true`.
 - Google Drive upload: `VCOS_DRIVE_REAL_UPLOAD_SMOKE=true`.
@@ -72,9 +72,9 @@ Core budget display:
 
 ```bash
 VCOS_BUDGET_MODE=hard_env
-VCOS_MONTHLY_AI_BUDGET_USD=250
-VCOS_LLM_MONTHLY_BUDGET_USD=
-VCOS_LLM_BUDGET_NOTE=Local Ollama/router budget cap, display only.
+VCOS_MONTHLY_AI_BUDGET_USD=12
+VCOS_LLM_MONTHLY_BUDGET_USD=12
+VCOS_LLM_BUDGET_NOTE=OpenAI Luna/Terra monthly hard cap; actual Responses usage is settled in the route receipt.
 ```
 
 ElevenLabs:

@@ -43,6 +43,7 @@ from app.services.production_package import (
     ProductionPackageService,
     ProductionReadinessService,
     semantic_hash,
+    strategic_lineage_from_record,
 )
 from app.services.production_workflow import (
     PreReadinessProductionGatewayDescriptor,
@@ -146,6 +147,18 @@ class CanonicalV2SupportCompiler:
         authority = _support_authority(context)
         versions = _ensure_support_versions(context, authority)
         admission = authority.admission
+        project_lineage = strategic_lineage_from_record(
+            authority.project,
+            invalid_reason_code="VIDEO_PROJECT_STRATEGIC_LINEAGE_INVALID",
+        )
+        admission_lineage = strategic_lineage_from_record(
+            admission,
+            invalid_reason_code="PROJECT_ADMISSION_STRATEGIC_LINEAGE_INVALID",
+        )
+        if project_lineage is None or admission_lineage is None:
+            raise ValidationFailureError("V2_PACKAGE_STRATEGIC_LINEAGE_REQUIRED")
+        if project_lineage != admission_lineage:
+            raise ValidationFailureError("V2_PACKAGE_STRATEGIC_LINEAGE_MISMATCH")
         script = versions["script"].content
         claims = list(script.get("supported_claims") or [])
         sections = list(script.get("sections") or [])
@@ -160,6 +173,7 @@ class CanonicalV2SupportCompiler:
                 channel_profile_hash=authority.profile.profile_input_hash,
                 compiled_policy_snapshot_id=authority.policy.id,
                 compiled_policy_snapshot_hash=authority.policy.content_hash,
+                strategic_lineage=project_lineage,
                 effective_context_ref=ExactContentRefV2(
                     type="effective_context",
                     ref=f"effective-context://{authority.effective.id}",
@@ -949,11 +963,10 @@ def _support_payloads(
     sections = script["sections"]
     adapter_operations: dict[str, dict[str, Any]] = {}
     operation_authorizations: dict[str, dict[str, Any]] = {}
-    modes = {
+    stage_modes = {
         "MEDIA": "PACKAGE_NATIVE_TIMELINE",
         "RENDER": "NATIVE_FFMPEG_LOCAL",
         "QC": "AUTOMATED_NATIVE_QC",
-        "ARCHIVE": "LOCAL_VERIFIED_ARCHIVE",
     }
     audio_strategy = "LOCAL_OS_TTS_SCRIPT_BOUND"
     route_by_stage = (
@@ -961,8 +974,32 @@ def _support_payloads(
         if authority.support_envelope is not None
         else {}
     )
-    for stage, mode in modes.items():
+    for stage in (*stage_modes, "ARCHIVE"):
         route = route_by_stage.get(stage)
+        adapter_key = (
+            route.adapter_key
+            if route is not None
+            else (
+                "v2-google-drive-archive" if stage == "ARCHIVE" else "v2-local-native"
+            )
+        )
+        # Normal production authority seals the Drive resolver.  A locally
+        # sealed route remains useful only for the native-effects qualification
+        # harness, where it is explicitly supplied in the frozen envelope; do
+        # not silently turn an unconfigured Drive archive into a local copy.
+        mode = (
+            "GOOGLE_DRIVE_VERIFIED_ARCHIVE"
+            if stage == "ARCHIVE" and adapter_key == "v2-google-drive-archive"
+            else (
+                "LOCAL_VERIFIED_ARCHIVE" if stage == "ARCHIVE" else stage_modes[stage]
+            )
+        )
+        parameters: dict[str, Any] = {
+            "mode": mode,
+            "audio_strategy": audio_strategy,
+        }
+        if adapter_key == "v2-google-drive-archive":
+            parameters["archive_resolution"] = "PERSISTED_VERIFIED_CLOUD_MEDIA"
         operation_id = (
             route.operation_id
             if route is not None
@@ -979,9 +1016,7 @@ def _support_payloads(
             "production_lane": authority.project.production_lane,
             "paid_provider_call": False,
             "operation_id": operation_id,
-            "adapter_key": (
-                route.adapter_key if route is not None else "v2-local-native"
-            ),
+            "adapter_key": adapter_key,
             "max_cost_usd": "0",
             **(
                 {
@@ -1001,17 +1036,12 @@ def _support_payloads(
                 if route is not None
                 else {}
             ),
-            "parameters": {
-                "mode": mode,
-                "audio_strategy": audio_strategy,
-            },
+            "parameters": parameters,
         }
         operation_authorizations[operation_id] = {
             "authorized": True,
             "operation_id": operation_id,
-            "adapter_key": (
-                route.adapter_key if route is not None else "v2-local-native"
-            ),
+            "adapter_key": adapter_key,
             "stage": stage,
             "paid_provider_call": False,
             "max_cost_usd": "0",

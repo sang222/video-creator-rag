@@ -3539,6 +3539,7 @@ def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:
         "next_action": run.next_action,
         "do_not_do": run.do_not_do,
         "technical_appendix": run.technical_appendix,
+        "strategic_lineage": getattr(run, "strategic_lineage", None),
         "created_at": run.created_at.isoformat(),
     }
 

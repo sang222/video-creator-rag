@@ -34,7 +34,11 @@ from app.contracts.production_package import (
     ProductionReadinessReceiptReadV2,
     ProductionRevisionV2,
 )
-from app.contracts.vcos_v2 import DurationContractV2, ProductionLane
+from app.contracts.vcos_v2 import (
+    DurationContractV2,
+    ProductionLane,
+    StrategicLineageV2,
+)
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models.channel import (
@@ -137,6 +141,10 @@ class ChannelDurationContractResolver:
             if isinstance(production_lane, ProductionLane)
             else production_lane
         )
+        # This resolver exists solely for the long-form package path. Retain
+        # its historical omitted-argument behavior while rejecting every
+        # explicit non-long-form request.
+        lane_key = lane_key or ProductionLane.LONG_FORM.value
         if lane_key != ProductionLane.LONG_FORM.value:
             raise ValidationFailureError("LONG_FORM_DURATION_CONTRACT_REQUIRED")
         profile_values = _profile_duration_values(
@@ -276,10 +284,20 @@ class ProductionPackageService:
                         "id": str(canonical.compiled_policy_snapshot_id),
                         "content_hash": canonical.compiled_policy_snapshot_hash,
                     },
+                    *_strategic_lineage_context_refs(canonical.strategic_lineage),
                 ],
                 packaging_metadata={
                     "schema_version": PRODUCTION_PACKAGE_SCHEMA_V2,
                     "authority_classification": "CANONICAL_V2_AUTHORITY",
+                    **(
+                        {
+                            "strategic_lineage_hash": semantic_hash(
+                                canonical.strategic_lineage
+                            )
+                        }
+                        if canonical.strategic_lineage is not None
+                        else {}
+                    ),
                 },
             ),
             correlation_id="phase3-production-package-version-create",
@@ -473,6 +491,19 @@ class ProductionPackageService:
             or admission.admitted_video_project_id != project.id
         ):
             raise ValidationFailureError("PRODUCTION_PACKAGE_ADMISSION_NOT_ADMITTED")
+        authority_lineage = _reconcile_project_admission_strategic_lineage(
+            project=project,
+            admission=admission,
+        )
+        if authority_lineage is None:
+            if content.strategic_lineage is not None:
+                raise ValidationFailureError(
+                    "PRODUCTION_PACKAGE_STRATEGIC_LINEAGE_UNEXPECTED"
+                )
+        elif content.strategic_lineage != authority_lineage:
+            raise ValidationFailureError(
+                "PRODUCTION_PACKAGE_STRATEGIC_LINEAGE_MISMATCH"
+            )
         if _admission_hash(admission) != content.project_admission_decision_hash:
             raise ValidationFailureError("PRODUCTION_PACKAGE_ADMISSION_HASH_MISMATCH")
         exact_duration = self.duration_resolver.resolve(
@@ -803,6 +834,7 @@ class ProductionReadinessService:
             channel_profile_hash=package_content.channel_profile_hash,
             compiled_policy_snapshot_id=package_content.compiled_policy_snapshot_id,
             compiled_policy_snapshot_hash=package_content.compiled_policy_snapshot_hash,
+            strategic_lineage=package_content.strategic_lineage,
             duration_contract_hash=package_content.duration_contract.duration_contract_hash,
             required_gate_runs=gate_bindings,
             research_evidence_refs=package_content.research_refs,
@@ -902,6 +934,7 @@ class ProductionReadinessService:
                         if receipt_content.support_envelope_ref is not None
                         else []
                     ),
+                    *_strategic_lineage_context_refs(receipt_content.strategic_lineage),
                 ],
             ),
             correlation_id="phase3-production-readiness-receipt-version",
@@ -993,6 +1026,8 @@ def _package_semantic_payload(
     payload = content.model_dump(mode="json")
     if content.support_envelope_ref is None:
         payload.pop("support_envelope_ref", None)
+    if content.strategic_lineage is None:
+        payload.pop("strategic_lineage", None)
     return payload
 
 
@@ -1004,6 +1039,8 @@ def _readiness_receipt_semantic_payload(
     payload = content.model_dump(mode="json")
     if content.support_envelope_ref is None:
         payload.pop("support_envelope_ref", None)
+    if content.strategic_lineage is None:
+        payload.pop("strategic_lineage", None)
     return payload
 
 
@@ -1521,6 +1558,91 @@ def _all_bound_refs(
 
 def _external_refs(content: ProductionPackageContentV2) -> list[dict[str, Any]]:
     return [item.model_dump(mode="json") for item in _all_bound_refs(content)]
+
+
+_STRATEGIC_LINEAGE_FIELD_NAMES = (
+    "audience_promise",
+    "audience_promise_version",
+    "audience_promise_hash",
+    "target_audience_definition",
+    "audience_drift_guard_version",
+    "strategic_intent",
+    "intent_success_criteria",
+    "intent_success_criteria_version",
+    "intent_success_criteria_hash",
+    "experiment_hypothesis",
+    "primary_variable_under_test",
+    "decision_reversibility",
+    "active_launch_policy_version_id",
+    "active_launch_policy_hash",
+    "active_launch_run_id",
+    "active_launch_run_hash",
+)
+
+
+def strategic_lineage_from_record(
+    record: Any,
+    *,
+    invalid_reason_code: str,
+) -> StrategicLineageV2 | None:
+    """Read a complete frozen lineage from a v2 project or admission row.
+
+    Legacy rows predate this authority and intentionally return ``None`` only
+    when every strategic field is absent. A partial row is never treated as a
+    compatible authority.
+    """
+
+    values = {
+        field_name: getattr(record, field_name, None)
+        for field_name in _STRATEGIC_LINEAGE_FIELD_NAMES
+    }
+    if all(value is None for value in values.values()):
+        return None
+    try:
+        return StrategicLineageV2.model_validate(values)
+    except (TypeError, ValueError) as exc:
+        raise ValidationFailureError(invalid_reason_code) from exc
+
+
+def _reconcile_project_admission_strategic_lineage(
+    *,
+    project: VideoProject,
+    admission: ProjectAdmissionDecision,
+) -> StrategicLineageV2 | None:
+    project_lineage = strategic_lineage_from_record(
+        project,
+        invalid_reason_code="VIDEO_PROJECT_STRATEGIC_LINEAGE_INVALID",
+    )
+    admission_lineage = strategic_lineage_from_record(
+        admission,
+        invalid_reason_code="PROJECT_ADMISSION_STRATEGIC_LINEAGE_INVALID",
+    )
+    if project_lineage is None and admission_lineage is None:
+        return None
+    if project_lineage is None or admission_lineage is None:
+        raise ValidationFailureError("PROJECT_ADMISSION_STRATEGIC_LINEAGE_INCOMPLETE")
+    if project_lineage != admission_lineage:
+        raise ValidationFailureError("PROJECT_ADMISSION_STRATEGIC_LINEAGE_MISMATCH")
+    return project_lineage
+
+
+def _strategic_lineage_context_refs(
+    lineage: StrategicLineageV2 | None,
+) -> list[dict[str, str]]:
+    if lineage is None:
+        return []
+    return [
+        {
+            "type": "first_channel_launch_policy_version",
+            "id": str(lineage.active_launch_policy_version_id),
+            "content_hash": lineage.active_launch_policy_hash,
+        },
+        {
+            "type": "launch_run",
+            "id": str(lineage.active_launch_run_id),
+            "content_hash": lineage.active_launch_run_hash,
+        },
+    ]
 
 
 def _package_project_id(

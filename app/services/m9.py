@@ -13,6 +13,7 @@ from app.contracts import AuditEnvelope, EventEnvelope
 from app.contracts.geo_delivery import GeoDistributionTracker
 from app.contracts.m9 import PostPublishHealthRunCreate
 from app.contracts.ops import ManualActionCreate
+from app.contracts.vcos_v2 import StrategicLineageV2
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
@@ -34,10 +35,13 @@ from app.db.models import (
     UploadedVideo,
     UploadedVideoMetricsSummary,
 )
+from app.db.models.m5 import ProjectAdmissionDecision
+from app.db.models.workflow import VideoProject
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 from app.services.geo_delivery import GeoMaturityDiagnosticService
 from app.services.ops import ManualActionService
+from app.services.production_package import strategic_lineage_from_record
 
 
 WINDOW_DELTAS = {
@@ -126,6 +130,7 @@ class DiagnosticContext:
     retention_snapshot: RetentionCurveSnapshot | None
     traffic_snapshot: TrafficSourceSnapshot | None
     engagement_snapshot: EngagementSnapshot | None
+    strategic_lineage: StrategicLineageV2 | None = None
 
 
 @dataclass(frozen=True)
@@ -274,6 +279,7 @@ class PostPublishHealthMonitorService:
             data.observation_window,
             analytics_snapshot_id=data.analytics_snapshot_id,
         )
+        strategic_lineage = _strategic_lineage_payload(context)
         window = ObservationWindowService(self.session).require_window(
             context.uploaded.id, data.observation_window
         )
@@ -313,6 +319,7 @@ class PostPublishHealthMonitorService:
             do_not_do=DO_NOT_DO_DEFAULT,
             technical_appendix={
                 "observation_window_id": str(window.id),
+                "strategic_lineage": strategic_lineage,
                 "m9_diagnostic_only": True,
                 "no_analytics_sync": True,
                 "no_platform_api_call": True,
@@ -336,6 +343,7 @@ class PostPublishHealthMonitorService:
                 "analytics_snapshot_id": str(run.analytics_snapshot_id)
                 if run.analytics_snapshot_id
                 else None,
+                "strategic_lineage": strategic_lineage,
                 "m9_diagnostic_only": True,
                 "no_analytics_sync": True,
                 "no_platform_api_call": True,
@@ -454,6 +462,7 @@ class PostPublishHealthMonitorService:
             "reason_codes": run.reason_codes,
             "metric_values": _metric_values_for_appendix(context),
             "lineage_refs": _lineage_refs(context.uploaded),
+            "strategic_lineage": _strategic_lineage_payload(context),
             "evidence_refs": run.evidence_refs,
             "m9_diagnostic_only": True,
             "no_analytics_sync": True,
@@ -532,6 +541,7 @@ class PostPublishHealthMonitorService:
                 "metric_values": _metric_values_for_appendix(context),
                 "snapshot_refs": _snapshot_refs(context),
                 "lineage_refs": _lineage_refs(context.uploaded),
+                "strategic_lineage": _strategic_lineage_payload(context),
                 "diagnostic_taxonomy_version": TAXONOMY_VERSION,
                 "m9_diagnostic_only": True,
             },
@@ -1268,6 +1278,7 @@ def _load_context(
     analytics_snapshot_id: uuid.UUID | None = None,
 ) -> DiagnosticContext:
     uploaded = _require_uploaded(session, uploaded_video_id)
+    strategic_lineage = _validated_uploaded_strategic_lineage(session, uploaded)
     summary = session.scalars(
         select(UploadedVideoMetricsSummary).where(
             UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id
@@ -1341,6 +1352,7 @@ def _load_context(
         retention_snapshot=retention,
         traffic_snapshot=traffic,
         engagement_snapshot=engagement,
+        strategic_lineage=strategic_lineage,
     )
 
 
@@ -1908,6 +1920,56 @@ def _lineage_refs(uploaded: UploadedVideo) -> dict[str, Any]:
         }
     )
     return refs
+
+
+def _strategic_lineage_payload(context: DiagnosticContext) -> dict[str, Any] | None:
+    return (
+        context.strategic_lineage.model_dump(mode="json")
+        if context.strategic_lineage is not None
+        else None
+    )
+
+
+def _validated_uploaded_strategic_lineage(
+    session: Session,
+    uploaded: UploadedVideo,
+) -> StrategicLineageV2 | None:
+    """Fail closed for v2 post-publish summaries before they enter learning."""
+
+    if uploaded.schema_version != "v2":
+        return None
+    refs = uploaded.lineage_refs if isinstance(uploaded.lineage_refs, dict) else {}
+    raw = refs.get("strategic_lineage")
+    if not isinstance(raw, dict):
+        raise ValidationFailureError("POST_PUBLISH_STRATEGIC_LINEAGE_REQUIRED")
+    try:
+        uploaded_lineage = StrategicLineageV2.model_validate(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValidationFailureError("POST_PUBLISH_STRATEGIC_LINEAGE_INVALID") from exc
+    project = session.get(VideoProject, uploaded.video_project_id)
+    admission = (
+        session.get(ProjectAdmissionDecision, project.project_admission_decision_id)
+        if project is not None and project.project_admission_decision_id is not None
+        else None
+    )
+    if project is None or admission is None:
+        raise ValidationFailureError("POST_PUBLISH_STRATEGIC_AUTHORITY_MISSING")
+    project_lineage = strategic_lineage_from_record(
+        project,
+        invalid_reason_code="VIDEO_PROJECT_STRATEGIC_LINEAGE_INVALID",
+    )
+    admission_lineage = strategic_lineage_from_record(
+        admission,
+        invalid_reason_code="PROJECT_ADMISSION_STRATEGIC_LINEAGE_INVALID",
+    )
+    if (
+        project_lineage is None
+        or admission_lineage is None
+        or project_lineage != admission_lineage
+        or uploaded_lineage != project_lineage
+    ):
+        raise ValidationFailureError("POST_PUBLISH_STRATEGIC_LINEAGE_MISMATCH")
+    return uploaded_lineage
 
 
 def _require_uploaded(session: Session, uploaded_video_id: uuid.UUID) -> UploadedVideo:

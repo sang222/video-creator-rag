@@ -15,6 +15,8 @@ const localReview: FinalReview = {
   description: "Nội dung qualification.",
   lane: "LONG_FORM",
   content_mode: "STANDALONE",
+  audience_promise: "Giúp người vận hành đưa ra quyết định có căn cứ.",
+  strategic_intent: "ACQUISITION",
   standalone_reason: "Video độc lập",
   destination_label: "Kênh VCOS",
   media: {
@@ -46,5 +48,7 @@ describe("FinalReviewSurface local archive", () => {
       "src",
       `http://localhost:8000/final-review-candidates/${candidateId}/thumbnail`
     );
+    expect(screen.getByText("Cam kết với khán giả")).toBeInTheDocument();
+    expect(screen.getByText("Thu hút đúng khán giả mục tiêu")).toBeInTheDocument();
   });
 });

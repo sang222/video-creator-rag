@@ -522,6 +522,7 @@ def test_worker_uses_configured_gateway_after_exact_readiness(
     phase3 = runpy.run_path(str(ROOT / "tests/test_phase3_production_package_v2.py"))
     scope = phase3["_scope"](db_session)
     package = phase3["_create_package"](db_session, scope)
+    scope.pause_active_launch_run(db_session)
     actor = authenticated_actor_context(
         canonical_user_id=scope.operator.id,
         operator_user_id=scope.operator.id,

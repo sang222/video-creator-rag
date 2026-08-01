@@ -413,6 +413,7 @@ class VideoProjectService:
 _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES = frozenset(
     {
         "mr1_final_media_lineage_receipt",
+        "v2_drive_final_media_lineage_receipt",
         "production_package",
         "production_readiness_receipt",
         "v2_frozen_support_envelope",

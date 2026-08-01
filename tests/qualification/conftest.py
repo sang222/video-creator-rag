@@ -81,18 +81,18 @@ class QualificationFactory:
     def seed_all(self) -> None:
         ConfigRegistryService(self.session).seed([ROOT / "config"])
         registry = ProviderRegistryService(self.session)
-        if registry.get_entry("ollama") is None:
+        if registry.get_entry("openai") is None:
             registry.create_entry(
                 data=ProviderRegistryEntryCreate(
-                    provider_key="ollama",
-                    provider_name="Ollama / LLMRouter",
+                    provider_key="openai",
+                    provider_name="OpenAI Responses Router",
                     provider_type="LLM",
                     capability_blob={
                         "llm_router_lane_bound": True,
                         "guarded_real_execution": True,
                     },
                     policy_fit_blob={"production_enabled_when_configured": True},
-                    metadata={"readiness_provider_key": "ollama"},
+                    metadata={"readiness_provider_key": "openai"},
                 )
             )
         GateDefinitionService(self.session).seed_definitions()

@@ -41,7 +41,7 @@ from .conftest import ROOT
 from .helpers.qualification_asserts import assert_no_secret_payload
 
 
-REAL_PROVIDER_KEY = "ollama"
+REAL_PROVIDER_KEY = "openai"
 
 
 def _seed_real_provider(db_session) -> None:
@@ -51,7 +51,7 @@ def _seed_real_provider(db_session) -> None:
         registry.create_entry(
             data=ProviderRegistryEntryCreate(
                 provider_key=REAL_PROVIDER_KEY,
-                provider_name="Ollama / LLMRouter",
+                provider_name="OpenAI Responses Router",
                 provider_type="LLM",
                 capability_blob={"llm_router_lane_bound": True, "guarded_real_execution": True},
                 policy_fit_blob={"production_enabled_when_configured": True},
@@ -83,7 +83,7 @@ def test_m4_real_provider_ops_and_test_fakes_are_separated(db_session) -> None:
             provider_key=REAL_PROVIDER_KEY,
             credential_key="primary",
             credential_type="API_KEY",
-            secret_ref="env://OLLAMA_BASE_URL",
+            secret_ref="env://OPENAI_API_KEY",
             status="EXPIRED",
         )
     )

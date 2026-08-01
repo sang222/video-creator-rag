@@ -493,6 +493,7 @@ def _post_publish_health_run(run: Any) -> dict[str, Any]:
         "next_action": run.next_action,
         "do_not_do": run.do_not_do,
         "technical_appendix": run.technical_appendix,
+        "strategic_lineage": getattr(run, "strategic_lineage", None),
         "created_at": run.created_at,
     }
 
@@ -517,6 +518,7 @@ def _failure_trace_report(report: Any) -> dict[str, Any]:
         "next_action": report.next_action,
         "do_not_do": report.do_not_do,
         "technical_appendix": report.technical_appendix,
+        "strategic_lineage": getattr(report, "strategic_lineage", None),
         "created_at": report.created_at,
     }
 

@@ -1,23 +1,38 @@
 catalog_key: provider_registry_catalog
-catalog_version: "2.0.0"
+catalog_version: "3.0.0"
 schema_version: catalog.v1
 status: active
 items:
-  - provider_key: ollama
-    provider_name: Ollama / LLMRouter
+  - provider_key: openai
+    provider_name: OpenAI Responses API
     provider_type: LLM
     status: ACTIVE
     capability_blob:
       llm_router_lane_bound: true
-      guarded_real_execution: true
+      models:
+        gpt-5.6-luna:
+          structured_outputs: true
+          function_calling: true
+          image_input: true
+          context_window: 1050000
+          max_output: 128000
+        gpt-5.6-terra:
+          structured_outputs: true
+          function_calling: true
+          image_input: true
+          context_window: 1050000
+          max_output: 128000
     policy_fit_blob:
       production_enabled_when_configured: true
+      service_tier: standard
+      automatic_model_fallback: false
     cost_model_blob:
-      provider_cost_unknown: true
+      pricing_version: openai-api-pricing-2026-08-01
+      evidence_ref: https://developers.openai.com/api/docs/models/compare
     quota_model_blob: {}
     retry_policy_blob: {}
     metadata:
-      readiness_provider_key: ollama
+      readiness_provider_key: openai
   - provider_key: youtube-public
     provider_name: YouTube Public Monitor
     provider_type: ANALYTICS

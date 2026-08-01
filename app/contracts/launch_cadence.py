@@ -43,8 +43,11 @@ class FirstChannelLaunchPolicyCreate(BaseModel):
     channel_workspace_id: uuid.UUID
     channel_profile_version_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
+    # Zero approved plans is valid when the launch deliberately uses the
+    # deterministic STANDALONE fallback.  The database constraint is updated
+    # separately with the next schema migration.
     approved_initial_series_plan_ids: list[uuid.UUID] = Field(
-        min_length=1, max_length=2
+        default_factory=list, max_length=2
     )
     policy_version: int = Field(default=1, gt=0)
     supersedes_policy_version_id: uuid.UUID | None = None
@@ -64,7 +67,7 @@ class FirstChannelLaunchPolicyCreate(BaseModel):
     max_concurrent_productions: int = Field(default=1, ge=1)
 
     max_active_runs: int = Field(default=2, ge=1, le=2)
-    initial_series_count: int = Field(default=2, ge=1, le=2)
+    initial_series_count: int = Field(default=0, ge=0, le=2)
 
     first_n_public_videos: int = Field(default=10, ge=1)
     max_primary_variables_changed_per_video: int = Field(default=1, ge=1, le=1)
@@ -110,6 +113,19 @@ class FirstChannelLaunchPolicyCreate(BaseModel):
     evidence_refs: list[dict[str, Any]] = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_initial_series_count(cls, value: Any) -> Any:
+        """Derive the omitted count without hiding an explicit mismatch."""
+
+        if not isinstance(value, dict) or "initial_series_count" in value:
+            return value
+        normalized = dict(value)
+        normalized["initial_series_count"] = len(
+            normalized.get("approved_initial_series_plan_ids") or []
+        )
+        return normalized
 
     @model_validator(mode="after")
     def validate_operating_envelope(self) -> "FirstChannelLaunchPolicyCreate":

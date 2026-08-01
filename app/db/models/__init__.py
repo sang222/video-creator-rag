@@ -131,6 +131,11 @@ from app.db.models.m10_1 import (
     LLMRouterLane,
     LLMRouterProfile,
 )
+from app.db.models.openai_cutover import (
+    OpenAICanaryArtifact,
+    OpenAICutoverReceipt,
+    OpenAIPricingSnapshot,
+)
 from app.db.models.m10_2 import (
     AIHeroAsset,
     FinalMediaRef,
@@ -375,6 +380,9 @@ __all__ = [
     "LLMRouteAttempt",
     "LLMRouterLane",
     "LLMRouterProfile",
+    "OpenAICanaryArtifact",
+    "OpenAICutoverReceipt",
+    "OpenAIPricingSnapshot",
     "AIHeroAsset",
     "FinalMediaRef",
     "LicenseEvidenceRecord",

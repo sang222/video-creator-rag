@@ -166,7 +166,7 @@ class FirstChannelLaunchPolicyVersion(Base):
         ),
         CheckConstraint(
             "max_active_runs between 1 and 2 and "
-            "initial_series_count between 1 and 2 and "
+            "initial_series_count between 0 and 2 and "
             "jsonb_array_length(approved_initial_series_plan_ids) = "
             "initial_series_count",
             name="ck_launch_policy_series_limits",

@@ -6,9 +6,12 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from app.contracts.vcos_v2 import (
     AssignmentMode,
     ContentMode,
+    DecisionReversibility,
     DurationContractV2,
     PlanningSourceType,
     ProductionLane,
+    StrategicIntent,
+    StrategicLineageV2,
 )
 
 ProjectStatus = Literal["draft", "in_review", "approved", "archived"]
@@ -60,6 +63,34 @@ class VideoProjectCreate(BaseModel):
     standalone_reason_code: str | None = None
     project_admission_decision_id: uuid.UUID | None = None
     duration_contract: DurationContractV2 | None = None
+    audience_promise: str | None = Field(default=None, min_length=1, max_length=4_000)
+    audience_promise_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    audience_promise_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    target_audience_definition: dict[str, Any] | None = None
+    audience_drift_guard_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    strategic_intent: StrategicIntent | None = None
+    intent_success_criteria: dict[str, Any] | None = None
+    intent_success_criteria_version: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+    intent_success_criteria_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    experiment_hypothesis: str | None = Field(default=None, max_length=4_000)
+    primary_variable_under_test: str | None = Field(
+        default=None, min_length=1, max_length=160
+    )
+    decision_reversibility: DecisionReversibility | None = None
+    active_launch_policy_version_id: uuid.UUID | None = None
+    active_launch_policy_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    active_launch_run_id: uuid.UUID | None = None
+    active_launch_run_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     render_eligible: bool = True
     priority: str | None = None
     owner_user_id: uuid.UUID | None = None
@@ -111,6 +142,34 @@ class VideoProjectCreate(BaseModel):
                 raise ValueError("standalone project cannot carry series fields")
             if not self.standalone_reason_code:
                 raise ValueError("standalone project requires standalone_reason_code")
+        strategic_lineage = {
+            "audience_promise": self.audience_promise,
+            "audience_promise_version": self.audience_promise_version,
+            "audience_promise_hash": self.audience_promise_hash,
+            "target_audience_definition": self.target_audience_definition,
+            "audience_drift_guard_version": self.audience_drift_guard_version,
+            "strategic_intent": self.strategic_intent,
+            "intent_success_criteria": self.intent_success_criteria,
+            "intent_success_criteria_version": self.intent_success_criteria_version,
+            "intent_success_criteria_hash": self.intent_success_criteria_hash,
+            "experiment_hypothesis": self.experiment_hypothesis,
+            "primary_variable_under_test": self.primary_variable_under_test,
+            "decision_reversibility": self.decision_reversibility,
+            "active_launch_policy_version_id": self.active_launch_policy_version_id,
+            "active_launch_policy_hash": self.active_launch_policy_hash,
+            "active_launch_run_id": self.active_launch_run_id,
+            "active_launch_run_hash": self.active_launch_run_hash,
+        }
+        missing = [
+            key
+            for key, value in strategic_lineage.items()
+            if value is None and key != "experiment_hypothesis"
+        ]
+        if missing:
+            raise ValueError(
+                "v2 project requires frozen strategic lineage: " + ", ".join(missing)
+            )
+        StrategicLineageV2.model_validate(strategic_lineage)
         return self
 
     @property

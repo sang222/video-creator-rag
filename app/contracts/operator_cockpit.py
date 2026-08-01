@@ -120,6 +120,8 @@ class FinalReviewRead(BaseModel):
     description: str
     lane: Literal["LONG_FORM"]
     content_mode: str
+    audience_promise: str | None = None
+    strategic_intent: str | None = None
     series_title: str | None = None
     run_label: str | None = None
     episode_label: str | None = None

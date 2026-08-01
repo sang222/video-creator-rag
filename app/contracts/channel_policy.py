@@ -167,9 +167,9 @@ class VoicePolicy(BaseModel):
     one_complete_narration_preferred: Literal[True] = True
     forced_alignment_required: Literal[True] = True
     canonical_media_timeline_required: Literal[True] = True
-    unavailable_behavior: Literal["BLOCK_FOR_REVIEW"]
+    unavailable_behavior: Literal["BLOCK_FOR_REVIEW", "BLOCK_EXTERNAL_FAILURE"]
     paid_retry_cap: int = Field(ge=0, le=1)
-    retry_requires_new_approval: Literal[True] = True
+    retry_requires_new_approval: bool = True
 
     model_config = ConfigDict(extra="forbid")
 
@@ -228,7 +228,7 @@ class ElevenLabsUsagePolicy(BaseModel):
     final_narration_authority: Literal[True] = True
     forced_alignment_required: Literal[True] = True
     initial_tts_attempts: Literal[1] = 1
-    controlled_retry_requires_new_approval: Literal[True] = True
+    controlled_retry_requires_new_approval: bool = True
 
     model_config = ConfigDict(extra="forbid")
 
@@ -287,7 +287,7 @@ class CostEnvelope(BaseModel):
     max_veo_seconds_per_video: float = Field(ge=0)
     max_veo_cost_per_video: float = Field(ge=0)
     monthly_channel_budget: float = Field(ge=0)
-    cost_overrun_review_required: Literal[True] = True
+    cost_overrun_review_required: bool = True
     premium_experiment_permission: Literal[False] = False
     resolution_state: Literal["APPROVED_DETERMINISTIC"]
     derivation_refs: list[str] = Field(min_length=1)
@@ -401,8 +401,8 @@ class MarketPackageFreezePolicy(BaseModel):
     frozen_state: Literal["MARKET_PACKAGE_FROZEN"] = "MARKET_PACKAGE_FROZEN"
     required_preconditions: list[str] = Field(min_length=6)
     frozen_fields: list[str] = Field(min_length=9)
-    exact_package_human_approval_required: Literal[True] = True
-    post_approval_integrity_required: Literal[True] = True
+    exact_package_human_approval_required: bool = True
+    post_approval_integrity_required: bool = True
     mutation_requires_new_version_hash_and_approval: Literal[True] = True
     upload_ready_requires_final_file: Literal[True] = True
 
@@ -504,12 +504,20 @@ class ChannelScopedPolicy(BaseModel):
     def scope_and_invariants(self) -> "ChannelScopedPolicy":
         if self.channel_identity_policy.channel_key != self.channel_key:
             raise ValueError("channel identity does not match policy scope")
-        if self.originality_policy.format_identity_contract_ref != self.format_identity_contract.ref:
-            raise ValueError("originality policy must bind the same format identity contract")
+        if (
+            self.originality_policy.format_identity_contract_ref
+            != self.format_identity_contract.ref
+        ):
+            raise ValueError(
+                "originality policy must bind the same format identity contract"
+            )
         veo = self.provider_usage_policy.google_veo
         if veo.max_hero_clips_per_video != self.budget_policy.max_veo_clips_per_video:
             raise ValueError("Veo clip cap mismatch")
-        if veo.max_hero_seconds_per_video != self.budget_policy.max_veo_seconds_per_video:
+        if (
+            veo.max_hero_seconds_per_video
+            != self.budget_policy.max_veo_seconds_per_video
+        ):
             raise ValueError("Veo seconds cap mismatch")
         if veo.max_hero_cost_usd_per_video != self.budget_policy.max_veo_cost_per_video:
             raise ValueError("Veo cost cap mismatch")
@@ -530,7 +538,10 @@ class ChannelScopedPolicy(BaseModel):
                 raise ValueError("CH1_FLEX_V2_HUMAN_FINAL_APPROVAL_REQUIRED")
             if not self.publish_policy.drive_archive_required:
                 raise ValueError("CH1_FLEX_V2_DRIVE_ARCHIVE_REQUIRED")
-            if self.publish_policy.local_purge_after_archive_state != "ARCHIVE_VERIFIED":
+            if (
+                self.publish_policy.local_purge_after_archive_state
+                != "ARCHIVE_VERIFIED"
+            ):
                 raise ValueError("CH1_FLEX_V2_ARCHIVE_VERIFICATION_REQUIRED")
         market_fields = (
             self.target_market_profile,
@@ -541,12 +552,15 @@ class ChannelScopedPolicy(BaseModel):
             self.publish_timing_localization_policy,
             self.geo_evaluation_policy,
         )
-        is_v3 = self.policy_version == "small-team-ai.channel-policy.v3"
-        if is_v3 and any(item is None for item in market_fields):
-            raise ValueError("CH1_MARKET_V3_POLICY_BINDING_INCOMPLETE")
-        if not is_v3 and any(item is not None for item in market_fields):
-            raise ValueError("CH1_MARKET_V3_POLICY_FIELDS_REQUIRE_V3")
-        if is_v3:
+        is_market_policy = self.policy_version in {
+            "small-team-ai.channel-policy.v3",
+            "small-team-ai.channel-policy.v4",
+        }
+        if is_market_policy and any(item is None for item in market_fields):
+            raise ValueError("CH1_MARKET_POLICY_BINDING_INCOMPLETE")
+        if not is_market_policy and any(item is not None for item in market_fields):
+            raise ValueError("CH1_MARKET_POLICY_FIELDS_REQUIRE_MARKET_VERSION")
+        if is_market_policy:
             profile = self.target_market_profile
             digest = self.target_market_digest
             destination = self.destination_binding_policy.destination
@@ -561,7 +575,38 @@ class ChannelScopedPolicy(BaseModel):
                 or timing.primary_timezone != profile.primary_timezone
                 or timing.narration_locale != profile.narration_locale
             ):
-                raise ValueError("CH1_MARKET_V3_MARKET_DESTINATION_SCOPE_MISMATCH")
+                raise ValueError("CH1_MARKET_POLICY_DESTINATION_SCOPE_MISMATCH")
+        if self.policy_version == "small-team-ai.channel-policy.v3":
+            if (
+                self.voice_policy.retry_requires_new_approval is not True
+                or self.voice_policy.unavailable_behavior != "BLOCK_FOR_REVIEW"
+                or self.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval
+                is not True
+                or self.budget_policy.cost_overrun_review_required is not True
+                or self.market_package_freeze_policy.exact_package_human_approval_required
+                is not True
+                or self.market_package_freeze_policy.post_approval_integrity_required
+                is not True
+            ):
+                raise ValueError("CH1_MARKET_V3_HUMAN_GATE_POLICY_REQUIRED")
+        if self.policy_version == "small-team-ai.channel-policy.v4":
+            if (
+                self.voice_policy.retry_requires_new_approval is not False
+                or self.voice_policy.unavailable_behavior != "BLOCK_EXTERNAL_FAILURE"
+                or self.provider_usage_policy.elevenlabs.controlled_retry_requires_new_approval
+                is not False
+                or self.budget_policy.cost_overrun_review_required is not False
+                or self.market_package_freeze_policy.exact_package_human_approval_required
+                is not False
+                or self.market_package_freeze_policy.post_approval_integrity_required
+                is not False
+            ):
+                raise ValueError("CH1_MARKET_V4_AUTOMATED_EXECUTION_REQUIRED")
+            if any(
+                "human" in item.lower() or "approval" in item.lower()
+                for item in self.market_package_freeze_policy.required_preconditions
+            ):
+                raise ValueError("CH1_MARKET_V4_PRE_RENDER_HUMAN_GATE_FORBIDDEN")
         return self
 
 
@@ -645,11 +690,23 @@ class PolicySnapshotRefs(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
-    target_market_profile: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
-    target_market_digest: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
-    destination_binding: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
-    market_alignment_policy: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
-    market_package_freeze_policy: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
-    geo_evaluation_policy: PolicyRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    target_market_profile: PolicyRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    target_market_digest: PolicyRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    destination_binding: PolicyRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    market_alignment_policy: PolicyRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    market_package_freeze_policy: PolicyRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    geo_evaluation_policy: PolicyRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     model_config = ConfigDict(extra="forbid")

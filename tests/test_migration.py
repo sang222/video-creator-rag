@@ -18,7 +18,7 @@ from tests.qualification.conftest import QualificationFactory
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "0049_vcos_long_form_cadence"
+HEAD = "0052_vcos_strategic_lineage"
 
 PHASE_A_D_TABLES = {
     "editorial_research_runs",
@@ -87,7 +87,11 @@ def _launch_helpers() -> dict:
     return runpy.run_path(str(ROOT / "tests/test_long_form_launch_cadence.py"))
 
 
-def test_alembic_has_one_linear_0049_head(engine: Engine) -> None:
+def _phase3_helpers() -> dict:
+    return runpy.run_path(str(ROOT / "tests/test_phase3_production_package_v2.py"))
+
+
+def test_alembic_has_one_linear_0052_head(engine: Engine) -> None:
     script = ScriptDirectory.from_config(_alembic_config())
     assert script.get_heads() == [HEAD]
     assert _current_revision(engine) == HEAD
@@ -211,6 +215,33 @@ def test_0049_guard_refuses_cadence_authority(
         command.upgrade(_alembic_config(), "head")
 
 
+def test_0052_guard_refuses_persisted_v2_strategic_lineage(
+    engine: Engine,
+    db_session,
+) -> None:
+    """The cutover cannot erase immutable launch-derived V2 project authority."""
+
+    scope = _phase3_helpers()["_scope"](db_session)
+    db_session.commit()
+
+    assert scope.project.schema_version == "v2"
+    assert scope.project.audience_promise
+    assert scope.project.active_launch_policy_version_id is not None
+    assert scope.project.active_launch_run_id is not None
+
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="DOWNGRADE_BLOCKED_STRATEGIC_LINEAGE_EXISTS",
+        ):
+            command.downgrade(_alembic_config(), "0051_openai_luna_terra_cutover")
+        assert _current_revision(engine) == HEAD
+    finally:
+        command.upgrade(_alembic_config(), "head")
+
+    assert _current_revision(engine) == HEAD
+
+
 def test_approved_launch_policy_is_database_immutable(
     engine: Engine,
     db_session,
@@ -236,16 +267,33 @@ def test_approved_launch_policy_is_database_immutable(
             )
 
 
-def test_offline_sql_generation_reaches_0049() -> None:
+def test_offline_sql_generation_reaches_0052() -> None:
     output = io.StringIO()
     command.upgrade(_alembic_config(output_buffer=output), "head", sql=True)
     sql = output.getvalue()
 
+    assert "0052_vcos_strategic_lineage" in sql
     assert "0049_vcos_long_form_cadence" in sql
     assert "CREATE TABLE first_channel_launch_policy_versions" in sql
     assert "CREATE TABLE long_form_publish_slots" in sql
     assert "CREATE TABLE cadence_evaluation_receipts" in sql
     assert "source ~ '^LP:[0-9a-f]" in sql
+    assert "ADD COLUMN audience_promise TEXT" in sql
+    assert "ck_video_projects_v2_strategic_lineage" in sql
+
+
+def test_offline_0052_downgrade_emits_strategic_lineage_guard() -> None:
+    output = io.StringIO()
+    command.downgrade(
+        _alembic_config(output_buffer=output),
+        "0052_vcos_strategic_lineage:0051_openai_luna_terra_cutover",
+        sql=True,
+    )
+    sql = output.getvalue()
+
+    assert "DOWNGRADE_BLOCKED_STRATEGIC_LINEAGE_EXISTS" in sql
+    assert "DROP COLUMN active_launch_run_hash" in sql
+    assert "ck_video_projects_v2_strategic_lineage" in sql
 
 
 def test_offline_0049_downgrade_restores_legacy_timing_source_check() -> None:

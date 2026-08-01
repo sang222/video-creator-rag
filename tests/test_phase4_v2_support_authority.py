@@ -406,7 +406,7 @@ def test_llm_router_producer_blocks_disabled_and_invalid_without_real_call(
             selected_model="injected-no-provider",
             fallback_level="PRIMARY",
             route_attempt_id=uuid.uuid4(),
-            reason_codes=["OLLAMA_REAL_EXECUTION_DISABLED"],
+            reason_codes=["OPENAI_REAL_EXECUTION_DISABLED"],
         )
     )
     guarded = LLMRouterV2SupportProducer(

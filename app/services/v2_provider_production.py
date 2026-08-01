@@ -252,6 +252,9 @@ class PackageBoundV2StageGateway:
 
     def archive_media(self, context: WorkflowStageContext) -> WorkflowStageResult:
         result = self._execute_operation(context, ProductionWorkflowStage.ARCHIVE)
+        operation = _authorized_adapter_operation(
+            context, ProductionWorkflowStage.ARCHIVE
+        )
         refs = result.authority_refs
         if (
             refs.final_media_ref_id is None
@@ -260,13 +263,26 @@ class PackageBoundV2StageGateway:
             or refs.final_media_ref_hash != context.run.render_output_checksum
         ):
             raise ValidationFailureError("V2_PROVIDER_ARCHIVE_RESULT_INCOMPLETE")
-        _require_verified_final_media(
-            context.session,
-            context.run.video_project_id,
-            refs.final_media_ref_id,
-            expected_checksum=context.run.render_output_checksum,
-            expected_archive_hash=refs.archive_receipt_hash,
-        )
+        if operation.adapter_key == "v2-google-drive-archive":
+            from app.services.v2_drive_archive import (
+                require_v2_google_drive_final_media,
+            )
+
+            require_v2_google_drive_final_media(
+                context.session,
+                project_id=context.run.video_project_id,
+                final_media_id=refs.final_media_ref_id,
+                expected_checksum=context.run.render_output_checksum,
+                expected_archive_hash=refs.archive_receipt_hash,
+            )
+        else:
+            _require_verified_final_media(
+                context.session,
+                context.run.video_project_id,
+                refs.final_media_ref_id,
+                expected_checksum=context.run.render_output_checksum,
+                expected_archive_hash=refs.archive_receipt_hash,
+            )
         destination = _destination_authority(context)
         expected_destination = _normalized_destination(destination.content)
         if (
@@ -337,6 +353,27 @@ class PackageBoundV2StageGateway:
             or project.planning_source_type != "LONG_FORM_PLAN"
         ):
             raise ValidationFailureError("V2_PROVIDER_PROJECT_REQUIRED")
+        archive_operation = _authorized_adapter_operation(
+            context, ProductionWorkflowStage.ARCHIVE
+        )
+        if archive_operation.adapter_key == "v2-google-drive-archive":
+            from app.services.v2_drive_archive import (
+                require_v2_google_drive_final_media,
+            )
+
+            require_v2_google_drive_final_media(
+                context.session,
+                project_id=run.video_project_id,
+                final_media_id=_required_run_uuid(
+                    run.final_media_ref_id, "final_media_ref_id"
+                ),
+                expected_checksum=_required_run_hash(
+                    run.render_output_checksum, "render_output_checksum"
+                ),
+                expected_archive_hash=_required_run_hash(
+                    run.archive_receipt_hash, "archive_receipt_hash"
+                ),
+            )
         final_review = _provider_plan(context).get("final_review")
         if not isinstance(final_review, dict):
             raise ValidationFailureError("V2_PROVIDER_FINAL_REVIEW_AUTHORITY_REQUIRED")
@@ -437,18 +474,25 @@ def build_v2_provider_production_gateway(
     *,
     adapters: Mapping[str, V2ProductionOperationAdapter] | None = None,
 ) -> V2ProviderProductionGateway:
-    """Build the in-repo gateway with a substantive no-paid-call default."""
+    """Build the V2 gateway with local render and Drive-only archive stages."""
 
     configured_adapters = adapters
     if configured_adapters is None:
         # Import lazily because the adapter implements the protocol declared in
         # this module and is also usable directly with injected test storage.
+        from app.services.v2_drive_archive import (
+            V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY,
+            V2GoogleDriveArchiveAdapter,
+        )
         from app.services.v2_native_effects import (
             V2_LOCAL_ADAPTER_KEY,
             V2LocalNativeProductionAdapter,
         )
 
-        configured_adapters = {V2_LOCAL_ADAPTER_KEY: V2LocalNativeProductionAdapter()}
+        configured_adapters = {
+            V2_LOCAL_ADAPTER_KEY: V2LocalNativeProductionAdapter(),
+            V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY: V2GoogleDriveArchiveAdapter(),
+        }
     package_bound = PackageBoundV2StageGateway(configured_adapters)
     return V2ProviderProductionGateway(
         media=package_bound,
@@ -458,7 +502,7 @@ def build_v2_provider_production_gateway(
         presentation=package_bound,
         descriptor=PostReadinessProductionGatewayDescriptor(
             gateway_id="v2-provider",
-            version="1.2.0",
+            version="1.3.0",
             supported_lanes=frozenset({ProductionLane.LONG_FORM}),
             production_eligible=True,
             fixture_only=False,

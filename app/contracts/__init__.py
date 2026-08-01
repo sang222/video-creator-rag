@@ -543,6 +543,7 @@ from app.contracts.vcos_v2 import (
     AssignmentResolution,
     AssignmentResolverInput,
     ContentMode,
+    DecisionReversibility,
     DurationContractV2,
     LegacySeriesClassification,
     LongFormPlanningRequest,
@@ -558,6 +559,8 @@ from app.contracts.vcos_v2 import (
     SeriesRunRead,
     SeriesRunState,
     SeriesRunTransitionRequest,
+    StrategicIntent,
+    StrategicLineageV2,
 )
 from app.contracts.production_package import (
     ExactContentRefV2,
@@ -631,6 +634,7 @@ __all__ = [
     "AssignmentResolution",
     "AssignmentResolverInput",
     "ContentMode",
+    "DecisionReversibility",
     "DurationContractV2",
     "LegacySeriesClassification",
     "LongFormPlanningRequest",
@@ -646,6 +650,8 @@ __all__ = [
     "SeriesRunRead",
     "SeriesRunState",
     "SeriesRunTransitionRequest",
+    "StrategicIntent",
+    "StrategicLineageV2",
     "ExactContentRefV2",
     "GateRunBindingV2",
     "ProductionPackageContentV2",

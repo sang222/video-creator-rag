@@ -94,6 +94,7 @@ from app.services.launch_cadence import (
     LaunchRunwayService,
     LongFormCadenceService,
 )
+from app.services.openai_cutover import OpenAICutoverService
 from app.services.m6 import (
     AccessibilityQCService,
     AssetPlanningService,
@@ -211,7 +212,7 @@ from app.services.m12 import (
     GoogleDriveReadinessCheck,
     IntegrationDashboardReadService,
     GoogleVeoReadinessCheck,
-    OllamaReadinessCheck,
+    OpenAIReadinessCheck,
     ProviderNextActionService,
     ProviderReadinessService,
     RealSmokeOrchestratorService,
@@ -709,7 +710,8 @@ __all__ = [
     "VisualSourceRouter",
     "VisualSourceRoutingPolicyCatalog",
     "VisualSourceRoutingPreviewService",
-    "OllamaReadinessCheck",
+    "OpenAIReadinessCheck",
+    "OpenAICutoverService",
     "YouTubePublicReadinessCheck",
     "YouTubeOwnerAnalyticsReadinessCheck",
     "GoogleDriveReadinessCheck",

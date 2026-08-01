@@ -9,7 +9,7 @@ const readinessPayload = {
   snapshot_state: "BLOCKED",
   latest_snapshot_id: null,
   provider_summaries: [
-    summary("ollama", "Ollama Router", "WARNING", { base_url: "http://localhost:11434", real_execution_enabled: false }),
+    summary("openai", "OpenAI Responses Router", "WARNING", { base_url: "https://api.openai.com/v1", api_key_configured: false, real_execution_enabled: false }),
     summary("youtube-public", "YouTube Public Monitor", "BLOCKED", { api_key_configured: false, learning_authority: "WEAK" }, ["YOUTUBE_DATA_API_KEY"]),
     summary("youtube-owner", "YouTube Owner Analytics", "BLOCKED", { connected: false, learning_authority: "STRONG" }, ["YOUTUBE_OAUTH_CLIENT_SECRETS_FILE_OR_CLIENT_FIELDS"]),
     summary("google-drive", "Google Drive", "BLOCKED", { connected: false, root_folder_configured: false }, ["GOOGLE_DRIVE_ROOT_FOLDER_ID"]),
@@ -21,7 +21,7 @@ const readinessPayload = {
     check("youtube-owner", "CREDENTIAL", "BLOCKED", "YouTube owner analytics cần OAuth token")
   ],
   blocking_items: [{ provider_key: "youtube-owner" }],
-  warning_items: [{ provider_key: "ollama" }],
+  warning_items: [{ provider_key: "openai" }],
   next_actions: [],
   budget_cards: [
     {

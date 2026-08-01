@@ -36,6 +36,7 @@ from app.contracts.production_publish import (
     PUBLISH_MATERIALITY_POLICY_V1,
     UploadedVideoReadV2,
 )
+from app.contracts.vcos_v2 import StrategicLineageV2
 from app.core.actor import ActorContext, ActorType
 from app.core.errors import (
     ConflictError,
@@ -47,6 +48,7 @@ from app.core.time import utc_now
 from app.db.models.m10_1 import HumanUploadTask
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
+from app.db.models.m5 import ProjectAdmissionDecision
 from app.db.models.m6 import MediaQCReport
 from app.db.models.m7 import ManualPublishConfirmation, UploadedVideo
 from app.db.models.production_publish import (
@@ -61,11 +63,18 @@ from app.services.company_access import require_company_permission
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
 from app.services.long_form_analytics import LongFormAnalyticsScheduler
+from app.services.production_package import (
+    ProductionPackageService,
+    strategic_lineage_from_record,
+)
 
 
 PUBLISH_SERVICE_VERSION = "vcos.production-publish.v2"
 _EVENT_NAMESPACE = uuid.UUID("6b147c80-23f9-5d0c-9e1a-128d79e3455a")
 _DURATION_TOLERANCE_SECONDS = Decimal("1.000000")
+_V2_DRIVE_ARCHIVE_ADAPTER_KEY = "v2-google-drive-archive"
+_V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE = "v2_drive_final_media_lineage_receipt"
+_V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA = "vcos.v2-drive-final-media-lineage.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +97,14 @@ def canonical_json(value: Any) -> str:
 
 def stable_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _strategic_lineage_event_payload(
+    lineage: StrategicLineageV2,
+) -> dict[str, Any]:
+    """Serialize only the frozen package object for an uploaded-video event."""
+
+    return lineage.model_dump(mode="json")
 
 
 def _v2_production_root() -> Path:
@@ -140,6 +157,68 @@ def _is_sha256(value: Any) -> bool:
         isinstance(value, str)
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _has_v2_drive_render_source(
+    *,
+    cloud: CloudMediaRef,
+    final_media: FinalMediaRef,
+    expected_checksum: str,
+) -> bool:
+    required = {
+        "type": "v2_render_output",
+        "render_output_checksum": expected_checksum,
+        "production_package_artifact_version_id": str(
+            final_media.production_package_artifact_version_id
+        ),
+        "production_package_hash": final_media.production_package_hash,
+    }
+    return any(
+        isinstance(item, dict)
+        and all(item.get(key) == value for key, value in required.items())
+        for item in (cloud.source_refs or [])
+    )
+
+
+def _v2_drive_duration_matches(
+    *,
+    cloud_appendix: dict[str, Any],
+    final_media: FinalMediaRef,
+) -> bool:
+    value = cloud_appendix.get("measured_render_duration_ms")
+    if isinstance(value, bool) or final_media.duration_seconds is None:
+        return False
+    try:
+        duration_ms = int(value)
+    except (TypeError, ValueError):
+        return False
+    return (
+        duration_ms > 0
+        and str(value) == str(duration_ms)
+        and duration_ms
+        == int(
+            (Decimal(final_media.duration_seconds) * Decimal(1000)).to_integral_value()
+        )
+    )
+
+
+def _v2_drive_web_view_matches_file_id(cloud: CloudMediaRef) -> bool:
+    if not cloud.web_view_link or not cloud.drive_file_id:
+        return False
+    parsed = urlparse(cloud.web_view_link)
+    if parsed.scheme != "https" or parsed.netloc not in {
+        "drive.google.com",
+        "docs.google.com",
+    }:
+        return False
+    file_id = str(cloud.drive_file_id)
+    if file_id in parse_qs(parsed.query).get("id", []):
+        return True
+    parts = [part for part in parsed.path.split("/") if part]
+    return any(
+        part == "d" and index + 1 < len(parts) and parts[index + 1] == file_id
+        for index, part in enumerate(parts)
     )
 
 
@@ -931,6 +1010,9 @@ class ProductionPublishService:
             decision=decision,
             final_media=final_media,
         )
+        strategic_lineage = self._require_uploaded_video_strategic_lineage(
+            candidate=candidate,
+        )
         verification_evidence_hash = stable_hash(
             _verification_evidence_payload(
                 confirmation=confirmation,
@@ -1018,6 +1100,11 @@ class ProductionPublishService:
             "series_run_id": _optional_uuid(candidate.series_run_id),
             "episode_number": candidate.episode_number,
         }
+        if strategic_lineage is not None:
+            # This is intentionally projected from the sealed package only.
+            # Neither the confirmation nor the verification command carries
+            # caller-authored strategic intent.
+            event_payload["strategic_lineage"] = strategic_lineage
         self._append_event_once(
             event_id=verified_event_id,
             event_type="UPLOADED_VIDEO_VERIFIED",
@@ -1392,6 +1479,10 @@ class ProductionPublishService:
         cloud = self.session.get(CloudMediaRef, final_media.cloud_media_ref_id)
         cloud_appendix = cloud.technical_appendix if cloud is not None else {}
         parsed_file_ref = urlparse(final_media.file_ref)
+        v2_drive_archive = bool(
+            final_media.provider_key == _V2_DRIVE_ARCHIVE_ADAPTER_KEY
+            and final_media.provider_type == "MEDIA_STORAGE"
+        )
         drive_binding_valid = bool(
             cloud is not None
             and cloud.storage_provider == "GOOGLE_DRIVE"
@@ -1419,9 +1510,39 @@ class ProductionPublishService:
             or cloud.verification_status != "CHECKSUM_VERIFIED"
             or cloud.checksum_sha256 != final_media.checksum_sha256
             or not cloud.drive_file_id
-            or not (drive_binding_valid or local_binding_valid)
-            or not isinstance(cloud_appendix, dict)
-            or cloud_appendix.get("archive_receipt_hash") != data.archive_receipt_hash
+            or not (
+                drive_binding_valid
+                if v2_drive_archive
+                else (drive_binding_valid or local_binding_valid)
+            )
+            or (
+                v2_drive_archive
+                and (
+                    not isinstance(cloud_appendix, dict)
+                    or cloud_appendix.get("drive_file_id_verified") is not True
+                    or cloud_appendix.get("size_verified") is not True
+                    or cloud_appendix.get("checksum_verified") is not True
+                    or cloud.mime_type != "video/mp4"
+                    or not _v2_drive_web_view_matches_file_id(cloud)
+                    or not _v2_drive_duration_matches(
+                        cloud_appendix=cloud_appendix,
+                        final_media=final_media,
+                    )
+                    or not _has_v2_drive_render_source(
+                        cloud=cloud,
+                        final_media=final_media,
+                        expected_checksum=data.render_output_checksum,
+                    )
+                )
+            )
+            or (
+                not v2_drive_archive
+                and (
+                    not isinstance(cloud_appendix, dict)
+                    or cloud_appendix.get("archive_receipt_hash")
+                    != data.archive_receipt_hash
+                )
+            )
         ):
             raise ValidationFailureError(
                 "FINAL_REVIEW_CLOUD_MEDIA_NOT_CHECKSUM_VERIFIED"
@@ -1446,7 +1567,11 @@ class ProductionPublishService:
         lineage, lineage_artifact = lineage_row
         lineage_content = lineage.content or {}
         expected_lineage = {
-            "schema_version": "vcos.native-final-media-lineage.v2",
+            "schema_version": (
+                _V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA
+                if v2_drive_archive
+                else "vcos.native-final-media-lineage.v2"
+            ),
             "video_project_id": str(project.id),
             "production_package_artifact_version_id": str(
                 data.production_package_artifact_version_id
@@ -1461,10 +1586,27 @@ class ProductionPublishService:
             "archive_receipt_hash": data.archive_receipt_hash,
             "archive_state": "VERIFIED",
             "cloud_media_ref_id": str(cloud.id),
-            "file_ref": final_media.file_ref,
+            (
+                "archive_object_ref" if v2_drive_archive else "file_ref"
+            ): final_media.file_ref,
         }
+        if v2_drive_archive:
+            expected_lineage.update(
+                {
+                    "render_output_ref": data.render_output_ref,
+                    "measured_render_duration_ms": duration_ms,
+                    "storage_provider": "GOOGLE_DRIVE",
+                    "invokes_mr1": False,
+                    "automatic_publish": False,
+                }
+            )
         if (
-            lineage_artifact.artifact_type != "mr1_final_media_lineage_receipt"
+            lineage_artifact.artifact_type
+            != (
+                _V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE
+                if v2_drive_archive
+                else "mr1_final_media_lineage_receipt"
+            )
             or lineage_artifact.video_project_id != project.id
             or lineage_artifact.current_version_id != lineage.id
             or lineage_artifact.status != "approved"
@@ -1718,6 +1860,96 @@ class ProductionPublishService:
         ):
             raise ValidationFailureError("UPLOAD_TASK_FINAL_MEDIA_SPLICE_DETECTED")
         return candidate, decision, final_media
+
+    def _require_uploaded_video_strategic_lineage(
+        self,
+        *,
+        candidate: FinalReviewCandidate,
+    ) -> dict[str, Any] | None:
+        """Resolve the immutable strategy authority for an uploaded V2 video.
+
+        A current V2 package must carry the same frozen audience, intent, and
+        launch-policy lineage as its admitted project.  The all-absent case is
+        retained solely for immutable pre-lineage V2 artifacts; it is not a
+        compatibility escape hatch for a partial or newly-created authority.
+        """
+
+        package = ProductionPackageService(self.session).validate_for_readiness(
+            candidate.production_package_artifact_version_id
+        )
+        package_version = self.session.get(
+            ArtifactVersion,
+            candidate.production_package_artifact_version_id,
+        )
+        if (
+            package_version is None
+            or package_version.content_hash != candidate.production_package_hash
+            or package.company_id != candidate.company_id
+            or package.channel_workspace_id != candidate.channel_workspace_id
+            or package.video_project_id != candidate.video_project_id
+            or package.production_lane.value != candidate.production_lane
+        ):
+            raise ValidationFailureError(
+                "UPLOADED_VIDEO_STRATEGIC_LINEAGE_PACKAGE_SCOPE_MISMATCH"
+            )
+        if package.project_admission_decision_hash is None:
+            raise ValidationFailureError(
+                "UPLOADED_VIDEO_STRATEGIC_LINEAGE_ADMISSION_HASH_REQUIRED"
+            )
+
+        project = self.session.get(VideoProject, candidate.video_project_id)
+        if (
+            project is None
+            or project.schema_version != "v2"
+            or project.company_id != candidate.company_id
+            or project.channel_workspace_id != candidate.channel_workspace_id
+            or project.project_admission_decision_id
+            != package.project_admission_decision_id
+        ):
+            raise ValidationFailureError(
+                "UPLOADED_VIDEO_STRATEGIC_LINEAGE_PROJECT_AUTHORITY_MISMATCH"
+            )
+        admission = self.session.get(
+            ProjectAdmissionDecision,
+            package.project_admission_decision_id,
+        )
+        if (
+            admission is None
+            or admission.schema_version != "v2"
+            or admission.company_id != candidate.company_id
+            or admission.channel_workspace_id != candidate.channel_workspace_id
+            or admission.decision != "ADMIT"
+            or admission.admitted_video_project_id != project.id
+            or admission.decision_hash != package.project_admission_decision_hash
+        ):
+            raise ValidationFailureError(
+                "UPLOADED_VIDEO_STRATEGIC_LINEAGE_ADMISSION_AUTHORITY_MISMATCH"
+            )
+
+        project_lineage = strategic_lineage_from_record(
+            project,
+            invalid_reason_code="UPLOADED_VIDEO_PROJECT_STRATEGIC_LINEAGE_INVALID",
+        )
+        admission_lineage = strategic_lineage_from_record(
+            admission,
+            invalid_reason_code=("UPLOADED_VIDEO_ADMISSION_STRATEGIC_LINEAGE_INVALID"),
+        )
+        package_lineage = package.strategic_lineage
+        if (
+            package_lineage is None
+            and project_lineage is None
+            and admission_lineage is None
+        ):
+            return None
+        if (
+            package_lineage is None
+            or project_lineage is None
+            or admission_lineage is None
+        ):
+            raise ValidationFailureError("UPLOADED_VIDEO_STRATEGIC_LINEAGE_REQUIRED")
+        if package_lineage != project_lineage or package_lineage != admission_lineage:
+            raise ValidationFailureError("UPLOADED_VIDEO_STRATEGIC_LINEAGE_MISMATCH")
+        return _strategic_lineage_event_payload(package_lineage)
 
     def _confirmation_payload(
         self,

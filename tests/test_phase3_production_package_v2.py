@@ -16,6 +16,12 @@ from app.contracts.mr1 import (
     MR1StartCommand,
     MR1V2AutomatedAdmissionRequest,
 )
+from app.contracts.launch_cadence import (
+    FirstChannelLaunchPolicyCreate,
+    LaunchPolicyApproval,
+    LaunchRunCreate,
+    LaunchRunTransition,
+)
 from app.contracts.ofv0 import FormatIdentityContractDraftRequest
 from app.contracts.profile import ChannelProfileInput
 from app.contracts.production_package import (
@@ -36,6 +42,7 @@ from app.contracts.vcos_v2 import (
     LongFormPlanningRequest,
     ProductionLane,
 )
+from app.core.actor import authenticated_actor_context
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
@@ -58,6 +65,7 @@ from app.db.models.m5 import (
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
 )
+from app.db.models.launch_cadence import LaunchRun
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
 from app.db.models.workflow import VideoProject
 from app.services.channel_profile import ChannelProfileService
@@ -67,6 +75,10 @@ from app.services.config_registry import ConfigRegistryService, content_hash
 from app.services.m12_2 import _expand_script_to_word_budget
 from app.services.ofv0 import FormatIdentityContractService
 from app.services.long_production import LongProductionOrchestrator
+from app.services.launch_cadence import (
+    FirstChannelLaunchPolicyService,
+    LaunchRunService,
+)
 from app.services.m6 import LocalFixtureRendererService
 from app.services.mr1_real_production import (
     MR1ProviderGateways,
@@ -77,6 +89,7 @@ from app.services.production_package import (
     ProductionPackageService,
     ProductionReadinessService,
     REQUIRED_PRODUCTION_GATE_KEYS,
+    strategic_lineage_from_record,
 )
 from app.services.profile_compiler import ChannelProfileCompiler
 from app.services.r3d1 import R3D1AdminService
@@ -100,6 +113,32 @@ class _Phase3Scope:
     admission: ProjectAdmissionDecision
     project: VideoProject
     effective: EffectiveChannelRuntimeContextSnapshot
+    launch_run: LaunchRun
+
+    def pause_active_launch_run(self, session: Session) -> LaunchRun:
+        """Stop fixture-only cadence commands after V2 lineage is frozen."""
+
+        run = session.get(LaunchRun, self.launch_run.id)
+        assert run is not None
+        if run.state != "ACTIVE":
+            return run
+        actor = authenticated_actor_context(
+            canonical_user_id=self.operator.id,
+            operator_user_id=self.operator.id,
+            actor_role="COMPANY_ADMIN",
+            permissions=RBACService(session).permissions_for_user(
+                user_id=self.operator.id,
+                company_id=self.company.id,
+            ),
+        )
+        return LaunchRunService(session).transition(
+            launch_run_id=run.id,
+            data=LaunchRunTransition(
+                target_state="PAUSED",
+                reason_codes=["FIXTURE_LINEAGE_CAPTURED"],
+            ),
+            actor=actor,
+        )
 
 
 def _exact_duration(
@@ -245,6 +284,56 @@ def _scope(
     session.add(policy)
     session.flush()
     ChannelProfileService(session).activate_snapshot(snapshot_id=policy.id)
+    actor = authenticated_actor_context(
+        canonical_user_id=operator.id,
+        operator_user_id=operator.id,
+        actor_role="COMPANY_ADMIN",
+        permissions=RBACService(session).permissions_for_user(
+            user_id=operator.id,
+            company_id=company.id,
+        ),
+    )
+    launch_evidence = [{"type": "phase3_fixture", "ref": "launch-authority"}]
+    launch_policy = FirstChannelLaunchPolicyService(session).create(
+        data=FirstChannelLaunchPolicyCreate(
+            company_id=company.id,
+            channel_workspace_id=channel.id,
+            channel_profile_version_id=profile.id,
+            policy_snapshot_id=policy.id,
+            approved_initial_series_plan_ids=[],
+            evidence_refs=launch_evidence,
+        ),
+        actor=actor,
+    )
+    launch_policy = FirstChannelLaunchPolicyService(session).approve(
+        policy_version_id=launch_policy.id,
+        data=LaunchPolicyApproval(evidence_refs=launch_evidence),
+        actor=actor,
+    )
+    launch_run = LaunchRunService(session).create(
+        data=LaunchRunCreate(
+            launch_policy_version_id=launch_policy.id,
+            launch_key=f"phase3-{uuid.uuid4().hex[:12]}",
+            preparation_started_on=date(2026, 7, 1),
+        ),
+        actor=actor,
+    )
+    LaunchRunService(session).transition(
+        launch_run_id=launch_run.id,
+        data=LaunchRunTransition(
+            target_state="READY_TO_LAUNCH",
+            reason_codes=["PHASE3_FIXTURE_READY"],
+        ),
+        actor=actor,
+    )
+    LaunchRunService(session).transition(
+        launch_run_id=launch_run.id,
+        data=LaunchRunTransition(
+            target_state="ACTIVE",
+            reason_codes=["PHASE3_FIXTURE_ACTIVE"],
+        ),
+        actor=actor,
+    )
     category = R3D1AdminService(session).create_content_category(
         ContentCategoryCreate(
             company_id=company.id,
@@ -338,6 +427,7 @@ def _scope(
         admission=admission,
         project=project,
         effective=effective,
+        launch_run=launch_run,
     )
 
 
@@ -434,6 +524,11 @@ def _content(
         ],
         "research_coverage_ratio": float(evidence["research_coverage_ratio"]),
     }
+    strategic_lineage = strategic_lineage_from_record(
+        scope.project,
+        invalid_reason_code="TEST_PROJECT_STRATEGIC_LINEAGE_INVALID",
+    )
+    assert strategic_lineage is not None
     return ProductionPackageContentV2(
         company_id=scope.company.id,
         channel_workspace_id=scope.channel.id,
@@ -444,6 +539,7 @@ def _content(
         channel_profile_hash=scope.profile.profile_input_hash,
         compiled_policy_snapshot_id=scope.policy.id,
         compiled_policy_snapshot_hash=scope.policy.content_hash,
+        strategic_lineage=strategic_lineage,
         effective_context_ref=ExactContentRefV2(
             type="effective_context",
             ref=f"effective-context://{scope.effective.id}",

@@ -61,7 +61,7 @@ ALLOWED_QUALIFICATION_DIRTY_PREFIXES = (
     "app/services/m12.py",
     "app/services/m12_1.py",
     "app/providers/mock.py",
-    "app/providers/ollama.py",
+    "app/providers/openai.py",
     "alembic/versions/0008_m7_publish_handoff.py",
     "alembic/versions/0009_m8_analytics_sync.py",
     "alembic/versions/0010_m9_post_publish_diagnostics.py",

@@ -5,7 +5,7 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-OLLAMA_LOCAL_BASE_URL = "http://localhost:11434"
+OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1"
 VEO_DEFAULT_MODEL_ID = "veo-3.1-fast-generate-preview"
 VEO_APPROVED_MODEL_IDS = (
     "veo-3.1-generate-preview",
@@ -50,19 +50,23 @@ class Settings(BaseSettings):
             "VCOS_CORS_ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS"
         ),
     )
-    ollama_base_url: str = Field(
-        default=OLLAMA_LOCAL_BASE_URL,
-        validation_alias=AliasChoices("OLLAMA_BASE_URL", "VCOS_OLLAMA_BASE_URL"),
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "VCOS_OPENAI_API_KEY"),
     )
-    ollama_timeout_seconds: int = Field(
+    openai_base_url: str = Field(
+        default=OPENAI_RESPONSES_BASE_URL,
+        validation_alias=AliasChoices("OPENAI_BASE_URL", "VCOS_OPENAI_BASE_URL"),
+    )
+    openai_timeout_seconds: int = Field(
         default=30,
         ge=1,
         validation_alias=AliasChoices(
-            "VCOS_OLLAMA_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT_SECONDS"
+            "VCOS_OPENAI_TIMEOUT_SECONDS", "OPENAI_TIMEOUT_SECONDS"
         ),
     )
     llm_provider: str = Field(
-        default="ollama",
+        default="openai",
         validation_alias=AliasChoices("VCOS_LLM_PROVIDER", "LLM_PROVIDER"),
     )
     llm_real_execution_enabled: bool = Field(
@@ -90,10 +94,10 @@ class Settings(BaseSettings):
             "VCOS_ENABLE_REAL_LLM_PACKAGE_RUN", "ENABLE_REAL_LLM_PACKAGE_RUN"
         ),
     )
-    real_ollama_agent_run_enabled: bool = Field(
+    real_openai_agent_run_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN", "ENABLE_REAL_OLLAMA_AGENT_RUN"
+            "VCOS_ENABLE_REAL_OPENAI_AGENT_RUN", "ENABLE_REAL_OPENAI_AGENT_RUN"
         ),
     )
     media_provider_calls_disabled: bool = Field(
@@ -616,6 +620,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "elevenlabs_api_key",
+        "openai_api_key",
         "gemini_api_key",
         "pexels_api_key",
         "pixabay_api_key",
@@ -644,7 +649,7 @@ class Settings(BaseSettings):
         "auth_mode",
         "bootstrap_admin_email",
         "bootstrap_admin_role",
-        "ollama_base_url",
+        "openai_base_url",
         "llm_provider",
         "vector_provider",
         "voice_provider",
@@ -669,6 +674,13 @@ class Settings(BaseSettings):
         if value == "":
             return None
         return value
+
+    @field_validator("llm_provider")
+    @classmethod
+    def llm_provider_must_be_openai(cls, value: str | None) -> str:
+        if value is None or value.strip().lower() != "openai":
+            raise ValueError("VCOS_LLM_PROVIDER must be openai")
+        return "openai"
 
     @field_validator(
         "elevenlabs_monthly_cap_usd",
