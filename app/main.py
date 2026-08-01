@@ -17,8 +17,6 @@ from app.api.routes import (
     learning_memory,
     provider_execution_safety,
     llm_prompt_ops,
-    package_review,
-    derivative_media,
     media_provider_workflow,
     originality_review,
     native_renderer,
@@ -30,6 +28,7 @@ from app.api.routes import (
     production_publish,
     operator_cockpit,
     operator_planning,
+    launch_cadence,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -68,8 +67,6 @@ def create_app() -> FastAPI:
     _include_router_flat(application, learning_memory.create_router())
     _include_router_flat(application, provider_execution_safety.create_router())
     _include_router_flat(application, llm_prompt_ops.create_router())
-    _include_router_flat(application, package_review.create_router())
-    _include_router_flat(application, derivative_media.create_router())
     _include_router_flat(application, media_provider_workflow.create_router())
     _include_router_flat(application, originality_review.create_router())
     _include_router_flat(application, native_renderer.create_router())
@@ -81,6 +78,7 @@ def create_app() -> FastAPI:
     _include_router_flat(application, production_publish.create_router())
     _include_router_flat(application, operator_cockpit.create_router())
     _include_router_flat(application, operator_planning.create_router())
+    _include_router_flat(application, launch_cadence.create_router())
     return application
 
 

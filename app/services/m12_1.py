@@ -49,10 +49,12 @@ from app.services.r3d3 import (
 PROMPT_CONTRACT_VERSION = "m12.1.0"
 DEFAULT_TEMPLATE_VERSION = "1.0.0"
 BASE_SCHEMA_REF = "base_agent_envelope"
-MISSING_CHANNEL_NEXT_ACTION = "Bổ sung hoặc compile lại ChannelProfileVersion trước khi render prompt."
+MISSING_CHANNEL_NEXT_ACTION = (
+    "Bổ sung hoặc compile lại ChannelProfileVersion trước khi render prompt."
+)
 REQUIRED_AGENT_KEYS = [
     "ChannelAuthorityAgent",
-    "DailyIdeaAgent",
+    "EditorialIdeaResearchAgent",
     "TopicIdeaScoringAgent",
     "ResearchPackSummarizer",
     "ScriptPlanningAgent",
@@ -66,9 +68,6 @@ REQUIRED_AGENT_KEYS = [
     "EvidenceBundleSummarizer",
     "PostPublishSummaryAgent",
     "EngineeringArchitectAgent",
-    "ShortCandidateExtractor",
-    "ShortCandidateRanker",
-    "DerivativeOriginalityReviewer",
     "RecoveryProposalReviewer",
     "LocalizationSubtitleAgent",
     "LocalizedMetadataAgent",
@@ -76,7 +75,6 @@ REQUIRED_AGENT_KEYS = [
     "ProviderReadinessSummaryAgent",
     "MediaQCExplanationAgent",
     "RightsDisclosureReviewer",
-    "UploadCardCopyAgent",
     "ChannelSetupResearchAgent",
 ]
 
@@ -127,11 +125,15 @@ class PromptRegistryRepository:
 
     def load_agent_manifests(self) -> dict[str, dict[str, Any]]:
         if not self.registry_path.exists():
-            raise ValidationFailureError("M12.1 prompt registry source file is missing.")
+            raise ValidationFailureError(
+                "M12.1 prompt registry source file is missing."
+            )
         raw = yaml.safe_load(self.registry_path.read_text(encoding="utf-8")) or {}
         agents = raw.get("agents")
         if not isinstance(agents, list):
-            raise ValidationFailureError("M12.1 prompt registry must contain an agents list.")
+            raise ValidationFailureError(
+                "M12.1 prompt registry must contain an agents list."
+            )
         manifests: dict[str, dict[str, Any]] = {}
         for item in agents:
             if not isinstance(item, dict) or not item.get("agent_key"):
@@ -140,7 +142,9 @@ class PromptRegistryRepository:
             manifests[agent_key] = item
         missing = sorted(set(REQUIRED_AGENT_KEYS) - set(manifests))
         if missing:
-            raise ValidationFailureError(f"M12.1 prompt registry missing required agents: {missing}")
+            raise ValidationFailureError(
+                f"M12.1 prompt registry missing required agents: {missing}"
+            )
         return manifests
 
     def load_bundle(self, agent_key: str) -> PromptTemplateBundle:
@@ -153,9 +157,19 @@ class PromptRegistryRepository:
             f"- {item['name']}: {item['ref']} hash={item['hash']}"
             for item in common_skill_digest["payload"]["common_skill_refs"]
         ]
-        system_delta = self._resolve(manifest["system_delta_ref"]).read_text(encoding="utf-8").strip()
-        user_template = self._resolve(manifest["user_template_ref"]).read_text(encoding="utf-8").strip()
-        schema = json.loads(self._resolve(manifest["output_schema_ref"]).read_text(encoding="utf-8"))
+        system_delta = (
+            self._resolve(manifest["system_delta_ref"])
+            .read_text(encoding="utf-8")
+            .strip()
+        )
+        user_template = (
+            self._resolve(manifest["user_template_ref"])
+            .read_text(encoding="utf-8")
+            .strip()
+        )
+        schema = json.loads(
+            self._resolve(manifest["output_schema_ref"]).read_text(encoding="utf-8")
+        )
         system_prompt = "\n\n".join(
             [
                 "# VCOS Hard-Rule Header",
@@ -170,7 +184,7 @@ class PromptRegistryRepository:
                     "The top-level keys must be exactly contract_version, agent_key, status, confidence_label, "
                     "evidence_refs, limitations, next_action, operator_summary_vi, technical_appendix, and artifact. "
                     "Do not include top-level risk_level; put risk semantics inside artifact.risk_assessment only when needed. "
-                    "Use contract_version \"m12.1.0\" and the exact requested agent_key. Use uppercase enum values only."
+                    'Use contract_version "m12.1.0" and the exact requested agent_key. Use uppercase enum values only.'
                 ),
             ]
         )
@@ -194,7 +208,11 @@ class PromptRegistryRepository:
         manifests = self.load_agent_manifests()
         for manifest in manifests.values():
             if manifest.get("schema_ref") == schema_ref:
-                return json.loads(self._resolve(manifest["output_schema_ref"]).read_text(encoding="utf-8"))
+                return json.loads(
+                    self._resolve(manifest["output_schema_ref"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
         raise NotFoundError(f"prompt schema not found: {schema_ref}")
 
     def load_eval_cases(self) -> list[dict[str, Any]]:
@@ -216,7 +234,9 @@ class PromptRegistryRepository:
 
 
 class PromptRegistryService:
-    def __init__(self, session: Session, repository: PromptRegistryRepository | None = None):
+    def __init__(
+        self, session: Session, repository: PromptRegistryRepository | None = None
+    ):
         self.session = session
         self.repository = repository or PromptRegistryRepository()
 
@@ -253,12 +273,19 @@ class PromptRegistryService:
         manifest = bundle.manifest
         template_key = data.template_key or manifest["template_key"]
         template_version = data.template_version or manifest["template_version"]
-        if template_key != manifest["template_key"] or template_version != manifest["template_version"]:
-            raise NotFoundError(f"prompt template not found: {data.agent_key}/{template_key}@{template_version}")
+        if (
+            template_key != manifest["template_key"]
+            or template_version != manifest["template_version"]
+        ):
+            raise NotFoundError(
+                f"prompt template not found: {data.agent_key}/{template_key}@{template_version}"
+            )
         profile = self._profile(data.agent_key)
         router_lane = data.router_lane or profile.default_router_lane
         if router_lane not in profile.allowed_router_lanes:
-            raise ValidationFailureError(f"router lane {router_lane} is not allowed for {data.agent_key}")
+            raise ValidationFailureError(
+                f"router lane {router_lane} is not allowed for {data.agent_key}"
+            )
 
         contract_payload = self._resolve_channel_payload(data=data, profile=profile)
         context_hash = self._prompt_context_hash(
@@ -307,10 +334,14 @@ class PromptRegistryService:
                 reason_codes=["CHANNEL_CONTRACT_REQUIRED"],
             )
 
-        render_vars = self._render_vars(data=data, manifest=manifest, contract_payload=contract_payload)
+        render_vars = self._render_vars(
+            data=data, manifest=manifest, contract_payload=contract_payload
+        )
         messages = [
             PromptMessage(role="system", content=bundle.system_prompt),
-            PromptMessage(role="user", content=render_template(bundle.user_template, render_vars)),
+            PromptMessage(
+                role="user", content=render_template(bundle.user_template, render_vars)
+            ),
         ]
         rendered_messages = [message.model_dump() for message in messages]
         render_run = self._create_render_run(
@@ -327,7 +358,10 @@ class PromptRegistryService:
         )
         audit = self._create_audit_snapshot(
             render_run=render_run,
-            validation_result={"status": "NOT_RUN", "schema_ref": manifest["schema_ref"]},
+            validation_result={
+                "status": "NOT_RUN",
+                "schema_ref": manifest["schema_ref"],
+            },
             repair_attempts=[],
             provider_attempt_refs=[],
         )
@@ -347,20 +381,39 @@ class PromptRegistryService:
             reason_codes=["PROMPT_RENDERED"],
         )
 
-    def validate_output(self, data: PromptOutputValidationRequest) -> PromptOutputValidationResult:
+    def validate_output(
+        self, data: PromptOutputValidationRequest
+    ) -> PromptOutputValidationResult:
         self.sync_repo_registry()
         schema = self.repository.load_schema(data.schema_ref)
         parsed, repair_attempts = parse_json_with_safe_repair(data.raw_output)
         if parsed is None:
-            result = {"valid": False, "errors": ["Output is not parseable JSON."], "schema_ref": data.schema_ref}
-            return PromptOutputValidationResult(status="ERROR", validation_result=result, repair_attempts=repair_attempts, reason_codes=["JSON_PARSE_FAILED"])
-        wrapped, wrap_attempt = _wrap_topic_idea_artifact_only_output(parsed, expected_agent_key=data.agent_key)
+            result = {
+                "valid": False,
+                "errors": ["Output is not parseable JSON."],
+                "schema_ref": data.schema_ref,
+            }
+            return PromptOutputValidationResult(
+                status="ERROR",
+                validation_result=result,
+                repair_attempts=repair_attempts,
+                reason_codes=["JSON_PARSE_FAILED"],
+            )
+        wrapped, wrap_attempt = _wrap_topic_idea_artifact_only_output(
+            parsed, expected_agent_key=data.agent_key
+        )
         if wrap_attempt is not None:
             parsed = wrapped
             repair_attempts.append(wrap_attempt)
-        parsed, shape_attempts = repair_envelope_shape(parsed, expected_agent_key=data.agent_key, max_attempts=max(0, 2 - len(repair_attempts)))
+        parsed, shape_attempts = repair_envelope_shape(
+            parsed,
+            expected_agent_key=data.agent_key,
+            max_attempts=max(0, 2 - len(repair_attempts)),
+        )
         repair_attempts = (repair_attempts + shape_attempts)[:2]
-        validation = validate_base_envelope(parsed, schema=schema, expected_agent_key=data.agent_key)
+        validation = validate_base_envelope(
+            parsed, schema=schema, expected_agent_key=data.agent_key
+        )
         status = "OK" if validation["valid"] else "REVIEW_REQUIRED"
         if parsed.get("status") in {"BLOCK", "REFUSAL", "ERROR"}:
             status = (
@@ -384,12 +437,20 @@ class PromptRegistryService:
             parsed_output=parsed,
             validation_result=validation,
             repair_attempts=repair_attempts,
-            reason_codes=["SCHEMA_VALIDATED"] if validation["valid"] else ["SCHEMA_VALIDATION_REVIEW_REQUIRED"],
+            reason_codes=["SCHEMA_VALIDATED"]
+            if validation["valid"]
+            else ["SCHEMA_VALIDATION_REVIEW_REQUIRED"],
         )
 
     def run_evaluation_cases(self) -> list[PromptEvaluationRun]:
         self.sync_repo_registry()
-        cases = list(self.session.scalars(select(PromptEvaluationCase).where(PromptEvaluationCase.status == "ACTIVE")).all())
+        cases = list(
+            self.session.scalars(
+                select(PromptEvaluationCase).where(
+                    PromptEvaluationCase.status == "ACTIVE"
+                )
+            ).all()
+        )
         runs: list[PromptEvaluationRun] = []
         for case in cases:
             state = "SKIPPED"
@@ -406,13 +467,27 @@ class PromptRegistryService:
                     )
                     expected_status = case.expected_outcome.get("status")
                     state = "PASS" if render.status == expected_status else "FAIL"
-                    result = {"render_status": render.status, "expected_status": expected_status, "reason_codes": render.reason_codes}
+                    result = {
+                        "render_status": render.status,
+                        "expected_status": expected_status,
+                        "reason_codes": render.reason_codes,
+                    }
                 elif case.pass_criteria.get("type") == "base_envelope_schema":
-                    fixture = json.loads((self.repository.root / case.input_fixture_ref).read_text(encoding="utf-8"))
-                    validation = self.validate_output(
-                        PromptOutputValidationRequest(agent_key=case.agent_key, raw_output=fixture["raw_output"])
+                    fixture = json.loads(
+                        (self.repository.root / case.input_fixture_ref).read_text(
+                            encoding="utf-8"
+                        )
                     )
-                    state = "PASS" if validation.status == case.expected_outcome.get("status") else "FAIL"
+                    validation = self.validate_output(
+                        PromptOutputValidationRequest(
+                            agent_key=case.agent_key, raw_output=fixture["raw_output"]
+                        )
+                    )
+                    state = (
+                        "PASS"
+                        if validation.status == case.expected_outcome.get("status")
+                        else "FAIL"
+                    )
                     result = validation.validation_result
             except Exception as exc:
                 state = "ERROR"
@@ -431,35 +506,61 @@ class PromptRegistryService:
         return runs
 
     def _profile(self, agent_key: str) -> AgentPromptProfile:
-        profile = self.session.scalars(select(AgentPromptProfile).where(AgentPromptProfile.agent_key == agent_key)).one_or_none()
+        profile = self.session.scalars(
+            select(AgentPromptProfile).where(AgentPromptProfile.agent_key == agent_key)
+        ).one_or_none()
         if profile is None:
             raise NotFoundError(f"agent prompt profile not found: {agent_key}")
         return profile
 
-    def _resolve_channel_payload(self, *, data: PromptRenderRequest, profile: AgentPromptProfile) -> dict[str, Any]:
+    def _resolve_channel_payload(
+        self, *, data: PromptRenderRequest, profile: AgentPromptProfile
+    ) -> dict[str, Any]:
         channel_contract = data.channel_contract_json
         compiled_policy = data.compiled_policy_snapshot_json
         market_locale = data.market_locale_context_json
         if data.channel_profile_version_id is not None:
-            profile_version = self.session.get(ChannelProfileVersion, data.channel_profile_version_id)
+            profile_version = self.session.get(
+                ChannelProfileVersion, data.channel_profile_version_id
+            )
             if profile_version is None:
-                raise NotFoundError(f"channel profile version not found: {data.channel_profile_version_id}")
+                raise NotFoundError(
+                    f"channel profile version not found: {data.channel_profile_version_id}"
+                )
             if channel_contract is None:
-                channel_contract = build_channel_contract_from_profile(self.session, profile_version)
+                channel_contract = build_channel_contract_from_profile(
+                    self.session, profile_version
+                )
         if data.compiled_policy_snapshot_id is not None:
-            snapshot = self.session.get(CompiledChannelPolicySnapshot, data.compiled_policy_snapshot_id)
+            snapshot = self.session.get(
+                CompiledChannelPolicySnapshot, data.compiled_policy_snapshot_id
+            )
             if snapshot is None:
-                raise NotFoundError(f"compiled policy snapshot not found: {data.compiled_policy_snapshot_id}")
-            if data.channel_profile_version_id is not None and snapshot.channel_profile_version_id != data.channel_profile_version_id:
-                raise ValidationFailureError("compiled policy snapshot does not match channel profile version")
+                raise NotFoundError(
+                    f"compiled policy snapshot not found: {data.compiled_policy_snapshot_id}"
+                )
+            if (
+                data.channel_profile_version_id is not None
+                and snapshot.channel_profile_version_id
+                != data.channel_profile_version_id
+            ):
+                raise ValidationFailureError(
+                    "compiled policy snapshot does not match channel profile version"
+                )
             if compiled_policy is None:
                 compiled_policy = snapshot.compiled_payload
-            if data.channel_contract_json is None and isinstance(snapshot.compiled_payload, dict):
+            if data.channel_contract_json is None and isinstance(
+                snapshot.compiled_payload, dict
+            ):
                 frozen_contract = snapshot.compiled_payload.get("channel_contract_json")
                 if isinstance(frozen_contract, dict):
                     channel_contract = frozen_contract
         if market_locale is None and channel_contract is not None:
-            market_locale = channel_contract.get("market_locale") if isinstance(channel_contract, dict) else None
+            market_locale = (
+                channel_contract.get("market_locale")
+                if isinstance(channel_contract, dict)
+                else None
+            )
         return {
             "channel_contract_json": channel_contract,
             "compiled_policy_snapshot_json": compiled_policy,
@@ -485,18 +586,32 @@ class PromptRegistryService:
                 missing.append("channel_contract_json")
             if not contract_payload["compiled_policy_snapshot_json"]:
                 missing.append("compiled_policy_snapshot_json")
-        if profile.market_locale_context_required and not contract_payload["market_locale_context_json"]:
+        if (
+            profile.market_locale_context_required
+            and not contract_payload["market_locale_context_json"]
+        ):
             missing.append("market_locale_context_json")
         contract_status = None
         market_status = None
         if isinstance(contract_payload["channel_contract_json"], dict):
-            contract_status = contract_payload["channel_contract_json"].get("contract_status")
+            contract_status = contract_payload["channel_contract_json"].get(
+                "contract_status"
+            )
             market = contract_payload["channel_contract_json"].get("market_locale")
             if isinstance(market, dict):
                 market_status = market.get("market_locale_context_status")
-        if profile.channel_contract_required and contract_status in {"MISSING", "PARTIAL", "STALE", "CONTRADICTORY"}:
+        if profile.channel_contract_required and contract_status in {
+            "MISSING",
+            "PARTIAL",
+            "STALE",
+            "CONTRADICTORY",
+        }:
             missing.append(f"contract_status:{contract_status}")
-        if profile.market_locale_context_required and market_status in {"UNKNOWN", "PARTIAL", None}:
+        if profile.market_locale_context_required and market_status in {
+            "UNKNOWN",
+            "PARTIAL",
+            None,
+        }:
             missing.append(f"market_locale_context_status:{market_status or 'MISSING'}")
         if not missing:
             return None
@@ -506,30 +621,58 @@ class PromptRegistryService:
             status="REVIEW_REQUIRED",
             confidence_label="LOW",
             evidence_refs=[],
-            limitations=["Thiếu Channel Contract đã compile/freeze nên agent không được suy đoán cấu hình kênh."],
+            limitations=[
+                "Thiếu Channel Contract đã compile/freeze nên agent không được suy đoán cấu hình kênh."
+            ],
             next_action=MISSING_CHANNEL_NEXT_ACTION,
             operator_summary_vi="Cần bổ sung hoặc compile lại cấu hình kênh trước khi render prompt.",
             technical_appendix={"missing_or_invalid_fields": sorted(set(missing))},
             artifact=None,
         )
 
-    def _render_vars(self, *, data: PromptRenderRequest, manifest: dict[str, Any], contract_payload: dict[str, Any]) -> dict[str, str]:
-        channel_profile_version_id = str(data.channel_profile_version_id) if data.channel_profile_version_id else "null"
-        compiled_policy_snapshot_id = str(data.compiled_policy_snapshot_id) if data.compiled_policy_snapshot_id else "null"
+    def _render_vars(
+        self,
+        *,
+        data: PromptRenderRequest,
+        manifest: dict[str, Any],
+        contract_payload: dict[str, Any],
+    ) -> dict[str, str]:
+        channel_profile_version_id = (
+            str(data.channel_profile_version_id)
+            if data.channel_profile_version_id
+            else "null"
+        )
+        compiled_policy_snapshot_id = (
+            str(data.compiled_policy_snapshot_id)
+            if data.compiled_policy_snapshot_id
+            else "null"
+        )
         channel_contract_ref = {
             "channel_profile_version_id": channel_profile_version_id,
             "compiled_policy_snapshot_id": compiled_policy_snapshot_id,
-            "channel_contract_hash": sha256_text(canonical_json(contract_payload["channel_contract_json"])),
-            "contract_status": _dict(contract_payload["channel_contract_json"]).get("contract_status"),
+            "channel_contract_hash": sha256_text(
+                canonical_json(contract_payload["channel_contract_json"])
+            ),
+            "contract_status": _dict(contract_payload["channel_contract_json"]).get(
+                "contract_status"
+            ),
         }
         compiled_policy_snapshot_ref = {
             "compiled_policy_snapshot_id": compiled_policy_snapshot_id,
-            "compiled_policy_snapshot_hash": sha256_text(canonical_json(contract_payload["compiled_policy_snapshot_json"])),
+            "compiled_policy_snapshot_hash": sha256_text(
+                canonical_json(contract_payload["compiled_policy_snapshot_json"])
+            ),
         }
         market_locale_ref = {
-            "market_locale_context_hash": sha256_text(canonical_json(contract_payload["market_locale_context_json"])),
+            "market_locale_context_hash": sha256_text(
+                canonical_json(contract_payload["market_locale_context_json"])
+            ),
         }
-        agent_context_pack = data.task_payload.get("agent_context_pack") if isinstance(data.task_payload, dict) else None
+        agent_context_pack = (
+            data.task_payload.get("agent_context_pack")
+            if isinstance(data.task_payload, dict)
+            else None
+        )
         task_payload_for_render = dict(data.task_payload)
         if isinstance(agent_context_pack, dict):
             task_payload_for_render["agent_context_pack"] = {
@@ -546,7 +689,9 @@ class PromptRegistryService:
             "channel_profile_version_id": channel_profile_version_id,
             "compiled_policy_snapshot_id": compiled_policy_snapshot_id,
             "channel_contract_ref_json": canonical_json(channel_contract_ref),
-            "compiled_policy_snapshot_ref_json": canonical_json(compiled_policy_snapshot_ref),
+            "compiled_policy_snapshot_ref_json": canonical_json(
+                compiled_policy_snapshot_ref
+            ),
             "market_locale_context_ref_json": canonical_json(market_locale_ref),
             "agent_context_pack_json": canonical_json(prompt_agent_context_pack),
             "task_payload_json": canonical_json(task_payload_for_render),
@@ -564,9 +709,17 @@ class PromptRegistryService:
         router_lane: str,
         contract_payload: dict[str, Any],
     ) -> str:
-        agent_context_pack = data.task_payload.get("agent_context_pack") if isinstance(data.task_payload, dict) else None
-        if isinstance(agent_context_pack, dict) and agent_context_pack.get("context_pack_hash"):
-            common_digest = _dict(_dict(agent_context_pack.get("digests")).get("common_skill_digest"))
+        agent_context_pack = (
+            data.task_payload.get("agent_context_pack")
+            if isinstance(data.task_payload, dict)
+            else None
+        )
+        if isinstance(agent_context_pack, dict) and agent_context_pack.get(
+            "context_pack_hash"
+        ):
+            common_digest = _dict(
+                _dict(agent_context_pack.get("digests")).get("common_skill_digest")
+            )
             schema_contract_hash = stable_hash(
                 {
                     "input_contract": manifest.get("input_contract"),
@@ -626,9 +779,12 @@ class PromptRegistryService:
             channel_profile_version_id=data.channel_profile_version_id,
             compiled_policy_snapshot_id=data.compiled_policy_snapshot_id,
             channel_contract_json=contract_payload["channel_contract_json"],
-            compiled_policy_snapshot_json=contract_payload["compiled_policy_snapshot_json"],
+            compiled_policy_snapshot_json=contract_payload[
+                "compiled_policy_snapshot_json"
+            ],
             market_locale_context_json=contract_payload["market_locale_context_json"],
-            render_vars_json=render_vars or {"task_payload": data.task_payload, "render_vars": data.render_vars},
+            render_vars_json=render_vars
+            or {"task_payload": data.task_payload, "render_vars": data.render_vars},
             artifact_refs=data.artifact_refs,
             validation_status=validation_status,
         )
@@ -690,7 +846,11 @@ class PromptRegistryService:
 
     def _upsert_profile(self, bundle: PromptTemplateBundle) -> AgentPromptProfile:
         manifest = bundle.manifest
-        profile = self.session.scalars(select(AgentPromptProfile).where(AgentPromptProfile.agent_key == manifest["agent_key"])).one_or_none()
+        profile = self.session.scalars(
+            select(AgentPromptProfile).where(
+                AgentPromptProfile.agent_key == manifest["agent_key"]
+            )
+        ).one_or_none()
         values = {
             "default_router_lane": manifest["default_router_lane"],
             "allowed_router_lanes": list(manifest["allowed_router_lanes"]),
@@ -699,7 +859,9 @@ class PromptRegistryService:
             "safety_policy_refs": list(manifest["safety_policy_refs"]),
             "common_skill_refs": list(manifest["common_skill_refs"]),
             "channel_contract_required": bool(manifest["channel_contract_required"]),
-            "market_locale_context_required": bool(manifest["market_locale_context_required"]),
+            "market_locale_context_required": bool(
+                manifest["market_locale_context_required"]
+            ),
             "status": manifest["status"],
         }
         if profile is None:
@@ -716,7 +878,9 @@ class PromptRegistryService:
             select(PromptTemplateRecord)
             .where(PromptTemplateRecord.agent_key == manifest["agent_key"])
             .where(PromptTemplateRecord.template_key == manifest["template_key"])
-            .where(PromptTemplateRecord.template_version == manifest["template_version"])
+            .where(
+                PromptTemplateRecord.template_version == manifest["template_version"]
+            )
         ).one_or_none()
         values = {
             "status": manifest["status"],
@@ -742,7 +906,9 @@ class PromptRegistryService:
             select(PromptContractVersion)
             .where(PromptContractVersion.agent_key == manifest["agent_key"])
             .where(PromptContractVersion.template_key == manifest["template_key"])
-            .where(PromptContractVersion.template_version == manifest["template_version"])
+            .where(
+                PromptContractVersion.template_version == manifest["template_version"]
+            )
         ).one_or_none()
         values = {
             "input_contract": dict(manifest["input_contract"]),
@@ -768,7 +934,11 @@ class PromptRegistryService:
         count = 0
         for case_data in self.repository.load_eval_cases():
             count += 1
-            case = self.session.scalars(select(PromptEvaluationCase).where(PromptEvaluationCase.case_key == case_data["case_key"])).one_or_none()
+            case = self.session.scalars(
+                select(PromptEvaluationCase).where(
+                    PromptEvaluationCase.case_key == case_data["case_key"]
+                )
+            ).one_or_none()
             values = {
                 "agent_key": case_data["agent_key"],
                 "template_key": case_data["template_key"],
@@ -779,16 +949,22 @@ class PromptRegistryService:
                 "status": case_data.get("status", "ACTIVE"),
             }
             if case is None:
-                self.session.add(PromptEvaluationCase(case_key=case_data["case_key"], **values))
+                self.session.add(
+                    PromptEvaluationCase(case_key=case_data["case_key"], **values)
+                )
             else:
                 for key, value in values.items():
                     setattr(case, key, value)
         return count
 
 
-def build_channel_contract_from_profile(session: Session, profile_version: ChannelProfileVersion) -> dict[str, Any]:
+def build_channel_contract_from_profile(
+    session: Session, profile_version: ChannelProfileVersion
+) -> dict[str, Any]:
     channel = session.get(ChannelWorkspace, profile_version.channel_workspace_id)
-    return build_channel_contract(profile_input=profile_version.profile_input, channel=channel)
+    return build_channel_contract(
+        profile_input=profile_version.profile_input, channel=channel
+    )
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -851,10 +1027,16 @@ def prompt_context_hash(
 ) -> str:
     payload = {
         "render_vars": render_vars,
-        "channel_profile_version_id": str(channel_profile_version_id) if channel_profile_version_id else None,
-        "compiled_policy_snapshot_id": str(compiled_policy_snapshot_id) if compiled_policy_snapshot_id else None,
+        "channel_profile_version_id": str(channel_profile_version_id)
+        if channel_profile_version_id
+        else None,
+        "compiled_policy_snapshot_id": str(compiled_policy_snapshot_id)
+        if compiled_policy_snapshot_id
+        else None,
         "channel_contract_hash": sha256_text(canonical_json(channel_contract_json)),
-        "market_locale_context_hash": sha256_text(canonical_json(market_locale_context_json)),
+        "market_locale_context_hash": sha256_text(
+            canonical_json(market_locale_context_json)
+        ),
         "artifact_refs": sorted(artifact_refs, key=lambda item: canonical_json(item)),
     }
     return sha256_text(canonical_json(payload))
@@ -870,7 +1052,9 @@ def render_template(template: str, values: dict[str, str]) -> str:
     return rendered
 
 
-def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def parse_json_with_safe_repair(
+    raw_output: str | dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     if isinstance(raw_output, dict):
         return raw_output, []
     stripped = raw_output.strip()
@@ -878,7 +1062,12 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
 
     fenced = _strip_whole_json_code_fence(stripped)
     if fenced is not None:
-        candidates.append((fenced, [{"repair_type": "strip_code_fence", "semantic_change_allowed": False}]))
+        candidates.append(
+            (
+                fenced,
+                [{"repair_type": "strip_code_fence", "semantic_change_allowed": False}],
+            )
+        )
 
     sources = [stripped]
     if fenced is not None:
@@ -892,7 +1081,9 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
                         {
                             "repair_type": "extract_base_envelope_json_object",
                             "semantic_change_allowed": False,
-                            "reason_codes": ["BASE_ENVELOPE_OBJECT_EXTRACTED_FROM_TEXT"],
+                            "reason_codes": [
+                                "BASE_ENVELOPE_OBJECT_EXTRACTED_FROM_TEXT"
+                            ],
                         }
                     ],
                 )
@@ -905,7 +1096,12 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
             (candidate, []),
             (
                 _repair_stray_colon_object_property(candidate),
-                [{"repair_type": "repair_stray_colon_object_property", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_stray_colon_object_property",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_duplicate_standalone_number_after_numeric_property(candidate),
@@ -918,27 +1114,57 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
             ),
             (
                 _repair_json_smart_quote_delimiters(candidate),
-                [{"repair_type": "repair_json_smart_quote_delimiters", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_json_smart_quote_delimiters",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_json_string_replace_expression(candidate),
-                [{"repair_type": "repair_json_string_replace_expression", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_json_string_replace_expression",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_artifact_compliance_chained_properties(candidate),
-                [{"repair_type": "repair_artifact_compliance_chained_properties", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_artifact_compliance_chained_properties",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_chained_string_properties(candidate),
-                [{"repair_type": "repair_chained_string_properties", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_chained_string_properties",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_contract_version_equals_typo(candidate),
-                [{"repair_type": "repair_contract_version_equals_typo", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_contract_version_equals_typo",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_embedded_agent_key_value(candidate),
-                [{"repair_type": "repair_embedded_agent_key_value", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_embedded_agent_key_value",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_missing_evidence_refs_array_close_before_limitations(candidate),
@@ -951,15 +1177,30 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
             ),
             (
                 _repair_unquoted_percent_number_values(candidate),
-                [{"repair_type": "repair_unquoted_percent_number_values", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_unquoted_percent_number_values",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_rights_artifact_present_marker(candidate),
-                [{"repair_type": "repair_rights_artifact_present_marker", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_rights_artifact_present_marker",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
             (
                 _repair_unclosed_string_before_json_delimiter(candidate),
-                [{"repair_type": "repair_unclosed_string_before_json_delimiter", "semantic_change_allowed": False}],
+                [
+                    {
+                        "repair_type": "repair_unclosed_string_before_json_delimiter",
+                        "semantic_change_allowed": False,
+                    }
+                ],
             ),
         ]
         completed_candidate = _append_missing_json_closing_delimiters(candidate)
@@ -967,7 +1208,12 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
             candidate_variants.append(
                 (
                     completed_candidate,
-                    [{"repair_type": "append_missing_json_closing_delimiters", "semantic_change_allowed": False}],
+                    [
+                        {
+                            "repair_type": "append_missing_json_closing_delimiters",
+                            "semantic_change_allowed": False,
+                        }
+                    ],
                 )
             )
         for base_text, base_attempts in candidate_variants:
@@ -975,13 +1221,24 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
                 (base_text, None),
                 (
                     re.sub(r",\s*([}\]])", r"\1", base_text),
-                    {"repair_type": "remove_trailing_commas", "semantic_change_allowed": False},
+                    {
+                        "repair_type": "remove_trailing_commas",
+                        "semantic_change_allowed": False,
+                    },
                 ),
             ):
                 if text in seen:
                     continue
                 seen.add(text)
-                combined = attempts + (base_attempts if base_text != candidate else []) + ([extra_attempt] if extra_attempt is not None and text != base_text else [])
+                combined = (
+                    attempts
+                    + (base_attempts if base_text != candidate else [])
+                    + (
+                        [extra_attempt]
+                        if extra_attempt is not None and text != base_text
+                        else []
+                    )
+                )
                 expanded.append((text, combined[:2]))
 
     for candidate, attempts in expanded:
@@ -996,7 +1253,9 @@ def parse_json_with_safe_repair(raw_output: str | dict[str, Any]) -> tuple[dict[
 
 
 def _strip_whole_json_code_fence(value: str) -> str | None:
-    match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.IGNORECASE | re.DOTALL)
+    match = re.fullmatch(
+        r"```(?:json)?\s*(.*?)\s*```", value, flags=re.IGNORECASE | re.DOTALL
+    )
     return match.group(1).strip() if match else None
 
 
@@ -1005,7 +1264,9 @@ def _repair_json_smart_quote_delimiters(value: str) -> str:
 
 
 def _repair_json_string_replace_expression(value: str) -> str:
-    pattern = re.compile(r'("(?:(?:\\.)|[^"\\])*")\.replace\(\s*("(?:(?:\\.)|[^"\\])*")\s*,\s*("(?:(?:\\.)|[^"\\])*")\s*\)')
+    pattern = re.compile(
+        r'("(?:(?:\\.)|[^"\\])*")\.replace\(\s*("(?:(?:\\.)|[^"\\])*")\s*,\s*("(?:(?:\\.)|[^"\\])*")\s*\)'
+    )
 
     def _replace(match: re.Match[str]) -> str:
         try:
@@ -1031,8 +1292,13 @@ def _repair_contract_version_equals_typo(value: str) -> str:
 
 
 def _repair_embedded_agent_key_value(value: str) -> str:
-    agent_keys = "|".join(re.escape(agent_key) for agent_key in sorted(REQUIRED_AGENT_KEYS, key=len, reverse=True))
-    pattern = re.compile(r'("agent_key"\s*:\s*)"[^"\n{}]*:\s*"(?P<agent_key>' + agent_keys + r')"')
+    agent_keys = "|".join(
+        re.escape(agent_key)
+        for agent_key in sorted(REQUIRED_AGENT_KEYS, key=len, reverse=True)
+    )
+    pattern = re.compile(
+        r'("agent_key"\s*:\s*)"[^"\n{}]*:\s*"(?P<agent_key>' + agent_keys + r')"'
+    )
 
     def _replace(match: re.Match[str]) -> str:
         return f'{match.group(1)}"{match.group("agent_key")}"'
@@ -1041,7 +1307,9 @@ def _repair_embedded_agent_key_value(value: str) -> str:
 
 
 def _repair_artifact_compliance_chained_properties(value: str) -> str:
-    block_pattern = re.compile(r'("artifact_compliance"\s*:\s*\{)(?P<body>[^{}]*)(\})', flags=re.DOTALL)
+    block_pattern = re.compile(
+        r'("artifact_compliance"\s*:\s*\{)(?P<body>[^{}]*)(\})', flags=re.DOTALL
+    )
     chained_pattern = re.compile(
         r'"(?P<field>[A-Za-z0-9_ -]+)"\s*:\s*"(?P<label>[^"]+)"\s*:\s*"(?P<state>[^"]*)"'
     )
@@ -1057,13 +1325,15 @@ def _repair_artifact_compliance_chained_properties(value: str) -> str:
             state = json.dumps(item.group("state"), ensure_ascii=False)
             return f'"{field}_{label}":{state}'
 
-        return f'{match.group(1)}{chained_pattern.sub(_replace_chained, match.group("body"))}{match.group(3)}'
+        return f"{match.group(1)}{chained_pattern.sub(_replace_chained, match.group('body'))}{match.group(3)}"
 
     return block_pattern.sub(_repair_block, value)
 
 
 def _repair_chained_string_properties(value: str) -> str:
-    pattern = re.compile(r'"(?P<field>[A-Za-z0-9_ -]+)"\s*:\s*"(?P<label>[^"]+)"\s*:\s*"(?P<state>[^"]*)"')
+    pattern = re.compile(
+        r'"(?P<field>[A-Za-z0-9_ -]+)"\s*:\s*"(?P<label>[^"]+)"\s*:\s*"(?P<state>[^"]*)"'
+    )
 
     def _safe_key(text: str) -> str:
         key = re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
@@ -1087,7 +1357,7 @@ def _repair_missing_evidence_refs_array_close_before_limitations(value: str) -> 
 
 
 def _repair_unquoted_percent_number_values(value: str) -> str:
-    pattern = re.compile(r':\s*(?P<number>-?\d+(?:\.\d+)?)%\s*(?P<suffix>[,}\]])')
+    pattern = re.compile(r":\s*(?P<number>-?\d+(?:\.\d+)?)%\s*(?P<suffix>[,}\]])")
 
     def _replace(match: re.Match[str]) -> str:
         return f':"{match.group("number")}%"{match.group("suffix")}'
@@ -1179,7 +1449,10 @@ def _balanced_json_object_candidates(value: str) -> list[str]:
 
 
 def _looks_like_base_envelope(candidate: str) -> bool:
-    return all(token in candidate for token in ('"contract_version"', '"agent_key"', '"status"', '"artifact"'))
+    return all(
+        token in candidate
+        for token in ('"contract_version"', '"agent_key"', '"status"', '"artifact"')
+    )
 
 
 def _repair_stray_colon_object_property(value: str) -> str:
@@ -1243,7 +1516,9 @@ def _append_missing_json_closing_delimiters(value: str) -> str | None:
 def _failed_json_repair_attempts(value: str) -> list[dict[str, Any]]:
     attempts: list[dict[str, Any]] = []
     if _strip_whole_json_code_fence(value) is not None:
-        attempts.append({"repair_type": "strip_code_fence", "semantic_change_allowed": False})
+        attempts.append(
+            {"repair_type": "strip_code_fence", "semantic_change_allowed": False}
+        )
     if _balanced_json_object_candidates(value):
         attempts.append(
             {
@@ -1252,11 +1527,23 @@ def _failed_json_repair_attempts(value: str) -> list[dict[str, Any]]:
                 "reason_codes": ["BASE_ENVELOPE_OBJECT_EXTRACTED_FROM_TEXT"],
             }
         )
-    attempts.append({"repair_type": "remove_trailing_commas", "semantic_change_allowed": False})
+    attempts.append(
+        {"repair_type": "remove_trailing_commas", "semantic_change_allowed": False}
+    )
     if _repair_stray_colon_object_property(value) != value:
-        attempts.append({"repair_type": "repair_stray_colon_object_property", "semantic_change_allowed": False})
+        attempts.append(
+            {
+                "repair_type": "repair_stray_colon_object_property",
+                "semantic_change_allowed": False,
+            }
+        )
     if _repair_embedded_agent_key_value(value) != value:
-        attempts.append({"repair_type": "repair_embedded_agent_key_value", "semantic_change_allowed": False})
+        attempts.append(
+            {
+                "repair_type": "repair_embedded_agent_key_value",
+                "semantic_change_allowed": False,
+            }
+        )
     if _repair_duplicate_standalone_number_after_numeric_property(value) != value:
         attempts.append(
             {
@@ -1265,9 +1552,19 @@ def _failed_json_repair_attempts(value: str) -> list[dict[str, Any]]:
             }
         )
     if _append_missing_json_closing_delimiters(value) is not None:
-        attempts.append({"repair_type": "append_missing_json_closing_delimiters", "semantic_change_allowed": False})
+        attempts.append(
+            {
+                "repair_type": "append_missing_json_closing_delimiters",
+                "semantic_change_allowed": False,
+            }
+        )
     if _repair_unclosed_string_before_json_delimiter(value) != value:
-        attempts.append({"repair_type": "repair_unclosed_string_before_json_delimiter", "semantic_change_allowed": False})
+        attempts.append(
+            {
+                "repair_type": "repair_unclosed_string_before_json_delimiter",
+                "semantic_change_allowed": False,
+            }
+        )
     return attempts
 
 
@@ -1307,7 +1604,10 @@ def _valid_topic_idea_artifact(value: Any) -> bool:
     if "risk_level" in value:
         return False
     keys = set(value)
-    return bool(keys & TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS) and keys <= TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS
+    return (
+        bool(keys & TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS)
+        and keys <= TOPIC_IDEA_ARTIFACT_ALLOWED_KEYS
+    )
 
 
 def repair_envelope_shape(
@@ -1357,7 +1657,12 @@ def repair_envelope_shape(
 
     if repaired.get("agent_key") != expected_agent_key:
         repaired["agent_key"] = expected_agent_key
-        attempts.append({"repair_type": "normalize_envelope_agent_key", "semantic_change_allowed": False})
+        attempts.append(
+            {
+                "repair_type": "normalize_envelope_agent_key",
+                "semantic_change_allowed": False,
+            }
+        )
 
     if len(attempts) >= max_attempts:
         return repaired, attempts[:max_attempts]
@@ -1377,9 +1682,13 @@ def repair_envelope_shape(
         if appendix_value in (None, "", []):
             repaired["technical_appendix"] = {}
             metadata_shape_fields.append("technical_appendix")
-            metadata_shape_reason_codes.append("TECHNICAL_APPENDIX_EMPTY_OBJECT_DEFAULTED")
+            metadata_shape_reason_codes.append(
+                "TECHNICAL_APPENDIX_EMPTY_OBJECT_DEFAULTED"
+            )
         else:
-            repaired["technical_appendix"] = {"repaired_non_object_value": appendix_value}
+            repaired["technical_appendix"] = {
+                "repaired_non_object_value": appendix_value
+            }
             metadata_shape_fields.append("technical_appendix")
             metadata_shape_reason_codes.append("TECHNICAL_APPENDIX_OBJECT_REPAIRED")
 
@@ -1392,7 +1701,9 @@ def repair_envelope_shape(
         repaired["limitations"] = _limitation_object_to_string_list(limitations_value)
         metadata_shape_fields.append("limitations")
         metadata_shape_reason_codes.append("LIMITATIONS_OBJECT_LIST_REPAIRED")
-    elif isinstance(limitations_value, list) and any(not isinstance(item, str) for item in limitations_value):
+    elif isinstance(limitations_value, list) and any(
+        not isinstance(item, str) for item in limitations_value
+    ):
         repaired["limitations"] = [
             item if isinstance(item, str) else canonical_json(item)
             for item in limitations_value
@@ -1403,39 +1714,68 @@ def repair_envelope_shape(
 
     next_action_value = repaired.get("next_action")
     if isinstance(next_action_value, list):
-        repaired["next_action"] = "; ".join(str(item) for item in next_action_value if item not in (None, "", [])) or None
+        repaired["next_action"] = (
+            "; ".join(
+                str(item) for item in next_action_value if item not in (None, "", [])
+            )
+            or None
+        )
         metadata_shape_fields.append("next_action")
         metadata_shape_reason_codes.append("NEXT_ACTION_LIST_STRING_REPAIRED")
 
     operator_summary = repaired.get("operator_summary_vi")
-    if expected_agent_key == "ChannelAuthorityAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
-        artifact = repaired.get("artifact") if isinstance(repaired.get("artifact"), dict) else {}
+    if expected_agent_key == "ChannelAuthorityAgent" and (
+        not isinstance(operator_summary, str) or not operator_summary.strip()
+    ):
+        artifact = (
+            repaired.get("artifact")
+            if isinstance(repaired.get("artifact"), dict)
+            else {}
+        )
         summary_source = artifact.get("reason") or repaired.get("next_action")
         if isinstance(summary_source, str) and summary_source.strip():
-            repaired["operator_summary_vi"] = f"ChannelAuthorityAgent cần review: {summary_source.strip()}"
+            repaired["operator_summary_vi"] = (
+                f"ChannelAuthorityAgent cần review: {summary_source.strip()}"
+            )
             metadata_shape_fields.append("operator_summary_vi")
-            metadata_shape_reason_codes.append("CHANNEL_AUTHORITY_OPERATOR_SUMMARY_REPAIRED")
-    if expected_agent_key == "TopicIdeaScoringAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
+            metadata_shape_reason_codes.append(
+                "CHANNEL_AUTHORITY_OPERATOR_SUMMARY_REPAIRED"
+            )
+    if expected_agent_key == "TopicIdeaScoringAgent" and (
+        not isinstance(operator_summary, str) or not operator_summary.strip()
+    ):
         artifact = repaired.get("artifact")
         if _valid_topic_idea_artifact(artifact):
-            repaired["operator_summary_vi"] = "Chủ đề cần được người vận hành kiểm tra trước khi tiếp tục."
+            repaired["operator_summary_vi"] = (
+                "Chủ đề cần được người vận hành kiểm tra trước khi tiếp tục."
+            )
             metadata_shape_fields.append("operator_summary_vi")
             metadata_shape_reason_codes.append("OPERATOR_SUMMARY_VI_COMPLETED")
 
-    if expected_agent_key == "ProviderReadinessSummaryAgent" and not isinstance(repaired.get("artifact"), dict):
+    if expected_agent_key == "ProviderReadinessSummaryAgent" and not isinstance(
+        repaired.get("artifact"), dict
+    ):
         appendix = repaired.get("technical_appendix")
-        nested_artifact = appendix.get("artifact") if isinstance(appendix, dict) else None
+        nested_artifact = (
+            appendix.get("artifact") if isinstance(appendix, dict) else None
+        )
         if _valid_provider_readiness_artifact(nested_artifact):
             repaired["artifact"] = nested_artifact
             appendix.pop("artifact", None)
             metadata_shape_fields.extend(["artifact", "technical_appendix"])
-            metadata_shape_reason_codes.append("PROVIDER_READINESS_ARTIFACT_MOVED_FROM_TECHNICAL_APPENDIX")
-    if expected_agent_key == "ProviderReadinessSummaryAgent" and (not isinstance(operator_summary, str) or not operator_summary.strip()):
+            metadata_shape_reason_codes.append(
+                "PROVIDER_READINESS_ARTIFACT_MOVED_FROM_TECHNICAL_APPENDIX"
+            )
+    if expected_agent_key == "ProviderReadinessSummaryAgent" and (
+        not isinstance(operator_summary, str) or not operator_summary.strip()
+    ):
         summary = _provider_readiness_operator_summary_vi(repaired.get("artifact"))
         if summary:
             repaired["operator_summary_vi"] = summary
             metadata_shape_fields.append("operator_summary_vi")
-            metadata_shape_reason_codes.append("PROVIDER_READINESS_OPERATOR_SUMMARY_REPAIRED")
+            metadata_shape_reason_codes.append(
+                "PROVIDER_READINESS_OPERATOR_SUMMARY_REPAIRED"
+            )
 
     if repaired.get("confidence_label") == "UNKNOWN":
         repaired["confidence_label"] = "LOW"
@@ -1450,16 +1790,27 @@ def repair_envelope_shape(
         metadata_shape_fields.append("confidence_label")
         metadata_shape_reason_codes.append("CONFIDENCE_VERY_HIGH_TO_HIGH_REPAIRED")
 
-    if repaired.get("status") in {"SUCCESS", "PASS", "COMPLETE", "COMPLETED", "READY", "READY_FOR_HUMAN_REVIEW"}:
+    if repaired.get("status") in {
+        "SUCCESS",
+        "PASS",
+        "COMPLETE",
+        "COMPLETED",
+        "READY",
+        "READY_FOR_HUMAN_REVIEW",
+    }:
         original_status = repaired.get("status")
         repaired["status"] = "OK"
         metadata_shape_fields.append("status")
         if original_status in {"COMPLETE", "COMPLETED"}:
-            metadata_shape_reason_codes.append(f"STATUS_{original_status}_TO_OK_REPAIRED")
+            metadata_shape_reason_codes.append(
+                f"STATUS_{original_status}_TO_OK_REPAIRED"
+            )
         elif original_status == "READY":
             metadata_shape_reason_codes.append("STATUS_READY_TO_OK_REPAIRED")
         elif original_status == "READY_FOR_HUMAN_REVIEW":
-            metadata_shape_reason_codes.append("STATUS_READY_FOR_HUMAN_REVIEW_TO_OK_REPAIRED")
+            metadata_shape_reason_codes.append(
+                "STATUS_READY_FOR_HUMAN_REVIEW_TO_OK_REPAIRED"
+            )
         else:
             metadata_shape_reason_codes.append("STATUS_SUCCESS_TO_OK_REPAIRED")
 
@@ -1489,7 +1840,12 @@ def repair_envelope_shape(
                 repaired[key] = upper_value
                 enum_changed = True
     if enum_changed:
-        attempts.append({"repair_type": "normalize_envelope_enum_casing", "semantic_change_allowed": False})
+        attempts.append(
+            {
+                "repair_type": "normalize_envelope_enum_casing",
+                "semantic_change_allowed": False,
+            }
+        )
 
     return repaired, attempts[:max_attempts]
 
@@ -1500,11 +1856,17 @@ def _limitation_object_to_string_list(value: dict[str, Any]) -> list[str]:
         if isinstance(item, list):
             for nested in item:
                 if nested not in (None, "", []):
-                    limitations.append(f"{key}: {nested if isinstance(nested, str) else canonical_json(nested)}")
+                    limitations.append(
+                        f"{key}: {nested if isinstance(nested, str) else canonical_json(nested)}"
+                    )
             continue
         if item not in (None, "", []):
-            limitations.append(f"{key}: {item if isinstance(item, str) else canonical_json(item)}")
-    return limitations or ["ChannelAuthorityAgent returned limitations as an object; review original output audit."]
+            limitations.append(
+                f"{key}: {item if isinstance(item, str) else canonical_json(item)}"
+            )
+    return limitations or [
+        "ChannelAuthorityAgent returned limitations as an object; review original output audit."
+    ]
 
 
 def _move_top_level_risk_level(repaired: dict[str, Any]) -> dict[str, Any] | None:
@@ -1556,18 +1918,26 @@ def _provider_readiness_operator_summary_vi(value: Any) -> str | None:
     for provider_key, provider in providers.items():
         if not isinstance(provider, dict):
             continue
-        state = str(provider.get("status") or provider.get("readiness_state") or "UNKNOWN").upper()
+        state = str(
+            provider.get("status") or provider.get("readiness_state") or "UNKNOWN"
+        ).upper()
         counts[state] = counts.get(state, 0) + 1
         if state in {"BLOCK", "BLOCKED", "NOT_CONFIGURED"}:
             blocked.append(str(provider_key))
     if not counts:
         return None
-    blocked_text = ", ".join(sorted(blocked)) if blocked else "không có provider bị block"
-    counts_text = ", ".join(f"{state}={count}" for state, count in sorted(counts.items()))
+    blocked_text = (
+        ", ".join(sorted(blocked)) if blocked else "không có provider bị block"
+    )
+    counts_text = ", ".join(
+        f"{state}={count}" for state, count in sorted(counts.items())
+    )
     return f"Tóm tắt readiness provider: {counts_text}. Provider cần cấu hình trước media stage: {blocked_text}."
 
 
-def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], expected_agent_key: str) -> dict[str, Any]:
+def validate_base_envelope(
+    parsed: dict[str, Any], *, schema: dict[str, Any], expected_agent_key: str
+) -> dict[str, Any]:
     errors: list[str] = []
     missing = sorted(ENVELOPE_REQUIRED_FIELDS - set(parsed))
     unknown = sorted(set(parsed) - ENVELOPE_REQUIRED_FIELDS)
@@ -1587,11 +1957,17 @@ def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], ex
         errors.append("limitations must be a list")
     if not isinstance(parsed.get("technical_appendix"), dict):
         errors.append("technical_appendix must be an object")
-    if not isinstance(parsed.get("operator_summary_vi"), str) or not parsed.get("operator_summary_vi"):
+    if not isinstance(parsed.get("operator_summary_vi"), str) or not parsed.get(
+        "operator_summary_vi"
+    ):
         errors.append("operator_summary_vi is required")
-    if parsed.get("artifact") is not None and not isinstance(parsed.get("artifact"), dict):
+    if parsed.get("artifact") is not None and not isinstance(
+        parsed.get("artifact"), dict
+    ):
         errors.append("artifact must be an object or null")
-    if expected_agent_key == "TopicIdeaScoringAgent" and not _valid_topic_idea_artifact(parsed.get("artifact")):
+    if expected_agent_key == "TopicIdeaScoringAgent" and not _valid_topic_idea_artifact(
+        parsed.get("artifact")
+    ):
         errors.append("TopicIdeaScoringAgent artifact must be a valid object")
     return {
         "valid": not errors,
@@ -1603,11 +1979,15 @@ def validate_base_envelope(parsed: dict[str, Any], *, schema: dict[str, Any], ex
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
+    )
 
 
 def normalize_text(value: str) -> str:
-    return "\n".join(line.rstrip() for line in value.replace("\r\n", "\n").strip().split("\n"))
+    return "\n".join(
+        line.rstrip() for line in value.replace("\r\n", "\n").strip().split("\n")
+    )
 
 
 def sha256_text(value: str) -> str:

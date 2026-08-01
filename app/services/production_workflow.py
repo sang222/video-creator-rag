@@ -69,6 +69,7 @@ from app.services.production_publish import ProductionPublishService
 WORKFLOW_EVENT_TYPE = "production.workflow.stage.requested"
 WORKFLOW_EVENT_VERSION = 1
 WORKFLOW_AGGREGATE_TYPE = "production_workflow_run"
+_DURABLE_WORKER_ACTOR_ID = uuid.UUID("95428dc2-b989-5a1c-8f49-8dd64e99f00e")
 WORKFLOW_COMMAND_NAMESPACE = uuid.UUID("405e3478-32c3-5c88-b231-226757d0fd70")
 WORKFLOW_CORRELATION_PREFIX = "production-workflow"
 WORKFLOW_HANDLER_VERSION = "production-workflow.v1"
@@ -400,9 +401,7 @@ class PostReadinessProductionGatewayDescriptor:
             )
         ):
             raise ValueError("PRODUCTION_GATEWAY_VERSION_INVALID")
-        if not self.supported_lanes:
-            raise ValueError("PRODUCTION_GATEWAY_LANE_REQUIRED")
-        if not self.supported_lanes.issubset(frozenset(ProductionLane)):
+        if self.supported_lanes != frozenset({ProductionLane.LONG_FORM}):
             raise ValueError("PRODUCTION_GATEWAY_LANE_INVALID")
         if not self.production_eligible:
             raise ValueError("PRODUCTION_GATEWAY_ELIGIBILITY_REQUIRED")
@@ -482,9 +481,7 @@ class PreReadinessProductionGatewayDescriptor:
             or any(character not in safe for character in self.version)
         ):
             raise ValueError("PRE_READINESS_GATEWAY_VERSION_INVALID")
-        if not self.supported_lanes or not self.supported_lanes.issubset(
-            frozenset(ProductionLane)
-        ):
+        if self.supported_lanes != frozenset({ProductionLane.LONG_FORM}):
             raise ValueError("PRE_READINESS_GATEWAY_LANE_INVALID")
         if not self.production_eligible:
             raise ValueError("PRE_READINESS_GATEWAY_ELIGIBILITY_REQUIRED")
@@ -1654,12 +1651,43 @@ def build_default_stage_handler_registry(
         else None
     )
     handlers: list[ProductionStageHandler] = []
-    for lane in ProductionLane:
-        for stage in (
-            ProductionWorkflowStage.PLANNING,
-            ProductionWorkflowStage.PREFLIGHT,
-            ProductionWorkflowStage.ADMISSION,
+    lane = ProductionLane.LONG_FORM
+    for stage in (
+        ProductionWorkflowStage.PLANNING,
+        ProductionWorkflowStage.PREFLIGHT,
+        ProductionWorkflowStage.ADMISSION,
+    ):
+        handlers.append(
+            ExistingV2AuthorityStageHandler(
+                key=handler_key_for(lane, stage),
+                version=WORKFLOW_HANDLER_VERSION,
+                stage=stage,
+            )
+        )
+    for stage in (
+        ProductionWorkflowStage.RESEARCH,
+        ProductionWorkflowStage.PACKAGE,
+        ProductionWorkflowStage.READINESS,
+    ):
+        if (
+            pre_readiness_gateway is not None
+            and pre_descriptor is not None
+            and lane in pre_descriptor.supported_lanes
         ):
+            handlers.append(
+                GatewayBackedPreReadinessStageHandler(
+                    key=handler_key_for(lane, stage),
+                    version=(
+                        f"{WORKFLOW_HANDLER_VERSION}+"
+                        f"{pre_descriptor.gateway_id}@"
+                        f"{pre_descriptor.version}"
+                    ),
+                    stage=stage,
+                    lane=lane,
+                    gateway=pre_readiness_gateway,
+                )
+            )
+        else:
             handlers.append(
                 ExistingV2AuthorityStageHandler(
                     key=handler_key_for(lane, stage),
@@ -1667,69 +1695,38 @@ def build_default_stage_handler_registry(
                     stage=stage,
                 )
             )
-        for stage in (
-            ProductionWorkflowStage.RESEARCH,
-            ProductionWorkflowStage.PACKAGE,
-            ProductionWorkflowStage.READINESS,
+    for stage in (
+        ProductionWorkflowStage.MEDIA,
+        ProductionWorkflowStage.RENDER,
+        ProductionWorkflowStage.QC,
+        ProductionWorkflowStage.ARCHIVE,
+        ProductionWorkflowStage.FINALIZE,
+    ):
+        if (
+            post_readiness_gateway is not None
+            and descriptor is not None
+            and lane in descriptor.supported_lanes
         ):
-            if (
-                pre_readiness_gateway is not None
-                and pre_descriptor is not None
-                and lane in pre_descriptor.supported_lanes
-            ):
-                handlers.append(
-                    GatewayBackedPreReadinessStageHandler(
-                        key=handler_key_for(lane, stage),
-                        version=(
-                            f"{WORKFLOW_HANDLER_VERSION}+"
-                            f"{pre_descriptor.gateway_id}@"
-                            f"{pre_descriptor.version}"
-                        ),
-                        stage=stage,
-                        lane=lane,
-                        gateway=pre_readiness_gateway,
-                    )
+            handlers.append(
+                GatewayBackedPostReadinessStageHandler(
+                    key=handler_key_for(lane, stage),
+                    version=(
+                        f"{WORKFLOW_HANDLER_VERSION}+"
+                        f"{descriptor.gateway_id}@{descriptor.version}"
+                    ),
+                    stage=stage,
+                    lane=lane,
+                    gateway=post_readiness_gateway,
                 )
-            else:
-                handlers.append(
-                    ExistingV2AuthorityStageHandler(
-                        key=handler_key_for(lane, stage),
-                        version=WORKFLOW_HANDLER_VERSION,
-                        stage=stage,
-                    )
+            )
+        else:
+            handlers.append(
+                ExistingFinalReviewAuthorityStageHandler(
+                    key=handler_key_for(lane, stage),
+                    version=WORKFLOW_HANDLER_VERSION,
+                    stage=stage,
                 )
-        for stage in (
-            ProductionWorkflowStage.MEDIA,
-            ProductionWorkflowStage.RENDER,
-            ProductionWorkflowStage.QC,
-            ProductionWorkflowStage.ARCHIVE,
-            ProductionWorkflowStage.FINALIZE,
-        ):
-            if (
-                post_readiness_gateway is not None
-                and descriptor is not None
-                and lane in descriptor.supported_lanes
-            ):
-                handlers.append(
-                    GatewayBackedPostReadinessStageHandler(
-                        key=handler_key_for(lane, stage),
-                        version=(
-                            f"{WORKFLOW_HANDLER_VERSION}+"
-                            f"{descriptor.gateway_id}@{descriptor.version}"
-                        ),
-                        stage=stage,
-                        lane=lane,
-                        gateway=post_readiness_gateway,
-                    )
-                )
-            else:
-                handlers.append(
-                    ExistingFinalReviewAuthorityStageHandler(
-                        key=handler_key_for(lane, stage),
-                        version=WORKFLOW_HANDLER_VERSION,
-                        stage=stage,
-                    )
-                )
+            )
     return ProductionStageHandlerRegistry(handlers)
 
 
@@ -1759,6 +1756,14 @@ class ProductionWorkflowCoordinator:
             permission="production.start",
             company_id=data.company_id,
         )
+        return self._start_authorized(data=data, actor=actor)
+
+    def _start_authorized(
+        self,
+        *,
+        data: ProductionWorkflowStart,
+        actor: ActorContext,
+    ) -> ProductionWorkflowRead:
         self._validate_scope(data)
         semantic_input = _start_semantic_payload(data)
         start_input_hash = semantic_hash(semantic_input)
@@ -1801,21 +1806,10 @@ class ProductionWorkflowCoordinator:
             last_progress_at=now,
             metadata_={
                 "schema_version": "production-workflow.v1",
-                "requested_by_user_id": str(actor.actor_id),
+                "requested_by_actor_id": str(actor.actor_id),
+                "requested_by_actor_type": actor.actor_type.value,
                 "idempotency_key": data.idempotency_key,
                 "max_attempts": data.max_attempts,
-                "parent_video_project_id": (
-                    str(data.parent_video_project_id)
-                    if data.parent_video_project_id is not None
-                    else None
-                ),
-                "parent_final_media_ref_id": (
-                    str(data.parent_final_media_ref_id)
-                    if data.parent_final_media_ref_id is not None
-                    else None
-                ),
-                "canonical_media_timeline_ref": (data.canonical_media_timeline_ref),
-                "canonical_media_timeline_hash": (data.canonical_media_timeline_hash),
             },
         )
         self.session.add(run)
@@ -1844,12 +1838,56 @@ class ProductionWorkflowCoordinator:
             permission="production.start",
             company_id=company_id,
         )
+        return self._start_from_project_authorized(
+            video_project_id=video_project_id,
+            company_id=company_id,
+            data=data,
+            actor=actor,
+        )
+
+    def start_from_project_system(
+        self,
+        *,
+        video_project_id: uuid.UUID,
+        company_id: uuid.UUID,
+        data: ProductionWorkflowProjectStart,
+        actor: ActorContext,
+    ) -> ProductionWorkflowRead:
+        """Internal cadence/worker start using the allowlisted durable identity."""
+
+        if (
+            actor.actor_type != ActorType.SYSTEM_WORKER
+            or actor.actor_id != _DURABLE_WORKER_ACTOR_ID
+            or actor.actor_role != "SYSTEM_WORKER"
+            or actor.operator_user_id is not None
+            or not actor.has_permission("production.start")
+        ):
+            raise ForbiddenError("TRUSTED_DURABLE_WORKER_REQUIRED")
+        return self._start_from_project_authorized(
+            video_project_id=video_project_id,
+            company_id=company_id,
+            data=data,
+            actor=actor,
+        )
+
+    def _start_from_project_authorized(
+        self,
+        *,
+        video_project_id: uuid.UUID,
+        company_id: uuid.UUID,
+        data: ProductionWorkflowProjectStart,
+        actor: ActorContext,
+    ) -> ProductionWorkflowRead:
+        """Derive a long-form workflow identity from exact admitted authority."""
+
         project = self.session.get(VideoProject, video_project_id)
         if (
             project is None
             or project.company_id != company_id
             or getattr(project, "schema_version", "v1") != "v2"
             or project.project_admission_decision_id is None
+            or project.production_lane != ProductionLane.LONG_FORM.value
+            or project.planning_source_type != PlanningSourceType.LONG_FORM_PLAN.value
         ):
             raise NotFoundError(f"v2 video project not found: {video_project_id}")
         admission = self.session.get(
@@ -1865,16 +1903,14 @@ class ProductionWorkflowCoordinator:
             or admission.channel_workspace_id != project.channel_workspace_id
             or admission.production_lane != project.production_lane
             or admission.planning_source_type != project.planning_source_type
+            or admission.production_lane != ProductionLane.LONG_FORM.value
+            or admission.planning_source_type != PlanningSourceType.LONG_FORM_PLAN.value
         ):
             raise ValidationFailureError(
                 "WORKFLOW_PROJECT_ADMISSION_AUTHORITY_MISMATCH"
             )
-        source_type = PlanningSourceType(project.planning_source_type)
-        source_id = {
-            PlanningSourceType.DAILY_IDEA: admission.daily_idea_decision_id,
-            PlanningSourceType.LONG_FORM_PLAN: admission.editorial_calendar_slot_id,
-            PlanningSourceType.DERIVED_SHORT: admission.parent_video_project_id,
-        }[source_type]
+        source_type = PlanningSourceType.LONG_FORM_PLAN
+        source_id = admission.editorial_calendar_slot_id
         if source_id is None:
             raise ValidationFailureError("WORKFLOW_PROJECT_PLANNING_SOURCE_MISSING")
         source_hash = semantic_hash(
@@ -1885,35 +1921,15 @@ class ProductionWorkflowCoordinator:
                 "project_admission_decision_hash": admission.decision_hash,
             }
         )
-        return self.start(
+        return self._start_authorized(
             data=ProductionWorkflowStart(
                 company_id=project.company_id,
                 channel_workspace_id=project.channel_workspace_id,
-                production_lane=ProductionLane(project.production_lane),
+                production_lane=ProductionLane.LONG_FORM,
                 planning_source_type=source_type,
                 planning_source_id=source_id,
                 planning_source_hash=source_hash,
                 video_project_id=project.id,
-                parent_video_project_id=(
-                    project.parent_video_project_id
-                    if source_type == PlanningSourceType.DERIVED_SHORT
-                    else None
-                ),
-                parent_final_media_ref_id=(
-                    project.parent_final_media_ref_id
-                    if source_type == PlanningSourceType.DERIVED_SHORT
-                    else None
-                ),
-                canonical_media_timeline_ref=(
-                    project.canonical_timeline_ref
-                    if source_type == PlanningSourceType.DERIVED_SHORT
-                    else None
-                ),
-                canonical_media_timeline_hash=(
-                    project.canonical_timeline_hash
-                    if source_type == PlanningSourceType.DERIVED_SHORT
-                    else None
-                ),
                 max_attempts=data.max_attempts,
                 idempotency_key=data.idempotency_key,
             ),
@@ -1954,7 +1970,12 @@ class ProductionWorkflowCoordinator:
             raise ValidationFailureError("WORKFLOW_LIST_LIMIT_INVALID")
         statement: Select[tuple[ProductionWorkflowRun]] = select(
             ProductionWorkflowRun
-        ).where(ProductionWorkflowRun.company_id == company_id)
+        ).where(
+            ProductionWorkflowRun.company_id == company_id,
+            ProductionWorkflowRun.production_lane == ProductionLane.LONG_FORM.value,
+            ProductionWorkflowRun.planning_source_type
+            == PlanningSourceType.LONG_FORM_PLAN.value,
+        )
         if view == "active":
             statement = statement.where(
                 ProductionWorkflowRun.state.not_in(TERMINAL_WORKFLOW_STATES)
@@ -2906,6 +2927,11 @@ class ProductionWorkflowCoordinator:
         )
 
     def _validate_scope(self, data: ProductionWorkflowStart) -> None:
+        if (
+            data.production_lane != ProductionLane.LONG_FORM
+            or data.planning_source_type != PlanningSourceType.LONG_FORM_PLAN
+        ):
+            raise ValidationFailureError("WORKFLOW_LONG_FORM_SOURCE_REQUIRED")
         channel = self.session.get(ChannelWorkspace, data.channel_workspace_id)
         if channel is None or channel.company_id != data.company_id:
             raise ValidationFailureError("WORKFLOW_CHANNEL_SCOPE_MISMATCH")
@@ -2920,28 +2946,6 @@ class ProductionWorkflowCoordinator:
                 or project.planning_source_type != data.planning_source_type.value
             ):
                 raise ValidationFailureError("WORKFLOW_INITIAL_PROJECT_SCOPE_MISMATCH")
-        if data.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            parent = self.session.get(VideoProject, data.parent_video_project_id)
-            if (
-                parent is None
-                or parent.company_id != data.company_id
-                or parent.channel_workspace_id != data.channel_workspace_id
-                or getattr(parent, "schema_version", "v1") != "v2"
-                or parent.production_lane != ProductionLane.LONG_FORM.value
-            ):
-                raise ValidationFailureError(
-                    "DERIVED_WORKFLOW_PARENT_AUTHORITY_MISMATCH"
-                )
-            if data.parent_final_media_ref_id is not None:
-                media = self.session.get(FinalMediaRef, data.parent_final_media_ref_id)
-                if (
-                    media is None
-                    or media.video_project_id != parent.id
-                    or media.checksum_sha256 is None
-                ):
-                    raise ValidationFailureError(
-                        "DERIVED_WORKFLOW_PARENT_MEDIA_MISMATCH"
-                    )
 
     def _advisory_lock(self, workflow_key: str) -> None:
         lock_key = int.from_bytes(bytes.fromhex(workflow_key[:16]), "big", signed=True)
@@ -2958,7 +2962,12 @@ class ProductionWorkflowCoordinator:
     ) -> ProductionWorkflowRun:
         statement = (
             select(ProductionWorkflowRun)
-            .where(ProductionWorkflowRun.id == workflow_run_id)
+            .where(
+                ProductionWorkflowRun.id == workflow_run_id,
+                ProductionWorkflowRun.production_lane == ProductionLane.LONG_FORM.value,
+                ProductionWorkflowRun.planning_source_type
+                == PlanningSourceType.LONG_FORM_PLAN.value,
+            )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -2976,6 +2985,9 @@ class ProductionWorkflowCoordinator:
             select(ProductionWorkflowRun).where(
                 ProductionWorkflowRun.id == workflow_run_id,
                 ProductionWorkflowRun.company_id == company_id,
+                ProductionWorkflowRun.production_lane == ProductionLane.LONG_FORM.value,
+                ProductionWorkflowRun.planning_source_type
+                == PlanningSourceType.LONG_FORM_PLAN.value,
             )
         )
         if run is None:
@@ -3040,6 +3052,8 @@ class ProductionWorkflowCoordinator:
 
 
 def handler_key_for(lane: ProductionLane, stage: ProductionWorkflowStage) -> str:
+    if lane != ProductionLane.LONG_FORM:
+        raise ValueError("WORKFLOW_LANE_UNSUPPORTED")
     return f"production.{lane.value.lower()}.{stage.value.lower()}"
 
 
@@ -3092,10 +3106,6 @@ def _project_admission_lineage_matches(
         "episode_number",
         "episode_role",
         "standalone_reason_code",
-        "parent_video_project_id",
-        "parent_final_media_ref_id",
-        "canonical_timeline_ref",
-        "canonical_timeline_hash",
         "duration_contract",
     )
     return all(
@@ -3122,18 +3132,6 @@ def _project_lineage_payload(project: VideoProject) -> dict[str, Any]:
         "episode_number": project.episode_number,
         "episode_role": project.episode_role,
         "standalone_reason_code": project.standalone_reason_code,
-        "parent_video_project_id": (
-            str(project.parent_video_project_id)
-            if project.parent_video_project_id is not None
-            else None
-        ),
-        "parent_final_media_ref_id": (
-            str(project.parent_final_media_ref_id)
-            if project.parent_final_media_ref_id is not None
-            else None
-        ),
-        "canonical_timeline_ref": project.canonical_timeline_ref,
-        "canonical_timeline_hash": project.canonical_timeline_hash,
     }
 
 

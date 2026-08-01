@@ -25,7 +25,6 @@ from app.contracts.caption_voice_quality import (
     CreativeQualityGateResult,
     FinalCueTrailingHoldEvidence,
     FinalCueTrailingHoldPolicy,
-    MaximumThreshold,
     NarrationAudioAnalysis,
     NarrationPacingCorrectionPlan,
     NarrationPacingMetrics,
@@ -60,10 +59,43 @@ ALLOWED_DISPLAY_TRANSFORMS = {
     "MINOR_PUNCTUATION_SIMPLIFICATION",
 }
 PREPOSITIONS = {
-    "about", "above", "across", "after", "against", "along", "among", "around", "at",
-    "before", "behind", "below", "beneath", "beside", "between", "beyond", "by", "during",
-    "for", "from", "in", "inside", "into", "near", "of", "on", "onto", "over", "through",
-    "to", "toward", "under", "until", "up", "with", "within", "without",
+    "about",
+    "above",
+    "across",
+    "after",
+    "against",
+    "along",
+    "among",
+    "around",
+    "at",
+    "before",
+    "behind",
+    "below",
+    "beneath",
+    "beside",
+    "between",
+    "beyond",
+    "by",
+    "during",
+    "for",
+    "from",
+    "in",
+    "inside",
+    "into",
+    "near",
+    "of",
+    "on",
+    "onto",
+    "over",
+    "through",
+    "to",
+    "toward",
+    "under",
+    "until",
+    "up",
+    "with",
+    "within",
+    "without",
 }
 _WORD_KEY_RE = re.compile(r"[^a-z0-9]")
 _BBOX_RE = re.compile(
@@ -98,11 +130,15 @@ def _coerce_policy(policy: Any, *, family: str, model: type[Any]) -> Any:
 
 
 def _narration_policy(policy: Any) -> NarrationPacingPolicy:
-    return _coerce_policy(policy, family="narration_pacing_policy", model=NarrationPacingPolicy)
+    return _coerce_policy(
+        policy, family="narration_pacing_policy", model=NarrationPacingPolicy
+    )
 
 
 def _caption_style_policy(policy: Any) -> CaptionStylePolicy:
-    return _coerce_policy(policy, family="caption_style_policy", model=CaptionStylePolicy)
+    return _coerce_policy(
+        policy, family="caption_style_policy", model=CaptionStylePolicy
+    )
 
 
 def _caption_sync_policy(policy: Any) -> CaptionSyncPolicy:
@@ -143,7 +179,9 @@ def _percentile(values: Sequence[float | int], percentile: float) -> float:
     return round(ordered[rank], 3)
 
 
-def _union_duration(spans: Iterable[tuple[int, int]], *, start_ms: int, end_ms: int) -> int:
+def _union_duration(
+    spans: Iterable[tuple[int, int]], *, start_ms: int, end_ms: int
+) -> int:
     clipped = sorted(
         (max(start_ms, start), min(end_ms, end))
         for start, end in spans
@@ -209,11 +247,16 @@ class NarrationPacingAnalyzer:
             or alignment.audio_duration_ms != audio_analysis.audio_duration_ms
         ):
             raise ValueError("PACING_AUDIO_EVIDENCE_MISMATCH")
-        words = sorted(alignment.verified_words, key=lambda item: (item.start_ms, item.end_ms, item.word_id))
+        words = sorted(
+            alignment.verified_words,
+            key=lambda item: (item.start_ms, item.end_ms, item.word_id),
+        )
         if not words:
             raise ValueError("PACING_VERIFIED_WORDS_REQUIRED")
         token_by_id = {token.token_id: token for token in normalized.spoken_tokens}
-        token_ids = [token_id for word in words for token_id in word.source_spoken_token_ids]
+        token_ids = [
+            token_id for word in words for token_id in word.source_spoken_token_ids
+        ]
         if len(token_ids) != len(set(token_ids)) or set(token_ids) != set(token_by_id):
             raise ValueError("PACING_WORD_COUNT_EVIDENCE_INVALID")
 
@@ -232,7 +275,9 @@ class NarrationPacingAnalyzer:
             if span.duration_ms > threshold
         ]
         duration_ms = alignment.audio_duration_ms
-        active_ms = max(1, duration_ms - _union_duration(excluded, start_ms=0, end_ms=duration_ms))
+        active_ms = max(
+            1, duration_ms - _union_duration(excluded, start_ms=0, end_ms=duration_ms)
+        )
         hook_end = min(policy.hook_window_ms, duration_ms)
         hook_words = [word for word in words if word.start_ms < hook_end]
         hook_active_ms = max(
@@ -255,7 +300,9 @@ class NarrationPacingAnalyzer:
             hook_active_speech_duration_ms=hook_active_ms,
             active_speech_wpm=round(word_count * 60_000 / active_ms, 3),
             delivered_wpm=round(word_count * 60_000 / duration_ms, 3),
-            hook_first_8s_active_wpm=round(len(hook_token_ids) * 60_000 / hook_active_ms, 3),
+            hook_first_8s_active_wpm=round(
+                len(hook_token_ids) * 60_000 / hook_active_ms, 3
+            ),
             comma_pause_ms_median=_median(pause_values["COMMA"]),
             sentence_pause_ms_median=_median(pause_values["SENTENCE"]),
             section_pause_ms_median=_median(pause_values["SECTION"]),
@@ -268,7 +315,9 @@ class NarrationPacingAnalyzer:
             "spoken_text_hash": normalized.spoken_text_hash,
             "verified_alignment_ref": f"verified-alignment:{alignment.content_hash}",
             "metrics": metrics.model_dump(mode="json"),
-            "detected_pause_spans": [item.model_dump(mode="json") for item in word_gaps],
+            "detected_pause_spans": [
+                item.model_dump(mode="json") for item in word_gaps
+            ],
             "waveform_summary": audio_analysis.waveform_summary,
             "word_count_evidence": [
                 {
@@ -294,7 +343,9 @@ class NarrationPacingAnalyzer:
         sections: set[str],
         audio_silences: Sequence[PauseSpan],
     ) -> list[PauseSpan]:
-        words = sorted(alignment.verified_words, key=lambda item: (item.start_ms, item.end_ms))
+        words = sorted(
+            alignment.verified_words, key=lambda item: (item.start_ms, item.end_ms)
+        )
         tokens = {item.token_id: item for item in normalized.spoken_tokens}
         spans: list[PauseSpan] = []
         if words[0].start_ms > 0:
@@ -358,8 +409,12 @@ class NarrationPacingAnalyzer:
         return spans
 
     @staticmethod
-    def _overlaps_audio_silence(start_ms: int, end_ms: int, spans: Sequence[PauseSpan]) -> bool:
-        return any(min(end_ms, span.end_ms) > max(start_ms, span.start_ms) for span in spans)
+    def _overlaps_audio_silence(
+        start_ms: int, end_ms: int, spans: Sequence[PauseSpan]
+    ) -> bool:
+        return any(
+            min(end_ms, span.end_ms) > max(start_ms, span.start_ms) for span in spans
+        )
 
 
 class NarrationPacingGate:
@@ -373,24 +428,49 @@ class NarrationPacingGate:
         reasons: list[str] = []
         metrics = report.metrics
         for value, threshold, fast_reason in (
-            (metrics.active_speech_wpm, policy.body_active_speech_wpm, "PACE_ACTIVE_TOO_FAST"),
-            (metrics.delivered_wpm, policy.body_delivered_wpm, "PACE_DELIVERED_TOO_FAST"),
+            (
+                metrics.active_speech_wpm,
+                policy.body_active_speech_wpm,
+                "PACE_ACTIVE_TOO_FAST",
+            ),
+            (
+                metrics.delivered_wpm,
+                policy.body_delivered_wpm,
+                "PACE_DELIVERED_TOO_FAST",
+            ),
         ):
             status, reason = self._wpm_status(value, threshold, fast_reason)
             statuses.append(status)
             reasons.extend(reason)
         hook_status = "PASS"
-        if metrics.hook_first_8s_active_wpm > policy.hook_first_8s_active_wpm.block_above:
+        if (
+            metrics.hook_first_8s_active_wpm
+            > policy.hook_first_8s_active_wpm.block_above
+        ):
             hook_status = "BLOCK"
             reasons.append("PACE_HOOK_TOO_FAST")
-        elif metrics.hook_first_8s_active_wpm > policy.hook_first_8s_active_wpm.pass_max:
+        elif (
+            metrics.hook_first_8s_active_wpm > policy.hook_first_8s_active_wpm.pass_max
+        ):
             hook_status = "REVIEW_REQUIRED"
             reasons.append("PACE_HOOK_TOO_FAST")
         statuses.append(hook_status)
         for value, threshold, reason in (
-            (metrics.comma_pause_ms_median, policy.comma_pause_ms, "PACE_COMMA_PAUSE_SHORT"),
-            (metrics.sentence_pause_ms_median, policy.sentence_pause_ms, "PACE_SENTENCE_PAUSE_SHORT"),
-            (metrics.section_pause_ms_median, policy.section_pause_ms, "PACE_SECTION_PAUSE_SHORT"),
+            (
+                metrics.comma_pause_ms_median,
+                policy.comma_pause_ms,
+                "PACE_COMMA_PAUSE_SHORT",
+            ),
+            (
+                metrics.sentence_pause_ms_median,
+                policy.sentence_pause_ms,
+                "PACE_SENTENCE_PAUSE_SHORT",
+            ),
+            (
+                metrics.section_pause_ms_median,
+                policy.section_pause_ms,
+                "PACE_SECTION_PAUSE_SHORT",
+            ),
         ):
             if value is None:
                 continue
@@ -411,10 +491,15 @@ class NarrationPacingGate:
         )
 
     @staticmethod
-    def _wpm_status(value: float, threshold: ThresholdBand, fast_reason: str) -> tuple[str, list[str]]:
+    def _wpm_status(
+        value: float, threshold: ThresholdBand, fast_reason: str
+    ) -> tuple[str, list[str]]:
         if threshold.block_above is not None and value > threshold.block_above:
             return "BLOCK", [fast_reason]
-        if threshold.extreme_slow_block_below is not None and value < threshold.extreme_slow_block_below:
+        if (
+            threshold.extreme_slow_block_below is not None
+            and value < threshold.extreme_slow_block_below
+        ):
             return "BLOCK", ["PACE_EXTREME_SLOW"]
         if threshold.pass_range[0] <= value <= threshold.pass_range[1]:
             return "PASS", []
@@ -462,7 +547,9 @@ class NarrationPacingCorrectionPlanner:
         if pacing_gate.gate != "NarrationPacingGate":
             raise ValueError("PACING_GATE_EVIDENCE_REQUIRED")
         reasons = set(pacing_gate.reason_codes)
-        pause_or_text_repair = text_density_excessive or bool(reasons & self._SCRIPT_REPAIR_REASONS)
+        pause_or_text_repair = text_density_excessive or bool(
+            reasons & self._SCRIPT_REPAIR_REASONS
+        )
 
         if emergency_atempo_delta_percent is not None:
             delta = abs(float(emergency_atempo_delta_percent))
@@ -484,7 +571,10 @@ class NarrationPacingCorrectionPlanner:
                     policy=policy,
                     pacing_gate=pacing_gate,
                     action="SCRIPT_PACING_REWRITE_REQUIRED",
-                    reason_codes=["SCRIPT_PACING_REWRITE_REQUIRED", "ATEMPO_CANNOT_HIDE_SCRIPT_DEFECT"],
+                    reason_codes=[
+                        "SCRIPT_PACING_REWRITE_REQUIRED",
+                        "ATEMPO_CANNOT_HIDE_SCRIPT_DEFECT",
+                    ],
                     recommendation="Repair text density, punctuation, and pause structure; generate and remeasure one complete narration.",
                 )
             if delta > block_above:
@@ -492,7 +582,10 @@ class NarrationPacingCorrectionPlanner:
                     policy=policy,
                     pacing_gate=pacing_gate,
                     action="SCRIPT_PACING_REWRITE_REQUIRED",
-                    reason_codes=["SCRIPT_PACING_REWRITE_REQUIRED", "ATEMPO_DELTA_ABOVE_POLICY"],
+                    reason_codes=[
+                        "SCRIPT_PACING_REWRITE_REQUIRED",
+                        "ATEMPO_DELTA_ABOVE_POLICY",
+                    ],
                     recommendation="Do not time-stretch; repair the script or regenerate narration, then remeasure final audio.",
                     emergency_atempo_delta_percent=delta,
                 )
@@ -543,7 +636,10 @@ class NarrationPacingCorrectionPlanner:
                     policy=policy,
                     pacing_gate=pacing_gate,
                     action="ONE_CONTROLLED_SPEED_REGENERATION",
-                    reason_codes=["ONE_CONTROLLED_SPEED_REGENERATION_ALLOWED", *sorted(reasons)],
+                    reason_codes=[
+                        "ONE_CONTROLLED_SPEED_REGENERATION_ALLOWED",
+                        *sorted(reasons),
+                    ],
                     recommendation="Use the model speed control for one modestly slower regeneration, then rerun alignment and pacing gates.",
                     provider_regeneration_authorized=True,
                     provider_speed_regeneration_count=1,
@@ -596,7 +692,9 @@ class NarrationPacingCorrectionPlanner:
             "policy_version": policy.policy_version,
             "policy_hash": _resolved_policy_hash(policy),
         }
-        return NarrationPacingCorrectionPlan(**payload, content_hash=stable_hash(payload))
+        return NarrationPacingCorrectionPlan(
+            **payload, content_hash=stable_hash(payload)
+        )
 
 
 @dataclass(frozen=True)
@@ -622,7 +720,9 @@ class ReadableCaptionCompiler:
         alignment: VerifiedNarrationAlignment,
         timeline: CanonicalMediaTimeline,
         policy: CaptionStylePolicy | dict[str, Any],
-        final_cue_trailing_hold_policy: FinalCueTrailingHoldPolicy | dict[str, Any] | None = None,
+        final_cue_trailing_hold_policy: FinalCueTrailingHoldPolicy
+        | dict[str, Any]
+        | None = None,
         display_caption_text: DisplayCaptionText | None = None,
         aspect_ratio: str = "16:9",
     ) -> CaptionCompilationOutput:
@@ -636,9 +736,15 @@ class ReadableCaptionCompiler:
             raise ValueError("CAPTION_VERIFIED_ALIGNMENT_REQUIRED")
         if alignment.spoken_text_hash != normalized.spoken_text_hash:
             raise ValueError("CAPTION_SPOKEN_TEXT_MISMATCH")
-        if timeline.audio_asset_id != alignment.audio_asset_ref or timeline.audio_duration_ms != alignment.audio_duration_ms:
+        if (
+            timeline.audio_asset_id != alignment.audio_asset_ref
+            or timeline.audio_duration_ms != alignment.audio_duration_ms
+        ):
             raise ValueError("CAPTION_TIMELINE_AUDIO_MISMATCH")
-        if display_caption_text and display_caption_text.spoken_text_hash != normalized.spoken_text_hash:
+        if (
+            display_caption_text
+            and display_caption_text.spoken_text_hash != normalized.spoken_text_hash
+        ):
             raise ValueError("CAPTION_DISPLAY_SPOKEN_HASH_MISMATCH")
 
         format_policy = self._format_policy(policy, aspect_ratio)
@@ -687,11 +793,15 @@ class ReadableCaptionCompiler:
             segment_cues: list[CanonicalCaptionCue] = []
             for batch in batches:
                 lines = self._wrap_lines(batch, format_policy)
-                spoken_ids = [token_id for unit in batch for token_id in unit.spoken_token_ids]
+                spoken_ids = [
+                    token_id for unit in batch for token_id in unit.spoken_token_ids
+                ]
                 start_ms = word_by_token[spoken_ids[0]].start_ms
                 end_ms = word_by_token[spoken_ids[-1]].end_ms
                 visible = " ".join(lines)
-                display_span = CaptionTextSpan(start=display_cursor, end=display_cursor + len(visible))
+                display_span = CaptionTextSpan(
+                    start=display_cursor, end=display_cursor + len(visible)
+                )
                 display_cursor = display_span.end + 1
                 duration_seconds = (end_ms - start_ms) / 1000
                 reading = CaptionReadingMetrics(
@@ -710,13 +820,17 @@ class ReadableCaptionCompiler:
                     "caption_end_ms": end_ms,
                     "caption_lines": lines,
                     "spoken_token_ids": spoken_ids,
-                    "display_tokens": [unit.display_token.model_dump(mode="json") for unit in batch],
+                    "display_tokens": [
+                        unit.display_token.model_dump(mode="json") for unit in batch
+                    ],
                     "reading_metrics": reading.model_dump(mode="json"),
                     "bbox_metrics": None,
                     "gate_results": [],
                     "timing_source": "CANONICAL_MEDIA_TIMELINE",
                 }
-                cue = CanonicalCaptionCue(**cue_payload, content_hash=stable_hash(cue_payload))
+                cue = CanonicalCaptionCue(
+                    **cue_payload, content_hash=stable_hash(cue_payload)
+                )
                 cues.append(cue)
                 segment_cues.append(cue)
             updated_segments.append(
@@ -725,16 +839,28 @@ class ReadableCaptionCompiler:
                         "display_span": TextSpan(
                             start=segment_cues[0].display_span.start,
                             end=segment_cues[-1].display_span.end,
-                        ) if segment_cues else segment.display_span,
-                        "caption_start_ms": segment_cues[0].caption_start_ms if segment_cues else None,
-                        "caption_end_ms": segment_cues[-1].caption_end_ms if segment_cues else None,
-                        "caption_lines": [line for cue in segment_cues for line in cue.caption_lines],
+                        )
+                        if segment_cues
+                        else segment.display_span,
+                        "caption_start_ms": segment_cues[0].caption_start_ms
+                        if segment_cues
+                        else None,
+                        "caption_end_ms": segment_cues[-1].caption_end_ms
+                        if segment_cues
+                        else None,
+                        "caption_lines": [
+                            line for cue in segment_cues for line in cue.caption_lines
+                        ],
                         "caption_cues": segment_cues,
                         "caption_cue_ids": [cue.cue_id for cue in segment_cues],
                         "caption_spoken_token_ids": [
-                            token_id for cue in segment_cues for token_id in cue.spoken_token_ids
+                            token_id
+                            for cue in segment_cues
+                            for token_id in cue.spoken_token_ids
                         ],
-                        "caption_reading_metrics": [cue.reading_metrics for cue in segment_cues],
+                        "caption_reading_metrics": [
+                            cue.reading_metrics for cue in segment_cues
+                        ],
                         "caption_bbox_metrics": [],
                         "caption_gate_results": [],
                     }
@@ -742,13 +868,15 @@ class ReadableCaptionCompiler:
             )
         trailing_hold_evidence: FinalCueTrailingHoldEvidence | None = None
         if trailing_hold_policy is not None:
-            cues, updated_segments, trailing_hold_evidence = self._apply_final_cue_trailing_hold(
-                cues=cues,
-                updated_segments=updated_segments,
-                normalized=normalized,
-                alignment=alignment,
-                source_timeline=timeline,
-                policy=trailing_hold_policy,
+            cues, updated_segments, trailing_hold_evidence = (
+                self._apply_final_cue_trailing_hold(
+                    cues=cues,
+                    updated_segments=updated_segments,
+                    normalized=normalized,
+                    alignment=alignment,
+                    source_timeline=timeline,
+                    policy=trailing_hold_policy,
+                )
             )
         compilation_gate = CaptionCompilationGate().evaluate(
             cues=cues,
@@ -773,7 +901,9 @@ class ReadableCaptionCompiler:
         compilation_hash = stable_hash(caption_compilation_payload)
         render_payload_hash = stable_hash(caption_render_payload(cues))
         timeline_payload = timeline.model_dump(mode="json", exclude={"timeline_hash"})
-        timeline_payload["segments"] = [item.model_dump(mode="json") for item in updated_segments]
+        timeline_payload["segments"] = [
+            item.model_dump(mode="json") for item in updated_segments
+        ]
         timeline_payload["qc_metrics"] = {
             **timeline.qc_metrics,
             "caption_compilation_ref": f"caption-compilation:{compilation_hash}",
@@ -794,7 +924,10 @@ class ReadableCaptionCompiler:
             ),
         }
         compilation_warnings = list(timeline_payload["compilation_warnings"])
-        if trailing_hold_evidence is not None and trailing_hold_evidence.status == "APPLIED":
+        if (
+            trailing_hold_evidence is not None
+            and trailing_hold_evidence.status == "APPLIED"
+        ):
             compilation_warnings.append(trailing_hold_evidence.reason_code)
         timeline_payload["compilation_warnings"] = sorted(set(compilation_warnings))
         compiled_timeline = CanonicalMediaTimeline(
@@ -849,7 +982,12 @@ class ReadableCaptionCompiler:
         list[CanonicalTimelineSegment],
         FinalCueTrailingHoldEvidence,
     ]:
-        if not cues or not updated_segments or not normalized.spoken_tokens or not alignment.verified_words:
+        if (
+            not cues
+            or not updated_segments
+            or not normalized.spoken_tokens
+            or not alignment.verified_words
+        ):
             raise ValueError("CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID")
         final_segment = updated_segments[-1]
         final_source_segment = source_timeline.segments[-1]
@@ -907,7 +1045,9 @@ class ReadableCaptionCompiler:
                     update={
                         "caption_end_ms": target_ms,
                         "caption_cues": segment_cues,
-                        "caption_reading_metrics": [cue.reading_metrics for cue in segment_cues],
+                        "caption_reading_metrics": [
+                            cue.reading_metrics for cue in segment_cues
+                        ],
                     }
                 ),
             ]
@@ -940,12 +1080,12 @@ class ReadableCaptionCompiler:
         return cues, updated_segments, evidence
 
     @staticmethod
-    def _format_policy(policy: CaptionStylePolicy, aspect_ratio: str) -> CaptionFormatPolicy:
+    def _format_policy(
+        policy: CaptionStylePolicy, aspect_ratio: str
+    ) -> CaptionFormatPolicy:
         normalized = aspect_ratio.replace(" ", "")
         if normalized in {"16:9", "longform_16_9", "LANDSCAPE"}:
             return policy.longform_16_9
-        if normalized in {"9:16", "shorts_9_16", "PORTRAIT"}:
-            return policy.shorts_9_16
         raise ValueError("CAPTION_ASPECT_RATIO_UNSUPPORTED")
 
     @staticmethod
@@ -964,20 +1104,32 @@ class ReadableCaptionCompiler:
                 for index, token in enumerate(normalized.spoken_tokens, start=1)
             ]
         else:
-            display_tokens = [CaptionDisplayToken.model_validate(item.model_dump()) for item in display.tokens]
-        positions = {token.token_id: index for index, token in enumerate(normalized.spoken_tokens)}
+            display_tokens = [
+                CaptionDisplayToken.model_validate(item.model_dump())
+                for item in display.tokens
+            ]
+        positions = {
+            token.token_id: index
+            for index, token in enumerate(normalized.spoken_tokens)
+        }
         units: list[_DisplayUnit] = []
         last_position = -1
         for index, token in enumerate(display_tokens):
             if any(token_id not in spoken_by_id for token_id in token.spoken_token_ids):
                 raise ValueError("CAPTION_DISPLAY_TOKEN_REF_UNKNOWN")
-            token_positions = [positions[token_id] for token_id in token.spoken_token_ids]
-            if token_positions != list(range(token_positions[0], token_positions[-1] + 1)):
+            token_positions = [
+                positions[token_id] for token_id in token.spoken_token_ids
+            ]
+            if token_positions != list(
+                range(token_positions[0], token_positions[-1] + 1)
+            ):
                 raise ValueError("CAPTION_DISPLAY_TOKEN_REF_NONCONTIGUOUS")
             if token_positions[0] <= last_position:
                 raise ValueError("CAPTION_DISPLAY_TOKEN_ORDER_INVALID")
             last_position = token_positions[-1]
-            spoken_text = " ".join(spoken_by_id[token_id].text for token_id in token.spoken_token_ids)
+            spoken_text = " ".join(
+                spoken_by_id[token_id].text for token_id in token.spoken_token_ids
+            )
             if token.transform_reason_code:
                 if token.transform_reason_code not in ALLOWED_DISPLAY_TRANSFORMS:
                     raise ValueError("CAPTION_DISPLAY_TRANSFORM_NOT_ALLOWED")
@@ -989,7 +1141,7 @@ class ReadableCaptionCompiler:
                 next_start = spoken_by_id[next_first_id].spoken_span.start
             else:
                 next_start = len(normalized.spoken_text)
-            separator = normalized.spoken_text[last_spoken.spoken_span.end:next_start]
+            separator = normalized.spoken_text[last_spoken.spoken_span.end : next_start]
             punctuation = "".join(re.findall(r"[,.!?;:%…]+", separator))
             units.append(
                 _DisplayUnit(
@@ -1013,7 +1165,10 @@ class ReadableCaptionCompiler:
             return []
         result: list[list[_DisplayUnit]] = []
         cursor = 0
-        max_total_chars = format_policy.max_chars_per_line_pass * policy.global_policy.max_lines_per_cue
+        max_total_chars = (
+            format_policy.max_chars_per_line_pass
+            * policy.global_policy.max_lines_per_cue
+        )
         pass_min, pass_max = policy.global_policy.cue_duration_seconds.pass_range
         while cursor < len(units):
             viable: list[int] = []
@@ -1021,7 +1176,9 @@ class ReadableCaptionCompiler:
                 batch = units[cursor:end]
                 visible = " ".join(unit.rendered_text for unit in batch)
                 ids = [token_id for unit in batch for token_id in unit.spoken_token_ids]
-                duration = (word_by_token[ids[-1]].end_ms - word_by_token[ids[0]].start_ms) / 1000
+                duration = (
+                    word_by_token[ids[-1]].end_ms - word_by_token[ids[0]].start_ms
+                ) / 1000
                 if len(visible) <= max_total_chars and duration <= pass_max:
                     viable.append(end)
                 else:
@@ -1029,13 +1186,20 @@ class ReadableCaptionCompiler:
             if not viable:
                 viable = [cursor + 1]
             eligible = [
-                end for end in viable
-                if (word_by_token[units[end - 1].spoken_token_ids[-1]].end_ms
-                    - word_by_token[units[cursor].spoken_token_ids[0]].start_ms) / 1000 >= pass_min
+                end
+                for end in viable
+                if (
+                    word_by_token[units[end - 1].spoken_token_ids[-1]].end_ms
+                    - word_by_token[units[cursor].spoken_token_ids[0]].start_ms
+                )
+                / 1000
+                >= pass_min
             ]
             candidates = eligible or viable
             punctuation_breaks = [
-                end for end in candidates if re.search(r"[.!?;:]$", units[end - 1].rendered_text)
+                end
+                for end in candidates
+                if re.search(r"[.!?;:]$", units[end - 1].rendered_text)
             ]
             selected = punctuation_breaks[-1] if punctuation_breaks else candidates[-1]
             result.append(units[cursor:selected])
@@ -1046,21 +1210,32 @@ class ReadableCaptionCompiler:
             last_duration = (
                 word_by_token[last_ids[-1]].end_ms - word_by_token[last_ids[0]].start_ms
             ) / 1000
-            merged_visible = " ".join(unit.rendered_text for unit in [*result[-2], *last])
-            merged_ids = [token_id for unit in [*result[-2], *last] for token_id in unit.spoken_token_ids]
+            merged_visible = " ".join(
+                unit.rendered_text for unit in [*result[-2], *last]
+            )
+            merged_ids = [
+                token_id
+                for unit in [*result[-2], *last]
+                for token_id in unit.spoken_token_ids
+            ]
             merged_duration = (
-                word_by_token[merged_ids[-1]].end_ms - word_by_token[merged_ids[0]].start_ms
+                word_by_token[merged_ids[-1]].end_ms
+                - word_by_token[merged_ids[0]].start_ms
             ) / 1000
             if (
-                last_duration < policy.global_policy.cue_duration_seconds.review_range[0]
+                last_duration
+                < policy.global_policy.cue_duration_seconds.review_range[0]
                 and len(merged_visible) <= format_policy.max_chars_per_line_block * 2
-                and merged_duration <= policy.global_policy.cue_duration_seconds.block_outside[1]
+                and merged_duration
+                <= policy.global_policy.cue_duration_seconds.block_outside[1]
             ):
                 result[-2:] = [[*result[-2], *last]]
         return result
 
     @classmethod
-    def _wrap_lines(cls, units: list[_DisplayUnit], policy: CaptionFormatPolicy) -> list[str]:
+    def _wrap_lines(
+        cls, units: list[_DisplayUnit], policy: CaptionFormatPolicy
+    ) -> list[str]:
         full = " ".join(item.rendered_text for item in units)
         if len(full) <= policy.max_chars_per_line_pass:
             return [full]
@@ -1076,8 +1251,12 @@ class ReadableCaptionCompiler:
                 if len(left) > limit or len(right) > limit:
                     continue
                 score = abs(len(left) - len(right))
-                left_word = re.sub(r"[^A-Za-z0-9'-]", "", units[split - 1].display_token.text)
-                right_word = re.sub(r"[^A-Za-z0-9'-]", "", units[split].display_token.text)
+                left_word = re.sub(
+                    r"[^A-Za-z0-9'-]", "", units[split - 1].display_token.text
+                )
+                right_word = re.sub(
+                    r"[^A-Za-z0-9'-]", "", units[split].display_token.text
+                )
                 if re.search(r"[.!?;:,]$", units[split - 1].rendered_text):
                     score -= 50
                 if left_word.casefold() in PREPOSITIONS:
@@ -1085,7 +1264,11 @@ class ReadableCaptionCompiler:
                 if left_word[:1].isupper() and right_word[:1].isupper():
                     score += 1_000
                 last_preposition = max(
-                    (index for index, unit in enumerate(units[:split]) if unit.display_token.text.casefold() in PREPOSITIONS),
+                    (
+                        index
+                        for index, unit in enumerate(units[:split])
+                        if unit.display_token.text.casefold() in PREPOSITIONS
+                    ),
                     default=-1,
                 )
                 if last_preposition >= 0 and not any(
@@ -1147,19 +1330,30 @@ class CaptionCompilationGate:
                 reasons.append("CAPTION_PARALLEL_TIMELINE")
             if len(cue.caption_lines) > policy.global_policy.max_lines_per_cue:
                 reasons.append("CAPTION_MORE_THAN_TWO_LINES")
-            if any(segment_id not in segment_ids for segment_id in cue.source_segment_ids):
+            if any(
+                segment_id not in segment_ids for segment_id in cue.source_segment_ids
+            ):
                 reasons.append("CAPTION_CANONICAL_SEGMENT_REF_MISSING")
-            display_ids = [token_id for token in cue.display_tokens for token_id in token.spoken_token_ids]
+            display_ids = [
+                token_id
+                for token in cue.display_tokens
+                for token_id in token.spoken_token_ids
+            ]
             if display_ids != cue.spoken_token_ids:
                 reasons.append("CAPTION_DISPLAY_TOKEN_MAPPING_INVALID")
             for token in cue.display_tokens:
-                if token.transform_reason_code and token.transform_reason_code not in ALLOWED_DISPLAY_TRANSFORMS:
+                if (
+                    token.transform_reason_code
+                    and token.transform_reason_code not in ALLOWED_DISPLAY_TRANSFORMS
+                ):
                     reasons.append("CAPTION_DISPLAY_TRANSFORM_NOT_ALLOWED")
         metrics = {
             "cue_count": len(cues),
             "expected_spoken_token_count": len(expected),
             "caption_spoken_token_count": len(actual),
-            "spoken_token_coverage": len(set(actual) & set(expected)) / len(expected) if expected else 0,
+            "spoken_token_coverage": len(set(actual) & set(expected)) / len(expected)
+            if expected
+            else 0,
             "timing_source": "CANONICAL_MEDIA_TIMELINE",
         }
         return _gate(
@@ -1200,7 +1394,9 @@ class CaptionLayoutGate:
             elif reading.max_chars_per_line > format_policy.max_chars_per_line_pass:
                 status = _worst_status([status, "REVIEW_REQUIRED"])
                 reasons.append("CAPTION_LINE_LENGTH_REVIEW")
-            block_low, block_high = policy.global_policy.cue_duration_seconds.block_outside
+            block_low, block_high = (
+                policy.global_policy.cue_duration_seconds.block_outside
+            )
             pass_low, pass_high = policy.global_policy.cue_duration_seconds.pass_range
             if duration < block_low or duration > block_high:
                 status = "BLOCK"
@@ -1208,10 +1404,16 @@ class CaptionLayoutGate:
             elif duration < pass_low or duration > pass_high:
                 status = _worst_status([status, "REVIEW_REQUIRED"])
                 reasons.append("CAPTION_DURATION_REVIEW")
-            if reading.characters_per_second > policy.global_policy.reading_speed_cps.block_any_above:
+            if (
+                reading.characters_per_second
+                > policy.global_policy.reading_speed_cps.block_any_above
+            ):
                 status = "BLOCK"
                 reasons.append("CAPTION_READING_SPEED_TOO_HIGH")
-            elif reading.characters_per_second > policy.global_policy.reading_speed_cps.pass_average_max:
+            elif (
+                reading.characters_per_second
+                > policy.global_policy.reading_speed_cps.pass_average_max
+            ):
                 status = _worst_status([status, "REVIEW_REQUIRED"])
                 reasons.append("CAPTION_READING_SPEED_REVIEW")
             if bbox is None or bbox.width <= 0 or bbox.height <= 0:
@@ -1224,10 +1426,18 @@ class CaptionLayoutGate:
                 elif bbox.block_width_ratio > format_policy.max_block_width_pass:
                     status = _worst_status([status, "REVIEW_REQUIRED"])
                     reasons.append("CAPTION_BLOCK_WIDTH_REVIEW")
-                if not format_policy.block_outside[0] <= bbox.font_scale <= format_policy.block_outside[1]:
+                if (
+                    not format_policy.block_outside[0]
+                    <= bbox.font_scale
+                    <= format_policy.block_outside[1]
+                ):
                     status = "BLOCK"
                     reasons.append("CAPTION_FONT_SCALE_OUTSIDE_POLICY")
-                elif not format_policy.font_scale_pass[0] <= bbox.font_scale <= format_policy.font_scale_pass[1]:
+                elif (
+                    not format_policy.font_scale_pass[0]
+                    <= bbox.font_scale
+                    <= format_policy.font_scale_pass[1]
+                ):
                     status = _worst_status([status, "REVIEW_REQUIRED"])
                     reasons.append("CAPTION_FONT_SCALE_REVIEW")
             statuses.append(status)
@@ -1378,10 +1588,14 @@ class CaptionBoundsPreflight:
                     "1",
                     str(preview_path),
                 ]
-                completed = self.runner(argv, capture_output=True, text=True, shell=False)
+                completed = self.runner(
+                    argv, capture_output=True, text=True, shell=False
+                )
                 stderr = str(getattr(completed, "stderr", "") or "")
                 if getattr(completed, "returncode", 1) != 0:
-                    raise ValueError(f"CAPTION_BBOX_PREFLIGHT_FAILED:{cue.cue_id}:{stderr[-500:]}")
+                    raise ValueError(
+                        f"CAPTION_BBOX_PREFLIGHT_FAILED:{cue.cue_id}:{stderr[-500:]}"
+                    )
                 matches = list(_BBOX_RE.finditer(stderr))
                 if not matches:
                     raise ValueError(f"CAPTION_BBOX_NOT_DETECTED:{cue.cue_id}")
@@ -1406,9 +1620,13 @@ class CaptionBoundsPreflight:
                         height=height,
                         block_width_ratio=round(width / frame_width, 6),
                         left_margin_ratio=round(max(0, x1) / frame_width, 6),
-                        right_margin_ratio=round(max(0, frame_width - (x2 + 1)) / frame_width, 6),
+                        right_margin_ratio=round(
+                            max(0, frame_width - (x2 + 1)) / frame_width, 6
+                        ),
                         top_margin_ratio=round(max(0, y1) / frame_height, 6),
-                        bottom_margin_ratio=round(max(0, frame_height - (y2 + 1)) / frame_height, 6),
+                        bottom_margin_ratio=round(
+                            max(0, frame_height - (y2 + 1)) / frame_height, 6
+                        ),
                         font_scale=font_scale,
                         line_count=cue.reading_metrics.line_count,
                         cpl=cue.reading_metrics.max_chars_per_line,
@@ -1444,7 +1662,9 @@ class CaptionBoundsPreflight:
             "policy_version": policy.policy_version,
             "policy_hash": _resolved_policy_hash(policy),
         }
-        return CaptionBoundsPreflightReport(**payload, content_hash=stable_hash(payload))
+        return CaptionBoundsPreflightReport(
+            **payload, content_hash=stable_hash(payload)
+        )
 
     def apply_to_timeline(
         self,
@@ -1458,19 +1678,30 @@ class CaptionBoundsPreflight:
             for cue in segment.caption_cues:
                 bbox = metrics.get(cue.cue_id)
                 cue_payload = cue.model_dump(mode="json", exclude={"content_hash"})
-                cue_payload["bbox_metrics"] = bbox.model_dump(mode="json") if bbox else None
+                cue_payload["bbox_metrics"] = (
+                    bbox.model_dump(mode="json") if bbox else None
+                )
                 cue_payload["gate_results"] = [
                     *[item.model_dump(mode="json") for item in cue.gate_results],
                     report.layout_gate.model_dump(mode="json"),
                     report.safe_area_gate.model_dump(mode="json"),
                 ]
-                cues.append(CanonicalCaptionCue(**cue_payload, content_hash=stable_hash(cue_payload)))
+                cues.append(
+                    CanonicalCaptionCue(
+                        **cue_payload, content_hash=stable_hash(cue_payload)
+                    )
+                )
             segments.append(
                 segment.model_copy(
                     update={
                         "caption_cues": cues,
-                        "caption_bbox_metrics": [item.bbox_metrics for item in cues if item.bbox_metrics],
-                        "caption_gate_results": [report.layout_gate, report.safe_area_gate],
+                        "caption_bbox_metrics": [
+                            item.bbox_metrics for item in cues if item.bbox_metrics
+                        ],
+                        "caption_gate_results": [
+                            report.layout_gate,
+                            report.safe_area_gate,
+                        ],
                     }
                 )
             )
@@ -1591,14 +1822,24 @@ class CaptionCoverageGate:
         reasons: list[str] = []
         missing = [token_id for token_id in expected if token_id not in set(actual)]
         extra = [token_id for token_id in actual if token_id not in set(expected)]
-        duplicates = sorted({token_id for token_id in actual if actual.count(token_id) > 1})
-        if missing or len(set(actual) & set(expected)) / max(1, len(expected)) < policy.spoken_token_coverage_required:
+        duplicates = sorted(
+            {token_id for token_id in actual if actual.count(token_id) > 1}
+        )
+        if (
+            missing
+            or len(set(actual) & set(expected)) / max(1, len(expected))
+            < policy.spoken_token_coverage_required
+        ):
             reasons.append("SYNC_COVERAGE_GAP")
         if extra or duplicates:
             reasons.append("SYNC_EXTRA_TOKEN")
         display_mapping_invalid = False
         for cue in cues:
-            mapped = [token_id for token in cue.display_tokens for token_id in token.spoken_token_ids]
+            mapped = [
+                token_id
+                for token in cue.display_tokens
+                for token_id in token.spoken_token_ids
+            ]
             if mapped != cue.spoken_token_ids:
                 display_mapping_invalid = True
             if any(
@@ -1642,7 +1883,9 @@ class CaptionAudioSyncGate:
         start_offsets: list[int] = []
         end_offsets: list[int] = []
         reasons: list[str] = []
-        trailing_hold, trailing_hold_error = _timeline_final_cue_trailing_hold(timeline, cues)
+        trailing_hold, trailing_hold_error = _timeline_final_cue_trailing_hold(
+            timeline, cues
+        )
         if trailing_hold_error:
             reasons.append(trailing_hold_error)
         authorized_trailing_hold_ms = 0
@@ -1685,11 +1928,17 @@ class CaptionAudioSyncGate:
                 end_offsets.append(0)
             else:
                 end_offsets.append(raw_end_offset)
-            if cue.caption_start_ms < previous_start or cue.caption_end_ms <= cue.caption_start_ms:
+            if (
+                cue.caption_start_ms < previous_start
+                or cue.caption_end_ms <= cue.caption_start_ms
+            ):
                 non_monotonic_count += 1
             if cue.caption_start_ms < previous_end:
                 overlap_count += 1
-            if cue.caption_start_ms < 0 or cue.caption_end_ms > alignment.audio_duration_ms:
+            if (
+                cue.caption_start_ms < 0
+                or cue.caption_end_ms > alignment.audio_duration_ms
+            ):
                 outside_count += 1
             if cue.timing_source != "CANONICAL_MEDIA_TIMELINE":
                 reasons.append("SYNC_PARALLEL_TIMELINE")
@@ -1702,13 +1951,25 @@ class CaptionAudioSyncGate:
         # Coverage is computed directly here because this gate intentionally accepts
         # only alignment/timeline evidence, not a second transcript object.
         expected_tokens = {
-            token_id for word in alignment.verified_words for token_id in word.source_spoken_token_ids
+            token_id
+            for word in alignment.verified_words
+            for token_id in word.source_spoken_token_ids
         }
         actual_tokens = [token_id for cue in cues for token_id in cue.spoken_token_ids]
-        coverage = len(set(actual_tokens) & expected_tokens) / len(expected_tokens) if expected_tokens else 0.0
-        if coverage < policy.spoken_token_coverage_required or set(actual_tokens) != expected_tokens:
+        coverage = (
+            len(set(actual_tokens) & expected_tokens) / len(expected_tokens)
+            if expected_tokens
+            else 0.0
+        )
+        if (
+            coverage < policy.spoken_token_coverage_required
+            or set(actual_tokens) != expected_tokens
+        ):
             reasons.append("SYNC_COVERAGE_GAP")
-        if len(actual_tokens) != len(set(actual_tokens)) or set(actual_tokens) - expected_tokens:
+        if (
+            len(actual_tokens) != len(set(actual_tokens))
+            or set(actual_tokens) - expected_tokens
+        ):
             reasons.append("SYNC_EXTRA_TOKEN")
         last_caption_end = cues[-1].caption_end_ms if cues else 0
         sync_metrics = CaptionSyncMetrics(
@@ -1724,11 +1985,31 @@ class CaptionAudioSyncGate:
         )
         statuses = ["BLOCK" if reasons else "PASS"]
         for value, threshold, reason in (
-            (sync_metrics.median_abs_start_offset_ms, policy.median_abs_start_offset_ms, "SYNC_START_OFFSET"),
-            (sync_metrics.p95_abs_start_offset_ms, policy.p95_abs_start_offset_ms, "SYNC_START_OFFSET"),
-            (sync_metrics.max_abs_start_offset_ms, policy.max_abs_start_offset_ms, "SYNC_START_OFFSET"),
-            (sync_metrics.median_abs_end_offset_ms, policy.median_abs_end_offset_ms, "SYNC_END_OFFSET"),
-            (sync_metrics.end_of_video_drift_ms, policy.end_of_video_drift_ms, "SYNC_END_DRIFT"),
+            (
+                sync_metrics.median_abs_start_offset_ms,
+                policy.median_abs_start_offset_ms,
+                "SYNC_START_OFFSET",
+            ),
+            (
+                sync_metrics.p95_abs_start_offset_ms,
+                policy.p95_abs_start_offset_ms,
+                "SYNC_START_OFFSET",
+            ),
+            (
+                sync_metrics.max_abs_start_offset_ms,
+                policy.max_abs_start_offset_ms,
+                "SYNC_START_OFFSET",
+            ),
+            (
+                sync_metrics.median_abs_end_offset_ms,
+                policy.median_abs_end_offset_ms,
+                "SYNC_END_OFFSET",
+            ),
+            (
+                sync_metrics.end_of_video_drift_ms,
+                policy.end_of_video_drift_ms,
+                "SYNC_END_DRIFT",
+            ),
         ):
             status = self._offset_status(value, threshold)
             statuses.append(status)
@@ -1760,6 +2041,7 @@ class CaptionAudioSyncGate:
             return "REVIEW_REQUIRED"
         return "PASS"
 
+
 class TimelineDriftGate:
     def evaluate(
         self,
@@ -1778,13 +2060,23 @@ class TimelineDriftGate:
         scene_drift = abs(final_audio_duration_ms - scene_end)
         timeline_drift = abs(final_audio_duration_ms - timeline.audio_duration_ms)
         for value in (caption_drift, scene_drift, timeline_drift):
-            status = CaptionAudioSyncGate._offset_status(value, policy.end_of_video_drift_ms)
+            status = CaptionAudioSyncGate._offset_status(
+                value, policy.end_of_video_drift_ms
+            )
             statuses.append(status)
             if status != "PASS":
                 reasons.append("SYNC_END_DRIFT")
-        if timeline.audio_duration_ms != final_audio_duration_ms or scene_end != timeline.audio_duration_ms:
+        if (
+            timeline.audio_duration_ms != final_audio_duration_ms
+            or scene_end != timeline.audio_duration_ms
+        ):
             reasons.append("SYNC_PARALLEL_TIMELINE")
-            statuses.append("BLOCK" if max(scene_drift, timeline_drift) > policy.end_of_video_drift_ms.block_above else "REVIEW_REQUIRED")
+            statuses.append(
+                "BLOCK"
+                if max(scene_drift, timeline_drift)
+                > policy.end_of_video_drift_ms.block_above
+                else "REVIEW_REQUIRED"
+            )
         return _gate(
             "TimelineDriftGate",
             _worst_status(statuses),

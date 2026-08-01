@@ -8,7 +8,6 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -23,7 +22,6 @@ from app.contracts.production_workflow import (
     WorkflowAuthorityRefs,
     WorkflowEffectState,
     WorkflowFailureClassification,
-    WorkflowStageEventPayload,
     WorkflowStageResult,
 )
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
@@ -124,28 +122,15 @@ def _start_data(
     source_id: uuid.UUID | None = None,
     max_attempts: int = 5,
 ) -> ProductionWorkflowStart:
-    source_type = {
-        ProductionLane.DAILY_SHORT: PlanningSourceType.DAILY_IDEA,
-        ProductionLane.LONG_FORM: PlanningSourceType.LONG_FORM_PLAN,
-        ProductionLane.LONG_DERIVED_SHORT: PlanningSourceType.DERIVED_SHORT,
-    }[lane]
     values = {
         "company_id": company.id,
         "channel_workspace_id": channel.id,
         "production_lane": lane,
-        "planning_source_type": source_type,
+        "planning_source_type": PlanningSourceType.LONG_FORM_PLAN,
         "planning_source_id": source_id or uuid.uuid4(),
         "planning_source_hash": "a" * 64,
         "max_attempts": max_attempts,
     }
-    if lane == ProductionLane.LONG_DERIVED_SHORT:
-        values.update(
-            {
-                "parent_video_project_id": uuid.uuid4(),
-                "canonical_media_timeline_ref": "artifact://timeline/1",
-                "canonical_media_timeline_hash": "b" * 64,
-            }
-        )
     return ProductionWorkflowStart(**values)
 
 
@@ -245,38 +230,6 @@ def test_duplicate_source_with_changed_semantics_fails_closed(
             channel=channel,
             actor=actor,
             data=original.model_copy(update={"planning_source_hash": "f" * 64}),
-        )
-
-
-def test_daily_short_event_never_resolves_long_form_handler(
-    db_session: Session,
-) -> None:
-    company, channel, _, actor = _scope(db_session)
-    run = _start(
-        db_session,
-        company=company,
-        channel=channel,
-        actor=actor,
-        data=_start_data(company, channel, lane=ProductionLane.DAILY_SHORT),
-    )
-    event = db_session.scalar(
-        select(DomainEvent).where(DomainEvent.workflow_run_id == run.id)
-    )
-    assert event is not None
-    payload = WorkflowStageEventPayload.model_validate(event.payload)
-    assert payload.handler_key.startswith("production.daily_short.")
-    assert "long_form" not in payload.handler_key
-
-
-def test_derived_short_contract_requires_exact_parent_timeline() -> None:
-    with pytest.raises(ValidationError):
-        ProductionWorkflowStart(
-            company_id=uuid.uuid4(),
-            channel_workspace_id=uuid.uuid4(),
-            production_lane=ProductionLane.LONG_DERIVED_SHORT,
-            planning_source_type=PlanningSourceType.DERIVED_SHORT,
-            planning_source_id=uuid.uuid4(),
-            planning_source_hash="a" * 64,
         )
 
 

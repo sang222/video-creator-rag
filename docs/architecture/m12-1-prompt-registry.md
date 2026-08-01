@@ -36,7 +36,11 @@ Every required agent has:
 - `channel_contract_required`
 - `market_locale_context_required`
 
-`DailyIdeaAgent` is the registered daily-authority role. It uses the `cheap_structured` lane and may emit only the typed daily proposal: title, angle, format, pillar, series, audience problem, search-intent hypothesis, rationale, `channel_fit_score`, and bounded channel-fit evidence. It cannot invent research, metrics, rights, provider results, or a policy-fit decision.
+`EditorialIdeaResearchAgent` is the registered pre-project research role. It
+uses the `cheap_structured` lane and may emit only the typed bounded proposal:
+title, angle, format, pillar, evidence, confidence, budget readiness,
+rights/policy state, and quality state. It cannot invent metrics, provider
+results, or a policy-fit decision.
 
 ## DB Audit
 
@@ -71,7 +75,8 @@ If required channel contract data is missing, incomplete, stale, or contradictor
 
 No agent may infer US/English/USD/timezone defaults, mutate ChannelProfileVersion, or suggest config upgrades unless the human explicitly asks for configuration advice.
 
-For a CH1-FLEX v2 daily run, Prompt Registry receives a bounded `AgentContextPack` whose required sections are:
+For strict v2 editorial research, Prompt Registry receives a bounded
+`AgentContextPack` whose required sections are:
 
 - `niche_contract_digest`;
 - `editorial_slot_digest`;
@@ -81,7 +86,11 @@ For a CH1-FLEX v2 daily run, Prompt Registry receives a bounded `AgentContextPac
 
 The NICH1 digest contains the semantic channel/category/slot contract needed to evaluate an idea: niche, sub-niche, positioning, brand promise, audience pains/outcomes, allowed and forbidden topics, category, pillar, series, production goal, voice/format summary, visual source profile, and frozen refs/hashes. A bare digest hash is insufficient.
 
-`PromptBudgetGate` validates this daily shape without requiring a project Effective Context, because admission has not happened yet. Production-package agents still require Effective Context. After admission, ScriptContractDigest also carries the frozen niche/category/pillar/audience fields and digest ref/hash, and agent-specific context packs may include the same bounded `niche_contract_digest` without exposing raw full artifacts.
+`PromptBudgetGate` validates this pre-project shape without requiring a project
+Effective Context, because admission has not happened yet. Production-package
+agents still require Effective Context. After admission, ScriptContractDigest
+also carries the frozen niche/category/pillar/audience fields and digest
+ref/hash.
 
 ## Ollama Messages
 

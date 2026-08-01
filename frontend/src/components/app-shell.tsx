@@ -14,7 +14,7 @@ const nav = [
   { href: "/", label: "Trung tâm", icon: Home },
   { href: "/channels", label: "Kênh", icon: Boxes },
   { href: "/queues", label: "Hàng chờ duyệt", icon: ListChecks },
-  { href: "/projects", label: "Dự án", icon: GitBranch },
+  { href: "/projects", label: "Launch cadence", icon: GitBranch },
   { href: "/publishing", label: "Gói publish", icon: CirclePlay },
   { href: "/uploaded-videos", label: "Video đã upload", icon: Video },
   { href: "/learning", label: "Bài học", icon: Activity },
@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div>
             <div className="text-xs font-semibold uppercase text-accent">VCOS</div>
-            <div className="text-lg font-semibold">Buồng lái vận hành</div>
+            <div className="text-lg font-semibold">Long-form YouTube</div>
           </div>
         </div>
         <nav className="mt-6 space-y-1">
@@ -84,8 +84,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-20 border-b border-border bg-background/90 px-4 py-3 backdrop-blur md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xs uppercase text-muted-foreground">Buồng lái vận hành thủ công</div>
-              <div className="text-lg font-semibold">Bảng điều hành VCOS</div>
+              <div className="text-xs uppercase text-muted-foreground">YouTube · long-form only</div>
+              <div className="text-lg font-semibold">LONG-FORM YOUTUBE OPERATING DASHBOARD</div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <FriendlyStatusBadge value="NO_AUTO_PUBLISH" />

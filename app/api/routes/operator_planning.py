@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from app.api.routes.serializers_publish_learning import _as_http_error
 from app.contracts.operator_planning import (
-    DailyShortPlanningLaunchRequest,
     LongFormPlanningLaunchRequest,
     OperatorPlanningCatalogRead,
     OperatorPlanningLaunchRead,
@@ -99,25 +98,6 @@ def create_router() -> APIRouter:
             actor = actor_from_request(request)
             with session_scope() as session:
                 return OperatorPlanningService(session).prepare_and_launch(
-                    data=data,
-                    actor=actor,
-                )
-        except Exception as exc:
-            raise _as_operator_planning_http_error(exc) from exc
-
-    @router.post(
-        "/operator-planning/daily-short/launch",
-        response_model=OperatorPlanningLaunchRead,
-        status_code=status.HTTP_201_CREATED,
-    )
-    def launch_daily_short(
-        data: DailyShortPlanningLaunchRequest,
-        request: Request,
-    ) -> OperatorPlanningLaunchRead:
-        try:
-            actor = actor_from_request(request)
-            with session_scope() as session:
-                return OperatorPlanningService(session).launch_daily_short(
                     data=data,
                     actor=actor,
                 )

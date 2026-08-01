@@ -199,6 +199,7 @@ _SC04_BLUEPRINT = {
     "provider_execution_required": False,
 }
 
+
 class PKG1SC04RevisionService:
     """Create an immutable, provider-free SC-04 package delta for human review."""
 
@@ -3124,7 +3125,6 @@ class PKG1SC04RevisionService:
             "niche_alignment_dossier",
             "target_market_consistency_check",
             "publish_handoff_package",
-            "upload_card",
         }
         reused: dict[str, Any] = {}
         historical: dict[str, Any] = {}
@@ -3875,9 +3875,7 @@ class PKG1SC04RevisionService:
                 expected_creator_user_id=source_approval.decided_by_user_id,
                 current_workspace_hash=current_workspace_hash,
             )
-            workspace_freshness_manifest = (
-                typed_workspace_freshness_receipt.manifest
-            )
+            workspace_freshness_manifest = typed_workspace_freshness_receipt.manifest
             workspace_freshness_mode = "CURRENT_WORKSPACE_MACHINE_REVALIDATION"
         return {
             "ref": self._geo_version_ref(version, artifact.artifact_type),

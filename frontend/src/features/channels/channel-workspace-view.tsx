@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import type { BackfillUploadedVideoInput, HumanUploadTask } from "@/lib/types";
 import { ChannelProfileManager } from "@/features/channels/channel-profile-manager";
+import { LaunchCadenceSummaryCard } from "@/features/launch/launch-cadence-dashboard";
 
 export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
@@ -158,15 +159,17 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
           ))}
         </Tabs.List>
         <Tabs.Content value="overview" className="mt-5">
-          <Panel>
-            <h2 className="text-base font-semibold">Vòng đời kênh</h2>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <StatusBadge value={workspace.lifecycle.lifecycle_state} />
-              <StatusBadge value={workspace.lifecycle.health_status} />
-              <StatusBadge value={workspace.lifecycle.daily_generation_allowed ? "DAILY_ALLOWED" : "DAILY_BLOCKED"} />
-            </div>
-            <p className="mt-4 text-sm text-muted-foreground">{workspace.lifecycle.next_action}</p>
-          </Panel>
+          <div className="space-y-4">
+            <Panel>
+              <h2 className="text-base font-semibold">Vòng đời kênh</h2>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <StatusBadge value={workspace.lifecycle.lifecycle_state} />
+                <StatusBadge value={workspace.lifecycle.health_status} />
+              </div>
+              <p className="mt-4 text-sm text-muted-foreground">{workspace.lifecycle.next_action}</p>
+            </Panel>
+            <LaunchCadenceSummaryCard channelId={channelId} />
+          </div>
         </Tabs.Content>
         <Tabs.Content value="projects" className="mt-5">
           {workspace.projects.length ? (
@@ -180,7 +183,7 @@ export function ChannelWorkspaceView({ channelId }: { channelId: string }) {
               ))}
             </div>
           ) : (
-            <EmptyStateCard title="Chưa có dự án" description="Luồng tạo hằng ngày chỉ tạo việc mới khi vòng đời là Đang hoạt động. Kiểm tra snapshot chính sách và trạng thái kênh trước khi chạy." />
+            <EmptyStateCard title="Chưa có dự án" description="Cadence chỉ bắt đầu một video long-form khi launch run, policy, buffer và publish slot đều cho phép. Mở dashboard cadence để xem reason codes." actions={[{ label: "Mở launch cadence", href: `/projects?channelId=${channelId}` }]} />
           )}
         </Tabs.Content>
         <Tabs.Content value="approvals" className="mt-5">

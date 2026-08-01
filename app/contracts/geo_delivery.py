@@ -366,7 +366,6 @@ class GeoDiagnosticResult(_HashBoundModel):
 
 class PlatformRevenueType(StrEnum):
     YOUTUBE_AD_FINALIZED = "YOUTUBE_AD_FINALIZED"
-    YOUTUBE_SHORTS_FINALIZED = "YOUTUBE_SHORTS_FINALIZED"
     YOUTUBE_PREMIUM_FINALIZED = "YOUTUBE_PREMIUM_FINALIZED"
     TIKTOK_REWARDS_FINALIZED_IF_ELIGIBLE = "TIKTOK_REWARDS_FINALIZED_IF_ELIGIBLE"
 
@@ -379,7 +378,7 @@ class AdsOnlyMonetizationPolicy(_HashBoundModel):
     base_policy_snapshot_id: uuid.UUID
     base_policy_snapshot_hash: str = Field(pattern=SHA256_PATTERN)
     overlay_authority_ref: str = Field(min_length=1)
-    allowed_revenue_types: list[PlatformRevenueType] = Field(min_length=4, max_length=4)
+    allowed_revenue_types: list[PlatformRevenueType] = Field(min_length=3, max_length=3)
     affiliate_enabled: Literal[False] = False
     shopping_enabled: Literal[False] = False
     product_sales_enabled: Literal[False] = False

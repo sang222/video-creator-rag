@@ -65,7 +65,10 @@ from app.services.r3d3 import (
     resolve_frozen_niche_authority,
     stable_hash,
 )
-from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler, build_effective_channel_runtime_digest
+from app.services.r3d2 import (
+    EffectiveChannelRuntimeContextCompiler,
+    build_effective_channel_runtime_digest,
+)
 from app.services.r3d4 import (
     AgentOutputValidationService,
     GATE_BLOCK,
@@ -86,15 +89,19 @@ M12_2S_REQUIRED_TAGS = (
     "m12-2p-channel-contract-init",
 )
 CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION = "Bổ sung hoặc compile lại ChannelProfileVersion trước khi chạy video package production."
-NEEDS_CHANNEL_NEXT_ACTION = "Tạo channel và compile ChannelProfileVersion trước khi chạy M12.2."
+NEEDS_CHANNEL_NEXT_ACTION = (
+    "Tạo channel và compile ChannelProfileVersion trước khi chạy M12.2."
+)
 M12_2S_NEEDS_COMPANY_NEXT_ACTION = "Tạo company trước, sau đó tạo channel."
 M12_2S_NEEDS_CHANNEL_NEXT_ACTION = "Tạo channel bằng Channel Init và compile snapshot."
-M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION = "Bổ sung field còn thiếu và compile lại ChannelProfileVersion."
-NEEDS_RESEARCH_PACK_NEXT_ACTION = "Bổ sung research pack/source notes trước khi chạy video package production."
-HUMAN_APPROVAL_REQUIRED = "Human final approval required before any media generation, upload, publish, or reupload."
-MEDIA_PROVIDER_BOUNDARY_SUMMARY = (
-    "Gói nội dung đã sẵn sàng tới bước tạo media; NativeFFmpeg là render authority và provider ngoài vẫn bị khóa."
+M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION = (
+    "Bổ sung field còn thiếu và compile lại ChannelProfileVersion."
 )
+NEEDS_RESEARCH_PACK_NEXT_ACTION = (
+    "Bổ sung research pack/source notes trước khi chạy video package production."
+)
+HUMAN_APPROVAL_REQUIRED = "Human final approval required before any media generation, upload, publish, or reupload."
+MEDIA_PROVIDER_BOUNDARY_SUMMARY = "Gói nội dung đã sẵn sàng tới bước tạo media; NativeFFmpeg là render authority và provider ngoài vẫn bị khóa."
 MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = "Cấu hình ElevenLabs khi được phê duyệt; Google Veo/Pexels là asset provider giới hạn và NativeFFmpeg vẫn bị khóa production."
 FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + Real Ollama Rehearsal"
 
@@ -116,32 +123,123 @@ class PackageAgentStep:
 
 
 PACKAGE_AGENT_CHAIN: tuple[PackageAgentStep, ...] = (
-    PackageAgentStep("ChannelAuthorityAgent", "cheap_structured", "admission_decision", "json_schema_output"),
-    PackageAgentStep("TopicIdeaScoringAgent", "cheap_structured", "topic_scores", "json_schema_output"),
-    PackageAgentStep("ResearchPackSummarizer", "long_context_text", "research_notes", "long_context_synthesis"),
-    PackageAgentStep("ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"),
-    PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
-    PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
-    PackageAgentStep("ThumbnailBriefAgent", "visual_creative_review", "thumbnail_brief", "thumbnail_direction_review"),
-    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
-    PackageAgentStep("UploadCardCopyAgent", "cheap_structured", "upload_card_copy", "metadata_generation"),
-    PackageAgentStep("GatekeeperSoftReviewAgent", "gatekeeper_soft_review", "gatekeeper_review", "policy_soft_review"),
+    PackageAgentStep(
+        "ChannelAuthorityAgent",
+        "cheap_structured",
+        "admission_decision",
+        "json_schema_output",
+    ),
+    PackageAgentStep(
+        "TopicIdeaScoringAgent",
+        "cheap_structured",
+        "topic_scores",
+        "json_schema_output",
+    ),
+    PackageAgentStep(
+        "ResearchPackSummarizer",
+        "long_context_text",
+        "research_notes",
+        "long_context_synthesis",
+    ),
+    PackageAgentStep(
+        "ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"
+    ),
+    PackageAgentStep(
+        "ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"
+    ),
+    PackageAgentStep(
+        "VisualPlanningAgent",
+        "visual_creative_review",
+        "visual_plan",
+        "visual_plan_review",
+    ),
+    PackageAgentStep(
+        "ThumbnailBriefAgent",
+        "visual_creative_review",
+        "thumbnail_brief",
+        "thumbnail_direction_review",
+    ),
+    PackageAgentStep(
+        "PublishingMetadataAgent",
+        "cheap_structured",
+        "metadata_package",
+        "metadata_generation",
+    ),
+    PackageAgentStep(
+        "GatekeeperSoftReviewAgent",
+        "gatekeeper_soft_review",
+        "gatekeeper_review",
+        "policy_soft_review",
+    ),
 )
 
 FULL_REHEARSAL_AGENT_CHAIN: tuple[PackageAgentStep, ...] = (
-    PackageAgentStep("ChannelAuthorityAgent", "cheap_structured", "admission_decision", "json_schema_output"),
-    PackageAgentStep("TopicIdeaScoringAgent", "cheap_structured", "topic_scores", "json_schema_output"),
-    PackageAgentStep("ResearchPackSummarizer", "long_context_text", "research_notes", "long_context_synthesis"),
-    PackageAgentStep("ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"),
-    PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
-    PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
-    PackageAgentStep("ThumbnailBriefAgent", "visual_creative_review", "thumbnail_brief", "thumbnail_direction_review"),
-    PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
-    PackageAgentStep("RightsDisclosureReviewer", "gatekeeper_soft_review", "rights_disclosure_review", "policy_soft_review"),
-    PackageAgentStep("GatekeeperSoftReviewAgent", "gatekeeper_soft_review", "gatekeeper_review", "policy_soft_review"),
-    PackageAgentStep("UploadCardCopyAgent", "cheap_structured", "upload_card_copy", "metadata_generation"),
-    PackageAgentStep("ProviderReadinessSummaryAgent", "cheap_structured", "provider_readiness_summary", "json_schema_output"),
-    PackageAgentStep("MediaQCExplanationAgent", "cheap_structured", "media_qc_explanation", "small_classification"),
+    PackageAgentStep(
+        "ChannelAuthorityAgent",
+        "cheap_structured",
+        "admission_decision",
+        "json_schema_output",
+    ),
+    PackageAgentStep(
+        "TopicIdeaScoringAgent",
+        "cheap_structured",
+        "topic_scores",
+        "json_schema_output",
+    ),
+    PackageAgentStep(
+        "ResearchPackSummarizer",
+        "long_context_text",
+        "research_notes",
+        "long_context_synthesis",
+    ),
+    PackageAgentStep(
+        "ScriptPlanningAgent", "long_context_text", "script_outline", "long_form_script"
+    ),
+    PackageAgentStep(
+        "ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"
+    ),
+    PackageAgentStep(
+        "VisualPlanningAgent",
+        "visual_creative_review",
+        "visual_plan",
+        "visual_plan_review",
+    ),
+    PackageAgentStep(
+        "ThumbnailBriefAgent",
+        "visual_creative_review",
+        "thumbnail_brief",
+        "thumbnail_direction_review",
+    ),
+    PackageAgentStep(
+        "PublishingMetadataAgent",
+        "cheap_structured",
+        "metadata_package",
+        "metadata_generation",
+    ),
+    PackageAgentStep(
+        "RightsDisclosureReviewer",
+        "gatekeeper_soft_review",
+        "rights_disclosure_review",
+        "policy_soft_review",
+    ),
+    PackageAgentStep(
+        "GatekeeperSoftReviewAgent",
+        "gatekeeper_soft_review",
+        "gatekeeper_review",
+        "policy_soft_review",
+    ),
+    PackageAgentStep(
+        "ProviderReadinessSummaryAgent",
+        "cheap_structured",
+        "provider_readiness_summary",
+        "json_schema_output",
+    ),
+    PackageAgentStep(
+        "MediaQCExplanationAgent",
+        "cheap_structured",
+        "media_qc_explanation",
+        "small_classification",
+    ),
 )
 
 FULL_REHEARSAL_REQUIRED_AGENT_KEYS = {
@@ -155,7 +253,6 @@ FULL_REHEARSAL_REQUIRED_AGENT_KEYS = {
     "ThumbnailBriefAgent",
     "RightsDisclosureReviewer",
     "GatekeeperSoftReviewAgent",
-    "UploadCardCopyAgent",
     "ProviderReadinessSummaryAgent",
     "MediaQCExplanationAgent",
 }
@@ -203,7 +300,11 @@ class M122NicheGateEvaluator:
         )
         if not authority.strict:
             return None
-        if not authority.valid or authority.digest is None or authority.digest_ref is None:
+        if (
+            not authority.valid
+            or authority.digest is None
+            or authority.digest_ref is None
+        ):
             raise ValidationFailureError(
                 "NICH1_FROZEN_AUTHORITY_INVALID:"
                 + ",".join(authority.reason_codes or ["NICHE_CONTRACT_DIGEST_MISSING"])
@@ -212,7 +313,9 @@ class M122NicheGateEvaluator:
         digest_ref = str(authority.digest_ref["ref"])
         artifact_key = self.ARTIFACT_KEYS[gate_key]
         artifact = _dict(artifacts.get(artifact_key))
-        subject_ref = f"first-scripted-video-package://{package_id}#artifacts/{artifact_key}"
+        subject_ref = (
+            f"first-scripted-video-package://{package_id}#artifacts/{artifact_key}"
+        )
         subject_hash = _niche_subject_hash(artifact_key, artifact)
         evidence_ref = NicheEvidenceRef(
             type="m12_2_canonical_agent_artifact",
@@ -230,7 +333,7 @@ class M122NicheGateEvaluator:
             "evidence_refs": [evidence_ref],
         }
         approved_topic = str(
-            _dict(artifacts.get("approved_daily_idea")).get("topic") or ""
+            _dict(artifacts.get("approved_editorial_candidate")).get("topic") or ""
         ).strip()
         topic_result = self._topic_result(artifacts)
         if gate_key == NicheGateKey.SCRIPT:
@@ -284,7 +387,9 @@ class M122NicheGateEvaluator:
         try:
             result = NicheGateResult.model_validate(raw)
         except Exception as exc:
-            raise ValidationFailureError("NICH1_TOPIC_GATE_TYPED_RESULT_INVALID") from exc
+            raise ValidationFailureError(
+                "NICH1_TOPIC_GATE_TYPED_RESULT_INVALID"
+            ) from exc
         if (
             result.gate_key != NicheGateKey.TOPIC
             or result.verdict != NicheGateVerdict.PASS
@@ -351,8 +456,8 @@ class M122NicheGateEvaluator:
         }
         return ScriptNicheAlignmentInput(
             **common,
-            daily_idea_ref=topic_result.subject_ref,
-            daily_idea_hash=topic_result.subject_hash,
+            editorial_idea_candidate_ref=topic_result.subject_ref,
+            editorial_idea_candidate_hash=topic_result.subject_hash,
             topic_gate_ref=f"niche-gate-result://{topic_result.content_hash}",
             topic_gate_result=topic_result,
             approved_topic=approved_topic or "UNSPECIFIED",
@@ -387,7 +492,9 @@ class M122NicheGateEvaluator:
         evidence_ref: NicheEvidenceRef,
     ) -> VisualNicheAlignmentInput:
         declared = _dict(artifact.get("niche_alignment_input"))
-        raw_scenes = [item for item in _list(artifact.get("scenes")) if isinstance(item, dict)]
+        raw_scenes = [
+            item for item in _list(artifact.get("scenes")) if isinstance(item, dict)
+        ]
         if not raw_scenes:
             raw_scenes = [{"scene_id": "missing-scene", "scene_meaning": ""}]
         scene_intents: list[dict[str, Any]] = []
@@ -407,9 +514,9 @@ class M122NicheGateEvaluator:
             )
             scene["scene_id"] = scene_id
             scene_intents.append(scene)
-            source = _dict(scene.get("visual_source_decision")) or explicit_decisions.get(
-                scene_id, {}
-            )
+            source = _dict(
+                scene.get("visual_source_decision")
+            ) or explicit_decisions.get(scene_id, {})
             route = (
                 source.get("preferred_source_route")
                 or source.get("visual_source_route")
@@ -476,7 +583,9 @@ class M122NicheGateEvaluator:
             or digest.content_pillar_key
         )
         declared_category = (
-            declared.get("category_id") or artifact.get("category_id") or digest.category_id
+            declared.get("category_id")
+            or artifact.get("category_id")
+            or digest.category_id
         )
         facts = {
             NicheCriterion.VISUAL_LANGUAGE_FIT: bool(decisions)
@@ -612,7 +721,7 @@ class M122NicheGateEvaluator:
                 description,
                 *chapters,
                 str(artifact.get("summary_copy") or ""),
-                str(artifact.get("upload_card_copy") or ""),
+                str(artifact.get("manual_publishing_copy") or ""),
                 str(cta or ""),
             ]
         )
@@ -648,7 +757,8 @@ class M122NicheGateEvaluator:
             tags=_strings(artifact.get("tags")),
             chapters=chapters,
             summary_copy=str(artifact.get("summary_copy") or "") or None,
-            upload_card_copy=str(artifact.get("upload_card_copy") or "") or None,
+            manual_publishing_copy=str(artifact.get("manual_publishing_copy") or "")
+            or None,
             cta=str(cta)[:4000] if cta else None,
             declared_category_id=declared.get("category_id") or digest.category_id,
             declared_content_pillar_key=str(
@@ -708,7 +818,9 @@ def verify_m12_2s_required_tags(repo_root: Path = ROOT) -> dict[str, Any]:
     return _verify_required_tags(M12_2S_REQUIRED_TAGS, repo_root=repo_root)
 
 
-def _verify_required_tags(required_tags: tuple[str, ...], *, repo_root: Path = ROOT) -> dict[str, Any]:
+def _verify_required_tags(
+    required_tags: tuple[str, ...], *, repo_root: Path = ROOT
+) -> dict[str, Any]:
     try:
         completed = subprocess.run(
             ["git", "tag", "--list"],
@@ -753,20 +865,28 @@ class FirstScriptedVideoPackageService:
         self.package_status_reducer = PackageStatusReducer()
         self.repo_root = repo_root
 
-    def create(self, data: FirstScriptedVideoPackageRequest) -> FirstScriptedVideoPackageRead:
+    def create(
+        self, data: FirstScriptedVideoPackageRequest
+    ) -> FirstScriptedVideoPackageRead:
         channel = self.session.get(ChannelWorkspace, data.channel_id)
         if channel is None:
-            raise ValidationFailureError(f"BLOCKED: NEEDS_CHANNEL_INIT. {NEEDS_CHANNEL_NEXT_ACTION}")
+            raise ValidationFailureError(
+                f"BLOCKED: NEEDS_CHANNEL_INIT. {NEEDS_CHANNEL_NEXT_ACTION}"
+            )
 
         preflight = verify_m12_2_required_tags(self.repo_root)
         if preflight["status"] != "PASS":
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                status="BLOCKED",
-                artifacts={"preflight": preflight},
-                limitations=["M12.2 preflight tags are required before production prompt activation."],
-                next_action=f"Khôi phục hoặc tạo tag còn thiếu: {', '.join(preflight['missing_tags'])}.",
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    status="BLOCKED",
+                    artifacts={"preflight": preflight},
+                    limitations=[
+                        "M12.2 preflight tags are required before production prompt activation."
+                    ],
+                    next_action=f"Khôi phục hoặc tạo tag còn thiếu: {', '.join(preflight['missing_tags'])}.",
+                )
+            )
 
         readiness_snapshot = ProviderReadinessService(self.session, self.settings).run()
         snapshot = self._snapshot_for_request(
@@ -774,26 +894,40 @@ class FirstScriptedVideoPackageService:
             video_project_id=data.video_project_id,
         )
         if snapshot is None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                status="BLOCKED",
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                artifacts={"preflight": {"reason_code": "CHANNEL_POLICY_SNAPSHOT_MISSING"}},
-                limitations=["Thiếu active CompiledChannelPolicySnapshot nên không được render prompt production."],
-                next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    status="BLOCKED",
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    artifacts={
+                        "preflight": {"reason_code": "CHANNEL_POLICY_SNAPSHOT_MISSING"}
+                    },
+                    limitations=[
+                        "Thiếu active CompiledChannelPolicySnapshot nên không được render prompt production."
+                    ],
+                    next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
+                )
+            )
 
-        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        profile_version = self.session.get(
+            ChannelProfileVersion, snapshot.channel_profile_version_id
+        )
         if profile_version is None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="BLOCKED",
-                artifacts={"preflight": {"reason_code": "CHANNEL_PROFILE_VERSION_MISSING"}},
-                limitations=["CompiledPolicySnapshot không còn ChannelProfileVersion hợp lệ."],
-                next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="BLOCKED",
+                    artifacts={
+                        "preflight": {"reason_code": "CHANNEL_PROFILE_VERSION_MISSING"}
+                    },
+                    limitations=[
+                        "CompiledPolicySnapshot không còn ChannelProfileVersion hợp lệ."
+                    ],
+                    next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
+                )
+            )
 
         video_project_id = self._validate_optional_project(
             data.video_project_id,
@@ -803,99 +937,145 @@ class FirstScriptedVideoPackageService:
         )
         flag_block = self._flag_block(data)
         if flag_block is not None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="BLOCKED",
-                artifacts={"runtime_mode": flag_block},
-                limitations=["Runtime mode M12.2 chưa cho phép production prompt activation an toàn."],
-                next_action=flag_block["next_action"],
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="BLOCKED",
+                    artifacts={"runtime_mode": flag_block},
+                    limitations=[
+                        "Runtime mode M12.2 chưa cho phép production prompt activation an toàn."
+                    ],
+                    next_action=flag_block["next_action"],
+                )
+            )
 
         channel_contract = (
             snapshot.compiled_payload.get("channel_contract_json")
-            if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
+            if isinstance(snapshot.compiled_payload, dict)
+            and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
             else {}
         )
         contract_block = self._channel_contract_block(channel_contract, snapshot)
         if contract_block is not None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="REVIEW_REQUIRED",
-                artifacts={"channel_contract_review": contract_block},
-                limitations=["Channel Contract chưa đủ để agent production suy luận an toàn."],
-                next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="REVIEW_REQUIRED",
+                    artifacts={"channel_contract_review": contract_block},
+                    limitations=[
+                        "Channel Contract chưa đủ để agent production suy luận an toàn."
+                    ],
+                    next_action=CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
+                )
+            )
 
         effective_context_snapshot = self._ensure_effective_context(video_project_id)
-        effective_context_block = self._effective_context_block(effective_context_snapshot)
+        effective_context_block = self._effective_context_block(
+            effective_context_snapshot
+        )
         if effective_context_block is not None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="REVIEW_REQUIRED" if effective_context_snapshot and effective_context_snapshot.compile_status == "REVIEW_REQUIRED" else "BLOCKED",
-                artifacts={"effective_context": effective_context_block},
-                limitations=["EffectiveChannelRuntimeContextSnapshot chưa PASS nên không chạy agent chain production."],
-                next_action=effective_context_block["next_action"],
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="REVIEW_REQUIRED"
+                    if effective_context_snapshot
+                    and effective_context_snapshot.compile_status == "REVIEW_REQUIRED"
+                    else "BLOCKED",
+                    artifacts={"effective_context": effective_context_block},
+                    limitations=[
+                        "EffectiveChannelRuntimeContextSnapshot chưa PASS nên không chạy agent chain production."
+                    ],
+                    next_action=effective_context_block["next_action"],
+                )
+            )
 
         if not data.topic:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="REVIEW_REQUIRED",
-                artifacts={"topic": {"status": "NEEDS_TOPIC"}},
-                limitations=["Thiếu seed topic hoặc project topic; VCOS không tự bịa đề tài."],
-                next_action="Bổ sung topic hoặc chọn VideoProject/candidate topic trước khi chạy M12.2.",
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="REVIEW_REQUIRED",
+                    artifacts={"topic": {"status": "NEEDS_TOPIC"}},
+                    limitations=[
+                        "Thiếu seed topic hoặc project topic; VCOS không tự bịa đề tài."
+                    ],
+                    next_action="Bổ sung topic hoặc chọn VideoProject/candidate topic trước khi chạy M12.2.",
+                )
+            )
 
         if not (data.research_pack_text or data.research_pack_ref):
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="REVIEW_REQUIRED",
-                artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
-                limitations=["Thiếu research pack/source notes; ResearchPackSummarizer không được browse web hoặc bịa nguồn."],
-                next_action=NEEDS_RESEARCH_PACK_NEXT_ACTION,
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="REVIEW_REQUIRED",
+                    artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
+                    limitations=[
+                        "Thiếu research pack/source notes; ResearchPackSummarizer không được browse web hoặc bịa nguồn."
+                    ],
+                    next_action=NEEDS_RESEARCH_PACK_NEXT_ACTION,
+                )
+            )
 
         llm_block = self._llm_readiness_block()
         if llm_block is not None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="NOT_CONFIGURED",
-                artifacts={"llm_readiness": llm_block},
-                limitations=["Real LLM package run chưa configured; không dùng mock fallback."],
-                next_action=llm_block["next_action"],
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="NOT_CONFIGURED",
+                    artifacts={"llm_readiness": llm_block},
+                    limitations=[
+                        "Real LLM package run chưa configured; không dùng mock fallback."
+                    ],
+                    next_action=llm_block["next_action"],
+                )
+            )
 
         package_state = self._run_agent_chain(
             channel=channel,
@@ -910,7 +1090,9 @@ class FirstScriptedVideoPackageService:
         package = self._create_package(**package_state)
         return self._read(package)
 
-    def rehearse_full(self, data: FirstScriptedVideoPackageRequest) -> FirstScriptedVideoPackageRead:
+    def rehearse_full(
+        self, data: FirstScriptedVideoPackageRequest
+    ) -> FirstScriptedVideoPackageRead:
         preflight = self.preflight_full_rehearsal(data)
         channel = self.session.get(ChannelWorkspace, data.channel_id)
         if channel is None:
@@ -918,20 +1100,28 @@ class FirstScriptedVideoPackageService:
         if preflight.status != "READY":
             artifacts: dict[str, Any] = {"preflight": preflight.model_dump(mode="json")}
             if preflight.status == "BLOCKED_NEEDS_CHANNEL_CONTRACT":
-                artifacts["channel_contract_review"] = preflight.details.get("channel_contract_review", {})
+                artifacts["channel_contract_review"] = preflight.details.get(
+                    "channel_contract_review", {}
+                )
             if preflight.status == "BLOCKED_ACTIVATION_FLAGS":
                 artifacts["runtime_mode"] = preflight.details.get("runtime_mode", {})
             if preflight.status == "NOT_CONFIGURED":
                 artifacts["llm_readiness"] = preflight.details.get("llm_readiness", {})
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                status="NOT_CONFIGURED" if preflight.status == "NOT_CONFIGURED" else "BLOCKED",
-                channel_profile_version_id=preflight.channel_profile_version_id,
-                compiled_policy_snapshot_id=preflight.compiled_policy_snapshot_id,
-                artifacts=artifacts,
-                limitations=["M12.2S preflight blocked full agent rehearsal before provider/readiness or LLM work."],
-                next_action=preflight.next_action,
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    status="NOT_CONFIGURED"
+                    if preflight.status == "NOT_CONFIGURED"
+                    else "BLOCKED",
+                    channel_profile_version_id=preflight.channel_profile_version_id,
+                    compiled_policy_snapshot_id=preflight.compiled_policy_snapshot_id,
+                    artifacts=artifacts,
+                    limitations=[
+                        "M12.2S preflight blocked full agent rehearsal before provider/readiness or LLM work."
+                    ],
+                    next_action=preflight.next_action,
+                )
+            )
 
         readiness_snapshot = ProviderReadinessService(self.session, self.settings).run()
         snapshot = self._snapshot_for_request(
@@ -939,11 +1129,17 @@ class FirstScriptedVideoPackageService:
             video_project_id=data.video_project_id,
         )
         if snapshot is None:
-            raise ValidationFailureError(f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}")
+            raise ValidationFailureError(
+                f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}"
+            )
 
-        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        profile_version = self.session.get(
+            ChannelProfileVersion, snapshot.channel_profile_version_id
+        )
         if profile_version is None:
-            raise ValidationFailureError(f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}")
+            raise ValidationFailureError(
+                f"BLOCKED_NEEDS_CHANNEL_CONTRACT: {M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}"
+            )
 
         video_project_id = self._validate_optional_project(
             data.video_project_id,
@@ -954,55 +1150,85 @@ class FirstScriptedVideoPackageService:
 
         channel_contract = (
             snapshot.compiled_payload.get("channel_contract_json")
-            if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
+            if isinstance(snapshot.compiled_payload, dict)
+            and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
             else {}
         )
         effective_context_snapshot = self._ensure_effective_context(video_project_id)
-        effective_context_block = self._effective_context_block(effective_context_snapshot)
+        effective_context_block = self._effective_context_block(
+            effective_context_snapshot
+        )
         if effective_context_block is not None:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="REVIEW_REQUIRED" if effective_context_snapshot and effective_context_snapshot.compile_status == "REVIEW_REQUIRED" else "BLOCKED",
-                artifacts={"effective_context": effective_context_block},
-                limitations=["EffectiveChannelRuntimeContextSnapshot chưa PASS nên không chạy full agent rehearsal."],
-                next_action=effective_context_block["next_action"],
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="REVIEW_REQUIRED"
+                    if effective_context_snapshot
+                    and effective_context_snapshot.compile_status == "REVIEW_REQUIRED"
+                    else "BLOCKED",
+                    artifacts={"effective_context": effective_context_block},
+                    limitations=[
+                        "EffectiveChannelRuntimeContextSnapshot chưa PASS nên không chạy full agent rehearsal."
+                    ],
+                    next_action=effective_context_block["next_action"],
+                )
+            )
 
         if not data.topic:
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="BLOCKED",
-                artifacts={"topic": {"status": "NEEDS_TOPIC"}},
-                limitations=["Thiếu topic; VCOS không tự bịa đề tài để chạy agent production."],
-                next_action="Bổ sung topic trước khi chạy full Ollama rehearsal.",
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="BLOCKED",
+                    artifacts={"topic": {"status": "NEEDS_TOPIC"}},
+                    limitations=[
+                        "Thiếu topic; VCOS không tự bịa đề tài để chạy agent production."
+                    ],
+                    next_action="Bổ sung topic trước khi chạy full Ollama rehearsal.",
+                )
+            )
 
         if not (data.research_pack_text or data.research_pack_ref):
-            return self._read(self._create_package(
-                channel_id=channel.id,
-                video_project_id=video_project_id,
-                channel_profile_version_id=profile_version.id,
-                compiled_policy_snapshot_id=snapshot.id,
-                effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-                effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
-                provider_readiness_snapshot_id=readiness_snapshot.id,
-                status="REVIEW_REQUIRED",
-                artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
-                limitations=["Thiếu research pack/source notes; VCOS không browse web hoặc bịa nguồn."],
-                next_action=NEEDS_RESEARCH_PACK_NEXT_ACTION,
-            ))
+            return self._read(
+                self._create_package(
+                    channel_id=channel.id,
+                    video_project_id=video_project_id,
+                    channel_profile_version_id=profile_version.id,
+                    compiled_policy_snapshot_id=snapshot.id,
+                    effective_context_snapshot_id=effective_context_snapshot.id
+                    if effective_context_snapshot
+                    else None,
+                    effective_context_hash=effective_context_snapshot.context_hash
+                    if effective_context_snapshot
+                    else None,
+                    provider_readiness_snapshot_id=readiness_snapshot.id,
+                    status="REVIEW_REQUIRED",
+                    artifacts={"research_notes": {"status": "NEEDS_RESEARCH_PACK"}},
+                    limitations=[
+                        "Thiếu research pack/source notes; VCOS không browse web hoặc bịa nguồn."
+                    ],
+                    next_action=NEEDS_RESEARCH_PACK_NEXT_ACTION,
+                )
+            )
 
         package_state = self._run_full_rehearsal_agent_chain(
             channel=channel,
@@ -1016,7 +1242,10 @@ class FirstScriptedVideoPackageService:
         )
         package = self._create_package(**package_state)
         if self._should_create_boundary(package.artifacts):
-            boundary = self._create_generation_boundary(package=package, readiness_snapshot=readiness_snapshot.model_dump(mode="json"))
+            boundary = self._create_generation_boundary(
+                package=package,
+                readiness_snapshot=readiness_snapshot.model_dump(mode="json"),
+            )
             package.artifacts = {
                 **package.artifacts,
                 "video_generation_boundary_ref": str(boundary.id),
@@ -1032,7 +1261,11 @@ class FirstScriptedVideoPackageService:
         channel_id: uuid.UUID | None = None,
     ) -> M122SPreflightRead:
         requested_channel_id = data.channel_id if data is not None else channel_id
-        companies = list(self.session.scalars(select(Company).order_by(desc(Company.created_at))).all())
+        companies = list(
+            self.session.scalars(
+                select(Company).order_by(desc(Company.created_at))
+            ).all()
+        )
         if not companies:
             return M122SPreflightRead(
                 status="BLOCKED_NEEDS_COMPANY",
@@ -1047,7 +1280,11 @@ class FirstScriptedVideoPackageService:
                 next_action=M12_2S_NEEDS_CHANNEL_NEXT_ACTION,
                 company_id=companies[0].id,
                 reason_codes=["CHANNEL_MISSING"],
-                details={"requested_channel_id": str(requested_channel_id) if requested_channel_id else None},
+                details={
+                    "requested_channel_id": str(requested_channel_id)
+                    if requested_channel_id
+                    else None
+                },
             )
 
         snapshot = self._active_snapshot(channel)
@@ -1063,13 +1300,17 @@ class FirstScriptedVideoPackageService:
                     "channel_contract_review": {
                         "status": "BLOCKED_NEEDS_CHANNEL_CONTRACT",
                         "reason_codes": ["ACTIVE_COMPILED_POLICY_SNAPSHOT_MISSING"],
-                        "missing_or_invalid_fields": ["active_compiled_policy_snapshot"],
+                        "missing_or_invalid_fields": [
+                            "active_compiled_policy_snapshot"
+                        ],
                         "next_action": M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
                     }
                 },
             )
 
-        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        profile_version = self.session.get(
+            ChannelProfileVersion, snapshot.channel_profile_version_id
+        )
         if profile_version is None:
             return M122SPreflightRead(
                 status="BLOCKED_NEEDS_CHANNEL_CONTRACT",
@@ -1091,7 +1332,8 @@ class FirstScriptedVideoPackageService:
 
         channel_contract = (
             snapshot.compiled_payload.get("channel_contract_json")
-            if isinstance(snapshot.compiled_payload, dict) and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
+            if isinstance(snapshot.compiled_payload, dict)
+            and isinstance(snapshot.compiled_payload.get("channel_contract_json"), dict)
             else {}
         )
         contract_block = self._channel_contract_block(channel_contract, snapshot)
@@ -1103,9 +1345,17 @@ class FirstScriptedVideoPackageService:
                 channel_id=channel.id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
-                contract_status=str(channel_contract.get("contract_status") or "MISSING"),
+                contract_status=str(
+                    channel_contract.get("contract_status") or "MISSING"
+                ),
                 reason_codes=["CHANNEL_CONTRACT_INCOMPLETE"],
-                details={"channel_contract_review": {**contract_block, "status": "BLOCKED_NEEDS_CHANNEL_CONTRACT", "next_action": M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION}},
+                details={
+                    "channel_contract_review": {
+                        **contract_block,
+                        "status": "BLOCKED_NEEDS_CHANNEL_CONTRACT",
+                        "next_action": M12_2S_NEEDS_CHANNEL_CONTRACT_NEXT_ACTION,
+                    }
+                },
             )
 
         tag_preflight = verify_m12_2s_required_tags(self.repo_root)
@@ -1118,12 +1368,16 @@ class FirstScriptedVideoPackageService:
                 channel_id=channel.id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
-                contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+                contract_status=str(
+                    channel_contract.get("contract_status") or "COMPLETE"
+                ),
                 reason_codes=["M12_2S_REQUIRED_TAGS_MISSING"],
                 details={"required_tags": tag_preflight},
             )
 
-        flag_block = self._flag_block(data or FirstScriptedVideoPackageRequest(channel_id=channel.id))
+        flag_block = self._flag_block(
+            data or FirstScriptedVideoPackageRequest(channel_id=channel.id)
+        )
         if flag_block is not None:
             return M122SPreflightRead(
                 status="BLOCKED_ACTIVATION_FLAGS",
@@ -1132,7 +1386,9 @@ class FirstScriptedVideoPackageService:
                 channel_id=channel.id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
-                contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+                contract_status=str(
+                    channel_contract.get("contract_status") or "COMPLETE"
+                ),
                 reason_codes=["M12_2S_ACTIVATION_FLAGS_INVALID"],
                 details={"runtime_mode": flag_block},
             )
@@ -1146,7 +1402,9 @@ class FirstScriptedVideoPackageService:
                 channel_id=channel.id,
                 channel_profile_version_id=profile_version.id,
                 compiled_policy_snapshot_id=snapshot.id,
-                contract_status=str(channel_contract.get("contract_status") or "COMPLETE"),
+                contract_status=str(
+                    channel_contract.get("contract_status") or "COMPLETE"
+                ),
                 reason_codes=["OLLAMA_OR_LLM_ROUTER_NOT_READY"],
                 details={"llm_readiness": llm_block},
             )
@@ -1167,7 +1425,9 @@ class FirstScriptedVideoPackageService:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
         return self._read(package)
 
-    def agent_runs(self, package_id: uuid.UUID) -> FirstScriptedVideoPackageAgentRunsRead:
+    def agent_runs(
+        self, package_id: uuid.UUID
+    ) -> FirstScriptedVideoPackageAgentRunsRead:
         package = self.session.get(FirstScriptedVideoPackage, package_id)
         if package is None:
             raise NotFoundError(f"first scripted video package not found: {package_id}")
@@ -1185,8 +1445,12 @@ class FirstScriptedVideoPackageService:
             package_id=package.id,
             package_status=package.package_status,  # type: ignore[arg-type]
             agent_runs=package.agent_run_refs,
-            prompt_render_run_refs=[uuid.UUID(str(item)) for item in package.prompt_render_run_refs],
-            prompt_audit_snapshot_refs=[uuid.UUID(str(item)) for item in package.prompt_audit_snapshot_refs],
+            prompt_render_run_refs=[
+                uuid.UUID(str(item)) for item in package.prompt_render_run_refs
+            ],
+            prompt_audit_snapshot_refs=[
+                uuid.UUID(str(item)) for item in package.prompt_audit_snapshot_refs
+            ],
             provider_attempt_refs=provider_attempt_refs,
             llm_run_snapshot_refs=llm_run_refs,
         )
@@ -1199,7 +1463,9 @@ class FirstScriptedVideoPackageService:
             .limit(1)
         ).one_or_none()
         if boundary is None:
-            raise NotFoundError(f"video generation boundary not found for package: {package_id}")
+            raise NotFoundError(
+                f"video generation boundary not found for package: {package_id}"
+            )
         return VideoGenerationBoundaryRead.model_validate(boundary)
 
     def review(self, package_id: uuid.UUID) -> FirstScriptedVideoPackageReviewRead:
@@ -1213,23 +1479,42 @@ class FirstScriptedVideoPackageService:
             package_status=package.package_status,  # type: ignore[arg-type]
             channel_binding={
                 "channel_id": str(package.channel_id),
-                "channel_profile_version_id": str(package.channel_profile_version_id) if package.channel_profile_version_id else None,
-                "compiled_policy_snapshot_id": str(package.compiled_policy_snapshot_id) if package.compiled_policy_snapshot_id else None,
+                "channel_profile_version_id": str(package.channel_profile_version_id)
+                if package.channel_profile_version_id
+                else None,
+                "compiled_policy_snapshot_id": str(package.compiled_policy_snapshot_id)
+                if package.compiled_policy_snapshot_id
+                else None,
             },
             effective_context={
-                "effective_context_snapshot_id": str(package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None,
+                "effective_context_snapshot_id": str(
+                    package.effective_context_snapshot_id
+                )
+                if package.effective_context_snapshot_id
+                else None,
                 "effective_context_hash": package.effective_context_hash,
-                "snapshot_ref": package.artifacts.get("effective_context_snapshot_ref") or package.artifacts.get("effective_context"),
+                "snapshot_ref": package.artifacts.get("effective_context_snapshot_ref")
+                or package.artifacts.get("effective_context"),
             },
-            packaging_handoff=PackagingHandoffReadService(self.session).build(package.id),
-            packaging_review_queue=PackagingReviewQueueService(self.session).read(package.id),
+            packaging_handoff=PackagingHandoffReadService(self.session).build(
+                package.id
+            ),
+            packaging_review_queue=PackagingReviewQueueService(self.session).read(
+                package.id
+            ),
             human_review_checklist=package.artifacts.get("human_review_checklist", {}),
-            agent_outputs={key: value for key, value in package.artifacts.items() if key not in {"human_review_checklist"}},
+            agent_outputs={
+                key: value
+                for key, value in package.artifacts.items()
+                if key not in {"human_review_checklist"}
+            },
             prompt_snapshots={
                 "prompt_render_run_refs": package.prompt_render_run_refs,
                 "prompt_audit_snapshot_refs": package.prompt_audit_snapshot_refs,
                 "agent_run_refs": package.agent_run_refs,
-                "agent_context_pack_refs": package.artifacts.get("agent_context_pack_refs", []),
+                "agent_context_pack_refs": package.artifacts.get(
+                    "agent_context_pack_refs", []
+                ),
             },
             provider_readiness_snapshot_ref=package.provider_readiness_snapshot_id,
             limitations=package.limitations,
@@ -1258,9 +1543,13 @@ class FirstScriptedVideoPackageService:
                 "compiled_policy_content_hash": snapshot.content_hash,
             }
         }
-        artifacts["duration_model"] = _duration_model_from_context(effective_context_snapshot, target_video_type=data.target_video_type)
+        artifacts["duration_model"] = _duration_model_from_context(
+            effective_context_snapshot, target_video_type=data.target_video_type
+        )
         if effective_context_snapshot is not None:
-            artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
+            artifacts["effective_context_snapshot_ref"] = (
+                build_effective_channel_runtime_digest(effective_context_snapshot)
+            )
         niche_seed_errors = self._seed_frozen_niche_authority(
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
@@ -1282,15 +1571,21 @@ class FirstScriptedVideoPackageService:
                 "video_project_id": video_project_id,
                 "channel_profile_version_id": profile_version.id,
                 "compiled_policy_snapshot_id": snapshot.id,
-                "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
-                "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
+                "effective_context_snapshot_id": effective_context_snapshot.id
+                if effective_context_snapshot
+                else None,
+                "effective_context_hash": effective_context_snapshot.context_hash
+                if effective_context_snapshot
+                else None,
                 "provider_readiness_snapshot_id": provider_readiness_snapshot_id,
                 "status": "BLOCKED",
                 "agent_run_refs": [],
                 "prompt_render_run_refs": [],
                 "prompt_audit_snapshot_refs": [],
                 "artifacts": artifacts,
-                "limitations": ["Strict NICH1 frozen authority failed before any LLM route."],
+                "limitations": [
+                    "Strict NICH1 frozen authority failed before any LLM route."
+                ],
                 "risk_limitations_summary": self._risk_summary(artifacts, "BLOCKED"),
                 "next_action": "Repair the frozen NICH1 lineage before package generation.",
             }
@@ -1307,13 +1602,18 @@ class FirstScriptedVideoPackageService:
         ]
 
         for step in PACKAGE_AGENT_CHAIN:
-            if step.agent_key == "GatekeeperSoftReviewAgent" and pre_gatekeeper_batch is None:
+            if (
+                step.agent_key == "GatekeeperSoftReviewAgent"
+                and pre_gatekeeper_batch is None
+            ):
                 pre_gatekeeper_batch = self._run_package_deterministic_gates(
                     package_id=package_id,
                     video_project_id=video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
-                    provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                    provider_readiness_state={
+                        "id": str(provider_readiness_snapshot_id)
+                    },
                     include_provider_boundary=False,
                 )
             context_result = self._build_agent_context_pack(
@@ -1330,14 +1630,20 @@ class FirstScriptedVideoPackageService:
                 context_pack_refs.append(
                     {
                         "agent_key": step.agent_key,
-                        "agent_context_pack_snapshot_id": str(context_result.snapshot.id),
+                        "agent_context_pack_snapshot_id": str(
+                            context_result.snapshot.id
+                        ),
                         "context_pack_hash": context_result.snapshot.context_pack_hash,
                     }
                 )
                 artifacts["agent_context_pack_refs"] = context_pack_refs
             if context_result.status != "OK" or context_result.context_pack is None:
                 artifacts[step.artifact_key] = context_result.blocking_report
-                status = "REVIEW_REQUIRED" if context_result.status == "REVIEW_REQUIRED" else "BLOCKED"
+                status = (
+                    "REVIEW_REQUIRED"
+                    if context_result.status == "REVIEW_REQUIRED"
+                    else "BLOCKED"
+                )
                 next_action = "Sửa AgentContextPack trước khi gọi LLM."
                 break
             task_payload = self._task_payload(
@@ -1368,12 +1674,22 @@ class FirstScriptedVideoPackageService:
                     prompt_render_run_id=render.prompt_render_run_id,
                     prompt_context_hash=render.prompt_context_hash,
                 )
-                self._record_prompt_budget_metrics(context_result.snapshot.id, render.rendered_messages)
+                self._record_prompt_budget_metrics(
+                    context_result.snapshot.id, render.rendered_messages
+                )
             prompt_render_run_refs.append(str(render.prompt_render_run_id))
             prompt_audit_snapshot_refs.append(str(render.prompt_audit_snapshot_id))
             if render.status != "OK":
-                artifacts[step.artifact_key] = render.blocking_output.model_dump(mode="json") if render.blocking_output else None
-                status = "REVIEW_REQUIRED" if render.status == "REVIEW_REQUIRED" else "BLOCKED"
+                artifacts[step.artifact_key] = (
+                    render.blocking_output.model_dump(mode="json")
+                    if render.blocking_output
+                    else None
+                )
+                status = (
+                    "REVIEW_REQUIRED"
+                    if render.status == "REVIEW_REQUIRED"
+                    else "BLOCKED"
+                )
                 next_action = CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION
                 break
 
@@ -1385,13 +1701,22 @@ class FirstScriptedVideoPackageService:
                 correlation_id=f"m12-2-first-video-package-{step.agent_key}",
             )
             if route.status != "SUCCESS":
-                agent_run_refs.append(self._agent_ref(step, render, route=route, validation=None))
-                artifacts[step.artifact_key] = {"status": route.status, "reason_codes": route.reason_codes}
+                agent_run_refs.append(
+                    self._agent_ref(step, render, route=route, validation=None)
+                )
+                artifacts[step.artifact_key] = {
+                    "status": route.status,
+                    "reason_codes": route.reason_codes,
+                }
                 status = "NOT_CONFIGURED" if route.status == "SKIPPED" else "ERROR"
-                next_action = "Cấu hình real LLMRouter/Ollama trước khi chạy package production."
+                next_action = (
+                    "Cấu hình real LLMRouter/Ollama trước khi chạy package production."
+                )
                 break
 
-            raw_output: str | dict[str, Any] | None = route.structured_output or route.content
+            raw_output: str | dict[str, Any] | None = (
+                route.structured_output or route.content
+            )
             validation = self.prompt_registry.validate_output(
                 PromptOutputValidationRequest(
                     agent_key=step.agent_key,
@@ -1404,19 +1729,36 @@ class FirstScriptedVideoPackageService:
                 provider_refs=[
                     {
                         "route_attempt_id": str(route.route_attempt_id),
-                        "provider_attempt_id": str(route.provider_attempt_id) if route.provider_attempt_id else None,
-                        "llm_run_snapshot_id": str(route.llm_run_snapshot_id) if route.llm_run_snapshot_id else None,
+                        "provider_attempt_id": str(route.provider_attempt_id)
+                        if route.provider_attempt_id
+                        else None,
+                        "llm_run_snapshot_id": str(route.llm_run_snapshot_id)
+                        if route.llm_run_snapshot_id
+                        else None,
                     }
                 ],
             )
             if audit_id is not None:
                 prompt_audit_snapshot_refs.append(str(audit_id))
-            agent_run_refs.append(self._agent_ref(step, render, route=route, validation=validation.model_dump(mode="json")))
+            agent_run_refs.append(
+                self._agent_ref(
+                    step,
+                    render,
+                    route=route,
+                    validation=validation.model_dump(mode="json"),
+                )
+            )
 
-            if validation.parsed_output is None or validation.status not in {"OK", "REVIEW_REQUIRED", "BLOCK"}:
+            if validation.parsed_output is None or validation.status not in {
+                "OK",
+                "REVIEW_REQUIRED",
+                "BLOCK",
+            }:
                 artifacts[step.artifact_key] = validation.validation_result
                 status = "ERROR"
-                next_action = "Sửa output schema/LLM response trước khi tiếp tục package."
+                next_action = (
+                    "Sửa output schema/LLM response trước khi tiếp tục package."
+                )
                 break
             if validation.status == "REVIEW_REQUIRED":
                 artifacts[step.artifact_key] = {
@@ -1425,7 +1767,9 @@ class FirstScriptedVideoPackageService:
                     "repair_attempts": validation.repair_attempts,
                 }
                 status = "REVIEW_REQUIRED"
-                next_action = "Sửa output schema/LLM response trước khi tiếp tục package."
+                next_action = (
+                    "Sửa output schema/LLM response trước khi tiếp tục package."
+                )
                 break
 
             output = validation.parsed_output
@@ -1447,12 +1791,22 @@ class FirstScriptedVideoPackageService:
                 context_pack_snapshot=context_result.snapshot,
             )
             if agent_run_refs:
-                agent_run_refs[-1]["agent_output_validation_run_id"] = str(output_validation.validation_run.id)
-                agent_run_refs[-1]["canonical_artifact_hash"] = output_validation.validation_run.artifact_hash
+                agent_run_refs[-1]["agent_output_validation_run_id"] = str(
+                    output_validation.validation_run.id
+                )
+                agent_run_refs[-1]["canonical_artifact_hash"] = (
+                    output_validation.validation_run.artifact_hash
+                )
             if output_validation.status != "OK":
                 artifacts[step.artifact_key] = output_validation.blocking_report
-                status = "REVIEW_REQUIRED" if output_validation.status == "REVIEW_REQUIRED" else "BLOCKED"
-                next_action = "Sửa AgentOutputContract/envelope trước khi tiếp tục package."
+                status = (
+                    "REVIEW_REQUIRED"
+                    if output_validation.status == "REVIEW_REQUIRED"
+                    else "BLOCKED"
+                )
+                next_action = (
+                    "Sửa AgentOutputContract/envelope trước khi tiếp tục package."
+                )
                 break
 
             artifacts[step.artifact_key] = output_validation.canonical_artifact or {}
@@ -1490,17 +1844,23 @@ class FirstScriptedVideoPackageService:
             if step.agent_key == "ScriptWriterAgent":
                 artifacts["srt"] = _build_srt_caption_artifact(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     script=_dict(artifacts.get("narration_script")),
                     duration_model=_dict(artifacts.get("duration_model")),
                     repo_root=self.repo_root,
                 )
                 srt_gate_stop = self._run_custom_deterministic_gates(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
-                    provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                    provider_readiness_state={
+                        "id": str(provider_readiness_snapshot_id)
+                    },
                     gate_keys=[
                         "srt_format_gate",
                         "srt_timing_gate",
@@ -1518,10 +1878,14 @@ class FirstScriptedVideoPackageService:
             if step.agent_key == "VisualPlanningAgent" and artifacts.get("srt"):
                 visual_srt_gate_stop = self._run_custom_deterministic_gates(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
-                    provider_readiness_state={"id": str(provider_readiness_snapshot_id)},
+                    provider_readiness_state={
+                        "id": str(provider_readiness_snapshot_id)
+                    },
                     gate_keys=["visual_srt_timeline_gate"],
                     trigger_agent_key="VisualSRTTimelineCrossCheck",
                 )
@@ -1538,21 +1902,38 @@ class FirstScriptedVideoPackageService:
                 )
                 artifacts["package_state_reducer"] = reducer_decision
                 status = reducer_decision["package_status"]
-                if reducer_decision["source"] == "gatekeeper_soft_review" and gatekeeper_result in {"BLOCK", "REVIEW_REQUIRED"}:
-                    next_action = output.get("next_action") or self._next_action_for_reducer_decision(reducer_decision)
+                if reducer_decision[
+                    "source"
+                ] == "gatekeeper_soft_review" and gatekeeper_result in {
+                    "BLOCK",
+                    "REVIEW_REQUIRED",
+                }:
+                    next_action = output.get(
+                        "next_action"
+                    ) or self._next_action_for_reducer_decision(reducer_decision)
                 else:
-                    next_action = self._next_action_for_reducer_decision(reducer_decision)
+                    next_action = self._next_action_for_reducer_decision(
+                        reducer_decision
+                    )
                 break
             if envelope_status == "BLOCK":
                 status = "BLOCKED"
-                next_action = output.get("next_action") or "Agent upstream trả BLOCK; không tiếp tục downstream."
+                next_action = (
+                    output.get("next_action")
+                    or "Agent upstream trả BLOCK; không tiếp tục downstream."
+                )
                 break
             if envelope_status == "REVIEW_REQUIRED":
                 status = "REVIEW_REQUIRED"
-                next_action = output.get("next_action") or "Agent upstream cần human review; không tiếp tục downstream."
+                next_action = (
+                    output.get("next_action")
+                    or "Agent upstream cần human review; không tiếp tục downstream."
+                )
                 break
 
-        artifacts["human_review_checklist"] = self._human_review_checklist(artifacts, provider_readiness_snapshot_id)
+        artifacts["human_review_checklist"] = self._human_review_checklist(
+            artifacts, provider_readiness_snapshot_id
+        )
         risk_summary = self._risk_summary(artifacts, status)
         return {
             "id": package_id,
@@ -1560,8 +1941,12 @@ class FirstScriptedVideoPackageService:
             "video_project_id": video_project_id,
             "channel_profile_version_id": profile_version.id,
             "compiled_policy_snapshot_id": snapshot.id,
-            "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
-            "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
+            "effective_context_snapshot_id": effective_context_snapshot.id
+            if effective_context_snapshot
+            else None,
+            "effective_context_hash": effective_context_snapshot.context_hash
+            if effective_context_snapshot
+            else None,
             "provider_readiness_snapshot_id": provider_readiness_snapshot_id,
             "status": status,
             "agent_run_refs": agent_run_refs,
@@ -1602,9 +1987,13 @@ class FirstScriptedVideoPackageService:
                 "old_provider_smoke_disabled": True,
             },
         }
-        artifacts["duration_model"] = _duration_model_from_context(effective_context_snapshot, target_video_type=data.target_video_type)
+        artifacts["duration_model"] = _duration_model_from_context(
+            effective_context_snapshot, target_video_type=data.target_video_type
+        )
         if effective_context_snapshot is not None:
-            artifacts["effective_context_snapshot_ref"] = build_effective_channel_runtime_digest(effective_context_snapshot)
+            artifacts["effective_context_snapshot_ref"] = (
+                build_effective_channel_runtime_digest(effective_context_snapshot)
+            )
         niche_seed_errors = self._seed_frozen_niche_authority(
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
@@ -1628,15 +2017,21 @@ class FirstScriptedVideoPackageService:
                 "video_project_id": video_project_id,
                 "channel_profile_version_id": profile_version.id,
                 "compiled_policy_snapshot_id": snapshot.id,
-                "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
-                "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
+                "effective_context_snapshot_id": effective_context_snapshot.id
+                if effective_context_snapshot
+                else None,
+                "effective_context_hash": effective_context_snapshot.context_hash
+                if effective_context_snapshot
+                else None,
                 "provider_readiness_snapshot_id": provider_id,
                 "status": "BLOCKED",
                 "agent_run_refs": [],
                 "prompt_render_run_refs": [],
                 "prompt_audit_snapshot_refs": [],
                 "artifacts": artifacts,
-                "limitations": ["Strict NICH1 frozen authority failed before any LLM route."],
+                "limitations": [
+                    "Strict NICH1 frozen authority failed before any LLM route."
+                ],
                 "risk_limitations_summary": self._risk_summary(artifacts, "BLOCKED"),
                 "next_action": "Repair the frozen NICH1 lineage before full rehearsal.",
             }
@@ -1653,18 +2048,25 @@ class FirstScriptedVideoPackageService:
         ]
 
         for step in FULL_REHEARSAL_AGENT_CHAIN:
-            if step.agent_key == "GatekeeperSoftReviewAgent" and pre_gatekeeper_batch is None:
+            if (
+                step.agent_key == "GatekeeperSoftReviewAgent"
+                and pre_gatekeeper_batch is None
+            ):
                 if artifacts.get("narration_script") and not artifacts.get("srt"):
                     artifacts["srt"] = _build_srt_caption_artifact(
                         package_id=package_id,
-                        video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                        video_project_id=effective_context_snapshot.video_project_id
+                        if effective_context_snapshot
+                        else data.video_project_id,
                         script=_dict(artifacts.get("narration_script")),
                         duration_model=_dict(artifacts.get("duration_model")),
                         repo_root=self.repo_root,
                     )
                     srt_gate_stop = self._run_custom_deterministic_gates(
                         package_id=package_id,
-                        video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                        video_project_id=effective_context_snapshot.video_project_id
+                        if effective_context_snapshot
+                        else data.video_project_id,
                         artifacts=artifacts,
                         effective_context_snapshot=effective_context_snapshot,
                         provider_readiness_state=provider_readiness_snapshot,
@@ -1685,7 +2087,9 @@ class FirstScriptedVideoPackageService:
                 if artifacts.get("visual_plan") and artifacts.get("srt"):
                     visual_srt_gate_stop = self._run_custom_deterministic_gates(
                         package_id=package_id,
-                        video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                        video_project_id=effective_context_snapshot.video_project_id
+                        if effective_context_snapshot
+                        else data.video_project_id,
                         artifacts=artifacts,
                         effective_context_snapshot=effective_context_snapshot,
                         provider_readiness_state=provider_readiness_snapshot,
@@ -1720,8 +2124,13 @@ class FirstScriptedVideoPackageService:
                 prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
                 context_pack_refs=context_pack_refs,
             )
-            if step.agent_key == "GatekeeperSoftReviewAgent" and result["stop_status"] is None:
-                gatekeeper_result = self._gatekeeper_result(result.get("parsed_output") or {})
+            if (
+                step.agent_key == "GatekeeperSoftReviewAgent"
+                and result["stop_status"] is None
+            ):
+                gatekeeper_result = self._gatekeeper_result(
+                    result.get("parsed_output") or {}
+                )
                 reducer_decision = self.package_status_reducer.resolve(
                     current_status="READY_FOR_MEDIA_PROVIDERS",
                     deterministic_batch=pre_gatekeeper_batch,
@@ -1730,7 +2139,9 @@ class FirstScriptedVideoPackageService:
                 artifacts["package_state_reducer"] = reducer_decision
                 if reducer_decision["package_status"] != "READY_FOR_MEDIA_PROVIDERS":
                     status = reducer_decision["package_status"]
-                    next_action = self._next_action_for_reducer_decision(reducer_decision)
+                    next_action = self._next_action_for_reducer_decision(
+                        reducer_decision
+                    )
                     break
             if result["stop_status"] is not None:
                 status = result["stop_status"]
@@ -1754,12 +2165,22 @@ class FirstScriptedVideoPackageService:
                     )
                     if rewrite["ran"]:
                         status = rewrite["stop_status"] or "REVIEW_REQUIRED"
-                        next_action = rewrite["next_action"] or "Review script rewrite trước khi chạy lại gatekeeper."
+                        next_action = (
+                            rewrite["next_action"]
+                            or "Review script rewrite trước khi chạy lại gatekeeper."
+                        )
                 break
             if step.agent_key == "GatekeeperSoftReviewAgent":
-                agent_run_refs.append(self._safe_skip_ref("ScriptRewriteAgent", "Gatekeeper PASS; validation không yêu cầu rewrite."))
+                agent_run_refs.append(
+                    self._safe_skip_ref(
+                        "ScriptRewriteAgent",
+                        "Gatekeeper PASS; validation không yêu cầu rewrite.",
+                    )
+                )
 
-        if status == "READY_FOR_MEDIA_PROVIDERS" and self._should_create_boundary(artifacts):
+        if status == "READY_FOR_MEDIA_PROVIDERS" and self._should_create_boundary(
+            artifacts
+        ):
             provider_boundary_batch = self._run_package_deterministic_gates(
                 package_id=package_id,
                 video_project_id=video_project_id,
@@ -1768,7 +2189,10 @@ class FirstScriptedVideoPackageService:
                 provider_readiness_state=provider_readiness_snapshot,
                 include_provider_boundary=True,
             )
-            if provider_boundary_batch and provider_boundary_batch.status in {GATE_BLOCK, GATE_REVIEW}:
+            if provider_boundary_batch and provider_boundary_batch.status in {
+                GATE_BLOCK,
+                GATE_REVIEW,
+            }:
                 reducer_decision = self.package_status_reducer.resolve(
                     current_status=status,
                     deterministic_batch=provider_boundary_batch,
@@ -1778,7 +2202,10 @@ class FirstScriptedVideoPackageService:
                 status = reducer_decision["package_status"]
                 next_action = self._next_action_for_reducer_decision(reducer_decision)
 
-        artifacts["human_review_checklist"] = self._human_review_checklist(artifacts, provider_readiness_snapshot_id=uuid.UUID(provider_readiness_snapshot["id"]))
+        artifacts["human_review_checklist"] = self._human_review_checklist(
+            artifacts,
+            provider_readiness_snapshot_id=uuid.UUID(provider_readiness_snapshot["id"]),
+        )
         risk_summary = self._risk_summary(artifacts, status)
         return {
             "id": package_id,
@@ -1786,9 +2213,15 @@ class FirstScriptedVideoPackageService:
             "video_project_id": video_project_id,
             "channel_profile_version_id": profile_version.id,
             "compiled_policy_snapshot_id": snapshot.id,
-            "effective_context_snapshot_id": effective_context_snapshot.id if effective_context_snapshot else None,
-            "effective_context_hash": effective_context_snapshot.context_hash if effective_context_snapshot else None,
-            "provider_readiness_snapshot_id": uuid.UUID(provider_readiness_snapshot["id"]),
+            "effective_context_snapshot_id": effective_context_snapshot.id
+            if effective_context_snapshot
+            else None,
+            "effective_context_hash": effective_context_snapshot.context_hash
+            if effective_context_snapshot
+            else None,
+            "provider_readiness_snapshot_id": uuid.UUID(
+                provider_readiness_snapshot["id"]
+            ),
             "status": status,
             "agent_run_refs": agent_run_refs,
             "prompt_render_run_refs": prompt_render_run_refs,
@@ -1840,7 +2273,9 @@ class FirstScriptedVideoPackageService:
         if context_result.status != "OK" or context_result.context_pack is None:
             artifacts[step.artifact_key] = context_result.blocking_report
             return {
-                "stop_status": "REVIEW_REQUIRED" if context_result.status == "REVIEW_REQUIRED" else "BLOCKED",
+                "stop_status": "REVIEW_REQUIRED"
+                if context_result.status == "REVIEW_REQUIRED"
+                else "BLOCKED",
                 "next_action": "Sửa AgentContextPack trước khi gọi LLM.",
                 "parsed_output": None,
             }
@@ -1884,21 +2319,29 @@ class FirstScriptedVideoPackageService:
                 evidence_refs=self._evidence_refs(data),
                 artifact_refs=self._artifact_refs(artifacts),
                 input_payload_ref=f"full-agent-rehearsal:{channel.id}:{step.agent_key}",
-                )
             )
+        )
         if context_result.snapshot is not None:
             AgentContextPackBuilder(self.session).link_prompt_render_run(
                 snapshot_id=context_result.snapshot.id,
                 prompt_render_run_id=render.prompt_render_run_id,
                 prompt_context_hash=render.prompt_context_hash,
             )
-            self._record_prompt_budget_metrics(context_result.snapshot.id, render.rendered_messages)
+            self._record_prompt_budget_metrics(
+                context_result.snapshot.id, render.rendered_messages
+            )
         prompt_render_run_refs.append(str(render.prompt_render_run_id))
         prompt_audit_snapshot_refs.append(str(render.prompt_audit_snapshot_id))
         if render.status != "OK":
-            artifacts[step.artifact_key] = render.blocking_output.model_dump(mode="json") if render.blocking_output else None
+            artifacts[step.artifact_key] = (
+                render.blocking_output.model_dump(mode="json")
+                if render.blocking_output
+                else None
+            )
             return {
-                "stop_status": "REVIEW_REQUIRED" if render.status == "REVIEW_REQUIRED" else "BLOCKED",
+                "stop_status": "REVIEW_REQUIRED"
+                if render.status == "REVIEW_REQUIRED"
+                else "BLOCKED",
                 "next_action": CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
                 "parsed_output": None,
             }
@@ -1911,15 +2354,24 @@ class FirstScriptedVideoPackageService:
             correlation_id=f"m12-2s-full-agent-rehearsal-{step.agent_key}",
         )
         if route.status != "SUCCESS":
-            agent_run_refs.append(self._agent_ref(step, render, route=route, validation=None))
-            artifacts[step.artifact_key] = {"status": route.status, "reason_codes": route.reason_codes}
+            agent_run_refs.append(
+                self._agent_ref(step, render, route=route, validation=None)
+            )
+            artifacts[step.artifact_key] = {
+                "status": route.status,
+                "reason_codes": route.reason_codes,
+            }
             return {
-                "stop_status": "NOT_CONFIGURED" if route.status == "SKIPPED" else "ERROR",
+                "stop_status": "NOT_CONFIGURED"
+                if route.status == "SKIPPED"
+                else "ERROR",
                 "next_action": "Cấu hình real Ollama/LLMRouter trước khi chạy full agent rehearsal.",
                 "parsed_output": None,
             }
 
-        raw_output: str | dict[str, Any] | None = route.structured_output or route.content
+        raw_output: str | dict[str, Any] | None = (
+            route.structured_output or route.content
+        )
         validation = self.prompt_registry.validate_output(
             PromptOutputValidationRequest(
                 agent_key=step.agent_key,
@@ -1932,16 +2384,26 @@ class FirstScriptedVideoPackageService:
             provider_refs=[
                 {
                     "route_attempt_id": str(route.route_attempt_id),
-                    "provider_attempt_id": str(route.provider_attempt_id) if route.provider_attempt_id else None,
-                    "llm_run_snapshot_id": str(route.llm_run_snapshot_id) if route.llm_run_snapshot_id else None,
+                    "provider_attempt_id": str(route.provider_attempt_id)
+                    if route.provider_attempt_id
+                    else None,
+                    "llm_run_snapshot_id": str(route.llm_run_snapshot_id)
+                    if route.llm_run_snapshot_id
+                    else None,
                 }
             ],
         )
         if audit_id is not None:
             prompt_audit_snapshot_refs.append(str(audit_id))
-        agent_run_refs.append(self._agent_ref(step, render, route=route, validation=validation.model_dump(mode="json")))
+        agent_run_refs.append(
+            self._agent_ref(
+                step, render, route=route, validation=validation.model_dump(mode="json")
+            )
+        )
 
-        if step.agent_key == "TopicIdeaScoringAgent" and _topic_idea_needs_schema_retry(validation.model_dump(mode="json")):
+        if step.agent_key == "TopicIdeaScoringAgent" and _topic_idea_needs_schema_retry(
+            validation.model_dump(mode="json")
+        ):
             retry = self._retry_topic_idea_schema_once(
                 step=step,
                 render=render,
@@ -1954,15 +2416,26 @@ class FirstScriptedVideoPackageService:
                 validation = retry["validation"]
                 raw_output = retry["raw_output"]
 
-        validation_is_structurally_valid = bool(validation.validation_result.get("valid")) if isinstance(validation.validation_result, dict) else False
-        if validation.parsed_output is None or validation.status not in {"OK", "REVIEW_REQUIRED", "BLOCK"}:
+        validation_is_structurally_valid = (
+            bool(validation.validation_result.get("valid"))
+            if isinstance(validation.validation_result, dict)
+            else False
+        )
+        if validation.parsed_output is None or validation.status not in {
+            "OK",
+            "REVIEW_REQUIRED",
+            "BLOCK",
+        }:
             artifacts[step.artifact_key] = validation.validation_result
             return {
                 "stop_status": "ERROR",
                 "next_action": "Sửa output schema/LLM response trước khi tiếp tục full rehearsal.",
                 "parsed_output": validation.parsed_output,
             }
-        if validation.status == "REVIEW_REQUIRED" and not validation_is_structurally_valid:
+        if (
+            validation.status == "REVIEW_REQUIRED"
+            and not validation_is_structurally_valid
+        ):
             artifacts[step.artifact_key] = {
                 "validation_result": validation.validation_result,
                 "parsed_output": validation.parsed_output,
@@ -1975,13 +2448,19 @@ class FirstScriptedVideoPackageService:
             }
 
         output = validation.parsed_output
-        artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        artifact = (
+            output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        )
         if step.agent_key == "ProviderReadinessSummaryAgent" and not artifact:
-            artifact = self._provider_readiness_summary_artifact(provider_readiness_snapshot, output)
+            artifact = self._provider_readiness_summary_artifact(
+                provider_readiness_snapshot, output
+            )
             output = {**output, "artifact": artifact}
         output_validation = self._validate_agent_output(
             package_id=package_id,
-            video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+            video_project_id=effective_context_snapshot.video_project_id
+            if effective_context_snapshot
+            else data.video_project_id,
             step=step,
             raw_output=raw_output,
             parsed_output=output,
@@ -1997,25 +2476,39 @@ class FirstScriptedVideoPackageService:
             context_pack_snapshot=context_result.snapshot,
         )
         if agent_run_refs:
-            agent_run_refs[-1]["agent_output_validation_run_id"] = str(output_validation.validation_run.id)
-            agent_run_refs[-1]["canonical_artifact_hash"] = output_validation.validation_run.artifact_hash
+            agent_run_refs[-1]["agent_output_validation_run_id"] = str(
+                output_validation.validation_run.id
+            )
+            agent_run_refs[-1]["canonical_artifact_hash"] = (
+                output_validation.validation_run.artifact_hash
+            )
         if output_validation.status != "OK":
             artifacts[step.artifact_key] = output_validation.blocking_report
             return {
-                "stop_status": "REVIEW_REQUIRED" if output_validation.status == "REVIEW_REQUIRED" else "BLOCKED",
+                "stop_status": "REVIEW_REQUIRED"
+                if output_validation.status == "REVIEW_REQUIRED"
+                else "BLOCKED",
                 "next_action": "Sửa AgentOutputContract/envelope trước khi tiếp tục full rehearsal.",
                 "parsed_output": output,
             }
 
         artifacts[step.artifact_key] = output_validation.canonical_artifact or {}
-        if step.agent_key == "ScriptPlanningAgent" and isinstance(artifacts[step.artifact_key], dict):
+        if step.agent_key == "ScriptPlanningAgent" and isinstance(
+            artifacts[step.artifact_key], dict
+        ):
             artifacts["script_word_budget"] = _script_word_budget_contract(
                 _dict(artifacts.get("duration_model")),
                 script_outline=artifacts[step.artifact_key],
             )
-            artifacts[step.artifact_key]["section_budgets"] = artifacts["script_word_budget"]["section_word_budgets"]
-        if step.agent_key in {"ScriptWriterAgent", "ScriptRewriteAgent"} and isinstance(artifacts[step.artifact_key], dict):
-            _refresh_script_duration_self_check(artifacts[step.artifact_key], _dict(artifacts.get("duration_model")))
+            artifacts[step.artifact_key]["section_budgets"] = artifacts[
+                "script_word_budget"
+            ]["section_word_budgets"]
+        if step.agent_key in {"ScriptWriterAgent", "ScriptRewriteAgent"} and isinstance(
+            artifacts[step.artifact_key], dict
+        ):
+            _refresh_script_duration_self_check(
+                artifacts[step.artifact_key], _dict(artifacts.get("duration_model"))
+            )
         output = {**output, "artifact": artifacts[step.artifact_key]}
         niche_stop = self._run_niche_gate_after_agent(
             package_id=package_id,
@@ -2029,14 +2522,22 @@ class FirstScriptedVideoPackageService:
                 "next_action": niche_stop["next_action"],
                 "parsed_output": output,
             }
-        agent_block = self._full_rehearsal_artifact_block(step.agent_key, artifacts[step.artifact_key])
+        agent_block = self._full_rehearsal_artifact_block(
+            step.agent_key, artifacts[step.artifact_key]
+        )
         if agent_block is not None:
             artifacts[f"{step.artifact_key}_review"] = agent_block
-            return {"stop_status": "REVIEW_REQUIRED", "next_action": agent_block["next_action"], "parsed_output": output}
+            return {
+                "stop_status": "REVIEW_REQUIRED",
+                "next_action": agent_block["next_action"],
+                "parsed_output": output,
+            }
 
         gate_stop = self._run_agent_deterministic_gates(
             package_id=package_id,
-            video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+            video_project_id=effective_context_snapshot.video_project_id
+            if effective_context_snapshot
+            else data.video_project_id,
             step=step,
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
@@ -2046,22 +2547,41 @@ class FirstScriptedVideoPackageService:
             if step.agent_key == "ScriptWriterAgent":
                 duration_repair = self._maybe_repair_script_duration_once(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
                     provider_readiness_snapshot=provider_readiness_snapshot,
                     gate_stop=gate_stop,
                 )
                 if duration_repair["attempted"]:
-                    if duration_repair["repaired"] and duration_repair["stop_status"] is None:
-                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    if (
+                        duration_repair["repaired"]
+                        and duration_repair["stop_status"] is None
+                    ):
+                        return {
+                            "stop_status": None,
+                            "next_action": None,
+                            "parsed_output": output,
+                        }
                     gate_stop = {
-                        "stop_status": duration_repair["stop_status"] or gate_stop["stop_status"],
-                        "next_action": duration_repair["next_action"] or gate_stop["next_action"],
-                        "gate_batch": duration_repair.get("gate_batch") or gate_stop.get("gate_batch"),
+                        "stop_status": duration_repair["stop_status"]
+                        or gate_stop["stop_status"],
+                        "next_action": duration_repair["next_action"]
+                        or gate_stop["next_action"],
+                        "gate_batch": duration_repair.get("gate_batch")
+                        or gate_stop.get("gate_batch"),
                     }
                     remaining_codes = _gate_stop_fail_codes(gate_stop)
-                    if any(code in remaining_codes for code in ("SCRIPT_DURATION_ABOVE_MAXIMUM", "SCRIPT_DURATION_BELOW_MINIMUM", "SCRIPT_WORD_BUDGET_BELOW_MINIMUM")):
+                    if any(
+                        code in remaining_codes
+                        for code in (
+                            "SCRIPT_DURATION_ABOVE_MAXIMUM",
+                            "SCRIPT_DURATION_BELOW_MINIMUM",
+                            "SCRIPT_WORD_BUDGET_BELOW_MINIMUM",
+                        )
+                    ):
                         return {
                             "stop_status": gate_stop["stop_status"],
                             "next_action": gate_stop["next_action"],
@@ -2069,7 +2589,9 @@ class FirstScriptedVideoPackageService:
                         }
                 repair = self._maybe_repair_script_style_once(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
                     provider_readiness_snapshot=provider_readiness_snapshot,
@@ -2077,44 +2599,72 @@ class FirstScriptedVideoPackageService:
                 )
                 if repair["attempted"]:
                     if repair["repaired"] and repair["stop_status"] is None:
-                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                        return {
+                            "stop_status": None,
+                            "next_action": None,
+                            "parsed_output": output,
+                        }
                     return {
-                        "stop_status": repair["stop_status"] or gate_stop["stop_status"],
-                        "next_action": repair["next_action"] or gate_stop["next_action"],
+                        "stop_status": repair["stop_status"]
+                        or gate_stop["stop_status"],
+                        "next_action": repair["next_action"]
+                        or gate_stop["next_action"],
                         "parsed_output": output,
                     }
             if step.agent_key == "VisualPlanningAgent":
                 visual_repair = self._maybe_repair_visual_coverage_once(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
                     provider_readiness_snapshot=provider_readiness_snapshot,
                     gate_stop=gate_stop,
                 )
                 if visual_repair["attempted"]:
-                    if visual_repair["repaired"] and visual_repair["stop_status"] is None:
-                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    if (
+                        visual_repair["repaired"]
+                        and visual_repair["stop_status"] is None
+                    ):
+                        return {
+                            "stop_status": None,
+                            "next_action": None,
+                            "parsed_output": output,
+                        }
                     return {
-                        "stop_status": visual_repair["stop_status"] or gate_stop["stop_status"],
-                        "next_action": visual_repair["next_action"] or gate_stop["next_action"],
+                        "stop_status": visual_repair["stop_status"]
+                        or gate_stop["stop_status"],
+                        "next_action": visual_repair["next_action"]
+                        or gate_stop["next_action"],
                         "parsed_output": output,
                     }
             if step.agent_key == "RightsDisclosureReviewer":
                 disclosure_repair = self._maybe_repair_ai_disclosure_wording_once(
                     package_id=package_id,
-                    video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                    video_project_id=effective_context_snapshot.video_project_id
+                    if effective_context_snapshot
+                    else data.video_project_id,
                     artifacts=artifacts,
                     effective_context_snapshot=effective_context_snapshot,
                     provider_readiness_snapshot=provider_readiness_snapshot,
                     gate_stop=gate_stop,
                 )
                 if disclosure_repair["attempted"]:
-                    if disclosure_repair["repaired"] and disclosure_repair["stop_status"] is None:
-                        return {"stop_status": None, "next_action": None, "parsed_output": output}
+                    if (
+                        disclosure_repair["repaired"]
+                        and disclosure_repair["stop_status"] is None
+                    ):
+                        return {
+                            "stop_status": None,
+                            "next_action": None,
+                            "parsed_output": output,
+                        }
                     return {
-                        "stop_status": disclosure_repair["stop_status"] or gate_stop["stop_status"],
-                        "next_action": disclosure_repair["next_action"] or gate_stop["next_action"],
+                        "stop_status": disclosure_repair["stop_status"]
+                        or gate_stop["stop_status"],
+                        "next_action": disclosure_repair["next_action"]
+                        or gate_stop["next_action"],
                         "parsed_output": output,
                     }
             return {
@@ -2126,14 +2676,18 @@ class FirstScriptedVideoPackageService:
         if step.agent_key == "ScriptWriterAgent":
             artifacts["srt"] = _build_srt_caption_artifact(
                 package_id=package_id,
-                video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                video_project_id=effective_context_snapshot.video_project_id
+                if effective_context_snapshot
+                else data.video_project_id,
                 script=_dict(artifacts.get("narration_script")),
                 duration_model=_dict(artifacts.get("duration_model")),
                 repo_root=self.repo_root,
             )
             srt_gate_stop = self._run_custom_deterministic_gates(
                 package_id=package_id,
-                video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                video_project_id=effective_context_snapshot.video_project_id
+                if effective_context_snapshot
+                else data.video_project_id,
                 artifacts=artifacts,
                 effective_context_snapshot=effective_context_snapshot,
                 provider_readiness_state=provider_readiness_snapshot,
@@ -2157,7 +2711,9 @@ class FirstScriptedVideoPackageService:
         if step.agent_key == "VisualPlanningAgent" and artifacts.get("srt"):
             visual_srt_gate_stop = self._run_custom_deterministic_gates(
                 package_id=package_id,
-                video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+                video_project_id=effective_context_snapshot.video_project_id
+                if effective_context_snapshot
+                else data.video_project_id,
                 artifacts=artifacts,
                 effective_context_snapshot=effective_context_snapshot,
                 provider_readiness_state=provider_readiness_snapshot,
@@ -2176,7 +2732,8 @@ class FirstScriptedVideoPackageService:
             if gatekeeper_result == "BLOCK":
                 return {
                     "stop_status": "BLOCKED",
-                    "next_action": output.get("next_action") or "Sửa rủi ro gatekeeper trước khi tới media boundary.",
+                    "next_action": output.get("next_action")
+                    or "Sửa rủi ro gatekeeper trước khi tới media boundary.",
                     "parsed_output": output,
                 }
             if gatekeeper_result == "REVIEW_REQUIRED":
@@ -2195,13 +2752,20 @@ class FirstScriptedVideoPackageService:
                     "source": "agent_envelope",
                     "agent_key": step.agent_key,
                     "expected_boundary_block": True,
-                    "reason_codes": ["PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"],
+                    "reason_codes": [
+                        "PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"
+                    ],
                     "next_action": output.get("next_action"),
                 }
-                return {"stop_status": None, "next_action": None, "parsed_output": output}
+                return {
+                    "stop_status": None,
+                    "next_action": None,
+                    "parsed_output": output,
+                }
             return {
                 "stop_status": "BLOCKED",
-                "next_action": output.get("next_action") or "Agent upstream trả BLOCK; không tiếp tục downstream.",
+                "next_action": output.get("next_action")
+                or "Agent upstream trả BLOCK; không tiếp tục downstream.",
                 "parsed_output": output,
             }
         if envelope_status == "REVIEW_REQUIRED":
@@ -2217,7 +2781,9 @@ class FirstScriptedVideoPackageService:
                 "parsed_output": output,
             }
         if step.agent_key == "ProviderReadinessSummaryAgent":
-            artifacts["provider_plan_dry_validation"] = _provider_plan_dry_validation(output.get("artifact"))
+            artifacts["provider_plan_dry_validation"] = _provider_plan_dry_validation(
+                output.get("artifact")
+            )
         return {"stop_status": None, "next_action": None, "parsed_output": output}
 
     def _retry_topic_idea_schema_once(
@@ -2230,7 +2796,9 @@ class FirstScriptedVideoPackageService:
         prompt_audit_snapshot_refs: list[str],
     ) -> dict[str, Any]:
         validation_payload = validation.model_dump(mode="json")
-        errors = _strings(_dict(validation_payload.get("validation_result")).get("errors"))
+        errors = _strings(
+            _dict(validation_payload.get("validation_result")).get("errors")
+        )
         retry_message = {
             "role": "user",
             "content": (
@@ -2239,13 +2807,14 @@ class FirstScriptedVideoPackageService:
                 f"{errors}. Required top-level fields: contract_version, agent_key, status, confidence_label, "
                 "evidence_refs, limitations, next_action, operator_summary_vi, technical_appendix, artifact. "
                 "artifact must be an object containing semantic topic scoring, for example "
-                "{\"topic_score\":{\"score\":\"UNKNOWN\"},\"risk_assessment\":{\"risk_level\":\"MEDIUM\"}}. "
+                '{"topic_score":{"score":"UNKNOWN"},"risk_assessment":{"risk_level":"MEDIUM"}}. '
                 "operator_summary_vi must be a non-empty Vietnamese sentence. Do not output top-level risk_level."
             ),
         }
         route = self.llm_router.route(
             lane_name=render.router_lane,
-            messages=[message.model_dump() for message in render.rendered_messages] + [retry_message],
+            messages=[message.model_dump() for message in render.rendered_messages]
+            + [retry_message],
             requested_task_type=step.requested_task_type,
             response_format="json",
             correlation_id="m12-2s-full-agent-rehearsal-TopicIdeaScoringAgent-schema-retry",
@@ -2261,10 +2830,16 @@ class FirstScriptedVideoPackageService:
             "mock_or_canned_output_used": False,
         }
         if route.status != "SUCCESS":
-            audit.update({"retry_status": route.status, "route_reason_codes": route.reason_codes})
-            agent_run_refs.append(self._agent_ref(step, render, route=route, validation=None))
+            audit.update(
+                {"retry_status": route.status, "route_reason_codes": route.reason_codes}
+            )
+            agent_run_refs.append(
+                self._agent_ref(step, render, route=route, validation=None)
+            )
             return {"audit": audit, "validation": None, "raw_output": None}
-        raw_output: str | dict[str, Any] | None = route.structured_output or route.content
+        raw_output: str | dict[str, Any] | None = (
+            route.structured_output or route.content
+        )
         retry_validation = self.prompt_registry.validate_output(
             PromptOutputValidationRequest(
                 agent_key=step.agent_key,
@@ -2274,23 +2849,40 @@ class FirstScriptedVideoPackageService:
         )
         audit["retry_validation_status"] = retry_validation.status
         audit["retry_validation_reason_codes"] = retry_validation.reason_codes
-        audit["repaired"] = bool(retry_validation.validation_result.get("valid")) if isinstance(retry_validation.validation_result, dict) else False
+        audit["repaired"] = (
+            bool(retry_validation.validation_result.get("valid"))
+            if isinstance(retry_validation.validation_result, dict)
+            else False
+        )
         retry_audit_id = self._latest_audit_id(
             render.prompt_render_run_id,
             provider_refs=[
                 {
                     "route_attempt_id": str(route.route_attempt_id),
-                    "provider_attempt_id": str(route.provider_attempt_id) if route.provider_attempt_id else None,
-                    "llm_run_snapshot_id": str(route.llm_run_snapshot_id) if route.llm_run_snapshot_id else None,
+                    "provider_attempt_id": str(route.provider_attempt_id)
+                    if route.provider_attempt_id
+                    else None,
+                    "llm_run_snapshot_id": str(route.llm_run_snapshot_id)
+                    if route.llm_run_snapshot_id
+                    else None,
                 }
             ],
         )
         if retry_audit_id is not None:
             prompt_audit_snapshot_refs.append(str(retry_audit_id))
-        ref = self._agent_ref(step, render, route=route, validation=retry_validation.model_dump(mode="json"))
+        ref = self._agent_ref(
+            step,
+            render,
+            route=route,
+            validation=retry_validation.model_dump(mode="json"),
+        )
         ref["retry_reason_codes"] = ["TOPIC_IDEA_SCHEMA_RETRY_MISSING_ARTIFACT"]
         agent_run_refs.append(ref)
-        return {"audit": audit, "validation": retry_validation, "raw_output": raw_output}
+        return {
+            "audit": audit,
+            "validation": retry_validation,
+            "raw_output": raw_output,
+        }
 
     def _provider_readiness_summary_artifact(
         self,
@@ -2336,9 +2928,16 @@ class FirstScriptedVideoPackageService:
         context_pack_refs: list[dict[str, Any]],
     ) -> dict[str, Any]:
         if not _needs_script_rewrite(gatekeeper_output):
-            agent_run_refs.append(self._safe_skip_ref("ScriptRewriteAgent", "Gatekeeper REVIEW_REQUIRED nhưng không yêu cầu rewrite."))
+            agent_run_refs.append(
+                self._safe_skip_ref(
+                    "ScriptRewriteAgent",
+                    "Gatekeeper REVIEW_REQUIRED nhưng không yêu cầu rewrite.",
+                )
+            )
             return {"ran": False, "stop_status": None, "next_action": None}
-        rewrite_step = PackageAgentStep("ScriptRewriteAgent", "long_context_text", "script_rewrite", "deep_rewrite")
+        rewrite_step = PackageAgentStep(
+            "ScriptRewriteAgent", "long_context_text", "script_rewrite", "deep_rewrite"
+        )
         result = self._execute_rehearsal_agent_step(
             package_id=package_id,
             step=rewrite_step,
@@ -2355,7 +2954,11 @@ class FirstScriptedVideoPackageService:
             prompt_audit_snapshot_refs=prompt_audit_snapshot_refs,
             context_pack_refs=context_pack_refs,
         )
-        return {"ran": True, "stop_status": result["stop_status"], "next_action": result["next_action"]}
+        return {
+            "ran": True,
+            "stop_status": result["stop_status"],
+            "next_action": result["next_action"],
+        }
 
     def _maybe_repair_script_style_once(
         self,
@@ -2369,15 +2972,39 @@ class FirstScriptedVideoPackageService:
     ) -> dict[str, Any]:
         batch = gate_stop.get("gate_batch")
         fail_codes = batch.fail_codes if batch is not None else []
-        if "SCRIPT_FORBIDDEN_STYLE_USED" not in fail_codes or effective_context_snapshot is None:
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None}
+        if (
+            "SCRIPT_FORBIDDEN_STYLE_USED" not in fail_codes
+            or effective_context_snapshot is None
+        ):
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+            }
         if artifacts.get("script_style_repair_attempt"):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None}
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+            }
         script = artifacts.get("narration_script")
         if not isinstance(script, dict):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None}
-        forbidden_terms = _strings(_dict(effective_context_snapshot.brand_voice_persona_context_json).get("forbidden_style"))
-        repaired_script, sentence_patches = _repair_forbidden_style_terms(script, forbidden_terms)
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+            }
+        forbidden_terms = _strings(
+            _dict(effective_context_snapshot.brand_voice_persona_context_json).get(
+                "forbidden_style"
+            )
+        )
+        repaired_script, sentence_patches = _repair_forbidden_style_terms(
+            script, forbidden_terms
+        )
         artifacts["script_style_repair_attempt"] = {
             "attempted": True,
             "repair_type": "rewrite_script_style_only",
@@ -2386,20 +3013,41 @@ class FirstScriptedVideoPackageService:
             "forbidden_style_terms": forbidden_terms,
             "sentence_patches": sentence_patches,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         if not sentence_patches:
-            return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"]}
-        _refresh_script_duration_self_check(repaired_script, _dict(artifacts.get("duration_model")))
+            return {
+                "attempted": True,
+                "repaired": False,
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+            }
+        _refresh_script_duration_self_check(
+            repaired_script, _dict(artifacts.get("duration_model"))
+        )
         artifacts["narration_script"] = repaired_script
         niche_stop = self._run_niche_gate_after_agent(
             package_id=package_id,
-            step=PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
+            step=PackageAgentStep(
+                "ScriptWriterAgent",
+                "long_context_text",
+                "narration_script",
+                "long_form_script",
+            ),
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
         )
         if niche_stop is not None:
-            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
+            return {
+                "attempted": True,
+                "repaired": True,
+                **niche_stop,
+                "gate_batch": batch,
+            }
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -2409,8 +3057,15 @@ class FirstScriptedVideoPackageService:
             provider_readiness_state=provider_readiness_snapshot,
         )
         if rerun is None:
-            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None}
-        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": None,
+                "next_action": None,
+            }
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(
+            artifacts.get("deterministic_gate_report"), rerun
+        )
         if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
                 current_status="READY_FOR_MEDIA_PROVIDERS",
@@ -2424,7 +3079,13 @@ class FirstScriptedVideoPackageService:
                 "next_action": self._next_action_for_reducer_decision(decision),
                 "gate_batch": rerun,
             }
-        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+        return {
+            "attempted": True,
+            "repaired": True,
+            "stop_status": None,
+            "next_action": None,
+            "gate_batch": rerun,
+        }
 
     def _maybe_repair_script_duration_once(
         self,
@@ -2438,16 +3099,42 @@ class FirstScriptedVideoPackageService:
     ) -> dict[str, Any]:
         batch = gate_stop.get("gate_batch")
         fail_codes = batch.fail_codes if batch is not None else []
-        duration_codes = {"SCRIPT_DURATION_ABOVE_MAXIMUM", "SCRIPT_DURATION_BELOW_MINIMUM", "SCRIPT_WORD_BUDGET_BELOW_MINIMUM"}
-        if effective_context_snapshot is None or not any(code in fail_codes for code in duration_codes):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        duration_codes = {
+            "SCRIPT_DURATION_ABOVE_MAXIMUM",
+            "SCRIPT_DURATION_BELOW_MINIMUM",
+            "SCRIPT_WORD_BUDGET_BELOW_MINIMUM",
+        }
+        if effective_context_snapshot is None or not any(
+            code in fail_codes for code in duration_codes
+        ):
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
         if artifacts.get("script_duration_repair_attempt"):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
         script = artifacts.get("narration_script")
         if not isinstance(script, dict):
-            return {"attempted": False, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+                "gate_batch": batch,
+            }
         duration_model = _dict(artifacts.get("duration_model"))
-        budget = _script_word_budget_contract(duration_model, script_outline=_dict(artifacts.get("script_outline")))
+        budget = _script_word_budget_contract(
+            duration_model, script_outline=_dict(artifacts.get("script_outline"))
+        )
         word_count_before = _script_word_count(script)
         repair_record: dict[str, Any] = {
             "attempted": True,
@@ -2466,9 +3153,16 @@ class FirstScriptedVideoPackageService:
                 "evidence_refs",
             ],
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
-        if "SCRIPT_DURATION_BELOW_MINIMUM" in fail_codes or "SCRIPT_WORD_BUDGET_BELOW_MINIMUM" in fail_codes:
+        if (
+            "SCRIPT_DURATION_BELOW_MINIMUM" in fail_codes
+            or "SCRIPT_WORD_BUDGET_BELOW_MINIMUM" in fail_codes
+        ):
             shorter_permitted = bool(
                 duration_model.get("shorter_format_permitted")
                 or _dict(artifacts.get("editorial_depth_policy")).get(
@@ -2477,9 +3171,7 @@ class FirstScriptedVideoPackageService:
             )
             depth_result = {
                 "status": (
-                    "SHORTER_FORMAT_REPLAN_REQUIRED"
-                    if shorter_permitted
-                    else "BLOCK"
+                    "SHORTER_FORMAT_REPLAN_REQUIRED" if shorter_permitted else "BLOCK"
                 ),
                 "reason_code": "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH",
                 "shorter_format_permitted": shorter_permitted,
@@ -2515,33 +3207,57 @@ class FirstScriptedVideoPackageService:
                 "next_action": depth_result["exact_next_action"],
                 "gate_batch": batch,
             }
-        repaired_script, sentence_patches = _trim_script_to_word_budget(script, duration_model, budget)
+        repaired_script, sentence_patches = _trim_script_to_word_budget(
+            script, duration_model, budget
+        )
         word_count_after = _script_word_count(repaired_script)
         repair_record.update(
             {
                 "repair_type": "bounded_script_duration_trim",
-                "repaired": bool(sentence_patches) and word_count_after <= int(budget["maximum_word_count"]),
-                "repair_status": "TRIMMED_TO_WORD_BUDGET" if sentence_patches else "NO_TRIMMABLE_SENTENCES",
+                "repaired": bool(sentence_patches)
+                and word_count_after <= int(budget["maximum_word_count"]),
+                "repair_status": "TRIMMED_TO_WORD_BUDGET"
+                if sentence_patches
+                else "NO_TRIMMABLE_SENTENCES",
                 "word_count_after": word_count_after,
                 "sentence_patches": sentence_patches,
-                "hook_preserved": repaired_script.get("hook_spec") == script.get("hook_spec"),
-                "payoff_location_preserved": _dict(repaired_script.get("hook_spec")).get("payoff_location")
+                "hook_preserved": repaired_script.get("hook_spec")
+                == script.get("hook_spec"),
+                "payoff_location_preserved": _dict(
+                    repaired_script.get("hook_spec")
+                ).get("payoff_location")
                 == _dict(script.get("hook_spec")).get("payoff_location"),
             }
         )
         artifacts["script_duration_repair_attempt"] = repair_record
         if not repair_record["repaired"]:
-            return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+            return {
+                "attempted": True,
+                "repaired": False,
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+                "gate_batch": batch,
+            }
         _refresh_script_duration_self_check(repaired_script, duration_model)
         artifacts["narration_script"] = repaired_script
         niche_stop = self._run_niche_gate_after_agent(
             package_id=package_id,
-            step=PackageAgentStep("ScriptWriterAgent", "long_context_text", "narration_script", "long_form_script"),
+            step=PackageAgentStep(
+                "ScriptWriterAgent",
+                "long_context_text",
+                "narration_script",
+                "long_form_script",
+            ),
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
         )
         if niche_stop is not None:
-            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
+            return {
+                "attempted": True,
+                "repaired": True,
+                **niche_stop,
+                "gate_batch": batch,
+            }
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -2551,8 +3267,16 @@ class FirstScriptedVideoPackageService:
             provider_readiness_state=provider_readiness_snapshot,
         )
         if rerun is None:
-            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
-        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(
+            artifacts.get("deterministic_gate_report"), rerun
+        )
         if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
                 current_status="READY_FOR_MEDIA_PROVIDERS",
@@ -2566,7 +3290,13 @@ class FirstScriptedVideoPackageService:
                 "next_action": self._next_action_for_reducer_decision(decision),
                 "gate_batch": rerun,
             }
-        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+        return {
+            "attempted": True,
+            "repaired": True,
+            "stop_status": None,
+            "next_action": None,
+            "gate_batch": rerun,
+        }
 
     def _maybe_repair_visual_coverage_once(
         self,
@@ -2585,18 +3315,46 @@ class FirstScriptedVideoPackageService:
             "VISUAL_COVERAGE_MISSING_SENTENCE_IDS",
             "VISUAL_SOURCE_DISALLOWED_BY_CONTRACT",
         }
-        if effective_context_snapshot is None or not any(code in fail_codes for code in repairable_codes):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        if effective_context_snapshot is None or not any(
+            code in fail_codes for code in repairable_codes
+        ):
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
         if artifacts.get("visual_coverage_repair_attempt"):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
         visual_plan = artifacts.get("visual_plan")
         narration_script = artifacts.get("narration_script")
         if not isinstance(visual_plan, dict) or not isinstance(narration_script, dict):
-            return {"attempted": False, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
-        allowed_sources = set(_strings(_dict(effective_context_snapshot.visual_style_context_json).get("allowed_visual_sources")))
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+                "gate_batch": batch,
+            }
+        allowed_sources = set(
+            _strings(
+                _dict(effective_context_snapshot.visual_style_context_json).get(
+                    "allowed_visual_sources"
+                )
+            )
+        )
         if not allowed_sources:
             allowed_sources = {"DIAGRAM", "CARD", "SCREENSHOT", "EXISTING_ASSET"}
-        repaired_plan, patches = _repair_visual_unknown_sentence_refs(visual_plan, narration_script, allowed_sources=allowed_sources)
+        repaired_plan, patches = _repair_visual_unknown_sentence_refs(
+            visual_plan, narration_script, allowed_sources=allowed_sources
+        )
         artifacts["visual_coverage_repair_attempt"] = {
             "attempted": True,
             "repair_type": "drop_visual_unknown_sentence_refs",
@@ -2606,19 +3364,39 @@ class FirstScriptedVideoPackageService:
             "repaired": bool(patches),
             "patches": patches,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         if not patches:
-            return {"attempted": True, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+            return {
+                "attempted": True,
+                "repaired": False,
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+                "gate_batch": batch,
+            }
         artifacts["visual_plan"] = repaired_plan
         niche_stop = self._run_niche_gate_after_agent(
             package_id=package_id,
-            step=PackageAgentStep("VisualPlanningAgent", "visual_creative_review", "visual_plan", "visual_plan_review"),
+            step=PackageAgentStep(
+                "VisualPlanningAgent",
+                "visual_creative_review",
+                "visual_plan",
+                "visual_plan_review",
+            ),
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
         )
         if niche_stop is not None:
-            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
+            return {
+                "attempted": True,
+                "repaired": True,
+                **niche_stop,
+                "gate_batch": batch,
+            }
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -2628,8 +3406,16 @@ class FirstScriptedVideoPackageService:
             provider_readiness_state=provider_readiness_snapshot,
         )
         if rerun is None:
-            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
-        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(
+            artifacts.get("deterministic_gate_report"), rerun
+        )
         if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
                 current_status="READY_FOR_HUMAN_REVIEW",
@@ -2643,7 +3429,13 @@ class FirstScriptedVideoPackageService:
                 "next_action": self._next_action_for_reducer_decision(decision),
                 "gate_batch": rerun,
             }
-        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+        return {
+            "attempted": True,
+            "repaired": True,
+            "stop_status": None,
+            "next_action": None,
+            "gate_batch": rerun,
+        }
 
     def _maybe_repair_ai_disclosure_wording_once(
         self,
@@ -2657,14 +3449,37 @@ class FirstScriptedVideoPackageService:
     ) -> dict[str, Any]:
         batch = gate_stop.get("gate_batch")
         fail_codes = batch.fail_codes if batch is not None else []
-        if effective_context_snapshot is None or "AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING" not in fail_codes:
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
-        if "AI_MEDIA_DISCLOSURE_FALSE_PRESENT_TENSE" in fail_codes or artifacts.get("disclosure_wording_repair_attempt"):
-            return {"attempted": False, "repaired": False, "stop_status": None, "next_action": None, "gate_batch": None}
+        if (
+            effective_context_snapshot is None
+            or "AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING" not in fail_codes
+        ):
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
+        if "AI_MEDIA_DISCLOSURE_FALSE_PRESENT_TENSE" in fail_codes or artifacts.get(
+            "disclosure_wording_repair_attempt"
+        ):
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
         metadata = artifacts.get("metadata_package")
         rights = artifacts.get("rights_disclosure_review")
         if not isinstance(metadata, dict) or not isinstance(rights, dict):
-            return {"attempted": False, "repaired": False, "stop_status": gate_stop["stop_status"], "next_action": gate_stop["next_action"], "gate_batch": batch}
+            return {
+                "attempted": False,
+                "repaired": False,
+                "stop_status": gate_stop["stop_status"],
+                "next_action": gate_stop["next_action"],
+                "gate_batch": batch,
+            }
         note = (
             str(rights.get("disclosure_notes") or "").strip()
             or "Future or planned AI-generated media, if produced later, requires source/provider manifest review and platform disclosure before publishing."
@@ -2675,12 +3490,22 @@ class FirstScriptedVideoPackageService:
         artifacts["metadata_package"] = repaired_metadata
         niche_stop = self._run_niche_gate_after_agent(
             package_id=package_id,
-            step=PackageAgentStep("PublishingMetadataAgent", "cheap_structured", "metadata_package", "metadata_generation"),
+            step=PackageAgentStep(
+                "PublishingMetadataAgent",
+                "cheap_structured",
+                "metadata_package",
+                "metadata_generation",
+            ),
             artifacts=artifacts,
             effective_context_snapshot=effective_context_snapshot,
         )
         if niche_stop is not None:
-            return {"attempted": True, "repaired": True, **niche_stop, "gate_batch": batch}
+            return {
+                "attempted": True,
+                "repaired": True,
+                **niche_stop,
+                "gate_batch": batch,
+            }
         artifacts["disclosure_wording_repair_attempt"] = {
             "attempted": True,
             "repair_type": "complete_ai_disclosure_conditional_wording",
@@ -2691,7 +3516,11 @@ class FirstScriptedVideoPackageService:
             "metadata_fields": ["disclosure_notes"],
             "source_artifact": "rights_disclosure_review.disclosure_notes",
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         rerun = self.deterministic_gates.run_after_agent(
             package_id=package_id,
@@ -2702,8 +3531,16 @@ class FirstScriptedVideoPackageService:
             provider_readiness_state=provider_readiness_snapshot,
         )
         if rerun is None:
-            return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": None}
-        artifacts["deterministic_gate_report"] = _gate_report_after_repair(artifacts.get("deterministic_gate_report"), rerun)
+            return {
+                "attempted": True,
+                "repaired": True,
+                "stop_status": None,
+                "next_action": None,
+                "gate_batch": None,
+            }
+        artifacts["deterministic_gate_report"] = _gate_report_after_repair(
+            artifacts.get("deterministic_gate_report"), rerun
+        )
         if rerun.status in {GATE_BLOCK, GATE_REVIEW}:
             decision = self.package_status_reducer.resolve(
                 current_status="READY_FOR_HUMAN_REVIEW",
@@ -2717,7 +3554,13 @@ class FirstScriptedVideoPackageService:
                 "next_action": self._next_action_for_reducer_decision(decision),
                 "gate_batch": rerun,
             }
-        return {"attempted": True, "repaired": True, "stop_status": None, "next_action": None, "gate_batch": rerun}
+        return {
+            "attempted": True,
+            "repaired": True,
+            "stop_status": None,
+            "next_action": None,
+            "gate_batch": rerun,
+        }
 
     def _safe_skip_ref(self, agent_key: str, reason: str) -> dict[str, Any]:
         return {
@@ -2729,10 +3572,14 @@ class FirstScriptedVideoPackageService:
             "llm_run_snapshot_id": None,
         }
 
-    def _active_snapshot(self, channel: ChannelWorkspace) -> CompiledChannelPolicySnapshot | None:
+    def _active_snapshot(
+        self, channel: ChannelWorkspace
+    ) -> CompiledChannelPolicySnapshot | None:
         if channel.active_policy_snapshot_id is None:
             return None
-        snapshot = self.session.get(CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id)
+        snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, channel.active_policy_snapshot_id
+        )
         if snapshot is None or snapshot.channel_workspace_id != channel.id:
             return None
         return snapshot if snapshot.status == "active" else None
@@ -2761,7 +3608,9 @@ class FirstScriptedVideoPackageService:
             project.policy_snapshot_id,
         )
         if snapshot is None:
-            raise ValidationFailureError("video project frozen policy snapshot is missing")
+            raise ValidationFailureError(
+                "video project frozen policy snapshot is missing"
+            )
         if snapshot.channel_workspace_id != channel.id:
             raise ValidationFailureError(
                 "video project frozen policy snapshot channel mismatch"
@@ -2776,7 +3625,9 @@ class FirstScriptedVideoPackageService:
             )
         return snapshot
 
-    def _select_preflight_channel(self, channel_id: uuid.UUID | None) -> ChannelWorkspace | None:
+    def _select_preflight_channel(
+        self, channel_id: uuid.UUID | None
+    ) -> ChannelWorkspace | None:
         if channel_id is not None:
             return self.session.get(ChannelWorkspace, channel_id)
         channels = list(
@@ -2784,8 +3635,14 @@ class FirstScriptedVideoPackageService:
                 select(ChannelWorkspace).order_by(desc(ChannelWorkspace.created_at))
             ).all()
         )
-        active_channels = [channel for channel in channels if channel.status == "active"]
-        return active_channels[0] if active_channels else (channels[0] if channels else None)
+        active_channels = [
+            channel for channel in channels if channel.status == "active"
+        ]
+        return (
+            active_channels[0]
+            if active_channels
+            else (channels[0] if channels else None)
+        )
 
     def _validate_optional_project(
         self,
@@ -2805,7 +3662,9 @@ class FirstScriptedVideoPackageService:
                 "PRODUCTION_PACKAGE_V2_CANONICAL_AUTHORITY_REQUIRED"
             )
         if project.channel_workspace_id != channel_id:
-            raise ValidationFailureError("video project does not belong to selected channel")
+            raise ValidationFailureError(
+                "video project does not belong to selected channel"
+            )
         if project.policy_snapshot_id != snapshot.id:
             raise ValidationFailureError(
                 "video project is not bound to the selected frozen policy snapshot"
@@ -2852,19 +3711,14 @@ class FirstScriptedVideoPackageService:
         if frozen and (
             project.channel_profile_version_id != profile_version.id
             or str(frozen.get("channel_id")) != str(channel_id)
-            or str(frozen_digest.get("category_id"))
-            != str(project.category_id)
+            or str(frozen_digest.get("category_id")) != str(project.category_id)
         ):
-            raise ValidationFailureError(
-                "video project NICH1 frozen scope mismatch"
-            )
+            raise ValidationFailureError("video project NICH1 frozen scope mismatch")
         if frozen_digest and (
-            frozen_digest.get("compiled_policy_snapshot_hash")
-            != snapshot.content_hash
+            frozen_digest.get("compiled_policy_snapshot_hash") != snapshot.content_hash
             or frozen_digest.get("channel_profile_version_hash")
             != profile_version.profile_input_hash
-            or frozen_digest.get("channel_contract_hash")
-            != channel_contract_hash
+            or frozen_digest.get("channel_contract_hash") != channel_contract_hash
         ):
             raise ValidationFailureError(
                 "video project NICH1 frozen authority hash mismatch"
@@ -2877,7 +3731,9 @@ class FirstScriptedVideoPackageService:
     ) -> EffectiveChannelRuntimeContextSnapshot | None:
         if video_project_id is None:
             return None
-        return EffectiveChannelRuntimeContextCompiler(self.session).ensure_for_project(video_project_id)
+        return EffectiveChannelRuntimeContextCompiler(self.session).ensure_for_project(
+            video_project_id
+        )
 
     def _effective_context_block(
         self,
@@ -2896,7 +3752,9 @@ class FirstScriptedVideoPackageService:
             return None
         status = snapshot.compile_status
         return {
-            "status": "NEEDS_EFFECTIVE_CONTEXT" if status == "BLOCK" else "REVIEW_REQUIRED",
+            "status": "NEEDS_EFFECTIVE_CONTEXT"
+            if status == "BLOCK"
+            else "REVIEW_REQUIRED",
             "compile_status": status,
             "effective_context_snapshot_id": str(snapshot.id),
             "context_hash": snapshot.context_hash,
@@ -2915,7 +3773,11 @@ class FirstScriptedVideoPackageService:
         if not snapshot.compiled_payload:
             missing.append("compiled_policy_snapshot_json")
         contract_status = channel_contract.get("contract_status")
-        market = channel_contract.get("market_locale") if isinstance(channel_contract.get("market_locale"), dict) else {}
+        market = (
+            channel_contract.get("market_locale")
+            if isinstance(channel_contract.get("market_locale"), dict)
+            else {}
+        )
         market_status = market.get("market_locale_context_status")
         if contract_status != "COMPLETE":
             missing.append(f"contract_status:{contract_status or 'MISSING'}")
@@ -2930,7 +3792,9 @@ class FirstScriptedVideoPackageService:
             "next_action": CHANNEL_CONTRACT_PACKAGE_NEXT_ACTION,
         }
 
-    def _flag_block(self, data: FirstScriptedVideoPackageRequest) -> dict[str, Any] | None:
+    def _flag_block(
+        self, data: FirstScriptedVideoPackageRequest
+    ) -> dict[str, Any] | None:
         failures: list[str] = []
         if not self.settings.production_prompt_activation_enabled:
             failures.append("VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION")
@@ -2948,7 +3812,9 @@ class FirstScriptedVideoPackageService:
             "next_action": "Bật đúng M12.2 activation flags và giữ media/upload/publish disabled.",
         }
 
-    def _llm_readiness_block(self, *, full_rehearsal: bool = False) -> dict[str, Any] | None:
+    def _llm_readiness_block(
+        self, *, full_rehearsal: bool = False
+    ) -> dict[str, Any] | None:
         failures: list[str] = []
         if not self.settings.real_llm_package_run_enabled:
             failures.append("VCOS_ENABLE_REAL_LLM_PACKAGE_RUN")
@@ -2960,7 +3826,9 @@ class FirstScriptedVideoPackageService:
             failures.append("VCOS_LLM_PROVIDER")
         lanes = LLMRouterConfigLoader(self.session).list_lanes(profile_key="default")
         lane_names = {lane.lane_name for lane in lanes}
-        required_chain = FULL_REHEARSAL_AGENT_CHAIN if full_rehearsal else PACKAGE_AGENT_CHAIN
+        required_chain = (
+            FULL_REHEARSAL_AGENT_CHAIN if full_rehearsal else PACKAGE_AGENT_CHAIN
+        )
         required_lanes = {step.router_lane for step in required_chain}
         missing_lanes = sorted(required_lanes - lane_names)
         if missing_lanes:
@@ -3018,15 +3886,23 @@ class FirstScriptedVideoPackageService:
         }
         return AgentContextPackBuilder(self.session).build(
             package_id=package_id,
-            video_project_id=effective_context_snapshot.video_project_id if effective_context_snapshot else data.video_project_id,
+            video_project_id=effective_context_snapshot.video_project_id
+            if effective_context_snapshot
+            else data.video_project_id,
             agent_key=step.agent_key,
             task_type=step.requested_task_type,
             lane=step.router_lane,
-            effective_context_snapshot_id=effective_context_snapshot.id if effective_context_snapshot else None,
-            effective_context_hash=effective_context_snapshot.context_hash if effective_context_snapshot else None,
+            effective_context_snapshot_id=effective_context_snapshot.id
+            if effective_context_snapshot
+            else None,
+            effective_context_hash=effective_context_snapshot.context_hash
+            if effective_context_snapshot
+            else None,
             compiled_policy_snapshot_id=snapshot.id,
             compiled_policy_snapshot_hash=snapshot.content_hash,
-            channel_contract_hash=effective_context_snapshot.channel_contract_hash if effective_context_snapshot else None,
+            channel_contract_hash=effective_context_snapshot.channel_contract_hash
+            if effective_context_snapshot
+            else None,
             artifacts=artifacts,
             evidence_refs=self._evidence_refs(data),
             current_package_state=current_package_state,
@@ -3048,14 +3924,20 @@ class FirstScriptedVideoPackageService:
         authority = resolve_frozen_niche_authority(effective_context_snapshot)
         if not authority.strict:
             return []
-        if not authority.valid or authority.digest is None or authority.digest_ref is None:
+        if (
+            not authority.valid
+            or authority.digest is None
+            or authority.digest_ref is None
+        ):
             return authority.reason_codes or ["NICHE_CONTRACT_DIGEST_MISSING"]
         if video_project_id is None:
             return ["NICH1_STRICT_PROJECT_REQUIRED"]
         project = self.session.get(VideoProject, video_project_id)
         if project is None:
             return ["NICH1_STRICT_PROJECT_MISSING"]
-        frozen = _dict((project.audience_delivery_summary or {}).get("niche_governance"))
+        frozen = _dict(
+            (project.audience_delivery_summary or {}).get("niche_governance")
+        )
         if not frozen:
             return ["NICH1_PROJECT_FROZEN_LINEAGE_MISSING"]
         reasons: list[str] = []
@@ -3108,23 +3990,24 @@ class FirstScriptedVideoPackageService:
                 != authority.digest["compiled_policy_snapshot_hash"]
             ):
                 reasons.append("NICH1_TOPIC_GATE_POLICY_BINDING_MISMATCH")
-            daily_idea_ref = _dict(frozen.get("daily_idea_decision_ref"))
+            candidate_ref = _dict(frozen.get("editorial_idea_candidate_ref"))
             if (
-                daily_idea_ref.get("ref") != topic_result.subject_ref
-                or daily_idea_ref.get("content_hash") != topic_result.subject_hash
+                candidate_ref.get("ref") != topic_result.subject_ref
+                or candidate_ref.get("content_hash") != topic_result.subject_hash
             ):
-                reasons.append("NICH1_DAILY_IDEA_TOPIC_GATE_BINDING_MISMATCH")
+                reasons.append("NICH1_EDITORIAL_CANDIDATE_TOPIC_GATE_BINDING_MISMATCH")
         if channel_fit is not None:
             if channel_fit.channel_fit_result != NicheGateVerdict.PASS:
                 reasons.append("NICH1_CHANNEL_FIT_NOT_PASS")
-            if topic_result is not None and channel_fit.gate_result_hashes.get(
-                NicheGateKey.TOPIC
-            ) != topic_result.content_hash:
+            if (
+                topic_result is not None
+                and channel_fit.gate_result_hashes.get(NicheGateKey.TOPIC)
+                != topic_result.content_hash
+            ):
                 reasons.append("NICH1_CHANNEL_FIT_TOPIC_HASH_MISMATCH")
         if (
             pre_admission_dossier is None
-            or pre_admission_dossier.dossier_scope
-            != NicheDossierScope.PRE_ADMISSION
+            or pre_admission_dossier.dossier_scope != NicheDossierScope.PRE_ADMISSION
             or pre_admission_dossier.overall_verdict != NicheGateVerdict.PASS
             or pre_admission_dossier.topic_result is None
             or topic_result is None
@@ -3141,8 +4024,7 @@ class FirstScriptedVideoPackageService:
             or channel_fit is None
             or pre_admission_dossier.channel_fit_result
             != channel_fit.channel_fit_result
-            or pre_admission_dossier.channel_fit_score
-            != channel_fit.channel_fit_score
+            or pre_admission_dossier.channel_fit_score != channel_fit.channel_fit_score
             or pre_admission_dossier.channel_fit_threshold
             != channel_fit.channel_fit_threshold
         ):
@@ -3168,10 +4050,10 @@ class FirstScriptedVideoPackageService:
         assert channel_fit is not None
         artifacts["niche_contract_digest"] = authority.digest
         artifacts["niche_contract_digest_ref"] = authority.digest_ref
-        artifacts["approved_daily_idea"] = {
+        artifacts["approved_editorial_candidate"] = {
             "topic": approved_topic,
             "angle": frozen.get("angle"),
-            "daily_idea_decision_ref": frozen.get("daily_idea_decision_ref"),
+            "editorial_idea_candidate_ref": frozen.get("editorial_idea_candidate_ref"),
             "editorial_slot_ref": frozen.get("editorial_slot_ref"),
             "category_id": frozen.get("category_id"),
             "content_pillar": frozen.get("content_pillar"),
@@ -3208,7 +4090,9 @@ class FirstScriptedVideoPackageService:
             "agent_context_pack": context_pack,
             "input_refs": {
                 "research_pack_ref": data.research_pack_ref,
-                "effective_context_snapshot_id": context_pack["audit_refs"]["effective_context_snapshot_id"],
+                "effective_context_snapshot_id": context_pack["audit_refs"][
+                    "effective_context_snapshot_id"
+                ],
                 "context_pack_hash": context_pack["context_pack_hash"],
             },
             "runtime_constraints": {
@@ -3244,7 +4128,9 @@ class FirstScriptedVideoPackageService:
             "agent_context_pack": context_pack,
             "input_refs": {
                 "research_pack_ref": data.research_pack_ref,
-                "effective_context_snapshot_id": context_pack["audit_refs"]["effective_context_snapshot_id"],
+                "effective_context_snapshot_id": context_pack["audit_refs"][
+                    "effective_context_snapshot_id"
+                ],
                 "context_pack_hash": context_pack["context_pack_hash"],
             },
             "required_stop_at": "video_generation",
@@ -3288,38 +4174,61 @@ class FirstScriptedVideoPackageService:
                 },
                 "media_qc_artifact_contract": {
                     "no_media_file_exists": True,
-                    "allowed_artifact_status": ["NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"],
+                    "allowed_artifact_status": [
+                        "NOT_AVAILABLE",
+                        "WAITING_MEDIA_GENERATION",
+                    ],
                     "forbidden_status": ["PASS", "QC_PASS"],
                     "provider_gap_handling": "limitations plus VideoGenerationBoundary, not BLOCK",
                 },
                 "rights_disclosure_artifact_contract": {
                     "required_non_empty_artifact": True,
-                    "minimum_fields": ["result", "source_manifest_status", "ai_disclosure_needed", "rights_risk", "disclosure_notes"],
+                    "minimum_fields": [
+                        "result",
+                        "source_manifest_status",
+                        "ai_disclosure_needed",
+                        "rights_risk",
+                        "disclosure_notes",
+                    ],
                     "text_only_rehearsal_note": "future generated media still needs source/provider manifest review",
                 },
                 "provider_readiness_artifact_contract": {
                     "missing_media_providers_expected_at_boundary": True,
                     "top_level_status_for_valid_summary": "OK",
-                    "forbidden_top_level_status_for_missing_provider_only": ["BLOCK", "REVIEW_REQUIRED"],
+                    "forbidden_top_level_status_for_missing_provider_only": [
+                        "BLOCK",
+                        "REVIEW_REQUIRED",
+                    ],
                     "minimum_artifact_fields": ["providers", "next_action"],
                 },
                 "visual_source_allowlist": sorted(VISUAL_SOURCE_ALLOWLIST),
-                "media_qc_expected_without_media": ["NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"],
+                "media_qc_expected_without_media": [
+                    "NOT_AVAILABLE",
+                    "WAITING_MEDIA_GENERATION",
+                ],
             },
         }
 
-    def _evidence_refs(self, data: FirstScriptedVideoPackageRequest) -> list[dict[str, Any]]:
+    def _evidence_refs(
+        self, data: FirstScriptedVideoPackageRequest
+    ) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = []
         if data.research_pack_ref:
-            refs.append({"source_type": "OPERATOR_RESEARCH_PACK", "ref": data.research_pack_ref})
+            refs.append(
+                {"source_type": "OPERATOR_RESEARCH_PACK", "ref": data.research_pack_ref}
+            )
         if data.research_pack_text:
-            refs.append({"source_type": "OPERATOR_RESEARCH_PACK_INLINE", "provided": True})
+            refs.append(
+                {"source_type": "OPERATOR_RESEARCH_PACK_INLINE", "provided": True}
+            )
         return refs
 
     def _artifact_refs(self, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
         return [{"artifact_key": key} for key in sorted(artifacts)]
 
-    def _latest_audit_id(self, render_run_id: uuid.UUID, *, provider_refs: list[dict[str, Any]]) -> uuid.UUID | None:
+    def _latest_audit_id(
+        self, render_run_id: uuid.UUID, *, provider_refs: list[dict[str, Any]]
+    ) -> uuid.UUID | None:
         audit = self.session.scalars(
             select(PromptAuditSnapshot)
             .where(PromptAuditSnapshot.prompt_render_run_id == render_run_id)
@@ -3333,7 +4242,9 @@ class FirstScriptedVideoPackageService:
         self.session.flush()
         return audit.id
 
-    def _record_prompt_budget_metrics(self, snapshot_id: uuid.UUID, rendered_messages: list[Any]) -> None:
+    def _record_prompt_budget_metrics(
+        self, snapshot_id: uuid.UUID, rendered_messages: list[Any]
+    ) -> None:
         snapshot = self.session.get(AgentContextPackSnapshot, snapshot_id)
         if snapshot is None:
             return
@@ -3368,10 +4279,20 @@ class FirstScriptedVideoPackageService:
         relevant_paths: list[str] = []
         for digest in (context_pack.get("digests") or {}).values():
             if isinstance(digest, dict):
-                relevant_paths.extend(str(path) for path in digest.get("relevant_contract_paths", []) if path)
-        audit_refs = context_pack.get("audit_refs") if isinstance(context_pack.get("audit_refs"), dict) else {}
+                relevant_paths.extend(
+                    str(path)
+                    for path in digest.get("relevant_contract_paths", [])
+                    if path
+                )
+        audit_refs = (
+            context_pack.get("audit_refs")
+            if isinstance(context_pack.get("audit_refs"), dict)
+            else {}
+        )
         return {
-            "effective_context_snapshot_id": str(effective_context_snapshot.id) if effective_context_snapshot else audit_refs.get("effective_context_snapshot_id"),
+            "effective_context_snapshot_id": str(effective_context_snapshot.id)
+            if effective_context_snapshot
+            else audit_refs.get("effective_context_snapshot_id"),
             "compiled_policy_snapshot_id": str(snapshot.id),
             "channel_contract_hash": (
                 effective_context_snapshot.channel_contract_hash
@@ -3379,9 +4300,14 @@ class FirstScriptedVideoPackageService:
                 else audit_refs.get("channel_contract_hash")
             ),
             "prompt_context_hash": render.prompt_context_hash,
-            "agent_context_pack_snapshot_id": str(context_pack_snapshot.id) if context_pack_snapshot else None,
-            "context_pack_hash": context_pack_snapshot.context_pack_hash if context_pack_snapshot else context_pack.get("context_pack_hash"),
-            "relevant_contract_paths_used": sorted(set(relevant_paths)) or ["effective_channel_runtime_context_snapshot"],
+            "agent_context_pack_snapshot_id": str(context_pack_snapshot.id)
+            if context_pack_snapshot
+            else None,
+            "context_pack_hash": context_pack_snapshot.context_pack_hash
+            if context_pack_snapshot
+            else context_pack.get("context_pack_hash"),
+            "relevant_contract_paths_used": sorted(set(relevant_paths))
+            or ["effective_channel_runtime_context_snapshot"],
         }
 
     def _validate_agent_output(
@@ -3406,7 +4332,9 @@ class FirstScriptedVideoPackageService:
             prompt_validation_result=prompt_validation_result,
             runtime_context_refs=runtime_context_refs,
             prompt_render_run_id=render.prompt_render_run_id,
-            agent_context_pack_snapshot_id=context_pack_snapshot.id if context_pack_snapshot else None,
+            agent_context_pack_snapshot_id=context_pack_snapshot.id
+            if context_pack_snapshot
+            else None,
             raw_output_ref=f"prompt-output:{render.prompt_render_run_id}",
         )
 
@@ -3553,7 +4481,9 @@ class FirstScriptedVideoPackageService:
         if status == "WAITING_PROVIDER_CONFIG":
             return MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
         if source == "deterministic_gates":
-            return "Sửa deterministic gate blockers trước khi chuyển trạng thái package."
+            return (
+                "Sửa deterministic gate blockers trước khi chuyển trạng thái package."
+            )
         if source == "gatekeeper_soft_review":
             return "Review kết quả GatekeeperSoftReviewAgent trước khi tiếp tục."
         return HUMAN_APPROVAL_REQUIRED
@@ -3576,15 +4506,21 @@ class FirstScriptedVideoPackageService:
             "prompt_context_hash": render.prompt_context_hash,
             "prompt_render_run_id": str(render.prompt_render_run_id),
             "llm_route_attempt_id": str(route.route_attempt_id),
-            "provider_attempt_id": str(route.provider_attempt_id) if route.provider_attempt_id else None,
-            "llm_run_snapshot_id": str(route.llm_run_snapshot_id) if route.llm_run_snapshot_id else None,
+            "provider_attempt_id": str(route.provider_attempt_id)
+            if route.provider_attempt_id
+            else None,
+            "llm_run_snapshot_id": str(route.llm_run_snapshot_id)
+            if route.llm_run_snapshot_id
+            else None,
             "route_status": route.status,
             "validation": validation,
         }
 
     def _visual_plan_block(self, artifact: Any) -> dict[str, Any] | None:
         values = _find_visual_source_values(artifact)
-        invalid = sorted(value for value in values if value not in VISUAL_SOURCE_ALLOWLIST)
+        invalid = sorted(
+            value for value in values if value not in VISUAL_SOURCE_ALLOWLIST
+        )
         missing_scene_sources = _find_scenes_missing_visual_source(artifact)
         if not invalid and not missing_scene_sources:
             return None
@@ -3597,8 +4533,15 @@ class FirstScriptedVideoPackageService:
         }
 
     def _gatekeeper_result(self, output: dict[str, Any]) -> str:
-        artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
-        result = str(artifact.get("result") or artifact.get("decision") or output.get("status") or "").upper()
+        artifact = (
+            output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        )
+        result = str(
+            artifact.get("result")
+            or artifact.get("decision")
+            or output.get("status")
+            or ""
+        ).upper()
         if result in {"PASS", "OK"}:
             return "PASS"
         if result in {"BLOCK", "BLOCKED"}:
@@ -3607,7 +4550,9 @@ class FirstScriptedVideoPackageService:
             return "REVIEW_REQUIRED"
         return "REVIEW_REQUIRED"
 
-    def _full_rehearsal_artifact_block(self, agent_key: str, artifact: Any) -> dict[str, Any] | None:
+    def _full_rehearsal_artifact_block(
+        self, agent_key: str, artifact: Any
+    ) -> dict[str, Any] | None:
         if agent_key == "VisualPlanningAgent":
             visual_block = self._visual_plan_block(artifact)
             if visual_block is not None:
@@ -3621,7 +4566,9 @@ class FirstScriptedVideoPackageService:
                 "reason_codes": ["SCRIPT_SENTENCE_IDS_REQUIRED"],
                 "next_action": "ScriptWriterAgent phải trả artifact.sentences với sentence_id/text/approx_seconds.",
             }
-        if agent_key == "RightsDisclosureReviewer" and not _has_required_rights_review(artifact):
+        if agent_key == "RightsDisclosureReviewer" and not _has_required_rights_review(
+            artifact
+        ):
             return {
                 "status": "REVIEW_REQUIRED",
                 "reason_codes": ["RIGHTS_DISCLOSURE_ARTIFACT_REQUIRED"],
@@ -3648,7 +4595,11 @@ class FirstScriptedVideoPackageService:
         return None
 
     def _should_create_boundary(self, artifacts: dict[str, Any]) -> bool:
-        return bool(artifacts.get("narration_script") and artifacts.get("visual_plan") and artifacts.get("thumbnail_brief"))
+        return bool(
+            artifacts.get("narration_script")
+            and artifacts.get("visual_plan")
+            and artifacts.get("thumbnail_brief")
+        )
 
     def _create_generation_boundary(
         self,
@@ -3663,30 +4614,46 @@ class FirstScriptedVideoPackageService:
             if provider_readiness.get(provider, {}).get("status") != "CONFIGURED"
         ]
         required_inputs = {
-            "narration_script": {"present": bool(package.artifacts.get("narration_script"))},
+            "narration_script": {
+                "present": bool(package.artifacts.get("narration_script"))
+            },
             "visual_plan": {"present": bool(package.artifacts.get("visual_plan"))},
-            "thumbnail_brief": {"present": bool(package.artifacts.get("thumbnail_brief"))},
-            "metadata_package": {"present": bool(package.artifacts.get("metadata_package"))},
-            "rights_disclosure_review": {"present": bool(package.artifacts.get("rights_disclosure_review"))},
+            "thumbnail_brief": {
+                "present": bool(package.artifacts.get("thumbnail_brief"))
+            },
+            "metadata_package": {
+                "present": bool(package.artifacts.get("metadata_package"))
+            },
+            "rights_disclosure_review": {
+                "present": bool(package.artifacts.get("rights_disclosure_review"))
+            },
         }
         blocked_reasons: list[str] = []
         if any(not item["present"] for item in required_inputs.values()):
             blocked_reasons.append("REQUIRED_INPUT_MISSING")
             boundary_status = "REVIEW_REQUIRED"
-            operator_summary = "Gói nội dung chưa đủ artifact để chuyển tới media boundary."
+            operator_summary = (
+                "Gói nội dung chưa đủ artifact để chuyển tới media boundary."
+            )
             next_action = "Bổ sung đủ script, visual plan, thumbnail brief, metadata và rights review."
         elif package.package_status == "BLOCKED":
             blocked_reasons.append("GATEKEEPER_BLOCK")
             boundary_status = "BLOCKED_GATEKEEPER"
-            operator_summary = "Gatekeeper đang BLOCK nên chưa thể chuyển tới bước tạo media."
+            operator_summary = (
+                "Gatekeeper đang BLOCK nên chưa thể chuyển tới bước tạo media."
+            )
             next_action = "Sửa các blocker gatekeeper trước khi tạo media."
         elif package.package_status == "REVIEW_REQUIRED":
             blocked_reasons.append("PACKAGE_REVIEW_REQUIRED")
             boundary_status = "REVIEW_REQUIRED"
-            operator_summary = "Package cần human review trước khi chuyển tới provider media."
+            operator_summary = (
+                "Package cần human review trước khi chuyển tới provider media."
+            )
             next_action = HUMAN_APPROVAL_REQUIRED
         elif missing_required:
-            blocked_reasons.extend(f"{provider.upper()}_NOT_CONFIGURED" for provider in missing_required)
+            blocked_reasons.extend(
+                f"{provider.upper()}_NOT_CONFIGURED" for provider in missing_required
+            )
             boundary_status = "BLOCKED_PROVIDER_NOT_CONFIGURED"
             operator_summary = MEDIA_PROVIDER_BOUNDARY_SUMMARY
             next_action = MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION
@@ -3701,9 +4668,21 @@ class FirstScriptedVideoPackageService:
             video_project_id=package.video_project_id,
             required_inputs=required_inputs,
             required_providers=[
-                {"provider_key": "elevenlabs", "role": "ElevenLabs voice", "required": True},
-                {"provider_key": "google_veo", "role": "optional Google Veo API AI hero", "required": False},
-                {"provider_key": "pexels_api", "role": "optional Pexels API visual fallback", "required": False},
+                {
+                    "provider_key": "elevenlabs",
+                    "role": "ElevenLabs voice",
+                    "required": True,
+                },
+                {
+                    "provider_key": "google_veo",
+                    "role": "optional Google Veo API AI hero",
+                    "required": False,
+                },
+                {
+                    "provider_key": "pexels_api",
+                    "role": "optional Pexels API visual fallback",
+                    "required": False,
+                },
             ],
             provider_readiness=provider_readiness,
             boundary_status=boundary_status,
@@ -3716,25 +4695,44 @@ class FirstScriptedVideoPackageService:
         self.session.flush()
         return boundary
 
-    def _boundary_provider_readiness(self, readiness_snapshot: dict[str, Any]) -> dict[str, Any]:
+    def _boundary_provider_readiness(
+        self, readiness_snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
         summaries = {
             str(summary.get("provider_key")): summary
             for summary in readiness_snapshot.get("provider_summaries", [])
             if isinstance(summary, dict) and summary.get("provider_key")
         }
         m2 = {
-            item.provider_key: self._m2_provider_boundary_state(item.model_dump(mode="json"))
+            item.provider_key: self._m2_provider_boundary_state(
+                item.model_dump(mode="json")
+            )
             for item in ProviderReadinessM2Service(self.settings).snapshot().providers
         }
         return {
-            "elevenlabs": m2.get("elevenlabs") or self._provider_boundary_state(summaries.get("elevenlabs")),
-            "google_veo": {**m2.get("google_veo", {"status": "NOT_CONFIGURED"}), "required": False},
-            "pexels_api": {**m2.get("pexels_api", {"status": "NOT_CONFIGURED"}), "required": False},
-            "google_drive_archive": {**m2.get("google_drive_archive", {"status": "DISABLED"}), "required": False},
-            "youtube_readonly": {**m2.get("youtube_readonly", {"status": "DISABLED"}), "required": False},
+            "elevenlabs": m2.get("elevenlabs")
+            or self._provider_boundary_state(summaries.get("elevenlabs")),
+            "google_veo": {
+                **m2.get("google_veo", {"status": "NOT_CONFIGURED"}),
+                "required": False,
+            },
+            "pexels_api": {
+                **m2.get("pexels_api", {"status": "NOT_CONFIGURED"}),
+                "required": False,
+            },
+            "google_drive_archive": {
+                **m2.get("google_drive_archive", {"status": "DISABLED"}),
+                "required": False,
+            },
+            "youtube_readonly": {
+                **m2.get("youtube_readonly", {"status": "DISABLED"}),
+                "required": False,
+            },
         }
 
-    def _provider_boundary_state(self, summary: dict[str, Any] | None, *, optional: bool = False) -> dict[str, Any]:
+    def _provider_boundary_state(
+        self, summary: dict[str, Any] | None, *, optional: bool = False
+    ) -> dict[str, Any]:
         if summary is None:
             return {
                 "status": "NOT_CONFIGURED",
@@ -3745,7 +4743,10 @@ class FirstScriptedVideoPackageService:
         readiness_state = str(summary.get("readiness_state") or "UNKNOWN")
         reason_codes = list(summary.get("reason_codes") or [])
         missing_env_keys = list(summary.get("missing_env_keys") or [])
-        credential_missing = any("KEY_MISSING" in code or "NEEDS_AUTH" in code or "CREDENTIAL" in code for code in reason_codes)
+        credential_missing = any(
+            "KEY_MISSING" in code or "NEEDS_AUTH" in code or "CREDENTIAL" in code
+            for code in reason_codes
+        )
         if readiness_state == "PASS":
             status = "CONFIGURED"
         elif credential_missing or missing_env_keys:
@@ -3765,11 +4766,17 @@ class FirstScriptedVideoPackageService:
         readiness_state = str(item.get("readiness_state") or "UNKNOWN")
         reason_codes = list(item.get("blocker_reason_codes") or [])
         missing_env_keys = list(item.get("missing_env_keys") or [])
-        if readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION", "CAPABILITY_READY"}:
+        if readiness_state in {
+            "READY_FOR_HUMAN_PAID_APPROVAL",
+            "READY_FOR_FUTURE_EXECUTION",
+            "CAPABILITY_READY",
+        }:
             status = "CONFIGURED"
         elif readiness_state == "DISABLED":
             status = "DISABLED"
-        elif missing_env_keys or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes):
+        elif missing_env_keys or any(
+            "CREDENTIAL" in code or "KEY" in code for code in reason_codes
+        ):
             status = "NEEDS_CREDENTIAL"
         else:
             status = "NOT_CONFIGURED"
@@ -3784,23 +4791,31 @@ class FirstScriptedVideoPackageService:
             "no_provider_calls_confirmed": True,
         }
 
-    def _human_review_checklist(self, artifacts: dict[str, Any], provider_readiness_snapshot_id: uuid.UUID) -> dict[str, Any]:
+    def _human_review_checklist(
+        self, artifacts: dict[str, Any], provider_readiness_snapshot_id: uuid.UUID
+    ) -> dict[str, Any]:
         narration = artifacts.get("narration_script") or {}
         research = artifacts.get("research_notes") or {}
         metadata = artifacts.get("metadata_package") or {}
         visual_plan = artifacts.get("visual_plan") or {}
         return {
             "facts_claims_need_review": True,
-            "evidence_refs_missing": not bool(research.get("evidence_refs") or research.get("sources") or research.get("source_notes")),
+            "evidence_refs_missing": not bool(
+                research.get("evidence_refs")
+                or research.get("sources")
+                or research.get("source_notes")
+            ),
             "title_thumbnail_accuracy": "REVIEW_REQUIRED",
             "rights_source_manifest": "REVIEW_REQUIRED",
             "ai_disclosure_needed": True,
             "market_locale_fit": "REVIEW_REQUIRED",
             "content_language_check": "REVIEW_REQUIRED",
             "reused_content_risk": "REVIEW_REQUIRED",
-            "upload_card_copy_ready": bool(artifacts.get("upload_card_copy")),
+            "publishing_metadata_ready": bool(artifacts.get("metadata_package")),
             "provider_readiness_gaps_ref": str(provider_readiness_snapshot_id),
-            "narration_sentence_ids_present": bool(narration.get("sentences") or narration.get("sentence_ids")),
+            "narration_sentence_ids_present": bool(
+                narration.get("sentences") or narration.get("sentence_ids")
+            ),
             "metadata_present": bool(metadata),
             "visual_plan_present": bool(visual_plan),
             "final_statement": HUMAN_APPROVAL_REQUIRED,
@@ -3861,14 +4876,17 @@ class FirstScriptedVideoPackageService:
             prompt_audit_snapshot_refs=prompt_audit_snapshot_refs or [],
             artifacts=artifacts or {},
             limitations=limitations or [],
-            risk_limitations_summary=risk_limitations_summary or self._risk_summary(artifacts or {}, status),
+            risk_limitations_summary=risk_limitations_summary
+            or self._risk_summary(artifacts or {}, status),
             next_action=next_action,
         )
         self.session.add(package)
         self.session.flush()
         return package
 
-    def _read(self, package: FirstScriptedVideoPackage) -> FirstScriptedVideoPackageRead:
+    def _read(
+        self, package: FirstScriptedVideoPackage
+    ) -> FirstScriptedVideoPackageRead:
         return FirstScriptedVideoPackageRead(
             id=package.id,
             video_project_id=package.video_project_id,
@@ -3880,8 +4898,12 @@ class FirstScriptedVideoPackageService:
             provider_readiness_snapshot_id=package.provider_readiness_snapshot_id,
             package_status=package.package_status,  # type: ignore[arg-type]
             agent_run_refs=package.agent_run_refs,
-            prompt_render_run_refs=[uuid.UUID(str(item)) for item in package.prompt_render_run_refs],
-            prompt_audit_snapshot_refs=[uuid.UUID(str(item)) for item in package.prompt_audit_snapshot_refs],
+            prompt_render_run_refs=[
+                uuid.UUID(str(item)) for item in package.prompt_render_run_refs
+            ],
+            prompt_audit_snapshot_refs=[
+                uuid.UUID(str(item)) for item in package.prompt_audit_snapshot_refs
+            ],
             artifacts=package.artifacts,
             limitations=package.limitations,
             risk_limitations_summary=package.risk_limitations_summary,
@@ -3894,14 +4916,21 @@ def _find_visual_source_values(value: Any, *, in_scene: bool = False) -> set[str
     found: set[str] = set()
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in {"visual_source", "intended_visual_source"} and isinstance(item, str):
+            if key in {"visual_source", "intended_visual_source"} and isinstance(
+                item, str
+            ):
                 found.add(item)
             elif key == "source_type" and in_scene and isinstance(item, str):
                 found.add(item)
             elif key == "scenes" and isinstance(item, list):
                 for scene in item:
                     found.update(_find_visual_source_values(scene, in_scene=True))
-            elif key not in {"evidence_refs", "applied_context_refs", "runtime_context_refs", "source_manifest_refs"}:
+            elif key not in {
+                "evidence_refs",
+                "applied_context_refs",
+                "runtime_context_refs",
+                "source_manifest_refs",
+            }:
                 found.update(_find_visual_source_values(item, in_scene=in_scene))
     elif isinstance(value, list):
         for item in value:
@@ -3922,9 +4951,17 @@ def _repair_visual_unknown_sentence_refs(
     }
     if not valid_sentence_ids:
         return visual_plan, []
-    allowed_sources = allowed_sources or {"DIAGRAM", "CARD", "SCREENSHOT", "EXISTING_ASSET"}
+    allowed_sources = allowed_sources or {
+        "DIAGRAM",
+        "CARD",
+        "SCREENSHOT",
+        "EXISTING_ASSET",
+    }
     repaired = {**visual_plan}
-    scenes = [dict(item) if isinstance(item, dict) else item for item in _list(visual_plan.get("scenes"))]
+    scenes = [
+        dict(item) if isinstance(item, dict) else item
+        for item in _list(visual_plan.get("scenes"))
+    ]
     repaired_scenes: list[Any] = []
     patches: list[dict[str, Any]] = []
     for scene in scenes:
@@ -3987,7 +5024,11 @@ def _repair_visual_unknown_sentence_refs(
                     scene.pop(ref_key, None)
                 patch["repair_action"] = "drop_unknown_sentence_refs"
                 scene_patches.append(patch)
-        source = scene.get("intended_visual_source") or scene.get("visual_source") or scene.get("source_type")
+        source = (
+            scene.get("intended_visual_source")
+            or scene.get("visual_source")
+            or scene.get("source_type")
+        )
         if isinstance(source, str) and source not in allowed_sources:
             fallback = _visual_source_fallback(source, allowed_sources)
             if fallback is None:
@@ -4031,18 +5072,28 @@ def _repair_visual_unknown_sentence_refs(
                 covered.add(ref)
             else:
                 unknown.add(ref)
-        source = scene.get("intended_visual_source") or scene.get("visual_source") or scene.get("source_type")
+        source = (
+            scene.get("intended_visual_source")
+            or scene.get("visual_source")
+            or scene.get("source_type")
+        )
         if isinstance(source, str) and source not in allowed_sources:
             disallowed.add(source)
     if unknown or disallowed or valid_sentence_ids - covered:
         missing_ids = [
             str(item.get("sentence_id"))
             for item in _list(narration_script.get("sentences"))
-            if isinstance(item, dict) and item.get("sentence_id") and str(item.get("sentence_id")) not in covered
+            if isinstance(item, dict)
+            and item.get("sentence_id")
+            and str(item.get("sentence_id")) not in covered
         ]
         if unknown or disallowed or not missing_ids:
             return visual_plan, []
-        fallback_source = "CARD" if "CARD" in allowed_sources else ("DIAGRAM" if "DIAGRAM" in allowed_sources else None)
+        fallback_source = (
+            "CARD"
+            if "CARD" in allowed_sources
+            else ("DIAGRAM" if "DIAGRAM" in allowed_sources else None)
+        )
         if fallback_source is None:
             return visual_plan, []
         for index in range(0, len(missing_ids), 6):
@@ -4095,7 +5146,11 @@ def _find_scenes_missing_visual_source(value: Any) -> list[int | str]:
         if not isinstance(scene, dict):
             missing.append(index)
             continue
-        source = scene.get("intended_visual_source") or scene.get("visual_source") or scene.get("source_type")
+        source = (
+            scene.get("intended_visual_source")
+            or scene.get("visual_source")
+            or scene.get("source_type")
+        )
         if not isinstance(source, str) or not source:
             missing.append(scene.get("section") or scene.get("sentence_id") or index)
     return missing
@@ -4121,7 +5176,13 @@ def _has_sentence_ids(value: Any) -> bool:
 def _has_required_rights_review(value: Any) -> bool:
     if not isinstance(value, dict) or not value:
         return False
-    required = {"result", "source_manifest_status", "ai_disclosure_needed", "rights_risk", "disclosure_notes"}
+    required = {
+        "result",
+        "source_manifest_status",
+        "ai_disclosure_needed",
+        "rights_risk",
+        "disclosure_notes",
+    }
     return required <= set(value)
 
 
@@ -4159,8 +5220,14 @@ def _media_qc_status(value: Any) -> str | None:
 def _needs_script_rewrite(output: dict[str, Any] | None) -> bool:
     if not isinstance(output, dict):
         return False
-    artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
-    appendix = output.get("technical_appendix") if isinstance(output.get("technical_appendix"), dict) else {}
+    artifact = (
+        output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+    )
+    appendix = (
+        output.get("technical_appendix")
+        if isinstance(output.get("technical_appendix"), dict)
+        else {}
+    )
     markers = (
         artifact.get("needs_script_rewrite"),
         artifact.get("rewrite_required"),
@@ -4179,18 +5246,40 @@ def _duration_model_from_context(
     if effective_context_snapshot is not None:
         category = effective_context_snapshot.category_runtime_context_json or {}
         if isinstance(category, dict):
-            policy = category.get("default_format_policy") if isinstance(category.get("default_format_policy"), dict) else {}
-    target = _first_number(policy.get("target_duration_seconds"), policy.get("target_seconds"))
+            policy = (
+                category.get("default_format_policy")
+                if isinstance(category.get("default_format_policy"), dict)
+                else {}
+            )
+    target = _first_number(
+        policy.get("target_duration_seconds"), policy.get("target_seconds")
+    )
     allowed = _dict(policy.get("allowed_duration_range_seconds"))
-    min_seconds = _first_number(allowed.get("min"), policy.get("min_seconds"), policy.get("target_duration_seconds_min"))
-    max_seconds = _first_number(allowed.get("max"), policy.get("max_seconds"), policy.get("target_duration_seconds_max"))
+    min_seconds = _first_number(
+        allowed.get("min"),
+        policy.get("min_seconds"),
+        policy.get("target_duration_seconds_min"),
+    )
+    max_seconds = _first_number(
+        allowed.get("max"),
+        policy.get("max_seconds"),
+        policy.get("target_duration_seconds_max"),
+    )
     long_form = _dict(policy.get("long_form"))
     if long_form and target is None:
         minutes = _dict(long_form.get("target_duration_minutes"))
         min_minutes = _first_number(minutes.get("min"), long_form.get("min_minutes"))
         max_minutes = _first_number(minutes.get("max"), long_form.get("max_minutes"))
-        min_seconds = _first_number(min_seconds, long_form.get("min_seconds"), min_minutes * 60 if min_minutes is not None else None)
-        max_seconds = _first_number(max_seconds, long_form.get("max_seconds"), max_minutes * 60 if max_minutes is not None else None)
+        min_seconds = _first_number(
+            min_seconds,
+            long_form.get("min_seconds"),
+            min_minutes * 60 if min_minutes is not None else None,
+        )
+        max_seconds = _first_number(
+            max_seconds,
+            long_form.get("max_seconds"),
+            max_minutes * 60 if max_minutes is not None else None,
+        )
         if min_seconds is not None and max_seconds is not None:
             target = round((min_seconds + max_seconds) / 2)
     if target is None and target_video_type == "long_form":
@@ -4236,15 +5325,21 @@ def _build_srt_caption_artifact(
     duration_model: dict[str, Any],
     repo_root: Path,
 ) -> dict[str, Any]:
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
     wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
     cues: list[dict[str, Any]] = []
     current = 0.0
     for sentence_index, sentence in enumerate(sentences, start=1):
-        sentence_id = str(sentence.get("sentence_id") or sentence.get("id") or f"S{sentence_index}")
+        sentence_id = str(
+            sentence.get("sentence_id") or sentence.get("id") or f"S{sentence_index}"
+        )
         chunks = _caption_chunks(str(sentence.get("text") or ""), max_words=16)
         sentence_word_count = sum(len(chunk.split()) for chunk in chunks)
-        sentence_duration = round((sentence_word_count / wpm) * 60, 3) if sentence_word_count else 0.0
+        sentence_duration = (
+            round((sentence_word_count / wpm) * 60, 3) if sentence_word_count else 0.0
+        )
         chunk_durations = _caption_chunk_durations(chunks, sentence_duration, wpm=wpm)
         for chunk, duration in zip(chunks, chunk_durations, strict=False):
             words = chunk.split()
@@ -4313,7 +5408,9 @@ def _caption_chunks(text: str, *, max_words: int) -> list[str]:
     current: list[str] = []
     for word in words:
         candidate = [*current, word]
-        if current and (len(candidate) > max_words or not _caption_chunk_fits(candidate)):
+        if current and (
+            len(candidate) > max_words or not _caption_chunk_fits(candidate)
+        ):
             chunks.append(" ".join(current).strip())
             current = [word]
         else:
@@ -4328,7 +5425,9 @@ def _caption_chunk_fits(words: list[str]) -> bool:
     return len(lines) <= 2 and all(len(line) <= 42 for line in lines)
 
 
-def _caption_chunk_durations(chunks: list[str], sentence_duration: float, *, wpm: float) -> list[float]:
+def _caption_chunk_durations(
+    chunks: list[str], sentence_duration: float, *, wpm: float
+) -> list[float]:
     if not chunks:
         return []
     word_counts = [len(chunk.split()) for chunk in chunks]
@@ -4337,7 +5436,9 @@ def _caption_chunk_durations(chunks: list[str], sentence_duration: float, *, wpm
     target = max(float(len(chunks)), sentence_duration)
     delta = round(sum(durations) - target, 3)
     if delta > 0:
-        for index in sorted(range(len(durations)), key=lambda item: durations[item], reverse=True):
+        for index in sorted(
+            range(len(durations)), key=lambda item: durations[item], reverse=True
+        ):
             removable = min(delta, max(0.0, durations[index] - 1.0))
             if removable <= 0:
                 continue
@@ -4403,15 +5504,26 @@ def _format_srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def _script_estimated_seconds_for_srt(script: dict[str, Any], duration_model: dict[str, Any]) -> float:
+def _script_estimated_seconds_for_srt(
+    script: dict[str, Any], duration_model: dict[str, Any]
+) -> float:
     word_count = _script_word_count(script)
     wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
     if word_count and wpm:
         return round((word_count / wpm) * 60, 3)
-    return round(sum(_first_number(item.get("approx_seconds")) or 0 for item in _list(script.get("sentences")) if isinstance(item, dict)), 3)
+    return round(
+        sum(
+            _first_number(item.get("approx_seconds")) or 0
+            for item in _list(script.get("sentences"))
+            if isinstance(item, dict)
+        ),
+        3,
+    )
 
 
-def _script_duration_contract(duration_model: Any, *, script_outline: dict[str, Any] | None = None) -> dict[str, Any]:
+def _script_duration_contract(
+    duration_model: Any, *, script_outline: dict[str, Any] | None = None
+) -> dict[str, Any]:
     model = _dict(duration_model)
     budget = _script_word_budget_contract(model, script_outline=_dict(script_outline))
     min_seconds = budget["min_seconds"]
@@ -4419,11 +5531,16 @@ def _script_duration_contract(duration_model: Any, *, script_outline: dict[str, 
     target_seconds = budget["target_seconds"]
     words_target = budget["target_word_count"]
     max_seconds_per_sentence = 15
-    duration_sentence_count = int((float(min_seconds or target_seconds or 0) + max_seconds_per_sentence - 1) // max_seconds_per_sentence)
+    duration_sentence_count = int(
+        (float(min_seconds or target_seconds or 0) + max_seconds_per_sentence - 1)
+        // max_seconds_per_sentence
+    )
     minimum_word_count = int(budget["minimum_word_count"])
     maximum_word_count = int(budget["maximum_word_count"])
     min_sentence_count = duration_sentence_count
-    target_sentence_count = int((float(words_target or minimum_word_count or 0) + 23) // 24)
+    target_sentence_count = int(
+        (float(words_target or minimum_word_count or 0) + 23) // 24
+    )
     contract = {
         "required": bool(target_seconds),
         "target_seconds": target_seconds,
@@ -4451,14 +5568,32 @@ def _script_duration_contract(duration_model: Any, *, script_outline: dict[str, 
     return contract
 
 
-def _script_word_budget_contract(duration_model: dict[str, Any], *, script_outline: dict[str, Any] | None = None) -> dict[str, Any]:
+def _script_word_budget_contract(
+    duration_model: dict[str, Any], *, script_outline: dict[str, Any] | None = None
+) -> dict[str, Any]:
     model = _dict(duration_model)
     allowed = _dict(model.get("allowed_duration_range_seconds"))
-    target_seconds = _first_number(model.get("target_duration_seconds") or model.get("target_seconds")) or 0
-    min_seconds = _first_number(allowed.get("min"), model.get("min_seconds")) or round(target_seconds * 0.9)
-    max_seconds = _first_number(allowed.get("max"), model.get("max_seconds")) or round(target_seconds * 1.1)
+    target_seconds = (
+        _first_number(
+            model.get("target_duration_seconds") or model.get("target_seconds")
+        )
+        or 0
+    )
+    min_seconds = _first_number(allowed.get("min"), model.get("min_seconds")) or round(
+        target_seconds * 0.9
+    )
+    max_seconds = _first_number(allowed.get("max"), model.get("max_seconds")) or round(
+        target_seconds * 1.1
+    )
     wpm = _first_number(model.get("words_per_minute_assumption")) or 140
-    target_word_count = int(round((_first_number(model.get("narration_words_target")) or (target_seconds / 60 * wpm))))
+    target_word_count = int(
+        round(
+            (
+                _first_number(model.get("narration_words_target"))
+                or (target_seconds / 60 * wpm)
+            )
+        )
+    )
     minimum_word_count = int(round((float(min_seconds) / 60) * float(wpm)))
     maximum_word_count = int(round((float(max_seconds) / 60) * float(wpm)))
     if target_word_count <= 0:
@@ -4493,10 +5628,23 @@ def _normalize_section_word_budgets(
         section = _dict(item)
         if not section:
             continue
-        name = str(section.get("section_id") or section.get("section") or f"section_{index}")
-        seconds = _first_number(section.get("seconds"), section.get("duration_seconds"), section.get("target_seconds"))
-        words = _first_number(section.get("word_target"), section.get("target_words"), section.get("words"), section.get("raw_word_target"))
-        sections.append({"section_id": name, "seconds": seconds, "raw_word_target": words})
+        name = str(
+            section.get("section_id") or section.get("section") or f"section_{index}"
+        )
+        seconds = _first_number(
+            section.get("seconds"),
+            section.get("duration_seconds"),
+            section.get("target_seconds"),
+        )
+        words = _first_number(
+            section.get("word_target"),
+            section.get("target_words"),
+            section.get("words"),
+            section.get("raw_word_target"),
+        )
+        sections.append(
+            {"section_id": name, "seconds": seconds, "raw_word_target": words}
+        )
     if not sections:
         defaults = [
             ("hook", 0.10),
@@ -4506,14 +5654,19 @@ def _normalize_section_word_budgets(
             ("proof_and_caveats", 0.14),
             ("close", 0.10),
         ]
-        return _distribute_word_budget(defaults, target_word_count=target_word_count, target_seconds=target_seconds)
+        return _distribute_word_budget(
+            defaults, target_word_count=target_word_count, target_seconds=target_seconds
+        )
     weights: list[float] = []
     for section in sections:
         raw_words = _first_number(section.get("raw_word_target"))
         seconds = _first_number(section.get("seconds"))
         weights.append(float(raw_words or seconds or 1))
     total_weight = sum(weights) or float(len(sections))
-    allocated = [max(1, int(round(target_word_count * weight / total_weight))) for weight in weights]
+    allocated = [
+        max(1, int(round(target_word_count * weight / total_weight)))
+        for weight in weights
+    ]
     delta = target_word_count - sum(allocated)
     index = 0
     while delta:
@@ -4537,13 +5690,31 @@ def _normalize_section_word_budgets(
     return normalized
 
 
-def _distribute_word_budget(defaults: list[tuple[str, float]], *, target_word_count: int, target_seconds: float | int) -> list[dict[str, Any]]:
-    sections = [{"section_id": name, "raw_word_target": weight, "seconds": round(float(target_seconds or 0) * weight, 3)} for name, weight in defaults]
-    return _normalize_section_word_budgets(sections, target_word_count=target_word_count, target_seconds=target_seconds)
+def _distribute_word_budget(
+    defaults: list[tuple[str, float]],
+    *,
+    target_word_count: int,
+    target_seconds: float | int,
+) -> list[dict[str, Any]]:
+    sections = [
+        {
+            "section_id": name,
+            "raw_word_target": weight,
+            "seconds": round(float(target_seconds or 0) * weight, 3),
+        }
+        for name, weight in defaults
+    ]
+    return _normalize_section_word_budgets(
+        sections, target_word_count=target_word_count, target_seconds=target_seconds
+    )
 
 
 def _script_word_count(script: dict[str, Any]) -> int:
-    return sum(len(str(item.get("text") or "").split()) for item in _list(script.get("sentences")) if isinstance(item, dict))
+    return sum(
+        len(str(item.get("text") or "").split())
+        for item in _list(script.get("sentences"))
+        if isinstance(item, dict)
+    )
 
 
 def _gate_stop_fail_codes(gate_stop: dict[str, Any]) -> list[str]:
@@ -4570,14 +5741,21 @@ def _trim_script_to_word_budget(
     budget: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     max_words = max(1, int(budget["maximum_word_count"]) - 8)
-    sentences = [dict(item) if isinstance(item, dict) else item for item in _list(script.get("sentences"))]
+    sentences = [
+        dict(item) if isinstance(item, dict) else item
+        for item in _list(script.get("sentences"))
+    ]
     repaired = {**script, "sentences": sentences}
     patches: list[dict[str, Any]] = []
     current_words = _script_word_count(repaired)
     if current_words <= max_words:
         _refresh_script_duration_self_check(repaired, duration_model)
         return repaired, patches
-    trimmable = [item for item in sentences if isinstance(item, dict) and str(item.get("text") or "").strip()]
+    trimmable = [
+        item
+        for item in sentences
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
     if not trimmable:
         return repaired, patches
     min_sentence_words = 6
@@ -4593,14 +5771,28 @@ def _trim_script_to_word_budget(
         if not candidates:
             break
         word_count, _, sentence = candidates[0]
-        remove_count = min(word_count - min_sentence_words, current_words - max_words, max(1, word_count - 10))
+        remove_count = min(
+            word_count - min_sentence_words,
+            current_words - max_words,
+            max(1, word_count - 10),
+        )
         before = str(sentence.get("text") or "")
         words = before.split()
         after = " ".join(words[: word_count - remove_count]).rstrip(" ,;:-")
         if after and after[-1] not in ".!?":
             after += "."
         sentence["text"] = after
-        sentence["approx_seconds"] = round((len(after.split()) / (_first_number(duration_model.get("words_per_minute_assumption")) or 140)) * 60, 3)
+        sentence["approx_seconds"] = round(
+            (
+                len(after.split())
+                / (
+                    _first_number(duration_model.get("words_per_minute_assumption"))
+                    or 140
+                )
+            )
+            * 60,
+            3,
+        )
         patches.append(
             {
                 "sentence_id": str(sentence.get("sentence_id") or len(patches) + 1),
@@ -4626,8 +5818,16 @@ def _expand_script_to_word_budget(
     return deepcopy(script), []
 
 
-def _repair_forbidden_style_terms(script: dict[str, Any], forbidden_terms: list[str]) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    repaired = {**script, "sentences": [dict(item) if isinstance(item, dict) else item for item in _list(script.get("sentences"))]}
+def _repair_forbidden_style_terms(
+    script: dict[str, Any], forbidden_terms: list[str]
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    repaired = {
+        **script,
+        "sentences": [
+            dict(item) if isinstance(item, dict) else item
+            for item in _list(script.get("sentences"))
+        ],
+    }
     patches: list[dict[str, str]] = []
     for sentence in repaired["sentences"]:
         if not isinstance(sentence, dict):
@@ -4653,16 +5853,33 @@ def _repair_forbidden_style_terms(script: dict[str, Any], forbidden_terms: list[
     return repaired, patches
 
 
-def _refresh_script_duration_self_check(script: dict[str, Any], duration_model: dict[str, Any]) -> None:
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+def _refresh_script_duration_self_check(
+    script: dict[str, Any], duration_model: dict[str, Any]
+) -> None:
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
     word_count = sum(len(str(item.get("text") or "").split()) for item in sentences)
-    sentence_total = sum(_first_number(item.get("approx_seconds")) or 0 for item in sentences)
+    sentence_total = sum(
+        _first_number(item.get("approx_seconds")) or 0 for item in sentences
+    )
     wpm = _first_number(duration_model.get("words_per_minute_assumption")) or 140.0
-    actual_total = round((word_count / wpm) * 60, 3) if word_count and wpm else round(sentence_total, 3)
-    target = _first_number(duration_model.get("target_duration_seconds") or duration_model.get("target_seconds"))
+    actual_total = (
+        round((word_count / wpm) * 60, 3)
+        if word_count and wpm
+        else round(sentence_total, 3)
+    )
+    target = _first_number(
+        duration_model.get("target_duration_seconds")
+        or duration_model.get("target_seconds")
+    )
     allowed_range = _dict(duration_model.get("allowed_duration_range_seconds"))
-    min_seconds = _first_number(allowed_range.get("min"), duration_model.get("min_seconds"))
-    max_seconds = _first_number(allowed_range.get("max"), duration_model.get("max_seconds"))
+    min_seconds = _first_number(
+        allowed_range.get("min"), duration_model.get("min_seconds")
+    )
+    max_seconds = _first_number(
+        allowed_range.get("max"), duration_model.get("max_seconds")
+    )
     words_target = _first_number(duration_model.get("narration_words_target"))
     script["total_approx_seconds"] = actual_total
     script["duration_self_check"] = {
@@ -4678,7 +5895,9 @@ def _refresh_script_duration_self_check(script: dict[str, Any], duration_model: 
     }
 
 
-def _gate_report_after_repair(existing: dict[str, Any] | None, batch: Any) -> dict[str, Any]:
+def _gate_report_after_repair(
+    existing: dict[str, Any] | None, batch: Any
+) -> dict[str, Any]:
     batch_refs = list(_dict(existing).get("gate_batch_run_refs") or [])
     if getattr(batch, "gate_batch_run_id", None):
         batch_refs.append(str(batch.gate_batch_run_id))
@@ -4708,7 +5927,9 @@ def _niche_subject_hash(artifact_key: str, artifact: dict[str, Any]) -> str:
 
 
 def _script_text(artifact: dict[str, Any]) -> str:
-    sentences = [item for item in _list(artifact.get("sentences")) if isinstance(item, dict)]
+    sentences = [
+        item for item in _list(artifact.get("sentences")) if isinstance(item, dict)
+    ]
     text = " ".join(str(item.get("text") or "").strip() for item in sentences).strip()
     if text:
         return text
@@ -4818,8 +6039,7 @@ def _niche_evidence_refs(values: Any) -> list[NicheEvidenceRef]:
             raw_hash = raw.get("content_hash")
             content_hash = (
                 str(raw_hash)
-                if isinstance(raw_hash, str)
-                and re.fullmatch(r"[0-9a-f]{64}", raw_hash)
+                if isinstance(raw_hash, str) and re.fullmatch(r"[0-9a-f]{64}", raw_hash)
                 else None
             )
             item = NicheEvidenceRef(
@@ -4846,11 +6066,7 @@ def _semantic_criterion_evidence(
     return [
         NicheCriterionEvidence(
             criterion=criterion,
-            verdict=(
-                NicheGateVerdict.PASS
-                if passed
-                else NicheGateVerdict.BLOCK
-            ),
+            verdict=(NicheGateVerdict.PASS if passed else NicheGateVerdict.BLOCK),
             score=1.0 if passed else 0.0,
             rationale=(
                 f"Deterministic canonical-artifact check passed for {criterion.value}."
@@ -4858,9 +6074,7 @@ def _semantic_criterion_evidence(
                 else f"Canonical artifact lacks deterministic evidence for {criterion.value}."
             ),
             reason_codes=(
-                []
-                if passed
-                else [NicheReasonCode.SEMANTIC_ALIGNMENT_BLOCKED]
+                [] if passed else [NicheReasonCode.SEMANTIC_ALIGNMENT_BLOCKED]
             ),
             evidence_refs=[evidence_ref],
         )

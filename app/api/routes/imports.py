@@ -1,3 +1,5 @@
+# ruff: noqa: F401, F811
+
 import uuid
 from typing import Any
 
@@ -58,9 +60,11 @@ from app.contracts import (
     CredentialHealthSnapshotRead,
     CredentialReferenceCreate,
     CredentialReferenceRead,
-    DailyIdeaDecisionCreate,
-    DailyIdeaDecisionRead,
-    DailyRunExecuteRequest,
+    EditorialIdeaCandidateCreate,
+    EditorialIdeaCandidateRead,
+    EditorialIdeaCandidateTransition,
+    EditorialResearchRunCreate,
+    EditorialResearchRunRead,
     DeadLetterJobCreate,
     DeadLetterJobRead,
     EditorialCalendarSlotCreate,
@@ -92,7 +96,6 @@ from app.contracts import (
     ProviderHealthSnapshotRead,
     ProviderRegistryEntryCreate,
     ProviderRegistryEntryRead,
-    ProjectAdmissionDecisionCreate,
     ProjectAdmissionDecisionRead,
     FailureTraceReportRead,
     LearningCandidateGenerationRunCreate,
@@ -101,16 +104,6 @@ from app.contracts import (
     LearningCandidateRead,
     LearningEvidenceBundleRead,
     LearningReviewQueueItemRead,
-    AssetReuseIndexEntryRead,
-    AssetReuseSearchRequest,
-    BuildUploadCardsRequest,
-    ContentDerivativeGraphEdgeCreate,
-    ContentDerivativeGraphEdgeRead,
-    CrossPlatformFunnelPackageCreate,
-    CrossPlatformFunnelPackageRead,
-    DerivativeOriginalityCheckCreate,
-    DerivativeOriginalityCheckRead,
-    HumanUploadTaskRead,
     AIHeroAssetPlanRequest,
     AIHeroAssetRead,
     AIHeroGenerationExecuteRequest,
@@ -133,8 +126,6 @@ from app.contracts import (
     ProviderCapabilityMatrixEntryRead,
     ReusedContentRiskGateCheckRequest,
     ReusedContentRiskGateRead,
-    ShortRenderPackageCreate,
-    ShortRenderPackageRead,
     ThumbnailVariantPlanRequest,
     ThumbnailVariantRead,
     LLMModelProfileRead,
@@ -144,15 +135,6 @@ from app.contracts import (
     LLMRouterProfileRead,
     LLMRouterSmokeTestRead,
     LLMRouterSmokeTestRequest,
-    PromoteShortToLongCandidateCreate,
-    PromoteShortToLongCandidateRead,
-    ReusableArtifactCreate,
-    ReusableArtifactRead,
-    ShortCandidateExtractRequest,
-    ShortCandidateRankRequest,
-    ShortCandidateRead,
-    ShortCandidateScoreRead,
-    UploadCardRead,
     ProductionArtifactRunCreate,
     ProductionArtifactRunRead,
     PostPublishHealthRunCreate,
@@ -204,8 +186,6 @@ from app.contracts import (
     YouTubePublicSyncRunRead,
     RecoveryProposalRead,
     PlaybookCandidateDraftRead,
-    ChannelDailyRunCreate,
-    ChannelDailyRunRead,
     ChannelStatePackSnapshotCreate,
     ChannelStatePackSnapshotRead,
     ContextPackSnapshotCreate,
@@ -214,7 +194,6 @@ from app.contracts import (
     AuthSessionRead,
     ChannelLocalizationConfig,
     ChannelLocalizationConfigUpdate,
-    ChannelPublishTimingPolicyCreate,
     ChannelPublishTimingPolicyRead,
     LocalizationReadinessGateRead,
     LocalizedMetadataPackageCreate,
@@ -324,7 +303,12 @@ from app.contracts.m11 import (
 )
 from app.core.config import get_settings
 from app.core.db import check_database
-from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailureError
+from app.core.errors import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ValidationFailureError,
+)
 from app.core.logging import configure_logging
 from app.db.session import session_scope
 from app.services import (
@@ -342,9 +326,8 @@ from app.services import (
     GateDefinitionService,
     GateRunnerService,
     BudgetGateService,
-    ChannelAuthorityService,
-    ChannelDailyRunService,
     ChannelStatePackService,
+    EditorialResearchService,
     ComponentHealthService,
     CostService,
     CredentialReferenceService,
@@ -361,11 +344,6 @@ from app.services import (
     LearningCandidateGenerationService,
     LearningReadService,
     LearningReviewQueueService,
-    AssetReuseIndexService,
-    CrossPlatformFunnelPackageService,
-    DerivativeGraphService,
-    DerivativeOriginalityService,
-    HumanUploadTaskService,
     AIHeroAssetPlanningService,
     AIHeroGenerationService,
     LicenseEvidenceGateService,
@@ -377,12 +355,10 @@ from app.services import (
     ProviderCapabilityGateService,
     ProviderCapabilityMatrixService,
     ReusedContentRiskGateService,
-    ShortRenderPackageService,
     ThumbnailVariantPlanningService,
     LLMRouterConfigLoader,
     LLMRouterService,
     MediaQCService,
-    PromoteShortToLongCandidateService,
     ProjectAdmissionService,
     ProviderHealthService,
     ProviderRegistryService,
@@ -394,11 +370,7 @@ from app.services import (
     ResourceResolverService,
     RetryOpsService,
     SearchDemandEvidenceService,
-    ReusableArtifactService,
-    ShortCandidateExtractionService,
-    ShortCandidateRankingService,
     SystemHealthService,
-    UploadCardService,
     WorkflowReadinessService,
     UploadedVideoYouTubeFollowReadService,
     GoogleDriveCredentialHealthService,
@@ -504,5 +476,6 @@ class ChannelActivateRequest(BaseModel):
     snapshot_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid")
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

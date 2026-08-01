@@ -101,7 +101,7 @@ def _preflight(profile: TargetMarketProfile, *, scope=None, score_all=True):
         "local_relevance": True,
     }
     result = IdeaMarketPreflightEvaluator().evaluate(
-        daily_idea_decision_ref="daily-idea://1",
+        editorial_idea_candidate_ref="editorial-candidate://1",
         niche_contract_digest_ref="niche://1",
         niche_contract_digest_hash="1" * 64,
         target_market_digest=digest,
@@ -275,7 +275,9 @@ def test_negative_market_mismatches_block_or_surface_review() -> None:
         profile=profile,
         digest=digest,
         data=VoiceLocaleAlignmentInput(
-            narration_locale="en-GB", content_language="en", voice_profile_locale="en-GB"
+            narration_locale="en-GB",
+            content_language="en",
+            voice_profile_locale="en-GB",
         ),
     )
     assert wrong_voice.verdict == MarketVerdict.BLOCK

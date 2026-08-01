@@ -87,7 +87,7 @@ class FinalReviewCandidateCreateV2(BaseModel):
     destination_platform_channel_id: str = Field(min_length=1)
     destination_account_identity: str = Field(min_length=1)
     target_platform: str = Field(min_length=1, max_length=40)
-    target_surface: str = Field(min_length=1, max_length=40)
+    target_surface: Literal["LONG_FORM"]
     target_market_lineage: dict[str, Any] = Field(min_length=1)
     publish_metadata_snapshot: dict[str, Any] = Field(min_length=1)
     disclosure_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -153,14 +153,12 @@ class FinalReviewCandidateRead(BaseModel):
     target_platform: str
     target_surface: str
     target_market_lineage: dict[str, Any]
-    production_lane: str
+    production_lane: Literal["LONG_FORM"]
     content_mode: str
     series_plan_id: uuid.UUID | None
     series_run_id: uuid.UUID | None
     episode_number: int | None
     standalone_reason_code: str | None
-    parent_video_project_id: uuid.UUID | None
-    parent_final_media_ref_id: uuid.UUID | None
     publish_metadata_snapshot: dict[str, Any]
     disclosure_snapshot: dict[str, Any]
     materiality_policy_snapshot: dict[str, Any]
@@ -248,14 +246,12 @@ class HumanUploadTaskReadV2(BaseModel):
     destination_binding_fingerprint: str
     channel_profile_version_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
-    production_lane: str
+    production_lane: Literal["LONG_FORM"]
     content_mode: str
     series_plan_id: uuid.UUID | None
     series_run_id: uuid.UUID | None
     episode_number: int | None
     standalone_reason_code: str | None
-    parent_video_project_id: uuid.UUID | None
-    parent_final_media_ref_id: uuid.UUID | None
     archive_object_ref: str
     selected_file_name: str | None
     selected_file_ref: str | None
@@ -424,14 +420,12 @@ class UploadedVideoReadV2(BaseModel):
     production_package_hash: str
     channel_profile_version_id: uuid.UUID
     reviewed_checksum: str
-    production_lane: str
+    production_lane: Literal["LONG_FORM"]
     content_mode: str
     series_plan_id: uuid.UUID | None
     series_run_id: uuid.UUID | None
     episode_number: int | None
     standalone_reason_code: str | None
-    parent_video_project_id: uuid.UUID | None
-    parent_final_media_ref_id: uuid.UUID | None
     target_market_lineage: dict[str, Any]
     archive_supplement: dict[str, Any]
     archive_supplement_ref: str

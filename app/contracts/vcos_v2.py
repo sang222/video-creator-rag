@@ -27,9 +27,7 @@ ASSIGNMENT_RESOLVER_VERSION = "vcos-assignment-resolver-v2.1"
 
 
 class ProductionLane(StrEnum):
-    DAILY_SHORT = "DAILY_SHORT"
     LONG_FORM = "LONG_FORM"
-    LONG_DERIVED_SHORT = "LONG_DERIVED_SHORT"
 
 
 class ContentMode(StrEnum):
@@ -72,7 +70,6 @@ class AssignmentReasonCode(StrEnum):
     SERIES_CAPACITY_EXHAUSTED = "SERIES_CAPACITY_EXHAUSTED"
     SERIES_COHERENCE_FAILED = "SERIES_COHERENCE_FAILED"
     BRIDGE_OR_SPECIAL = "BRIDGE_OR_SPECIAL"
-    LONG_DERIVATIVE_AVAILABLE = "LONG_DERIVATIVE_AVAILABLE"
     SERIES_BINDING_INVALID = "SERIES_BINDING_INVALID"
     SERIES_PLAN_SUPERSEDED = "SERIES_PLAN_SUPERSEDED"
     SERIES_RUN_NOT_ACTIVE = "SERIES_RUN_NOT_ACTIVE"
@@ -88,9 +85,7 @@ class LegacySeriesClassification(StrEnum):
 
 
 class PlanningSourceType(StrEnum):
-    DAILY_IDEA = "DAILY_IDEA"
     LONG_FORM_PLAN = "LONG_FORM_PLAN"
-    DERIVED_SHORT = "DERIVED_SHORT"
 
 
 class DurationContractV2(BaseModel):
@@ -184,14 +179,12 @@ class SeriesPlanCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_lanes(self) -> Self:
-        if ProductionLane.LONG_DERIVED_SHORT in self.allowed_production_lanes:
-            raise ValueError(
-                "LONG_DERIVED_SHORT is always standalone and cannot be a series lane"
-            )
         if len(set(self.allowed_production_lanes)) != len(
             self.allowed_production_lanes
         ):
             raise ValueError("allowed_production_lanes must not contain duplicates")
+        if self.allowed_production_lanes != [ProductionLane.LONG_FORM]:
+            raise ValueError("SeriesPlan supports LONG_FORM only")
         return self
 
 
@@ -288,7 +281,6 @@ class AssignmentCandidate(BaseModel):
     schedule_obligation: int = Field(default=0, ge=0, le=100)
     recent_repetition_penalty: int = Field(default=0, ge=0, le=100)
     niche_opportunity_value: int = Field(default=0, ge=0, le=100)
-    derivative_parent_available: bool = False
     episode_role: str | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -309,7 +301,6 @@ class AssignmentResolverInput(BaseModel):
     market_gate_passed: bool = False
     timely_niche_opportunity: bool = False
     bridge_or_special: bool = False
-    parent_video_project_id: uuid.UUID | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -322,15 +313,6 @@ class AssignmentResolverInput(BaseModel):
             raise ValueError(
                 "preferred_series_run_id requires preferred_series_plan_id"
             )
-        if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            if self.parent_video_project_id is None:
-                raise ValueError(
-                    "LONG_DERIVED_SHORT requires parent_video_project_id"
-                )
-            if self.assignment_mode != AssignmentMode.STANDALONE_REQUIRED:
-                raise ValueError(
-                    "LONG_DERIVED_SHORT requires STANDALONE_REQUIRED"
-                )
         return self
 
 
@@ -363,31 +345,21 @@ class AssignmentResolution(BaseModel):
                     "SERIES_EPISODE requires series_plan_id, series_run_id, and episode_number"
                 )
             if self.standalone_reason_code is not None:
-                raise ValueError(
-                    "SERIES_EPISODE cannot have standalone_reason_code"
-                )
+                raise ValueError("SERIES_EPISODE cannot have standalone_reason_code")
         else:
-            if any(value is not None for value in typed) or self.episode_role is not None:
+            if (
+                any(value is not None for value in typed)
+                or self.episode_role is not None
+            ):
                 raise ValueError("STANDALONE cannot carry series or episode fields")
             if self.standalone_reason_code is None:
-                raise ValueError(
-                    "STANDALONE requires standalone_reason_code"
-                )
+                raise ValueError("STANDALONE requires standalone_reason_code")
         return self
 
     @property
     def standalone_reason(self) -> AssignmentReasonCode | None:
         """Read-only compatibility view; v2 serialization uses the code name."""
         return self.standalone_reason_code
-
-
-class DerivativeLineageInput(BaseModel):
-    parent_video_project_id: uuid.UUID
-    parent_final_media_ref_id: uuid.UUID | None = None
-    canonical_timeline_ref: str = Field(min_length=1)
-    canonical_timeline_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class ProjectAdmissionV2Request(BaseModel):
@@ -398,8 +370,7 @@ class ProjectAdmissionV2Request(BaseModel):
     channel_profile_version_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
     editorial_calendar_slot_id: uuid.UUID | None = None
-    channel_daily_run_id: uuid.UUID | None = None
-    daily_idea_decision_id: uuid.UUID | None = None
+    editorial_idea_candidate_id: uuid.UUID | None = None
     idea_market_preflight_id: uuid.UUID | None = None
     production_lane: ProductionLane
     assignment_mode: AssignmentMode
@@ -412,13 +383,13 @@ class ProjectAdmissionV2Request(BaseModel):
     character_binding_id: uuid.UUID | None = None
     episode_role: str | None = None
     standalone_reason_code: str | None = None
-    derivative_lineage: DerivativeLineageInput | None = None
     duration_contract: DurationContractV2
     niche_gate_passed: bool = False
     market_gate_passed: bool = False
     timely_niche_opportunity: bool = False
     bridge_or_special: bool = False
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    budget_gate_result: dict[str, Any] | None = None
     created_by_user_id: uuid.UUID
     model_config = ConfigDict(extra="forbid")
 
@@ -428,56 +399,19 @@ class ProjectAdmissionV2Request(BaseModel):
             raise ValueError(
                 "v2 admission forbids raw_series_key; use typed SeriesPlan/SeriesRun ids"
             )
-        if self.planning_source_type == PlanningSourceType.DAILY_IDEA:
-            if self.production_lane != ProductionLane.DAILY_SHORT:
-                raise ValueError("daily idea admission must use DAILY_SHORT")
-            if self.channel_daily_run_id is None or self.daily_idea_decision_id is None:
-                raise ValueError(
-                    "daily idea admission requires channel_daily_run_id and daily_idea_decision_id"
-                )
-        else:
-            if self.channel_daily_run_id is not None or self.daily_idea_decision_id is not None:
-                raise ValueError(
-                    "non-daily planning must not masquerade as a ChannelDailyRun"
-                )
-        if self.planning_source_type == PlanningSourceType.LONG_FORM_PLAN:
-            if self.production_lane != ProductionLane.LONG_FORM:
-                raise ValueError("long-form planning must use LONG_FORM")
-            if self.editorial_calendar_slot_id is None:
-                raise ValueError(
-                    "long-form planning requires editorial_calendar_slot_id"
-                )
-        if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            if self.planning_source_type != PlanningSourceType.DERIVED_SHORT:
-                raise ValueError(
-                    "LONG_DERIVED_SHORT requires DERIVED_SHORT planning source"
-                )
-            if self.assignment_mode != AssignmentMode.STANDALONE_REQUIRED:
-                raise ValueError(
-                    "LONG_DERIVED_SHORT requires STANDALONE_REQUIRED"
-                )
-            if self.derivative_lineage is None:
-                raise ValueError(
-                    "LONG_DERIVED_SHORT requires exact derivative_lineage"
-                )
-            if (
-                self.preferred_series_plan_id is not None
-                or self.preferred_series_run_id is not None
-            ):
-                raise ValueError("LONG_DERIVED_SHORT cannot bind a SeriesRun")
-        elif self.derivative_lineage is not None:
-            raise ValueError(
-                "derivative_lineage is only valid for LONG_DERIVED_SHORT"
-            )
+        if self.planning_source_type != PlanningSourceType.LONG_FORM_PLAN:
+            raise ValueError("long-form planning source is required")
+        if self.production_lane != ProductionLane.LONG_FORM:
+            raise ValueError("production lane must be LONG_FORM")
+        if self.editorial_calendar_slot_id is None:
+            raise ValueError("long-form planning requires editorial_calendar_slot_id")
         if (
             self.duration_contract.source_profile_version_id
             != self.channel_profile_version_id
             or self.duration_contract.source_policy_snapshot_id
             != self.policy_snapshot_id
         ):
-            raise ValueError(
-                "duration contract must bind the admission profile/policy"
-            )
+            raise ValueError("duration contract must bind the admission profile/policy")
         return self
 
 
@@ -495,7 +429,7 @@ class ProjectAdmissionV2Read(BaseModel):
     episode_number: int | None
     episode_role: str | None
     standalone_reason_code: str | None
-    parent_video_project_id: uuid.UUID | None
+    editorial_idea_candidate_id: uuid.UUID | None
     resolver_version: str
     resolver_input_hash: str
     decision_hash: str
@@ -512,6 +446,7 @@ class LongFormPlanningRequest(BaseModel):
     channel_profile_version_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
     editorial_calendar_slot_id: uuid.UUID
+    editorial_idea_candidate_id: uuid.UUID | None = None
     idea_market_preflight_id: uuid.UUID
     assignment_mode: AssignmentMode
     title: str = Field(min_length=1)
@@ -525,21 +460,11 @@ class LongFormPlanningRequest(BaseModel):
     timely_niche_opportunity: bool = False
     bridge_or_special: bool = False
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    budget_gate_result: dict[str, Any] | None = None
     duration_contract: DurationContractV2
     created_by_user_id: uuid.UUID
 
     model_config = ConfigDict(extra="forbid")
-
-
-class DailyIdeaV2Freeze(BaseModel):
-    schema_version: Literal["v2"] = "v2"
-    production_lane: Literal[ProductionLane.DAILY_SHORT] = (
-        ProductionLane.DAILY_SHORT
-    )
-    proposed_content_mode: ContentMode | None = None
-    assignment_input_ref: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class EditorialSlotV2Input(BaseModel):
@@ -556,9 +481,7 @@ class EditorialSlotV2Input(BaseModel):
     @model_validator(mode="after")
     def reject_v2_raw_series(self) -> Self:
         if self.legacy_series_key is not None:
-            raise ValueError(
-                "v2 editorial slots cannot use legacy raw series_key"
-            )
+            raise ValueError("v2 editorial slots cannot use legacy raw series_key")
         if (
             self.preferred_series_run_id is not None
             and self.preferred_series_plan_id is None

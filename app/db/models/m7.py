@@ -483,12 +483,6 @@ class UploadedVideo(Base):
     )
     episode_number: Mapped[int | None] = mapped_column(Integer)
     standalone_reason_code: Mapped[str | None] = mapped_column(String(160))
-    parent_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("video_projects.id")
-    )
-    parent_final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
-    )
     target_market_lineage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     archive_supplement: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     archive_supplement_ref: Mapped[str | None] = mapped_column(Text)
@@ -549,8 +543,7 @@ class UploadedVideo(Base):
             "and reviewed_checksum ~ '^[0-9a-f]{64}$' "
             "and destination_binding_id is not null "
             "and destination_binding_fingerprint ~ '^[0-9a-f]{64}$' "
-            "and production_lane in "
-            "('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT') "
+            "and production_lane = 'LONG_FORM' "
             "and content_mode in ('SERIES_EPISODE','STANDALONE') "
             "and target_market_lineage is not null "
             "and archive_supplement is not null "
@@ -576,13 +569,6 @@ class UploadedVideo(Base):
             "and episode_number is null "
             "and standalone_reason_code is not null))",
             name="ck_uploaded_videos_v2_assignment",
-        ),
-        CheckConstraint(
-            "(schema_version = 'v1') or "
-            "(production_lane <> 'LONG_DERIVED_SHORT') or "
-            "(parent_video_project_id is not null "
-            "and parent_final_media_ref_id is not null)",
-            name="ck_uploaded_videos_v2_parent_lineage",
         ),
         Index("ix_uploaded_videos_company_id", "company_id"),
         Index("ix_uploaded_videos_channel_workspace_id", "channel_workspace_id"),

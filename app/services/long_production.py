@@ -194,7 +194,10 @@ def strict_render_package_blockers(
             blockers.append(f"ASSET_FILE_MISSING:{asset.scene_id}")
         elif _sha256_file(path) != asset.checksum_sha256:
             blockers.append(f"ASSET_CHECKSUM_MISMATCH:{asset.scene_id}")
-        if not asset.provenance_refs or asset.rights_status not in {"CONFIRMED", "NOT_REQUIRED"}:
+        if not asset.provenance_refs or asset.rights_status not in {
+            "CONFIRMED",
+            "NOT_REQUIRED",
+        }:
             blockers.append(f"ASSET_PROVENANCE_INCOMPLETE:{asset.scene_id}")
     if plan is None:
         blockers.append("NATIVE_RENDER_PLAN_MISSING")
@@ -229,19 +232,26 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             if asset is None or decision is None:
                 raise ValueError("LPRO1_SCENE_VISUAL_BINDING_MISSING")
             overlay_plan = None
-            exact_text = decision.preferred_route == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
-            text_regions = [
-                TextSafeRegion(
-                    id=f"{segment.segment_id}-native-overlay",
-                    x=0.08,
-                    y=0.08,
-                    width=0.48,
-                    height=0.12,
-                    purpose="NATIVE_EXACT_TEXT",
-                    minimum_contrast_requirement=4.5,
-                    alignment="LEFT",
-                )
-            ] if exact_text else []
+            exact_text = (
+                decision.preferred_route
+                == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+            )
+            text_regions = (
+                [
+                    TextSafeRegion(
+                        id=f"{segment.segment_id}-native-overlay",
+                        x=0.08,
+                        y=0.08,
+                        width=0.48,
+                        height=0.12,
+                        purpose="NATIVE_EXACT_TEXT",
+                        minimum_contrast_requirement=4.5,
+                        alignment="LEFT",
+                    )
+                ]
+                if exact_text
+                else []
+            )
             if exact_text:
                 exact_payload = {
                     "scene_id": segment.segment_id,
@@ -254,8 +264,12 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
                     "forbidden_generated_logo": True,
                     "forbidden_generated_fake_ui": True,
                     "native_overlay_required": True,
-                    "authoritative_content_kinds": [AuthoritativeOverlayContentKind.HEADLINE],
-                    "authoritative_content_refs": ["fixture-content://generated-scene/native-headline"],
+                    "authoritative_content_kinds": [
+                        AuthoritativeOverlayContentKind.HEADLINE
+                    ],
+                    "authoritative_content_refs": [
+                        "fixture-content://generated-scene/native-headline"
+                    ],
                 }
                 exact_contract = ExactTextNativeOverlayContract(
                     **exact_payload,
@@ -278,8 +292,12 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
                     content_hash=stable_hash(
                         {
                             **overlay_payload,
-                            "exact_text_contract": exact_contract.model_dump(mode="json"),
-                            "text_safe_regions": [item.model_dump(mode="json") for item in text_regions],
+                            "exact_text_contract": exact_contract.model_dump(
+                                mode="json"
+                            ),
+                            "text_safe_regions": [
+                                item.model_dump(mode="json") for item in text_regions
+                            ],
                         }
                     ),
                 )
@@ -357,7 +375,9 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             "format_identity_contract_hash": authority.visual_direction_contract_hash,
             "format_identity_status": "APPROVED",
             "episode_originality_manifest_ref": f"fixture-originality://{authority.package_id}",
-            "episode_originality_manifest_hash": stable_hash({"package": authority.package_hash, "original": True}),
+            "episode_originality_manifest_hash": stable_hash(
+                {"package": authority.package_hash, "original": True}
+            ),
             "final_originality_gate": "PASS",
             "claim_evidence_ledger_refs": [f"fixture-claims://{authority.package_id}"],
             "script_ref": authority.script_ref,
@@ -371,7 +391,9 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             "canonical_audio_asset_ref": str(audio_path),
             "canonical_caption_compilation_ref": metrics["caption_compilation_ref"],
             "canonical_caption_compilation_hash": metrics["caption_compilation_hash"],
-            "canonical_caption_render_payload_hash": metrics["caption_render_payload_hash"],
+            "canonical_caption_render_payload_hash": metrics[
+                "caption_render_payload_hash"
+            ],
             "scene_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "caption_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "parallel_timing_inputs": [],
@@ -471,8 +493,16 @@ class LongProductionOrchestrator:
     ) -> None:
         self.session = session
         self.workspace_root = workspace_root.resolve()
-        self.ffmpeg = ffmpeg or (FFMPEG_FULL_DEFAULT if Path(FFMPEG_FULL_DEFAULT).is_file() else shutil.which("ffmpeg"))
-        self.ffprobe = ffprobe or (FFPROBE_FULL_DEFAULT if Path(FFPROBE_FULL_DEFAULT).is_file() else shutil.which("ffprobe"))
+        self.ffmpeg = ffmpeg or (
+            FFMPEG_FULL_DEFAULT
+            if Path(FFMPEG_FULL_DEFAULT).is_file()
+            else shutil.which("ffmpeg")
+        )
+        self.ffprobe = ffprobe or (
+            FFPROBE_FULL_DEFAULT
+            if Path(FFPROBE_FULL_DEFAULT).is_file()
+            else shutil.which("ffprobe")
+        )
         if not self.ffmpeg or not self.ffprobe:
             raise RuntimeError("LPRO1_FFMPEG_RUNTIME_UNAVAILABLE")
 
@@ -494,9 +524,16 @@ class LongProductionOrchestrator:
         if execution_mode == LongProductionExecutionMode.REAL_APPROVED_PRODUCTION:
             if execution_envelope is None:
                 raise ValidationFailureError("LPRO1_MR1_EXECUTION_ENVELOPE_REQUIRED")
-            if execution_envelope.project_ref != authority.project_ref or execution_envelope.package_ref != authority.package_ref:
-                raise ValidationFailureError("LPRO1_PRODUCTION_ENVELOPE_LINEAGE_MISMATCH")
-            raise ValidationFailureError("LPRO1_REAL_PROVIDER_EXECUTION_REMAINS_MR1_ON_HOLD")
+            if (
+                execution_envelope.project_ref != authority.project_ref
+                or execution_envelope.package_ref != authority.package_ref
+            ):
+                raise ValidationFailureError(
+                    "LPRO1_PRODUCTION_ENVELOPE_LINEAGE_MISMATCH"
+                )
+            raise ValidationFailureError(
+                "LPRO1_REAL_PROVIDER_EXECUTION_REMAINS_MR1_ON_HOLD"
+            )
         receipt = self._run_authority(authority)
         self._persist_receipt(
             project_id=project_id,
@@ -508,7 +545,9 @@ class LongProductionOrchestrator:
     def run_fixture(self) -> LongProductionOrchestrationReceipt:
         return self._run_authority(self._fixture_authority())
 
-    def _run_authority(self, authority: _PackageAuthority) -> LongProductionOrchestrationReceipt:
+    def _run_authority(
+        self, authority: _PackageAuthority
+    ) -> LongProductionOrchestrationReceipt:
         lineage_seed = {
             "package_hash": authority.package_hash,
             "project_hash": authority.project_hash,
@@ -542,7 +581,10 @@ class LongProductionOrchestrator:
                 if output.is_file() and _sha256_file(output) == candidate.output_sha256:
                     return prior
 
-        transitions = [LongProductionState.PACKAGE_ACCEPTED.value, LongProductionState.AWAITING_NARRATION.value]
+        transitions = [
+            LongProductionState.PACKAGE_ACCEPTED.value,
+            LongProductionState.AWAITING_NARRATION.value,
+        ]
         normalized = SpokenTextNormalizer().normalize(
             script_revision_id=f"script:{authority.script_hash}",
             source_text=authority.source_text,
@@ -600,8 +642,14 @@ class LongProductionOrchestrator:
             **narration_result_payload,
             content_hash=stable_hash(narration_result_payload),
         )
-        _write_json(audio_dir / "narration-request.json", narration_request.model_dump(mode="json"))
-        _write_json(audio_dir / "narration-result.json", narration_result.model_dump(mode="json"))
+        _write_json(
+            audio_dir / "narration-request.json",
+            narration_request.model_dump(mode="json"),
+        )
+        _write_json(
+            audio_dir / "narration-result.json",
+            narration_result.model_dump(mode="json"),
+        )
         _write_json(
             audio_dir / "provider-manifest.json",
             {
@@ -610,7 +658,12 @@ class LongProductionOrchestrator:
                 "audio_sha256": audio_hash,
             },
         )
-        transitions.extend([LongProductionState.NARRATION_READY.value, LongProductionState.AWAITING_ALIGNMENT.value])
+        transitions.extend(
+            [
+                LongProductionState.NARRATION_READY.value,
+                LongProductionState.AWAITING_ALIGNMENT.value,
+            ]
+        )
 
         alignment_request_payload = {
             "request_id": f"alignment-request:{run_id}",
@@ -639,7 +692,10 @@ class LongProductionOrchestrator:
                 forced_start_ms=index * 600,
                 forced_end_ms=(index + 1) * 600,
                 confidence=1.0,
-                reason_codes=["FIXTURE_PROVIDER_TIMING", "FIXTURE_FORCED_ALIGNMENT_VERIFIED"],
+                reason_codes=[
+                    "FIXTURE_PROVIDER_TIMING",
+                    "FIXTURE_FORCED_ALIGNMENT_VERIFIED",
+                ],
             )
             for index, token in enumerate(normalized.spoken_tokens)
         ]
@@ -656,7 +712,9 @@ class LongProductionOrchestrator:
             "normalization_only_differences": [],
             "timing_conflicts": [],
             "alignment_confidence": 1.0,
-            "reconciliation_reason_codes": ["FIXTURE_PROVIDER_AND_FORCED_ALIGNMENT_RECONCILED"],
+            "reconciliation_reason_codes": [
+                "FIXTURE_PROVIDER_AND_FORCED_ALIGNMENT_RECONCILED"
+            ],
             "verification_status": "PASS",
         }
         alignment = VerifiedNarrationAlignment(
@@ -664,7 +722,10 @@ class LongProductionOrchestrator:
             content_hash=stable_hash(alignment_payload),
         )
         alignment_dir = root / "alignment"
-        _write_json(alignment_dir / "forced-alignment-request.json", alignment_request.model_dump(mode="json"))
+        _write_json(
+            alignment_dir / "forced-alignment-request.json",
+            alignment_request.model_dump(mode="json"),
+        )
         _write_json(
             alignment_dir / "fixture-forced-alignment-result.json",
             {
@@ -675,21 +736,36 @@ class LongProductionOrchestrator:
                 "token_coverage": 1.0,
             },
         )
-        _write_json(alignment_dir / "verified-narration-alignment.json", alignment.model_dump(mode="json"))
+        _write_json(
+            alignment_dir / "verified-narration-alignment.json",
+            alignment.model_dump(mode="json"),
+        )
         transitions.append(LongProductionState.ALIGNMENT_READY.value)
 
         token_groups = self._three_token_groups(normalized.spoken_tokens)
         segments = []
         for index, tokens in enumerate(token_groups):
-            source_start = min(span.start for token in tokens for span in token.source_spans)
-            source_end = max(span.end for token in tokens for span in token.source_spans)
+            source_start = min(
+                span.start for token in tokens for span in token.source_spans
+            )
+            source_end = max(
+                span.end for token in tokens for span in token.source_spans
+            )
             segments.append(
                 EditorialSegmentInput(
                     segment_id=f"scene-{index + 1}",
                     editorial_span=TextSpan(start=source_start, end=source_end),
                     spoken_token_ids=[token.token_id for token in tokens],
-                    motion_intent=("NATIVE_DIAGRAM" if index == 0 else "STOCK_MOTION" if index == 1 else "GENERATED_STILL_NATIVE_OVERLAY"),
-                    source_provenance=[{"type": "approved_script", "ref": authority.script_ref}],
+                    motion_intent=(
+                        "NATIVE_DIAGRAM"
+                        if index == 0
+                        else "STOCK_MOTION"
+                        if index == 1
+                        else "GENERATED_STILL_NATIVE_OVERLAY"
+                    ),
+                    source_provenance=[
+                        {"type": "approved_script", "ref": authority.script_ref}
+                    ],
                 )
             )
         timeline = CanonicalMediaTimelineCompiler().compile(
@@ -730,10 +806,24 @@ class LongProductionOrchestrator:
         if temporal_gate.gate_status != "PASS":
             raise RuntimeError("LPRO1_TEMPORAL_AUTHORITY_FAILED")
         timeline_dir = root / "timeline"
-        _write_json(timeline_dir / "canonical-media-timeline.json", timeline.model_dump(mode="json"))
-        _write_json(timeline_dir / "compiled-caption-track.json", captioned.track.model_dump(mode="json"))
-        _write_json(timeline_dir / "temporal-authority-gate.json", temporal_gate.model_dump(mode="json"))
-        transitions.extend([LongProductionState.CANONICAL_TIMELINE_READY.value, LongProductionState.AWAITING_ASSETS.value])
+        _write_json(
+            timeline_dir / "canonical-media-timeline.json",
+            timeline.model_dump(mode="json"),
+        )
+        _write_json(
+            timeline_dir / "compiled-caption-track.json",
+            captioned.track.model_dump(mode="json"),
+        )
+        _write_json(
+            timeline_dir / "temporal-authority-gate.json",
+            temporal_gate.model_dump(mode="json"),
+        )
+        transitions.extend(
+            [
+                LongProductionState.CANONICAL_TIMELINE_READY.value,
+                LongProductionState.AWAITING_ASSETS.value,
+            ]
+        )
 
         decisions = self._visual_decisions(run_id)
         assets, normalization = self._materialize_and_normalize_assets(
@@ -741,7 +831,12 @@ class LongProductionOrchestrator:
             timeline=timeline,
             decisions=decisions,
         )
-        transitions.extend([LongProductionState.ASSETS_READY.value, LongProductionState.NATIVE_RENDER_PLAN_READY.value])
+        transitions.extend(
+            [
+                LongProductionState.ASSETS_READY.value,
+                LongProductionState.NATIVE_RENDER_PLAN_READY.value,
+            ]
+        )
         plan = LongFormRenderPackageToNativeRenderPlanAdapter().adapt(
             authority=authority,
             timeline=timeline,
@@ -757,7 +852,10 @@ class LongProductionOrchestrator:
             allow_resolved_provider_assets=True,
             canonical_timeline=timeline,
         )
-        _write_json(plan_dir / "compiled-native-render-manifest.json", manifest.model_dump(mode="json"))
+        _write_json(
+            plan_dir / "compiled-native-render-manifest.json",
+            manifest.model_dump(mode="json"),
+        )
         transitions.append(LongProductionState.RENDERING.value)
         command = FFmpegCommandBuilder(
             self.workspace_root,
@@ -778,7 +876,8 @@ class LongProductionOrchestrator:
         technical_checks = {
             "decode": measured.get("full_decode") is True,
             "codec_container": measured.get("codec_container_matches_expected") is True,
-            "stream_integrity": measured.get("stream_integrity") is True and measured.get("av_drift_within_limit") is True,
+            "stream_integrity": measured.get("stream_integrity") is True
+            and measured.get("av_drift_within_limit") is True,
             "dimensions": measured.get("dimensions_match_expected") is True,
             "fps": measured.get("fps_matches_expected") is True,
             "audio_format": measured.get("audio_format_matches_expected") is True,
@@ -807,7 +906,9 @@ class LongProductionOrchestrator:
             payload = {
                 "gate_name": name,
                 "result": result,
-                "reason_codes": ["LPRO1_FIXTURE_HUMAN_WATCH_REQUIRED"] if result == "REVIEW_REQUIRED" else [],
+                "reason_codes": ["LPRO1_FIXTURE_HUMAN_WATCH_REQUIRED"]
+                if result == "REVIEW_REQUIRED"
+                else [],
                 "metrics": {
                     "fixture_evidence": True,
                     "scene_semantic_match": "PASS",
@@ -816,7 +917,9 @@ class LongProductionOrchestrator:
                     "overlay_readability": "PASS",
                     "stock_mechanism_appropriateness": "PASS",
                     "generated_image_native_overlay_appropriateness": "PASS",
-                    "transition_quality": "REVIEW_REQUIRED" if result == "REVIEW_REQUIRED" else "PASS",
+                    "transition_quality": "REVIEW_REQUIRED"
+                    if result == "REVIEW_REQUIRED"
+                    else "PASS",
                     "overall_watchability": "HUMAN_REVIEW_REQUIRED",
                 },
                 "evidence_refs": [receipt.output_path],
@@ -832,8 +935,13 @@ class LongProductionOrchestrator:
             raise RuntimeError("LPRO1_CREATIVE_REVIEW_BOUNDARY_INVALID")
         transitions.append(LongProductionState.CREATIVE_REVIEW_REQUIRED.value)
         qc_dir = root / "qc"
-        _write_json(qc_dir / "technical-media-qc.json", technical.model_dump(mode="json"))
-        _write_json(qc_dir / "creative-perceptual-media-qc.json", creative.model_dump(mode="json"))
+        _write_json(
+            qc_dir / "technical-media-qc.json", technical.model_dump(mode="json")
+        )
+        _write_json(
+            qc_dir / "creative-perceptual-media-qc.json",
+            creative.model_dump(mode="json"),
+        )
         candidate_payload = {
             "candidate_id": f"review-media-candidate:{run_id}",
             "project_ref": authority.project_ref,
@@ -853,7 +961,9 @@ class LongProductionOrchestrator:
             **candidate_payload,
             content_hash=stable_hash(candidate_payload),
         )
-        _write_json(root / "review_media_candidate.json", candidate.model_dump(mode="json"))
+        _write_json(
+            root / "review_media_candidate.json", candidate.model_dump(mode="json")
+        )
         transitions.append(LongProductionState.READY_FOR_HUMAN_REVIEW.value)
 
         asset_usage_payload = {
@@ -880,10 +990,14 @@ class LongProductionOrchestrator:
             "narration_result_ref": str(audio_dir / "narration-result.json"),
             "audio_asset_ref": str(audio_path),
             "audio_asset_hash": audio_hash,
-            "verified_alignment_ref": str(alignment_dir / "verified-narration-alignment.json"),
+            "verified_alignment_ref": str(
+                alignment_dir / "verified-narration-alignment.json"
+            ),
             "verified_alignment_hash": alignment.content_hash,
             "verified_alignment_status": "PASS",
-            "canonical_timeline_ref": str(timeline_dir / "canonical-media-timeline.json"),
+            "canonical_timeline_ref": str(
+                timeline_dir / "canonical-media-timeline.json"
+            ),
             "canonical_timeline_hash": timeline.timeline_hash,
             "caption_track_ref": str(timeline_dir / "compiled-caption-track.json"),
             "caption_track_hash": captioned.track.content_hash,
@@ -891,9 +1005,13 @@ class LongProductionOrchestrator:
             "visual_direction_contract_hash": authority.visual_direction_contract_hash,
             "visual_source_decisions": decisions,
             "resolved_assets": assets,
-            "asset_usage_manifest_ref": str(root / "assets" / "asset-usage-manifest.json"),
+            "asset_usage_manifest_ref": str(
+                root / "assets" / "asset-usage-manifest.json"
+            ),
             "asset_usage_manifest_hash": asset_usage_hash,
-            "media_normalization_manifest_ref": str(root / "assets" / "media-normalization-manifest.json"),
+            "media_normalization_manifest_ref": str(
+                root / "assets" / "media-normalization-manifest.json"
+            ),
             "media_normalization_manifest_hash": normalization.content_hash,
             "native_render_policy_snapshot_ref": authority.native_render_policy_snapshot_ref,
             "native_render_policy_snapshot_hash": authority.native_render_policy_snapshot_hash,
@@ -905,7 +1023,11 @@ class LongProductionOrchestrator:
             "cost_estimate_snapshot_ref": authority.cost_estimate_snapshot_ref,
             "cost_estimate_snapshot_hash": authority.cost_estimate_snapshot_hash,
             "approval_refs": list(authority.approval_refs),
-            "idempotency_refs": [lineage_fingerprint, command.run_key, command.command_hash],
+            "idempotency_refs": [
+                lineage_fingerprint,
+                command.run_key,
+                command.command_hash,
+            ],
             "target_duration_seconds": duration_ms / 1000.0,
         }
         if authority.production_package_schema_version == "v2":
@@ -931,8 +1053,13 @@ class LongProductionOrchestrator:
         )
         package_blockers = strict_render_package_blockers(strict_contract, plan=plan)
         if package_blockers:
-            raise RuntimeError("LPRO1_STRICT_RENDER_PACKAGE_FAILED:" + ",".join(package_blockers))
-        _write_json(root / "strict-long-form-render-package.json", strict_contract.model_dump(mode="json"))
+            raise RuntimeError(
+                "LPRO1_STRICT_RENDER_PACKAGE_FAILED:" + ",".join(package_blockers)
+            )
+        _write_json(
+            root / "strict-long-form-render-package.json",
+            strict_contract.model_dump(mode="json"),
+        )
         _write_json(root / "assets" / "asset-usage-manifest.json", asset_usage_payload)
 
         final_fingerprint = stable_hash(
@@ -961,12 +1088,20 @@ class LongProductionOrchestrator:
                 "request": str(alignment_dir / "forced-alignment-request.json"),
                 "verified": str(alignment_dir / "verified-narration-alignment.json"),
             },
-            "canonical_timeline_ref": str(timeline_dir / "canonical-media-timeline.json"),
+            "canonical_timeline_ref": str(
+                timeline_dir / "canonical-media-timeline.json"
+            ),
             "asset_resolution_refs": [item.local_file_ref for item in assets],
-            "normalization_ref": str(root / "assets" / "media-normalization-manifest.json"),
+            "normalization_ref": str(
+                root / "assets" / "media-normalization-manifest.json"
+            ),
             "native_render_plan_ref": str(plan_dir / "native-render-plan.json"),
-            "native_motion_compiler_ref": str(plan_dir / "compiled-native-render-manifest.json"),
-            "ffmpeg_receipt_ref": str(Path(command.working_directory) / "execution_receipt.json"),
+            "native_motion_compiler_ref": str(
+                plan_dir / "compiled-native-render-manifest.json"
+            ),
+            "ffmpeg_receipt_ref": str(
+                Path(command.working_directory) / "execution_receipt.json"
+            ),
             "technical_media_qc_ref": str(qc_dir / "technical-media-qc.json"),
             "creative_media_qc_ref": str(qc_dir / "creative-perceptual-media-qc.json"),
             "review_media_candidate_ref": str(root / "review_media_candidate.json"),
@@ -988,8 +1123,13 @@ class LongProductionOrchestrator:
     def _materialize_audio(self, path: Path, duration_ms: int) -> None:
         if path.is_file() and not path.is_symlink():
             probe = _probe(path, str(self.ffprobe))
-            audio = next(item for item in probe["streams"] if item.get("codec_type") == "audio")
-            if int(audio.get("sample_rate") or 0) == 48000 and int(audio.get("channels") or 0) == 2:
+            audio = next(
+                item for item in probe["streams"] if item.get("codec_type") == "audio"
+            )
+            if (
+                int(audio.get("sample_rate") or 0) == 48000
+                and int(audio.get("channels") or 0) == 2
+            ):
                 return
         path.parent.mkdir(parents=True, exist_ok=True)
         part = path.with_suffix(".part.wav")
@@ -1038,35 +1178,75 @@ class LongProductionOrchestrator:
             raise FileNotFoundError("LPRO1_NATIVE_FONT_NOT_FOUND")
         results: list[ResolvedMediaAsset] = []
         normalized_items: list[MediaNormalizationItem] = []
-        for index, (segment, decision) in enumerate(zip(timeline.segments, decisions, strict=True)):
+        for index, (segment, decision) in enumerate(
+            zip(timeline.segments, decisions, strict=True)
+        ):
             duration = segment.target_scene_duration_ms / 1000.0
             if index == 0:
                 source = source_dir / "native-diagram-source.mp4"
                 source_command = [
-                    str(self.ffmpeg), "-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i",
-                    f"color=c=0x071827:s=1280x720:r=24:d={duration:.6f}", "-vf",
+                    str(self.ffmpeg),
+                    "-hide_banner",
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c=0x071827:s=1280x720:r=24:d={duration:.6f}",
+                    "-vf",
                     f"drawbox=x=90:y=210:w=260:h=150:color=0x2563eb:t=fill,drawbox=x=510:y=210:w=260:h=150:color=0x14b8a6:t=fill,drawbox=x=930:y=210:w=260:h=150:color=0xf59e0b:t=fill,drawtext=fontfile='{font}':text='SCRIPT':fontcolor=white:fontsize=38:x=145:y=260,drawtext=fontfile='{font}':text='TIMELINE':fontcolor=white:fontsize=34:x=550:y=260,drawtext=fontfile='{font}':text='REVIEW':fontcolor=white:fontsize=38:x=985:y=260,drawbox=x=350:y=275:w=160:h=12:color=white:t=fill,drawbox=x=770:y=275:w=160:h=12:color=white:t=fill",
-                    "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(source),
                 ]
             elif index == 1:
                 source = source_dir / "stock-like-source.mp4"
                 source_command = [
-                    str(self.ffmpeg), "-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i",
-                    f"testsrc2=size=1280x720:rate=24:duration={duration:.6f}", "-vf",
-                    "hue=s=0.75,eq=contrast=1.08:brightness=-0.04", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+                    str(self.ffmpeg),
+                    "-hide_banner",
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"testsrc2=size=1280x720:rate=24:duration={duration:.6f}",
+                    "-vf",
+                    "hue=s=0.75,eq=contrast=1.08:brightness=-0.04",
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(source),
                 ]
             else:
                 source = source_dir / "generated-like-source.png"
                 source_command = [
-                    str(self.ffmpeg), "-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i",
-                    "color=c=0x1d1538:s=1280x720", "-vf",
+                    str(self.ffmpeg),
+                    "-hide_banner",
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=0x1d1538:s=1280x720",
+                    "-vf",
                     "drawbox=x=80:y=80:w=1120:h=560:color=0x312e81:t=fill,drawbox=x=180:y=180:w=360:h=360:color=0x7c3aed:t=fill,drawbox=x=740:y=150:w=300:h=420:color=0x0ea5e9:t=fill,drawbox=x=520:y=330:w=260:h=60:color=white:t=fill",
-                    "-frames:v", "1", "-update", "1", str(source),
+                    "-frames:v",
+                    "1",
+                    "-update",
+                    "1",
+                    str(source),
                 ]
             if not source.is_file():
                 process = subprocess.run(source_command, capture_output=True, text=True)
                 if process.returncode != 0:
-                    raise RuntimeError(f"LPRO1_SOURCE_ASSET_MATERIALIZATION_FAILED:{index + 1}")
+                    raise RuntimeError(
+                        f"LPRO1_SOURCE_ASSET_MATERIALIZATION_FAILED:{index + 1}"
+                    )
             normalized_path = normalized_dir / f"scene-{index + 1}-normalized.mp4"
             if not normalized_path.is_file():
                 input_args = ["-loop", "1"] if source.suffix == ".png" else []
@@ -1076,10 +1256,32 @@ class LongProductionOrchestrator:
                 )
                 process = subprocess.run(
                     [
-                        str(self.ffmpeg), "-hide_banner", "-nostdin", "-y", *input_args,
-                        "-i", str(source), "-vf", filtergraph, "-an", "-t", f"{duration:.6f}",
-                        "-r", "30", "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
-                        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+                        str(self.ffmpeg),
+                        "-hide_banner",
+                        "-nostdin",
+                        "-y",
+                        *input_args,
+                        "-i",
+                        str(source),
+                        "-vf",
+                        filtergraph,
+                        "-an",
+                        "-t",
+                        f"{duration:.6f}",
+                        "-r",
+                        "30",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "fast",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-colorspace",
+                        "bt709",
+                        "-color_primaries",
+                        "bt709",
+                        "-color_trc",
+                        "bt709",
                         str(normalized_path),
                     ],
                     capture_output=True,
@@ -1089,7 +1291,11 @@ class LongProductionOrchestrator:
                     raise RuntimeError(f"LPRO1_MEDIA_NORMALIZATION_FAILED:{index + 1}")
             source_probe = _probe(source, str(self.ffprobe))
             normalized_probe = _probe(normalized_path, str(self.ffprobe))
-            video = next(item for item in normalized_probe["streams"] if item.get("codec_type") == "video")
+            video = next(
+                item
+                for item in normalized_probe["streams"]
+                if item.get("codec_type") == "video"
+            )
             source_hash = _sha256_file(source)
             normalized_hash = _sha256_file(normalized_path)
             asset_id = f"lpro1-asset-scene-{index + 1}"
@@ -1106,7 +1312,10 @@ class LongProductionOrchestrator:
                     height=int(video["height"]),
                     duration_ms=segment.target_scene_duration_ms,
                     rights_status="CONFIRMED" if index == 1 else "NOT_REQUIRED",
-                    provenance_refs=[f"fixture-provenance://scene-{index + 1}", str(source)],
+                    provenance_refs=[
+                        f"fixture-provenance://scene-{index + 1}",
+                        str(source),
+                    ],
                     normalization_state="NORMALIZED",
                     scene_usage_ref=f"canonical-timeline:{timeline.timeline_hash}#{segment.segment_id}",
                 )
@@ -1150,7 +1359,10 @@ class LongProductionOrchestrator:
             **manifest_payload,
             content_hash=stable_hash(manifest_payload),
         )
-        _write_json(root / "assets" / "media-normalization-manifest.json", manifest.model_dump(mode="json"))
+        _write_json(
+            root / "assets" / "media-normalization-manifest.json",
+            manifest.model_dump(mode="json"),
+        )
         return results, manifest
 
     def _authority_from_db(
@@ -1203,7 +1415,9 @@ class LongProductionOrchestrator:
         )
         if package_id is not None:
             query = query.where(FirstScriptedVideoPackage.id == package_id)
-        package = self.session.scalars(query.order_by(FirstScriptedVideoPackage.created_at.desc())).first()
+        package = self.session.scalars(
+            query.order_by(FirstScriptedVideoPackage.created_at.desc())
+        ).first()
         if package is None:
             raise ValidationFailureError("LPRO1_SCRIPTED_PACKAGE_NOT_FOUND")
         receipt_artifact = self.session.scalars(
@@ -1217,8 +1431,13 @@ class LongProductionOrchestrator:
             else None
         )
         receipt = receipt_version.content if receipt_version is not None else {}
-        if receipt.get("state") != "READY_FOR_LONG_PRODUCTION" or receipt.get("human_review_state") != "PASS":
-            raise ValidationFailureError("LPRO1_PACKAGE_HUMAN_REVIEW_BOUNDARY_NOT_PASSED")
+        if (
+            receipt.get("state") != "READY_FOR_LONG_PRODUCTION"
+            or receipt.get("human_review_state") != "PASS"
+        ):
+            raise ValidationFailureError(
+                "LPRO1_PACKAGE_HUMAN_REVIEW_BOUNDARY_NOT_PASSED"
+            )
         package_ref = receipt.get("scripted_package_ref") or {}
         if package_ref.get("id") != str(package.id):
             raise ValidationFailureError("LPRO1_SCRIPTED_PACKAGE_RECEIPT_MISMATCH")
@@ -1226,17 +1445,25 @@ class LongProductionOrchestrator:
             package.channel_id != project.channel_workspace_id
             or package.channel_profile_version_id != project.channel_profile_version_id
             or package.compiled_policy_snapshot_id != project.policy_snapshot_id
-            or package.effective_context_snapshot_id != project.effective_context_snapshot_id
-            or package.effective_context_hash != (receipt.get("effective_context_ref") or {}).get("content_hash")
+            or package.effective_context_snapshot_id
+            != project.effective_context_snapshot_id
+            or package.effective_context_hash
+            != (receipt.get("effective_context_ref") or {}).get("content_hash")
         ):
             raise ValidationFailureError("LPRO1_FROZEN_PACKAGE_LINEAGE_MISMATCH")
         dossier = (package.artifacts or {}).get("niche_alignment_dossier") or {}
-        if str(dossier.get("overall_verdict")) != "PASS" or not dossier.get("content_hash"):
+        if str(dossier.get("overall_verdict")) != "PASS" or not dossier.get(
+            "content_hash"
+        ):
             raise ValidationFailureError("LPRO1_NICHE_ALIGNMENT_DOSSIER_PASS_REQUIRED")
-        snapshot = self.session.get(CompiledChannelPolicySnapshot, project.policy_snapshot_id)
+        snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, project.policy_snapshot_id
+        )
         if snapshot is None:
             raise ValidationFailureError("LPRO1_COMPILED_POLICY_SNAPSHOT_NOT_FOUND")
-        source_text = self._extract_script_text((package.artifacts or {}).get("narration_script"))
+        source_text = self._extract_script_text(
+            (package.artifacts or {}).get("narration_script")
+        )
         if not source_text:
             raise ValidationFailureError("LPRO1_STRICT_SCRIPT_ARTIFACT_MISSING")
         artifacts = package.artifacts or {}
@@ -1244,7 +1471,7 @@ class LongProductionOrchestrator:
         cost = artifacts.get("cost_estimate_snapshot")
         if not isinstance(provider_plan, dict) or not isinstance(cost, dict):
             raise ValidationFailureError("LPRO1_PROVIDER_COST_EVIDENCE_MISSING")
-        digest = (receipt.get("niche_contract_digest_ref") or {})
+        digest = receipt.get("niche_contract_digest_ref") or {}
         return (
             _PackageAuthority(
                 project_id=str(project.id),
@@ -1252,7 +1479,14 @@ class LongProductionOrchestrator:
                 company_id=str(project.company_id),
                 channel_id=str(project.channel_workspace_id),
                 project_ref=f"video-project://{project.id}",
-                project_hash=stable_hash({"id": str(project.id), "profile": str(project.channel_profile_version_id), "policy": str(project.policy_snapshot_id), "effective": str(project.effective_context_snapshot_id)}),
+                project_hash=stable_hash(
+                    {
+                        "id": str(project.id),
+                        "profile": str(project.channel_profile_version_id),
+                        "policy": str(project.policy_snapshot_id),
+                        "effective": str(project.effective_context_snapshot_id),
+                    }
+                ),
                 package_ref=f"first-scripted-video-package://{package.id}",
                 package_hash=str(package_ref["content_hash"]),
                 production_package_schema_version=None,
@@ -1260,7 +1494,13 @@ class LongProductionOrchestrator:
                 channel_profile_version_ref=f"channel-profile-version://{package.channel_profile_version_id}",
                 compiled_policy_snapshot_ref=f"compiled-policy-snapshot://{snapshot.id}",
                 compiled_policy_snapshot_hash=snapshot.content_hash,
-                channel_contract_hash=project.channel_contract_content_hash or stable_hash({"snapshot": snapshot.content_hash, "channel": str(project.channel_workspace_id)}),
+                channel_contract_hash=project.channel_contract_content_hash
+                or stable_hash(
+                    {
+                        "snapshot": snapshot.content_hash,
+                        "channel": str(project.channel_workspace_id),
+                    }
+                ),
                 niche_contract_digest_ref=str(digest.get("ref")),
                 niche_contract_digest_hash=str(digest.get("content_hash")),
                 effective_context_ref=f"effective-context://{package.effective_context_snapshot_id}",
@@ -1271,14 +1511,27 @@ class LongProductionOrchestrator:
                 script_hash=stable_hash(artifacts["narration_script"]),
                 source_text=source_text,
                 visual_direction_contract_ref=f"first-scripted-video-package://{package.id}#visual_plan",
-                visual_direction_contract_hash=stable_hash(artifacts.get("visual_plan") or {}),
+                visual_direction_contract_hash=stable_hash(
+                    artifacts.get("visual_plan") or {}
+                ),
                 provider_execution_plan_ref=f"first-scripted-video-package://{package.id}#provider_execution_plan",
                 provider_execution_plan_hash=stable_hash(provider_plan),
                 cost_estimate_snapshot_ref=f"first-scripted-video-package://{package.id}#cost_estimate_snapshot",
                 cost_estimate_snapshot_hash=stable_hash(cost),
-                native_render_policy_snapshot_ref=project.native_render_policy_snapshot_ref or f"compiled-policy-snapshot://{snapshot.id}#native-render",
-                native_render_policy_snapshot_hash=project.native_render_policy_snapshot_hash or stable_hash(snapshot.compiled_payload.get("native_render_policy") or snapshot.content_hash),
-                approval_refs=(str((receipt.get("package_human_review_ref") or {}).get("approval_decision_id")),),
+                native_render_policy_snapshot_ref=project.native_render_policy_snapshot_ref
+                or f"compiled-policy-snapshot://{snapshot.id}#native-render",
+                native_render_policy_snapshot_hash=project.native_render_policy_snapshot_hash
+                or stable_hash(
+                    snapshot.compiled_payload.get("native_render_policy")
+                    or snapshot.content_hash
+                ),
+                approval_refs=(
+                    str(
+                        (receipt.get("package_human_review_ref") or {}).get(
+                            "approval_decision_id"
+                        )
+                    ),
+                ),
             ),
             project.created_by_user_id,
         )
@@ -1306,9 +1559,7 @@ class LongProductionOrchestrator:
             else None
         )
         if receipt_version is None:
-            raise ValidationFailureError(
-                "LPRO1_PRODUCTION_READINESS_RECEIPT_REQUIRED"
-            )
+            raise ValidationFailureError("LPRO1_PRODUCTION_READINESS_RECEIPT_REQUIRED")
         try:
             receipt = ProductionReadinessReceiptContentV2.model_validate(
                 receipt_version.content
@@ -1325,13 +1576,9 @@ class LongProductionOrchestrator:
             or receipt.duration_contract_hash
             != package.duration_contract.duration_contract_hash
         ):
-            raise ValidationFailureError(
-                "LPRO1_PRODUCTION_READINESS_RECEIPT_MISMATCH"
-            )
+            raise ValidationFailureError("LPRO1_PRODUCTION_READINESS_RECEIPT_MISMATCH")
         if package.script_ref.artifact_version_id is None:
-            raise ValidationFailureError(
-                "LPRO1_V2_SCRIPT_ARTIFACT_VERSION_REQUIRED"
-            )
+            raise ValidationFailureError("LPRO1_V2_SCRIPT_ARTIFACT_VERSION_REQUIRED")
         script_version = self.session.get(
             ArtifactVersion, package.script_ref.artifact_version_id
         )
@@ -1429,7 +1676,9 @@ class LongProductionOrchestrator:
             )
         if artifact.current_version_id:
             current = self.session.get(ArtifactVersion, artifact.current_version_id)
-            if current is not None and current.content == receipt.model_dump(mode="json"):
+            if current is not None and current.content == receipt.model_dump(
+                mode="json"
+            ):
                 return current
         return service.create_artifact_version(
             data=ArtifactVersionCreate(
@@ -1438,8 +1687,16 @@ class LongProductionOrchestrator:
                 content=receipt.model_dump(mode="json"),
                 status="submitted",
                 created_by_user_id=actor_id,
-                source_manifest={"output_is_mp4": True, "final_media_ref_created": False},
-                evidence_refs=[{"type": "review_media_candidate", "ref": receipt.review_media_candidate_ref}],
+                source_manifest={
+                    "output_is_mp4": True,
+                    "final_media_ref_created": False,
+                },
+                evidence_refs=[
+                    {
+                        "type": "review_media_candidate",
+                        "ref": receipt.review_media_candidate_ref,
+                    }
+                ],
             ),
             correlation_id=f"lpro1-orchestration-version-{project_id}",
         )
@@ -1458,31 +1715,61 @@ class LongProductionOrchestrator:
         if artifact is not None and artifact.current_version_id:
             version = session.get(ArtifactVersion, artifact.current_version_id)
             if version is not None:
-                receipt = LongProductionOrchestrationReceipt.model_validate(version.content)
-        state = receipt.current_state if receipt else LongProductionState.PACKAGE_ACCEPTED
+                receipt = LongProductionOrchestrationReceipt.model_validate(
+                    version.content
+                )
+        state = (
+            receipt.current_state if receipt else LongProductionState.PACKAGE_ACCEPTED
+        )
         transitions = set(receipt.state_transitions if receipt else [])
         return LongProductionStatusRead(
             project_id=str(project_id),
             current_state=state,
             package_readiness="PASS" if receipt else "AWAITING_CONTROLLED_RUN",
-            narration_status="READY" if LongProductionState.NARRATION_READY.value in transitions else "NOT_STARTED",
-            alignment_status="PASS" if LongProductionState.ALIGNMENT_READY.value in transitions else "NOT_STARTED",
-            timeline_status="READY" if LongProductionState.CANONICAL_TIMELINE_READY.value in transitions else "NOT_STARTED",
-            asset_status="READY" if LongProductionState.ASSETS_READY.value in transitions else "NOT_STARTED",
-            render_plan_status="READY" if LongProductionState.NATIVE_RENDER_PLAN_READY.value in transitions else "NOT_STARTED",
-            render_status="MP4_CREATED" if receipt and receipt.ffmpeg_receipt_ref else "NOT_STARTED",
-            technical_qc_status="PASS" if receipt and receipt.technical_media_qc_ref else "NOT_STARTED",
-            creative_qc_status="REVIEW_REQUIRED" if receipt and receipt.creative_media_qc_ref else "NOT_STARTED",
-            human_review_status="PENDING" if state == LongProductionState.READY_FOR_HUMAN_REVIEW else "NOT_READY",
+            narration_status="READY"
+            if LongProductionState.NARRATION_READY.value in transitions
+            else "NOT_STARTED",
+            alignment_status="PASS"
+            if LongProductionState.ALIGNMENT_READY.value in transitions
+            else "NOT_STARTED",
+            timeline_status="READY"
+            if LongProductionState.CANONICAL_TIMELINE_READY.value in transitions
+            else "NOT_STARTED",
+            asset_status="READY"
+            if LongProductionState.ASSETS_READY.value in transitions
+            else "NOT_STARTED",
+            render_plan_status="READY"
+            if LongProductionState.NATIVE_RENDER_PLAN_READY.value in transitions
+            else "NOT_STARTED",
+            render_status="MP4_CREATED"
+            if receipt and receipt.ffmpeg_receipt_ref
+            else "NOT_STARTED",
+            technical_qc_status="PASS"
+            if receipt and receipt.technical_media_qc_ref
+            else "NOT_STARTED",
+            creative_qc_status="REVIEW_REQUIRED"
+            if receipt and receipt.creative_media_qc_ref
+            else "NOT_STARTED",
+            human_review_status="PENDING"
+            if state == LongProductionState.READY_FOR_HUMAN_REVIEW
+            else "NOT_READY",
             archive_status="NOT_STARTED",
-            final_media_ref_status="NOT_CREATED" if not receipt or not receipt.final_media_ref else "REGISTERED",
+            final_media_ref_status="NOT_CREATED"
+            if not receipt or not receipt.final_media_ref
+            else "REGISTERED",
             blockers=list(receipt.blockers if receipt else []),
-            exact_next_action=(receipt.exact_next_action if receipt else "Run the controlled long-production trigger after D2P1 human review PASS."),
+            exact_next_action=(
+                receipt.exact_next_action
+                if receipt
+                else "Run the controlled long-production trigger after D2P1 human review PASS."
+            ),
             receipt=receipt,
         )
 
     def _fixture_authority(self) -> _PackageAuthority:
-        package_hash = stable_hash({"fixture": "approved-scripted-package", "script": FIXTURE_SCRIPT})
+        package_hash = stable_hash(
+            {"fixture": "approved-scripted-package", "script": FIXTURE_SCRIPT}
+        )
         return _PackageAuthority(
             project_id="lpro1-fixture-project",
             package_id="lpro1-approved-scripted-package",
@@ -1508,13 +1795,21 @@ class LongProductionOrchestrator:
             script_hash=stable_hash(FIXTURE_SCRIPT),
             source_text=FIXTURE_SCRIPT,
             visual_direction_contract_ref="fixture://visual-direction-contract/lpro1",
-            visual_direction_contract_hash=stable_hash({"visual_direction": "approved"}),
+            visual_direction_contract_hash=stable_hash(
+                {"visual_direction": "approved"}
+            ),
             provider_execution_plan_ref="fixture://provider-execution-plan/lpro1",
-            provider_execution_plan_hash=stable_hash({"providers": [], "fixture": True}),
+            provider_execution_plan_hash=stable_hash(
+                {"providers": [], "fixture": True}
+            ),
             cost_estimate_snapshot_ref="fixture://cost-estimate/lpro1",
-            cost_estimate_snapshot_hash=stable_hash({"currency": "USD", "estimated": 0}),
+            cost_estimate_snapshot_hash=stable_hash(
+                {"currency": "USD", "estimated": 0}
+            ),
             native_render_policy_snapshot_ref="fixture://native-render-policy/lpro1",
-            native_render_policy_snapshot_hash=stable_hash({"profile": "YT_LONG_1080P30"}),
+            native_render_policy_snapshot_hash=stable_hash(
+                {"profile": "YT_LONG_1080P30"}
+            ),
             approval_refs=("fixture-approval://scripted-package-human-pass",),
         )
 
@@ -1529,7 +1824,10 @@ class LongProductionOrchestrator:
                     return result
             sentences = value.get("sentences") or value.get("segments")
             if isinstance(sentences, list):
-                parts = [LongProductionOrchestrator._extract_script_text(item) for item in sentences]
+                parts = [
+                    LongProductionOrchestrator._extract_script_text(item)
+                    for item in sentences
+                ]
                 joined = " ".join(item for item in parts if item)
                 return joined or None
         return None
@@ -1547,7 +1845,10 @@ class LongProductionOrchestrator:
         specs = (
             (VisualSourceRoute.NATIVE_DIAGRAM, SourceFallbackClass.NATIVE_ONLY),
             (VisualSourceRoute.PEXELS_VIDEO, SourceFallbackClass.PEXELS_ONLY),
-            (VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY, SourceFallbackClass.AI_IMAGE_PRIMARY),
+            (
+                VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY,
+                SourceFallbackClass.AI_IMAGE_PRIMARY,
+            ),
         )
         values = []
         for index, (route, fallback) in enumerate(specs, start=1):
@@ -1556,11 +1857,15 @@ class LongProductionOrchestrator:
                 VisualSourceBinding(
                     scene_id=f"scene-{index}",
                     decision_ref=ref,
-                    decision_hash=stable_hash({"ref": ref, "route": route.value, "fallback": fallback.value}),
+                    decision_hash=stable_hash(
+                        {"ref": ref, "route": route.value, "fallback": fallback.value}
+                    ),
                     preferred_route=route,
                     fallback_class=fallback,
                     routing_reason_codes=[f"LPRO1_FIXTURE_{route.value}"],
-                    eligibility_gate_refs=[f"fixture-eligibility-gate://scene-{index}/PASS"],
+                    eligibility_gate_refs=[
+                        f"fixture-eligibility-gate://scene-{index}/PASS"
+                    ],
                 )
             )
         return values
@@ -1571,25 +1876,33 @@ class LongProductionOrchestrator:
             "policy_ref": "fixture-policy://caption-style/lpro1-v1",
             "policy_version": "lpro1-caption-style-v1",
             "longform_16_9": {
-                "font_scale_pass": [0.044, 0.050], "font_scale_review": [0.040, 0.054],
-                "block_outside": [0.040, 0.054], "max_chars_per_line_pass": 42,
-                "max_chars_per_line_review": 46, "max_chars_per_line_block": 46,
-                "max_block_width_pass": 0.68, "max_block_width_review": 0.74,
-                "max_block_width_block": 0.74, "bottom_safe_margin_pass": 0.08,
+                "font_scale_pass": [0.044, 0.050],
+                "font_scale_review": [0.040, 0.054],
+                "block_outside": [0.040, 0.054],
+                "max_chars_per_line_pass": 42,
+                "max_chars_per_line_review": 46,
+                "max_chars_per_line_block": 46,
+                "max_block_width_pass": 0.68,
+                "max_block_width_review": 0.74,
+                "max_block_width_block": 0.74,
+                "bottom_safe_margin_pass": 0.08,
                 "bottom_safe_margin_review_min": 0.05,
-            },
-            "shorts_9_16": {
-                "font_scale_pass": [0.046, 0.054], "font_scale_review": [0.042, 0.058],
-                "block_outside": [0.042, 0.058], "max_chars_per_line_pass": 32,
-                "max_chars_per_line_review": 36, "max_chars_per_line_block": 36,
-                "max_block_width_pass": 0.84, "max_block_width_review": 0.88,
-                "max_block_width_block": 0.88, "bottom_safe_margin_pass": 0.12,
-                "bottom_safe_margin_review_min": 0.08,
             },
             "global": {
                 "max_lines_per_cue": 2,
-                "cue_duration_seconds": {"pass": [1.0, 6.0], "review": [0.8, 7.0], "block_outside": [0.8, 7.0]},
-                "reading_speed_cps": {"pass_average_max": 15, "review_average_max": 17.5, "block_average_above": 17.5, "pass_p95_max": 17, "review_p95_max": 20, "block_any_above": 20},
+                "cue_duration_seconds": {
+                    "pass": [1.0, 6.0],
+                    "review": [0.8, 7.0],
+                    "block_outside": [0.8, 7.0],
+                },
+                "reading_speed_cps": {
+                    "pass_average_max": 15,
+                    "review_average_max": 17.5,
+                    "block_average_above": 17.5,
+                    "pass_p95_max": 17,
+                    "review_p95_max": 20,
+                    "block_any_above": 20,
+                },
             },
             "font_family": "Arial",
             "outline_ratio": 0.055,
@@ -1597,5 +1910,7 @@ class LongProductionOrchestrator:
         }
 
 
-def run_lpro1_fixture_rehearsal(workspace_root: Path) -> LongProductionOrchestrationReceipt:
+def run_lpro1_fixture_rehearsal(
+    workspace_root: Path,
+) -> LongProductionOrchestrationReceipt:
     return LongProductionOrchestrator(None, workspace_root=workspace_root).run_fixture()

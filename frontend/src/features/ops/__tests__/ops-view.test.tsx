@@ -103,7 +103,7 @@ describe("OpsView", () => {
     expect(within(providerPanel as HTMLElement).getByText("Không")).toBeInTheDocument();
 
     for (const button of screen.queryAllByRole("button")) {
-      expect(button).not.toHaveTextContent(/daily|no.?view|vector|provider|render|upload|youtube|chạy|run/i);
+      expect(button).not.toHaveTextContent(/scheduler|scanner|learning|provider|render|upload|youtube|chạy|run/i);
     }
   });
 });
@@ -164,7 +164,7 @@ const commandCenterPayload = {
   provider_cost_blockers: [card("provider_cost", "package-1", "Provider cost blocker", "BLOCKED_BY_PROVIDER_BOUNDARY")],
   gate_failures: [card("gate", "gate-1", "Gate fail", "REVIEW_PACKAGE")],
   next_actions: [nextAction("REVIEW_PACKAGE"), nextAction("BACKFILL_VIDEO_ID")],
-  forbidden_actions: ["RUN_DAILY_GENERATION", "RUN_NOVIEW_SCANNER", "RUN_VECTOR_LEARNING", "EXECUTE_PROVIDER", "YOUTUBE_UPLOAD"],
+  forbidden_actions: ["RUN_SCHEDULED_GENERATION", "RUN_NOVIEW_SCANNER", "RUN_VECTOR_LEARNING", "EXECUTE_PROVIDER", "YOUTUBE_UPLOAD"],
   technical_appendix: { no_provider_media_upload_execution: true }
 };
 

@@ -59,12 +59,6 @@ class VideoProjectCreate(BaseModel):
     episode_role: str | None = None
     standalone_reason_code: str | None = None
     project_admission_decision_id: uuid.UUID | None = None
-    parent_video_project_id: uuid.UUID | None = None
-    parent_final_media_ref_id: uuid.UUID | None = None
-    canonical_timeline_ref: str | None = None
-    canonical_timeline_hash: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
     duration_contract: DurationContractV2 | None = None
     render_eligible: bool = True
     priority: str | None = None
@@ -99,9 +93,7 @@ class VideoProjectCreate(BaseModel):
             or self.duration_contract.source_policy_snapshot_id
             != self.policy_snapshot_id
         ):
-            raise ValueError(
-                "duration contract must bind the project profile/policy"
-            )
+            raise ValueError("duration contract must bind the project profile/policy")
         series_values = (
             self.series_plan_id,
             self.series_run_id,
@@ -113,29 +105,12 @@ class VideoProjectCreate(BaseModel):
                     "series episode requires plan, run, and episode number"
                 )
             if self.standalone_reason_code is not None:
-                raise ValueError(
-                    "series episode cannot have standalone_reason_code"
-                )
+                raise ValueError("series episode cannot have standalone_reason_code")
         else:
             if any(value is not None for value in series_values):
                 raise ValueError("standalone project cannot carry series fields")
             if not self.standalone_reason_code:
-                raise ValueError(
-                    "standalone project requires standalone_reason_code"
-                )
-        if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            if self.content_mode != ContentMode.STANDALONE:
-                raise ValueError("long-derived short must be standalone")
-            if (
-                self.parent_video_project_id is None
-                or self.canonical_timeline_ref is None
-                or self.canonical_timeline_hash is None
-            ):
-                raise ValueError(
-                    "long-derived short requires exact parent and canonical timeline"
-                )
-            if self.render_eligible:
-                raise ValueError("long-derived short must not create a new render")
+                raise ValueError("standalone project requires standalone_reason_code")
         return self
 
     @property

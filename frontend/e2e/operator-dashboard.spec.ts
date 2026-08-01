@@ -60,7 +60,7 @@ test.beforeEach(async ({ page }) => {
 
 test("loads command center", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Trung tâm điều hành" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "LONG-FORM YOUTUBE OPERATING DASHBOARD" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Không tự publish" })).toBeVisible();
-  await expect(page.getByText("Bảng điều hành VCOS")).toBeVisible();
+  await expect(page.getByText("LONG-FORM YOUTUBE OPERATING DASHBOARD")).toBeVisible();
 });

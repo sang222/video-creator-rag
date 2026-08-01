@@ -93,7 +93,7 @@ export function ChannelsView() {
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricSummaryCard icon={Boxes} label="Tổng số kênh" value={query.data.length} hint="Mỗi kênh giữ snapshot chính sách riêng." />
-        <MetricSummaryCard icon={CheckCircle2} label="Kênh đang hoạt động" value={activeCount} hint="Luồng tạo hằng ngày chỉ chạy khi vòng đời là Đang hoạt động." />
+        <MetricSummaryCard icon={CheckCircle2} label="Kênh đang hoạt động" value={activeCount} hint="Launch cadence chỉ đánh giá khi vòng đời kênh đang hoạt động." />
         <MetricSummaryCard icon={PauseCircle} label="Kênh tạm dừng/ngừng" value={pausedCount} hint="Người vận hành có thể bật lại khi đủ điều kiện." />
         <MetricSummaryCard icon={ShieldAlert} label="Kênh cần xem lại" value={reviewCount} hint="Mở kênh để xem blocker và việc tiếp theo." />
         <MetricSummaryCard icon={FileWarning} label="Cần bổ sung hồ sơ" value={contractMissingCount} hint="Channel Contract chưa đủ để kích hoạt." />
@@ -133,7 +133,7 @@ export function ChannelsView() {
       ) : (
         <EmptyStateCard
           title="Chưa có kênh"
-          description="Tạo kênh đầu tiên, sinh snapshot chính sách, rồi người vận hành bật kênh trước khi daily generation được phép chạy."
+          description="Tạo kênh đầu tiên, sinh snapshot chính sách, rồi người vận hành kích hoạt launch run long-form."
           actions={[{ label: "Tạo kênh", href: "/channels/new", variant: "primary" }]}
         />
       )}

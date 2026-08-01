@@ -10,7 +10,7 @@ import { Panel } from "@/components/ui/panel";
 import type { ProductionProgress } from "@/lib/types";
 import { SafeTechnicalJson } from "./production-cockpit-card";
 
-type ProgressAction = "start" | "resume" | "cancel";
+type ProgressAction = "resume" | "cancel";
 
 export function ProductionProgressSurface({
   progress,
@@ -32,15 +32,6 @@ export function ProductionProgressSurface({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {progress.operator_action === "START_PRODUCTION" ? (
-            <Button
-              variant="primary"
-              disabled={!onAction || Boolean(busyAction)}
-              onClick={() => onAction?.("start")}
-            >
-              {busyAction === "start" ? "Đang bắt đầu..." : "Bắt đầu sản xuất"}
-            </Button>
-          ) : null}
           {progress.operator_action === "RESUME_PRODUCTION" ? (
             <Button
               variant="primary"

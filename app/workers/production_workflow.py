@@ -11,18 +11,21 @@ import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.actor import ActorContext, _system_worker_actor
 from app.core.db import get_session_factory
 from app.core.time import utc_now
+from app.db.models.launch_cadence import LaunchRun
 from app.services.outbox_dispatcher import (
     ClaimedWorkflowEvent,
     DurableOutboxDispatcher,
     OutboxLeaseLostError,
 )
+from app.services.cadence_events import CADENCE_EVALUATION_EVENT_TYPE
 from app.services.production_workflow import (
     PreReadinessProductionGateway,
     PostReadinessProductionGateway,
@@ -60,11 +63,14 @@ class ProductionWorkflowWorker:
         max_execution_seconds: int = 3600,
         heartbeat_interval_seconds: float | None = None,
         poll_interval_seconds: float = 1.0,
+        cadence_scan_interval_seconds: float = 60.0,
         after_stage_before_ack: (Callable[[ClaimedWorkflowEvent], None] | None) = None,
         now: Callable[[], datetime] = utc_now,
     ) -> None:
         if poll_interval_seconds <= 0 or poll_interval_seconds > 60:
             raise ValueError("poll_interval_seconds must be in (0, 60]")
+        if cadence_scan_interval_seconds <= 0 or cadence_scan_interval_seconds > 3600:
+            raise ValueError("cadence_scan_interval_seconds must be in (0, 3600]")
         if handlers is not None and (
             pre_readiness_gateway is not None or post_readiness_gateway is not None
         ):
@@ -103,12 +109,15 @@ class ProductionWorkflowWorker:
                 "heartbeat interval must be positive and below lease duration"
             )
         self.poll_interval_seconds = poll_interval_seconds
+        self.cadence_scan_interval_seconds = cadence_scan_interval_seconds
         self.after_stage_before_ack = after_stage_before_ack
         self.now = now
         self._stop = threading.Event()
         self._actor = _trusted_system_worker_actor()
+        self._next_cadence_scan_at: datetime | None = None
 
     def run_once(self) -> WorkerRunResult:
+        self._enqueue_due_cadence_evaluations()
         claim = self._claim()
         if claim is None:
             return WorkerRunResult(status="IDLE")
@@ -129,20 +138,39 @@ class ProductionWorkflowWorker:
                 event_id=claim.event_id, worker_id=self.worker_id
             )
             pump.start()
-            coordinator = ProductionWorkflowCoordinator(
-                session,
-                handlers=self.handlers,
-                now=self.now,
-            )
-            coordinator.execute_event(
-                event=event,
-                actor=self._actor,
-                heartbeat=pump.heartbeat_now,
-                max_execution_seconds=max(
-                    1,
-                    int((claim.execution_deadline - self.now()).total_seconds()),
-                ),
-            )
+            if event.event_type == CADENCE_EVALUATION_EVENT_TYPE:
+                from app.contracts.launch_cadence import (
+                    CadenceEvaluationCommand,
+                )
+                from app.services.launch_cadence import LongFormCadenceService
+
+                launch_run_id = uuid.UUID(str(event.payload["launch_run_id"]))
+                if launch_run_id != event.aggregate_id or not event.payload.get(
+                    "evaluation_key"
+                ):
+                    raise ValueError("CADENCE_EVENT_AUTHORITY_MISMATCH")
+                LongFormCadenceService(session, now=self.now).evaluate(
+                    launch_run_id=launch_run_id,
+                    data=CadenceEvaluationCommand(
+                        evaluation_key=str(event.payload["evaluation_key"])
+                    ),
+                    actor=self._actor,
+                )
+            else:
+                coordinator = ProductionWorkflowCoordinator(
+                    session,
+                    handlers=self.handlers,
+                    now=self.now,
+                )
+                coordinator.execute_event(
+                    event=event,
+                    actor=self._actor,
+                    heartbeat=pump.heartbeat_now,
+                    max_execution_seconds=max(
+                        1,
+                        int((claim.execution_deadline - self.now()).total_seconds()),
+                    ),
+                )
             pump.stop()
             if pump.error is not None:
                 raise pump.error
@@ -205,6 +233,49 @@ class ProductionWorkflowWorker:
             claim = self._dispatcher(session).claim_next(worker_id=self.worker_id)
             session.commit()
             return claim
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _enqueue_due_cadence_evaluations(self) -> int:
+        """Use the existing worker/outbox to evaluate every active launch.
+
+        The hourly command identity in ``LongFormCadenceService`` makes scans
+        idempotent. Row locks with ``SKIP LOCKED`` let multiple worker
+        processes share the scan without producing duplicate commands.
+        """
+
+        scan_started_at = self.now()
+        if (
+            self._next_cadence_scan_at is not None
+            and scan_started_at < self._next_cadence_scan_at
+        ):
+            return 0
+        session = self.session_factory()
+        try:
+            from app.services.launch_cadence import LongFormCadenceService
+
+            launch_runs = list(
+                session.scalars(
+                    select(LaunchRun)
+                    .where(LaunchRun.state == "ACTIVE")
+                    .order_by(LaunchRun.id)
+                    .with_for_update(skip_locked=True)
+                ).all()
+            )
+            cadence = LongFormCadenceService(session, now=self.now)
+            for launch_run in launch_runs:
+                cadence.request_evaluation(
+                    launch_run_id=launch_run.id,
+                    actor=self._actor,
+                )
+            session.commit()
+            self._next_cadence_scan_at = scan_started_at + timedelta(
+                seconds=self.cadence_scan_interval_seconds
+            )
+            return len(launch_runs)
         except Exception:
             session.rollback()
             raise
@@ -370,6 +441,10 @@ def main() -> None:
             "VCOS_WORKFLOW_HEARTBEAT_INTERVAL_SECONDS"
         ),
         poll_interval_seconds=_env_float("VCOS_WORKFLOW_POLL_INTERVAL_SECONDS", 1.0),
+        cadence_scan_interval_seconds=_env_float(
+            "VCOS_CADENCE_SCAN_INTERVAL_SECONDS",
+            60.0,
+        ),
     )
 
     def request_stop(_signum: int, _frame: object) -> None:

@@ -36,7 +36,6 @@ export type CommandCenter = {
 
 export type OperatorAction =
   | "NONE"
-  | "START_PRODUCTION"
   | "RESUME_PRODUCTION"
   | "FINAL_REVIEW"
   | "START_MANUAL_UPLOAD"
@@ -183,63 +182,133 @@ export type ProductionCockpit = {
   technical_appendix: Record<string, unknown>;
 };
 
-export type OperatorPlanningOption = {
-  source_id: string;
-  source_type: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
-  lane: "DAILY_SHORT" | "LONG_FORM";
-  title: string;
-  company_label: string;
-  channel_label: string;
-  slot_label: string;
-  assignment_label: string;
-  duration_label?: string | null;
-  state: "READY" | "ALREADY_ADMITTED" | "WORKFLOW_STARTED" | "BLOCKED";
-  status_label: string;
-  launchable: boolean;
-  guidance: string;
-  project_id?: string | null;
-  workflow_run_id?: string | null;
-  technical_appendix: Record<string, unknown>;
+export type LaunchRunState =
+  | "NOT_CONFIGURED"
+  | "PREPARING"
+  | "READY_TO_LAUNCH"
+  | "ACTIVE"
+  | "PAUSED"
+  | "COMPLETED"
+  | "CANCELED";
+
+export type CadenceDecision =
+  | "START_LONG_FORM_PRODUCTION"
+  | "WAIT_BUFFER_FULL"
+  | "WAIT_NO_ELIGIBLE_CANDIDATE"
+  | "WAIT_ACTIVE_PRODUCTION"
+  | "WAIT_OUTSIDE_PRODUCTION_HORIZON"
+  | "WAIT_BUDGET_BLOCKED"
+  | "WAIT_POLICY_OR_RIGHTS_BLOCKED"
+  | "WAIT_QUALITY_BLOCKED"
+  | "WAIT_LAUNCH_NOT_ACTIVE";
+
+export type LaunchRunwayProjection = {
+  idea_candidates: number;
+  preflight_passed: number;
+  greenlit: number;
+  in_production: number;
+  final_review_ready: number;
+  upload_approved: number;
+  published: number;
+  rejected_or_expired: number;
+  targets: {
+    idea_candidates: number;
+    preflight_passed: number;
+    greenlit: number;
+    public_ready_buffer: number;
+  };
 };
 
-export type OperatorPlanningCatalog = {
-  generated_at: string;
-  daily_short_options: OperatorPlanningOption[];
-  long_form_options: OperatorPlanningOption[];
-  safety_notice: string;
-  technical_appendix: Record<string, unknown>;
+export type PublicReadyBuffer = {
+  count: number;
+  target: number;
+  state: "BELOW_TARGET" | "AT_TARGET" | "ABOVE_TARGET";
 };
 
-export type OperatorPlanningLaunch = {
-  lane: "DAILY_SHORT" | "LONG_FORM";
-  title: string;
-  admission_id: string;
-  project_id: string;
-  workflow_run_id: string;
-  workflow_state: string;
-  reused_admission: boolean;
-  reused_workflow: boolean;
-  next_action: string;
-  technical_appendix: Record<string, unknown>;
+export type LongFormPublishSlot = {
+  slot_id: string;
+  publish_at: string;
+  timezone: string;
+  weekday: string;
+  state: "PLANNED" | "READY" | "FILLED" | "SKIPPED" | "CANCELED";
 };
 
-export type OperatorPlanningPrepare = {
-  source_type: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
-  source_id: string;
-  lane: "DAILY_SHORT" | "LONG_FORM";
-  title: string;
-  admission_id: string;
-  project_id: string;
-  support_artifact_id: string;
-  support_artifact_version_id: string;
-  envelope_hash: string;
-  status: "APPROVED";
-  replayed: boolean;
-  approved_script_hash: string;
-  approved_script_word_count: number;
-  exact_source_refs: Array<Record<string, unknown>>;
+export type ProductionStartWindow = {
+  opens_at: string;
+  closes_at: string;
+  timezone: string;
+};
+
+export type LaunchSeriesSummary = {
+  series_plan_id: string;
+  series_run_id?: string | null;
+  display_name: string;
+  state: string;
+  next_episode_number?: number | null;
+};
+
+export type LaunchExperimentSummary = {
+  public_video_number?: number | null;
+  phase:
+    | "AUDIENCE_PROMISE_EVIDENCE"
+    | "SERIES_PACKAGING_EXPERIMENT"
+    | "ALLOCATION_PREPARATION"
+    | "COMPLETE"
+    | "NOT_STARTED";
+  primary_variable?: string | null;
+  baseline_refs: Array<Record<string, unknown>>;
+  comparison_group?: string | null;
+};
+
+export type CadenceEvaluation = {
+  evaluation_id: string;
+  evaluated_at: string;
+  decision: CadenceDecision;
   reason_codes: string[];
+  buffer_count: number;
+  active_production_count: number;
+  eligible_candidate_count: number;
+  eligible_publish_slot?: LongFormPublishSlot | null;
+  input_hash: string;
+  decision_hash: string;
+};
+
+export type LaunchCadenceDashboard = {
+  generated_at: string;
+  channel_id: string;
+  channel_name: string;
+  launch_mode: "CONTROLLED_EVIDENCE_BUILDING";
+  launch_day?: number | null;
+  launch_state: LaunchRunState;
+  launch_run_id?: string | null;
+  policy_version_id?: string | null;
+  policy_hash?: string | null;
+  runway: LaunchRunwayProjection;
+  public_ready_buffer: PublicReadyBuffer;
+  active_series: LaunchSeriesSummary[];
+  videos_published: number;
+  next_publish_slot?: LongFormPublishSlot | null;
+  next_production_start_window?: ProductionStartWindow | null;
+  current_experiment: LaunchExperimentSummary;
+  latest_evaluation?: CadenceEvaluation | null;
+  blockers: Array<{
+    code: string;
+    message: string;
+    severity: Severity;
+  }>;
   next_action: string;
+  phase_e_analytics: {
+    state: "PHASE_E_NOT_AVAILABLE";
+    subscriber_count: null;
+    valid_public_watch_hours_12m: null;
+    projected_full_ypp_date: null;
+  };
+  permissions: {
+    can_pause: boolean;
+    can_resume: boolean;
+    can_evaluate: boolean;
+  };
+  safety_notice: string;
   technical_appendix: Record<string, unknown>;
 };
 
@@ -504,7 +573,6 @@ export type ChannelLifecycle = {
   channel_id: string;
   lifecycle_state: string;
   health_status: string;
-  daily_generation_allowed: boolean;
   next_action: string;
   main_blocker?: string | null;
   allowed_actions: string[];
@@ -520,7 +588,6 @@ export type ChannelSummary = {
   lifecycle_state: string;
   health_status: string;
   next_action: string;
-  daily_generation_allowed: boolean;
   contract_status?: string;
   contract_review_label?: string;
   contract_review?: {
@@ -552,7 +619,6 @@ export type ChannelWorkspace = {
   health_summary: Record<string, unknown>;
   lifecycle: ChannelLifecycle;
   projects: Array<Record<string, unknown>>;
-  daily_runs: Array<Record<string, unknown>>;
   approvals: ApprovalQueueItem[];
   uploaded_videos: Array<Record<string, unknown>>;
   publish_ledger?: PublishLedgerCounts & { operator_summary_vi?: string };

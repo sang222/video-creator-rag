@@ -10,13 +10,20 @@ NICH1 makes niche alignment a typed, hash-bound production contract. It extends 
 - active channel-owned ContentCategory;
 - strict EditorialCalendarSlot bound to the same company, channel, snapshot, category, pillar, series, and production goal.
 
-The digest contains semantic content plus immutable refs/hashes: primary niche/sub-niche, positioning, brand promise, market/language/locale, audience segments/pains/outcomes, channel and category allowed/forbidden topics, category, pillar, series, production goal, voice/format summary, and visual-source profile. Canonical sorted JSON produces the content hash. Scope, status, profile hash, snapshot hash, category hash, or slot mismatch blocks compilation. After an immutable ADMIT receipt exists, D2P1 may recompile the exact frozen snapshot while it is approved historical; that narrow mode does not permit latest-snapshot substitution and still requires exact hashes and scope.
+The digest contains semantic content plus immutable refs/hashes: primary niche/sub-niche, positioning, brand promise, market/language/locale, audience segments/pains/outcomes, channel and category allowed/forbidden topics, category, pillar, optional series preference, production goal, voice/format summary, and visual-source profile. Canonical sorted JSON produces the content hash. Scope, status, profile hash, snapshot hash, category hash, or slot mismatch blocks compilation. After an immutable ADMIT receipt exists, the exact frozen snapshot may be recompiled for validation; this does not permit latest-snapshot substitution and still requires exact hashes and scope.
 
-Legacy slots remain readable. A CH1-FLEX v2 slot is production-eligible only when `EditorialSlotValidator(strict_production=True)` returns PASS; missing category/pillar/series/goal is not silently inferred.
+Legacy slots remain readable. A strict v2 slot is production-eligible only when
+`EditorialSlotValidator(strict_production=True)` returns PASS; missing
+category/pillar/goal is not silently inferred. Series or standalone assignment
+remains the v2 admission authority.
 
-## Daily idea and admission
+## Editorial idea and admission
 
-ResourceResolver stores the full bounded digest and its ref/hash in ContextPackSnapshot together with editorial-slot, runtime-guard, evidence, common-skill, and prompt-budget sections. `DailyIdeaAgent` receives that allowlisted context through Prompt Registry and LLMRouter. It proposes an evidence-bounded `channel_fit_score`; it does not decide policy fit.
+ResourceResolver stores the full bounded digest and its ref/hash in
+ContextPackSnapshot together with editorial-slot, runtime-guard, evidence,
+common-skill, and prompt-budget sections. `EditorialIdeaResearchAgent` receives
+that allowlisted context through Prompt Registry and LLMRouter. It proposes
+bounded research evidence; it does not decide policy fit.
 
 IdeaMarketPreflight evaluates:
 
@@ -26,7 +33,12 @@ IdeaMarketPreflight evaluates:
 
 `policy_fit_state` is derived from those checks. A caller-provided value is recorded as ignored, not accepted as authority. Missing topic evidence, a score below the threshold, or a BLOCK gate blocks admission.
 
-On ADMIT, M5 freezes the digest and DailyIdeaDecision/slot/category/pillar/series/goal/topic lineage in VideoProject state. Effective Context validates hashes and scope, exposes the bounded niche context to downstream agents, and extends ScriptContractDigest with niche, positioning, brand promise, allowed/forbidden topics, audience pains/outcomes, category/pillar, and digest ref/hash.
+On ADMIT, M5 freezes the digest and EditorialIdeaCandidate/preflight/slot/
+category/pillar/assignment/goal/topic lineage in VideoProject state. Effective
+Context validates hashes and scope, exposes the bounded niche context to
+downstream agents, and extends ScriptContractDigest with niche, positioning,
+brand promise, allowed/forbidden topics, audience pains/outcomes,
+category/pillar, and digest ref/hash.
 
 ## Mandatory gate chain
 

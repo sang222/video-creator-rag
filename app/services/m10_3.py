@@ -57,9 +57,25 @@ YOUTUBE_ANALYTICS_REPORTS_URL = "https://youtubeanalytics.googleapis.com/v2/repo
 YOUTUBE_PUBLIC_PROVIDER_KEY = "YOUTUBE_DATA_API"
 YOUTUBE_OWNER_PROVIDER_KEY = "YOUTUBE_ANALYTICS_API"
 
-SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
-RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_", "ya29.")
-YOUTUBE_PLATFORM_VALUES = {"YOUTUBE", "YOUTUBE_SHORTS"}
+SECRET_KEY_FRAGMENTS = {
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential_value",
+}
+RAW_SECRET_MARKERS = (
+    "sk-",
+    "pk_live_",
+    "BEGIN PRIVATE KEY",
+    "anthropic-",
+    "xoxb-",
+    "ghp_",
+    "ya29.",
+)
+YOUTUBE_PLATFORM_VALUES = {"YOUTUBE"}
 YOUTUBE_NOT_AVAILABLE_METRICS = {"saves", "bookmarks"}
 OWNER_TO_M8_METRIC_KEYS = {
     "impression_click_through_rate": "click_through_rate",
@@ -77,15 +93,19 @@ class ProviderFetchResult:
 
 
 class TokenExchanger(Protocol):
-    def exchange_code(self, *, code: str, client_config: dict[str, str], scopes: list[str]) -> dict[str, Any]:
-        ...
+    def exchange_code(
+        self, *, code: str, client_config: dict[str, str], scopes: list[str]
+    ) -> dict[str, Any]: ...
 
-    def refresh_access_token(self, *, refresh_token: str, client_config: dict[str, str]) -> dict[str, Any]:
-        ...
+    def refresh_access_token(
+        self, *, refresh_token: str, client_config: dict[str, str]
+    ) -> dict[str, Any]: ...
 
 
 class GoogleOAuthTokenExchanger:
-    def exchange_code(self, *, code: str, client_config: dict[str, str], scopes: list[str]) -> dict[str, Any]:
+    def exchange_code(
+        self, *, code: str, client_config: dict[str, str], scopes: list[str]
+    ) -> dict[str, Any]:
         payload = {
             "code": code,
             "client_id": client_config["client_id"],
@@ -95,7 +115,9 @@ class GoogleOAuthTokenExchanger:
         }
         return _post_google_token(payload)
 
-    def refresh_access_token(self, *, refresh_token: str, client_config: dict[str, str]) -> dict[str, Any]:
+    def refresh_access_token(
+        self, *, refresh_token: str, client_config: dict[str, str]
+    ) -> dict[str, Any]:
         payload = {
             "refresh_token": refresh_token,
             "client_id": client_config["client_id"],
@@ -111,16 +133,31 @@ class YouTubeMonitoringConfigService:
 
     @property
     def scopes(self) -> list[str]:
-        return [item.strip() for item in self.settings.youtube_oauth_scopes.split(",") if item.strip()]
+        return [
+            item.strip()
+            for item in self.settings.youtube_oauth_scopes.split(",")
+            if item.strip()
+        ]
 
     def public_monitor_enabled(self) -> bool:
-        return bool(self.settings.youtube_public_monitor_enabled and self.settings.youtube_data_api_key)
+        return bool(
+            self.settings.youtube_public_monitor_enabled
+            and self.settings.youtube_data_api_key
+        )
 
     def owner_analytics_enabled(self) -> bool:
-        return bool(self.settings.youtube_owner_analytics_enabled and self._oauth_client_config_or_none() and self.scopes)
+        return bool(
+            self.settings.youtube_owner_analytics_enabled
+            and self._oauth_client_config_or_none()
+            and self.scopes
+        )
 
     def public_api_key(self) -> str | None:
-        return self.settings.youtube_data_api_key.get_secret_value() if self.settings.youtube_data_api_key else None
+        return (
+            self.settings.youtube_data_api_key.get_secret_value()
+            if self.settings.youtube_data_api_key
+            else None
+        )
 
     def oauth_client_config(self) -> dict[str, str]:
         config = self._oauth_client_config_or_none()
@@ -142,23 +179,41 @@ class YouTubeMonitoringConfigService:
 
     def _oauth_client_config_or_none(self) -> dict[str, str] | None:
         client_id = self.settings.youtube_oauth_client_id
-        client_secret = self.settings.youtube_oauth_client_secret.get_secret_value() if self.settings.youtube_oauth_client_secret else None
+        client_secret = (
+            self.settings.youtube_oauth_client_secret.get_secret_value()
+            if self.settings.youtube_oauth_client_secret
+            else None
+        )
         redirect_uri = self.settings.youtube_oauth_redirect_uri
         if self.settings.youtube_oauth_client_secrets_file:
-            file_config = _read_oauth_client_file(Path(self.settings.youtube_oauth_client_secrets_file))
+            file_config = _read_oauth_client_file(
+                Path(self.settings.youtube_oauth_client_secrets_file)
+            )
             client_id = client_id or file_config.get("client_id")
             client_secret = client_secret or file_config.get("client_secret")
             redirect_uri = redirect_uri or file_config.get("redirect_uri")
         if not client_id or not client_secret or not redirect_uri:
             return None
-        return {"client_id": client_id, "client_secret": client_secret, "redirect_uri": redirect_uri}
+        return {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        }
 
 
 class YouTubeMetricMappingService:
-    def map_public_video_item(self, item: dict[str, Any]) -> YouTubePublicProviderOutput:
+    def map_public_video_item(
+        self, item: dict[str, Any]
+    ) -> YouTubePublicProviderOutput:
         snippet = item.get("snippet") if isinstance(item.get("snippet"), dict) else {}
-        statistics = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
-        content_details = item.get("contentDetails") if isinstance(item.get("contentDetails"), dict) else {}
+        statistics = (
+            item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
+        )
+        content_details = (
+            item.get("contentDetails")
+            if isinstance(item.get("contentDetails"), dict)
+            else {}
+        )
         status = item.get("status") if isinstance(item.get("status"), dict) else {}
         platform_video_id = str(item.get("id") or "")
         public_stats_viewable = status.get("publicStatsViewable")
@@ -168,14 +223,24 @@ class YouTubeMetricMappingService:
             "comments": _optional_int(statistics.get("commentCount")),
         }
         availability = {
-            key: "AVAILABLE" if value is not None else "NOT_AVAILABLE" if public_stats_viewable is False else "UNKNOWN"
+            key: "AVAILABLE"
+            if value is not None
+            else "NOT_AVAILABLE"
+            if public_stats_viewable is False
+            else "UNKNOWN"
             for key, value in values.items()
         }
-        thumbnails = snippet.get("thumbnails") if isinstance(snippet.get("thumbnails"), dict) else {}
+        thumbnails = (
+            snippet.get("thumbnails")
+            if isinstance(snippet.get("thumbnails"), dict)
+            else {}
+        )
         thumbnail_url = _best_thumbnail_url(thumbnails)
         return YouTubePublicProviderOutput(
             platform_video_id=platform_video_id,
-            video_url=f"https://www.youtube.com/watch?v={platform_video_id}" if platform_video_id else None,
+            video_url=f"https://www.youtube.com/watch?v={platform_video_id}"
+            if platform_video_id
+            else None,
             views=values["views"],
             likes=values["likes"],
             comments=values["comments"],
@@ -184,11 +249,15 @@ class YouTubeMetricMappingService:
             youtube_channel_id=snippet.get("channelId"),
             youtube_channel_title=snippet.get("channelTitle"),
             thumbnail_url=thumbnail_url,
-            duration_seconds=_parse_iso8601_duration_seconds(content_details.get("duration")),
+            duration_seconds=_parse_iso8601_duration_seconds(
+                content_details.get("duration")
+            ),
             definition=content_details.get("definition"),
             caption_status=content_details.get("caption"),
             privacy_status=status.get("privacyStatus"),
-            public_stats_viewable=public_stats_viewable if isinstance(public_stats_viewable, bool) else None,
+            public_stats_viewable=public_stats_viewable
+            if isinstance(public_stats_viewable, bool)
+            else None,
             metric_availability=availability,
             freshness_state="FRESH",
             technical_appendix={
@@ -207,15 +276,23 @@ class YouTubeMetricMappingService:
         end_date: date,
         report: dict[str, Any],
     ) -> YouTubeOwnerAnalyticsProviderOutput | None:
-        headers = report.get("columnHeaders") if isinstance(report.get("columnHeaders"), list) else []
+        headers = (
+            report.get("columnHeaders")
+            if isinstance(report.get("columnHeaders"), list)
+            else []
+        )
         rows = report.get("rows") if isinstance(report.get("rows"), list) else []
         if not rows:
             return None
-        names = [str(header.get("name")) for header in headers if isinstance(header, dict)]
+        names = [
+            str(header.get("name")) for header in headers if isinstance(header, dict)
+        ]
         first = rows[0]
         if not isinstance(first, list):
             return None
-        by_source_name = {names[index]: first[index] for index in range(min(len(names), len(first)))}
+        by_source_name = {
+            names[index]: first[index] for index in range(min(len(names), len(first)))
+        }
         source_to_field = {
             "views": "views",
             "likes": "likes",
@@ -234,7 +311,9 @@ class YouTubeMetricMappingService:
             if source_name in by_source_name:
                 numeric = _optional_float(by_source_name[source_name])
                 values[field_name] = numeric
-                availability[field_name] = "AVAILABLE" if numeric is not None else "UNKNOWN"
+                availability[field_name] = (
+                    "AVAILABLE" if numeric is not None else "UNKNOWN"
+                )
             else:
                 values[field_name] = None
                 availability[field_name] = "UNKNOWN"
@@ -245,7 +324,9 @@ class YouTubeMetricMappingService:
             metric_availability=availability,
             freshness_state="FRESH",
             technical_appendix={
-                "payload_hash": _payload_hash({"columnHeaders": headers, "row_count": len(rows)}),
+                "payload_hash": _payload_hash(
+                    {"columnHeaders": headers, "row_count": len(rows)}
+                ),
                 "source": YOUTUBE_OWNER_PROVIDER_KEY,
                 "filters": ["video"],
                 "monetization_metrics_deferred": True,
@@ -270,15 +351,37 @@ class YouTubePublicStatsProvider:
         try:
             with urlrequest.urlopen(request, timeout=20) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-                items = payload.get("items") if isinstance(payload.get("items"), list) else []
+                items = (
+                    payload.get("items")
+                    if isinstance(payload.get("items"), list)
+                    else []
+                )
                 if not items:
-                    return ProviderFetchResult(False, http_status=response.status, error_code="YOUTUBE_VIDEO_NOT_FOUND", error_message="video not found")
-                output = self.mapping_service.map_public_video_item(items[0]).model_dump(mode="json")
-                return ProviderFetchResult(True, output=output, http_status=response.status)
+                    return ProviderFetchResult(
+                        False,
+                        http_status=response.status,
+                        error_code="YOUTUBE_VIDEO_NOT_FOUND",
+                        error_message="video not found",
+                    )
+                output = self.mapping_service.map_public_video_item(
+                    items[0]
+                ).model_dump(mode="json")
+                return ProviderFetchResult(
+                    True, output=output, http_status=response.status
+                )
         except urllib.error.HTTPError as exc:
-            return ProviderFetchResult(False, http_status=exc.code, error_code=_youtube_http_error_code(exc.code), error_message="YouTube Data API error")
+            return ProviderFetchResult(
+                False,
+                http_status=exc.code,
+                error_code=_youtube_http_error_code(exc.code),
+                error_message="YouTube Data API error",
+            )
         except Exception:
-            return ProviderFetchResult(False, error_code="YOUTUBE_PUBLIC_SYNC_FAILED", error_message="YouTube Data API request failed")
+            return ProviderFetchResult(
+                False,
+                error_code="YOUTUBE_PUBLIC_SYNC_FAILED",
+                error_message="YouTube Data API request failed",
+            )
 
 
 class YouTubeOwnerAnalyticsProvider:
@@ -321,12 +424,30 @@ class YouTubeOwnerAnalyticsProvider:
                     report=payload,
                 )
                 if output is None:
-                    return ProviderFetchResult(False, http_status=response.status, error_code="YOUTUBE_METRIC_UNKNOWN", error_message="no analytics row returned")
-                return ProviderFetchResult(True, output=output.model_dump(mode="json"), http_status=response.status)
+                    return ProviderFetchResult(
+                        False,
+                        http_status=response.status,
+                        error_code="YOUTUBE_METRIC_UNKNOWN",
+                        error_message="no analytics row returned",
+                    )
+                return ProviderFetchResult(
+                    True,
+                    output=output.model_dump(mode="json"),
+                    http_status=response.status,
+                )
         except urllib.error.HTTPError as exc:
-            return ProviderFetchResult(False, http_status=exc.code, error_code=_youtube_http_error_code(exc.code), error_message="YouTube Analytics API error")
+            return ProviderFetchResult(
+                False,
+                http_status=exc.code,
+                error_code=_youtube_http_error_code(exc.code),
+                error_message="YouTube Analytics API error",
+            )
         except Exception:
-            return ProviderFetchResult(False, error_code="YOUTUBE_OWNER_ANALYTICS_SYNC_FAILED", error_message="YouTube Analytics API request failed")
+            return ProviderFetchResult(
+                False,
+                error_code="YOUTUBE_OWNER_ANALYTICS_SYNC_FAILED",
+                error_message="YouTube Analytics API request failed",
+            )
 
 
 class YouTubeOAuthCredentialService:
@@ -354,7 +475,9 @@ class YouTubeOAuthCredentialService:
         refresh_value = token_response.get("refresh_token")
         access_value = token_response.get("access_token")
         if not refresh_value or not access_value:
-            raise ValidationFailureError("YouTube OAuth owner analytics requires refresh_token and access_token")
+            raise ValidationFailureError(
+                "YouTube OAuth owner analytics requires refresh_token and access_token"
+            )
         expires_at = _expires_at_from_response(token_response)
         credential_id = uuid.uuid4()
         storage_path = self._token_storage_path(credential_id)
@@ -399,7 +522,9 @@ class YouTubeOAuthCredentialService:
         channel_workspace_id: uuid.UUID | None,
     ) -> CredentialReference:
         client_config = self.config_service.oauth_client_config()
-        token_response = self.token_exchanger.exchange_code(code=code, client_config=client_config, scopes=scopes)
+        token_response = self.token_exchanger.exchange_code(
+            code=code, client_config=client_config, scopes=scopes
+        )
         return self.store_token_response(
             token_response=token_response,
             scopes=scopes,
@@ -410,7 +535,9 @@ class YouTubeOAuthCredentialService:
     def get_connected_owner_reference(self) -> CredentialReference | None:
         monitoring = self.session.scalars(
             select(YouTubeMonitoringCredential)
-            .where(YouTubeMonitoringCredential.provider_key == YOUTUBE_OWNER_PROVIDER_KEY)
+            .where(
+                YouTubeMonitoringCredential.provider_key == YOUTUBE_OWNER_PROVIDER_KEY
+            )
             .where(YouTubeMonitoringCredential.connection_state == "CONNECTED")
             .order_by(YouTubeMonitoringCredential.updated_at.desc())
             .limit(1)
@@ -421,7 +548,12 @@ class YouTubeOAuthCredentialService:
 
     def get_valid_access_token(self, reference: CredentialReference) -> str | None:
         if reference.status in {"MISSING", "REVOKED", "DISABLED"}:
-            self._mark_monitoring_state(reference.id, "NEEDS_REAUTH", "YOUTUBE_OAUTH_NEEDS_REAUTH", "credential is not usable")
+            self._mark_monitoring_state(
+                reference.id,
+                "NEEDS_REAUTH",
+                "YOUTUBE_OAUTH_NEEDS_REAUTH",
+                "credential is not usable",
+            )
             return None
         payload = self._read_token_payload(reference)
         access_token = payload.get("access_token")
@@ -429,7 +561,12 @@ class YouTubeOAuthCredentialService:
         expires_at = _parse_datetime(payload.get("expires_at"))
         if expires_at is not None and expires_at <= utc_now() + timedelta(seconds=60):
             if not refresh_token:
-                self._mark_monitoring_state(reference.id, "NEEDS_REAUTH", "YOUTUBE_OAUTH_NEEDS_REAUTH", "refresh token missing")
+                self._mark_monitoring_state(
+                    reference.id,
+                    "NEEDS_REAUTH",
+                    "YOUTUBE_OAUTH_NEEDS_REAUTH",
+                    "refresh token missing",
+                )
                 return None
             try:
                 refreshed = self.token_exchanger.refresh_access_token(
@@ -437,23 +574,44 @@ class YouTubeOAuthCredentialService:
                     client_config=self.config_service.oauth_client_config(),
                 )
             except Exception:
-                self._mark_monitoring_state(reference.id, "NEEDS_REAUTH", "YOUTUBE_OAUTH_NEEDS_REAUTH", "token refresh failed")
+                self._mark_monitoring_state(
+                    reference.id,
+                    "NEEDS_REAUTH",
+                    "YOUTUBE_OAUTH_NEEDS_REAUTH",
+                    "token refresh failed",
+                )
                 return None
             access_token = refreshed.get("access_token")
             if not access_token:
-                self._mark_monitoring_state(reference.id, "NEEDS_REAUTH", "YOUTUBE_OAUTH_NEEDS_REAUTH", "token refresh failed")
+                self._mark_monitoring_state(
+                    reference.id,
+                    "NEEDS_REAUTH",
+                    "YOUTUBE_OAUTH_NEEDS_REAUTH",
+                    "token refresh failed",
+                )
                 return None
             expires_at = _expires_at_from_response(refreshed)
             payload["access_token"] = access_token
             payload["expires_at"] = expires_at.isoformat() if expires_at else None
-            _write_json_secret_file(self._path_from_secret_ref(reference.secret_ref), payload)
+            _write_json_secret_file(
+                self._path_from_secret_ref(reference.secret_ref), payload
+            )
             reference.expires_at = expires_at
             reference.status = "CONFIGURED"
-            reference.metadata_ = {**(reference.metadata_ or {}), "last_refresh_at": utc_now().isoformat(), "raw_values_in_db": False}
+            reference.metadata_ = {
+                **(reference.metadata_ or {}),
+                "last_refresh_at": utc_now().isoformat(),
+                "raw_values_in_db": False,
+            }
             self._mark_monitoring_state(reference.id, "CONNECTED", None, None)
             self.session.flush()
         if not access_token:
-            self._mark_monitoring_state(reference.id, "NEEDS_REAUTH", "YOUTUBE_OAUTH_NEEDS_REAUTH", "access token missing")
+            self._mark_monitoring_state(
+                reference.id,
+                "NEEDS_REAUTH",
+                "YOUTUBE_OAUTH_NEEDS_REAUTH",
+                "access token missing",
+            )
             return None
         return str(access_token)
 
@@ -489,7 +647,10 @@ class YouTubeOAuthCredentialService:
             existing.scope_blob = {"scopes": scopes}
             existing.status = "CONFIGURED"
             existing.expires_at = expires_at
-            existing.metadata_ = {"storage": "LOCAL_DEV_FILE", "raw_values_in_db": False}
+            existing.metadata_ = {
+                "storage": "LOCAL_DEV_FILE",
+                "raw_values_in_db": False,
+            }
         self.session.flush()
         return existing
 
@@ -544,7 +705,8 @@ class YouTubeOAuthCredentialService:
     ) -> None:
         monitoring = self.session.scalars(
             select(YouTubeMonitoringCredential).where(
-                YouTubeMonitoringCredential.credential_reference_id == credential_reference_id,
+                YouTubeMonitoringCredential.credential_reference_id
+                == credential_reference_id,
                 YouTubeMonitoringCredential.provider_key == YOUTUBE_OWNER_PROVIDER_KEY,
             )
         ).one_or_none()
@@ -559,13 +721,20 @@ class YouTubeOAuthCredentialService:
     def _read_token_payload(self, reference: CredentialReference) -> dict[str, Any]:
         path = self._path_from_secret_ref(reference.secret_ref)
         if not path.exists():
-            self._mark_monitoring_state(reference.id, "NEEDS_REAUTH", "YOUTUBE_OAUTH_NEEDS_REAUTH", "local token file missing")
+            self._mark_monitoring_state(
+                reference.id,
+                "NEEDS_REAUTH",
+                "YOUTUBE_OAUTH_NEEDS_REAUTH",
+                "local token file missing",
+            )
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
     def _path_from_secret_ref(self, secret_ref: str | None) -> Path:
         if not secret_ref or not secret_ref.startswith("local_file://"):
-            raise ValidationFailureError("credential reference does not point to local dev token storage")
+            raise ValidationFailureError(
+                "credential reference does not point to local dev token storage"
+            )
         value = secret_ref.removeprefix("local_file://")
         path = Path(value)
         return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
@@ -584,7 +753,9 @@ class YouTubeOAuthSessionService:
     ):
         self.session = session
         self.config_service = config_service or YouTubeMonitoringConfigService()
-        self.credential_service = credential_service or YouTubeOAuthCredentialService(session, config_service=self.config_service)
+        self.credential_service = credential_service or YouTubeOAuthCredentialService(
+            session, config_service=self.config_service
+        )
 
     def start(
         self,
@@ -593,7 +764,9 @@ class YouTubeOAuthSessionService:
         channel_workspace_id: uuid.UUID | None = None,
     ) -> YouTubeOAuthStartResult:
         if not self.config_service.owner_analytics_enabled():
-            raise ValidationFailureError("YouTube owner analytics OAuth is not configured")
+            raise ValidationFailureError(
+                "YouTube owner analytics OAuth is not configured"
+            )
         client_config = self.config_service.oauth_client_config()
         state_token = secrets.token_urlsafe(32)
         scopes = self.config_service.scopes
@@ -622,7 +795,9 @@ class YouTubeOAuthSessionService:
             authorization_url=f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}",
         )
 
-    def handle_callback(self, *, state: str, code: str | None = None, error: str | None = None) -> YouTubeOAuthSession:
+    def handle_callback(
+        self, *, state: str, code: str | None = None, error: str | None = None
+    ) -> YouTubeOAuthSession:
         session = self._require_session_for_state(state)
         session.status = "CALLBACK_RECEIVED"
         self.session.flush()
@@ -661,7 +836,10 @@ class YouTubeOAuthSessionService:
     def _require_session_for_state(self, state: str) -> YouTubeOAuthSession:
         hashed = _hash_state(state)
         session = self.session.scalars(
-            select(YouTubeOAuthSession).where(YouTubeOAuthSession.state_token_hash == hashed).order_by(YouTubeOAuthSession.created_at.desc()).limit(1)
+            select(YouTubeOAuthSession)
+            .where(YouTubeOAuthSession.state_token_hash == hashed)
+            .order_by(YouTubeOAuthSession.created_at.desc())
+            .limit(1)
         ).one_or_none()
         if session is None:
             raise ValidationFailureError("invalid YouTube OAuth state")
@@ -669,22 +847,41 @@ class YouTubeOAuthSessionService:
 
 
 class YouTubeCredentialHealthService:
-    def __init__(self, session: Session, *, config_service: YouTubeMonitoringConfigService | None = None):
+    def __init__(
+        self,
+        session: Session,
+        *,
+        config_service: YouTubeMonitoringConfigService | None = None,
+    ):
         self.session = session
         self.config_service = config_service or YouTubeMonitoringConfigService()
 
     def connection_status(self) -> YouTubeConnectionStatusRead:
         config = self.config_service.safe_status()
-        public_ref = self._ensure_public_api_key_reference() if config["public_monitor_enabled"] else None
+        public_ref = (
+            self._ensure_public_api_key_reference()
+            if config["public_monitor_enabled"]
+            else None
+        )
         public_state = "CONFIGURED" if public_ref is not None else "NOT_CONFIGURED"
         owner_monitoring = self.session.scalars(
             select(YouTubeMonitoringCredential)
-            .where(YouTubeMonitoringCredential.provider_key == YOUTUBE_OWNER_PROVIDER_KEY)
+            .where(
+                YouTubeMonitoringCredential.provider_key == YOUTUBE_OWNER_PROVIDER_KEY
+            )
             .order_by(YouTubeMonitoringCredential.updated_at.desc())
             .limit(1)
         ).one_or_none()
-        owner_state = owner_monitoring.connection_state if owner_monitoring else config["owner_config_state"]
-        owner_ref_id = owner_monitoring.credential_reference_id if owner_monitoring and owner_monitoring.connection_state == "CONNECTED" else None
+        owner_state = (
+            owner_monitoring.connection_state
+            if owner_monitoring
+            else config["owner_config_state"]
+        )
+        owner_ref_id = (
+            owner_monitoring.credential_reference_id
+            if owner_monitoring and owner_monitoring.connection_state == "CONNECTED"
+            else None
+        )
         reasons: list[str] = []
         if public_ref is not None:
             reasons.append("YOUTUBE_PUBLIC_MONITOR_CONFIGURED")
@@ -710,7 +907,9 @@ class YouTubeCredentialHealthService:
             next_action=next_action,
         )
 
-    def record_owner_health(self, *, reference: CredentialReference | None, state: str, reason_code: str) -> None:
+    def record_owner_health(
+        self, *, reference: CredentialReference | None, state: str, reason_code: str
+    ) -> None:
         if reference is None:
             return
         snapshot = CredentialHealthSnapshot(
@@ -718,7 +917,9 @@ class YouTubeCredentialHealthService:
             provider_key=reference.provider_key,
             health_state=state,
             reason_codes=[reason_code],
-            next_action="Reconnect YouTube OAuth." if state in {"MISSING", "EXPIRED", "REVOKED"} else None,
+            next_action="Reconnect YouTube OAuth."
+            if state in {"MISSING", "EXPIRED", "REVOKED"}
+            else None,
             metadata_={"youtube_owner_analytics": True, "raw_values_in_db": False},
         )
         reference.last_checked_at = snapshot.checked_at
@@ -742,7 +943,10 @@ class YouTubeCredentialHealthService:
                 secret_ref="env://YOUTUBE_DATA_API_KEY",
                 scope_blob={"mode": "PUBLIC_MONITOR"},
                 status="CONFIGURED",
-                metadata_={"env_ref": "YOUTUBE_DATA_API_KEY", "raw_values_in_db": False},
+                metadata_={
+                    "env_ref": "YOUTUBE_DATA_API_KEY",
+                    "raw_values_in_db": False,
+                },
             )
             self.session.add(existing)
             self.session.flush()
@@ -759,7 +963,10 @@ class YouTubeCredentialHealthService:
                 provider_key=YOUTUBE_PUBLIC_PROVIDER_KEY,
                 connection_state="CONFIGURED",
                 scopes=[],
-                token_metadata={"env_ref": "YOUTUBE_DATA_API_KEY", "raw_values_in_db": False},
+                token_metadata={
+                    "env_ref": "YOUTUBE_DATA_API_KEY",
+                    "raw_values_in_db": False,
+                },
                 last_health_check_at=utc_now(),
             )
             self.session.add(monitoring)
@@ -783,7 +990,9 @@ class YouTubePublicStatsSyncService:
         self.config_service = config_service or YouTubeMonitoringConfigService()
         self.provider = provider or YouTubePublicStatsProvider()
 
-    def sync_uploaded_video(self, *, uploaded_video_id: uuid.UUID) -> YouTubePublicSyncRun:
+    def sync_uploaded_video(
+        self, *, uploaded_video_id: uuid.UUID
+    ) -> YouTubePublicSyncRun:
         uploaded = _require_uploaded_video(self.session, uploaded_video_id)
         _validate_youtube_uploaded(uploaded)
         run = YouTubePublicSyncRun(
@@ -807,7 +1016,9 @@ class YouTubePublicStatsSyncService:
         run.run_state = "RUNNING"
         run.started_at = utc_now()
         self.session.flush()
-        result = self.provider.fetch(platform_video_id=uploaded.platform_video_id, api_key=api_key or "")
+        result = self.provider.fetch(
+            platform_video_id=uploaded.platform_video_id, api_key=api_key or ""
+        )
         run.http_status = result.http_status
         if not result.ok or result.output is None:
             run.run_state = "FAILED"
@@ -821,7 +1032,11 @@ class YouTubePublicStatsSyncService:
         analytics = _create_m8_snapshot(
             self.session,
             uploaded=uploaded,
-            metrics={key: getattr(output, key) for key in PUBLIC_MONITOR_METRICS if getattr(output, key) is not None},
+            metrics={
+                key: getattr(output, key)
+                for key in PUBLIC_MONITOR_METRICS
+                if getattr(output, key) is not None
+            },
             explicit_availability=output.metric_availability,
             sync_mode="YOUTUBE_PUBLIC_MONITOR",
             provider_key="youtube_data_api",
@@ -830,7 +1045,10 @@ class YouTubePublicStatsSyncService:
             source_snapshot_id=snapshot.id,
             freshness_state=output.freshness_state,
             confidence_level="MEDIUM",
-            reason_codes=["YOUTUBE_PUBLIC_SYNC_COMPLETED", "PUBLIC_MONITOR_WEAK_AUTHORITY"],
+            reason_codes=[
+                "YOUTUBE_PUBLIC_SYNC_COMPLETED",
+                "PUBLIC_MONITOR_WEAK_AUTHORITY",
+            ],
         )
         run.run_state = "COMPLETED"
         run.completed_at = utc_now()
@@ -839,11 +1057,19 @@ class YouTubePublicStatsSyncService:
         self.session.flush()
         return run
 
-    def latest_snapshot(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubePublicMonitorSnapshot | None:
+    def latest_snapshot(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubePublicMonitorSnapshot | None:
         return self.session.scalars(
             select(UploadedVideoYouTubePublicMonitorSnapshot)
-            .where(UploadedVideoYouTubePublicMonitorSnapshot.uploaded_video_id == uploaded_video_id)
-            .order_by(UploadedVideoYouTubePublicMonitorSnapshot.last_synced_at.desc(), UploadedVideoYouTubePublicMonitorSnapshot.created_at.desc())
+            .where(
+                UploadedVideoYouTubePublicMonitorSnapshot.uploaded_video_id
+                == uploaded_video_id
+            )
+            .order_by(
+                UploadedVideoYouTubePublicMonitorSnapshot.last_synced_at.desc(),
+                UploadedVideoYouTubePublicMonitorSnapshot.created_at.desc(),
+            )
             .limit(1)
         ).one_or_none()
 
@@ -853,11 +1079,21 @@ class YouTubePublicStatsSyncService:
         uploaded: UploadedVideo,
         output: YouTubePublicProviderOutput,
     ) -> UploadedVideoYouTubePublicMonitorSnapshot:
-        unknown = sorted(key for key, state in output.metric_availability.items() if state == "UNKNOWN")
-        unavailable = sorted(key for key, state in output.metric_availability.items() if state == "NOT_AVAILABLE")
+        unknown = sorted(
+            key
+            for key, state in output.metric_availability.items()
+            if state == "UNKNOWN"
+        )
+        unavailable = sorted(
+            key
+            for key, state in output.metric_availability.items()
+            if state == "NOT_AVAILABLE"
+        )
         status = "OK" if not unknown and not unavailable else "PARTIAL"
         title_match = _title_matches(uploaded, output.youtube_title)
-        duration_match = _duration_matches(self.session, uploaded, output.duration_seconds)
+        duration_match = _duration_matches(
+            self.session, uploaded, output.duration_seconds
+        )
         snapshot = UploadedVideoYouTubePublicMonitorSnapshot(
             uploaded_video_id=uploaded.id,
             company_id=uploaded.company_id,
@@ -912,7 +1148,9 @@ class YouTubeOwnerAnalyticsSyncService:
     ):
         self.session = session
         self.config_service = config_service or YouTubeMonitoringConfigService()
-        self.credential_service = credential_service or YouTubeOAuthCredentialService(session, config_service=self.config_service)
+        self.credential_service = credential_service or YouTubeOAuthCredentialService(
+            session, config_service=self.config_service
+        )
         self.provider = provider or YouTubeOwnerAnalyticsProvider()
 
     def sync_uploaded_video(
@@ -995,7 +1233,10 @@ class YouTubeOwnerAnalyticsSyncService:
             source_snapshot_id=snapshot.id,
             freshness_state=output.freshness_state,
             confidence_level="HIGH",
-            reason_codes=["YOUTUBE_OWNER_ANALYTICS_SYNC_COMPLETED", "OWNER_ANALYTICS_STRONG_AUTHORITY"],
+            reason_codes=[
+                "YOUTUBE_OWNER_ANALYTICS_SYNC_COMPLETED",
+                "OWNER_ANALYTICS_STRONG_AUTHORITY",
+            ],
         )
         run.run_state = "COMPLETED"
         run.completed_at = utc_now()
@@ -1004,11 +1245,19 @@ class YouTubeOwnerAnalyticsSyncService:
         self.session.flush()
         return run
 
-    def latest_snapshot(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot | None:
+    def latest_snapshot(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot | None:
         return self.session.scalars(
             select(UploadedVideoYouTubeOwnerAnalyticsSnapshot)
-            .where(UploadedVideoYouTubeOwnerAnalyticsSnapshot.uploaded_video_id == uploaded_video_id)
-            .order_by(UploadedVideoYouTubeOwnerAnalyticsSnapshot.last_synced_at.desc(), UploadedVideoYouTubeOwnerAnalyticsSnapshot.created_at.desc())
+            .where(
+                UploadedVideoYouTubeOwnerAnalyticsSnapshot.uploaded_video_id
+                == uploaded_video_id
+            )
+            .order_by(
+                UploadedVideoYouTubeOwnerAnalyticsSnapshot.last_synced_at.desc(),
+                UploadedVideoYouTubeOwnerAnalyticsSnapshot.created_at.desc(),
+            )
             .limit(1)
         ).one_or_none()
 
@@ -1018,8 +1267,16 @@ class YouTubeOwnerAnalyticsSyncService:
         uploaded: UploadedVideo,
         output: YouTubeOwnerAnalyticsProviderOutput,
     ) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot:
-        unknown = [key for key in OWNER_ANALYTICS_METRICS if output.metric_availability.get(key) == "UNKNOWN"]
-        unavailable = [key for key in OWNER_ANALYTICS_METRICS if output.metric_availability.get(key) == "NOT_AVAILABLE"]
+        unknown = [
+            key
+            for key in OWNER_ANALYTICS_METRICS
+            if output.metric_availability.get(key) == "UNKNOWN"
+        ]
+        unavailable = [
+            key
+            for key in OWNER_ANALYTICS_METRICS
+            if output.metric_availability.get(key) == "NOT_AVAILABLE"
+        ]
         status = "OK" if not unknown and not unavailable else "PARTIAL"
         snapshot = UploadedVideoYouTubeOwnerAnalyticsSnapshot(
             uploaded_video_id=uploaded.id,
@@ -1062,7 +1319,9 @@ class UploadedVideoYouTubeFollowReadService:
     def __init__(self, session: Session):
         self.session = session
 
-    def get_summary(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubeFollowSummaryRead:
+    def get_summary(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubeFollowSummaryRead:
         uploaded = _require_uploaded_video(self.session, uploaded_video_id)
         public = self._latest_public(uploaded.id)
         owner = self._latest_owner(uploaded.id)
@@ -1087,38 +1346,72 @@ class UploadedVideoYouTubeFollowReadService:
                     unknown.add(key)
                 elif item == "NOT_AVAILABLE":
                     unavailable.add(key)
-        title = public.youtube_title if public and public.youtube_title else uploaded.actual_metadata.get("actual_title")
+        title = (
+            public.youtube_title
+            if public and public.youtube_title
+            else uploaded.actual_metadata.get("actual_title")
+        )
         learning_authority = _summary_learning_authority(public, owner)
         return UploadedVideoYouTubeFollowSummaryRead(
             uploaded_video_id=uploaded.id,
             platform_video_id=uploaded.platform_video_id,
             video_url=uploaded.video_url,
             title=title,
-            thumbnail_url=public.thumbnail_url if public else _thumbnail_from_uploaded(uploaded),
-            published_at=public.youtube_published_at if public and public.youtube_published_at else uploaded.published_at,
-            views=owner.views if owner and owner.views is not None else public.views if public else None,
-            likes=owner.likes if owner and owner.likes is not None else public.likes if public else None,
-            comments=owner.comments if owner and owner.comments is not None else public.comments if public else None,
+            thumbnail_url=public.thumbnail_url
+            if public
+            else _thumbnail_from_uploaded(uploaded),
+            published_at=public.youtube_published_at
+            if public and public.youtube_published_at
+            else uploaded.published_at,
+            views=owner.views
+            if owner and owner.views is not None
+            else public.views
+            if public
+            else None,
+            likes=owner.likes
+            if owner and owner.likes is not None
+            else public.likes
+            if public
+            else None,
+            comments=owner.comments
+            if owner and owner.comments is not None
+            else public.comments
+            if public
+            else None,
             public_last_synced_at=public.last_synced_at if public else None,
             public_freshness_state=public.freshness_state if public else "UNKNOWN",
             owner_analytics_connected=connection.owner_analytics_connected,
             impressions=owner.impressions if owner else None,
-            impression_click_through_rate=owner.impression_click_through_rate if owner else None,
-            average_view_duration_seconds=owner.average_view_duration_seconds if owner else None,
+            impression_click_through_rate=owner.impression_click_through_rate
+            if owner
+            else None,
+            average_view_duration_seconds=owner.average_view_duration_seconds
+            if owner
+            else None,
             average_view_percentage=owner.average_view_percentage if owner else None,
-            estimated_minutes_watched=owner.estimated_minutes_watched if owner else None,
+            estimated_minutes_watched=owner.estimated_minutes_watched
+            if owner
+            else None,
             subscribers_gained=owner.subscribers_gained if owner else None,
             subscribers_lost=owner.subscribers_lost if owner else None,
             owner_last_synced_at=owner.last_synced_at if owner else None,
             owner_freshness_state=owner.freshness_state if owner else "UNKNOWN",
             title_match_status=_title_match_status(public),
             duration_match_status=_duration_match_status(public),
-            caption_status=_dashboard_caption_status(public.caption_status if public else None),
-            visibility_status=_visibility_status(public.privacy_status if public else uploaded.actual_metadata.get("actual_privacy_status")),
+            caption_status=_dashboard_caption_status(
+                public.caption_status if public else None
+            ),
+            visibility_status=_visibility_status(
+                public.privacy_status
+                if public
+                else uploaded.actual_metadata.get("actual_privacy_status")
+            ),
             learning_authority=learning_authority,
             unavailable_metrics=sorted(unavailable),
             unknown_metrics=sorted(unknown - unavailable),
-            next_action=_summary_next_action(public, owner, connection.owner_analytics_connected),
+            next_action=_summary_next_action(
+                public, owner, connection.owner_analytics_connected
+            ),
             technical_appendix={
                 "public_snapshot_id": str(public.id) if public else None,
                 "owner_snapshot_id": str(owner.id) if owner else None,
@@ -1129,15 +1422,25 @@ class UploadedVideoYouTubeFollowReadService:
 
     def list_summaries(self) -> list[UploadedVideoYouTubeFollowSummaryRead]:
         uploaded_videos = self.session.scalars(
-            select(UploadedVideo).where(UploadedVideo.platform.in_(list(YOUTUBE_PLATFORM_VALUES))).order_by(UploadedVideo.published_at.desc())
+            select(UploadedVideo)
+            .where(UploadedVideo.platform.in_(list(YOUTUBE_PLATFORM_VALUES)))
+            .order_by(UploadedVideo.published_at.desc())
         ).all()
         return [self.get_summary(uploaded.id) for uploaded in uploaded_videos]
 
-    def _latest_public(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubePublicMonitorSnapshot | None:
-        return YouTubePublicStatsSyncService(self.session).latest_snapshot(uploaded_video_id)
+    def _latest_public(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubePublicMonitorSnapshot | None:
+        return YouTubePublicStatsSyncService(self.session).latest_snapshot(
+            uploaded_video_id
+        )
 
-    def _latest_owner(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot | None:
-        return YouTubeOwnerAnalyticsSyncService(self.session).latest_snapshot(uploaded_video_id)
+    def _latest_owner(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot | None:
+        return YouTubeOwnerAnalyticsSyncService(self.session).latest_snapshot(
+            uploaded_video_id
+        )
 
 
 def _create_m8_snapshot(
@@ -1178,7 +1481,12 @@ def _create_m8_snapshot(
         provider_key=provider_key,
         reason_codes=reason_codes,
         next_action="Use YouTube follow summary for dashboard-ready monitoring.",
-        metadata_={"source": source, "authority": authority, "no_scraping": True, "raw_secrets_exposed": False},
+        metadata_={
+            "source": source,
+            "authority": authority,
+            "no_scraping": True,
+            "raw_secrets_exposed": False,
+        },
     )
     session.add(sync_run)
     session.flush()
@@ -1262,7 +1570,9 @@ def _update_m8_summary(
     authority: str,
 ) -> UploadedVideoMetricsSummary:
     summary = session.scalars(
-        select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id)
+        select(UploadedVideoMetricsSummary).where(
+            UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id
+        )
     ).one_or_none()
     if summary is None:
         summary = UploadedVideoMetricsSummary(
@@ -1307,8 +1617,14 @@ def _update_m8_summary(
     summary.availability_summary = availability_summary
     summary.freshness_state = snapshot.freshness_state
     summary.confidence_level = snapshot.confidence_level
-    summary.monitoring_state = "PARTIAL_DATA" if availability_snapshot.unknown_metrics else "SYNCED"
-    summary.operator_summary = "YouTube analytics synced successfully" if authority == "STRONG" else "YouTube public stats synced successfully"
+    summary.monitoring_state = (
+        "PARTIAL_DATA" if availability_snapshot.unknown_metrics else "SYNCED"
+    )
+    summary.operator_summary = (
+        "YouTube analytics synced successfully"
+        if authority == "STRONG"
+        else "YouTube public stats synced successfully"
+    )
     summary.next_action = "Review YouTube follow summary"
     session.flush()
     return summary
@@ -1331,7 +1647,13 @@ def _build_youtube_metric_availability(
             reason_code = None
         elif explicit in {"AVAILABLE", "UNKNOWN", "NOT_AVAILABLE"}:
             state = explicit
-            reason_code = "YOUTUBE_METRIC_UNKNOWN" if state == "UNKNOWN" else "YOUTUBE_METRIC_UNAVAILABLE" if state == "NOT_AVAILABLE" else None
+            reason_code = (
+                "YOUTUBE_METRIC_UNKNOWN"
+                if state == "UNKNOWN"
+                else "YOUTUBE_METRIC_UNAVAILABLE"
+                if state == "NOT_AVAILABLE"
+                else None
+            )
         elif metric_key in YOUTUBE_NOT_AVAILABLE_METRICS:
             state = "NOT_AVAILABLE"
             reason_code = "YOUTUBE_METRIC_UNAVAILABLE"
@@ -1353,7 +1675,9 @@ def _build_youtube_metric_availability(
     return availability, unknown, unavailable
 
 
-def _owner_output_to_m8_metrics(output: YouTubeOwnerAnalyticsProviderOutput) -> dict[str, Any]:
+def _owner_output_to_m8_metrics(
+    output: YouTubeOwnerAnalyticsProviderOutput,
+) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     for key in OWNER_ANALYTICS_METRICS:
         value = getattr(output, key)
@@ -1364,10 +1688,15 @@ def _owner_output_to_m8_metrics(output: YouTubeOwnerAnalyticsProviderOutput) -> 
 
 
 def _owner_availability_to_m8(metric_availability: dict[str, str]) -> dict[str, str]:
-    return {OWNER_TO_M8_METRIC_KEYS.get(key, key): value for key, value in metric_availability.items()}
+    return {
+        OWNER_TO_M8_METRIC_KEYS.get(key, key): value
+        for key, value in metric_availability.items()
+    }
 
 
-def _require_uploaded_video(session: Session, uploaded_video_id: uuid.UUID) -> UploadedVideo:
+def _require_uploaded_video(
+    session: Session, uploaded_video_id: uuid.UUID
+) -> UploadedVideo:
     uploaded = session.get(UploadedVideo, uploaded_video_id)
     if uploaded is None:
         raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
@@ -1376,7 +1705,9 @@ def _require_uploaded_video(session: Session, uploaded_video_id: uuid.UUID) -> U
 
 def _validate_youtube_uploaded(uploaded: UploadedVideo) -> None:
     if uploaded.platform not in YOUTUBE_PLATFORM_VALUES:
-        raise ValidationFailureError("YouTube follow sync only supports YouTube uploaded videos")
+        raise ValidationFailureError(
+            "YouTube follow sync only supports YouTube uploaded videos"
+        )
     if uploaded.monitoring_state != "READY_FOR_ANALYTICS":
         raise ValidationFailureError("uploaded video is not ready for analytics")
 
@@ -1388,7 +1719,9 @@ def _title_matches(uploaded: UploadedVideo, youtube_title: str | None) -> bool |
     return str(actual).strip() == youtube_title.strip()
 
 
-def _duration_matches(session: Session, uploaded: UploadedVideo, youtube_duration_seconds: int | None) -> bool | None:
+def _duration_matches(
+    session: Session, uploaded: UploadedVideo, youtube_duration_seconds: int | None
+) -> bool | None:
     if youtube_duration_seconds is None:
         return None
     package = session.get(RenderPackageSnapshot, uploaded.render_package_snapshot_id)
@@ -1397,13 +1730,17 @@ def _duration_matches(session: Session, uploaded: UploadedVideo, youtube_duratio
     return abs(float(package.duration_seconds) - float(youtube_duration_seconds)) <= 1.0
 
 
-def _title_match_status(public: UploadedVideoYouTubePublicMonitorSnapshot | None) -> str:
+def _title_match_status(
+    public: UploadedVideoYouTubePublicMonitorSnapshot | None,
+) -> str:
     if public is None or public.title_matches_confirmed_metadata is None:
         return "UNKNOWN"
     return "OK" if public.title_matches_confirmed_metadata else "CHANGED"
 
 
-def _duration_match_status(public: UploadedVideoYouTubePublicMonitorSnapshot | None) -> str:
+def _duration_match_status(
+    public: UploadedVideoYouTubePublicMonitorSnapshot | None,
+) -> str:
     if public is None or public.duration_matches_render_package is None:
         return "UNKNOWN"
     return "OK" if public.duration_matches_render_package else "REVIEW"
@@ -1470,7 +1807,11 @@ def _read_oauth_client_file(path: Path) -> dict[str, str]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     container = payload.get("web") or payload.get("installed") or payload
-    redirect_uris = container.get("redirect_uris") if isinstance(container.get("redirect_uris"), list) else []
+    redirect_uris = (
+        container.get("redirect_uris")
+        if isinstance(container.get("redirect_uris"), list)
+        else []
+    )
     return {
         "client_id": container.get("client_id"),
         "client_secret": container.get("client_secret"),
@@ -1491,7 +1832,9 @@ def _post_google_token(payload: dict[str, str]) -> dict[str, Any]:
 
 
 def _write_json_secret_file(path: Path, payload: dict[str, Any]) -> None:
-    _ensure_no_secret_payload_for_db({"storage": "LOCAL_DEV_FILE", "raw_values_in_db": False})
+    _ensure_no_secret_payload_for_db(
+        {"storage": "LOCAL_DEV_FILE", "raw_values_in_db": False}
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     path.chmod(0o600)
@@ -1509,9 +1852,15 @@ def _local_file_secret_ref(path: Path) -> str:
 def _ensure_no_secret_payload_for_db(value: Any) -> None:
     for key, item in _walk_items(value):
         normalized = key.lower().replace("-", "_")
-        if any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS) and normalized not in {"secret_ref"}:
-            raise ValidationFailureError(f"secret-like payload key is not allowed: {key}")
-        if isinstance(item, str) and any(marker.lower() in item.lower() for marker in RAW_SECRET_MARKERS):
+        if any(
+            fragment in normalized for fragment in SECRET_KEY_FRAGMENTS
+        ) and normalized not in {"secret_ref"}:
+            raise ValidationFailureError(
+                f"secret-like payload key is not allowed: {key}"
+            )
+        if isinstance(item, str) and any(
+            marker.lower() in item.lower() for marker in RAW_SECRET_MARKERS
+        ):
             raise ValidationFailureError("raw secret-like value is not allowed")
 
 
@@ -1531,16 +1880,26 @@ def _hash_state(state: str) -> str:
 
 
 def _payload_hash(payload: Any) -> str:
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
 
 
 def _minimal_public_debug_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": item.get("id"),
-        "snippet_keys": sorted((item.get("snippet") or {}).keys()) if isinstance(item.get("snippet"), dict) else [],
-        "statistics_keys": sorted((item.get("statistics") or {}).keys()) if isinstance(item.get("statistics"), dict) else [],
-        "content_details_keys": sorted((item.get("contentDetails") or {}).keys()) if isinstance(item.get("contentDetails"), dict) else [],
-        "status_keys": sorted((item.get("status") or {}).keys()) if isinstance(item.get("status"), dict) else [],
+        "snippet_keys": sorted((item.get("snippet") or {}).keys())
+        if isinstance(item.get("snippet"), dict)
+        else [],
+        "statistics_keys": sorted((item.get("statistics") or {}).keys())
+        if isinstance(item.get("statistics"), dict)
+        else [],
+        "content_details_keys": sorted((item.get("contentDetails") or {}).keys())
+        if isinstance(item.get("contentDetails"), dict)
+        else [],
+        "status_keys": sorted((item.get("status") or {}).keys())
+        if isinstance(item.get("status"), dict)
+        else [],
     }
 
 

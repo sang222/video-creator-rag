@@ -1,4 +1,4 @@
-registry_version: "1.0.0"
+registry_version: "2.0.0"
 default_user_template_ref: &default_user_template_ref app/prompts/agents/user_templates/base_task_payload.md
 default_output_schema_ref: &default_output_schema_ref app/prompts/schemas/base_envelope.schema.json
 schema_ref: &schema_ref base_agent_envelope
@@ -65,11 +65,11 @@ agents:
     common_skill_refs: *common_skill_refs
     channel_contract_required: true
     market_locale_context_required: true
-  - agent_key: DailyIdeaAgent
-    template_key: daily_idea_agent.production
-    template_version: "1.0.0"
+  - agent_key: EditorialIdeaResearchAgent
+    template_key: editorial_idea_research_agent.production
+    template_version: "2.0.0"
     status: *active
-    system_delta_ref: app/prompts/agents/system_deltas/daily_idea_agent.md
+    system_delta_ref: app/prompts/agents/system_deltas/editorial_idea_research_agent.md
     user_template_ref: *default_user_template_ref
     output_schema_ref: *default_output_schema_ref
     schema_ref: *schema_ref
@@ -303,57 +303,6 @@ agents:
     common_skill_refs: *common_skill_refs
     channel_contract_required: true
     market_locale_context_required: true
-  - agent_key: ShortCandidateExtractor
-    template_key: short_candidate_extractor.production
-    template_version: "1.0.0"
-    status: *active
-    system_delta_ref: app/prompts/agents/system_deltas/short_candidate_extractor.md
-    user_template_ref: *default_user_template_ref
-    output_schema_ref: *default_output_schema_ref
-    schema_ref: *schema_ref
-    schema_version: *schema_version
-    allowed_router_lanes: [cheap_structured, long_context_text]
-    default_router_lane: cheap_structured
-    input_contract: *input_contract
-    output_contract: *output_contract
-    safety_policy_refs: *safety_policy_refs
-    common_skill_refs: *common_skill_refs
-    channel_contract_required: true
-    market_locale_context_required: true
-  - agent_key: ShortCandidateRanker
-    template_key: short_candidate_ranker.production
-    template_version: "1.0.0"
-    status: *active
-    system_delta_ref: app/prompts/agents/system_deltas/short_candidate_ranker.md
-    user_template_ref: *default_user_template_ref
-    output_schema_ref: *default_output_schema_ref
-    schema_ref: *schema_ref
-    schema_version: *schema_version
-    allowed_router_lanes: [cheap_structured]
-    default_router_lane: cheap_structured
-    input_contract: *input_contract
-    output_contract: *output_contract
-    safety_policy_refs: *safety_policy_refs
-    common_skill_refs: *common_skill_refs
-    channel_contract_required: true
-    market_locale_context_required: true
-  - agent_key: DerivativeOriginalityReviewer
-    template_key: derivative_originality_reviewer.production
-    template_version: "1.0.0"
-    status: *active
-    system_delta_ref: app/prompts/agents/system_deltas/derivative_originality_reviewer.md
-    user_template_ref: *default_user_template_ref
-    output_schema_ref: *default_output_schema_ref
-    schema_ref: *schema_ref
-    schema_version: *schema_version
-    allowed_router_lanes: [gatekeeper_soft_review, cheap_structured]
-    default_router_lane: gatekeeper_soft_review
-    input_contract: *input_contract
-    output_contract: *output_contract
-    safety_policy_refs: *safety_policy_refs
-    common_skill_refs: *common_skill_refs
-    channel_contract_required: true
-    market_locale_context_required: true
   - agent_key: RecoveryProposalReviewer
     template_key: recovery_proposal_reviewer.production
     template_version: "1.0.0"
@@ -467,23 +416,6 @@ agents:
     schema_version: *schema_version
     allowed_router_lanes: [gatekeeper_soft_review]
     default_router_lane: gatekeeper_soft_review
-    input_contract: *input_contract
-    output_contract: *output_contract
-    safety_policy_refs: *safety_policy_refs
-    common_skill_refs: *common_skill_refs
-    channel_contract_required: true
-    market_locale_context_required: true
-  - agent_key: UploadCardCopyAgent
-    template_key: upload_card_copy_agent.production
-    template_version: "1.0.0"
-    status: *active
-    system_delta_ref: app/prompts/agents/system_deltas/upload_card_copy_agent.md
-    user_template_ref: *default_user_template_ref
-    output_schema_ref: *default_output_schema_ref
-    schema_ref: *schema_ref
-    schema_version: *schema_version
-    allowed_router_lanes: [cheap_structured]
-    default_router_lane: cheap_structured
     input_contract: *input_contract
     output_contract: *output_contract
     safety_policy_refs: *safety_policy_refs

@@ -5,10 +5,20 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.db.models import ApprovedPlaybookEntry, ChannelProfileVersion, CloudMediaRef, LearningReviewDecision
+from app.db.models import (
+    ApprovedPlaybookEntry,
+    ChannelProfileVersion,
+    CloudMediaRef,
+    LearningReviewDecision,
+)
 from app.main import create_app
 
-from .test_m10_learning_review_queue import _import_metrics, _run_m9, _run_m10, _uploaded_video
+from .test_m10_learning_review_queue import (
+    _import_metrics,
+    _run_m9,
+    _run_m10,
+    _uploaded_video,
+)
 
 
 def test_m11_command_center_and_provider_status_empty_state() -> None:
@@ -33,24 +43,29 @@ def test_m11_command_center_and_provider_status_empty_state() -> None:
 
     providers = client.get("/providers/status")
     assert providers.status_code == 200, providers.text
-    assert providers.json()["integrations"]["native_ffmpeg_renderer"]["state"] == "LOCAL_CAPABILITY"
+    assert (
+        providers.json()["integrations"]["native_ffmpeg_renderer"]["state"]
+        == "LOCAL_CAPABILITY"
+    )
 
 
-def test_m11_channel_lifecycle_is_human_decided(db_session, qualification_factory) -> None:
+def test_m11_channel_lifecycle_is_human_decided(
+    db_session, qualification_factory
+) -> None:
     scope = qualification_factory.channel_scope(name="M11 Lifecycle")
     db_session.commit()
     client = TestClient(create_app())
 
     readonly = client.post(
         f"/channels/{scope.channel.id}/lifecycle-decision",
-        json={"action": "PAUSE_DAILY_GENERATION", "actor_role": "READ_ONLY_OBSERVER"},
+        json={"action": "PAUSE_EDITORIAL_RESEARCH", "actor_role": "READ_ONLY_OBSERVER"},
     )
     assert readonly.status_code == 403
 
     paused = client.post(
         f"/channels/{scope.channel.id}/lifecycle-decision",
         json={
-            "action": "PAUSE_DAILY_GENERATION",
+            "action": "PAUSE_EDITORIAL_RESEARCH",
             "actor_role": "OWNER_ADMIN",
             "health_status": "WATCHLIST",
             "reason": "Pause requested by human operator.",
@@ -61,7 +76,7 @@ def test_m11_channel_lifecycle_is_human_decided(db_session, qualification_factor
 
     lifecycle = client.get(f"/channels/{scope.channel.id}/lifecycle")
     assert lifecycle.status_code == 200, lifecycle.text
-    assert lifecycle.json()["daily_generation_allowed"] is False
+    assert lifecycle.json()["editorial_research_allowed"] is False
     assert "PAUSED" in lifecycle.json()["next_action"]
 
     workspace = client.get(f"/channels/{scope.channel.id}/workspace")
@@ -69,8 +84,12 @@ def test_m11_channel_lifecycle_is_human_decided(db_session, qualification_factor
     assert workspace.json()["health_summary"]["storage_state"] == "NO_CLOUD_MEDIA"
 
 
-def test_m11_uploaded_video_dashboard_uses_drive_cta_only(db_session, qualification_factory, tmp_path) -> None:
-    uploaded = _uploaded_video(db_session, qualification_factory, tmp_path, video_id="yt-m11-drive")
+def test_m11_uploaded_video_dashboard_uses_drive_cta_only(
+    db_session, qualification_factory, tmp_path
+) -> None:
+    uploaded = _uploaded_video(
+        db_session, qualification_factory, tmp_path, video_id="yt-m11-drive"
+    )
     ref = CloudMediaRef(
         company_id=uploaded.company_id,
         channel_workspace_id=uploaded.channel_workspace_id,
@@ -112,7 +131,9 @@ def test_m11_learning_approval_creates_audited_playbook_without_profile_mutation
     qualification_factory,
     tmp_path,
 ) -> None:
-    uploaded = _uploaded_video(db_session, qualification_factory, tmp_path, video_id="yt-m11-learning")
+    uploaded = _uploaded_video(
+        db_session, qualification_factory, tmp_path, video_id="yt-m11-learning"
+    )
     _import_metrics(
         db_session,
         uploaded,
@@ -141,7 +162,11 @@ def test_m11_learning_approval_creates_audited_playbook_without_profile_mutation
     learning_candidate_id = candidates[0]["id"]
     approved = client.post(
         f"/learning-candidates/{learning_candidate_id}/approve",
-        json={"action": "APPROVE", "actor_role": "LEARNING_REVIEWER", "rationale": "Evidence reviewed."},
+        json={
+            "action": "APPROVE",
+            "actor_role": "LEARNING_REVIEWER",
+            "rationale": "Evidence reviewed.",
+        },
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["approved_playbook_entry_id"] is not None

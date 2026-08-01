@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -29,9 +28,15 @@ PYTEST = ROOT / ".venv" / "bin" / "pytest"
 VCOS = ROOT / ".venv" / "bin" / "vcos"
 PYTHON = ROOT / ".venv" / "bin" / "python"
 
-REQUIRED_TAGS = ["m5-daily-run-context-admission", "m6-production-media-qc-foundation"]
-EXPECTED_ALEMBIC_HEAD = "0007_m6_production"
-MEDIA_GITIGNORE_PATTERNS = ["var/generated/", "test-render-output/", "*.mp4", "*.mov", "*.wav"]
+REQUIRED_TAGS = ["pre-m7-m0-m6-qualification-pass", "m6-production-media-qc-foundation"]
+EXPECTED_ALEMBIC_HEAD = "0049_vcos_long_form_cadence"
+MEDIA_GITIGNORE_PATTERNS = [
+    "var/generated/",
+    "test-render-output/",
+    "*.mp4",
+    "*.mov",
+    "*.wav",
+]
 MEDIA_SUFFIXES = {".mp4", ".mov", ".wav"}
 WHOLE_RUNNER_TIMEOUT_SECONDS = 600
 
@@ -44,7 +49,7 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = [
     "docs/architecture/m2-artifact-workflow.md",
     "docs/architecture/m3-policy-gate-readiness.md",
     "docs/architecture/m4-ops-foundation.md",
-    "docs/architecture/m5-daily-run-context-admission.md",
+    "docs/architecture/m5-editorial-research-context-admission.md",
     "docs/architecture/m6-production-artifacts.md",
     "docs/architecture/policy-snapshot-invariants.md",
     "docs/architecture/profile-compiler.md",
@@ -116,7 +121,9 @@ class RunnerState:
 
 
 def git(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=ROOT, text=True, capture_output=True, check=False)
+    return subprocess.run(
+        ["git", *args], cwd=ROOT, text=True, capture_output=True, check=False
+    )
 
 
 def run_command(
@@ -157,8 +164,12 @@ def run_command(
             exit_code=None,
             timeout_seconds=effective_timeout,
             duration_seconds=round(time.monotonic() - started, 3),
-            stdout_tail=(exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
-            stderr_tail=(exc.stderr or "")[-4000:] if isinstance(exc.stderr, str) else "",
+            stdout_tail=(exc.stdout or "")[-4000:]
+            if isinstance(exc.stdout, str)
+            else "",
+            stderr_tail=(exc.stderr or "")[-4000:]
+            if isinstance(exc.stderr, str)
+            else "",
             timed_out=True,
         )
     state.commands.append(record)
@@ -168,7 +179,13 @@ def run_command(
         state.add(label, "FAIL", timeout_seconds=effective_timeout)
         return False
     if record.exit_code != 0:
-        state.add(label, "FAIL", exit_code=record.exit_code, stderr_tail=record.stderr_tail, stdout_tail=record.stdout_tail)
+        state.add(
+            label,
+            "FAIL",
+            exit_code=record.exit_code,
+            stderr_tail=record.stderr_tail,
+            stdout_tail=record.stdout_tail,
+        )
         return False
     state.add(label, "PASS", duration_seconds=record.duration_seconds)
     return True
@@ -182,23 +199,40 @@ def check_repo_preflight(state: RunnerState) -> None:
     git_root = git(["rev-parse", "--show-toplevel"])
     state.add(
         "repo_path",
-        "PASS" if git_root.returncode == 0 and Path(git_root.stdout.strip()).resolve() == ROOT else "FAIL",
+        "PASS"
+        if git_root.returncode == 0 and Path(git_root.stdout.strip()).resolve() == ROOT
+        else "FAIL",
         expected=str(ROOT),
         actual=git_root.stdout.strip(),
     )
     head = git(["rev-parse", "HEAD"])
-    state.add("head_commit", "PASS" if head.returncode == 0 else "FAIL", head=head.stdout.strip(), stderr=head.stderr.strip())
+    state.add(
+        "head_commit",
+        "PASS" if head.returncode == 0 else "FAIL",
+        head=head.stdout.strip(),
+        stderr=head.stderr.strip(),
+    )
 
     tag_status = {}
     for tag in REQUIRED_TAGS:
-        tag_status[tag] = git(["rev-parse", "-q", "--verify", f"refs/tags/{tag}"]).returncode == 0
-    state.add("required_tags", "PASS" if all(tag_status.values()) else "FAIL", tags=tag_status)
+        tag_status[tag] = (
+            git(["rev-parse", "-q", "--verify", f"refs/tags/{tag}"]).returncode == 0
+        )
+    state.add(
+        "required_tags", "PASS" if all(tag_status.values()) else "FAIL", tags=tag_status
+    )
 
     status = git(["status", "--porcelain"])
     porcelain = [line for line in status.stdout.splitlines() if line.strip()]
-    unrelated = [line for line in porcelain if not dirty_path(line).startswith(ALLOWED_QUALIFICATION_DIRTY_PREFIXES)]
+    unrelated = [
+        line
+        for line in porcelain
+        if not dirty_path(line).startswith(ALLOWED_QUALIFICATION_DIRTY_PREFIXES)
+    ]
     if unrelated:
-        state.add("working_tree_clean", "FAIL", porcelain=porcelain, unrelated_dirty=unrelated)
+        state.add(
+            "working_tree_clean", "FAIL", porcelain=porcelain, unrelated_dirty=unrelated
+        )
     elif porcelain:
         state.add(
             "working_tree_clean",
@@ -209,9 +243,19 @@ def check_repo_preflight(state: RunnerState) -> None:
     else:
         state.add("working_tree_clean", "PASS", porcelain=[])
 
-    missing = [path for path in REQUIRED_SOURCE_OF_TRUTH_PATHS if not (ROOT / path).exists()]
-    m0_m1_final = [path for path in ["reports/m0-final-report.md", "reports/m1-final-report.md"] if (ROOT / path).exists()]
-    m0_m1_waiver_docs = [path for path in ["docs/architecture/m0-scope.md", "docs/architecture/m1-scope.md"] if (ROOT / path).exists()]
+    missing = [
+        path for path in REQUIRED_SOURCE_OF_TRUTH_PATHS if not (ROOT / path).exists()
+    ]
+    m0_m1_final = [
+        path
+        for path in ["reports/m0-final-report.md", "reports/m1-final-report.md"]
+        if (ROOT / path).exists()
+    ]
+    m0_m1_waiver_docs = [
+        path
+        for path in ["docs/architecture/m0-scope.md", "docs/architecture/m1-scope.md"]
+        if (ROOT / path).exists()
+    ]
     design_report_present = any(
         ("pre-m7" in path.name.lower() or "pre_m7" in path.name.lower())
         and ("design" in path.name.lower() or "thiết" in path.name.lower())
@@ -228,27 +272,53 @@ def check_repo_preflight(state: RunnerState) -> None:
         design_report_present=design_report_present,
     )
 
-    gitignore_lines = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
-    gitignore_status = {pattern: pattern in gitignore_lines for pattern in MEDIA_GITIGNORE_PATTERNS}
-    state.add("generated_media_gitignore", "PASS" if all(gitignore_status.values()) else "FAIL", patterns=gitignore_status)
+    gitignore_lines = set(
+        (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    )
+    gitignore_status = {
+        pattern: pattern in gitignore_lines for pattern in MEDIA_GITIGNORE_PATTERNS
+    }
+    state.add(
+        "generated_media_gitignore",
+        "PASS" if all(gitignore_status.values()) else "FAIL",
+        patterns=gitignore_status,
+    )
 
     staged = git(["diff", "--cached", "--name-only", "--diff-filter=ACMRT"])
     staged_files = [line.strip() for line in staged.stdout.splitlines() if line.strip()]
-    staged_binary = [path for path in staged_files if Path(path).suffix.lower() in MEDIA_SUFFIXES]
-    state.add("staged_binary_media", "PASS" if not staged_binary else "FAIL", staged_binary_media=staged_binary)
+    staged_binary = [
+        path for path in staged_files if Path(path).suffix.lower() in MEDIA_SUFFIXES
+    ]
+    state.add(
+        "staged_binary_media",
+        "PASS" if not staged_binary else "FAIL",
+        staged_binary_media=staged_binary,
+    )
 
 
 def check_dependencies(state: RunnerState) -> bool:
-    missing_bins = [str(path) for path in [ALEMBIC, PYTEST, VCOS, PYTHON] if not path.exists()]
-    state.add("venv_commands", "PASS" if not missing_bins else "BLOCKED", missing=missing_bins)
+    missing_bins = [
+        str(path) for path in [ALEMBIC, PYTEST, VCOS, PYTHON] if not path.exists()
+    ]
+    state.add(
+        "venv_commands", "PASS" if not missing_bins else "BLOCKED", missing=missing_bins
+    )
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
-    state.add("ffmpeg_ffprobe", "PASS" if ffmpeg and ffprobe else "BLOCKED", ffmpeg=ffmpeg, ffprobe=ffprobe)
+    state.add(
+        "ffmpeg_ffprobe",
+        "PASS" if ffmpeg and ffprobe else "BLOCKED",
+        ffmpeg=ffmpeg,
+        ffprobe=ffprobe,
+    )
     return not missing_bins and bool(ffmpeg and ffprobe)
 
 
 def admin_url() -> str:
-    return os.getenv("VCOS_TEST_ADMIN_DATABASE_URL", "postgresql+psycopg://vcos:vcos@localhost:55432/postgres")
+    return os.getenv(
+        "VCOS_TEST_ADMIN_DATABASE_URL",
+        "postgresql+psycopg://vcos:vcos@localhost:55432/postgres",
+    )
 
 
 def psycopg_conninfo(url: str, *, database: str | None = None) -> str:
@@ -267,15 +337,21 @@ def create_disposable_database(state: RunnerState) -> bool:
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            with psycopg.connect(psycopg_conninfo(admin_url()), autocommit=True) as connection:
+            with psycopg.connect(
+                psycopg_conninfo(admin_url()), autocommit=True
+            ) as connection:
                 connection.execute("select 1")
-                connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+                connection.execute(
+                    sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name))
+                )
             state.add("postgres_disposable_db", "PASS", database=db_name)
             return True
         except Exception as exc:
             last_error = exc
             time.sleep(1)
-    state.add("postgres_disposable_db", "BLOCKED", database=db_name, error=str(last_error))
+    state.add(
+        "postgres_disposable_db", "BLOCKED", database=db_name, error=str(last_error)
+    )
     return False
 
 
@@ -283,11 +359,25 @@ def drop_disposable_database(state: RunnerState) -> None:
     if not state.db_name:
         return
     try:
-        with psycopg.connect(psycopg_conninfo(admin_url()), autocommit=True) as connection:
-            connection.execute("select pg_terminate_backend(pid) from pg_stat_activity where datname = %s", (state.db_name,))
-            connection.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(state.db_name)))
+        with psycopg.connect(
+            psycopg_conninfo(admin_url()), autocommit=True
+        ) as connection:
+            connection.execute(
+                "select pg_terminate_backend(pid) from pg_stat_activity where datname = %s",
+                (state.db_name,),
+            )
+            connection.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                    sql.Identifier(state.db_name)
+                )
+            )
     except Exception as exc:
-        state.add("postgres_disposable_db_drop", "WARN", error=str(exc), database=state.db_name)
+        state.add(
+            "postgres_disposable_db_drop",
+            "WARN",
+            error=str(exc),
+            database=state.db_name,
+        )
 
 
 def run_migration_seed_pytest_sequence(state: RunnerState, *, deadline: float) -> None:
@@ -310,9 +400,15 @@ def run_migration_seed_pytest_sequence(state: RunnerState, *, deadline: float) -
     ]
     for label, command, timeout in commands:
         if time.monotonic() >= deadline:
-            state.add("runner_deadline", "BLOCKED", timeout_seconds=WHOLE_RUNNER_TIMEOUT_SECONDS)
+            state.add(
+                "runner_deadline",
+                "BLOCKED",
+                timeout_seconds=WHOLE_RUNNER_TIMEOUT_SECONDS,
+            )
             return
-        ok = run_command(state, label, command, env=env, timeout=timeout, deadline=deadline)
+        ok = run_command(
+            state, label, command, env=env, timeout=timeout, deadline=deadline
+        )
         if not ok:
             return
 
@@ -355,7 +451,14 @@ def run_local_mp4_smoke(state: RunnerState, *, deadline: float) -> None:
         str(output_path),
     ]
     env = os.environ.copy()
-    if not run_command(state, "local_mp4_ffmpeg_smoke", command, env=env, timeout=min(60, int(deadline - time.monotonic())), deadline=deadline):
+    if not run_command(
+        state,
+        "local_mp4_ffmpeg_smoke",
+        command,
+        env=env,
+        timeout=min(60, int(deadline - time.monotonic())),
+        deadline=deadline,
+    ):
         return
     probe = subprocess.run(
         [
@@ -387,11 +490,17 @@ def run_local_mp4_smoke(state: RunnerState, *, deadline: float) -> None:
         "size_bytes": size,
         "gitignored": ignored,
     }
-    state.add("local_mp4_ffprobe_smoke", "PASS" if size > 0 and ignored else "FAIL", **state.smoke)
+    state.add(
+        "local_mp4_ffprobe_smoke",
+        "PASS" if size > 0 and ignored else "FAIL",
+        **state.smoke,
+    )
 
 
 def command_summary(state: RunnerState, label_prefix: str) -> str:
-    matches = [record for record in state.commands if record.label.startswith(label_prefix)]
+    matches = [
+        record for record in state.commands if record.label.startswith(label_prefix)
+    ]
     if not matches:
         return "not_run"
     return "; ".join(f"{record.label}: exit={record.exit_code}" for record in matches)
@@ -408,28 +517,64 @@ def write_reports(state: RunnerState) -> None:
     REPORT_MD.parent.mkdir(parents=True, exist_ok=True)
     verdict = state.verdict()
     safe = "YES" if state.safe_to_start_m7() else "NO"
-    head = next((check.details.get("head") for check in state.checks if check.name == "head_commit"), "")
-    tags = next((check.details.get("tags") for check in state.checks if check.name == "required_tags"), {})
-    source = next((check.details for check in state.checks if check.name == "source_of_truth"), {})
+    head = next(
+        (
+            check.details.get("head")
+            for check in state.checks
+            if check.name == "head_commit"
+        ),
+        "",
+    )
+    tags = next(
+        (
+            check.details.get("tags")
+            for check in state.checks
+            if check.name == "required_tags"
+        ),
+        {},
+    )
+    source = next(
+        (check.details for check in state.checks if check.name == "source_of_truth"), {}
+    )
     smoke = state.smoke or {}
-    failed_commands = [asdict(record) for record in state.commands if record.exit_code not in (0, None) or record.timed_out]
-    pytest_commands = [asdict(record) for record in state.commands if record.label.startswith("pytest_qualification")]
+    failed_commands = [
+        asdict(record)
+        for record in state.commands
+        if record.exit_code not in (0, None) or record.timed_out
+    ]
+    pytest_commands = [
+        asdict(record)
+        for record in state.commands
+        if record.label.startswith("pytest_qualification")
+    ]
     bugs = []
     repairs = []
     if state.blocked_reasons:
-        repairs.append("Unblock environment/preflight, then rerun scripts/pre_m7_qualification.py.")
+        repairs.append(
+            "Unblock environment/preflight, then rerun scripts/pre_m7_qualification.py."
+        )
     if state.fail_reasons:
         repairs.append("Repair failed P0 qualification checks before starting M7.")
         bugs.extend(state.fail_reasons)
     if not bugs:
-        bugs.append("None recorded" if verdict == "PASS" else "Not fully assessed due to BLOCKED preflight")
+        bugs.append(
+            "None recorded"
+            if verdict == "PASS"
+            else "Not fully assessed due to BLOCKED preflight"
+        )
     waivers = []
     if source.get("m0_m1_waiver_applied"):
-        waivers.append("M0/M1 final reports absent; accepted docs/architecture/m0-scope.md and docs/architecture/m1-scope.md per explicit waiver.")
+        waivers.append(
+            "M0/M1 final reports absent; accepted docs/architecture/m0-scope.md and docs/architecture/m1-scope.md per explicit waiver."
+        )
     if not source.get("design_report_present"):
-        waivers.append("Uploaded/deep-research Pre-M7 design report is not present as a repo file; user prompt used as implementation brief.")
+        waivers.append(
+            "Uploaded/deep-research Pre-M7 design report is not present as a repo file; user prompt used as implementation brief."
+        )
     if check_status(state, "working_tree_clean") == "WARN":
-        waivers.append("Working tree dirty only because Pre-M7 qualification deliverables/report are uncommitted for user review.")
+        waivers.append(
+            "Working tree dirty only because Pre-M7 qualification deliverables/report are uncommitted for user review."
+        )
 
     md = f"""# Pre-M7 M0→M6 Qualification Report
 
@@ -540,7 +685,10 @@ def write_reports(state: RunnerState) -> None:
         "bugs_found": bugs,
         "required_repairs": repairs,
     }
-    REPORT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    REPORT_JSON.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 def main() -> int:

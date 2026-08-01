@@ -29,7 +29,7 @@ FinalVideoDecisionValue = Literal["UPLOAD", "DO_NOT_UPLOAD"]
 class NextVideoRead(BaseModel):
     project_id: uuid.UUID
     workflow_run_id: uuid.UUID | None = None
-    lane: str
+    lane: Literal["LONG_FORM"]
     content_mode: str
     assignment_mode: str
     title: str
@@ -118,7 +118,7 @@ class FinalReviewRead(BaseModel):
     state: str
     title: str
     description: str
-    lane: str
+    lane: Literal["LONG_FORM"]
     content_mode: str
     series_title: str | None = None
     run_label: str | None = None

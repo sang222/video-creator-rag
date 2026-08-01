@@ -54,7 +54,7 @@ class SceneVisualIntent(BaseModel):
     scene_id: str = Field(min_length=1)
     semantic_intent: str = Field(min_length=1)
     target_duration_seconds: float = Field(gt=0)
-    aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
+    aspect_ratio: Literal["16:9"] = "16:9"
     crop_safety_required: bool = True
     previous_scene_summary: str | None = None
     next_scene_summary: str | None = None
@@ -120,15 +120,28 @@ class VisualScoreThresholds(BaseModel):
         return self
 
     @classmethod
-    def from_policy(cls, policy: Mapping[str, Any] | BaseModel) -> "VisualScoreThresholds":
+    def from_policy(
+        cls, policy: Mapping[str, Any] | BaseModel
+    ) -> "VisualScoreThresholds":
         """Build thresholds from an injected catalog snapshot or policy family."""
 
-        source = policy.model_dump(mode="python") if isinstance(policy, BaseModel) else dict(policy)
+        source = (
+            policy.model_dump(mode="python")
+            if isinstance(policy, BaseModel)
+            else dict(policy)
+        )
         selected = dict(source.get("visual_continuity_policy") or source)
         semantic = selected.get("semantic_match_score")
         adjacency = selected.get("adjacency_continuity_score")
-        required = {"hard_conflicts_block", "cross_provider_cut_requires_both_scores_pass"}
-        if not isinstance(semantic, Mapping) or not isinstance(adjacency, Mapping) or not required <= set(selected):
+        required = {
+            "hard_conflicts_block",
+            "cross_provider_cut_requires_both_scores_pass",
+        }
+        if (
+            not isinstance(semantic, Mapping)
+            or not isinstance(adjacency, Mapping)
+            or not required <= set(selected)
+        ):
             raise ValueError("VISUAL_SCORE_THRESHOLDS_POLICY_REQUIRED")
         return cls(
             semantic_pass_min=semantic["pass_min"],
@@ -162,8 +175,14 @@ class VisualRankingWeights(BaseModel):
         return self
 
     @classmethod
-    def from_policy(cls, policy: Mapping[str, Any] | BaseModel) -> "VisualRankingWeights":
-        source = policy.model_dump(mode="python") if isinstance(policy, BaseModel) else dict(policy)
+    def from_policy(
+        cls, policy: Mapping[str, Any] | BaseModel
+    ) -> "VisualRankingWeights":
+        source = (
+            policy.model_dump(mode="python")
+            if isinstance(policy, BaseModel)
+            else dict(policy)
+        )
         selected = dict(source.get("visual_continuity_policy") or source)
         weights = selected.get("ranking_weights")
         if not isinstance(weights, Mapping):
@@ -190,8 +209,14 @@ class VisualRiskPenalties(BaseModel):
         return self
 
     @classmethod
-    def from_policy(cls, policy: Mapping[str, Any] | BaseModel) -> "VisualRiskPenalties":
-        source = policy.model_dump(mode="python") if isinstance(policy, BaseModel) else dict(policy)
+    def from_policy(
+        cls, policy: Mapping[str, Any] | BaseModel
+    ) -> "VisualRiskPenalties":
+        source = (
+            policy.model_dump(mode="python")
+            if isinstance(policy, BaseModel)
+            else dict(policy)
+        )
         selected = dict(source.get("visual_continuity_policy") or source)
         penalties = selected.get("explicit_risk_penalties")
         if not isinstance(penalties, Mapping):
@@ -217,8 +242,14 @@ class VeoDurationFitThresholds(BaseModel):
         return self
 
     @classmethod
-    def from_policy(cls, policy: Mapping[str, Any] | BaseModel) -> "VeoDurationFitThresholds":
-        source = policy.model_dump(mode="python") if isinstance(policy, BaseModel) else dict(policy)
+    def from_policy(
+        cls, policy: Mapping[str, Any] | BaseModel
+    ) -> "VeoDurationFitThresholds":
+        source = (
+            policy.model_dump(mode="python")
+            if isinstance(policy, BaseModel)
+            else dict(policy)
+        )
         selected = dict(source.get("visual_continuity_policy") or source)
         duration_fit = selected.get("veo_duration_fit")
         if not isinstance(duration_fit, Mapping):

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import runpy
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ from app.core.actor import authenticated_actor_context
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
+from app.db.models.m10_1 import HumanUploadTask
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
 from app.db.models.production_workflow import (
@@ -59,11 +62,52 @@ from app.workers.production_workflow import ProductionWorkflowWorker
 
 
 ROOT = Path(__file__).resolve().parents[1]
-QUALIFICATION_SCRIPT = (
-    "Verified evidence guides decisions with exact source facts. "
-    "Package timing keeps approved statements aligned to policy. "
-    "Operators review private media before every manual publication."
+FULL_DURATION_QUALIFICATION = (
+    os.getenv("VCOS_PHASED_FULL_DURATION_QUALIFICATION") == "1"
 )
+QUALIFICATION_DURATION_MIN_MS = 360_000 if FULL_DURATION_QUALIFICATION else 6_000
+QUALIFICATION_DURATION_TARGET_MS = 540_000 if FULL_DURATION_QUALIFICATION else 12_000
+QUALIFICATION_DURATION_MAX_MS = 720_000 if FULL_DURATION_QUALIFICATION else 15_000
+
+
+def _qualification_script() -> str:
+    if not FULL_DURATION_QUALIFICATION:
+        return (
+            "Verified evidence guides decisions with exact source facts. "
+            "Package timing keeps approved statements aligned to policy. "
+            "Operators review private media before every manual publication."
+        )
+    actions = (
+        "maps",
+        "documents",
+        "checks",
+        "compares",
+        "measures",
+        "reviews",
+        "records",
+    )
+    objects = (
+        "one operating handoff",
+        "the approved audience promise",
+        "a source-bound workflow claim",
+        "the responsible human boundary",
+        "a deterministic production input",
+        "the channel-scoped policy",
+        "the intended viewer outcome",
+    )
+    return " ".join(
+        (
+            f"Evidence segment {index:03d} {actions[index % len(actions)]} "
+            f"{objects[index % len(objects)]}, preserves exact ownership, "
+            "and keeps manual publication auditable."
+        )
+        # Calibrated against the pinned Samantha/150 WPM runtime so the
+        # deterministic narration lands near the canonical 540-second target.
+        for index in range(1, 60)
+    )
+
+
+QUALIFICATION_SCRIPT = _qualification_script()
 
 
 class _QualificationTrustedProducer:
@@ -186,6 +230,8 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    qualification_started = time.perf_counter()
+    disk_free_start = shutil.disk_usage(tmp_path).free
     assert Path("/usr/bin/say").is_file()
     assert shutil.which("ffmpeg")
     assert shutil.which("ffprobe")
@@ -198,9 +244,9 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
     support_scope.__globals__["_approved_script"] = lambda: QUALIFICATION_SCRIPT
     base = phase3["_scope"](
         db_session,
-        minimum_ms=6_000,
-        target_ms=12_000,
-        maximum_ms=15_000,
+        minimum_ms=QUALIFICATION_DURATION_MIN_MS,
+        target_ms=QUALIFICATION_DURATION_TARGET_MS,
+        maximum_ms=QUALIFICATION_DURATION_MAX_MS,
     )
     scope = support_scope(db_session, base)
     _configure_verified_destination(scope)
@@ -269,6 +315,12 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
         "thumbnail_ffmpeg": 0,
         "archive_copy": 0,
     }
+    effect_elapsed_seconds = {
+        "narration": 0.0,
+        "render": 0.0,
+        "thumbnail": 0.0,
+        "archive_copy": 0.0,
+    }
     forbid_render_reinvoke = False
     forbid_thumbnail_reinvoke = False
     real_run = subprocess.run
@@ -278,12 +330,15 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
         nonlocal forbid_render_reinvoke, forbid_thumbnail_reinvoke
         values = [str(value) for value in argv]
         executable = Path(values[0]).name if values else ""
+        timer_key = None
         if values and values[0] == "/usr/bin/say":
             calls["say"] += 1
+            timer_key = "narration"
         if executable == "ffmpeg" and "-filter_complex_script" in values:
             if forbid_render_reinvoke:
                 raise AssertionError("FFmpeg render effect was invoked twice")
             calls["render_ffmpeg"] += 1
+            timer_key = "render"
         if (
             executable == "ffmpeg"
             and "-frames:v" in values
@@ -293,13 +348,21 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
             if forbid_thumbnail_reinvoke:
                 raise AssertionError("FFmpeg thumbnail effect was invoked twice")
             calls["thumbnail_ffmpeg"] += 1
-        return real_run(argv, *args, **kwargs)
+            timer_key = "thumbnail"
+        started_at = time.perf_counter()
+        result = real_run(argv, *args, **kwargs)
+        if timer_key is not None:
+            effect_elapsed_seconds[timer_key] += time.perf_counter() - started_at
+        return result
 
     def tracked_copyfileobj(*args, **kwargs):
         calls["archive_copy"] += 1
         if calls["archive_copy"] > 1:
             raise AssertionError("archive copy effect was invoked twice")
-        return real_copyfileobj(*args, **kwargs)
+        started_at = time.perf_counter()
+        result = real_copyfileobj(*args, **kwargs)
+        effect_elapsed_seconds["archive_copy"] += time.perf_counter() - started_at
+        return result
 
     monkeypatch.setattr(subprocess, "run", tracked_run)
     monkeypatch.setattr(shutil, "copyfileobj", tracked_copyfileobj)
@@ -370,7 +433,11 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
         == hashlib.sha256(QUALIFICATION_SCRIPT.encode()).hexdigest()
     )
     assert narration_receipt["duration_ms"] > 0
-    assert 6_000 <= narration_receipt["duration_ms"] <= 15_000
+    assert (
+        QUALIFICATION_DURATION_MIN_MS
+        <= narration_receipt["duration_ms"]
+        <= QUALIFICATION_DURATION_MAX_MS
+    )
     assert narration_intent["state"] == "VERIFIED"
 
     render_command_id = command_id_for(
@@ -624,6 +691,16 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
             )
             <= 250
         )
+        upload_task_count = len(
+            list(
+                check.scalars(
+                    select(HumanUploadTask.id).where(
+                        HumanUploadTask.video_project_id == scope.project.id
+                    )
+                )
+            )
+        )
+        assert upload_task_count == 0
 
         authority_text = json.dumps(
             {
@@ -639,6 +716,94 @@ def test_v2_native_real_say_h264_aac_and_archive_effects_reconcile_exactly_once(
         assert "mr1://" not in authority_text
 
         assert run.archive_receipt_hash is not None
+        evidence_path_value = os.getenv("VCOS_PHASED_FULL_DURATION_EVIDENCE_PATH")
+        if FULL_DURATION_QUALIFICATION and evidence_path_value:
+            evidence_path = Path(evidence_path_value).resolve()
+            evidence_path.parent.mkdir(parents=True, exist_ok=True)
+            workspace_files = [
+                item
+                for item in adapter.root.rglob("*")
+                if item.is_file() and not item.is_symlink()
+            ]
+            workspace_size_bytes = sum(item.stat().st_size for item in workspace_files)
+            timeline_path = (
+                adapter.root
+                / ledger_by_stage["MEDIA"].effect_journal["timeline_relative_path"]
+            )
+            plan_path = (
+                adapter.root
+                / ledger_by_stage["RENDER"].effect_journal["plan_relative_path"]
+            )
+            evidence = {
+                "schema_version": ("vcos.phaseD-full-duration-qualification.v1"),
+                "result": "PASS",
+                "qualification_only": True,
+                "channel_template_key": "saas_digital_leverage",
+                "channel_profile_version_id": str(scope.profile.id),
+                "compiled_policy_snapshot_id": str(scope.policy.id),
+                "channel_workspace_id": str(scope.channel.id),
+                "video_project_id": str(scope.project.id),
+                "workflow_run_id": str(started.id),
+                "production_package_artifact_version_id": str(
+                    run.production_package_artifact_version_id
+                ),
+                "duration_contract": scope.duration.model_dump(mode="json"),
+                "measured_duration_seconds": float(final_media.duration_seconds),
+                "render_elapsed_seconds": round(effect_elapsed_seconds["render"], 3),
+                "narration_elapsed_seconds": round(
+                    effect_elapsed_seconds["narration"], 3
+                ),
+                "archive_elapsed_seconds": round(
+                    effect_elapsed_seconds["archive_copy"]
+                    + effect_elapsed_seconds["thumbnail"],
+                    3,
+                ),
+                "total_elapsed_seconds": round(
+                    time.perf_counter() - qualification_started, 3
+                ),
+                "disk_free_start_bytes": disk_free_start,
+                "disk_free_end_bytes": shutil.disk_usage(tmp_path).free,
+                "workspace_size_bytes": workspace_size_bytes,
+                "peak_disk_usage": "NOT_AVAILABLE_SAMPLED_START_END_ONLY",
+                "output_path": str(render_output),
+                "output_size_bytes": render_output.stat().st_size,
+                "output_checksum_sha256": render_checksum,
+                "archive_path": str(archive_output),
+                "archive_size_bytes": archive_output.stat().st_size,
+                "archive_receipt_hash": run.archive_receipt_hash,
+                "final_media_ref_id": str(final_media.id),
+                "final_review_candidate_id": str(run.final_review_candidate_id),
+                "canonical_timeline_path": str(timeline_path),
+                "canonical_timeline_size_bytes": (timeline_path.stat().st_size),
+                "canonical_timeline_hash": (run.canonical_media_timeline_hash),
+                "scene_count": len(timeline["scenes"]),
+                "native_render_plan_path": str(plan_path),
+                "native_render_plan_size_bytes": plan_path.stat().st_size,
+                "native_render_plan_hash": run.native_render_plan_hash,
+                "video_codec": (
+                    "h264" if native_qc["checks"]["video_codec_h264"] else "UNKNOWN"
+                ),
+                "audio_codec": native_qc["checks"]["audio_codec"],
+                "width": native_qc["checks"]["width"],
+                "height": native_qc["checks"]["height"],
+                "technical_qc_result": native_qc["result"],
+                "creative_qc_hash": run.creative_qc_receipt_hash,
+                "archive_verification_state": "VERIFIED",
+                "narration_present": timeline["narration_present"],
+                "narration_audio_checksum": timeline["audio_checksum"],
+                "effect_invocation_counts": {
+                    row.stage: row.effect_invocation_count for row in ledgers
+                },
+                "physical_call_counts": calls,
+                "retry_scheduled_observations": 4,
+                "upload_task_count": upload_task_count,
+                "paid_provider_calls": 0,
+                "automatic_publish": False,
+            }
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
         _require_verified_final_media(
             check,
             scope.project.id,

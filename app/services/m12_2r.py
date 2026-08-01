@@ -27,8 +27,6 @@ from app.core.config import Settings, get_settings
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models import (
-    Artifact,
-    ArtifactVersion,
     ChannelWorkspace,
     FirstScriptedVideoPackage,
     HumanUploadTask,
@@ -41,7 +39,6 @@ from app.db.models import (
 from app.services.audit import AuditService
 from app.services.company_access import require_company_permission
 from app.services.domain_events import DomainEventBus
-from app.services.m1 import PackagingHandoffReadService
 from app.services.m10_3 import YouTubePublicStatsProvider
 
 
@@ -80,8 +77,6 @@ def parse_youtube_video_id(value: str) -> str:
         if parsed.path == "/watch":
             values = parse_qs(parsed.query).get("v") or []
             candidate = values[0] if values else None
-        elif parsed.path.startswith("/shorts/"):
-            candidate = parsed.path.removeprefix("/shorts/").split("/")[0]
     elif host == "youtu.be":
         candidate = parsed.path.lstrip("/").split("/")[0]
     if candidate and YOUTUBE_VIDEO_ID_RE.fullmatch(candidate):
@@ -140,109 +135,6 @@ class PublishHandoffLedgerService:
             tasks=[self._read_task(task) for task in tasks],
             **counts,
         )
-
-    def create_upload_task_from_package(
-        self,
-        package_id: uuid.UUID,
-        *,
-        actor: ActorContext | None = None,
-    ) -> HumanUploadTaskLedgerRead:
-        candidate_version = self.session.get(ArtifactVersion, package_id)
-        if candidate_version is not None:
-            candidate_artifact = self.session.get(
-                Artifact, candidate_version.artifact_id
-            )
-            if (
-                candidate_artifact is not None
-                and candidate_artifact.artifact_type == "production_package"
-                and (candidate_version.content or {}).get("schema_version")
-                == "production.package.v2"
-            ):
-                raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
-        package = self.session.get(FirstScriptedVideoPackage, package_id)
-        if package is None:
-            raise NotFoundError(f"first scripted video package not found: {package_id}")
-        channel = self._require_channel(package.channel_id)
-        if actor is not None:
-            require_company_permission(
-                self.session,
-                actor=actor,
-                permission="publish.prepare",
-                company_id=channel.company_id,
-            )
-        project = (
-            self.session.get(VideoProject, package.video_project_id)
-            if package.video_project_id is not None
-            else None
-        )
-        if (package.artifacts or {}).get(
-            "schema_version"
-        ) == "production.package.v2" or (
-            project is not None and getattr(project, "schema_version", "v1") == "v2"
-        ):
-            raise ValidationFailureError("FINAL_MEDIA_DECISION_REQUIRED")
-        if package.package_status != "READY_FOR_HUMAN_REVIEW":
-            raise ValidationFailureError(
-                "package must be READY_FOR_HUMAN_REVIEW before manual upload handoff"
-            )
-        from app.services.r3d9_ux2 import PackagingReviewQueueService
-
-        PackagingReviewQueueService(self.session).assert_upload_task_allowed(package.id)
-        existing = self.session.scalars(
-            select(HumanUploadTask)
-            .where(HumanUploadTask.first_scripted_video_package_id == package.id)
-            .where(HumanUploadTask.destination == "YOUTUBE")
-            .where(HumanUploadTask.task_state.not_in(TERMINAL_UPLOAD_TASK_STATES))
-            .order_by(desc(HumanUploadTask.created_at))
-            .limit(1)
-        ).one_or_none()
-        if existing is not None:
-            return self._read_task(existing)
-        handoff = PackagingHandoffReadService(self.session).build(package.id)
-        snapshot = _package_task_snapshot(package, handoff.model_dump(mode="json"))
-        task = HumanUploadTask(
-            company_id=channel.company_id,
-            channel_workspace_id=channel.id,
-            upload_card_id=None,
-            video_project_id=package.video_project_id,
-            first_scripted_video_package_id=package.id,
-            publish_package_id=None,
-            destination="YOUTUBE",
-            target_platform="YOUTUBE_LONG",
-            task_state="READY_FOR_HUMAN_UPLOAD",
-            upload_card_ref=f"first_scripted_video_package:{package.id}:upload_card_copy",
-            title_snapshot=snapshot["title"],
-            description_snapshot=snapshot["description"],
-            thumbnail_ref=snapshot["thumbnail_ref"],
-            subtitle_refs=snapshot["subtitle_refs"],
-            required_assets=snapshot["required_assets"],
-            checklist=snapshot["checklist"],
-            required_checklist=snapshot["checklist"],
-            scheduled_time_suggestion=_coerce_datetime(
-                snapshot.get("scheduled_time_suggestion")
-            ),
-            actual_uploaded_video_id=None,
-        )
-        self.session.add(task)
-        self.session.flush()
-        self._record_event(
-            event_type="HUMAN_UPLOAD_TASK_CREATED",
-            aggregate_type="human_upload_task",
-            aggregate_id=task.id,
-            target_type="human_upload_task",
-            target_id=task.id,
-            company_id=task.company_id,
-            reason_code="NEEDS_HUMAN_UPLOAD",
-            payload={
-                "channel_id": str(task.channel_workspace_id),
-                "first_scripted_video_package_id": str(package.id),
-                "destination": task.destination,
-                "status": task.task_state,
-                "manual_only": True,
-                "no_upload_api_by_policy": True,
-            },
-        )
-        return self._read_task(task)
 
     def start_upload_task(
         self,
@@ -912,7 +804,7 @@ class PublishHandoffLedgerService:
             publish_package_id=task.publish_package_id,
             destination="YOUTUBE",
             status=status,  # type: ignore[arg-type]
-            upload_card_ref=task.upload_card_ref,
+            publish_metadata_ref=task.publish_metadata_ref,
             title_snapshot=task.title_snapshot or "Chưa có tiêu đề",
             description_snapshot=task.description_snapshot,
             thumbnail_ref=task.thumbnail_ref,
@@ -1049,83 +941,6 @@ def _task_next_action(status: str) -> str:
     }.get(status, "Kiểm tra task upload thủ công.")
 
 
-def _package_task_snapshot(
-    package: FirstScriptedVideoPackage, handoff: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    artifacts = package.artifacts or {}
-    upload_handoff = _dict((handoff or {}).get("upload_handoff_copy"))
-    thumbnail_handoff = _dict((handoff or {}).get("thumbnail_handoff"))
-    timing = _dict((handoff or {}).get("publish_timing_recommendation"))
-    upload_copy = (
-        artifacts.get("upload_card_copy")
-        if isinstance(artifacts.get("upload_card_copy"), dict)
-        else {}
-    )
-    metadata = (
-        artifacts.get("metadata_package")
-        if isinstance(artifacts.get("metadata_package"), dict)
-        else {}
-    )
-    visual = (
-        artifacts.get("visual_plan")
-        if isinstance(artifacts.get("visual_plan"), dict)
-        else {}
-    )
-    title = str(
-        upload_handoff.get("title")
-        or upload_copy.get("title")
-        or metadata.get("title")
-        or f"First scripted package {package.id}"
-    )
-    description = (
-        upload_handoff.get("description")
-        or upload_copy.get("description")
-        or metadata.get("description")
-    )
-    checklist_blob = (
-        artifacts.get("human_review_checklist")
-        if isinstance(artifacts.get("human_review_checklist"), dict)
-        else {}
-    )
-    checklist = _json_list(upload_handoff.get("checklist_items_json")) or [
-        {"item": key, "state": value} for key, value in sorted(checklist_blob.items())
-    ]
-    if handoff:
-        checklist.append(
-            {
-                "item": "packaging_gate_status",
-                "state": _dict(handoff.get("packaging_gate_summary")).get(
-                    "overall_status", "REVIEW_REQUIRED"
-                ),
-            }
-        )
-    return {
-        "title": title,
-        "description": str(description) if description else None,
-        "thumbnail_ref": thumbnail_handoff.get("drive_ref")
-        or thumbnail_handoff.get("thumbnail_ref")
-        or metadata.get("thumbnail_ref")
-        or metadata.get("planned_thumbnail_ref"),
-        "subtitle_refs": _json_list(
-            upload_handoff.get("subtitle_refs_json")
-            or metadata.get("subtitle_refs")
-            or metadata.get("caption_refs")
-        ),
-        "required_assets": [
-            {"type": "metadata_package", "ready": bool(metadata)},
-            {"type": "visual_plan", "ready": bool(visual)},
-            {"type": "upload_card_copy", "ready": bool(upload_copy)},
-            {"type": "packaging_handoff", "ready": bool(handoff)},
-        ],
-        "scheduled_time_suggestion": timing.get("suggested_publish_time_channel_tz"),
-        "checklist": checklist
-        or [
-            {"item": "upload_manual_only", "state": "PENDING"},
-            {"item": "paste_back_youtube_url_or_video_id", "state": "PENDING"},
-        ],
-    }
-
-
 def _package_metadata_diff(
     task: HumanUploadTask, data: BackfillUploadedVideoRequest
 ) -> dict[str, Any]:
@@ -1186,12 +1001,6 @@ def _coerce_datetime(value: Any) -> datetime | None:
         except ValueError:
             return None
     return None
-
-
-def _json_list(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [item if isinstance(item, dict) else {"value": item} for item in value]
 
 
 def _dict(value: Any) -> dict[str, Any]:

@@ -15,7 +15,11 @@ from app.contracts.caption_voice_quality import (
     CreativeQualityGateResult,
     NarrationAudioAnalysis,
 )
-from app.contracts.native_renderer import CanvasSpec, NativeRenderPlan, NativeRenderScene
+from app.contracts.native_renderer import (
+    CanvasSpec,
+    NativeRenderPlan,
+    NativeRenderScene,
+)
 from app.contracts.temporal_authority import (
     DisplayCaptionText,
     DisplayCaptionToken,
@@ -24,7 +28,6 @@ from app.contracts.temporal_authority import (
     VerifiedNarrationAlignment,
     VerifiedNarrationWord,
 )
-from app.services.caption_ass import build_caption_ass_document
 from app.services.caption_voice_quality import (
     CaptionAudioSyncGate,
     CaptionBoundsPreflight,
@@ -39,14 +42,20 @@ from app.services.caption_voice_quality import (
     TimelineDriftGate,
 )
 from app.services.creative_media_qc import TechnicalMediaQC
-from app.services.native_ffmpeg_renderer import FFmpegCommandBuilder, NativeFFmpegRenderer
+from app.services.native_ffmpeg_renderer import (
+    FFmpegCommandBuilder,
+    NativeFFmpegRenderer,
+)
 from app.services.native_motion_compiler import NativeMotionCompiler
 from app.services.native_render_plan import (
     canonical_caption_render_hash,
     canonical_plan_hash,
     stable_hash,
 )
-from app.services.temporal_authority import CanonicalMediaTimelineCompiler, SpokenTextNormalizer
+from app.services.temporal_authority import (
+    CanonicalMediaTimelineCompiler,
+    SpokenTextNormalizer,
+)
 
 
 FFMPEG_FULL = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
@@ -58,17 +67,37 @@ def pacing_policy() -> dict:
         "policy_version": "fixture-narration-pacing/v1",
         "silence_gap_threshold_ms": 350,
         "body_active_speech_wpm": {
-            "pass": [145, 170], "review": [135, 180], "block_above": 180,
+            "pass": [145, 170],
+            "review": [135, 180],
+            "block_above": 180,
             "extreme_slow_block_below": 120,
         },
         "body_delivered_wpm": {
-            "pass": [130, 155], "review": [120, 165], "block_above": 165,
+            "pass": [130, 155],
+            "review": [120, 165],
+            "block_above": 165,
             "extreme_slow_block_below": 105,
         },
-        "hook_first_8s_active_wpm": {"pass_max": 180, "review_max": 188, "block_above": 188},
-        "comma_pause_ms": {"pass": [180, 320], "review": [140, 380], "block_below": 140},
-        "sentence_pause_ms": {"pass": [320, 650], "review": [250, 800], "block_below": 250},
-        "section_pause_ms": {"pass": [600, 1200], "review": [450, 1500], "block_below": 450},
+        "hook_first_8s_active_wpm": {
+            "pass_max": 180,
+            "review_max": 188,
+            "block_above": 188,
+        },
+        "comma_pause_ms": {
+            "pass": [180, 320],
+            "review": [140, 380],
+            "block_below": 140,
+        },
+        "sentence_pause_ms": {
+            "pass": [320, 650],
+            "review": [250, 800],
+            "block_below": 250,
+        },
+        "section_pause_ms": {
+            "pass": [600, 1200],
+            "review": [450, 1500],
+            "block_below": 450,
+        },
         "emergency_atempo": {
             "max_abs_delta_percent_without_human": 2,
             "human_approval_required_above_percent": 2,
@@ -77,37 +106,37 @@ def pacing_policy() -> dict:
     }
 
 
-def caption_policy(*, long_cpl: int = 42, short_cpl: int = 32) -> dict:
+def caption_policy(*, long_cpl: int = 42) -> dict:
     return {
         "policy_ref": "policy://fixture/caption-style/v1",
         "policy_version": "fixture-caption-style/v1",
         "longform_16_9": {
-            "font_scale_pass": [0.044, 0.050], "font_scale_review": [0.040, 0.054],
+            "font_scale_pass": [0.044, 0.050],
+            "font_scale_review": [0.040, 0.054],
             "block_outside": [0.040, 0.054],
             "max_chars_per_line_pass": long_cpl,
             "max_chars_per_line_review": max(long_cpl, 46),
             "max_chars_per_line_block": max(long_cpl, 46),
-            "max_block_width_pass": 0.68, "max_block_width_review": 0.74,
+            "max_block_width_pass": 0.68,
+            "max_block_width_review": 0.74,
             "max_block_width_block": 0.74,
-            "bottom_safe_margin_pass": 0.08, "bottom_safe_margin_review_min": 0.05,
-        },
-        "shorts_9_16": {
-            "font_scale_pass": [0.046, 0.054], "font_scale_review": [0.042, 0.058],
-            "block_outside": [0.042, 0.058],
-            "max_chars_per_line_pass": short_cpl,
-            "max_chars_per_line_review": max(short_cpl, 36),
-            "max_chars_per_line_block": max(short_cpl, 36),
-            "max_block_width_pass": 0.84, "max_block_width_review": 0.88,
-            "max_block_width_block": 0.88,
-            "bottom_safe_margin_pass": 0.12, "bottom_safe_margin_review_min": 0.08,
+            "bottom_safe_margin_pass": 0.08,
+            "bottom_safe_margin_review_min": 0.05,
         },
         "global": {
             "max_lines_per_cue": 2,
-            "cue_duration_seconds": {"pass": [1.0, 6.0], "review": [0.8, 7.0], "block_outside": [0.8, 7.0]},
+            "cue_duration_seconds": {
+                "pass": [1.0, 6.0],
+                "review": [0.8, 7.0],
+                "block_outside": [0.8, 7.0],
+            },
             "reading_speed_cps": {
-                "pass_average_max": 15, "review_average_max": 17.5,
-                "block_average_above": 17.5, "pass_p95_max": 17,
-                "review_p95_max": 20, "block_any_above": 20,
+                "pass_average_max": 15,
+                "review_average_max": 17.5,
+                "block_average_above": 17.5,
+                "pass_p95_max": 17,
+                "review_p95_max": 20,
+                "block_any_above": 20,
             },
         },
         "font_family": "Arial",
@@ -120,11 +149,31 @@ def sync_policy() -> dict:
     return {
         "policy_ref": "policy://fixture/caption-sync/v1",
         "policy_version": "fixture-caption-sync/v1",
-        "median_abs_start_offset_ms": {"pass_max": 80, "review_max": 120, "block_above": 120},
-        "p95_abs_start_offset_ms": {"pass_max": 150, "review_max": 220, "block_above": 220},
-        "max_abs_start_offset_ms": {"pass_max": 220, "review_max": 300, "block_above": 300},
-        "median_abs_end_offset_ms": {"pass_max": 100, "review_max": 150, "block_above": 150},
-        "end_of_video_drift_ms": {"pass_max": 150, "review_max": 250, "block_above": 250},
+        "median_abs_start_offset_ms": {
+            "pass_max": 80,
+            "review_max": 120,
+            "block_above": 120,
+        },
+        "p95_abs_start_offset_ms": {
+            "pass_max": 150,
+            "review_max": 220,
+            "block_above": 220,
+        },
+        "max_abs_start_offset_ms": {
+            "pass_max": 220,
+            "review_max": 300,
+            "block_above": 300,
+        },
+        "median_abs_end_offset_ms": {
+            "pass_max": 100,
+            "review_max": 150,
+            "block_above": 150,
+        },
+        "end_of_video_drift_ms": {
+            "pass_max": 150,
+            "review_max": 250,
+            "block_above": 250,
+        },
         "spoken_token_coverage_required": 1.0,
         "unexpected_cue_overlap_block": True,
     }
@@ -147,7 +196,9 @@ def authority_components(
     punctuation_gaps: dict[str, int] | None = None,
     trailing_ms: int = 0,
 ):
-    normalized = SpokenTextNormalizer().normalize(script_revision_id="cqr1b-script", source_text=source)
+    normalized = SpokenTextNormalizer().normalize(
+        script_revision_id="cqr1b-script", source_text=source
+    )
     punctuation_gaps = punctuation_gaps or {}
     words = []
     cursor = 0
@@ -155,18 +206,35 @@ def authority_components(
         end = cursor + word_ms
         words.append(
             VerifiedNarrationWord(
-                word_id=f"verified-{index + 1:04d}", text=token.text,
-                start_ms=cursor, end_ms=end, source_spoken_token_ids=[token.token_id],
-                provider_start_ms=cursor, provider_end_ms=end,
-                forced_start_ms=cursor, forced_end_ms=end,
+                word_id=f"verified-{index + 1:04d}",
+                text=token.text,
+                start_ms=cursor,
+                end_ms=end,
+                source_spoken_token_ids=[token.token_id],
+                provider_start_ms=cursor,
+                provider_end_ms=end,
+                forced_start_ms=cursor,
+                forced_end_ms=end,
                 confidence=1.0,
-                reason_codes=["PROVIDER_TIMING_PRIMARY_SEED", "FORCED_ALIGNMENT_VERIFIED"],
+                reason_codes=[
+                    "PROVIDER_TIMING_PRIMARY_SEED",
+                    "FORCED_ALIGNMENT_VERIFIED",
+                ],
             )
         )
         if index + 1 < len(normalized.spoken_tokens):
             following = normalized.spoken_tokens[index + 1]
-            separator = normalized.spoken_text[token.spoken_span.end:following.spoken_span.start]
-            gap = next((value for mark, value in punctuation_gaps.items() if mark in separator), base_gap_ms)
+            separator = normalized.spoken_text[
+                token.spoken_span.end : following.spoken_span.start
+            ]
+            gap = next(
+                (
+                    value
+                    for mark, value in punctuation_gaps.items()
+                    if mark in separator
+                ),
+                base_gap_ms,
+            )
             cursor = end + gap
         else:
             cursor = end
@@ -179,48 +247,74 @@ def authority_components(
         "provider_seed_ref": "provider-seed:fixture",
         "forced_alignment_ref": "forced-alignment:fixture",
         "token_coverage": 1.0,
-        "missing_tokens": [], "extra_tokens": [], "normalization_only_differences": [],
-        "timing_conflicts": [], "alignment_confidence": 1.0,
+        "missing_tokens": [],
+        "extra_tokens": [],
+        "normalization_only_differences": [],
+        "timing_conflicts": [],
+        "alignment_confidence": 1.0,
         "reconciliation_reason_codes": ["PROVIDER_SEED_FORCED_ALIGNMENT_RECONCILED"],
         "verification_status": "PASS",
     }
-    alignment = VerifiedNarrationAlignment(**alignment_payload, content_hash=stable_hash(alignment_payload))
+    alignment = VerifiedNarrationAlignment(
+        **alignment_payload, content_hash=stable_hash(alignment_payload)
+    )
     timeline = CanonicalMediaTimelineCompiler().compile(
-        project_id="cqr1b-project", package_id="cqr1b-package", channel_id="fixture-channel",
+        project_id="cqr1b-project",
+        package_id="cqr1b-package",
+        channel_id="fixture-channel",
         script_revision_id=normalized.script_revision_id,
-        spoken_text_revision_id=normalized.content_hash, tts_request_id="fixture-tts",
-        normalized=normalized, alignment=alignment,
-        segments=[EditorialSegmentInput(
-            segment_id="scene-1", editorial_span=TextSpan(start=0, end=len(source)),
-            spoken_token_ids=[item.token_id for item in normalized.spoken_tokens],
-        )],
+        spoken_text_revision_id=normalized.content_hash,
+        tts_request_id="fixture-tts",
+        normalized=normalized,
+        alignment=alignment,
+        segments=[
+            EditorialSegmentInput(
+                segment_id="scene-1",
+                editorial_span=TextSpan(start=0, end=len(source)),
+                spoken_token_ids=[item.token_id for item in normalized.spoken_tokens],
+            )
+        ],
     )
     return normalized, alignment, timeline
 
 
 def compiled_components(source: str | None = None, *, policy: dict | None = None):
-    normalized, alignment, timeline = authority_components(source or "A calm media workflow turns one approved script into a synchronized final video.")
+    normalized, alignment, timeline = authority_components(
+        source
+        or "A calm media workflow turns one approved script into a synchronized final video."
+    )
     result = ReadableCaptionCompiler().compile(
-        normalized=normalized, alignment=alignment, timeline=timeline,
-        policy=policy or caption_policy(), aspect_ratio="16:9",
+        normalized=normalized,
+        alignment=alignment,
+        timeline=timeline,
+        policy=policy or caption_policy(),
+        aspect_ratio="16:9",
     )
     return normalized, alignment, timeline, result
 
 
 def test_pacing_policy_accepts_catalog_alias_and_defaults_to_350ms():
-    parsed = __import__("app.contracts.caption_voice_quality", fromlist=["NarrationPacingPolicy"]).NarrationPacingPolicy.model_validate(pacing_policy())
+    parsed = __import__(
+        "app.contracts.caption_voice_quality", fromlist=["NarrationPacingPolicy"]
+    ).NarrationPacingPolicy.model_validate(pacing_policy())
     assert parsed.active_speech_silence_gap_threshold_ms == 350
 
 
 def test_pacing_analyzer_uses_alignment_and_pause_evidence_deterministically():
     source = "A calm workflow, keeps one approved script moving. Then final media stays synchronized."
     normalized, alignment, _ = authority_components(
-        source, word_ms=300, base_gap_ms=80,
+        source,
+        word_ms=300,
+        base_gap_ms=80,
         punctuation_gaps={",": 220, ".": 420},
     )
     period_token = next(
-        token.token_id for token, following in zip(normalized.spoken_tokens, normalized.spoken_tokens[1:])
-        if "." in normalized.spoken_text[token.spoken_span.end:following.spoken_span.start]
+        token.token_id
+        for token, following in zip(
+            normalized.spoken_tokens, normalized.spoken_tokens[1:]
+        )
+        if "."
+        in normalized.spoken_text[token.spoken_span.end : following.spoken_span.start]
     )
     analysis = NarrationAudioAnalysis(
         audio_asset_ref=alignment.audio_asset_ref,
@@ -228,8 +322,11 @@ def test_pacing_analyzer_uses_alignment_and_pause_evidence_deterministically():
         waveform_summary={"peak_dbfs": -2.0, "rms_dbfs": -18.0},
     )
     kwargs = dict(
-        normalized=normalized, alignment=alignment, audio_analysis=analysis,
-        policy=pacing_policy(), section_boundary_after_token_ids=[period_token],
+        normalized=normalized,
+        alignment=alignment,
+        audio_analysis=analysis,
+        policy=pacing_policy(),
+        section_boundary_after_token_ids=[period_token],
     )
     first = NarrationPacingAnalyzer().analyze(**kwargs)
     second = NarrationPacingAnalyzer().analyze(**kwargs)
@@ -241,29 +338,73 @@ def test_pacing_analyzer_uses_alignment_and_pause_evidence_deterministically():
 
 
 def test_pacing_fast_and_short_pauses_block_with_required_reason_codes():
-    normalized, alignment, _ = authority_components("One, two. Three four.", word_ms=100, base_gap_ms=20, punctuation_gaps={",": 100, ".": 120})
+    normalized, alignment, _ = authority_components(
+        "One, two. Three four.",
+        word_ms=100,
+        base_gap_ms=20,
+        punctuation_gaps={",": 100, ".": 120},
+    )
     report = NarrationPacingAnalyzer().analyze(
-        normalized=normalized, alignment=alignment,
-        audio_analysis=NarrationAudioAnalysis(audio_asset_ref=alignment.audio_asset_ref, audio_duration_ms=alignment.audio_duration_ms),
+        normalized=normalized,
+        alignment=alignment,
+        audio_analysis=NarrationAudioAnalysis(
+            audio_asset_ref=alignment.audio_asset_ref,
+            audio_duration_ms=alignment.audio_duration_ms,
+        ),
         policy=pacing_policy(),
     )
     result = NarrationPacingGate().evaluate(report, pacing_policy())
     assert result.status == "BLOCK"
-    assert {"PACE_ACTIVE_TOO_FAST", "PACE_DELIVERED_TOO_FAST", "PACE_COMMA_PAUSE_SHORT", "PACE_SENTENCE_PAUSE_SHORT"} <= set(result.reason_codes)
+    assert {
+        "PACE_ACTIVE_TOO_FAST",
+        "PACE_DELIVERED_TOO_FAST",
+        "PACE_COMMA_PAUSE_SHORT",
+        "PACE_SENTENCE_PAUSE_SHORT",
+    } <= set(result.reason_codes)
 
 
 def test_extreme_slow_blocks_but_moderately_slow_routes_review():
     normalized, alignment, _ = authority_components("One two three four five.")
     report = NarrationPacingAnalyzer().analyze(
-        normalized=normalized, alignment=alignment,
-        audio_analysis=NarrationAudioAnalysis(audio_asset_ref=alignment.audio_asset_ref, audio_duration_ms=alignment.audio_duration_ms),
+        normalized=normalized,
+        alignment=alignment,
+        audio_analysis=NarrationAudioAnalysis(
+            audio_asset_ref=alignment.audio_asset_ref,
+            audio_duration_ms=alignment.audio_duration_ms,
+        ),
         policy=pacing_policy(),
     )
-    slow = report.model_copy(update={"metrics": report.metrics.model_copy(update={"active_speech_wpm": 110, "delivered_wpm": 110, "hook_first_8s_active_wpm": 110})})
-    review = report.model_copy(update={"metrics": report.metrics.model_copy(update={"active_speech_wpm": 130, "delivered_wpm": 115, "hook_first_8s_active_wpm": 130})})
+    slow = report.model_copy(
+        update={
+            "metrics": report.metrics.model_copy(
+                update={
+                    "active_speech_wpm": 110,
+                    "delivered_wpm": 110,
+                    "hook_first_8s_active_wpm": 110,
+                }
+            )
+        }
+    )
+    review = report.model_copy(
+        update={
+            "metrics": report.metrics.model_copy(
+                update={
+                    "active_speech_wpm": 130,
+                    "delivered_wpm": 115,
+                    "hook_first_8s_active_wpm": 130,
+                }
+            )
+        }
+    )
     assert NarrationPacingGate().evaluate(slow, pacing_policy()).status == "BLOCK"
-    assert "PACE_EXTREME_SLOW" in NarrationPacingGate().evaluate(slow, pacing_policy()).reason_codes
-    assert NarrationPacingGate().evaluate(review, pacing_policy()).status == "REVIEW_REQUIRED"
+    assert (
+        "PACE_EXTREME_SLOW"
+        in NarrationPacingGate().evaluate(slow, pacing_policy()).reason_codes
+    )
+    assert (
+        NarrationPacingGate().evaluate(review, pacing_policy()).status
+        == "REVIEW_REQUIRED"
+    )
 
 
 def test_pacing_correction_allows_only_one_explicitly_authorized_speed_regeneration():
@@ -362,9 +503,16 @@ def test_emergency_atempo_cannot_hide_short_pause_or_dense_script():
 def test_caption_compiler_maps_all_tokens_adds_explicit_lines_and_rehashes_timeline():
     normalized, _, original, result = compiled_components()
     assert result.timeline.timeline_hash != original.timeline_hash
-    assert result.timeline.qc_metrics["caption_compilation_hash"] == result.track.content_hash
-    assert result.timeline.qc_metrics["caption_compilation_ref"].endswith(result.track.content_hash)
-    assert [token for cue in result.track.cues for token in cue.spoken_token_ids] == [item.token_id for item in normalized.spoken_tokens]
+    assert (
+        result.timeline.qc_metrics["caption_compilation_hash"]
+        == result.track.content_hash
+    )
+    assert result.timeline.qc_metrics["caption_compilation_ref"].endswith(
+        result.track.content_hash
+    )
+    assert [token for cue in result.track.cues for token in cue.spoken_token_ids] == [
+        item.token_id for item in normalized.spoken_tokens
+    ]
     assert all(1 <= len(cue.caption_lines) <= 2 for cue in result.track.cues)
     assert all(event.text for event in result.track.ass_events)
     assert "\n" in result.track.srt_text
@@ -395,9 +543,9 @@ def test_caption_compiler_holds_only_final_cue_through_bounded_canonical_tail_si
     assert [
         token_id for cue in result.track.cues for token_id in cue.spoken_token_ids
     ] == [token.token_id for token in normalized.spoken_tokens]
-    assert result.timeline.qc_metrics["caption_final_cue_trailing_hold"] == evidence.model_dump(
-        mode="json"
-    )
+    assert result.timeline.qc_metrics[
+        "caption_final_cue_trailing_hold"
+    ] == evidence.model_dump(mode="json")
     sync = CaptionAudioSyncGate().evaluate(
         timeline=result.timeline,
         alignment=alignment,
@@ -406,11 +554,16 @@ def test_caption_compiler_holds_only_final_cue_through_bounded_canonical_tail_si
     assert sync.status == "PASS"
     assert sync.metrics["raw_final_cue_end_offset_ms"] == 546
     assert sync.metrics["authorized_final_cue_trailing_hold_ms"] == 546
-    assert TimelineDriftGate().evaluate(
-        timeline=result.timeline,
-        final_audio_duration_ms=alignment.audio_duration_ms,
-        policy=sync_policy(),
-    ).status == "PASS"
+    assert (
+        TimelineDriftGate()
+        .evaluate(
+            timeline=result.timeline,
+            final_audio_duration_ms=alignment.audio_duration_ms,
+            policy=sync_policy(),
+        )
+        .status
+        == "PASS"
+    )
 
 
 def test_caption_compiler_blocks_trailing_hold_above_explicit_maximum():
@@ -478,13 +631,16 @@ def test_caption_sync_blocks_final_cue_held_to_audio_end_without_compiler_eviden
                 extended_segment.model_copy(
                     update={
                         "scene_end_ms": audio_end,
-                        "target_scene_duration_ms": audio_end - extended_segment.scene_start_ms,
+                        "target_scene_duration_ms": audio_end
+                        - extended_segment.scene_start_ms,
                     }
                 ),
             ],
         }
     )
-    unauthorized_alignment = alignment.model_copy(update={"audio_duration_ms": audio_end})
+    unauthorized_alignment = alignment.model_copy(
+        update={"audio_duration_ms": audio_end}
+    )
     gate = CaptionAudioSyncGate().evaluate(
         timeline=unauthorized_timeline,
         alignment=unauthorized_alignment,
@@ -501,30 +657,67 @@ def test_display_caption_allows_acronym_and_number_recompaction_but_blocks_rewri
         spoken_text_hash=normalized.spoken_text_hash,
         display_text="AI costs $12.",
         tokens=[
-            DisplayCaptionToken(display_token_id="d1", text="AI", spoken_token_ids=ids[:2], transform_reason_code="APPROVED_BRANDED_CASING"),
-            DisplayCaptionToken(display_token_id="d2", text="costs", spoken_token_ids=[ids[2]]),
-            DisplayCaptionToken(display_token_id="d3", text="$12", spoken_token_ids=ids[3:], transform_reason_code="KNOWN_NUMBER_RECOMPACTION"),
+            DisplayCaptionToken(
+                display_token_id="d1",
+                text="AI",
+                spoken_token_ids=ids[:2],
+                transform_reason_code="APPROVED_BRANDED_CASING",
+            ),
+            DisplayCaptionToken(
+                display_token_id="d2", text="costs", spoken_token_ids=[ids[2]]
+            ),
+            DisplayCaptionToken(
+                display_token_id="d3",
+                text="$12",
+                spoken_token_ids=ids[3:],
+                transform_reason_code="KNOWN_NUMBER_RECOMPACTION",
+            ),
         ],
         content_hash="display-fixture",
     )
     result = ReadableCaptionCompiler().compile(
-        normalized=normalized, alignment=alignment, timeline=timeline,
-        display_caption_text=display, policy=caption_policy(), aspect_ratio="16:9",
+        normalized=normalized,
+        alignment=alignment,
+        timeline=timeline,
+        display_caption_text=display,
+        policy=caption_policy(),
+        aspect_ratio="16:9",
     )
     assert result.track.cues[0].caption_lines == ["AI costs $12."]
-    bad = display.model_copy(update={"tokens": [display.tokens[0].model_copy(update={"text": "Robots", "transform_reason_code": None}), *display.tokens[1:]]})
+    bad = display.model_copy(
+        update={
+            "tokens": [
+                display.tokens[0].model_copy(
+                    update={"text": "Robots", "transform_reason_code": None}
+                ),
+                *display.tokens[1:],
+            ]
+        }
+    )
     with pytest.raises(ValueError, match="CAPTION_SEMANTIC_REWRITE_BLOCKED"):
         ReadableCaptionCompiler().compile(
-            normalized=normalized, alignment=alignment, timeline=timeline,
-            display_caption_text=bad, policy=caption_policy(), aspect_ratio="16:9",
+            normalized=normalized,
+            alignment=alignment,
+            timeline=timeline,
+            display_caption_text=bad,
+            policy=caption_policy(),
+            aspect_ratio="16:9",
         )
 
 
 def test_line_break_prefers_clause_boundary_and_does_not_split_preposition_or_name():
     policy = CaptionStylePolicy.model_validate(caption_policy(long_cpl=22))
     units = [
-        SimpleNamespace(display_token=CaptionDisplayToken(display_token_id=f"d{i}", text=text, spoken_token_ids=[f"s{i}"]), rendered_text=text, spoken_token_ids=(f"s{i}",))
-        for i, text in enumerate(["Morgan", "Lee", "explains,", "through", "one", "approved", "workflow"])
+        SimpleNamespace(
+            display_token=CaptionDisplayToken(
+                display_token_id=f"d{i}", text=text, spoken_token_ids=[f"s{i}"]
+            ),
+            rendered_text=text,
+            spoken_token_ids=(f"s{i}",),
+        )
+        for i, text in enumerate(
+            ["Morgan", "Lee", "explains,", "through", "one", "approved", "workflow"]
+        )
     ]
     lines = ReadableCaptionCompiler._wrap_lines(units, policy.longform_16_9)
     assert len(lines) == 2
@@ -536,16 +729,41 @@ def test_line_break_prefers_clause_boundary_and_does_not_split_preposition_or_na
 def test_compilation_and_coverage_gates_block_three_lines_and_missing_token():
     normalized, _, _, result = compiled_components()
     cue = result.track.cues[0]
-    three_line_reading = cue.reading_metrics.model_copy(update={"line_count": 3, "chars_per_line": [3, 3, 3]})
-    bad_cue = cue.model_copy(update={"caption_lines": ["one", "two", "three"], "reading_metrics": three_line_reading})
+    three_line_reading = cue.reading_metrics.model_copy(
+        update={"line_count": 3, "chars_per_line": [3, 3, 3]}
+    )
+    bad_cue = cue.model_copy(
+        update={
+            "caption_lines": ["one", "two", "three"],
+            "reading_metrics": three_line_reading,
+        }
+    )
     compilation = CaptionCompilationGate().evaluate(
-        cues=[bad_cue, *result.track.cues[1:]], normalized=normalized,
-        timeline=result.timeline, policy=caption_policy(),
+        cues=[bad_cue, *result.track.cues[1:]],
+        normalized=normalized,
+        timeline=result.timeline,
+        policy=caption_policy(),
     )
     assert compilation.status == "BLOCK"
     assert "CAPTION_MORE_THAN_TWO_LINES" in compilation.reason_codes
-    missing = result.timeline.model_copy(update={"segments": [result.timeline.segments[0].model_copy(update={"caption_cues": [cue.model_copy(update={"spoken_token_ids": cue.spoken_token_ids[:-1]})]})]})
-    coverage = CaptionCoverageGate().evaluate(normalized=normalized, timeline=missing, policy=sync_policy())
+    missing = result.timeline.model_copy(
+        update={
+            "segments": [
+                result.timeline.segments[0].model_copy(
+                    update={
+                        "caption_cues": [
+                            cue.model_copy(
+                                update={"spoken_token_ids": cue.spoken_token_ids[:-1]}
+                            )
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+    coverage = CaptionCoverageGate().evaluate(
+        normalized=normalized, timeline=missing, policy=sync_policy()
+    )
     assert coverage.status == "BLOCK"
     assert "SYNC_COVERAGE_GAP" in coverage.reason_codes
 
@@ -553,49 +771,107 @@ def test_compilation_and_coverage_gates_block_three_lines_and_missing_token():
 def test_layout_gate_blocks_high_cps_and_bbox_overflow():
     _, _, _, result = compiled_components()
     cue = result.track.cues[0]
-    cue = cue.model_copy(update={"reading_metrics": cue.reading_metrics.model_copy(update={"characters_per_second": 21.0})})
+    cue = cue.model_copy(
+        update={
+            "reading_metrics": cue.reading_metrics.model_copy(
+                update={"characters_per_second": 21.0}
+            )
+        }
+    )
     bbox = CaptionBBoxMetrics(
-        cue_id=cue.cue_id, frame_width=1920, frame_height=1080,
-        x=100, y=900, width=1500, height=100, block_width_ratio=0.78125,
-        left_margin_ratio=0.05, right_margin_ratio=0.16, top_margin_ratio=0.83,
-        bottom_margin_ratio=0.074, font_scale=0.047, line_count=cue.reading_metrics.line_count,
-        cpl=cue.reading_metrics.max_chars_per_line, cps=21.0,
+        cue_id=cue.cue_id,
+        frame_width=1920,
+        frame_height=1080,
+        x=100,
+        y=900,
+        width=1500,
+        height=100,
+        block_width_ratio=0.78125,
+        left_margin_ratio=0.05,
+        right_margin_ratio=0.16,
+        top_margin_ratio=0.83,
+        bottom_margin_ratio=0.074,
+        font_scale=0.047,
+        line_count=cue.reading_metrics.line_count,
+        cpl=cue.reading_metrics.max_chars_per_line,
+        cps=21.0,
         duration_seconds=cue.reading_metrics.duration_seconds,
     )
-    gate = CaptionLayoutGate().evaluate(cues=[cue], bbox_metrics=[bbox], policy=caption_policy(), aspect_ratio="16:9")
+    gate = CaptionLayoutGate().evaluate(
+        cues=[cue], bbox_metrics=[bbox], policy=caption_policy(), aspect_ratio="16:9"
+    )
     assert gate.status == "BLOCK"
-    assert {"CAPTION_READING_SPEED_TOO_HIGH", "CAPTION_BBOX_OVERFLOW"} <= set(gate.reason_codes)
+    assert {"CAPTION_READING_SPEED_TOO_HIGH", "CAPTION_BBOX_OVERFLOW"} <= set(
+        gate.reason_codes
+    )
 
 
 def test_safe_area_gate_reviews_and_blocks_bottom_margin_and_subject_overlap():
     base = dict(
-        cue_id="c1", frame_width=1920, frame_height=1080, x=300, y=900,
-        width=1000, height=80, block_width_ratio=0.52, left_margin_ratio=0.15,
-        right_margin_ratio=0.32, top_margin_ratio=0.83, font_scale=0.047,
-        line_count=1, cpl=20, cps=10, duration_seconds=2,
+        cue_id="c1",
+        frame_width=1920,
+        frame_height=1080,
+        x=300,
+        y=900,
+        width=1000,
+        height=80,
+        block_width_ratio=0.52,
+        left_margin_ratio=0.15,
+        right_margin_ratio=0.32,
+        top_margin_ratio=0.83,
+        font_scale=0.047,
+        line_count=1,
+        cpl=20,
+        cps=10,
+        duration_seconds=2,
     )
     review = CaptionBBoxMetrics(**base, bottom_margin_ratio=0.06)
-    blocked = CaptionBBoxMetrics(**base, bottom_margin_ratio=0.04, required_safe_zone_overlap=True)
-    assert CaptionSafeAreaGate().evaluate(bbox_metrics=[review], policy=caption_policy(), aspect_ratio="16:9").status == "REVIEW_REQUIRED"
-    result = CaptionSafeAreaGate().evaluate(bbox_metrics=[blocked], policy=caption_policy(), aspect_ratio="16:9")
+    blocked = CaptionBBoxMetrics(
+        **base, bottom_margin_ratio=0.04, required_safe_zone_overlap=True
+    )
+    assert (
+        CaptionSafeAreaGate()
+        .evaluate(bbox_metrics=[review], policy=caption_policy(), aspect_ratio="16:9")
+        .status
+        == "REVIEW_REQUIRED"
+    )
+    result = CaptionSafeAreaGate().evaluate(
+        bbox_metrics=[blocked], policy=caption_policy(), aspect_ratio="16:9"
+    )
     assert result.status == "BLOCK"
-    assert {"CAPTION_UNSAFE_BOTTOM_MARGIN", "CAPTION_REQUIRED_VISUAL_SAFE_ZONE_OVERLAP"} <= set(result.reason_codes)
+    assert {
+        "CAPTION_UNSAFE_BOTTOM_MARGIN",
+        "CAPTION_REQUIRED_VISUAL_SAFE_ZONE_OVERLAP",
+    } <= set(result.reason_codes)
 
 
-def test_bbox_preflight_uses_injected_libass_alpha_bbox_and_relative_style(tmp_path: Path):
+def test_bbox_preflight_uses_injected_libass_alpha_bbox_and_relative_style(
+    tmp_path: Path,
+):
     _, _, _, compiled = compiled_components()
     observed = {}
 
     def fake_runner(argv, **kwargs):
         observed["argv"] = argv
         ass_filter = argv[argv.index("-vf") + 1]
-        ass_path = Path(ass_filter.split("filename='")[1].split("':alpha")[0].replace("\\:", ":"))
+        ass_path = Path(
+            ass_filter.split("filename='")[1].split("':alpha")[0].replace("\\:", ":")
+        )
         observed["ass"] = ass_path.read_text(encoding="utf-8")
-        return SimpleNamespace(returncode=0, stderr="[Parsed_bbox_3] n:0 pts:0 x1:40 x2:279 y1:130 y2:159 w:240 h:30 crop=240:30:40:130")
+        return SimpleNamespace(
+            returncode=0,
+            stderr="[Parsed_bbox_3] n:0 pts:0 x1:40 x2:279 y1:130 y2:159 w:240 h:30 crop=240:30:40:130",
+        )
 
-    report = CaptionBoundsPreflight(ffmpeg_binary="fixture-ffmpeg", runner=fake_runner).preflight(
-        cues=[compiled.track.cues[0]], frame_width=320, frame_height=180,
-        policy=caption_policy(), aspect_ratio="16:9", evidence_dir=tmp_path,
+    report = CaptionBoundsPreflight(
+        ffmpeg_binary="fixture-ffmpeg", runner=fake_runner
+    ).preflight(
+        cues=[compiled.track.cues[0]],
+        frame_width=320,
+        frame_height=180,
+        policy=caption_policy(),
+        aspect_ratio="16:9",
+        evidence_dir=tmp_path,
     )
     assert "alphaextract,bbox" in observed["argv"][observed["argv"].index("-vf") + 1]
     assert observed["argv"][observed["argv"].index("-i") + 1].endswith(",format=rgba")
@@ -609,8 +885,12 @@ def test_bbox_preflight_uses_injected_libass_alpha_bbox_and_relative_style(tmp_p
 def test_real_ffmpeg_libass_bbox_preflight_produces_nonempty_geometry(tmp_path: Path):
     _, _, _, compiled = compiled_components()
     report = CaptionBoundsPreflight(ffmpeg_binary=FFMPEG_FULL).preflight(
-        cues=[compiled.track.cues[0]], frame_width=640, frame_height=360,
-        policy=caption_policy(), aspect_ratio="16:9", evidence_dir=tmp_path,
+        cues=[compiled.track.cues[0]],
+        frame_width=640,
+        frame_height=360,
+        policy=caption_policy(),
+        aspect_ratio="16:9",
+        evidence_dir=tmp_path,
     )
     metric = report.cue_metrics[0]
     assert 0 < metric.width < metric.frame_width
@@ -623,27 +903,67 @@ def test_real_ffmpeg_libass_bbox_preflight_produces_nonempty_geometry(tmp_path: 
 
 def test_caption_sync_passes_exact_alignment_and_blocks_lead_lag_overlap_and_extra_token():
     _, alignment, _, result = compiled_components()
-    assert CaptionAudioSyncGate().evaluate(timeline=result.timeline, alignment=alignment, policy=sync_policy()).status == "PASS"
+    assert (
+        CaptionAudioSyncGate()
+        .evaluate(timeline=result.timeline, alignment=alignment, policy=sync_policy())
+        .status
+        == "PASS"
+    )
     segment = result.timeline.segments[0]
     cue = segment.caption_cues[0]
     shifted = cue.model_copy(update={"caption_start_ms": cue.caption_start_ms + 301})
-    bad_segment = segment.model_copy(update={"caption_cues": [shifted, *segment.caption_cues[1:]]})
+    bad_segment = segment.model_copy(
+        update={"caption_cues": [shifted, *segment.caption_cues[1:]]}
+    )
     bad_timeline = result.timeline.model_copy(update={"segments": [bad_segment]})
-    gate = CaptionAudioSyncGate().evaluate(timeline=bad_timeline, alignment=alignment, policy=sync_policy())
+    gate = CaptionAudioSyncGate().evaluate(
+        timeline=bad_timeline, alignment=alignment, policy=sync_policy()
+    )
     assert gate.status == "BLOCK" and "SYNC_START_OFFSET" in gate.reason_codes
 
-    duplicate = cue.model_copy(update={"cue_id": "duplicate", "caption_start_ms": cue.caption_start_ms, "caption_end_ms": cue.caption_end_ms})
-    overlap_timeline = result.timeline.model_copy(update={"segments": [segment.model_copy(update={"caption_cues": [cue, duplicate, *segment.caption_cues[1:]]})]})
-    overlap = CaptionAudioSyncGate().evaluate(timeline=overlap_timeline, alignment=alignment, policy=sync_policy())
+    duplicate = cue.model_copy(
+        update={
+            "cue_id": "duplicate",
+            "caption_start_ms": cue.caption_start_ms,
+            "caption_end_ms": cue.caption_end_ms,
+        }
+    )
+    overlap_timeline = result.timeline.model_copy(
+        update={
+            "segments": [
+                segment.model_copy(
+                    update={"caption_cues": [cue, duplicate, *segment.caption_cues[1:]]}
+                )
+            ]
+        }
+    )
+    overlap = CaptionAudioSyncGate().evaluate(
+        timeline=overlap_timeline, alignment=alignment, policy=sync_policy()
+    )
     assert overlap.status == "BLOCK"
     assert {"SYNC_CUE_OVERLAP", "SYNC_EXTRA_TOKEN"} <= set(overlap.reason_codes)
 
 
 def test_timeline_drift_gate_uses_caption_scene_timeline_and_audio_endpoints():
     _, alignment, _, result = compiled_components()
-    assert TimelineDriftGate().evaluate(timeline=result.timeline, final_audio_duration_ms=alignment.audio_duration_ms, policy=sync_policy()).status == "PASS"
-    drifted = result.timeline.model_copy(update={"audio_duration_ms": alignment.audio_duration_ms + 251})
-    gate = TimelineDriftGate().evaluate(timeline=drifted, final_audio_duration_ms=alignment.audio_duration_ms, policy=sync_policy())
+    assert (
+        TimelineDriftGate()
+        .evaluate(
+            timeline=result.timeline,
+            final_audio_duration_ms=alignment.audio_duration_ms,
+            policy=sync_policy(),
+        )
+        .status
+        == "PASS"
+    )
+    drifted = result.timeline.model_copy(
+        update={"audio_duration_ms": alignment.audio_duration_ms + 251}
+    )
+    gate = TimelineDriftGate().evaluate(
+        timeline=drifted,
+        final_audio_duration_ms=alignment.audio_duration_ms,
+        policy=sync_policy(),
+    )
     assert gate.status == "BLOCK"
     assert {"SYNC_END_DRIFT", "SYNC_PARALLEL_TIMELINE"} <= set(gate.reason_codes)
 
@@ -652,12 +972,20 @@ def test_bbox_application_rehashes_timeline_and_attaches_gate_evidence():
     _, _, _, compiled = compiled_components()
 
     def fake_runner(argv, **kwargs):
-        return SimpleNamespace(returncode=0, stderr="[Parsed_bbox_3] x1:200 x2:439 y1:290 y2:319 w:240 h:30")
+        return SimpleNamespace(
+            returncode=0,
+            stderr="[Parsed_bbox_3] x1:200 x2:439 y1:290 y2:319 w:240 h:30",
+        )
 
-    preflight = CaptionBoundsPreflight(ffmpeg_binary="fixture-ffmpeg", runner=fake_runner)
+    preflight = CaptionBoundsPreflight(
+        ffmpeg_binary="fixture-ffmpeg", runner=fake_runner
+    )
     report = preflight.preflight(
-        cues=compiled.track.cues, frame_width=640, frame_height=360,
-        policy=caption_policy(), aspect_ratio="16:9",
+        cues=compiled.track.cues,
+        frame_width=640,
+        frame_height=360,
+        policy=caption_policy(),
+        aspect_ratio="16:9",
     )
     updated = preflight.apply_to_timeline(compiled.timeline, report)
     assert updated.timeline_hash != compiled.timeline.timeline_hash
@@ -794,8 +1122,11 @@ def test_measured_fast_hook_and_short_section_pause_block():
     )
     section_token_id = next(
         token.token_id
-        for token, following in zip(normalized.spoken_tokens, normalized.spoken_tokens[1:])
-        if "." in normalized.spoken_text[token.spoken_span.end:following.spoken_span.start]
+        for token, following in zip(
+            normalized.spoken_tokens, normalized.spoken_tokens[1:]
+        )
+        if "."
+        in normalized.spoken_text[token.spoken_span.end : following.spoken_span.start]
     )
     report = NarrationPacingAnalyzer().analyze(
         normalized=normalized,
@@ -853,42 +1184,6 @@ def test_caption_layout_blocks_flashing_and_overlong_cues(duration_seconds: floa
     assert "CAPTION_DURATION_OUTSIDE_POLICY" in gate.reason_codes
 
 
-def test_portrait_caption_style_and_preflight_margin_are_shared_byte_for_byte():
-    normalized, alignment, timeline = authority_components("Portrait captions stay readable.")
-    compiled = ReadableCaptionCompiler().compile(
-        normalized=normalized,
-        alignment=alignment,
-        timeline=timeline,
-        policy=caption_policy(),
-        aspect_ratio="9:16",
-    )
-    style = compiled.timeline.qc_metrics["caption_render_style"]
-    assert style["aspect_ratio"] == "9:16"
-    assert style["font_scale"] == pytest.approx(0.05)
-    assert style["bottom_safe_margin"] == pytest.approx(0.12)
-    final_document = build_caption_ass_document(
-        cues=compiled.track.cues,
-        frame_width=1080,
-        frame_height=1920,
-        render_style=style,
-    )
-    parsed_policy = CaptionStylePolicy.model_validate(caption_policy())
-    preflight_document = CaptionBoundsPreflight._ass_document(
-        cue=compiled.track.cues[0],
-        frame_width=1080,
-        frame_height=1920,
-        font_scale=style["font_scale"],
-        bottom_margin_ratio=style["bottom_safe_margin"],
-        policy=parsed_policy,
-    )
-    final_header = final_document.encode().split(b"[Events]\n", 1)[0]
-    preflight_header = preflight_document.encode().split(b"[Events]\n", 1)[0]
-    assert final_header == preflight_header
-    assert next(line for line in final_document.splitlines() if line.startswith("Style: CQR1")).endswith(
-        ",0,0,233,1"
-    )
-
-
 def test_strict_golden_manifest_uses_only_canonical_caption_hash_style_and_ref():
     _, _, _, compiled, plan, manifest = golden_compilation()
     timeline = compiled.timeline
@@ -897,9 +1192,17 @@ def test_strict_golden_manifest_uses_only_canonical_caption_hash_style_and_ref()
     assert metrics["caption_render_payload_hash"] == canonical_caption_render_hash(cues)
     assert plan.srt_ref == metrics["caption_compilation_ref"]
     assert plan.srt_hash == metrics["caption_compilation_hash"]
-    assert manifest.canonical_caption_compilation_ref == metrics["caption_compilation_ref"]
-    assert manifest.canonical_caption_compilation_hash == metrics["caption_compilation_hash"]
-    assert manifest.canonical_caption_render_payload_hash == metrics["caption_render_payload_hash"]
+    assert (
+        manifest.canonical_caption_compilation_ref == metrics["caption_compilation_ref"]
+    )
+    assert (
+        manifest.canonical_caption_compilation_hash
+        == metrics["caption_compilation_hash"]
+    )
+    assert (
+        manifest.canonical_caption_render_payload_hash
+        == metrics["caption_render_payload_hash"]
+    )
     assert manifest.normalized_caption == metrics["caption_render_style"]
     assert manifest.caption_schedule["render_style"] == metrics["caption_render_style"]
     assert manifest.caption_schedule["independent_srt_used"] is False
@@ -911,7 +1214,9 @@ def test_strict_golden_manifest_uses_only_canonical_caption_hash_style_and_ref()
     not Path(FFMPEG_FULL).is_file() or not Path(FFPROBE_FULL).is_file(),
     reason="ffmpeg-full/ffprobe unavailable",
 )
-def test_strict_command_uses_timeline_duration_and_preflight_identical_ass_style(tmp_path: Path):
+def test_strict_command_uses_timeline_duration_and_preflight_identical_ass_style(
+    tmp_path: Path,
+):
     _, _, _, compiled, _, manifest = golden_compilation()
     timeline = compiled.timeline
     command = FFmpegCommandBuilder(
@@ -942,10 +1247,13 @@ def test_strict_command_uses_timeline_duration_and_preflight_identical_ass_style
         bottom_margin_ratio=style["bottom_safe_margin"],
         policy=CaptionStylePolicy.model_validate(caption_policy()),
     ).encode()
-    assert final_ass.split(b"[Events]\n", 1)[0] == preflight_ass.split(b"[Events]\n", 1)[0]
-    assert command.canonical_caption_render_payload_hash == timeline.qc_metrics[
-        "caption_render_payload_hash"
-    ]
+    assert (
+        final_ass.split(b"[Events]\n", 1)[0] == preflight_ass.split(b"[Events]\n", 1)[0]
+    )
+    assert (
+        command.canonical_caption_render_payload_hash
+        == timeline.qc_metrics["caption_render_payload_hash"]
+    )
 
 
 def test_caption_lag_over_block_threshold_is_measured_from_verified_alignment():
@@ -956,7 +1264,9 @@ def test_caption_lag_over_block_threshold_is_measured_from_verified_alignment():
     timeline = compiled.timeline.model_copy(
         update={
             "segments": [
-                segment.model_copy(update={"caption_cues": [lagged, *segment.caption_cues[1:]]})
+                segment.model_copy(
+                    update={"caption_cues": [lagged, *segment.caption_cues[1:]]}
+                )
             ]
         }
     )
@@ -1037,8 +1347,12 @@ def test_renderer_rejects_generated_ass_and_command_argv_tamper(tmp_path: Path):
     _, _, _, _, _, manifest = golden_compilation()
     builder = FFmpegCommandBuilder(tmp_path, ffmpeg=FFMPEG_FULL, ffprobe=FFPROBE_FULL)
     ass_command = builder.build_synthetic(manifest, run_key="cqr1b-ass-tamper")
-    Path(ass_command.generated_caption_path).write_text("tampered ASS\n", encoding="utf-8")
-    renderer = NativeFFmpegRenderer(tmp_path, smoke_enabled=True, production_enabled=False)
+    Path(ass_command.generated_caption_path).write_text(
+        "tampered ASS\n", encoding="utf-8"
+    )
+    renderer = NativeFFmpegRenderer(
+        tmp_path, smoke_enabled=True, production_enabled=False
+    )
     with pytest.raises(ValueError, match="GENERATED_FILE_CHECKSUM_MISMATCH"):
         renderer.execute(
             manifest,
@@ -1048,7 +1362,14 @@ def test_renderer_rejects_generated_ass_and_command_argv_tamper(tmp_path: Path):
 
     argv_command = builder.build_synthetic(manifest, run_key="cqr1b-argv-tamper")
     tampered_argv = argv_command.model_copy(
-        update={"sanitized_argv": [*argv_command.sanitized_argv[:-1], "-t", "99", argv_command.sanitized_argv[-1]]}
+        update={
+            "sanitized_argv": [
+                *argv_command.sanitized_argv[:-1],
+                "-t",
+                "99",
+                argv_command.sanitized_argv[-1],
+            ]
+        }
     )
     with pytest.raises(ValueError, match="COMMAND_MANIFEST_HASH_MISMATCH"):
         renderer.execute(
@@ -1105,7 +1426,9 @@ def test_actual_strict_golden_render_passes_ffprobe_decode_faststart_and_technic
 def test_strict_golden_decoded_video_and_audio_are_deterministic(tmp_path: Path):
     _, _, _, _, _, manifest = golden_compilation()
     builder = FFmpegCommandBuilder(tmp_path, ffmpeg=FFMPEG_FULL, ffprobe=FFPROBE_FULL)
-    renderer = NativeFFmpegRenderer(tmp_path, smoke_enabled=True, production_enabled=False)
+    renderer = NativeFFmpegRenderer(
+        tmp_path, smoke_enabled=True, production_enabled=False
+    )
     outputs: list[Path] = []
     for run_key in ("cqr1b-deterministic-a", "cqr1b-deterministic-b"):
         command = builder.build_synthetic(manifest, run_key=run_key)
@@ -1119,7 +1442,18 @@ def test_strict_golden_decoded_video_and_audio_are_deterministic(tmp_path: Path)
 
     def decoded_digest(path: Path, stream: str) -> str:
         completed = subprocess.run(
-            [FFMPEG_FULL, "-v", "error", "-i", str(path), "-map", stream, "-f", "framemd5", "-"],
+            [
+                FFMPEG_FULL,
+                "-v",
+                "error",
+                "-i",
+                str(path),
+                "-map",
+                stream,
+                "-f",
+                "framemd5",
+                "-",
+            ],
             capture_output=True,
             check=True,
         )

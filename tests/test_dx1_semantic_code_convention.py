@@ -11,7 +11,6 @@ from app.main import create_app
 
 
 SEMANTIC_SERVICE_MODULES = [
-    "app.services.daily_operations",
     "app.services.context_resolver",
     "app.services.project_admission",
     "app.services.post_publish_diagnostics",
@@ -130,32 +129,87 @@ PHASE_CODED_MODEL_MODULES = [
 ]
 
 EXPORT_EXPECTATIONS = [
-    ("app.services.daily_operations", "app.services.m5", "ChannelDailyRunService"),
     ("app.services.context_resolver", "app.services.m5", "ResourceResolverService"),
     ("app.services.project_admission", "app.services.m5", "ProjectAdmissionService"),
-    ("app.services.post_publish_diagnostics", "app.services.m9", "NoViewDiagnosticService"),
-    ("app.services.learning_candidates", "app.services.m10", "LearningCandidateGenerationService"),
+    (
+        "app.services.post_publish_diagnostics",
+        "app.services.m9",
+        "NoViewDiagnosticService",
+    ),
+    (
+        "app.services.learning_candidates",
+        "app.services.m10",
+        "LearningCandidateGenerationService",
+    ),
     ("app.services.learning_review", "app.services.m11", "M11LearningReviewService"),
     ("app.services.approved_playbook", "app.services.m11", "M11LearningReviewService"),
     ("app.services.provider_readiness", "app.services.m12", "ProviderReadinessService"),
     ("app.services.prompt_registry", "app.services.m12_1", "PromptRegistryService"),
     ("app.services.prompt_audit", "app.services.m12_1", "prompt_context_hash"),
-    ("app.services.runtime_provider_boundary", "app.services.m2", "ProviderBoundaryPreflight"),
-    ("app.services.video_package_generation", "app.services.m12_2", "FirstScriptedVideoPackageService"),
-    ("app.services.publish_handoff", "app.services.m12_2r", "PublishHandoffLedgerService"),
-    ("app.services.uploaded_video_backfill", "app.services.m12_2r", "PublishHandoffLedgerService"),
-    ("app.services.channel_contract_compiler", "app.services.m12_2p3", "ChannelContractCompiler"),
-    ("app.services.channel_init_research", "app.services.m12_2p3", "ChannelSetupResearchAgentService"),
-    ("app.services.agent_rehearsal", "app.services.m12_2", "FirstScriptedVideoPackageService"),
-    ("app.services.package_generation_rehearsal", "app.services.m12_2", "FirstScriptedVideoPackageService"),
-    ("app.services.channel_scope_authority", "app.services.r3d1", "ChannelRuntimeAuthorityService"),
-    ("app.services.channel_runtime_context", "app.services.r3d2", "EffectiveChannelRuntimeContextCompiler"),
+    (
+        "app.services.runtime_provider_boundary",
+        "app.services.m2",
+        "ProviderBoundaryPreflight",
+    ),
+    (
+        "app.services.video_package_generation",
+        "app.services.m12_2",
+        "FirstScriptedVideoPackageService",
+    ),
+    (
+        "app.services.publish_handoff",
+        "app.services.m12_2r",
+        "PublishHandoffLedgerService",
+    ),
+    (
+        "app.services.uploaded_video_backfill",
+        "app.services.m12_2r",
+        "PublishHandoffLedgerService",
+    ),
+    (
+        "app.services.channel_contract_compiler",
+        "app.services.m12_2p3",
+        "ChannelContractCompiler",
+    ),
+    (
+        "app.services.channel_init_research",
+        "app.services.m12_2p3",
+        "ChannelSetupResearchAgentService",
+    ),
+    (
+        "app.services.agent_rehearsal",
+        "app.services.m12_2",
+        "FirstScriptedVideoPackageService",
+    ),
+    (
+        "app.services.package_generation_rehearsal",
+        "app.services.m12_2",
+        "FirstScriptedVideoPackageService",
+    ),
+    (
+        "app.services.channel_scope_authority",
+        "app.services.r3d1",
+        "ChannelRuntimeAuthorityService",
+    ),
+    (
+        "app.services.channel_runtime_context",
+        "app.services.r3d2",
+        "EffectiveChannelRuntimeContextCompiler",
+    ),
     ("app.services.agent_context_pack", "app.services.r3d3", "AgentContextPackBuilder"),
     ("app.services.output_validation_gates", "app.services.r3d4", "R3D4GateService"),
-    ("app.services.packaging_handoff", "app.services.m1", "PackagingHandoffReadService"),
+    (
+        "app.services.packaging_handoff",
+        "app.services.m1",
+        "PackagingHandoffReadService",
+    ),
     ("app.services.provider_wiring", "app.services.m2", "ProviderReadinessM2Service"),
     ("app.services.controlled_memory", "app.services.r3d5", "ControlledMemoryService"),
-    ("app.services.vector_retrieval", "app.services.r3d6", "VectorSafeRetrievalService"),
+    (
+        "app.services.vector_retrieval",
+        "app.services.r3d6",
+        "VectorSafeRetrievalService",
+    ),
     ("app.services.learning_loop", "app.services.r3d7", "ClosedLearningLoopService"),
     ("app.services.cost_firewall", "app.services.r3d8", "PaidProviderBoundaryService"),
 ]
@@ -167,7 +221,11 @@ def test_dx1_semantic_service_modules_import() -> None:
 
 
 def test_dx1_old_phase_coded_modules_still_import() -> None:
-    for module_name in [*PHASE_CODED_SERVICE_MODULES, *PHASE_CODED_CONTRACT_MODULES, *PHASE_CODED_MODEL_MODULES]:
+    for module_name in [
+        *PHASE_CODED_SERVICE_MODULES,
+        *PHASE_CODED_CONTRACT_MODULES,
+        *PHASE_CODED_MODEL_MODULES,
+    ]:
         assert importlib.import_module(module_name)
 
 
@@ -243,5 +301,7 @@ def test_dx1_alembic_history_not_rewritten() -> None:
     assert Path("alembic/versions/0030_r3d7_closed_learning_loop.py").exists()
     assert Path("alembic/versions/0031_r3d8_production_cost_firewall.py").exists()
     assert Path("alembic/versions/0032_r3d9_ux2_packaging_review_queue.py").exists()
-    assert Path("alembic/versions/0033_p1_pre_lts_package_runtime_disposition.py").exists()
+    assert Path(
+        "alembic/versions/0033_p1_pre_lts_package_runtime_disposition.py"
+    ).exists()
     assert Path("alembic/versions/0032_r3d9_ux2_packaging_review_queue.py").exists()

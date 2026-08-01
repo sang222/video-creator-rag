@@ -276,56 +276,6 @@ class LongFormRenderPackage(Base):
     )
 
 
-class ShortRenderPackage(Base):
-    __tablename__ = "short_render_packages"
-
-    id: Mapped[uuid.UUID] = uuid_pk()
-    company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
-    )
-    channel_workspace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
-    )
-    video_project_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("video_projects.id")
-    )
-    short_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("short_candidates.id")
-    )
-    short_render_plan_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("short_render_plans.id")
-    )
-    voice_ref: Mapped[str | None] = mapped_column(Text)
-    caption_track_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("caption_track_snapshots.id")
-    )
-    hero_reuse_ref: Mapped[str | None] = mapped_column(Text)
-    template_asset_refs: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
-    )
-    cloud_media_refs: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
-    )
-    render_manifest: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
-    )
-    target_duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
-    target_aspect_ratio: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="9:16"
-    )
-    hard_cap_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=59)
-    renderer_provider_key: Mapped[str | None] = mapped_column(String(160))
-    package_state: Mapped[str] = mapped_column(String(80), nullable=False)
-    created_at: Mapped[datetime] = utc_created_at()
-    updated_at: Mapped[datetime] = utc_updated_at()
-
-    __table_args__ = (
-        Index("ix_short_render_packages_company", "company_id"),
-        Index("ix_short_render_packages_candidate", "short_candidate_id"),
-        Index("ix_short_render_packages_state", "package_state"),
-    )
-
-
 class AIHeroAsset(Base):
     __tablename__ = "ai_hero_assets"
 

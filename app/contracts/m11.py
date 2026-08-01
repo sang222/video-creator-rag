@@ -16,7 +16,9 @@ OperatorRole = Literal[
     "LEARNING_REVIEWER",
     "READ_ONLY_OBSERVER",
 ]
-ChannelLifecycleState = Literal["DRAFT", "READY", "ACTIVE", "PAUSED", "DEACTIVATED", "ARCHIVED"]
+ChannelLifecycleState = Literal[
+    "DRAFT", "READY", "ACTIVE", "PAUSED", "DEACTIVATED", "ARCHIVED"
+]
 ChannelHealthStatus = Literal[
     "NEW",
     "OBSERVING",
@@ -30,14 +32,16 @@ ChannelHealthStatus = Literal[
 ]
 ChannelLifecycleAction = Literal[
     "KEEP_ACTIVE",
-    "PAUSE_DAILY_GENERATION",
+    "PAUSE_EDITORIAL_RESEARCH",
     "CONTINUE_OBSERVING",
     "ADD_MANUAL_NOTE",
     "DEACTIVATE_CHANNEL",
     "ARCHIVE_CHANNEL",
     "REACTIVATE_CHANNEL",
 ]
-LearningReviewAction = Literal["APPROVE", "REJECT", "REQUEST_MORE_EVIDENCE", "SUPPRESS", "EXPIRE"]
+LearningReviewAction = Literal[
+    "APPROVE", "REJECT", "REQUEST_MORE_EVIDENCE", "SUPPRESS", "EXPIRE"
+]
 
 
 class DashboardMetricCard(BaseModel):
@@ -130,7 +134,7 @@ class ChannelLifecycleRead(BaseModel):
     channel_id: uuid.UUID
     lifecycle_state: ChannelLifecycleState
     health_status: ChannelHealthStatus
-    daily_generation_allowed: bool
+    editorial_research_allowed: bool
     next_action: str
     main_blocker: str | None = None
     allowed_actions: list[ChannelLifecycleAction]
@@ -172,7 +176,7 @@ class ChannelWorkspaceDashboardRead(BaseModel):
     health_summary: dict[str, Any]
     lifecycle: ChannelLifecycleRead
     projects: list[dict[str, Any]]
-    daily_runs: list[dict[str, Any]]
+    editorial_research_runs: list[dict[str, Any]]
     approvals: list[ApprovalQueueItem]
     uploaded_videos: list[dict[str, Any]]
     publish_ledger: dict[str, Any] = Field(default_factory=dict)

@@ -82,7 +82,9 @@ _AUTHORIZED_EVIDENCE_ROUTES = {
 
 
 class NicheContractCompilationError(ValueError):
-    def __init__(self, reason_codes: Sequence[NicheReasonCode], details: str | None = None):
+    def __init__(
+        self, reason_codes: Sequence[NicheReasonCode], details: str | None = None
+    ):
         self.reason_codes = _ordered_unique(reason_codes)
         message = ",".join(code.value for code in self.reason_codes)
         if details:
@@ -188,7 +190,9 @@ def _labels_overlap(left: Any, right: Any) -> bool:
     return bool(left_tokens and right_tokens and left_tokens & right_tokens)
 
 
-def _any_label_match(candidate_values: Sequence[str], authority_values: Sequence[str]) -> bool:
+def _any_label_match(
+    candidate_values: Sequence[str], authority_values: Sequence[str]
+) -> bool:
     return any(
         _same(candidate, authority) or _labels_overlap(candidate, authority)
         for candidate in candidate_values
@@ -210,7 +214,9 @@ def _summary(value: Any, *, limit: int = 2000) -> str:
     if isinstance(value, str):
         rendered = _clean(value) or "UNKNOWN"
     else:
-        rendered = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        rendered = json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        )
     return rendered[:limit]
 
 
@@ -240,9 +246,15 @@ def _category_topics(category: Any, kind: str) -> list[str]:
     return []
 
 
-def _series_plan(channel_contract: Mapping[str, Any], profile_version: Any) -> list[dict[str, Any]]:
+def _series_plan(
+    channel_contract: Mapping[str, Any], profile_version: Any
+) -> list[dict[str, Any]]:
     identity = _as_dict(channel_contract.get("channel_identity"))
-    raw = identity.get("series_plan") or _profile_input(profile_version).get("series_plan") or []
+    raw = (
+        identity.get("series_plan")
+        or _profile_input(profile_version).get("series_plan")
+        or []
+    )
     return [dict(item) for item in raw if isinstance(item, Mapping)]
 
 
@@ -339,12 +351,15 @@ class EditorialSlotValidator:
             )
 
         checks["category_active"] = bool(
-            category is not None and str(_get(category, "status", "")).upper() == "ACTIVE"
+            category is not None
+            and str(_get(category, "status", "")).upper() == "ACTIVE"
         )
         if category is not None and not checks["category_active"]:
             reasons.append(NicheReasonCode.CATEGORY_NOT_ACTIVE)
 
-        sub_niche = _clean(_get(category, "sub_niche")) if category is not None else None
+        sub_niche = (
+            _clean(_get(category, "sub_niche")) if category is not None else None
+        )
         checks["category_sub_niche"] = bool(sub_niche)
         if category is not None and not sub_niche:
             reasons.append(NicheReasonCode.CATEGORY_SUB_NICHE_MISSING)
@@ -363,14 +378,18 @@ class EditorialSlotValidator:
         if not checks["pillar_present"]:
             reasons.append(NicheReasonCode.CONTENT_PILLAR_BINDING_MISSING)
 
-        pillars = _strings(_as_dict(channel_contract.get("editorial_strategy")).get("content_pillars"))
+        pillars = _strings(
+            _as_dict(channel_contract.get("editorial_strategy")).get("content_pillars")
+        )
         checks["pillar_in_contract"] = bool(
             pillar_key and any(_same(pillar_key, item) for item in pillars)
         )
         if pillar_key and not checks["pillar_in_contract"]:
             reasons.append(NicheReasonCode.CONTENT_PILLAR_NOT_IN_CHANNEL_CONTRACT)
 
-        category_pillar = _clean(_get(category, "content_pillar")) if category is not None else None
+        category_pillar = (
+            _clean(_get(category, "content_pillar")) if category is not None else None
+        )
         checks["category_pillar_combination"] = bool(
             pillar_key and (not category_pillar or _same(category_pillar, pillar_key))
         )
@@ -378,15 +397,26 @@ class EditorialSlotValidator:
             reasons.append(NicheReasonCode.CATEGORY_PILLAR_MISMATCH)
 
         series_key = _clean(_get(editorial_slot, "series_key"))
-        checks["series_present"] = bool(series_key)
-        if not series_key:
+        assignment_mode = str(
+            _get(editorial_slot, "assignment_mode") or ""
+        ).upper()
+        requires_series = assignment_mode == "SERIES_REQUIRED"
+        checks["series_present"] = bool(series_key) or not requires_series
+        if requires_series and not series_key:
             reasons.append(NicheReasonCode.SERIES_BINDING_MISSING)
         series_plan = _series_plan(channel_contract, profile_version)
         series_item = next(
-            (item for item in series_plan if series_key and _same(_series_key(item), series_key)),
+            (
+                item
+                for item in series_plan
+                if series_key and _same(_series_key(item), series_key)
+            ),
             None,
         )
-        checks["series_allowed"] = bool(series_key and (not series_plan or series_item is not None))
+        checks["series_allowed"] = bool(
+            (not series_key and not requires_series)
+            or (series_key and (not series_plan or series_item is not None))
+        )
         if series_key and series_plan and series_item is None:
             reasons.append(NicheReasonCode.SERIES_NOT_ALLOWED)
         if series_item is not None:
@@ -408,7 +438,9 @@ class EditorialSlotValidator:
                 str(category_id) if category_id else "",
                 _clean(_get(category, "category_key")) or "",
             }
-            if series_category and not any(_same(series_category, marker) for marker in category_markers):
+            if series_category and not any(
+                _same(series_category, marker) for marker in category_markers
+            ):
                 reasons.append(NicheReasonCode.SERIES_CATEGORY_MISMATCH)
                 checks["series_allowed"] = False
 
@@ -420,7 +452,9 @@ class EditorialSlotValidator:
             _as_dict(channel_contract.get("editorial_strategy")).get("forbidden_topics")
         ) + (_category_topics(category, "forbidden") if category is not None else [])
         goal_conflicts = _matched_forbidden_topics(production_goal or "", forbidden)
-        checks["production_goal_supported"] = bool(production_goal and not goal_conflicts)
+        checks["production_goal_supported"] = bool(
+            production_goal and not goal_conflicts
+        )
         if goal_conflicts:
             reasons.append(NicheReasonCode.PRODUCTION_GOAL_UNSUPPORTED)
 
@@ -451,7 +485,6 @@ class EditorialSlotValidator:
             and slot_id
             and category_id
             and pillar_key
-            and series_key
             and production_goal
             and sub_niche
         ):
@@ -461,8 +494,12 @@ class EditorialSlotValidator:
                 "slot_ref": _ref("editorial-slot", slot_id),
                 "company_id": company_id,
                 "channel_id": channel_id,
-                "active_profile_version_ref": _ref("channel-profile-version", profile_id),
-                "active_policy_snapshot_ref": _ref("compiled-policy-snapshot", snapshot_id),
+                "active_profile_version_ref": _ref(
+                    "channel-profile-version", profile_id
+                ),
+                "active_policy_snapshot_ref": _ref(
+                    "compiled-policy-snapshot", snapshot_id
+                ),
                 "active_policy_snapshot_hash": snapshot_hash,
                 "category_id": category_id,
                 "content_pillar_id": pillar_id,
@@ -523,7 +560,9 @@ class NicheContractDigestCompiler:
         payload = _compiled_payload(policy_snapshot)
         channel_contract = _as_dict(payload.get("channel_contract_json"))
         contract_status = str(
-            channel_contract.get("contract_status") or payload.get("contract_status") or ""
+            channel_contract.get("contract_status")
+            or payload.get("contract_status")
+            or ""
         ).upper()
         if contract_status != "COMPLETE":
             authority_reasons.append(NicheReasonCode.CHANNEL_CONTRACT_INCOMPLETE)
@@ -573,7 +612,9 @@ class NicheContractDigestCompiler:
         visual_source_profile = _clean(
             compiled_visual_binding.get("niche_visual_source_profile")
             or compiled_visual.get("niche_visual_source_profile")
-            or _as_dict(profile_input.get("media_style")).get("niche_visual_source_profile")
+            or _as_dict(profile_input.get("media_style")).get(
+                "niche_visual_source_profile"
+            )
             or _as_dict(_get(category, "default_visual_style_json", {})).get(
                 "niche_visual_source_profile"
             )
@@ -581,7 +622,9 @@ class NicheContractDigestCompiler:
         )
         required = {
             "primary_niche": _clean(identity.get("niche")),
-            "sub_niche": _clean(_get(category, "sub_niche") or identity.get("sub_niche")),
+            "sub_niche": _clean(
+                _get(category, "sub_niche") or identity.get("sub_niche")
+            ),
             "positioning": _clean(identity.get("positioning")),
             "brand_promise": _clean(identity.get("brand_promise")),
             "primary_market": _clean(market.get("primary_market")),
@@ -626,9 +669,9 @@ class NicheContractDigestCompiler:
         )
         format_summary = _summary(
             {
-                "primary_format": _as_dict(compiled_channel_policy.get("channel_identity_policy")).get(
-                    "primary_format"
-                ),
+                "primary_format": _as_dict(
+                    compiled_channel_policy.get("channel_identity_policy")
+                ).get("primary_format"),
                 "slot_format_hint": _get(editorial_slot, "format_hint"),
                 "format_policy": format_policy,
                 "category_format_policy": _as_dict(
@@ -646,7 +689,9 @@ class NicheContractDigestCompiler:
             "channel_contract_hash": channel_contract_hash,
             "channel_profile_version_ref": _ref("channel-profile-version", profile_id),
             "channel_profile_version_hash": profile_hash,
-            "compiled_policy_snapshot_ref": _ref("compiled-policy-snapshot", snapshot_id),
+            "compiled_policy_snapshot_ref": _ref(
+                "compiled-policy-snapshot", snapshot_id
+            ),
             "compiled_policy_snapshot_hash": snapshot_hash,
             "primary_niche": required["primary_niche"],
             "sub_niche": required["sub_niche"],
@@ -694,9 +739,15 @@ class NicheContractDigestCompiler:
         channel_id = _uuid(_get(channel, "id"))
         profile_id = _uuid(_get(profile_version, "id"))
         snapshot_id = _uuid(_get(policy_snapshot, "id"))
-        if not channel_id or _uuid(_get(profile_version, "channel_workspace_id")) != channel_id:
+        if (
+            not channel_id
+            or _uuid(_get(profile_version, "channel_workspace_id")) != channel_id
+        ):
             reasons.append(NicheReasonCode.PROFILE_SCOPE_MISMATCH)
-        if str(_get(profile_version, "status", "")).lower() not in {"approved", "active"}:
+        if str(_get(profile_version, "status", "")).lower() not in {
+            "approved",
+            "active",
+        }:
             reasons.append(NicheReasonCode.PROFILE_NOT_ACTIVE_OR_APPROVED)
         profile_payload = _profile_input(profile_version)
         profile_hash = _clean(_get(profile_version, "profile_input_hash"))
@@ -840,7 +891,9 @@ class _BaseNicheAlignmentGate:
                 _check(
                     "niche_contract_digest_ref",
                     NicheGateVerdict.PASS if ref_match else NicheGateVerdict.BLOCK,
-                    None if ref_match else NicheReasonCode.NICHE_CONTRACT_DIGEST_REF_MISMATCH,
+                    None
+                    if ref_match
+                    else NicheReasonCode.NICHE_CONTRACT_DIGEST_REF_MISMATCH,
                 )
             )
             hash_match = data.niche_contract_digest_hash == digest.content_hash
@@ -848,7 +901,9 @@ class _BaseNicheAlignmentGate:
                 _check(
                     "niche_contract_digest_hash",
                     NicheGateVerdict.PASS if hash_match else NicheGateVerdict.BLOCK,
-                    None if hash_match else NicheReasonCode.NICHE_CONTRACT_DIGEST_HASH_MISMATCH,
+                    None
+                    if hash_match
+                    else NicheReasonCode.NICHE_CONTRACT_DIGEST_HASH_MISMATCH,
                 )
             )
             active_match = (
@@ -860,7 +915,9 @@ class _BaseNicheAlignmentGate:
                 _check(
                     "active_policy_snapshot",
                     NicheGateVerdict.PASS if active_match else NicheGateVerdict.BLOCK,
-                    None if active_match else NicheReasonCode.NICHE_CONTRACT_DIGEST_STALE,
+                    None
+                    if active_match
+                    else NicheReasonCode.NICHE_CONTRACT_DIGEST_STALE,
                 )
             )
         evidence_by_criterion = {
@@ -945,7 +1002,9 @@ class TopicNicheAlignmentGate(_BaseNicheAlignmentGate):
         if slot is None:
             checks.append(
                 _check(
-                    "slot_binding", NicheGateVerdict.BLOCK, NicheReasonCode.SLOT_SCOPE_MISMATCH
+                    "slot_binding",
+                    NicheGateVerdict.BLOCK,
+                    NicheReasonCode.SLOT_SCOPE_MISMATCH,
                 )
             )
         else:
@@ -954,7 +1013,10 @@ class TopicNicheAlignmentGate(_BaseNicheAlignmentGate):
                 and slot.channel_id == digest.channel_id
                 and slot.category_id == digest.category_id
                 and _same(slot.content_pillar_key, digest.content_pillar_key)
-                and _same(slot.series_key, digest.series_key)
+                and (
+                    (slot.series_key is None and digest.series_key is None)
+                    or _same(slot.series_key, digest.series_key)
+                )
                 and _same(slot.production_goal, digest.production_goal)
                 and slot.active_policy_snapshot_ref
                 == digest.compiled_policy_snapshot_ref
@@ -1054,22 +1116,21 @@ class ScriptNicheAlignmentGate(_BaseNicheAlignmentGate):
                 None if upstream_pass else NicheReasonCode.UPSTREAM_TOPIC_GATE_NOT_PASS,
             )
         )
-        daily_idea_binding = (
-            data.daily_idea_ref == data.topic_gate_result.subject_ref
-            and data.daily_idea_hash == data.topic_gate_result.subject_hash
+        candidate_binding = (
+            data.editorial_idea_candidate_ref == data.topic_gate_result.subject_ref
+            and data.editorial_idea_candidate_hash
+            == data.topic_gate_result.subject_hash
         )
         checks.append(
             _check(
-                "daily_idea_topic_gate_binding",
-                NicheGateVerdict.PASS
-                if daily_idea_binding
-                else NicheGateVerdict.BLOCK,
-                None
-                if daily_idea_binding
-                else NicheReasonCode.ARTIFACT_BINDING_MISSING,
+                "editorial_candidate_topic_gate_binding",
+                NicheGateVerdict.PASS if candidate_binding else NicheGateVerdict.BLOCK,
+                None if candidate_binding else NicheReasonCode.ARTIFACT_BINDING_MISSING,
             )
         )
-        topic_gate_ref_bound = data.topic_gate_result.content_hash in data.topic_gate_ref
+        topic_gate_ref_bound = (
+            data.topic_gate_result.content_hash in data.topic_gate_ref
+        )
         checks.append(
             _check(
                 "topic_gate_result_hash_binding",
@@ -1094,9 +1155,9 @@ class ScriptNicheAlignmentGate(_BaseNicheAlignmentGate):
                 None if binding_match else NicheReasonCode.CATEGORY_SUB_NICHE_MISMATCH,
             )
         )
-        topic_overlap = _labels_overlap(data.approved_topic, data.script_topic) or _same(
+        topic_overlap = _labels_overlap(
             data.approved_topic, data.script_topic
-        )
+        ) or _same(data.approved_topic, data.script_topic)
         checks.append(
             _check(
                 "approved_topic_fidelity",
@@ -1167,9 +1228,8 @@ class VisualNicheAlignmentGate(_BaseNicheAlignmentGate):
         digest = data.niche_contract_digest
         if digest is None:
             return self._result(data, checks)
-        binding_match = (
-            data.category_id == digest.category_id
-            and _same(data.content_pillar_key, digest.content_pillar_key)
+        binding_match = data.category_id == digest.category_id and _same(
+            data.content_pillar_key, digest.content_pillar_key
         )
         checks.append(
             _check(
@@ -1179,7 +1239,9 @@ class VisualNicheAlignmentGate(_BaseNicheAlignmentGate):
             )
         )
         direction_channel = _clean(data.visual_direction_contract.get("channel_id"))
-        direction_match = bool(direction_channel and _same(direction_channel, str(digest.channel_id)))
+        direction_match = bool(
+            direction_channel and _same(direction_channel, str(digest.channel_id))
+        )
         checks.append(
             _check(
                 "visual_direction_channel",
@@ -1275,7 +1337,9 @@ class VisualNicheAlignmentGate(_BaseNicheAlignmentGate):
                 )
             )
             if route in _AI_IMAGE_ROUTES:
-                justified = bool(data.ai_image_editorial_justification_refs.get(scene_id))
+                justified = bool(
+                    data.ai_image_editorial_justification_refs.get(scene_id)
+                )
                 checks.append(
                     _check(
                         f"scene:{scene_id}:ai_image_justification",
@@ -1291,7 +1355,8 @@ class VisualNicheAlignmentGate(_BaseNicheAlignmentGate):
                 or 0.0
             )
             actual_evidence = evidence_truth >= 0.5 or any(
-                marker in scene_class for marker in ("actual ui", "product", "document", "evidence")
+                marker in scene_class
+                for marker in ("actual ui", "product", "document", "evidence")
             )
             if actual_evidence:
                 authorized = route in _AUTHORIZED_EVIDENCE_ROUTES and bool(
@@ -1325,9 +1390,9 @@ class ThumbnailNicheAlignmentGate(_BaseNicheAlignmentGate):
         digest = data.niche_contract_digest
         if digest is None:
             return self._result(data, checks)
-        promise_match = _same(data.approved_topic, data.thumbnail_promise) or _labels_overlap(
+        promise_match = _same(
             data.approved_topic, data.thumbnail_promise
-        )
+        ) or _labels_overlap(data.approved_topic, data.thumbnail_promise)
         checks.append(
             _check(
                 "thumbnail_topic_promise",
@@ -1414,9 +1479,8 @@ class MetadataNicheAlignmentGate(_BaseNicheAlignmentGate):
         digest = data.niche_contract_digest
         if digest is None:
             return self._result(data, checks)
-        binding_match = (
-            data.declared_category_id == digest.category_id
-            and _same(data.declared_content_pillar_key, digest.content_pillar_key)
+        binding_match = data.declared_category_id == digest.category_id and _same(
+            data.declared_content_pillar_key, digest.content_pillar_key
         )
         checks.append(
             _check(
@@ -1443,7 +1507,7 @@ class MetadataNicheAlignmentGate(_BaseNicheAlignmentGate):
                 *data.tags,
                 *data.chapters,
                 data.summary_copy or "",
-                data.upload_card_copy or "",
+                data.manual_publishing_copy or "",
                 data.cta or "",
                 *data.claim_scope,
             ]
@@ -1544,7 +1608,9 @@ class NicheAlignmentDossierBuilder:
         if (
             missing_required
             or channel_fit is None
-            or any(result.verdict == NicheGateVerdict.BLOCK for result in required_results)
+            or any(
+                result.verdict == NicheGateVerdict.BLOCK for result in required_results
+            )
             or (
                 channel_fit is not None
                 and channel_fit.channel_fit_result == NicheGateVerdict.BLOCK
@@ -1589,8 +1655,12 @@ class NicheAlignmentDossierBuilder:
             "thumbnail_result": by_key.get(NicheGateKey.THUMBNAIL),
             "metadata_result": by_key.get(NicheGateKey.METADATA),
             "channel_fit_score": channel_fit.channel_fit_score if channel_fit else None,
-            "channel_fit_threshold": channel_fit.channel_fit_threshold if channel_fit else None,
-            "channel_fit_result": channel_fit.channel_fit_result if channel_fit else None,
+            "channel_fit_threshold": channel_fit.channel_fit_threshold
+            if channel_fit
+            else None,
+            "channel_fit_result": channel_fit.channel_fit_result
+            if channel_fit
+            else None,
             "completed_gate_keys": [
                 key for key in NICHE_GATE_STRICT_ORDER if key in by_key
             ],

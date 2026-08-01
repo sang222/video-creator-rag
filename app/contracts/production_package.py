@@ -64,7 +64,6 @@ class ProductionReadinessEvidenceV2(BaseModel):
     supported_claim_count: int = Field(ge=0)
     distinct_editorial_section_count: int = Field(ge=0)
     research_coverage_ratio: float = Field(ge=0, le=1)
-    shorter_format_permitted: bool = False
     script_duration_ms: int = Field(gt=0)
     anti_padding_pass: bool
     padding_phrase_hits: int = Field(ge=0)
@@ -111,7 +110,7 @@ class ProductionPackageContentV2(BaseModel):
     compiled_policy_snapshot_id: uuid.UUID
     compiled_policy_snapshot_hash: str = Field(pattern=SHA256_PATTERN)
     effective_context_ref: ExactContentRefV2
-    production_lane: ProductionLane
+    production_lane: Literal[ProductionLane.LONG_FORM]
     assignment_mode: AssignmentMode
     content_mode: ContentMode
     series_plan_id: uuid.UUID | None = None
@@ -119,7 +118,6 @@ class ProductionPackageContentV2(BaseModel):
     episode_number: int | None = Field(default=None, gt=0)
     episode_role: str | None = None
     standalone_reason_code: str | None = None
-    parent_derivative_lineage: ExactContentRefV2 | None = None
     duration_contract: ProductionDurationContractV2
     # Optional only so already-sealed Phase 3 package payloads remain readable.
     # The canonical Phase 4+ compiler always binds this exact authority.
@@ -141,7 +139,7 @@ class ProductionPackageContentV2(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     @model_validator(mode="after")
-    def validate_assignment_and_derivative_lineage(self) -> Self:
+    def validate_assignment(self) -> Self:
         if self.content_mode == ContentMode.SERIES_EPISODE:
             if (
                 self.series_plan_id is None
@@ -168,17 +166,6 @@ class ProductionPackageContentV2(BaseModel):
                 raise ValueError("STANDALONE package cannot carry series bindings")
             if not self.standalone_reason_code:
                 raise ValueError("STANDALONE package requires standalone_reason_code")
-        if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            if self.parent_derivative_lineage is None:
-                raise ValueError(
-                    "LONG_DERIVED_SHORT package requires parent derivative lineage"
-                )
-            if self.content_mode != ContentMode.STANDALONE:
-                raise ValueError("LONG_DERIVED_SHORT package must be STANDALONE")
-        elif self.parent_derivative_lineage is not None:
-            raise ValueError(
-                "parent derivative lineage is only valid for LONG_DERIVED_SHORT"
-            )
         artifact_refs = [
             *(
                 [self.support_envelope_ref]
@@ -201,11 +188,6 @@ class ProductionPackageContentV2(BaseModel):
             raise ValueError(
                 "ProductionPackage v2 artifact refs require artifact_version_id"
             )
-        if (
-            self.parent_derivative_lineage is not None
-            and self.parent_derivative_lineage.artifact_version_id is None
-        ):
-            raise ValueError("parent derivative lineage requires artifact_version_id")
         return self
 
 

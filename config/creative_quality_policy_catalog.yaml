@@ -1,5 +1,5 @@
 catalog_key: creative_quality_policy_catalog
-catalog_version: "1.0.0"
+catalog_version: "2.0.0"
 schema_version: cqr1.creative-quality-policy.v1
 status: active
 items:
@@ -67,18 +67,6 @@ items:
         max_block_width_block: 0.74
         bottom_safe_margin_pass: 0.08
         bottom_safe_margin_review_min: 0.05
-      shorts_9_16:
-        font_scale_pass: [0.046, 0.054]
-        font_scale_review: [0.042, 0.058]
-        block_outside: [0.042, 0.058]
-        max_chars_per_line_pass: 32
-        max_chars_per_line_review: 36
-        max_chars_per_line_block: 36
-        max_block_width_pass: 0.84
-        max_block_width_review: 0.88
-        max_block_width_block: 0.88
-        bottom_safe_margin_pass: 0.12
-        bottom_safe_margin_review_min: 0.08
     caption_sync_policy:
       median_abs_start_offset_ms: {pass_max: 80, review_max: 120, block_above: 120}
       p95_abs_start_offset_ms: {pass_max: 150, review_max: 220, block_above: 220}

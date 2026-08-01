@@ -1,15 +1,27 @@
 import { PageHeader } from "@/components/cockpit";
-import { OperatorPlanningLauncher } from "@/features/production/operator-planning-launcher";
+import { LaunchCadenceView } from "@/features/launch/launch-cadence-dashboard";
 
-export default function Page() {
+export default async function Page({
+  searchParams
+}: {
+  searchParams: Promise<{ channelId?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const initialChannelId = Array.isArray(params.channelId)
+    ? params.channelId[0]
+    : params.channelId;
+
   return (
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
-        title="Dự án và lịch sản xuất"
-        subtitle="Chọn nguồn kế hoạch typed v2 đã đủ điều kiện để tạo dự án và xếp lịch workflow trong một thao tác an toàn."
-        breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Dự án" }]}
+        title="Launch và nhịp xuất bản long-form"
+        subtitle="Theo dõi runway, buffer public-ready, publish slot và quyết định cadence deterministic của từng kênh."
+        breadcrumbs={[
+          { label: "Trung tâm", href: "/" },
+          { label: "Launch cadence" }
+        ]}
       />
-      <OperatorPlanningLauncher />
+      <LaunchCadenceView initialChannelId={initialChannelId} />
     </div>
   );
 }

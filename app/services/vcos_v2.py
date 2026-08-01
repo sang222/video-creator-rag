@@ -22,7 +22,6 @@ from app.contracts.vcos_v2 import (
     AssignmentResolution,
     AssignmentResolverInput,
     ContentMode,
-    DerivativeLineageInput,
     LegacySeriesClassification,
     LongFormPlanningRequest,
     PlanningSourceType,
@@ -43,21 +42,78 @@ from app.db.models.channel import (
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
 )
-from app.db.models.m10_2 import FinalMediaRef
+from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion
 from app.db.models.m5 import (
-    ChannelDailyRun,
-    DailyIdeaDecision,
     EditorialCalendarSlot,
+    EditorialIdeaCandidate,
+    EditorialResearchRun,
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
 )
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
+from app.services.production_start_readiness import (
+    resolve_budget_authority,
+)
 from app.services.workflow import VideoProjectService
 
 
 FaultHook = Callable[[str], None]
+
+
+def _approved_launch_policy_for_channel(
+    session: Session,
+    *,
+    company_id: uuid.UUID,
+    channel_workspace_id: uuid.UUID,
+    lock: bool = False,
+) -> FirstChannelLaunchPolicyVersion | None:
+    """Return the channel-level launch authority when controlled launch applies."""
+
+    statement = select(FirstChannelLaunchPolicyVersion).where(
+        FirstChannelLaunchPolicyVersion.company_id == company_id,
+        FirstChannelLaunchPolicyVersion.channel_workspace_id == channel_workspace_id,
+        FirstChannelLaunchPolicyVersion.state == "APPROVED",
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return session.scalar(statement)
+
+
+def _launch_policy_series_plan_ids(
+    policy: FirstChannelLaunchPolicyVersion,
+) -> set[str]:
+    return {
+        str(series_plan_id)
+        for series_plan_id in policy.approved_initial_series_plan_ids or []
+    }
+
+
+def _launch_policy_allows_series_plan(
+    policy: FirstChannelLaunchPolicyVersion | None,
+    series_plan_id: uuid.UUID,
+) -> bool:
+    return policy is None or (
+        str(series_plan_id) in _launch_policy_series_plan_ids(policy)
+    )
+
+
+def _launch_policy_active_series_violation(
+    policy: FirstChannelLaunchPolicyVersion | None,
+    series_plan_ids: Iterable[uuid.UUID],
+) -> str | None:
+    if policy is None:
+        return None
+    projected_series_plan_ids = list(series_plan_ids)
+    if any(
+        not _launch_policy_allows_series_plan(policy, series_plan_id)
+        for series_plan_id in projected_series_plan_ids
+    ):
+        return "LAUNCH_ACTIVE_SERIES_OUTSIDE_INITIAL_POLICY"
+    if len(projected_series_plan_ids) > policy.max_active_runs:
+        return "LAUNCH_MAX_ACTIVE_SERIES_EXCEEDED"
+    return None
 
 
 class AssignmentResolutionError(ValidationFailureError):
@@ -74,10 +130,10 @@ class _AdmissionContext:
     workspace: ChannelWorkspace
     profile: ChannelProfileVersion
     policy: CompiledChannelPolicySnapshot
-    slot: EditorialCalendarSlot | None
-    daily_run: ChannelDailyRun | None
-    daily_idea: DailyIdeaDecision | None
-    preflight: IdeaMarketPreflight | None
+    slot: EditorialCalendarSlot
+    candidate: EditorialIdeaCandidate | None
+    research_run: EditorialResearchRun | None
+    preflight: IdeaMarketPreflight
 
 
 class DeterministicAssignmentResolver:
@@ -92,12 +148,6 @@ class DeterministicAssignmentResolver:
         if not data.market_gate_passed:
             raise AssignmentResolutionError("MARKET_GATE_NOT_PASS")
 
-        if data.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            return self._standalone(
-                data,
-                input_hash=input_hash,
-                reason=AssignmentReasonCode.LONG_DERIVATIVE_AVAILABLE,
-            )
         if data.assignment_mode == AssignmentMode.STANDALONE_REQUIRED:
             return self._standalone(
                 data,
@@ -282,9 +332,7 @@ class DeterministicAssignmentResolver:
         primary_reason: AssignmentReasonCode,
     ) -> AssignmentResolution:
         if candidate is None:
-            raise AssignmentResolutionError(
-                AssignmentReasonCode.NO_ELIGIBLE_SERIES
-            )
+            raise AssignmentResolutionError(AssignmentReasonCode.NO_ELIGIBLE_SERIES)
         reasons = [primary_reason]
         if candidate.mandatory_next_episode and primary_reason not in reasons:
             reasons.append(AssignmentReasonCode.MANDATORY_NEXT_EPISODE)
@@ -337,9 +385,7 @@ class SeriesPlanService:
     def create(self, data: SeriesPlanCreate) -> SeriesPlan:
         self._validate_binding(data)
         if data.supersedes_series_plan_id is not None:
-            previous = self.session.get(
-                SeriesPlan, data.supersedes_series_plan_id
-            )
+            previous = self.session.get(SeriesPlan, data.supersedes_series_plan_id)
             if previous is None:
                 raise NotFoundError(
                     f"series plan not found: {data.supersedes_series_plan_id}"
@@ -354,9 +400,7 @@ class SeriesPlanService:
                     "superseding plan must preserve scope/key and increment version"
                 )
         plan = SeriesPlan(
-            **data.model_dump(
-                exclude={"allowed_production_lanes"}, mode="python"
-            ),
+            **data.model_dump(exclude={"allowed_production_lanes"}, mode="python"),
             allowed_production_lanes=[
                 str(lane) for lane in data.allowed_production_lanes
             ],
@@ -371,9 +415,7 @@ class SeriesPlanService:
         self, plan_id: uuid.UUID, data: SeriesPlanTransitionRequest
     ) -> SeriesPlan:
         plan = self.session.scalar(
-            select(SeriesPlan)
-            .where(SeriesPlan.id == plan_id)
-            .with_for_update()
+            select(SeriesPlan).where(SeriesPlan.id == plan_id).with_for_update()
         )
         if plan is None:
             raise NotFoundError(f"series plan not found: {plan_id}")
@@ -420,10 +462,7 @@ class SeriesPlanService:
         profile = self.session.get(
             ChannelProfileVersion, data.channel_profile_version_id
         )
-        if (
-            profile is None
-            or profile.channel_workspace_id != data.channel_workspace_id
-        ):
+        if profile is None or profile.channel_workspace_id != data.channel_workspace_id:
             raise ValidationFailureError(
                 "SeriesPlan profile does not belong to workspace"
             )
@@ -433,12 +472,9 @@ class SeriesPlanService:
         if (
             policy is None
             or policy.channel_workspace_id != data.channel_workspace_id
-            or policy.channel_profile_version_id
-            != data.channel_profile_version_id
+            or policy.channel_profile_version_id != data.channel_profile_version_id
         ):
-            raise ValidationFailureError(
-                "SeriesPlan policy/profile binding is invalid"
-            )
+            raise ValidationFailureError("SeriesPlan policy/profile binding is invalid")
 
 
 class SeriesRunService:
@@ -500,9 +536,7 @@ class SeriesRunService:
         if plan is None:
             raise NotFoundError(f"series plan not found: {data.series_plan_id}")
         if plan.state != SeriesPlanState.APPROVED:
-            raise ValidationFailureError(
-                "SeriesRun requires an APPROVED SeriesPlan"
-            )
+            raise ValidationFailureError("SeriesRun requires an APPROVED SeriesPlan")
         run = SeriesRun(
             series_plan_id=plan.id,
             company_id=plan.company_id,
@@ -556,6 +590,34 @@ class SeriesRunService:
         elif data.target_state == SeriesRunState.ACTIVE:
             if run.reserved_episode_count >= run.capacity:
                 raise ConflictError("capacity-exhausted SeriesRun cannot activate")
+            launch_policy = _approved_launch_policy_for_channel(
+                self.session,
+                company_id=run.company_id,
+                channel_workspace_id=run.channel_workspace_id,
+                lock=True,
+            )
+            if launch_policy is not None:
+                active_series_plan_ids = list(
+                    self.session.scalars(
+                        select(SeriesRun.series_plan_id)
+                        .where(
+                            SeriesRun.channel_workspace_id == run.channel_workspace_id,
+                            SeriesRun.state == SeriesRunState.ACTIVE,
+                            SeriesRun.id != run.id,
+                        )
+                        .with_for_update()
+                    ).all()
+                )
+                projected_series_plan_ids = [
+                    *active_series_plan_ids,
+                    run.series_plan_id,
+                ]
+                violation = _launch_policy_active_series_violation(
+                    launch_policy,
+                    projected_series_plan_ids,
+                )
+                if violation is not None:
+                    raise ValidationFailureError(violation)
             run.activated_at = now
         elif data.target_state == SeriesRunState.COMPLETION_PENDING:
             run.completion_pending_at = now
@@ -571,118 +633,9 @@ class SeriesRunService:
         return run
 
 
-class DerivativeLineageValidator:
-    def __init__(self, session: Session):
-        self.session = session
-
-    def validate(
-        self,
-        *,
-        data: DerivativeLineageInput,
-        company_id: uuid.UUID,
-        channel_workspace_id: uuid.UUID,
-    ) -> VideoProject:
-        parent = self.session.get(VideoProject, data.parent_video_project_id)
-        if parent is None:
-            raise NotFoundError(
-                f"parent video project not found: {data.parent_video_project_id}"
-            )
-        if (
-            parent.company_id != company_id
-            or parent.channel_workspace_id != channel_workspace_id
-        ):
-            raise ValidationFailureError(
-                "derivative parent does not belong to admission scope"
-            )
-        if parent.status != "approved":
-            # V2 replaces blanket pre-render human approval with the exact,
-            # immutable automated readiness receipt.  Accept that authority
-            # as the typed equivalent once the parent timeline is frozen.
-            from app.services.production_package import (
-                ProductionPackageService,
-            )
-
-            try:
-                ProductionPackageService(
-                    self.session
-                ).require_ready_projection_authority(project_id=parent.id)
-            except (NotFoundError, ValidationFailureError) as exc:
-                raise ValidationFailureError(
-                    "LONG_DERIVED_SHORT requires an approved or "
-                    "READY_FOR_PRODUCTION parent"
-                ) from exc
-        if (
-            parent.schema_version != "v2"
-            or parent.production_lane != ProductionLane.LONG_FORM
-            or parent.project_admission_decision_id is None
-        ):
-            raise ValidationFailureError(
-                "LONG_DERIVED_SHORT requires an admitted typed LONG_FORM parent"
-            )
-        parent_admission = self.session.get(
-            ProjectAdmissionDecision, parent.project_admission_decision_id
-        )
-        if (
-            parent_admission is None
-            or parent_admission.schema_version != "v2"
-            or parent_admission.decision != "ADMIT"
-            or parent_admission.production_lane != ProductionLane.LONG_FORM
-            or parent_admission.admitted_video_project_id != parent.id
-        ):
-            raise ValidationFailureError(
-                "parent project admission authority is missing or invalid"
-            )
-        parent_preflight = (
-            self.session.get(
-                IdeaMarketPreflight, parent_admission.idea_market_preflight_id
-            )
-            if parent_admission.idea_market_preflight_id is not None
-            else None
-        )
-        if (
-            parent_preflight is None
-            or parent_preflight.policy_fit_state != "PASS"
-            or parent_preflight.decision != "PASS"
-        ):
-            raise ValidationFailureError(
-                "derivative parent lacks inherited PASS niche/market authority"
-            )
-        if (
-            parent.canonical_timeline_ref != data.canonical_timeline_ref
-            or parent.canonical_timeline_hash != data.canonical_timeline_hash
-        ):
-            raise ValidationFailureError(
-                "derivative canonical timeline does not exactly match parent"
-            )
-        current_final_media = self.session.scalars(
-            select(FinalMediaRef)
-            .where(
-                FinalMediaRef.video_project_id == parent.id,
-                FinalMediaRef.company_id == company_id,
-                FinalMediaRef.channel_workspace_id == channel_workspace_id,
-            )
-            .order_by(
-                FinalMediaRef.created_at.desc(),
-                FinalMediaRef.id.desc(),
-            )
-        ).first()
-        if current_final_media is not None and (
-            data.parent_final_media_ref_id != current_final_media.id
-        ):
-            raise ValidationFailureError(
-                "parent_final_media_ref_id must bind current parent media"
-            )
-        if (
-            data.parent_final_media_ref_id is not None
-            and current_final_media is None
-        ):
-            raise ValidationFailureError(
-                "parent_final_media_ref_id is not exact parent media"
-            )
-        return parent
-
-
 class ProjectAdmissionV2Service:
+    """Atomic, idempotent admission for the only active LONG_FORM lane."""
+
     def __init__(
         self,
         session: Session,
@@ -700,14 +653,26 @@ class ProjectAdmissionV2Service:
         data: ProjectAdmissionV2Request,
         correlation_id: str = "vcos-v2-project-admission",
     ) -> ProjectAdmissionDecision:
-        del correlation_id  # Event emission remains owned by existing services.
-        data, context = self._load_context(data)
+        del correlation_id
+        context = self._load_context(data)
         existing = self._lock_source_and_existing(data)
         if existing is not None:
             return existing
-
-        gate_reasons = self._gate_reasons(data, context)
+        budget_gate_result = resolve_budget_authority(
+            self.session,
+            policy_snapshot_id=data.policy_snapshot_id,
+            channel_workspace_id=data.channel_workspace_id,
+        )
+        if (
+            data.budget_gate_result is not None
+            and data.budget_gate_result != budget_gate_result
+        ):
+            raise ValidationFailureError(
+                "LONG_FORM_ADMISSION_BUDGET_AUTHORITY_MISMATCH"
+            )
+        data = data.model_copy(update={"budget_gate_result": budget_gate_result})
         resolver_input = self._resolver_input(data, context)
+        gate_reasons = self._gate_reasons(data, context)
         if gate_reasons:
             return self._persist_block(
                 data=data,
@@ -739,316 +704,202 @@ class ProjectAdmissionV2Service:
         )
 
     def _load_context(
-        self, data: ProjectAdmissionV2Request
-    ) -> tuple[ProjectAdmissionV2Request, _AdmissionContext]:
+        self,
+        data: ProjectAdmissionV2Request,
+    ) -> _AdmissionContext:
+        if (
+            data.production_lane != ProductionLane.LONG_FORM
+            or data.planning_source_type != PlanningSourceType.LONG_FORM_PLAN
+            or data.editorial_calendar_slot_id is None
+            or data.idea_market_preflight_id is None
+        ):
+            raise ValidationFailureError("LONG_FORM_ADMISSION_SOURCE_REQUIRED")
         workspace = self.session.get(ChannelWorkspace, data.channel_workspace_id)
-        if workspace is None:
-            raise NotFoundError(
-                f"channel workspace not found: {data.channel_workspace_id}"
-            )
-        if workspace.company_id != data.company_id:
-            raise ValidationFailureError(
-                "admission workspace does not belong to company"
-            )
         profile = self.session.get(
-            ChannelProfileVersion, data.channel_profile_version_id
+            ChannelProfileVersion,
+            data.channel_profile_version_id,
         )
-        if (
-            profile is None
-            or profile.channel_workspace_id != data.channel_workspace_id
-        ):
-            raise ValidationFailureError(
-                "admission profile does not belong to workspace"
-            )
         policy = self.session.get(
-            CompiledChannelPolicySnapshot, data.policy_snapshot_id
+            CompiledChannelPolicySnapshot,
+            data.policy_snapshot_id,
         )
         if (
-            policy is None
-            or policy.channel_workspace_id != data.channel_workspace_id
-            or policy.channel_profile_version_id
-            != data.channel_profile_version_id
-        ):
-            raise ValidationFailureError(
-                "admission profile/policy binding is invalid"
-            )
-        if (
-            policy.status != "active"
+            workspace is None
+            or workspace.company_id != data.company_id
+            or profile is None
+            or profile.channel_workspace_id != workspace.id
+            or profile.status not in {"approved", "active"}
+            or policy is None
+            or policy.channel_workspace_id != workspace.id
+            or policy.channel_profile_version_id != profile.id
+            or policy.status != "active"
             or workspace.active_policy_snapshot_id != policy.id
         ):
-            raise ValidationFailureError(
-                "admission policy snapshot must be active"
-            )
-        # The request may carry the frozen contract, but it is not authority.
-        # Resolve the exact approved profile/policy values before any project,
-        # episode reservation, or immutable admission receipt can be created.
+            raise ValidationFailureError("LONG_FORM_ADMISSION_PROFILE_POLICY_MISMATCH")
         from app.services.production_package import (
             ChannelDurationContractResolver,
         )
 
-        authoritative_duration = ChannelDurationContractResolver(
-            self.session
-        ).resolve(
+        authoritative_duration = ChannelDurationContractResolver(self.session).resolve(
             profile_version_id=profile.id,
             policy_snapshot_id=policy.id,
-            production_lane=data.production_lane,
+            production_lane=ProductionLane.LONG_FORM,
+        )
+        if authoritative_duration.model_dump(
+            mode="json"
+        ) != data.duration_contract.model_dump(mode="json"):
+            raise ValidationFailureError("ADMISSION_DURATION_CONTRACT_MISMATCH")
+
+        slot = self.session.get(
+            EditorialCalendarSlot,
+            data.editorial_calendar_slot_id,
         )
         if (
-            authoritative_duration.model_dump(mode="json")
-            != data.duration_contract.model_dump(mode="json")
-        ):
-            raise ValidationFailureError(
-                "ADMISSION_DURATION_CONTRACT_MISMATCH"
-            )
-
-        daily_run = (
-            self.session.get(ChannelDailyRun, data.channel_daily_run_id)
-            if data.channel_daily_run_id is not None
-            else None
-        )
-        daily_idea = (
-            self.session.get(DailyIdeaDecision, data.daily_idea_decision_id)
-            if data.daily_idea_decision_id is not None
-            else None
-        )
-        slot_id = data.editorial_calendar_slot_id
-        if daily_run is not None:
-            if (
-                daily_run.company_id != data.company_id
-                or daily_run.channel_workspace_id != data.channel_workspace_id
-                or daily_run.policy_snapshot_id != data.policy_snapshot_id
-            ):
-                raise ValidationFailureError(
-                    "daily run does not match admission scope"
-                )
-            authoritative_slot_id = daily_run.editorial_calendar_slot_id
-            if authoritative_slot_id is None:
-                raise ValidationFailureError(
-                    "typed daily admission requires a frozen editorial slot"
-                )
-            if slot_id is not None and slot_id != authoritative_slot_id:
-                raise ValidationFailureError(
-                    "DAILY_ADMISSION_EDITORIAL_SLOT_MISMATCH"
-                )
-            slot_id = authoritative_slot_id
-        if data.planning_source_type == PlanningSourceType.DAILY_IDEA:
-            if daily_run is None or daily_idea is None:
-                raise NotFoundError("daily admission source was not found")
-            if (
-                daily_idea.channel_daily_run_id != daily_run.id
-                or daily_idea.company_id != data.company_id
-                or daily_idea.channel_workspace_id != data.channel_workspace_id
-                or daily_idea.policy_snapshot_id != data.policy_snapshot_id
-            ):
-                raise ValidationFailureError(
-                    "daily idea does not match daily run/admission scope"
-                )
-            if (
-                daily_idea.schema_version != "v2"
-                or daily_idea.production_lane != ProductionLane.DAILY_SHORT
-            ):
-                raise ValidationFailureError(
-                    "typed daily admission requires a frozen v2 DAILY_SHORT idea"
-                )
-            if (
-                daily_run.daily_idea_decision_id is not None
-                and daily_run.daily_idea_decision_id != daily_idea.id
-            ):
-                raise ValidationFailureError(
-                    "DAILY_ADMISSION_FROZEN_IDEA_MISMATCH"
-                )
-            assignment_input = (
-                daily_idea.assignment_input_ref
-                if isinstance(daily_idea.assignment_input_ref, dict)
-                else {}
-            )
-            frozen_slot_id = assignment_input.get(
-                "editorial_calendar_slot_id",
-                assignment_input.get("slot_id"),
-            )
-            if (
-                frozen_slot_id is None
-                or str(frozen_slot_id) != str(slot_id)
-            ):
-                raise ValidationFailureError(
-                    "DAILY_IDEA_FROZEN_SLOT_MISMATCH"
-                )
-            if data.title != daily_idea.proposed_title:
-                raise ValidationFailureError(
-                    "DAILY_ADMISSION_FROZEN_TITLE_MISMATCH"
-                )
-
-        slot = (
-            self.session.get(EditorialCalendarSlot, slot_id)
-            if slot_id is not None
-            else None
-        )
-        if slot_id is not None and slot is None:
-            raise NotFoundError(f"editorial slot not found: {slot_id}")
-        if slot is not None:
-            if (
-                slot.company_id != data.company_id
-                or slot.channel_workspace_id != data.channel_workspace_id
-                or slot.policy_snapshot_id != data.policy_snapshot_id
-            ):
-                raise ValidationFailureError(
-                    "editorial slot does not match admission scope"
-                )
-            if slot.schema_version != "v2":
-                raise ValidationFailureError(
-                    "typed admission requires a v2 editorial slot"
-                )
-            if slot.series_key:
-                raise ValidationFailureError(
-                    "v2 slot raw series_key cannot be assignment authority"
-                )
-            if (
-                slot.production_lane != data.production_lane
-                or slot.assignment_mode != data.assignment_mode
-            ):
-                raise ValidationFailureError(
-                    "request lane/assignment must match frozen editorial slot"
-                )
-            if (
+            slot is None
+            or slot.company_id != data.company_id
+            or slot.channel_workspace_id != data.channel_workspace_id
+            or slot.policy_snapshot_id != data.policy_snapshot_id
+            or slot.schema_version != "v2"
+            or slot.production_lane != "LONG_FORM"
+            or slot.assignment_mode != data.assignment_mode
+            or slot.series_key is not None
+            or (
                 data.preferred_series_plan_id is not None
-                and data.preferred_series_plan_id
-                != slot.preferred_series_plan_id
-            ) or (
+                and data.preferred_series_plan_id != slot.preferred_series_plan_id
+            )
+            or (
                 data.preferred_series_run_id is not None
                 and data.preferred_series_run_id != slot.preferred_series_run_id
-            ):
-                raise ValidationFailureError(
-                    "request series preference conflicts with frozen slot"
-                )
-            if (
-                data.planning_source_type == PlanningSourceType.DAILY_IDEA
-                and data.category_id is not None
-                and data.category_id != slot.category_id
-            ):
-                raise ValidationFailureError(
-                    "DAILY_ADMISSION_FROZEN_CATEGORY_MISMATCH"
-                )
-            data = data.model_copy(
-                update={
-                    "editorial_calendar_slot_id": slot.id,
-                    "preferred_series_plan_id": slot.preferred_series_plan_id,
-                    "preferred_series_run_id": slot.preferred_series_run_id,
-                    "category_id": (
-                        slot.category_id
-                        if data.planning_source_type
-                        == PlanningSourceType.DAILY_IDEA
-                        else data.category_id
-                    ),
-                }
             )
-        if (
-            data.planning_source_type == PlanningSourceType.LONG_FORM_PLAN
-            and slot is None
         ):
-            raise ValidationFailureError(
-                "LONG_FORM planning requires a persisted v2 editorial slot"
-            )
+            raise ValidationFailureError("LONG_FORM_EDITORIAL_SLOT_MISMATCH")
 
-        preflight = (
-            self.session.get(IdeaMarketPreflight, data.idea_market_preflight_id)
-            if data.idea_market_preflight_id is not None
+        candidate = (
+            self.session.get(
+                EditorialIdeaCandidate,
+                data.editorial_idea_candidate_id,
+            )
+            if data.editorial_idea_candidate_id is not None
             else None
         )
-        if data.idea_market_preflight_id is not None and preflight is None:
-            raise NotFoundError(
-                f"idea market preflight not found: {data.idea_market_preflight_id}"
+        research_run = (
+            self.session.get(
+                EditorialResearchRun,
+                candidate.editorial_research_run_id,
             )
-        if preflight is not None and (
-            preflight.company_id != data.company_id
+            if candidate is not None
+            else None
+        )
+        if data.editorial_idea_candidate_id is not None and (
+            candidate is None
+            or research_run is None
+            or candidate.company_id != data.company_id
+            or candidate.channel_workspace_id != data.channel_workspace_id
+            or candidate.policy_snapshot_id != data.policy_snapshot_id
+            or candidate.proposed_title != data.title
+            or candidate.stage
+            not in {
+                "GREENLIT",
+                "SELECTED_FOR_SLOT",
+                "IN_PRODUCTION",
+                "FINAL_REVIEW_READY",
+            }
+            or research_run.channel_profile_version_id
+            != data.channel_profile_version_id
+        ):
+            raise ValidationFailureError("LONG_FORM_EDITORIAL_CANDIDATE_MISMATCH")
+
+        preflight = self.session.get(
+            IdeaMarketPreflight,
+            data.idea_market_preflight_id,
+        )
+        if (
+            preflight is None
+            or preflight.company_id != data.company_id
             or preflight.channel_workspace_id != data.channel_workspace_id
-        ):
-            raise ValidationFailureError(
-                "idea market preflight does not match admission scope"
+            or (
+                candidate is None
+                and preflight.editorial_calendar_slot_id is not None
+                and preflight.editorial_calendar_slot_id != slot.id
             )
-        if (
-            preflight is not None
-            and data.planning_source_type == PlanningSourceType.DAILY_IDEA
-            and (
-                preflight.channel_daily_run_id != data.channel_daily_run_id
-                or preflight.daily_idea_decision_id
-                != data.daily_idea_decision_id
-                or preflight.editorial_calendar_slot_id != slot_id
+            or (
+                candidate is not None
+                and preflight.editorial_idea_candidate_id != candidate.id
             )
         ):
-            raise ValidationFailureError(
-                "IDEA_MARKET_PREFLIGHT_DAILY_SOURCE_MISMATCH"
-            )
-        if (
-            preflight is not None
-            and data.planning_source_type
-            == PlanningSourceType.LONG_FORM_PLAN
-            and (
-                slot is None
-                or preflight.editorial_calendar_slot_id != slot.id
-                or preflight.channel_daily_run_id is not None
-                or preflight.daily_idea_decision_id is not None
-            )
-        ):
-            raise ValidationFailureError(
-                "IDEA_MARKET_PREFLIGHT_EDITORIAL_SLOT_MISMATCH"
-            )
-        if data.derivative_lineage is not None:
-            DerivativeLineageValidator(self.session).validate(
-                data=data.derivative_lineage,
-                company_id=data.company_id,
-                channel_workspace_id=data.channel_workspace_id,
-            )
-        return data, _AdmissionContext(
+            raise ValidationFailureError("LONG_FORM_PREFLIGHT_SCOPE_MISMATCH")
+        return _AdmissionContext(
             workspace=workspace,
             profile=profile,
             policy=policy,
             slot=slot,
-            daily_run=daily_run,
-            daily_idea=daily_idea,
+            candidate=candidate,
+            research_run=research_run,
             preflight=preflight,
         )
 
     @staticmethod
     def _gate_reasons(
-        data: ProjectAdmissionV2Request, context: _AdmissionContext
+        data: ProjectAdmissionV2Request,
+        context: _AdmissionContext,
     ) -> list[str]:
-        if data.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            return []
-        if context.preflight is None:
-            return ["IDEA_MARKET_PREFLIGHT_REQUIRED"]
         reasons: list[str] = []
-        if context.preflight.policy_fit_state != "PASS":
+        preflight = context.preflight
+        if preflight.policy_fit_state != "PASS" or not data.niche_gate_passed:
             reasons.append("NICHE_GATE_NOT_PASS")
-        if context.preflight.decision != "PASS":
+        if preflight.decision != "PASS" or not data.market_gate_passed:
             reasons.append("MARKET_GATE_NOT_PASS")
-        return reasons
+        evidence = preflight.evidence_blob or {}
+        niche_hash = preflight.niche_contract_digest_hash or evidence.get(
+            "niche_contract_digest_hash"
+        )
+        market_hash = preflight.target_market_digest_hash or evidence.get(
+            "target_market_digest_hash"
+        )
+        if not niche_hash:
+            reasons.append("NICHE_CONTRACT_DIGEST_REQUIRED")
+        if not market_hash:
+            reasons.append("TARGET_MARKET_DIGEST_REQUIRED")
+        if context.candidate is not None and (
+            context.candidate.rights_policy_state != "PASS"
+            or context.candidate.quality_state != "PASS"
+        ):
+            reasons.append("EDITORIAL_CANDIDATE_READINESS_NOT_PASS")
+        if (
+            not isinstance(data.budget_gate_result, dict)
+            or data.budget_gate_result.get("decision") != "PASS"
+        ):
+            reasons.append("CHANNEL_BUDGET_GATE_NOT_PASS")
+        return list(dict.fromkeys(reasons))
 
     def _resolver_input(
-        self, data: ProjectAdmissionV2Request, context: _AdmissionContext
+        self,
+        data: ProjectAdmissionV2Request,
+        context: _AdmissionContext,
     ) -> AssignmentResolverInput:
         gate_passed = not self._gate_reasons(data, context)
         return AssignmentResolverInput(
-            production_lane=data.production_lane,
+            production_lane=ProductionLane.LONG_FORM,
             assignment_mode=data.assignment_mode,
-            preferred_series_plan_id=data.preferred_series_plan_id,
-            preferred_series_run_id=data.preferred_series_run_id,
+            preferred_series_plan_id=context.slot.preferred_series_plan_id,
+            preferred_series_run_id=context.slot.preferred_series_run_id,
             candidates=self._candidates(data, context),
             niche_gate_passed=gate_passed,
             market_gate_passed=gate_passed,
             timely_niche_opportunity=data.timely_niche_opportunity,
             bridge_or_special=data.bridge_or_special,
-            parent_video_project_id=(
-                data.derivative_lineage.parent_video_project_id
-                if data.derivative_lineage is not None
-                else None
-            ),
         )
 
     def _candidates(
-        self, data: ProjectAdmissionV2Request, context: _AdmissionContext
+        self,
+        data: ProjectAdmissionV2Request,
+        context: _AdmissionContext,
     ) -> list[AssignmentCandidate]:
-        if data.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            return []
+        launch_policy = _approved_launch_policy_for_channel(
+            self.session,
+            company_id=data.company_id,
+            channel_workspace_id=data.channel_workspace_id,
+        )
         rows = self.session.execute(
             select(SeriesRun, SeriesPlan)
             .join(SeriesPlan, SeriesPlan.id == SeriesRun.series_plan_id)
@@ -1065,25 +916,26 @@ class ProjectAdmissionV2Service:
         ).all()
         envelope = (
             context.slot.operational_envelope
-            if context.slot is not None
-            and isinstance(context.slot.operational_envelope, dict)
+            if isinstance(context.slot.operational_envelope, dict)
             else {}
         )
         candidates: list[AssignmentCandidate] = []
         for run, plan in rows:
-            if str(data.production_lane) not in (plan.allowed_production_lanes or []):
+            if not _launch_policy_allows_series_plan(launch_policy, plan.id):
+                continue
+            if plan.allowed_production_lanes != ["LONG_FORM"]:
                 continue
             try:
                 plan_state = SeriesPlanState(plan.state)
                 run_state = SeriesRunState(run.state)
             except ValueError:
                 continue
-            run_id = str(run.id)
+            run_key = str(run.id)
             candidates.append(
                 AssignmentCandidate(
                     series_plan_id=plan.id,
                     series_run_id=run.id,
-                    production_lane=data.production_lane,
+                    production_lane=ProductionLane.LONG_FORM,
                     plan_state=plan_state,
                     run_state=run_state,
                     next_episode_number=run.next_episode_number,
@@ -1091,35 +943,56 @@ class ProjectAdmissionV2Service:
                     reserved_episode_count=run.reserved_episode_count,
                     priority=run.priority,
                     coherence_score=self._mapping_int(
-                        envelope, "series_coherence_scores", run_id, 0
+                        envelope,
+                        "series_coherence_scores",
+                        run_key,
+                        100,
                     ),
                     schedule_eligible=self._schedule_eligible(
                         run=run,
                         slot=context.slot,
                     ),
-                    mandatory_next_episode=run_id
+                    mandatory_next_episode=run_key
                     in self._string_list(envelope.get("mandatory_series_run_ids")),
                     explicit_slot_priority=self._mapping_int(
-                        envelope, "series_slot_priorities", run_id, 0
+                        envelope,
+                        "series_slot_priorities",
+                        run_key,
+                        0,
                     ),
                     schedule_obligation=self._mapping_int(
-                        envelope, "series_schedule_obligations", run_id, 0
+                        envelope,
+                        "series_schedule_obligations",
+                        run_key,
+                        0,
                     ),
                     recent_repetition_penalty=self._mapping_int(
-                        envelope, "series_repetition_penalties", run_id, 0
+                        envelope,
+                        "series_repetition_penalties",
+                        run_key,
+                        0,
                     ),
                     niche_opportunity_value=self._mapping_int(
-                        envelope, "series_niche_opportunity_values", run_id, 0
+                        envelope,
+                        "series_niche_opportunity_values",
+                        run_key,
+                        0,
                     ),
-                    derivative_parent_available=False,
                     episode_role=(
                         data.episode_role
-                        or (plan.episode_role_policy or {}).get(
-                            "default_episode_role"
-                        )
+                        or (plan.episode_role_policy or {}).get("default_episode_role")
                     ),
                 )
             )
+        # If legacy/direct writes already oversubscribed the approved set,
+        # there is no authoritative "first N" subset for admission to choose.
+        if launch_policy is not None and (
+            sum(
+                candidate.run_state == SeriesRunState.ACTIVE for candidate in candidates
+            )
+            > launch_policy.max_active_runs
+        ):
+            return []
         return candidates
 
     @staticmethod
@@ -1137,30 +1010,22 @@ class ProjectAdmissionV2Service:
 
     @staticmethod
     def _string_list(value: Any) -> set[str]:
-        if not isinstance(value, list):
-            return set()
-        return {str(item) for item in value}
+        return {str(item) for item in value} if isinstance(value, list) else set()
 
     @staticmethod
     def _schedule_eligible(
         *,
         run: SeriesRun,
-        slot: EditorialCalendarSlot | None,
+        slot: EditorialCalendarSlot,
     ) -> bool:
-        if slot is None:
-            return (
-                run.schedule_window_start is None
-                and run.schedule_window_end is None
-            )
-        slot_date = slot.slot_date
         if (
             run.schedule_window_start is not None
-            and slot_date < run.schedule_window_start.date()
+            and slot.slot_date < run.schedule_window_start.date()
         ):
             return False
         if (
             run.schedule_window_end is not None
-            and slot_date > run.schedule_window_end.date()
+            and slot.slot_date > run.schedule_window_end.date()
         ):
             return False
         return True
@@ -1180,106 +1045,84 @@ class ProjectAdmissionV2Service:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-            if run is None:
-                return self._persist_block(
-                    data=data,
-                    context=context,
-                    resolver_input=resolver_input,
-                    reason_codes=[
-                        str(AssignmentReasonCode.SERIES_BINDING_INVALID)
-                    ],
-                    use_savepoint=False,
-                )
-            plan = self.session.get(SeriesPlan, run.series_plan_id)
-            selected_candidate = next(
+            candidate = next(
                 (
-                    candidate
-                    for candidate in resolver_input.candidates
-                    if candidate.series_run_id == run.id
+                    item
+                    for item in resolver_input.candidates
+                    if run is not None and item.series_run_id == run.id
                 ),
                 None,
             )
-            invalid = self._locked_run_reason(
-                data=data,
-                plan=plan,
-                run=run,
-                candidate=selected_candidate,
+            invalid = (
+                self._locked_run_reason(
+                    data=data,
+                    run=run,
+                    candidate=candidate,
+                )
+                if run is not None
+                else AssignmentReasonCode.SERIES_BINDING_INVALID
             )
             if invalid is not None:
-                if data.assignment_mode != AssignmentMode.SERIES_REQUIRED:
-                    fallback = AssignmentResolution(
-                        resolver_version=self.resolver.version,
-                        resolver_input_hash=resolution.resolver_input_hash,
-                        production_lane=data.production_lane,
-                        assignment_mode=data.assignment_mode,
-                        content_mode=ContentMode.STANDALONE,
-                        standalone_reason_code=invalid,
-                        reason_codes=[invalid],
-                    )
-                    receipt_id = uuid.uuid4()
-                    project = self._create_project(
-                        data=data,
-                        resolution=fallback,
-                        receipt_id=receipt_id,
-                    )
-                    return self._persist_admit(
+                if data.assignment_mode == AssignmentMode.SERIES_REQUIRED:
+                    return self._persist_block(
                         data=data,
                         context=context,
                         resolver_input=resolver_input,
-                        resolution=fallback,
-                        project=project,
-                        receipt_id=receipt_id,
+                        reason_codes=[str(invalid)],
+                        use_savepoint=False,
                     )
-                return self._persist_block(
+                fallback = self.resolver._standalone(
+                    resolver_input,
+                    input_hash=resolution.resolver_input_hash,
+                    reason=invalid,
+                )
+                return self._create_admitted(
                     data=data,
                     context=context,
                     resolver_input=resolver_input,
-                    reason_codes=[str(invalid)],
-                    use_savepoint=False,
+                    resolution=fallback,
                 )
+            assert run is not None
             episode_number = run.next_episode_number
             run.next_episode_number += 1
             run.reserved_episode_count += 1
             self.session.flush()
             if self._fault_hook is not None:
                 self._fault_hook("after_episode_reservation")
-            resolution = resolution.model_copy(
-                update={"episode_number": episode_number}
-            )
-            receipt_id = uuid.uuid4()
-            project = self._create_project(
-                data=data,
-                resolution=resolution,
-                receipt_id=receipt_id,
-            )
-            receipt = self._persist_admit(
+            return self._create_admitted(
                 data=data,
                 context=context,
                 resolver_input=resolver_input,
-                resolution=resolution,
-                project=project,
-                receipt_id=receipt_id,
+                resolution=resolution.model_copy(
+                    update={"episode_number": episode_number}
+                ),
             )
-            return receipt
 
     def _locked_run_reason(
         self,
         *,
         data: ProjectAdmissionV2Request,
-        plan: SeriesPlan | None,
         run: SeriesRun,
         candidate: AssignmentCandidate | None,
     ) -> AssignmentReasonCode | None:
+        plan = self.session.get(SeriesPlan, run.series_plan_id)
         if (
             plan is None
-            or run.series_plan_id != plan.id
-            or plan.id != data.preferred_series_plan_id
-            and data.assignment_mode == AssignmentMode.SERIES_REQUIRED
             or plan.company_id != data.company_id
             or plan.channel_workspace_id != data.channel_workspace_id
-            or plan.channel_profile_version_id
-            != data.channel_profile_version_id
+            or plan.channel_profile_version_id != data.channel_profile_version_id
             or plan.policy_snapshot_id != data.policy_snapshot_id
+            or plan.allowed_production_lanes != ["LONG_FORM"]
+        ):
+            return AssignmentReasonCode.SERIES_BINDING_INVALID
+        launch_policy = _approved_launch_policy_for_channel(
+            self.session,
+            company_id=data.company_id,
+            channel_workspace_id=data.channel_workspace_id,
+        )
+        if launch_policy is not None and not _launch_policy_allows_series_plan(
+            launch_policy,
+            plan.id,
         ):
             return AssignmentReasonCode.SERIES_BINDING_INVALID
         if plan.state == SeriesPlanState.SUPERSEDED:
@@ -1288,16 +1131,12 @@ class ProjectAdmissionV2Service:
             return AssignmentReasonCode.SERIES_BINDING_INVALID
         if run.state != SeriesRunState.ACTIVE:
             return AssignmentReasonCode.SERIES_RUN_NOT_ACTIVE
-        if candidate is None:
-            return AssignmentReasonCode.SERIES_BINDING_INVALID
-        if not candidate.schedule_eligible:
+        if candidate is None or not candidate.schedule_eligible:
             return AssignmentReasonCode.SERIES_SCHEDULE_INELIGIBLE
         if candidate.coherence_score <= 0:
             return AssignmentReasonCode.SERIES_COHERENCE_FAILED
         if run.reserved_episode_count >= run.capacity:
             return AssignmentReasonCode.SERIES_CAPACITY_EXHAUSTED
-        if str(data.production_lane) not in (plan.allowed_production_lanes or []):
-            return AssignmentReasonCode.SERIES_BINDING_INVALID
         return None
 
     def _admit_standalone(
@@ -1309,35 +1148,23 @@ class ProjectAdmissionV2Service:
         resolution: AssignmentResolution,
     ) -> ProjectAdmissionDecision:
         with self.session.begin_nested():
-            receipt_id = uuid.uuid4()
-            project = self._create_project(
-                data=data,
-                resolution=resolution,
-                receipt_id=receipt_id,
-            )
-            return self._persist_admit(
+            return self._create_admitted(
                 data=data,
                 context=context,
                 resolver_input=resolver_input,
                 resolution=resolution,
-                project=project,
-                receipt_id=receipt_id,
             )
 
-    def _create_project(
+    def _create_admitted(
         self,
         *,
         data: ProjectAdmissionV2Request,
+        context: _AdmissionContext,
+        resolver_input: AssignmentResolverInput,
         resolution: AssignmentResolution,
-        receipt_id: uuid.UUID,
-    ) -> VideoProject:
-        lineage = data.derivative_lineage
-        project_type = {
-            PlanningSourceType.DAILY_IDEA: "vcos_v2_daily_short",
-            PlanningSourceType.LONG_FORM_PLAN: "vcos_v2_long_form",
-            PlanningSourceType.DERIVED_SHORT: "vcos_v2_long_derived_short",
-        }[data.planning_source_type]
-        return VideoProjectService(self.session).create_project(
+    ) -> ProjectAdmissionDecision:
+        receipt_id = uuid.uuid4()
+        project = VideoProjectService(self.session).create_project(
             data=VideoProjectCreate(
                 company_id=data.company_id,
                 channel_workspace_id=data.channel_workspace_id,
@@ -1348,10 +1175,10 @@ class ProjectAdmissionV2Service:
                 title=data.title,
                 description=data.description,
                 status="draft",
-                project_type=project_type,
+                project_type="vcos_v2_long_form",
                 schema_version="v2",
-                planning_source_type=data.planning_source_type,
-                production_lane=data.production_lane,
+                planning_source_type=PlanningSourceType.LONG_FORM_PLAN,
+                production_lane=ProductionLane.LONG_FORM,
                 content_mode=resolution.content_mode,
                 assignment_mode=data.assignment_mode,
                 series_plan_id=resolution.series_plan_id,
@@ -1364,84 +1191,46 @@ class ProjectAdmissionV2Service:
                     else None
                 ),
                 project_admission_decision_id=receipt_id,
-                parent_video_project_id=(
-                    lineage.parent_video_project_id
-                    if lineage is not None
-                    else None
-                ),
-                parent_final_media_ref_id=(
-                    lineage.parent_final_media_ref_id
-                    if lineage is not None
-                    else None
-                ),
-                canonical_timeline_ref=(
-                    lineage.canonical_timeline_ref
-                    if lineage is not None
-                    else None
-                ),
-                canonical_timeline_hash=(
-                    lineage.canonical_timeline_hash
-                    if lineage is not None
-                    else None
-                ),
                 duration_contract=data.duration_contract,
-                render_eligible=data.production_lane
-                != ProductionLane.LONG_DERIVED_SHORT,
+                render_eligible=True,
                 created_by_user_id=data.created_by_user_id,
                 audience_delivery_summary={
-                    "planning_source_type": str(data.planning_source_type),
-                    "editorial_calendar_slot_id": (
-                        str(data.editorial_calendar_slot_id)
-                        if data.editorial_calendar_slot_id
-                        else None
-                    ),
-                    "daily_idea_decision_id": (
-                        str(data.daily_idea_decision_id)
-                        if data.daily_idea_decision_id
+                    "planning_source_type": "LONG_FORM_PLAN",
+                    "editorial_calendar_slot_id": str(context.slot.id),
+                    "editorial_idea_candidate_id": (
+                        str(context.candidate.id)
+                        if context.candidate is not None
                         else None
                     ),
                 },
             ),
-            correlation_id="vcos-v2-project-created-from-admission",
+            correlation_id="vcos-v2-long-form-project-created",
             trusted_v2_admission=True,
         )
-
-    def _persist_admit(
-        self,
-        *,
-        data: ProjectAdmissionV2Request,
-        context: _AdmissionContext,
-        resolver_input: AssignmentResolverInput,
-        resolution: AssignmentResolution,
-        project: VideoProject,
-        receipt_id: uuid.UUID,
-    ) -> ProjectAdmissionDecision:
-        decision_hash = self._decision_hash(
-            data=data, resolution=resolution, decision="ADMIT"
+        decision_hash = content_hash(
+            {
+                "decision": "ADMIT",
+                "request": data.model_dump(mode="json"),
+                "resolution": resolution.model_dump(mode="json"),
+            }
         )
-        existing = self.session.scalar(
-            select(ProjectAdmissionDecision).where(
-                ProjectAdmissionDecision.decision_hash == decision_hash
-            )
-        )
-        if existing is not None:
-            raise ConflictError(
-                "deterministic admission already exists with a different source lock"
-            )
-        lineage = data.derivative_lineage
         receipt = ProjectAdmissionDecision(
             id=receipt_id,
             schema_version="v2",
-            channel_daily_run_id=data.channel_daily_run_id,
-            daily_idea_decision_id=data.daily_idea_decision_id,
-            editorial_calendar_slot_id=data.editorial_calendar_slot_id,
+            editorial_research_run_id=(
+                context.research_run.id if context.research_run is not None else None
+            ),
+            editorial_idea_candidate_id=(
+                context.candidate.id if context.candidate is not None else None
+            ),
+            editorial_calendar_slot_id=context.slot.id,
             company_id=data.company_id,
             channel_workspace_id=data.channel_workspace_id,
             channel_profile_version_id=data.channel_profile_version_id,
             policy_snapshot_id=data.policy_snapshot_id,
-            idea_market_preflight_id=data.idea_market_preflight_id,
-            planning_source_type=data.planning_source_type,
-            production_lane=data.production_lane,
+            idea_market_preflight_id=context.preflight.id,
+            planning_source_type=PlanningSourceType.LONG_FORM_PLAN,
+            production_lane=ProductionLane.LONG_FORM,
             content_mode=resolution.content_mode,
             assignment_mode=data.assignment_mode,
             series_plan_id=resolution.series_plan_id,
@@ -1453,35 +1242,13 @@ class ProjectAdmissionV2Service:
                 if resolution.standalone_reason_code is not None
                 else None
             ),
-            parent_video_project_id=(
-                lineage.parent_video_project_id if lineage else None
-            ),
-            parent_final_media_ref_id=(
-                lineage.parent_final_media_ref_id if lineage else None
-            ),
-            canonical_timeline_ref=(
-                lineage.canonical_timeline_ref if lineage else None
-            ),
-            canonical_timeline_hash=(
-                lineage.canonical_timeline_hash if lineage else None
-            ),
             resolver_version=resolution.resolver_version,
             resolver_input_hash=resolution.resolver_input_hash,
             decision_hash=decision_hash,
             assignment_input_ref=resolver_input.model_dump(mode="json"),
-            duration_contract=(
-                data.duration_contract.model_dump(mode="json")
-                if data.duration_contract is not None
-                else None
-            ),
-            budget_gate_result={
-                "decision": "PASS",
-                "deterministic": True,
-                "schema_version": "v2",
-            },
-            readiness_gate_refs=self._readiness_refs(
-                data=data, context=context
-            ),
+            duration_contract=data.duration_contract.model_dump(mode="json"),
+            budget_gate_result=data.budget_gate_result,
+            readiness_gate_refs=self._readiness_refs(context),
             decision="ADMIT",
             reason_codes=[str(code) for code in resolution.reason_codes],
             evidence_refs=list(data.evidence_refs),
@@ -1490,50 +1257,15 @@ class ProjectAdmissionV2Service:
             created_by_user_id=data.created_by_user_id,
         )
         self.session.add(receipt)
+        context.slot.status = "ADMITTED"
+        if context.candidate is not None:
+            context.candidate.stage = "IN_PRODUCTION"
         self.session.flush()
         if project.project_admission_decision_id != receipt.id:
             raise ValidationFailureError(
                 "PROJECT_ADMISSION_BIDIRECTIONAL_LINK_MISMATCH"
             )
-        self._link_source(context=context, receipt=receipt)
-        self.session.flush()
         return receipt
-
-    def _readiness_refs(
-        self,
-        *,
-        data: ProjectAdmissionV2Request,
-        context: _AdmissionContext,
-    ) -> list[dict[str, Any]]:
-        if context.preflight is not None:
-            return [
-                {
-                    "type": "idea_market_preflight",
-                    "id": str(context.preflight.id),
-                    "decision": context.preflight.decision,
-                    "policy_fit_state": context.preflight.policy_fit_state,
-                }
-            ]
-        if data.derivative_lineage is None:
-            return []
-        parent = self.session.get(
-            VideoProject, data.derivative_lineage.parent_video_project_id
-        )
-        return [
-            {
-                "type": "inherited_parent_admission",
-                "parent_video_project_id": str(
-                    data.derivative_lineage.parent_video_project_id
-                ),
-                "parent_project_admission_decision_id": (
-                    str(parent.project_admission_decision_id)
-                    if parent is not None
-                    and parent.project_admission_decision_id is not None
-                    else None
-                ),
-                "niche_market_authority": "INHERITED_EXACT_PARENT_PASS",
-            }
-        ]
 
     def _persist_block(
         self,
@@ -1562,19 +1294,25 @@ class ProjectAdmissionV2Service:
         if existing is not None:
             return existing
 
-        def add_receipt() -> ProjectAdmissionDecision:
+        def create_receipt() -> ProjectAdmissionDecision:
             receipt = ProjectAdmissionDecision(
                 schema_version="v2",
-                channel_daily_run_id=data.channel_daily_run_id,
-                daily_idea_decision_id=data.daily_idea_decision_id,
-                editorial_calendar_slot_id=data.editorial_calendar_slot_id,
+                editorial_research_run_id=(
+                    context.research_run.id
+                    if context.research_run is not None
+                    else None
+                ),
+                editorial_idea_candidate_id=(
+                    context.candidate.id if context.candidate is not None else None
+                ),
+                editorial_calendar_slot_id=context.slot.id,
                 company_id=data.company_id,
                 channel_workspace_id=data.channel_workspace_id,
                 channel_profile_version_id=data.channel_profile_version_id,
                 policy_snapshot_id=data.policy_snapshot_id,
-                idea_market_preflight_id=data.idea_market_preflight_id,
-                planning_source_type=data.planning_source_type,
-                production_lane=data.production_lane,
+                idea_market_preflight_id=context.preflight.id,
+                planning_source_type=PlanningSourceType.LONG_FORM_PLAN,
+                production_lane=ProductionLane.LONG_FORM,
                 content_mode=None,
                 assignment_mode=data.assignment_mode,
                 series_plan_id=data.preferred_series_plan_id,
@@ -1582,41 +1320,21 @@ class ProjectAdmissionV2Service:
                 episode_number=None,
                 episode_role=data.episode_role,
                 standalone_reason_code=None,
-                parent_video_project_id=(
-                    data.derivative_lineage.parent_video_project_id
-                    if data.derivative_lineage
-                    else None
-                ),
-                parent_final_media_ref_id=(
-                    data.derivative_lineage.parent_final_media_ref_id
-                    if data.derivative_lineage
-                    else None
-                ),
-                canonical_timeline_ref=(
-                    data.derivative_lineage.canonical_timeline_ref
-                    if data.derivative_lineage
-                    else None
-                ),
-                canonical_timeline_hash=(
-                    data.derivative_lineage.canonical_timeline_hash
-                    if data.derivative_lineage
-                    else None
-                ),
                 resolver_version=self.resolver.version,
                 resolver_input_hash=resolver_input_hash,
                 decision_hash=decision_hash,
                 assignment_input_ref=resolver_input.model_dump(mode="json"),
-                duration_contract=(
-                    data.duration_contract.model_dump(mode="json")
-                    if data.duration_contract is not None
-                    else None
+                duration_contract=data.duration_contract.model_dump(mode="json"),
+                budget_gate_result=(
+                    data.budget_gate_result
+                    or {
+                        "decision": "BLOCK",
+                        "reason_codes": ["BUDGET_AUTHORITY_NOT_AVAILABLE"],
+                        "deterministic": True,
+                        "schema_version": "v2",
+                    }
                 ),
-                budget_gate_result={
-                    "decision": "NOT_EVALUATED",
-                    "deterministic": True,
-                    "schema_version": "v2",
-                },
-                readiness_gate_refs=[],
+                readiness_gate_refs=self._readiness_refs(context),
                 decision="BLOCK",
                 reason_codes=reason_codes,
                 evidence_refs=list(data.evidence_refs),
@@ -1626,102 +1344,70 @@ class ProjectAdmissionV2Service:
             )
             self.session.add(receipt)
             self.session.flush()
-            self._link_source(context=context, receipt=receipt)
-            self.session.flush()
             return receipt
 
         if not use_savepoint:
-            return add_receipt()
+            return create_receipt()
         with self.session.begin_nested():
-            return add_receipt()
+            return create_receipt()
 
     @staticmethod
-    def _decision_hash(
-        *,
-        data: ProjectAdmissionV2Request,
-        resolution: AssignmentResolution,
-        decision: str,
-    ) -> str:
-        return content_hash(
-            {
-                "decision": decision,
-                "request": data.model_dump(mode="json"),
-                "resolution": resolution.model_dump(mode="json"),
-            }
-        )
-
-    @staticmethod
-    def _link_source(
-        *,
+    def _readiness_refs(
         context: _AdmissionContext,
-        receipt: ProjectAdmissionDecision,
-    ) -> None:
-        if context.daily_run is not None:
-            context.daily_run.project_admission_decision_id = receipt.id
-        if context.slot is not None and receipt.decision == "ADMIT":
-            context.slot.status = "ADMITTED"
-
-    def _existing_source_receipt(
-        self, data: ProjectAdmissionV2Request
-    ) -> ProjectAdmissionDecision | None:
-        if data.daily_idea_decision_id is not None:
-            return self.session.scalars(
-                select(ProjectAdmissionDecision)
-                .where(
-                    ProjectAdmissionDecision.schema_version == "v2",
-                    ProjectAdmissionDecision.planning_source_type
-                    == PlanningSourceType.DAILY_IDEA,
-                    ProjectAdmissionDecision.daily_idea_decision_id
-                    == data.daily_idea_decision_id,
-                )
-                .order_by(ProjectAdmissionDecision.created_at.asc())
-            ).first()
-        if (
-            data.planning_source_type == PlanningSourceType.LONG_FORM_PLAN
-            and data.editorial_calendar_slot_id is not None
-        ):
-            return self.session.scalars(
-                select(ProjectAdmissionDecision)
-                .where(
-                    ProjectAdmissionDecision.schema_version == "v2",
-                    ProjectAdmissionDecision.planning_source_type
-                    == PlanningSourceType.LONG_FORM_PLAN,
-                    ProjectAdmissionDecision.editorial_calendar_slot_id
-                    == data.editorial_calendar_slot_id,
-                )
-                .order_by(ProjectAdmissionDecision.created_at.asc())
-            ).first()
-        return None
+    ) -> list[dict[str, Any]]:
+        preflight = context.preflight
+        evidence = preflight.evidence_blob or {}
+        return [
+            {
+                "type": "idea_market_preflight",
+                "id": str(preflight.id),
+                "decision": preflight.decision,
+                "policy_fit_state": preflight.policy_fit_state,
+                "niche_contract_digest_hash": (
+                    preflight.niche_contract_digest_hash
+                    or evidence.get("niche_contract_digest_hash")
+                ),
+                "target_market_digest_hash": (
+                    preflight.target_market_digest_hash
+                    or evidence.get("target_market_digest_hash")
+                ),
+            }
+        ]
 
     def _lock_source_and_existing(
-        self, data: ProjectAdmissionV2Request
+        self,
+        data: ProjectAdmissionV2Request,
     ) -> ProjectAdmissionDecision | None:
-        """Serialize one immutable admission receipt per exact planning source."""
-
-        if data.daily_idea_decision_id is not None:
+        self.session.scalar(
+            select(EditorialCalendarSlot)
+            .where(EditorialCalendarSlot.id == data.editorial_calendar_slot_id)
+            .with_for_update()
+        )
+        if data.editorial_idea_candidate_id is not None:
             self.session.scalar(
-                select(DailyIdeaDecision)
-                .where(DailyIdeaDecision.id == data.daily_idea_decision_id)
+                select(EditorialIdeaCandidate)
+                .where(EditorialIdeaCandidate.id == data.editorial_idea_candidate_id)
                 .with_for_update()
             )
-        elif (
-            data.planning_source_type == PlanningSourceType.LONG_FORM_PLAN
-            and data.editorial_calendar_slot_id is not None
-        ):
-            self.session.scalar(
-                select(EditorialCalendarSlot)
-                .where(
-                    EditorialCalendarSlot.id
-                    == data.editorial_calendar_slot_id
+            existing = self.session.scalar(
+                select(ProjectAdmissionDecision).where(
+                    ProjectAdmissionDecision.schema_version == "v2",
+                    ProjectAdmissionDecision.editorial_idea_candidate_id
+                    == data.editorial_idea_candidate_id,
                 )
-                .with_for_update()
             )
-        return self._existing_source_receipt(data)
+            if existing is not None:
+                return existing
+        return self.session.scalar(
+            select(ProjectAdmissionDecision).where(
+                ProjectAdmissionDecision.schema_version == "v2",
+                ProjectAdmissionDecision.editorial_calendar_slot_id
+                == data.editorial_calendar_slot_id,
+            )
+        )
 
 
 class LongFormPlanningService:
-    """Dedicated LONG_FORM entry; it never creates a ChannelDailyRun."""
-
     def __init__(
         self,
         session: Session,
@@ -1729,12 +1415,11 @@ class LongFormPlanningService:
         admission_service: ProjectAdmissionV2Service | None = None,
     ):
         self.session = session
-        self.admission_service = admission_service or ProjectAdmissionV2Service(
-            session
-        )
+        self.admission_service = admission_service or ProjectAdmissionV2Service(session)
 
     def admit(
-        self, data: LongFormPlanningRequest
+        self,
+        data: LongFormPlanningRequest,
     ) -> ProjectAdmissionDecision:
         return self.admission_service.create_decision(
             data=ProjectAdmissionV2Request(
@@ -1744,6 +1429,7 @@ class LongFormPlanningService:
                 channel_profile_version_id=data.channel_profile_version_id,
                 policy_snapshot_id=data.policy_snapshot_id,
                 editorial_calendar_slot_id=data.editorial_calendar_slot_id,
+                editorial_idea_candidate_id=data.editorial_idea_candidate_id,
                 idea_market_preflight_id=data.idea_market_preflight_id,
                 production_lane=ProductionLane.LONG_FORM,
                 assignment_mode=data.assignment_mode,
@@ -1758,6 +1444,7 @@ class LongFormPlanningService:
                 timely_niche_opportunity=data.timely_niche_opportunity,
                 bridge_or_special=data.bridge_or_special,
                 evidence_refs=data.evidence_refs,
+                budget_gate_result=data.budget_gate_result,
                 duration_contract=data.duration_contract,
                 created_by_user_id=data.created_by_user_id,
             )
@@ -1765,29 +1452,29 @@ class LongFormPlanningService:
 
 
 class LongFormPackageEligibilityService:
-    """Boundary guard used by package/render entry points for typed projects."""
-
     def __init__(self, session: Session):
         self.session = session
 
-    def require_eligible(self, video_project_id: uuid.UUID) -> VideoProject:
+    def require_eligible(
+        self,
+        video_project_id: uuid.UUID,
+    ) -> VideoProject:
         project = self.session.get(VideoProject, video_project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {video_project_id}")
         if project.schema_version == "v2" and (
             project.production_lane != ProductionLane.LONG_FORM
-            or project.planning_source_type
-            != PlanningSourceType.LONG_FORM_PLAN
+            or project.planning_source_type != PlanningSourceType.LONG_FORM_PLAN
             or project.render_eligible is not True
         ):
             raise ValidationFailureError(
-                "LONG_FORM package requires an admitted v2 LONG_FORM project"
+                "LONG_FORM package requires an admitted LONG_FORM project"
             )
         return project
 
 
 class LegacySeriesReader:
-    """Dual reader that classifies v1 truth without rewriting it."""
+    """Read-only archival classification without creating legacy authority."""
 
     def __init__(self, session: Session):
         self.session = session
@@ -1801,49 +1488,41 @@ class LegacySeriesReader:
         legacy_series_key: str | None,
     ) -> LegacySeriesClassification:
         if schema_version == "v2":
-            if series_plan_id is not None and series_run_id is not None:
-                return LegacySeriesClassification.V2_TYPED
             return LegacySeriesClassification.V2_TYPED
         if legacy_series_key and legacy_series_key.strip():
             return LegacySeriesClassification.LEGACY_SERIES_BOUND
         return LegacySeriesClassification.UNRESOLVED_LEGACY
 
     def classify_project(
-        self, video_project_id: uuid.UUID
+        self,
+        video_project_id: uuid.UUID,
     ) -> LegacySeriesClassification:
         project = self.session.get(VideoProject, video_project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {video_project_id}")
         if project.schema_version == "v2":
             return LegacySeriesClassification.V2_TYPED
-        admission = self.session.scalars(
+        admission = self.session.scalar(
             select(ProjectAdmissionDecision)
-            .where(
-                ProjectAdmissionDecision.admitted_video_project_id == project.id
-            )
+            .where(ProjectAdmissionDecision.admitted_video_project_id == project.id)
             .order_by(ProjectAdmissionDecision.created_at.asc())
-        ).first()
-        if admission is None:
-            return LegacySeriesClassification.UNRESOLVED_LEGACY
-        if admission.schema_version == "v2":
-            return LegacySeriesClassification.V2_TYPED
+        )
         legacy_key: str | None = None
-        if admission.daily_idea_decision_id is not None:
-            idea = self.session.get(
-                DailyIdeaDecision, admission.daily_idea_decision_id
+        if admission is not None and admission.editorial_research_run_id is not None:
+            research_run = self.session.get(
+                EditorialResearchRun,
+                admission.editorial_research_run_id,
             )
-            if idea is not None:
-                legacy_key = idea.proposed_series_key
-        if not legacy_key and admission.channel_daily_run_id is not None:
-            run = self.session.get(
-                ChannelDailyRun, admission.channel_daily_run_id
-            )
-            if run is not None and run.editorial_calendar_slot_id is not None:
-                slot = self.session.get(
-                    EditorialCalendarSlot, run.editorial_calendar_slot_id
+            slot = (
+                self.session.get(
+                    EditorialCalendarSlot,
+                    research_run.editorial_calendar_slot_id,
                 )
-                if slot is not None:
-                    legacy_key = slot.series_key
+                if research_run is not None
+                and research_run.editorial_calendar_slot_id is not None
+                else None
+            )
+            legacy_key = slot.series_key if slot is not None else None
         return self.classify_values(
             schema_version="v1",
             series_plan_id=None,

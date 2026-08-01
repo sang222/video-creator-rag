@@ -48,14 +48,6 @@ MediaJobType = Literal[
     "LONG_FORM_FINAL_RENDER",
     "LONG_MEDIA_QC",
     "LONG_PUBLISH_PACKAGE",
-    "SHORT_CANDIDATE_EXTRACTION",
-    "SHORT_SCRIPT_GENERATION",
-    "SHORT_VOICE_GENERATION",
-    "SHORT_CAPTION_TIMELINE",
-    "SHORT_HERO_REUSE",
-    "SHORT_RENDER",
-    "SHORT_MEDIA_QC",
-    "SHORT_PUBLISH_PACKAGE",
     "PREVIEW_CLIP_RENDER",
     "LICENSE_EVIDENCE_CHECK",
     "BUDGET_CHECK",
@@ -93,11 +85,8 @@ LongFormRenderPackageState = Literal[
     "QC_READY",
     "CANCELLED",
 ]
-ShortRenderPackageState = Literal[
-    "DRAFT", "READY_FOR_TEMPLATE_RENDER", "RENDERED", "QC_READY", "BLOCKED", "CANCELLED"
-]
 AIHeroIntendedUsage = Literal[
-    "OPENING_HOOK", "KEY_METAPHOR", "SHORT_HOOK", "THUMBNAIL_STILL", "OTHER"
+    "OPENING_HOOK", "KEY_METAPHOR", "THUMBNAIL_STILL", "OTHER"
 ]
 AIHeroAssetState = Literal[
     "PLANNED", "READY_FOR_PROVIDER", "GENERATED", "BLOCKED", "CANCELLED"
@@ -105,9 +94,7 @@ AIHeroAssetState = Literal[
 ThumbnailVariantState = Literal[
     "DRAFT", "READY_FOR_PROVIDER", "RENDERED", "SELECTED", "REJECTED", "CANCELLED"
 ]
-FinalMediaType = Literal[
-    "LONG_FORM_FINAL", "SHORT_FINAL", "THUMBNAIL", "CARD", "AI_HERO", "PREVIEW"
-]
+FinalMediaType = Literal["LONG_FORM_FINAL", "THUMBNAIL", "CARD", "AI_HERO", "PREVIEW"]
 LicenseStatus = Literal[
     "CONFIRMED", "NEEDS_REVIEW", "BLOCKED", "NOT_REQUIRED", "UNKNOWN"
 ]
@@ -338,9 +325,7 @@ class YouTubeOnlyAnalyticsGateRead(BaseModel):
 
 class LongFormRenderPackageCreate(BaseModel):
     production_package_artifact_version_id: uuid.UUID | None = None
-    production_package_hash: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    production_package_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     duration_contract: DurationContractV2 | None = None
     voice_timeline_id: uuid.UUID | None = None
     caption_track_id: uuid.UUID | None = None
@@ -385,42 +370,6 @@ class LongFormRenderPackageRead(_ReadModel):
     final_renderer_required: bool
     final_renderer_provider_key: str | None
     package_state: LongFormRenderPackageState
-    created_at: AwareDatetime
-    updated_at: AwareDatetime
-
-
-class ShortRenderPackageCreate(BaseModel):
-    short_render_plan_id: uuid.UUID | None = None
-    voice_ref: str | None = None
-    caption_track_id: uuid.UUID | None = None
-    hero_reuse_ref: str | None = None
-    template_asset_refs: list[dict[str, Any]] = Field(default_factory=list)
-    cloud_media_refs: list[dict[str, Any]] = Field(default_factory=list)
-    render_manifest: dict[str, Any] = Field(default_factory=dict)
-    target_duration_seconds: Decimal | None = None
-    target_aspect_ratio: str = "9:16"
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ShortRenderPackageRead(_ReadModel):
-    id: uuid.UUID
-    company_id: uuid.UUID
-    channel_workspace_id: uuid.UUID
-    video_project_id: uuid.UUID | None
-    short_candidate_id: uuid.UUID | None
-    short_render_plan_id: uuid.UUID | None
-    voice_ref: str | None
-    caption_track_id: uuid.UUID | None
-    hero_reuse_ref: str | None
-    template_asset_refs: list[dict[str, Any]]
-    cloud_media_refs: list[dict[str, Any]]
-    render_manifest: dict[str, Any]
-    target_duration_seconds: Decimal | None
-    target_aspect_ratio: str
-    hard_cap_seconds: int
-    renderer_provider_key: str | None
-    package_state: ShortRenderPackageState
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
@@ -516,9 +465,7 @@ class FinalMediaRefCreate(BaseModel):
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID | None = None
     production_package_artifact_version_id: uuid.UUID | None = None
-    production_package_hash: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    production_package_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     duration_contract: DurationContractV2 | None = None
     uploaded_video_id: uuid.UUID | None = None
     media_type: FinalMediaType

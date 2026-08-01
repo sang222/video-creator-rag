@@ -115,6 +115,8 @@ def _new_long_scope_with_approved_script(
     evidence_blob = {
         "authority": "strict-preflight",
         "evidence_complete": True,
+        "niche_contract_digest_hash": "a" * 64,
+        "target_market_digest_hash": "b" * 64,
     }
     if include_frozen_script:
         evidence_blob["approved_script"] = script
@@ -125,6 +127,8 @@ def _new_long_scope_with_approved_script(
         policy_fit_state="PASS",
         confidence_state="HIGH",
         evidence_blob=evidence_blob,
+        niche_contract_digest_hash="a" * 64,
+        target_market_digest_hash="b" * 64,
         reason_codes=["STRICT_EVIDENCE_COMPLETE"],
         decision="PASS",
     )
@@ -142,6 +146,8 @@ def _new_long_scope_with_approved_script(
             title="Phase 4 support compiler",
             description=script,
             category_id=base.project.category_id,
+            niche_gate_passed=True,
+            market_gate_passed=True,
             evidence_refs=[
                 {
                     "type": "idea_market_preflight",
@@ -152,7 +158,7 @@ def _new_long_scope_with_approved_script(
             created_by_user_id=base.operator.id,
         )
     )
-    assert admission.admitted_video_project_id is not None
+    assert admission.admitted_video_project_id is not None, admission.reason_codes
     project = session.get(VideoProject, admission.admitted_video_project_id)
     assert project is not None
     effective = EffectiveChannelRuntimeContextCompiler(session).ensure_for_project(

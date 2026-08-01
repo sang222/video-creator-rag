@@ -96,9 +96,7 @@ def _observable_pexels_description(
 
     if not _is_official_pexels_url(source_page_url):
         return None
-    path_tokens = re.findall(
-        r"[a-z0-9]+", urlsplit(source_page_url).path.casefold()
-    )
+    path_tokens = re.findall(r"[a-z0-9]+", urlsplit(source_page_url).path.casefold())
     if (
         len(path_tokens) < 3
         or path_tokens[0] != "video"
@@ -117,13 +115,14 @@ def _is_official_pexels_url(value: str) -> bool:
     parsed = urlsplit(value)
     return bool(
         parsed.scheme.casefold() == "https"
-        and (parsed.hostname or "").casefold()
-        in {"pexels.com", "www.pexels.com"}
+        and (parsed.hostname or "").casefold() in {"pexels.com", "www.pexels.com"}
     )
 
 
 class PexelsRenditionSelector:
-    def select(self, candidate: ParsedStockCandidate, request: AssetRequest) -> dict[str, Any]:
+    def select(
+        self, candidate: ParsedStockCandidate, request: AssetRequest
+    ) -> dict[str, Any]:
         if request.requested_role != "SUPPORTING_STOCK":
             raise ValueError("PEXELS_RENDITION_ROLE_INVALID")
         min_width, min_height = _resolution(request.minimum_resolution)
@@ -152,19 +151,38 @@ class PexelsRenditionSelector:
             if request.required_orientation == "portrait" and landscape:
                 continue
             distance = abs(width - target_width) + abs(height - target_height)
-            compatible.append(((distance, -(width * height), int(item.get("id") or 0), str(item.get("id") or "")), item))
+            compatible.append(
+                (
+                    (
+                        distance,
+                        -(width * height),
+                        int(item.get("id") or 0),
+                        str(item.get("id") or ""),
+                    ),
+                    item,
+                )
+            )
         if not compatible:
             raise ValueError("PEXELS_COMPATIBLE_MP4_NOT_FOUND")
         return sorted(compatible, key=lambda pair: pair[0])[0][1]
 
 
 class PexelsDownloadPlanBuilder:
-    def build(self, candidate: ParsedStockCandidate, rendition: dict[str, Any], request: AssetRequest) -> PexelsDownloadPlan:
+    def build(
+        self,
+        candidate: ParsedStockCandidate,
+        rendition: dict[str, Any],
+        request: AssetRequest,
+    ) -> PexelsDownloadPlan:
         raw_link = str(rendition.get("link") or "")
         if not raw_link:
             raise ValueError("PEXELS_DOWNLOAD_LINK_MISSING")
         parsed = urlsplit(raw_link)
-        if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.path.lower().endswith(".m3u8"):
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.path.lower().endswith(".m3u8")
+        ):
             raise ValueError("PEXELS_DOWNLOAD_LINK_INVALID")
         download_url_hash = hashlib.sha256(raw_link.encode()).hexdigest()
         safe_ref = f"volatile://pexels-download/{download_url_hash[:24]}"
@@ -193,7 +211,10 @@ class PexelsRateLimitMetadataParser:
 
     def parse(self, headers: dict[str, Any]) -> dict[str, int | None]:
         lowered = {str(key).lower(): value for key, value in headers.items()}
-        return {key.replace("x-ratelimit-", ""): _optional_int(lowered.get(key)) for key in sorted(self.ALLOWED)}
+        return {
+            key.replace("x-ratelimit-", ""): _optional_int(lowered.get(key))
+            for key in sorted(self.ALLOWED)
+        }
 
 
 def build_stock_source_manifest(
@@ -208,7 +229,12 @@ def build_stock_source_manifest(
     rights_policy_ref: str,
     attribution_required: bool = True,
 ) -> StockSourceManifest:
-    if download.state != "ASSET_DOWNLOADED" or not download.local_path or not download.sha256 or not download.size_bytes:
+    if (
+        download.state != "ASSET_DOWNLOADED"
+        or not download.local_path
+        or not download.sha256
+        or not download.size_bytes
+    ):
         raise ValueError("DOWNLOAD_EVIDENCE_INCOMPLETE")
     payload = {
         "asset_id": asset_id,
@@ -231,10 +257,22 @@ def build_stock_source_manifest(
         "usage_role": "SUPPORTING_STOCK",
         "rights_policy_ref": rights_policy_ref,
         "attribution_required": attribution_required,
-        "attribution_copy": f"Video by {candidate.creator_name} on Pexels" if attribution_required else "",
+        "attribution_copy": f"Video by {candidate.creator_name} on Pexels"
+        if attribution_required
+        else "",
         "identifiable_person_present": candidate.identifiable_person_present,
-        "logo_or_brand_present": candidate.logo_or_text_present or candidate.brand_or_trademark_present,
-        "human_review_status": "REQUIRED" if any(value is None for value in (candidate.identifiable_person_present, candidate.logo_or_text_present, candidate.brand_or_trademark_present)) else "FIXTURE_REVIEWED",
+        "logo_or_brand_present": candidate.logo_or_text_present
+        or candidate.brand_or_trademark_present,
+        "human_review_status": "REQUIRED"
+        if any(
+            value is None
+            for value in (
+                candidate.identifiable_person_present,
+                candidate.logo_or_text_present,
+                candidate.brand_or_trademark_present,
+            )
+        )
+        else "FIXTURE_REVIEWED",
     }
     return StockSourceManifest(**payload, manifest_hash=stable_hash(payload))
 
@@ -251,12 +289,18 @@ def build_ai_hero_request(
     if asset_request.requested_role != "AI_HERO":
         raise ValueError("AI_HERO_REQUEST_ROLE_INVALID")
     reason = asset_request.purpose.upper()
-    allowed = {"HOOK", "METAPHOR", "EMOTIONAL_PAYOFF", "VISUAL_SIGNATURE", "NATIVE_MOTION_INSUFFICIENT"}
+    allowed = {
+        "HOOK",
+        "METAPHOR",
+        "EMOTIONAL_PAYOFF",
+        "VISUAL_SIGNATURE",
+        "NATIVE_MOTION_INSUFFICIENT",
+    }
     if reason not in allowed:
         raise ValueError("AI_HERO_REASON_NOT_ALLOWED")
-    if asset_request.required_orientation == "square":
+    if asset_request.required_orientation != "landscape":
         raise ValueError("AI_HERO_ASPECT_RATIO_UNSUPPORTED")
-    aspect = {"landscape": "16:9", "portrait": "9:16"}[asset_request.required_orientation]
+    aspect = "16:9"
     prompt_hash = hashlib.sha256(prompt_text.encode()).hexdigest()
     payload = {
         "request_id": asset_request.request_id,

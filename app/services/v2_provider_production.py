@@ -162,7 +162,7 @@ class V2ProviderProductionGateway:
         PostReadinessProductionGatewayDescriptor(
             gateway_id="v2-provider",
             version="1.0.0",
-            supported_lanes=frozenset(ProductionLane),
+            supported_lanes=frozenset({ProductionLane.LONG_FORM}),
             production_eligible=True,
             fixture_only=False,
             invokes_mr1=False,
@@ -282,6 +282,7 @@ class PackageBoundV2StageGateway:
         context: WorkflowStageContext,
         stage: ProductionWorkflowStage,
     ) -> WorkflowStageResult:
+        _require_long_form_context(context)
         operation = _authorized_adapter_operation(context, stage)
         adapter = self._adapters.get(operation.adapter_key)
         if adapter is None:
@@ -327,24 +328,22 @@ class PackageBoundV2StageGateway:
     def build_final_review_candidate(
         self, context: WorkflowStageContext
     ) -> FinalReviewCandidateCreateV2:
+        _require_long_form_context(context)
         run = context.run
         project = context.session.get(VideoProject, run.video_project_id)
-        if project is None:
+        if (
+            project is None
+            or project.production_lane != ProductionLane.LONG_FORM.value
+            or project.planning_source_type != "LONG_FORM_PLAN"
+        ):
             raise ValidationFailureError("V2_PROVIDER_PROJECT_REQUIRED")
         final_review = _provider_plan(context).get("final_review")
         if not isinstance(final_review, dict):
             raise ValidationFailureError("V2_PROVIDER_FINAL_REVIEW_AUTHORITY_REQUIRED")
         destination = _normalized_destination(_destination_authority(context).content)
-        target_surface = str(
-            final_review.get(
-                "target_surface",
-                (
-                    "LONG_FORM"
-                    if run.production_lane == ProductionLane.LONG_FORM.value
-                    else "SHORTS"
-                ),
-            )
-        )
+        if final_review.get("target_surface", "LONG_FORM") != "LONG_FORM":
+            raise ValidationFailureError("V2_PROVIDER_LONG_FORM_SURFACE_REQUIRED")
+        target_surface = "LONG_FORM"
         return FinalReviewCandidateCreateV2(
             workflow_run_id=run.id,
             production_package_artifact_version_id=(
@@ -460,7 +459,7 @@ def build_v2_provider_production_gateway(
         descriptor=PostReadinessProductionGatewayDescriptor(
             gateway_id="v2-provider",
             version="1.2.0",
-            supported_lanes=frozenset(ProductionLane),
+            supported_lanes=frozenset({ProductionLane.LONG_FORM}),
             production_eligible=True,
             fixture_only=False,
             invokes_mr1=False,
@@ -471,6 +470,7 @@ def build_v2_provider_production_gateway(
 
 
 def _provider_plan(context: WorkflowStageContext) -> dict[str, Any]:
+    _require_long_form_context(context)
     run = context.run
     if run.production_package_artifact_version_id is None:
         raise ValidationFailureError("V2_PROVIDER_PACKAGE_REQUIRED")
@@ -513,6 +513,14 @@ def _provider_plan(context: WorkflowStageContext) -> dict[str, Any]:
     if str(plan.get("production_lane")) != run.production_lane:
         raise ValidationFailureError("V2_PROVIDER_EXECUTION_PLAN_LANE_MISMATCH")
     return plan
+
+
+def _require_long_form_context(context: WorkflowStageContext) -> None:
+    if (
+        context.run.production_lane != ProductionLane.LONG_FORM.value
+        or context.run.planning_source_type != "LONG_FORM_PLAN"
+    ):
+        raise ValidationFailureError("V2_PROVIDER_LONG_FORM_ONLY")
 
 
 def _authorized_adapter_operation(

@@ -71,6 +71,24 @@ def _rule(
 
 
 PROTECTED_READ_RULES = (
+    _rule(
+        "production.read",
+        r"^/(?:launch-(?:runs|policies)(?:/|$)|"
+        r"channels/[^/]+/launch-policy$)",
+        methods={"GET"},
+    ),
+    _rule(
+        "production.read",
+        r"^/editorial-(?:research-runs|idea-candidates)(?:/|$)",
+        methods={"GET"},
+    ),
+    _rule(
+        "production.read",
+        r"^/(?:project-admission-decisions/[^/]+|"
+        r"production-runs/[^/]+|"
+        r"video-projects/[^/]+/long-production)$",
+        methods={"GET"},
+    ),
     _rule("production.read", r"^/production-workflows(?:/|$)", methods={"GET"}),
     _rule(
         "production.read",
@@ -99,8 +117,18 @@ PROTECTED_READ_RULES = (
 # precede broad resource families.
 PERMISSION_RULES = (
     _rule(
+        "production.start",
+        r"^/(?:channels/[^/]+/launch-runs$|"
+        r"launch-runs(?:/|$))",
+    ),
+    _rule(
+        "channel.manage",
+        r"^/(?:channels/[^/]+/launch-policies$|"
+        r"launch-policies(?:/|$))",
+    ),
+    _rule(
         "production.cancel",
-        r"^/(?:production-runs|channel-daily-runs|production-workflows)/"
+        r"^/(?:production-runs|production-workflows)/"
         r"[^/]+/(?:cancel|abort|stop)$",
     ),
     _rule(
@@ -123,7 +151,7 @@ PERMISSION_RULES = (
     ),
     _rule(
         "publish.prepare",
-        r"^/(?:publish-handoffs(?:/|$)|video-packages/[^/]+/upload-task$|cross-platform-funnel-packages(?:/|$)|human-upload-tasks(?:/|$))",
+        r"^/(?:publish-handoffs(?:/|$)|video-packages/[^/]+/upload-task$|human-upload-tasks(?:/|$))",
     ),
     _rule(
         "analytics.sync",
@@ -159,14 +187,14 @@ PERMISSION_RULES = (
     ),
     _rule(
         "production.start",
-        r"^/(?:operator-planning/(?:prepare|launch|(?:daily-short|long-form)/launch)$|"
-        r"channel-daily-runs(?:/|$)|production-runs(?:/|$)|render-revisions(?:/|$)|"
+        r"^/(?:operator-planning/(?:prepare|launch|long-form/launch)$|"
+        r"production-runs(?:/|$)|render-revisions(?:/|$)|"
         r"production-workflows/[^/]+/resume$|"
         r"video-packages(?:/|$)|production-packages(?:/|$)|"
         r"video-projects/[^/]+/(?:production-workflow/start|long-production(?:/run)?|long-form-render-package|"
-        r"short-candidates/extract|ai-hero-assets/plan|thumbnail-variants/plan)$|"
+        r"ai-hero-assets/plan|thumbnail-variants/plan)$|"
         r"revision-requests/[^/]+/resolve$|"
-        r"short-candidates/[^/]+/(?:rank|short-render-package)$|media-qc/run$|accessibility-qc/run$|"
+        r"media-qc/run$|accessibility-qc/run$|"
         r"media-render-routing/decide$)",
     ),
     _rule(
@@ -176,14 +204,14 @@ PERMISSION_RULES = (
         r"voice-profiles(?:/|$)|artifacts(?:/|$)|artifact-versions(?:/|$)|review-tasks(?:/|$)|"
         r"review-findings(?:/|$)|revision-requests(?:/|$)|gates(?:/|$)|policy-(?:catalogs|versions|source-refs|"
         r"change-records|revalidation-batches)(?:/|$)|editorial-calendar-slots(?:/|$)|"
-        r"search-demand-evidence(?:/|$)|context(?:/|$)|channel-state-packs(?:/|$)|daily-idea-decisions(?:/|$)|"
-        r"idea-market-preflights(?:/|$)|project-admission-decisions(?:/|$)|derivative-(?:graph|originality-checks)(?:/|$)|"
+        r"search-demand-evidence(?:/|$)|context(?:/|$)|channel-state-packs(?:/|$)|"
+        r"editorial-research-runs(?:/|$)|editorial-idea-candidates(?:/|$)|"
+        r"idea-market-preflights(?:/|$)|project-admission-decisions(?:/|$)|"
         r"series-(?:plans|runs)(?:/|$)|"
-        r"reusable-artifacts(?:/|$)|asset-reuse-index(?:/|$)|promote-short-to-long-candidates(?:/|$)|"
+        r"reusable-artifacts(?:/|$)|asset-reuse-index(?:/|$)|"
         r"proxy-preview-artifact-flags(?:/|$)|"
         r"originality/format-identities$|localized-(?:subtitle|metadata)-packages(?:/|$)|"
-        r"media-provider-(?:roles|capabilities|budgets)(?:/|$)|thumbnail-variants(?:/|$)|"
-        r"cross-platform-funnel-packages(?:/|$))",
+        r"media-provider-(?:roles|capabilities|budgets)(?:/|$)|thumbnail-variants(?:/|$))",
     ),
 )
 

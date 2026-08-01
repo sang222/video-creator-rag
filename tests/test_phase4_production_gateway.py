@@ -243,9 +243,7 @@ class _DeterministicV2Pipeline:
             destination_platform_channel_id="channel-v2",
             destination_account_identity="account-v2",
             target_platform="YOUTUBE",
-            target_surface=(
-                "LONG_FORM" if self.lane == ProductionLane.LONG_FORM else "SHORTS"
-            ),
+            target_surface="LONG_FORM",
             target_market_lineage={"market": "approved"},
             publish_metadata_snapshot={
                 "title": "Approved v2 output",
@@ -629,7 +627,10 @@ def test_package_bound_gateway_executes_authorized_adapter_operations(
     gateway = PackageBoundV2StageGateway({"recording-native": adapter})
     context = SimpleNamespace(
         command_id=f"command-{lane.value.lower()}",
-        run=SimpleNamespace(production_lane=lane.value),
+        run=SimpleNamespace(
+            production_lane=lane.value,
+            planning_source_type="LONG_FORM_PLAN",
+        ),
         ensure_active=lambda: None,
     )
 

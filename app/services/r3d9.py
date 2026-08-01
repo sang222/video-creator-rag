@@ -29,7 +29,6 @@ from app.core.time import utc_now
 from app.db.models import (
     AgentContextPackSnapshot,
     AgentOutputValidationRun,
-    AnalyticsSnapshot,
     ChannelMemoryItem,
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
@@ -51,7 +50,6 @@ from app.db.models import (
     ProviderJobSnapshot,
     ProxyPreviewArtifactFlag,
     QualityDeltaAttribution,
-    R3D4GateBatchRun,
     R3D4GateRun,
     RecoveryProposal,
     RenderRevision,
@@ -67,7 +65,6 @@ from app.services.dx2 import ProviderStackDriftGuard
 
 
 FORBIDDEN_OPS_ACTIONS = [
-    "RUN_DAILY_GENERATION",
     "RUN_NOVIEW_SCANNER",
     "RUN_VECTOR_LEARNING",
     "EXECUTE_PROVIDER",
@@ -118,7 +115,10 @@ def _status_severity(status: str | None, *, default: str = "INFO") -> str:
     normalized = (status or "").upper()
     if any(token in normalized for token in ["BLOCK", "FAILED", "REJECTED", "ERROR"]):
         return "HIGH"
-    if any(token in normalized for token in ["WAIT", "PENDING", "REVIEW", "UNVERIFIED", "TOO_EARLY", "STALE"]):
+    if any(
+        token in normalized
+        for token in ["WAIT", "PENDING", "REVIEW", "UNVERIFIED", "TOO_EARLY", "STALE"]
+    ):
         return "NORMAL"
     if "CRITICAL" in normalized:
         return "CRITICAL"
@@ -174,32 +174,80 @@ class OperatorNextActionService:
             is_manual_only=is_manual_only,
         )
 
-    def for_package(self, package: FirstScriptedVideoPackage, upload_task: HumanUploadTask | None = None) -> OperatorNextActionRead:
+    def for_package(
+        self,
+        package: FirstScriptedVideoPackage,
+        upload_task: HumanUploadTask | None = None,
+    ) -> OperatorNextActionRead:
         if package.package_status in {"READY_FOR_HUMAN_REVIEW", "REVIEW_REQUIRED"}:
-            return self.build("REVIEW_PACKAGE", target_url=f"/video-packages/{package.id}/review")
+            return self.build(
+                "REVIEW_PACKAGE", target_url=f"/video-packages/{package.id}/review"
+            )
         if upload_task is None:
-            return self.build("CREATE_UPLOAD_TASK", target_url=f"/video-packages/{package.id}/review")
+            return self.build(
+                "CREATE_UPLOAD_TASK", target_url=f"/video-packages/{package.id}/review"
+            )
         return self.for_upload_task(upload_task)
 
     def for_upload_task(self, task: HumanUploadTask) -> OperatorNextActionRead:
-        target = f"/video-packages/{task.first_scripted_video_package_id}/review" if task.first_scripted_video_package_id else "/publishing"
+        target = (
+            f"/video-packages/{task.first_scripted_video_package_id}/review"
+            if task.first_scripted_video_package_id
+            else "/publishing"
+        )
         if task.task_state == "READY_FOR_HUMAN_UPLOAD":
-            return self.build("MANUAL_UPLOAD_OUTSIDE_VCOS", target_url=target, blocking_reason_codes=["HUMAN_UPLOAD_REQUIRED"])
+            return self.build(
+                "MANUAL_UPLOAD_OUTSIDE_VCOS",
+                target_url=target,
+                blocking_reason_codes=["HUMAN_UPLOAD_REQUIRED"],
+            )
         if task.task_state in {"HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"}:
-            return self.build("BACKFILL_VIDEO_ID", target_url=target, blocking_reason_codes=["PASTE_BACK_REQUIRED"])
-        if task.task_state in {"BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED"} and task.actual_uploaded_video_id:
-            return self.build("VERIFY_UPLOADED_VIDEO", target_url=f"/uploaded-videos/{task.actual_uploaded_video_id}")
+            return self.build(
+                "BACKFILL_VIDEO_ID",
+                target_url=target,
+                blocking_reason_codes=["PASTE_BACK_REQUIRED"],
+            )
+        if (
+            task.task_state
+            in {"BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED"}
+            and task.actual_uploaded_video_id
+        ):
+            return self.build(
+                "VERIFY_UPLOADED_VIDEO",
+                target_url=f"/uploaded-videos/{task.actual_uploaded_video_id}",
+            )
         if task.task_state == "BLOCKED":
-            return self.build("BACKFILL_VIDEO_ID", target_url=target, blocking_reason_codes=[task.blocked_reason or "UPLOAD_TASK_BLOCKED"])
+            return self.build(
+                "BACKFILL_VIDEO_ID",
+                target_url=target,
+                blocking_reason_codes=[task.blocked_reason or "UPLOAD_TASK_BLOCKED"],
+            )
         return self.build("NO_ACTION", target_url=target)
 
-    def for_uploaded_video(self, uploaded: UploadedVideo, maturity: str | None = None) -> OperatorNextActionRead:
+    def for_uploaded_video(
+        self, uploaded: UploadedVideo, maturity: str | None = None
+    ) -> OperatorNextActionRead:
         if uploaded.verification_status in {"NOT_VERIFIED", "VERIFICATION_FAILED"}:
-            return self.build("VERIFY_UPLOADED_VIDEO", target_url=f"/uploaded-videos/{uploaded.id}", blocking_reason_codes=[uploaded.verification_status])
-        if uploaded.analytics_sync_status in {"NOT_STARTED", "PENDING"} or maturity in {"TOO_EARLY", "NO_DATA"}:
-            return self.build("WAIT_ANALYTICS_MATURITY", target_url=f"/uploaded-videos/{uploaded.id}", blocking_reason_codes=[uploaded.analytics_sync_status])
+            return self.build(
+                "VERIFY_UPLOADED_VIDEO",
+                target_url=f"/uploaded-videos/{uploaded.id}",
+                blocking_reason_codes=[uploaded.verification_status],
+            )
+        if uploaded.analytics_sync_status in {"NOT_STARTED", "PENDING"} or maturity in {
+            "TOO_EARLY",
+            "NO_DATA",
+        }:
+            return self.build(
+                "WAIT_ANALYTICS_MATURITY",
+                target_url=f"/uploaded-videos/{uploaded.id}",
+                blocking_reason_codes=[uploaded.analytics_sync_status],
+            )
         if uploaded.analytics_sync_status in {"FAILED", "NOT_CONFIGURED"}:
-            return self.build("RESOLVE_PROVIDER_CREDENTIALS", target_url="/ops", blocking_reason_codes=[uploaded.analytics_sync_status])
+            return self.build(
+                "RESOLVE_PROVIDER_CREDENTIALS",
+                target_url="/ops",
+                blocking_reason_codes=[uploaded.analytics_sync_status],
+            )
         return self.build("NO_ACTION", target_url=f"/uploaded-videos/{uploaded.id}")
 
 
@@ -216,13 +264,24 @@ class RuntimeDashboardService:
                 entity_id=channel.id,
                 title=channel.name,
                 status=channel.status,
-                next_action=self.actions.build("NO_ACTION", target_url=f"/channels/{channel.id}"),
+                next_action=self.actions.build(
+                    "NO_ACTION", target_url=f"/channels/{channel.id}"
+                ),
                 link_target=f"/channels/{channel.id}",
                 updated_at=channel.updated_at,
-                technical_appendix={"key": channel.key, "primary_timezone": channel.primary_timezone},
+                technical_appendix={
+                    "key": channel.key,
+                    "primary_timezone": channel.primary_timezone,
+                },
             )
             for channel in self.session.scalars(
-                select(ChannelWorkspace).where(ChannelWorkspace.status.in_(["active", "ACTIVE", "activated", "ACTIVATED"])).limit(limit)
+                select(ChannelWorkspace)
+                .where(
+                    ChannelWorkspace.status.in_(
+                        ["active", "ACTIVE", "activated", "ACTIVATED"]
+                    )
+                )
+                .limit(limit)
             ).all()
         ]
         packages = self._package_cards(limit)
@@ -273,8 +332,15 @@ class RuntimeDashboardService:
     def _package_cards(self, limit: int) -> list[OpsCardRead]:
         rows = self.session.scalars(
             select(FirstScriptedVideoPackage)
-            .where(FirstScriptedVideoPackage.package_status.in_(["READY_FOR_HUMAN_REVIEW", "REVIEW_REQUIRED", "BLOCKED"]))
-            .order_by(desc(FirstScriptedVideoPackage.created_at), desc(FirstScriptedVideoPackage.id))
+            .where(
+                FirstScriptedVideoPackage.package_status.in_(
+                    ["READY_FOR_HUMAN_REVIEW", "REVIEW_REQUIRED", "BLOCKED"]
+                )
+            )
+            .order_by(
+                desc(FirstScriptedVideoPackage.created_at),
+                desc(FirstScriptedVideoPackage.id),
+            )
             .limit(limit)
         ).all()
         cards: list[OpsCardRead] = []
@@ -296,7 +362,10 @@ class RuntimeDashboardService:
                     next_action=self.actions.for_package(package, upload_task),
                     link_target=f"/video-packages/{package.id}/review",
                     updated_at=package.created_at,
-                    technical_appendix={"video_project_id": _id_str(package.video_project_id), "channel_id": str(package.channel_id)},
+                    technical_appendix={
+                        "video_project_id": _id_str(package.video_project_id),
+                        "channel_id": str(package.channel_id),
+                    },
                 )
             )
         return cards
@@ -304,7 +373,18 @@ class RuntimeDashboardService:
     def _upload_task_cards(self, limit: int) -> list[OpsCardRead]:
         rows = self.session.scalars(
             select(HumanUploadTask)
-            .where(HumanUploadTask.task_state.in_(["READY_FOR_HUMAN_UPLOAD", "HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL", "BACKFILLED_WAITING_VERIFICATION", "UPLOADED_UNVERIFIED", "BLOCKED"]))
+            .where(
+                HumanUploadTask.task_state.in_(
+                    [
+                        "READY_FOR_HUMAN_UPLOAD",
+                        "HUMAN_UPLOAD_IN_PROGRESS",
+                        "UPLOADED_WAITING_BACKFILL",
+                        "BACKFILLED_WAITING_VERIFICATION",
+                        "UPLOADED_UNVERIFIED",
+                        "BLOCKED",
+                    ]
+                )
+            )
             .order_by(desc(HumanUploadTask.updated_at), desc(HumanUploadTask.id))
             .limit(limit)
         ).all()
@@ -315,11 +395,18 @@ class RuntimeDashboardService:
                 entity_id=task.id,
                 title=task.title_snapshot or f"Upload task {str(task.id)[:8]}",
                 status=task.task_state,
-                blocker_reason_codes=[task.blocked_reason] if task.blocked_reason else [],
+                blocker_reason_codes=[task.blocked_reason]
+                if task.blocked_reason
+                else [],
                 next_action=self.actions.for_upload_task(task),
-                link_target=f"/video-packages/{task.first_scripted_video_package_id}/review" if task.first_scripted_video_package_id else "/publishing",
+                link_target=f"/video-packages/{task.first_scripted_video_package_id}/review"
+                if task.first_scripted_video_package_id
+                else "/publishing",
                 updated_at=task.updated_at,
-                technical_appendix={"manual_only": True, "destination": task.destination},
+                technical_appendix={
+                    "manual_only": True,
+                    "destination": task.destination,
+                },
             )
             for task in rows
         ]
@@ -329,8 +416,12 @@ class RuntimeDashboardService:
             select(UploadedVideo)
             .where(
                 or_(
-                    UploadedVideo.verification_status.not_in(["VERIFIED_PUBLIC", "VERIFIED_OWNER"]),
-                    UploadedVideo.analytics_sync_status.in_(["NOT_STARTED", "PENDING", "FAILED", "NOT_CONFIGURED"]),
+                    UploadedVideo.verification_status.not_in(
+                        ["VERIFIED_PUBLIC", "VERIFIED_OWNER"]
+                    ),
+                    UploadedVideo.analytics_sync_status.in_(
+                        ["NOT_STARTED", "PENDING", "FAILED", "NOT_CONFIGURED"]
+                    ),
                 )
             )
             .order_by(desc(UploadedVideo.updated_at), desc(UploadedVideo.id))
@@ -338,7 +429,9 @@ class RuntimeDashboardService:
         ).all()
         cards: list[OpsCardRead] = []
         for uploaded in rows:
-            maturity, confidence = UploadedVideoOpsService(self.session).analytics_state(uploaded)
+            maturity, confidence = UploadedVideoOpsService(
+                self.session
+            ).analytics_state(uploaded)
             cards.append(
                 self._card(
                     key=f"uploaded_video:{uploaded.id}",
@@ -346,11 +439,16 @@ class RuntimeDashboardService:
                     entity_id=uploaded.id,
                     title=uploaded.actual_title or uploaded.platform_video_id,
                     status=f"{uploaded.verification_status}/{uploaded.analytics_sync_status}",
-                    blocker_reason_codes=[maturity] if maturity not in {"MATURE", "UNKNOWN"} else [],
+                    blocker_reason_codes=[maturity]
+                    if maturity not in {"MATURE", "UNKNOWN"}
+                    else [],
                     next_action=self.actions.for_uploaded_video(uploaded, maturity),
                     link_target=f"/uploaded-videos/{uploaded.id}",
                     updated_at=uploaded.updated_at,
-                    technical_appendix={"analytics_confidence": confidence, YT_DASHBOARD_READ_KEY: False},
+                    technical_appendix={
+                        "analytics_confidence": confidence,
+                        YT_DASHBOARD_READ_KEY: False,
+                    },
                 )
             )
         return cards
@@ -370,10 +468,17 @@ class RuntimeDashboardService:
                 title=gate.gate_key,
                 status=gate.status,
                 blocker_reason_codes=list(gate.fail_codes or []),
-                next_action=self.actions.build("REVIEW_PACKAGE", target_url=f"/video-packages/{gate.package_id}/review", blocking_reason_codes=list(gate.fail_codes or [])),
+                next_action=self.actions.build(
+                    "REVIEW_PACKAGE",
+                    target_url=f"/video-packages/{gate.package_id}/review",
+                    blocking_reason_codes=list(gate.fail_codes or []),
+                ),
                 link_target=f"/video-packages/{gate.package_id}/review",
                 updated_at=gate.created_at,
-                technical_appendix={"severity": gate.severity, "repair_hint": gate.repair_hint},
+                technical_appendix={
+                    "severity": gate.severity,
+                    "repair_hint": gate.repair_hint,
+                },
             )
             for gate in rows
         ]
@@ -399,7 +504,8 @@ class RuntimeDashboardService:
             title=title,
             status=status,
             severity=_status_severity(status),
-            blocker_reason_codes=blocker_reason_codes or next_action.blocking_reason_codes,
+            blocker_reason_codes=blocker_reason_codes
+            or next_action.blocking_reason_codes,
             next_action=next_action,
             link_target=link_target,
             updated_at=updated_at,
@@ -414,40 +520,88 @@ class ChannelRuntimeTraceService:
     def for_channel(self, channel_id: uuid.UUID) -> ChannelRuntimeTraceRead:
         effective = self.session.scalars(
             select(EffectiveChannelRuntimeContextSnapshot)
-            .where(EffectiveChannelRuntimeContextSnapshot.channel_workspace_id == channel_id)
-            .order_by(desc(EffectiveChannelRuntimeContextSnapshot.created_at), desc(EffectiveChannelRuntimeContextSnapshot.id))
+            .where(
+                EffectiveChannelRuntimeContextSnapshot.channel_workspace_id
+                == channel_id
+            )
+            .order_by(
+                desc(EffectiveChannelRuntimeContextSnapshot.created_at),
+                desc(EffectiveChannelRuntimeContextSnapshot.id),
+            )
             .limit(1)
         ).one_or_none()
         if effective is None:
-            raise NotFoundError(f"runtime context snapshot not found for channel: {channel_id}")
+            raise NotFoundError(
+                f"runtime context snapshot not found for channel: {channel_id}"
+            )
         return self._trace(effective)
 
     def for_project(self, project_id: uuid.UUID) -> ChannelRuntimeTraceRead:
         project = self.session.get(VideoProject, project_id)
-        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, project.effective_context_snapshot_id) if project and project.effective_context_snapshot_id else None
+        effective = (
+            self.session.get(
+                EffectiveChannelRuntimeContextSnapshot,
+                project.effective_context_snapshot_id,
+            )
+            if project and project.effective_context_snapshot_id
+            else None
+        )
         if effective is None:
             effective = self.session.scalars(
                 select(EffectiveChannelRuntimeContextSnapshot)
-                .where(EffectiveChannelRuntimeContextSnapshot.video_project_id == project_id)
-                .order_by(desc(EffectiveChannelRuntimeContextSnapshot.created_at), desc(EffectiveChannelRuntimeContextSnapshot.id))
+                .where(
+                    EffectiveChannelRuntimeContextSnapshot.video_project_id
+                    == project_id
+                )
+                .order_by(
+                    desc(EffectiveChannelRuntimeContextSnapshot.created_at),
+                    desc(EffectiveChannelRuntimeContextSnapshot.id),
+                )
                 .limit(1)
             ).one_or_none()
         if effective is None:
-            raise NotFoundError(f"runtime context snapshot not found for project: {project_id}")
+            raise NotFoundError(
+                f"runtime context snapshot not found for project: {project_id}"
+            )
         return self._trace(effective)
 
     def for_package(self, package_id: uuid.UUID) -> ChannelRuntimeTraceRead:
         package = self.session.get(FirstScriptedVideoPackage, package_id)
         if package is None:
             raise NotFoundError(f"package not found: {package_id}")
-        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None
+        effective = (
+            self.session.get(
+                EffectiveChannelRuntimeContextSnapshot,
+                package.effective_context_snapshot_id,
+            )
+            if package.effective_context_snapshot_id
+            else None
+        )
         if effective is None:
-            raise NotFoundError(f"runtime context snapshot not found for package: {package_id}")
+            raise NotFoundError(
+                f"runtime context snapshot not found for package: {package_id}"
+            )
         return self._trace(effective, package_id=package.id)
 
-    def _trace(self, effective: EffectiveChannelRuntimeContextSnapshot, package_id: uuid.UUID | None = None) -> ChannelRuntimeTraceRead:
-        profile = self.session.get(ChannelProfileVersion, effective.channel_profile_version_id) if effective.channel_profile_version_id else None
-        snapshot = self.session.get(CompiledChannelPolicySnapshot, effective.compiled_policy_snapshot_id) if effective.compiled_policy_snapshot_id else None
+    def _trace(
+        self,
+        effective: EffectiveChannelRuntimeContextSnapshot,
+        package_id: uuid.UUID | None = None,
+    ) -> ChannelRuntimeTraceRead:
+        profile = (
+            self.session.get(
+                ChannelProfileVersion, effective.channel_profile_version_id
+            )
+            if effective.channel_profile_version_id
+            else None
+        )
+        snapshot = (
+            self.session.get(
+                CompiledChannelPolicySnapshot, effective.compiled_policy_snapshot_id
+            )
+            if effective.compiled_policy_snapshot_id
+            else None
+        )
         return ChannelRuntimeTraceRead(
             channel_id=effective.channel_workspace_id,
             video_project_id=effective.video_project_id,
@@ -516,7 +670,10 @@ class PackageOpsSummaryService:
         context_packs = self.session.scalars(
             select(AgentContextPackSnapshot)
             .where(AgentContextPackSnapshot.package_id == package.id)
-            .order_by(AgentContextPackSnapshot.created_at.asc(), AgentContextPackSnapshot.id.asc())
+            .order_by(
+                AgentContextPackSnapshot.created_at.asc(),
+                AgentContextPackSnapshot.id.asc(),
+            )
         ).all()
         latest_task = self.session.scalars(
             select(HumanUploadTask)
@@ -525,7 +682,9 @@ class PackageOpsSummaryService:
             .limit(1)
         ).one_or_none()
         r3d4_runs = self.session.scalars(
-            select(R3D4GateRun).where(R3D4GateRun.package_id == package.id).order_by(R3D4GateRun.created_at.asc(), R3D4GateRun.id.asc())
+            select(R3D4GateRun)
+            .where(R3D4GateRun.package_id == package.id)
+            .order_by(R3D4GateRun.created_at.asc(), R3D4GateRun.id.asc())
         ).all()
         gatekeeper = self.session.scalars(
             select(AgentOutputValidationRun)
@@ -533,7 +692,10 @@ class PackageOpsSummaryService:
                 AgentOutputValidationRun.package_id == package.id,
                 AgentOutputValidationRun.agent_key == "GatekeeperSoftReviewAgent",
             )
-            .order_by(desc(AgentOutputValidationRun.created_at), desc(AgentOutputValidationRun.id))
+            .order_by(
+                desc(AgentOutputValidationRun.created_at),
+                desc(AgentOutputValidationRun.id),
+            )
             .limit(1)
         ).one_or_none()
         provider_cost = ProviderCostOpsService(self.session).build(package.id)
@@ -551,7 +713,9 @@ class PackageOpsSummaryService:
                     "lane": pack.lane,
                     "context_pack_hash": pack.context_pack_hash,
                     "prompt_context_hash": pack.prompt_context_hash,
-                    "effective_context_snapshot_id": str(pack.effective_context_snapshot_id),
+                    "effective_context_snapshot_id": str(
+                        pack.effective_context_snapshot_id
+                    ),
                 }
                 for pack in context_packs
             ],
@@ -561,14 +725,20 @@ class PackageOpsSummaryService:
                     "agent_key": pack.agent_key,
                     "budget_report": _jsonable(pack.budget_report_json),
                     "omitted_items": _jsonable(pack.omitted_items_json),
-                    "largest_context_contributors": _jsonable(pack.largest_context_contributors_json),
+                    "largest_context_contributors": _jsonable(
+                        pack.largest_context_contributors_json
+                    ),
                 }
                 for pack in context_packs
             ],
             hook_first_3_seconds=_jsonable(handoff_dict.get("hook_spec", {})),
-            title_description_subtitles_disclosure=_jsonable(handoff_dict.get("upload_handoff_copy", {})),
+            title_description_subtitles_disclosure=_jsonable(
+                handoff_dict.get("upload_handoff_copy", {})
+            ),
             thumbnail_handoff=_jsonable(handoff_dict.get("thumbnail_handoff", {})),
-            publish_timing_recommendation=_jsonable(handoff_dict.get("publish_timing_recommendation", {})),
+            publish_timing_recommendation=_jsonable(
+                handoff_dict.get("publish_timing_recommendation", {})
+            ),
             r3d4_deterministic_gate_results=[
                 {
                     "id": str(run.id),
@@ -592,21 +762,36 @@ class PackageOpsSummaryService:
             )
             if gatekeeper
             else None,
-            packaging_gate_results=_jsonable(_as_dict(handoff_dict.get("packaging_gate_summary")).get("gate_results", [])),
+            packaging_gate_results=_jsonable(
+                _as_dict(handoff_dict.get("packaging_gate_summary")).get(
+                    "gate_results", []
+                )
+            ),
             provider_boundary_summary=provider_cost.model_dump(mode="json"),
             manual_publish_handoff={
                 **_as_dict(handoff_dict.get("manual_upload")),
-                "human_upload_task": _jsonable(_task_summary(latest_task)) if latest_task else None,
+                "human_upload_task": _jsonable(_task_summary(latest_task))
+                if latest_task
+                else None,
                 "manual_only_warning_vi": "Upload/publish phải làm thủ công ngoài VCOS; VCOS chỉ nhận paste-back video_id/URL.",
-                "allowed_actions": ["CREATE_UPLOAD_TASK", "MANUAL_UPLOAD_OUTSIDE_VCOS", "BACKFILL_VIDEO_ID", "VERIFY_UPLOADED_VIDEO"],
+                "allowed_actions": [
+                    "CREATE_UPLOAD_TASK",
+                    "MANUAL_UPLOAD_OUTSIDE_VCOS",
+                    "BACKFILL_VIDEO_ID",
+                    "VERIFY_UPLOADED_VIDEO",
+                ],
             },
             next_action=self.actions.for_package(package, latest_task),
             no_provider_media_upload_execution=True,
             technical_appendix={
                 "agent_run_refs": _jsonable(package.agent_run_refs),
                 "prompt_render_run_refs": _jsonable(package.prompt_render_run_refs),
-                "prompt_audit_snapshot_refs": _jsonable(package.prompt_audit_snapshot_refs),
-                "no_upload_or_publish_calls_made": bool(handoff.no_upload_or_publish_calls_made),
+                "prompt_audit_snapshot_refs": _jsonable(
+                    package.prompt_audit_snapshot_refs
+                ),
+                "no_upload_or_publish_calls_made": bool(
+                    handoff.no_upload_or_publish_calls_made
+                ),
             },
         )
 
@@ -621,26 +806,43 @@ class UploadedVideoOpsService:
         if uploaded is None:
             raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
         channel = self.session.get(ChannelWorkspace, uploaded.channel_workspace_id)
-        task = self.session.get(HumanUploadTask, uploaded.human_upload_task_id) if uploaded.human_upload_task_id else None
+        task = (
+            self.session.get(HumanUploadTask, uploaded.human_upload_task_id)
+            if uploaded.human_upload_task_id
+            else None
+        )
         maturity, confidence = self.analytics_state(uploaded)
         backfill_events = self.session.scalars(
             select(UploadedVideoBackfillEvent)
             .where(UploadedVideoBackfillEvent.uploaded_video_id == uploaded.id)
-            .order_by(UploadedVideoBackfillEvent.created_at.asc(), UploadedVideoBackfillEvent.id.asc())
+            .order_by(
+                UploadedVideoBackfillEvent.created_at.asc(),
+                UploadedVideoBackfillEvent.id.asc(),
+            )
         ).all()
         metrics = self.session.scalars(
-            select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id)
+            select(UploadedVideoMetricsSummary).where(
+                UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id
+            )
         ).one_or_none()
         diagnostics = DiagnosticOpsService(self.session).for_uploaded_video(uploaded.id)
         recovery = self.session.scalars(
-            select(RecoveryProposal).where(RecoveryProposal.uploaded_video_id == uploaded.id).order_by(desc(RecoveryProposal.created_at))
+            select(RecoveryProposal)
+            .where(RecoveryProposal.uploaded_video_id == uploaded.id)
+            .order_by(desc(RecoveryProposal.created_at))
         ).all()
         learning = self.session.scalars(
-            select(LearningCandidate).where(LearningCandidate.uploaded_video_id == uploaded.id).order_by(desc(LearningCandidate.created_at))
+            select(LearningCandidate)
+            .where(LearningCandidate.uploaded_video_id == uploaded.id)
+            .order_by(desc(LearningCandidate.created_at))
         ).all()
         flags = []
         if metrics and _as_dict(metrics.availability_summary).get("enforcement_flags"):
-            flags.extend(_as_list(_as_dict(metrics.availability_summary).get("enforcement_flags")))
+            flags.extend(
+                _as_list(
+                    _as_dict(metrics.availability_summary).get("enforcement_flags")
+                )
+            )
         return UploadedVideoOpsSummaryRead(
             uploaded_video_id=uploaded.id,
             platform=uploaded.platform,
@@ -662,7 +864,8 @@ class UploadedVideoOpsService:
             actual_upload_time=uploaded.actual_upload_time,
             actual_publish_time=uploaded.actual_publish_time or uploaded.published_at,
             channel_timezone=channel.primary_timezone if channel else None,
-            operator_timezone=getattr(get_settings(), "operator_timezone", None) or "Asia/Ho_Chi_Minh",
+            operator_timezone=getattr(get_settings(), "operator_timezone", None)
+            or "Asia/Ho_Chi_Minh",
             analytics_sync_status=uploaded.analytics_sync_status,
             analytics_maturity=maturity,
             analytics_confidence=confidence,
@@ -670,14 +873,32 @@ class UploadedVideoOpsService:
             linked_package_project={
                 "channel_id": str(uploaded.channel_workspace_id),
                 "video_project_id": _id_str(uploaded.video_project_id),
-                "first_scripted_video_package_id": _id_str(uploaded.first_scripted_video_package_id),
-                "publish_package_id": _id_str(getattr(uploaded, "publish_package_id", None)),
+                "first_scripted_video_package_id": _id_str(
+                    uploaded.first_scripted_video_package_id
+                ),
+                "publish_package_id": _id_str(
+                    getattr(uploaded, "publish_package_id", None)
+                ),
                 "human_upload_task_id": _id_str(uploaded.human_upload_task_id),
                 "task_status": task.task_state if task else None,
             },
             diagnostics=diagnostics,
-            recovery_proposal_refs=[{"id": str(item.id), "state": item.proposal_state, "type": item.proposal_type} for item in recovery],
-            learning_candidate_refs=[{"id": str(item.id), "state": item.candidate_state, "scope": item.recommended_scope} for item in learning],
+            recovery_proposal_refs=[
+                {
+                    "id": str(item.id),
+                    "state": item.proposal_state,
+                    "type": item.proposal_type,
+                }
+                for item in recovery
+            ],
+            learning_candidate_refs=[
+                {
+                    "id": str(item.id),
+                    "state": item.candidate_state,
+                    "scope": item.recommended_scope,
+                }
+                for item in learning
+            ],
             next_action=self.actions.for_uploaded_video(uploaded, maturity),
             technical_appendix={
                 "analytics_summary_id": str(metrics.id) if metrics else None,
@@ -689,10 +910,16 @@ class UploadedVideoOpsService:
 
     def analytics_state(self, uploaded: UploadedVideo) -> tuple[str, str]:
         summary = self.session.scalars(
-            select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id)
+            select(UploadedVideoMetricsSummary).where(
+                UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id
+            )
         ).one_or_none()
         if summary is None:
-            if uploaded.analytics_sync_status in {"NOT_STARTED", "PENDING", "NOT_CONFIGURED"}:
+            if uploaded.analytics_sync_status in {
+                "NOT_STARTED",
+                "PENDING",
+                "NOT_CONFIGURED",
+            }:
                 return "TOO_EARLY", "UNKNOWN"
             return "NO_DATA", "UNKNOWN"
         if summary.freshness_state == "STALE":
@@ -715,10 +942,15 @@ class DiagnosticOpsService:
         health_runs = self.session.scalars(
             select(PostPublishHealthRun)
             .where(PostPublishHealthRun.health_state != "HEALTHY")
-            .order_by(desc(PostPublishHealthRun.created_at), desc(PostPublishHealthRun.id))
+            .order_by(
+                desc(PostPublishHealthRun.created_at), desc(PostPublishHealthRun.id)
+            )
             .limit(limit)
         ).all()
-        return DiagnosticOpsQueueRead(generated_at=utc_now(), items=[self._health_item(run) for run in health_runs])
+        return DiagnosticOpsQueueRead(
+            generated_at=utc_now(),
+            items=[self._health_item(run) for run in health_runs],
+        )
 
     def cards(self, *, limit: int) -> list[OpsCardRead]:
         return [
@@ -733,7 +965,12 @@ class DiagnosticOpsService:
                 next_action=item["next_action"],
                 link_target=f"/uploaded-videos/{item['uploaded_video_id']}",
                 updated_at=item["created_at"],
-                technical_appendix=_jsonable({"health_state": item["health_state"], "action_ready": item["action_ready"]}),
+                technical_appendix=_jsonable(
+                    {
+                        "health_state": item["health_state"],
+                        "action_ready": item["action_ready"],
+                    }
+                ),
             )
             for item in self.queue(limit=limit).items
         ]
@@ -742,7 +979,9 @@ class DiagnosticOpsService:
         runs = self.session.scalars(
             select(PostPublishHealthRun)
             .where(PostPublishHealthRun.uploaded_video_id == uploaded_video_id)
-            .order_by(desc(PostPublishHealthRun.created_at), desc(PostPublishHealthRun.id))
+            .order_by(
+                desc(PostPublishHealthRun.created_at), desc(PostPublishHealthRun.id)
+            )
         ).all()
         return [self._health_item(run) for run in runs]
 
@@ -750,14 +989,18 @@ class DiagnosticOpsService:
         maturity, action_ready = self._diagnostic_maturity(run)
         reason_codes = list(run.reason_codes or [])
         next_action = self.actions.build(
-            "WAIT_ANALYTICS_MATURITY" if maturity in {"TOO_EARLY", "STALE", "CONFLICTED"} else "REVIEW_DIAGNOSTIC",
+            "WAIT_ANALYTICS_MATURITY"
+            if maturity in {"TOO_EARLY", "STALE", "CONFLICTED"}
+            else "REVIEW_DIAGNOSTIC",
             target_url=f"/uploaded-videos/{run.uploaded_video_id}",
             blocking_reason_codes=reason_codes or [maturity],
         )
         no_view = self.session.scalars(
             select(NoViewDiagnosticRun)
             .where(NoViewDiagnosticRun.post_publish_health_run_id == run.id)
-            .order_by(desc(NoViewDiagnosticRun.created_at), desc(NoViewDiagnosticRun.id))
+            .order_by(
+                desc(NoViewDiagnosticRun.created_at), desc(NoViewDiagnosticRun.id)
+            )
             .limit(1)
         ).one_or_none()
         return {
@@ -786,10 +1029,15 @@ class DiagnosticOpsService:
 
     def _diagnostic_maturity(self, run: PostPublishHealthRun) -> tuple[str, bool]:
         summary = self.session.scalars(
-            select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == run.uploaded_video_id)
+            select(UploadedVideoMetricsSummary).where(
+                UploadedVideoMetricsSummary.uploaded_video_id == run.uploaded_video_id
+            )
         ).one_or_none()
         codes = {str(code).upper() for code in run.reason_codes or []}
-        if "ANALYTICS_NOT_MATURE" in codes or run.health_state in {"TOO_EARLY", "ANALYTICS_TOO_EARLY"}:
+        if "ANALYTICS_NOT_MATURE" in codes or run.health_state in {
+            "TOO_EARLY",
+            "ANALYTICS_TOO_EARLY",
+        }:
             return "TOO_EARLY", False
         if summary is None:
             return "TOO_EARLY", False
@@ -803,17 +1051,41 @@ class DiagnosticOpsService:
 
     def _metrics(self, run: PostPublishHealthRun) -> dict[str, Any]:
         summary = self.session.scalars(
-            select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == run.uploaded_video_id)
+            select(UploadedVideoMetricsSummary).where(
+                UploadedVideoMetricsSummary.uploaded_video_id == run.uploaded_video_id
+            )
         ).one_or_none()
         return _jsonable(summary.metrics_summary) if summary else {}
 
     def _recovery_refs(self, uploaded_video_id: uuid.UUID) -> list[dict[str, Any]]:
-        rows = self.session.scalars(select(RecoveryProposal).where(RecoveryProposal.uploaded_video_id == uploaded_video_id)).all()
-        return [{"recovery_proposal_id": str(row.id), "state": row.proposal_state, "type": row.proposal_type} for row in rows]
+        rows = self.session.scalars(
+            select(RecoveryProposal).where(
+                RecoveryProposal.uploaded_video_id == uploaded_video_id
+            )
+        ).all()
+        return [
+            {
+                "recovery_proposal_id": str(row.id),
+                "state": row.proposal_state,
+                "type": row.proposal_type,
+            }
+            for row in rows
+        ]
 
     def _learning_refs(self, uploaded_video_id: uuid.UUID) -> list[dict[str, Any]]:
-        rows = self.session.scalars(select(LearningCandidate).where(LearningCandidate.uploaded_video_id == uploaded_video_id)).all()
-        return [{"learning_candidate_id": str(row.id), "state": row.candidate_state, "scope": row.recommended_scope} for row in rows]
+        rows = self.session.scalars(
+            select(LearningCandidate).where(
+                LearningCandidate.uploaded_video_id == uploaded_video_id
+            )
+        ).all()
+        return [
+            {
+                "learning_candidate_id": str(row.id),
+                "state": row.candidate_state,
+                "scope": row.recommended_scope,
+            }
+            for row in rows
+        ]
 
 
 class RecoveryOpsService:
@@ -824,11 +1096,17 @@ class RecoveryOpsService:
     def queue(self, *, limit: int = 100) -> RecoveryOpsQueueRead:
         proposals = self.session.scalars(
             select(RecoveryProposal)
-            .where(RecoveryProposal.proposal_state.in_(["PROPOSED", "PENDING", "READY_FOR_REVIEW"]))
+            .where(
+                RecoveryProposal.proposal_state.in_(
+                    ["PROPOSED", "PENDING", "READY_FOR_REVIEW"]
+                )
+            )
             .order_by(desc(RecoveryProposal.created_at), desc(RecoveryProposal.id))
             .limit(limit)
         ).all()
-        return RecoveryOpsQueueRead(generated_at=utc_now(), items=[self._item(item) for item in proposals])
+        return RecoveryOpsQueueRead(
+            generated_at=utc_now(), items=[self._item(item) for item in proposals]
+        )
 
     def cards(self, *, limit: int) -> list[OpsCardRead]:
         return [
@@ -855,13 +1133,25 @@ class RecoveryOpsService:
             "source_uploaded_video_id": str(proposal.uploaded_video_id),
             "failure_cause": failure.primary_suspected_cause if failure else None,
             "proposed_recovery": proposal.operator_summary,
-            "expected_metric_family_direction": _jsonable(_as_dict(failure.operator_report).get("expected_metric_family_direction")) if failure else None,
+            "expected_metric_family_direction": _jsonable(
+                _as_dict(failure.operator_report).get(
+                    "expected_metric_family_direction"
+                )
+            )
+            if failure
+            else None,
             "evidence_refs": _jsonable(proposal.evidence_refs),
             "risk_notes": proposal.risk_level,
             "affected_future_artifact_type": proposal.proposal_type,
             "approval_status": proposal.proposal_state,
-            "allowed_actions": ["APPROVE", "REJECT"] if proposal.requires_human_approval else [],
-            "next_action": self.actions.build("REVIEW_RECOVERY_PROPOSAL", target_url=f"/uploaded-videos/{proposal.uploaded_video_id}", action_ref={"recovery_proposal_id": str(proposal.id)}),
+            "allowed_actions": ["APPROVE", "REJECT"]
+            if proposal.requires_human_approval
+            else [],
+            "next_action": self.actions.build(
+                "REVIEW_RECOVERY_PROPOSAL",
+                target_url=f"/uploaded-videos/{proposal.uploaded_video_id}",
+                action_ref={"recovery_proposal_id": str(proposal.id)},
+            ),
             "created_at": proposal.created_at,
             "updated_at": proposal.updated_at,
         }
@@ -875,11 +1165,25 @@ class LearningOpsService:
     def queue(self, *, limit: int = 100) -> LearningOpsQueueRead:
         rows = self.session.scalars(
             select(LearningReviewQueueItem)
-            .where(LearningReviewQueueItem.queue_state.in_(["PENDING", "READY_FOR_REVIEW", "READY_FOR_HUMAN_REVIEW", "NEEDS_MORE_EVIDENCE"]))
-            .order_by(desc(LearningReviewQueueItem.created_at), desc(LearningReviewQueueItem.id))
+            .where(
+                LearningReviewQueueItem.queue_state.in_(
+                    [
+                        "PENDING",
+                        "READY_FOR_REVIEW",
+                        "READY_FOR_HUMAN_REVIEW",
+                        "NEEDS_MORE_EVIDENCE",
+                    ]
+                )
+            )
+            .order_by(
+                desc(LearningReviewQueueItem.created_at),
+                desc(LearningReviewQueueItem.id),
+            )
             .limit(limit)
         ).all()
-        return LearningOpsQueueRead(generated_at=utc_now(), items=[self._item(row) for row in rows])
+        return LearningOpsQueueRead(
+            generated_at=utc_now(), items=[self._item(row) for row in rows]
+        )
 
     def cards(self, *, limit: int) -> list[OpsCardRead]:
         return [
@@ -894,7 +1198,10 @@ class LearningOpsService:
                 next_action=item["next_action"],
                 link_target="/learning",
                 updated_at=item["updated_at"],
-                technical_appendix={"scope": item["scope"], "allowed_actions": item["allowed_actions"]},
+                technical_appendix={
+                    "scope": item["scope"],
+                    "allowed_actions": item["allowed_actions"],
+                },
             )
             for item in self.queue(limit=limit).items
         ]
@@ -903,28 +1210,55 @@ class LearningOpsService:
         candidate = self.session.get(LearningCandidate, queue.learning_candidate_id)
         promotion = self.session.scalars(
             select(MemoryReviewQueueItem)
-            .join(ChannelMemoryItem, MemoryReviewQueueItem.memory_item_id == ChannelMemoryItem.id)
-            .where(ChannelMemoryItem.created_from_learning_candidate_id == queue.learning_candidate_id)
+            .join(
+                ChannelMemoryItem,
+                MemoryReviewQueueItem.memory_item_id == ChannelMemoryItem.id,
+            )
+            .where(
+                ChannelMemoryItem.created_from_learning_candidate_id
+                == queue.learning_candidate_id
+            )
             .order_by(desc(MemoryReviewQueueItem.created_at))
             .limit(1)
         ).one_or_none()
         return {
             "id": str(queue.id),
-            "source_uploaded_video_id": str(queue.uploaded_video_id) if queue.uploaded_video_id else None,
-            "source_diagnostic_refs": _jsonable(candidate.diagnostic_refs if candidate else []),
-            "learning_candidate": candidate.candidate_summary if candidate else queue.operator_summary,
-            "evidence_bundle": {"id": str(queue.evidence_bundle_id) if queue.evidence_bundle_id else None, "summary": queue.evidence_summary},
+            "source_uploaded_video_id": str(queue.uploaded_video_id)
+            if queue.uploaded_video_id
+            else None,
+            "source_diagnostic_refs": _jsonable(
+                candidate.diagnostic_refs if candidate else []
+            ),
+            "learning_candidate": candidate.candidate_summary
+            if candidate
+            else queue.operator_summary,
+            "evidence_bundle": {
+                "id": str(queue.evidence_bundle_id)
+                if queue.evidence_bundle_id
+                else None,
+                "summary": queue.evidence_summary,
+            },
             "proposed_lesson": candidate.suggested_learning if candidate else None,
             "scope": {
                 "recommended_scope": queue.recommended_scope,
-                "channel_id": str(queue.channel_workspace_id) if queue.channel_workspace_id else None,
-                "video_project_id": str(queue.video_project_id) if queue.video_project_id else None,
+                "channel_id": str(queue.channel_workspace_id)
+                if queue.channel_workspace_id
+                else None,
+                "video_project_id": str(queue.video_project_id)
+                if queue.video_project_id
+                else None,
             },
             "approval_status": queue.queue_state,
-            "linked_memory_promotion_status": promotion.queue_status if promotion else None,
+            "linked_memory_promotion_status": promotion.queue_status
+            if promotion
+            else None,
             "allowed_actions": queue.approval_actions_allowed,
             "priority": queue.priority,
-            "next_action": self.actions.build("REVIEW_LEARNING_CANDIDATE", target_url="/learning", action_ref={"learning_candidate_id": str(queue.learning_candidate_id)}),
+            "next_action": self.actions.build(
+                "REVIEW_LEARNING_CANDIDATE",
+                target_url="/learning",
+                action_ref={"learning_candidate_id": str(queue.learning_candidate_id)},
+            ),
             "created_at": queue.created_at,
             "updated_at": queue.updated_at,
         }
@@ -938,11 +1272,19 @@ class MemoryOpsReadModelService:
     def queue(self, *, limit: int = 100) -> MemoryOpsQueueRead:
         rows = self.session.scalars(
             select(MemoryReviewQueueItem)
-            .where(MemoryReviewQueueItem.queue_status.in_(["PENDING", "IN_REVIEW", "NEEDS_CHANGES"]))
-            .order_by(desc(MemoryReviewQueueItem.created_at), desc(MemoryReviewQueueItem.id))
+            .where(
+                MemoryReviewQueueItem.queue_status.in_(
+                    ["PENDING", "IN_REVIEW", "NEEDS_CHANGES"]
+                )
+            )
+            .order_by(
+                desc(MemoryReviewQueueItem.created_at), desc(MemoryReviewQueueItem.id)
+            )
             .limit(limit)
         ).all()
-        return MemoryOpsQueueRead(generated_at=utc_now(), items=[self._item(row) for row in rows])
+        return MemoryOpsQueueRead(
+            generated_at=utc_now(), items=[self._item(row) for row in rows]
+        )
 
     def cards(self, *, limit: int) -> list[OpsCardRead]:
         return [
@@ -953,11 +1295,16 @@ class MemoryOpsReadModelService:
                 title=str(item["summary"]),
                 status=str(item["approval_status"]),
                 severity="NORMAL" if not item["prompt_eligible"] else "INFO",
-                blocker_reason_codes=[str(code) for code in item["prompt_eligibility_blockers"]],
+                blocker_reason_codes=[
+                    str(code) for code in item["prompt_eligibility_blockers"]
+                ],
                 next_action=item["next_action"],
                 link_target="/learning",
                 updated_at=item["updated_at"],
-                technical_appendix={"memory_item_id": item["memory_item_id"], "prompt_eligible": item["prompt_eligible"]},
+                technical_appendix={
+                    "memory_item_id": item["memory_item_id"],
+                    "prompt_eligible": item["prompt_eligible"],
+                },
             )
             for item in self.queue(limit=limit).items
         ]
@@ -965,9 +1312,16 @@ class MemoryOpsReadModelService:
     def _item(self, queue: MemoryReviewQueueItem) -> dict[str, Any]:
         item = self.session.get(ChannelMemoryItem, queue.memory_item_id)
         if item is None:
-            return {"queue_item_id": str(queue.id), "memory_item_id": str(queue.memory_item_id), "summary": "Memory item missing", "prompt_eligible": False}
+            return {
+                "queue_item_id": str(queue.id),
+                "memory_item_id": str(queue.memory_item_id),
+                "summary": "Memory item missing",
+                "prompt_eligible": False,
+            }
         facets = self.session.scalars(
-            select(MemoryFacet).where(MemoryFacet.memory_item_id == item.id).order_by(MemoryFacet.created_at.asc(), MemoryFacet.id.asc())
+            select(MemoryFacet)
+            .where(MemoryFacet.memory_item_id == item.id)
+            .order_by(MemoryFacet.created_at.asc(), MemoryFacet.id.asc())
         ).all()
         blockers = _memory_prompt_blockers(item)
         return {
@@ -1000,13 +1354,32 @@ class MemoryOpsReadModelService:
                 "character_profile_id": _id_str(item.character_profile_id),
                 "character_version_id": _id_str(item.character_version_id),
             },
-            "allowed_use_cases": sorted({case for facet in facets for case in (facet.allowed_use_cases_json or [])}),
-            "forbidden_use_cases": sorted({case for facet in facets for case in (facet.forbidden_use_cases_json or [])}),
-            "gate_result_summary": "PROMPT_ELIGIBLE" if not blockers else "BLOCKED_FROM_PROMPT",
+            "allowed_use_cases": sorted(
+                {
+                    case
+                    for facet in facets
+                    for case in (facet.allowed_use_cases_json or [])
+                }
+            ),
+            "forbidden_use_cases": sorted(
+                {
+                    case
+                    for facet in facets
+                    for case in (facet.forbidden_use_cases_json or [])
+                }
+            ),
+            "gate_result_summary": "PROMPT_ELIGIBLE"
+            if not blockers
+            else "BLOCKED_FROM_PROMPT",
             "prompt_eligible": not blockers,
             "prompt_eligibility_blockers": blockers,
             "review_actions": ["APPROVE", "REJECT", "ARCHIVE"],
-            "next_action": self.actions.build("REVIEW_MEMORY_ITEM", target_url="/learning", blocking_reason_codes=blockers, action_ref={"memory_item_id": str(item.id)}),
+            "next_action": self.actions.build(
+                "REVIEW_MEMORY_ITEM",
+                target_url="/learning",
+                blocking_reason_codes=blockers,
+                action_ref={"memory_item_id": str(item.id)},
+            ),
             "created_at": queue.created_at,
             "updated_at": queue.updated_at,
         }
@@ -1028,9 +1401,16 @@ class RetrievalOpsTraceService:
             sql_filter=_jsonable(manifest.sql_filter_json),
             candidate_count_before_vector=manifest.candidate_count_before_vector,
             candidate_count_after_policy=manifest.candidate_count_after_policy,
-            selected_facets=[_strip_raw_memory_ref(ref) for ref in manifest.selected_memory_facet_refs_json],
-            blocked_refs=[_strip_raw_memory_ref(ref) for ref in manifest.blocked_refs_json],
-            rejected_refs=[_strip_raw_memory_ref(ref) for ref in manifest.rejected_refs_json],
+            selected_facets=[
+                _strip_raw_memory_ref(ref)
+                for ref in manifest.selected_memory_facet_refs_json
+            ],
+            blocked_refs=[
+                _strip_raw_memory_ref(ref) for ref in manifest.blocked_refs_json
+            ],
+            rejected_refs=[
+                _strip_raw_memory_ref(ref) for ref in manifest.rejected_refs_json
+            ],
             retrieval_hash=manifest.retrieval_hash,
             digest_hash=manifest.digest_hash,
             raw_memory_hidden=True,
@@ -1058,15 +1438,28 @@ class MemoryInfluenceOpsService:
             package_id=manifest.package_id,
             agent_key=manifest.agent_key,
             retrieval_manifest_id=manifest.retrieval_manifest_id,
-            memory_facets_used=[self._facet_ref(facet_id) for facet_id in manifest.memory_facet_ids_used_json],
+            memory_facets_used=[
+                self._facet_ref(facet_id)
+                for facet_id in manifest.memory_facet_ids_used_json
+            ],
             digest_hash=manifest.digest_hash,
             prompt_context_hash=manifest.prompt_context_hash,
             applied_as=_jsonable(manifest.applied_as_json),
-            ignored_memory_refs=[_strip_raw_memory_ref(ref) for ref in manifest.ignored_memory_refs_json],
-            blocked_memory_refs=[_strip_raw_memory_ref(ref) for ref in manifest.blocked_memory_refs_json],
+            ignored_memory_refs=[
+                _strip_raw_memory_ref(ref) for ref in manifest.ignored_memory_refs_json
+            ],
+            blocked_memory_refs=[
+                _strip_raw_memory_ref(ref) for ref in manifest.blocked_memory_refs_json
+            ],
             scope_status=manifest.scope_status,
-            next_action=self.actions.build("VIEW_RETRIEVAL_MANIFEST", target_url=f"/ops?retrieval={manifest.retrieval_manifest_id}"),
-            technical_appendix={"prompt_render_run_id": _id_str(manifest.prompt_render_run_id), "raw_memory_text_hidden": True},
+            next_action=self.actions.build(
+                "VIEW_RETRIEVAL_MANIFEST",
+                target_url=f"/ops?retrieval={manifest.retrieval_manifest_id}",
+            ),
+            technical_appendix={
+                "prompt_render_run_id": _id_str(manifest.prompt_render_run_id),
+                "raw_memory_text_hidden": True,
+            },
         )
 
     def _facet_ref(self, facet_id: str) -> dict[str, Any]:
@@ -1076,7 +1469,11 @@ class MemoryInfluenceOpsService:
             return {"memory_facet_id": facet_id, "raw_memory_text_hidden": True}
         facet = self.session.get(MemoryFacet, facet_uuid)
         if facet is None:
-            return {"memory_facet_id": facet_id, "missing": True, "raw_memory_text_hidden": True}
+            return {
+                "memory_facet_id": facet_id,
+                "missing": True,
+                "raw_memory_text_hidden": True,
+            }
         return {
             "memory_item_id": str(facet.memory_item_id),
             "memory_facet_id": str(facet.id),
@@ -1096,11 +1493,20 @@ class QualityDeltaOpsService:
         attribution = self.session.get(QualityDeltaAttribution, quality_delta_id)
         if attribution is None:
             raise NotFoundError(f"quality delta not found: {quality_delta_id}")
-        influence = self.session.get(MemoryInfluenceManifest, attribution.source_memory_influence_manifest_id)
+        influence = self.session.get(
+            MemoryInfluenceManifest, attribution.source_memory_influence_manifest_id
+        )
         facet_refs = []
         if influence is not None:
-            facet_refs = [MemoryInfluenceOpsService(self.session)._facet_ref(facet_id) for facet_id in influence.memory_facet_ids_used_json]
-        next_code = "WAIT_ANALYTICS_MATURITY" if attribution.confidence_result == "TOO_EARLY" else "VIEW_QUALITY_DELTA"
+            facet_refs = [
+                MemoryInfluenceOpsService(self.session)._facet_ref(facet_id)
+                for facet_id in influence.memory_facet_ids_used_json
+            ]
+        next_code = (
+            "WAIT_ANALYTICS_MATURITY"
+            if attribution.confidence_result == "TOO_EARLY"
+            else "VIEW_QUALITY_DELTA"
+        )
         if attribution.confidence_result == "BLOCKED_BY_DATA_QUALITY":
             next_code = "WAIT_ANALYTICS_MATURITY"
         return QualityDeltaOpsRead(
@@ -1113,10 +1519,18 @@ class QualityDeltaOpsService:
             result=attribution.confidence_result,
             confidence_delta=attribution.confidence_delta,
             reason_codes=attribution.reason_codes_json,
-            next_action=self.actions.build(next_code, target_url="/learning", blocking_reason_codes=attribution.reason_codes_json),
+            next_action=self.actions.build(
+                next_code,
+                target_url="/learning",
+                blocking_reason_codes=attribution.reason_codes_json,
+            ),
             technical_appendix={
-                "source_memory_influence_manifest_id": str(attribution.source_memory_influence_manifest_id),
-                "target_uploaded_video_id": _id_str(attribution.target_uploaded_video_id),
+                "source_memory_influence_manifest_id": str(
+                    attribution.source_memory_influence_manifest_id
+                ),
+                "target_uploaded_video_id": _id_str(
+                    attribution.target_uploaded_video_id
+                ),
                 "target_video_project_id": str(attribution.target_video_project_id),
             },
         )
@@ -1132,17 +1546,37 @@ class ProviderCostOpsService:
         if package is None:
             raise NotFoundError(f"package not found: {package_id}")
         revisions = self.session.scalars(
-            select(RenderRevision).where(RenderRevision.package_id == package_id).order_by(desc(RenderRevision.revision_no), desc(RenderRevision.created_at))
+            select(RenderRevision)
+            .where(RenderRevision.package_id == package_id)
+            .order_by(desc(RenderRevision.revision_no), desc(RenderRevision.created_at))
         ).all()
         revision_ids = [revision.id for revision in revisions]
-        estimates = self._by_revision(CostEstimateSnapshot, CostEstimateSnapshot.render_revision_id, revision_ids)
-        approvals = self._by_revision(HumanPaidRenderApproval, HumanPaidRenderApproval.render_revision_id, revision_ids)
-        limits = self._by_revision(PaidAttemptLimitRecord, PaidAttemptLimitRecord.render_revision_id, revision_ids)
-        ledgers = self._by_revision(PaidProviderCallLedger, PaidProviderCallLedger.render_revision_id, revision_ids)
+        estimates = self._by_revision(
+            CostEstimateSnapshot, CostEstimateSnapshot.render_revision_id, revision_ids
+        )
+        approvals = self._by_revision(
+            HumanPaidRenderApproval,
+            HumanPaidRenderApproval.render_revision_id,
+            revision_ids,
+        )
+        limits = self._by_revision(
+            PaidAttemptLimitRecord,
+            PaidAttemptLimitRecord.render_revision_id,
+            revision_ids,
+        )
+        ledgers = self._by_revision(
+            PaidProviderCallLedger,
+            PaidProviderCallLedger.render_revision_id,
+            revision_ids,
+        )
         flags = self.session.scalars(
-            select(ProxyPreviewArtifactFlag).where(ProxyPreviewArtifactFlag.package_id == package_id).order_by(desc(ProxyPreviewArtifactFlag.created_at))
+            select(ProxyPreviewArtifactFlag)
+            .where(ProxyPreviewArtifactFlag.package_id == package_id)
+            .order_by(desc(ProxyPreviewArtifactFlag.created_at))
         ).all()
-        jobs = self._by_revision(ProviderJobSnapshot, ProviderJobSnapshot.render_revision_id, revision_ids)
+        jobs = self._by_revision(
+            ProviderJobSnapshot, ProviderJobSnapshot.render_revision_id, revision_ids
+        )
         drift_guard = ProviderStackDriftGuard().check()
         readiness = _provider_readiness()
         readiness["provider_stack_drift_guard"] = drift_guard.model_dump(mode="json")
@@ -1152,18 +1586,26 @@ class ProviderCostOpsService:
             {
                 code
                 for provider in readiness.get("providers", [])
-                for code in [*provider.get("missing_env_keys", []), *provider.get("reason_codes", [])]
+                for code in [
+                    *provider.get("missing_env_keys", []),
+                    *provider.get("reason_codes", []),
+                ]
                 if code
             }
         )
         if drift_guard.status != "PASS":
             missing.extend(drift_guard.reason_codes)
         missing = sorted(set(missing))
-        blocker_codes = self._blocker_codes(estimates, approvals, limits, ledgers, jobs, missing)
+        blocker_codes = self._blocker_codes(
+            estimates, approvals, limits, ledgers, jobs, missing
+        )
         next_code = "NO_ACTION"
         if drift_guard.status != "PASS":
             next_code = "PROVIDER_STACK_DRIFT"
-        elif any(getattr(approval, "approval_status", "") == "PENDING" for approval in approvals):
+        elif any(
+            getattr(approval, "approval_status", "") == "PENDING"
+            for approval in approvals
+        ):
             next_code = "WAIT_HUMAN_PAID_APPROVAL"
         elif missing:
             next_code = "RESOLVE_PROVIDER_CREDENTIALS"
@@ -1181,7 +1623,12 @@ class ProviderCostOpsService:
             paid_provider_call_ledger=[_ledger_ref(row) for row in ledgers],
             proxy_preview_flags=[_proxy_flag_ref(row) for row in flags],
             will_execute=False,
-            next_action=self.actions.build(next_code, target_url="/ops", blocking_reason_codes=blocker_codes, is_manual_only=True),
+            next_action=self.actions.build(
+                next_code,
+                target_url="/ops",
+                blocking_reason_codes=blocker_codes,
+                is_manual_only=True,
+            ),
             technical_appendix={
                 "read_only": True,
                 "provider_boundary_preflight_not_called": True,
@@ -1193,11 +1640,24 @@ class ProviderCostOpsService:
 
     def cards(self, *, limit: int) -> list[OpsCardRead]:
         package_ids = {
-            *[row.package_id for row in self.session.scalars(select(CostEstimateSnapshot).where(CostEstimateSnapshot.estimate_status != "ESTIMATED").limit(limit)).all()],
+            *[
+                row.package_id
+                for row in self.session.scalars(
+                    select(CostEstimateSnapshot)
+                    .where(CostEstimateSnapshot.estimate_status != "ESTIMATED")
+                    .limit(limit)
+                ).all()
+            ],
             *[
                 revision.package_id
                 for revision in self.session.scalars(
-                    select(RenderRevision).where(RenderRevision.revision_status.in_(["READY_FOR_COST_ESTIMATE", "APPROVAL_REQUIRED", "BLOCKED"])).limit(limit)
+                    select(RenderRevision)
+                    .where(
+                        RenderRevision.revision_status.in_(
+                            ["READY_FOR_COST_ESTIMATE", "APPROVAL_REQUIRED", "BLOCKED"]
+                        )
+                    )
+                    .limit(limit)
                 ).all()
             ],
         }
@@ -1211,7 +1671,9 @@ class ProviderCostOpsService:
                     entity_id=package_id,
                     title=f"Provider/cost boundary {str(package_id)[:8]}",
                     status=summary.next_action.next_action_code,
-                    severity="HIGH" if summary.next_action.blocking_reason_codes else "NORMAL",
+                    severity="HIGH"
+                    if summary.next_action.blocking_reason_codes
+                    else "NORMAL",
                     blocker_reason_codes=summary.next_action.blocking_reason_codes,
                     next_action=summary.next_action,
                     link_target=f"/video-packages/{package_id}/review",
@@ -1221,10 +1683,18 @@ class ProviderCostOpsService:
             )
         return cards
 
-    def _by_revision(self, model: Any, column: Any, revision_ids: list[uuid.UUID]) -> list[Any]:
+    def _by_revision(
+        self, model: Any, column: Any, revision_ids: list[uuid.UUID]
+    ) -> list[Any]:
         if not revision_ids:
             return []
-        return list(self.session.scalars(select(model).where(column.in_(revision_ids)).order_by(desc(model.created_at))).all())
+        return list(
+            self.session.scalars(
+                select(model)
+                .where(column.in_(revision_ids))
+                .order_by(desc(model.created_at))
+            ).all()
+        )
 
     def _blocker_codes(
         self,
@@ -1238,7 +1708,10 @@ class ProviderCostOpsService:
         codes: list[str] = list(missing)
         for estimate in estimates:
             if estimate.estimate_status != "ESTIMATED":
-                codes.extend(estimate.blocker_reason_codes_json or [f"COST_ESTIMATE_{estimate.estimate_status}"])
+                codes.extend(
+                    estimate.blocker_reason_codes_json
+                    or [f"COST_ESTIMATE_{estimate.estimate_status}"]
+                )
         for approval in approvals:
             if approval.approval_status != "APPROVED":
                 codes.append(f"HUMAN_PAID_APPROVAL_{approval.approval_status}")
@@ -1249,7 +1722,10 @@ class ProviderCostOpsService:
             if ledger.call_status == "BLOCKED":
                 codes.extend(ledger.reason_codes_json)
         for job in jobs:
-            if job.job_status in {"SUBMISSION_BLOCKED", "RESUME_REQUIRED", "FAILED"} and job.last_error_code:
+            if (
+                job.job_status in {"SUBMISSION_BLOCKED", "RESUME_REQUIRED", "FAILED"}
+                and job.last_error_code
+            ):
                 codes.append(job.last_error_code)
         return sorted(set(codes))
 
@@ -1272,7 +1748,14 @@ def _strip_raw_memory_ref(ref: Any) -> dict[str, Any]:
     return {
         key: _jsonable(value)
         for key, value in data.items()
-        if key not in {"facet_text", "raw_text", "text", "embedding_vector_json", "memory_text"}
+        if key
+        not in {
+            "facet_text",
+            "raw_text",
+            "text",
+            "embedding_vector_json",
+            "memory_text",
+        }
     } | {"raw_memory_text_hidden": True}
 
 
@@ -1284,7 +1767,9 @@ def _task_summary(task: HumanUploadTask | None) -> dict[str, Any] | None:
         "status": task.task_state,
         "destination": task.destination,
         "title_snapshot": task.title_snapshot,
-        "scheduled_time_suggestion": task.scheduled_time_suggestion.isoformat() if task.scheduled_time_suggestion else None,
+        "scheduled_time_suggestion": task.scheduled_time_suggestion.isoformat()
+        if task.scheduled_time_suggestion
+        else None,
         "actual_uploaded_video_id": _id_str(task.actual_uploaded_video_id),
         "manual_only": True,
     }
@@ -1326,7 +1811,9 @@ def _cost_estimate_ref(row: CostEstimateSnapshot) -> dict[str, Any]:
         "render_revision_id": str(row.render_revision_id),
         "estimate_status": row.estimate_status,
         "currency": row.currency,
-        "estimated_total_cost": str(row.estimated_total_cost) if row.estimated_total_cost is not None else None,
+        "estimated_total_cost": str(row.estimated_total_cost)
+        if row.estimated_total_cost is not None
+        else None,
         "blocker_reason_codes": row.blocker_reason_codes_json,
         "provider_estimates": _jsonable(row.provider_estimates_json),
     }
@@ -1338,7 +1825,9 @@ def _approval_ref(row: HumanPaidRenderApproval) -> dict[str, Any]:
         "render_revision_id": str(row.render_revision_id),
         "approval_status": row.approval_status,
         "approved_provider_stages": row.approved_provider_stages_json,
-        "max_approved_cost": str(row.max_approved_cost) if row.max_approved_cost is not None else None,
+        "max_approved_cost": str(row.max_approved_cost)
+        if row.max_approved_cost is not None
+        else None,
         "expires_at": row.expires_at.isoformat() if row.expires_at else None,
     }
 

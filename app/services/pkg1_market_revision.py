@@ -55,7 +55,7 @@ from app.db.models import (
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
     ContentCategory,
-    DailyIdeaDecision,
+    EditorialIdeaCandidate,
     EditorialCalendarSlot,
     LLMRouteAttempt,
     LLMRunSnapshot,
@@ -177,7 +177,6 @@ REVISION_INVENTORY = {
     "AssetProvenancePlan": "REBUILD",
     "PublishRiskDossier": "REBUILD",
     "PublishHandoffPackage": "REBUILD",
-    "UploadCard": "REBUILD",
     "MR1ExecutionApproval": "SUPERSEDE",
 }
 
@@ -257,7 +256,11 @@ class PKG1MarketRevisionService:
         market_profile = policy.target_market_profile
         market_digest = policy.target_market_digest
         destination_policy = policy.destination_binding_policy
-        if market_profile is None or market_digest is None or destination_policy is None:
+        if (
+            market_profile is None
+            or market_digest is None
+            or destination_policy is None
+        ):
             failures.append("MARKET_AUTHORITY_BINDING_MISSING")
             return {"status": "FAIL", "reason_codes": failures}
         destination = destination_policy.destination
@@ -342,9 +345,7 @@ class PKG1MarketRevisionService:
             if (
                 historical_provider_plan is None
                 or historical_mr1_approval is None
-                or (historical_mr1_approval.metadata_ or {}).get(
-                    "approval_scope"
-                )
+                or (historical_mr1_approval.metadata_ or {}).get("approval_scope")
                 != "MR1_PAID_EXECUTION"
             ):
                 failures.append("HISTORICAL_MR1_EXACT_APPROVAL_MISSING")
@@ -394,8 +395,7 @@ class PKG1MarketRevisionService:
         entry = self.entry_status(channel_id)
         if entry["status"] != "PASS":
             raise ValidationFailureError(
-                "PKG1_MARKET_REVISION_ENTRY_FAILED:"
-                + ",".join(entry["reason_codes"])
+                "PKG1_MARKET_REVISION_ENTRY_FAILED:" + ",".join(entry["reason_codes"])
             )
         existing = list(
             self.session.scalars(
@@ -423,9 +423,7 @@ class PKG1MarketRevisionService:
         destination: DestinationBinding = entry["destination"]
         snapshot_refs: dict[str, Any] = entry["snapshot_refs"]
         historical_project: VideoProject = entry["historical_project"]
-        historical_mr1_approval: ApprovalDecision = entry[
-            "historical_mr1_approval"
-        ]
+        historical_mr1_approval: ApprovalDecision = entry["historical_mr1_approval"]
         category: ContentCategory = entry["category"]
 
         historical_artifacts = self._current_artifacts(historical_project.id)
@@ -575,16 +573,12 @@ class PKG1MarketRevisionService:
                 "revision_hash": revision_hash,
                 "historical_package": self._version_ref(historical_package),
                 "classification": REVISION_INVENTORY,
-                "reused_artifacts": {
-                    key: refs[key] for key in REUSED_ARTIFACT_TYPES
-                },
+                "reused_artifacts": {key: refs[key] for key in REUSED_ARTIFACT_TYPES},
                 "historical_approval_policy": {
                     "pkg1_v1": "HISTORICAL_PASS_IMMUTABLE",
                     "old_mr1_approval": "SUPERSEDED_NOT_REUSABLE",
                     "historical_receipts_mutated": False,
-                    "old_mr1_approval_decision_id": str(
-                        historical_mr1_approval.id
-                    ),
+                    "old_mr1_approval_decision_id": str(historical_mr1_approval.id),
                 },
             },
             created_by_user_id,
@@ -636,9 +630,7 @@ class PKG1MarketRevisionService:
             {
                 "script": refs["script"],
                 "research_pack": self._version_ref(created["research_pack"]),
-                "claim_evidence": self._version_ref(
-                    created["claim_evidence_ledger"]
-                ),
+                "claim_evidence": self._version_ref(created["claim_evidence_ledger"]),
             }
         )
         created["creative_brief"] = self._create_artifact(
@@ -697,9 +689,7 @@ class PKG1MarketRevisionService:
                 "destination": destination.model_dump(mode="json"),
                 "publish_execution_allowed": False,
                 "publish_blocker": "PENDING_PLATFORM_ID",
-                "publish_blocker_reason_code": (
-                    "DESTINATION_PLATFORM_ID_NOT_VERIFIED"
-                ),
+                "publish_blocker_reason_code": ("DESTINATION_PLATFORM_ID_NOT_VERIFIED"),
             },
             created_by_user_id,
             revision_hash,
@@ -842,18 +832,14 @@ class PKG1MarketRevisionService:
             visual_ref=self._version_ref(created["visual_plan"]),
             visual_direction=created["visual_direction_contract"].content,
             scene_intents=created["scene_visual_intent"].content["scenes"],
-            visual_decisions=created["visual_source_decision_set"].content[
-                "decisions"
-            ],
+            visual_decisions=created["visual_source_decision_set"].content["decisions"],
             thumbnail_ref=self._version_ref(created["thumbnail_brief"]),
             thumbnail=thumbnail,
-            metadata_ref=self._version_ref(
-                created["publishing_metadata_package"]
-            ),
+            metadata_ref=self._version_ref(created["publishing_metadata_package"]),
             metadata=metadata,
             idea_id=uuid.UUID(
                 historical_artifacts["idea_admission_lineage"].content[
-                    "daily_idea_decision_id"
+                    "editorial_idea_candidate_id"
                 ]
             ),
         )
@@ -877,15 +863,11 @@ class PKG1MarketRevisionService:
             revision_slot=revision_slot,
             category=category,
             niche_digest_ref=self._version_ref(created["niche_contract_digest"]),
-            niche_dossier_ref=self._version_ref(
-                created["niche_alignment_dossier"]
-            ),
+            niche_dossier_ref=self._version_ref(created["niche_alignment_dossier"]),
             voice_ref=self._version_ref(created["voice_policy"]),
             visual_ref=self._version_ref(created["visual_plan"]),
             thumbnail_ref=self._version_ref(created["thumbnail_brief"]),
-            metadata_ref=self._version_ref(
-                created["publishing_metadata_package"]
-            ),
+            metadata_ref=self._version_ref(created["publishing_metadata_package"]),
             profile=profile,
             snapshot=snapshot,
         )
@@ -909,9 +891,7 @@ class PKG1MarketRevisionService:
         thumbnail_evidence_version = created["thumbnail_brief"]
         thumbnail = {
             **deepcopy(thumbnail),
-            "market_alignment_dossier": bindings[
-                "market_alignment_dossier"
-            ],
+            "market_alignment_dossier": bindings["market_alignment_dossier"],
             "niche_alignment_dossier": bindings["niche_alignment_dossier"],
             "market_alignment_evidence_subject": self._version_ref(
                 thumbnail_evidence_version
@@ -924,9 +904,7 @@ class PKG1MarketRevisionService:
             created_by_user_id,
             revision_hash,
         )
-        bindings["thumbnail_brief"] = self._version_ref(
-            created["thumbnail_brief"]
-        )
+        bindings["thumbnail_brief"] = self._version_ref(created["thumbnail_brief"])
         consistency = self._target_market_consistency(
             market_profile=market_profile,
             destination=destination,
@@ -952,9 +930,7 @@ class PKG1MarketRevisionService:
             revision_hash=revision_hash,
             script_ref=refs["script"],
             voice_ref=self._version_ref(created["voice_policy"]),
-            decision_set_ref=self._version_ref(
-                created["visual_source_decision_set"]
-            ),
+            decision_set_ref=self._version_ref(created["visual_source_decision_set"]),
             decisions=visual_payloads["visual_source_decision_set"]["decisions"],
             bindings=bindings,
         )
@@ -970,9 +946,7 @@ class PKG1MarketRevisionService:
             script_ref=refs["script"],
             script=script,
             visual_plan_ref=self._version_ref(created["visual_plan"]),
-            provider_plan_ref=self._version_ref(
-                created["provider_execution_plan"]
-            ),
+            provider_plan_ref=self._version_ref(created["provider_execution_plan"]),
             decisions=visual_payloads["visual_source_decision_set"]["decisions"],
         )
         created["cost_estimate_snapshot"] = self._create_artifact(
@@ -1021,9 +995,7 @@ class PKG1MarketRevisionService:
             bindings=bindings,
             consistency=consistency,
             revision_hash=revision_hash,
-            market_dossier_ref=self._version_ref(
-                created["market_alignment_dossier"]
-            ),
+            market_dossier_ref=self._version_ref(created["market_alignment_dossier"]),
             consistency_ref=self._version_ref(
                 created["target_market_consistency_check"]
             ),
@@ -1046,9 +1018,7 @@ class PKG1MarketRevisionService:
             revision_hash=revision_hash,
             bindings=bindings,
             thumbnail_ref=self._version_ref(created["thumbnail_brief"]),
-            metadata_ref=self._version_ref(
-                created["publishing_metadata_package"]
-            ),
+            metadata_ref=self._version_ref(created["publishing_metadata_package"]),
             disclosure_ref=self._version_ref(
                 created["synthetic_media_disclosure_receipt_draft"]
             ),
@@ -1063,21 +1033,6 @@ class PKG1MarketRevisionService:
             revision_project.id,
             "publish_handoff_package",
             publish_package,
-            created_by_user_id,
-            revision_hash,
-        )
-        upload_card = self._upload_card(
-            destination=destination,
-            metadata_ref=self._version_ref(
-                created["publishing_metadata_package"]
-            ),
-            title=metadata["title"],
-            description=metadata["description"],
-        )
-        created["upload_card"] = self._create_artifact(
-            revision_project.id,
-            "upload_card",
-            upload_card,
             created_by_user_id,
             revision_hash,
         )
@@ -1126,10 +1081,7 @@ class PKG1MarketRevisionService:
             for key in no_execution_before
         }
         output_set_hash = content_hash(
-            {
-                key: value.content_hash
-                for key, value in sorted(created.items())
-            }
+            {key: value.content_hash for key, value in sorted(created.items())}
         )
         manifest = {
             "schema_version": REVISION_SCHEMA_VERSION,
@@ -1143,9 +1095,7 @@ class PKG1MarketRevisionService:
             "historical_pkg1_mutated": False,
             "storage_project_ref": f"video-project://{revision_project.id}",
             "exact_bindings": bindings,
-            "reused_artifacts": {
-                key: refs[key] for key in REUSED_ARTIFACT_TYPES
-            },
+            "reused_artifacts": {key: refs[key] for key in REUSED_ARTIFACT_TYPES},
             "revised_artifacts": {
                 key: self._version_ref(value) for key, value in created.items()
             },
@@ -1155,9 +1105,9 @@ class PKG1MarketRevisionService:
                 "target_artifact_version_id": str(
                     historical_mr1_approval.target_artifact_version_id
                 ),
-                "approval_ref": (
-                    historical_mr1_approval.metadata_ or {}
-                ).get("approval_ref"),
+                "approval_ref": (historical_mr1_approval.metadata_ or {}).get(
+                    "approval_ref"
+                ),
                 "reuse_allowed": False,
                 "state_for_revision": "SUPERSEDED_BY_PKG1_MARKET_REVISION",
                 "historical_receipt_mutated": False,
@@ -1170,9 +1120,7 @@ class PKG1MarketRevisionService:
             "PUBLISH_EXECUTION_READY": False,
             "publish_execution_allowed": False,
             "publish_blocker": "PENDING_PLATFORM_ID",
-            "publish_blocker_reason_code": (
-                "DESTINATION_PLATFORM_ID_NOT_VERIFIED"
-            ),
+            "publish_blocker_reason_code": ("DESTINATION_PLATFORM_ID_NOT_VERIFIED"),
             "destination_status": destination.destination_status,
             "PKG1_MARKET_REVISION_HUMAN_REVIEW": "PENDING",
             "PKG1_MARKET_REVISION_FINAL": "WAITING_HUMAN_REVIEW",
@@ -1232,10 +1180,15 @@ class PKG1MarketRevisionService:
             correlation_id="pkg1-market-revision-human-review",
         )
         if self._no_execution_counts() != no_execution_before:
-            raise ValidationFailureError("PKG1_MARKET_REVISION_EXECUTION_BOUNDARY_CHANGED")
-        if self._historical_fingerprint(
-            historical_project, self._current_artifacts(historical_project.id)
-        ) != historical_before:
+            raise ValidationFailureError(
+                "PKG1_MARKET_REVISION_EXECUTION_BOUNDARY_CHANGED"
+            )
+        if (
+            self._historical_fingerprint(
+                historical_project, self._current_artifacts(historical_project.id)
+            )
+            != historical_before
+        ):
             raise ValidationFailureError("HISTORICAL_PKG1_MUTATED")
         result = self.read_revision(revision_project.id)
         result["human_review_task_id"] = str(review.id)
@@ -1273,8 +1226,7 @@ class PKG1MarketRevisionService:
             "EXISTING_REVISION_CATEGORY_ID_STALE",
         )
         require(
-            package.get("package_status")
-            == "TECHNICAL_PASS_HUMAN_REVIEW_PENDING",
+            package.get("package_status") == "TECHNICAL_PASS_HUMAN_REVIEW_PENDING",
             "EXISTING_REVISION_PACKAGE_STATUS_NOT_PENDING",
         )
         require(
@@ -1282,8 +1234,7 @@ class PKG1MarketRevisionService:
             "EXISTING_REVISION_HUMAN_REVIEW_NOT_PENDING",
         )
         require(
-            package.get("PKG1_MARKET_REVISION_FINAL")
-            == "WAITING_HUMAN_REVIEW",
+            package.get("PKG1_MARKET_REVISION_FINAL") == "WAITING_HUMAN_REVIEW",
             "EXISTING_REVISION_FINAL_STATE_CHANGED",
         )
         require(
@@ -1296,11 +1247,8 @@ class PKG1MarketRevisionService:
             "EXISTING_REVISION_MR1_BOUNDARY_CHANGED",
         )
         require(
-            (bindings.get("channel_profile_version") or {}).get("id")
-            == str(profile.id)
-            and (bindings.get("channel_profile_version") or {}).get(
-                "content_hash"
-            )
+            (bindings.get("channel_profile_version") or {}).get("id") == str(profile.id)
+            and (bindings.get("channel_profile_version") or {}).get("content_hash")
             == profile.profile_input_hash,
             "EXISTING_REVISION_PROFILE_BINDING_STALE",
         )
@@ -1326,15 +1274,12 @@ class PKG1MarketRevisionService:
         require(
             (bindings.get("destination_binding") or {}).get("content_hash")
             == destination.content_hash
-            and (bindings.get("destination_binding") or {}).get(
-                "destination_status"
-            )
+            and (bindings.get("destination_binding") or {}).get("destination_status")
             == destination.destination_status,
             "EXISTING_REVISION_DESTINATION_BINDING_STALE",
         )
         require(
-            (bindings.get("content_category") or {}).get("id")
-            == str(category.id)
+            (bindings.get("content_category") or {}).get("id") == str(category.id)
             and (bindings.get("content_category") or {}).get("content_hash")
             == category.content_hash,
             "EXISTING_REVISION_CATEGORY_BINDING_STALE",
@@ -1342,9 +1287,7 @@ class PKG1MarketRevisionService:
         require(
             (bindings.get("historical_video_project") or {}).get("ref")
             == f"video-project://{historical_project.id}"
-            and (bindings.get("historical_video_project") or {}).get(
-                "content_hash"
-            )
+            and (bindings.get("historical_video_project") or {}).get("content_hash")
             == self._project_hash(historical_project),
             "EXISTING_REVISION_HISTORICAL_PROJECT_BINDING_STALE",
         )
@@ -1352,9 +1295,7 @@ class PKG1MarketRevisionService:
         package_id = uuid.UUID(result["package_artifact_version_id"])
         reviews = list(
             self.session.scalars(
-                select(ReviewTask).where(
-                    ReviewTask.video_project_id == project.id
-                )
+                select(ReviewTask).where(ReviewTask.video_project_id == project.id)
             ).all()
         )
         require(
@@ -1395,8 +1336,7 @@ class PKG1MarketRevisionService:
                 ConfigRegistryService(self.session).validate_catalog(path)
                 for path in (
                     ROOT / "config/media_provider_budget_policy_catalog.yaml",
-                    ROOT
-                    / "config/google_gemini_image_model_price_catalog.yaml",
+                    ROOT / "config/google_gemini_image_model_price_catalog.yaml",
                     ROOT / "config/google_veo_model_price_catalog.yaml",
                 )
             ]
@@ -1417,8 +1357,7 @@ class PKG1MarketRevisionService:
 
         if failures:
             raise ValidationFailureError(
-                "EXISTING_PKG1_MARKET_REVISION_INVALID:"
-                + ",".join(failures)
+                "EXISTING_PKG1_MARKET_REVISION_INVALID:" + ",".join(failures)
             )
 
     def read_revision(self, project_id: uuid.UUID) -> dict[str, Any]:
@@ -1438,9 +1377,7 @@ class PKG1MarketRevisionService:
                 )
             ).all()
         )
-        receipt = artifacts.get(
-            "pkg1_market_revision_human_review_receipt"
-        )
+        receipt = artifacts.get("pkg1_market_revision_human_review_receipt")
         approvals = list(
             self.session.scalars(
                 select(ApprovalDecision).where(
@@ -1462,9 +1399,7 @@ class PKG1MarketRevisionService:
             and receipt.content.get("decision") == "PASS"
             and receipt.content.get("decision_source") == "OPERATOR"
             and receipt.content.get("review_authority") == "HUMAN"
-            and receipt.content.get("reviewed_package", {}).get(
-                "artifact_version_id"
-            )
+            and receipt.content.get("reviewed_package", {}).get("artifact_version_id")
             == str(package.id)
             and receipt.content.get("reviewed_package", {}).get("content_hash")
             == package.content_hash
@@ -1480,9 +1415,7 @@ class PKG1MarketRevisionService:
             else package.content["PKG1_MARKET_REVISION_HUMAN_REVIEW"]
         )
         final_state = (
-            "PASS"
-            if closeout_pass
-            else package.content["PKG1_MARKET_REVISION_FINAL"]
+            "PASS" if closeout_pass else package.content["PKG1_MARKET_REVISION_FINAL"]
         )
         return {
             "video_project_id": str(project.id),
@@ -1500,9 +1433,7 @@ class PKG1MarketRevisionService:
                 for key, value in artifacts.items()
             },
             "human_review_task_ids": [str(item.id) for item in reviews],
-            "approval_decision_ids": [
-                str(item.id) for item in closeout_approvals
-            ],
+            "approval_decision_ids": [str(item.id) for item in closeout_approvals],
             "human_review_state": human_review_state,
             "final_state": final_state,
             "effective_state": {
@@ -1512,9 +1443,7 @@ class PKG1MarketRevisionService:
                 "UPLOAD_READY": False,
                 "PUBLISH_EXECUTION_READY": False,
                 "destination_status": "PENDING_PLATFORM_ID",
-                "MR1_REAPPROVAL_ENTRY": (
-                    "READY" if closeout_pass else "NOT_READY"
-                ),
+                "MR1_REAPPROVAL_ENTRY": ("READY" if closeout_pass else "NOT_READY"),
                 "MR1_EXECUTION": "NOT_STARTED",
                 "PROCEED_TO_MR1_REAPPROVAL": closeout_pass,
                 "PROCEED_TO_MR1": False,
@@ -1836,7 +1765,7 @@ class PKG1MarketRevisionService:
         )
 
     @staticmethod
-    def _idea_subject_hash(idea: DailyIdeaDecision) -> str:
+    def _idea_subject_hash(idea: EditorialIdeaCandidate) -> str:
         return content_hash(
             {
                 "id": str(idea.id),
@@ -1844,8 +1773,12 @@ class PKG1MarketRevisionService:
                 "angle": idea.proposed_angle,
                 "format": idea.proposed_format,
                 "pillar": idea.proposed_pillar,
-                "series": idea.proposed_series_key,
-                "decision_status": idea.decision_status,
+                "suggested_series_plan_id": (
+                    str(idea.suggested_series_plan_id)
+                    if idea.suggested_series_plan_id
+                    else None
+                ),
+                "stage": idea.stage,
             }
         )
 
@@ -1925,9 +1858,7 @@ class PKG1MarketRevisionService:
             },
             "provider_usage_policy": {
                 "ref": snapshot_refs["provider_usage_policy"]["ref"],
-                "content_hash": snapshot_refs["provider_usage_policy"][
-                    "content_hash"
-                ],
+                "content_hash": snapshot_refs["provider_usage_policy"]["content_hash"],
             },
             "budget_policy": {
                 "ref": snapshot_refs["budget_policy"]["ref"],
@@ -1935,9 +1866,7 @@ class PKG1MarketRevisionService:
             },
             "native_render_policy": {
                 "ref": snapshot_refs["native_render_policy"]["ref"],
-                "content_hash": snapshot_refs["native_render_policy"][
-                    "content_hash"
-                ],
+                "content_hash": snapshot_refs["native_render_policy"]["content_hash"],
             },
             "lpro1_production_orchestrator_version": LPRO1_ORCHESTRATOR_VERSION,
             "lpro1_production_contract_version": LPRO1_RENDER_CONTRACT_VERSION,
@@ -2002,7 +1931,9 @@ class PKG1MarketRevisionService:
                 "schema_version": "pkg1.market-claim-evidence-ledger.v2",
                 "supersedes": {
                     "artifact_version_ref": f"artifact-version://{historical_artifacts['claim_evidence_ledger'].id}",
-                    "content_hash": historical_artifacts["claim_evidence_ledger"].content_hash,
+                    "content_hash": historical_artifacts[
+                        "claim_evidence_ledger"
+                    ].content_hash,
                 },
                 "target_market": "US",
                 "source_pack_authority": "REVISION_SCOPED_SRC_003_V3",
@@ -2049,8 +1980,11 @@ class PKG1MarketRevisionService:
                 "schema_version": "pkg1.market-idea-lineage.v2",
                 "revision_id": revision_id,
                 "revision_hash": revision_hash,
-                "historical_idea_decision_ref": f"daily-idea-decision://{old_lineage['daily_idea_decision_id']}",
-                "historical_idea_decision_reused_as_source": True,
+                "historical_editorial_candidate_ref": (
+                    "editorial-idea-candidate://"
+                    f"{old_lineage['editorial_idea_candidate_id']}"
+                ),
+                "historical_editorial_candidate_reused_as_source": True,
                 "historical_slot_ref": f"editorial-slot://{old_lineage['editorial_calendar_slot_id']}",
                 "historical_slot_current_authority": False,
                 "revision_slot_ref": f"editorial-slot://{revision_slot.id}",
@@ -2305,7 +2239,7 @@ class PKG1MarketRevisionService:
             ],
             "tags": ["AI workflows", "automation", "small teams"],
             "cta": "Map one repeated workflow, measure its baseline, and keep a human exception path.",
-            "upload_card_copy": "US English master; illustrative scenario; manual YouTube upload only.",
+            "manual_publishing_copy": "US English master; illustrative scenario; manual YouTube upload only.",
             "category_ref": f"content-category://{category.id}",
             "content_pillar": category.content_pillar,
             "claim_evidence_ref": {
@@ -2345,10 +2279,10 @@ class PKG1MarketRevisionService:
         metadata: dict[str, Any],
         idea_id: uuid.UUID,
     ) -> dict[str, Any]:
-        idea = self.session.get(DailyIdeaDecision, idea_id)
+        idea = self.session.get(EditorialIdeaCandidate, idea_id)
         if idea is None:
-            raise ValidationFailureError("HISTORICAL_DAILY_IDEA_DECISION_MISSING")
-        idea_subject_ref = f"daily-idea-decision://{idea.id}"
+            raise ValidationFailureError("HISTORICAL_EDITORIAL_CANDIDATE_MISSING")
+        idea_subject_ref = f"editorial-idea-candidate://{idea.id}"
         idea_subject_hash = self._idea_subject_hash(idea)
         channel_contract = (snapshot.compiled_payload or {}).get(
             "channel_contract_json"
@@ -2385,16 +2319,12 @@ class PKG1MarketRevisionService:
                 NicheCriterionEvidence(
                     criterion=criterion,
                     verdict=(
-                        NicheGateVerdict.PASS
-                        if passed
-                        else NicheGateVerdict.BLOCK
+                        NicheGateVerdict.PASS if passed else NicheGateVerdict.BLOCK
                     ),
                     score=1.0 if passed else 0.0,
                     rationale=rationale,
                     reason_codes=(
-                        []
-                        if passed
-                        else [NicheReasonCode.SEMANTIC_ALIGNMENT_BLOCKED]
+                        [] if passed else [NicheReasonCode.SEMANTIC_ALIGNMENT_BLOCKED]
                     ),
                     evidence_refs=[subject],
                 )
@@ -2418,8 +2348,7 @@ class PKG1MarketRevisionService:
                 "Compiled niche positioning is non-empty and exact-bound.",
             ),
             NicheCriterion.BRAND_PROMISE_FIT: (
-                bool(niche_digest.brand_promise)
-                and idea.decision_status == "ADMITTED",
+                bool(niche_digest.brand_promise) and idea.decision_status == "ADMITTED",
                 "Compiled brand promise is present and the admitted topic remains its approved evidence.",
             ),
             NicheCriterion.ALLOWED_TOPIC_COMPLIANCE: (
@@ -2507,8 +2436,8 @@ class PKG1MarketRevisionService:
                     script_evidence,
                 ),
                 evidence_refs=[script_evidence],
-                daily_idea_ref=idea_subject_ref,
-                daily_idea_hash=idea_subject_hash,
+                editorial_idea_candidate_ref=idea_subject_ref,
+                editorial_idea_candidate_hash=idea_subject_hash,
                 topic_gate_ref=f"niche-gate://topic/{topic.content_hash}",
                 topic_gate_result=topic,
                 approved_topic=idea.proposed_title,
@@ -2518,9 +2447,7 @@ class PKG1MarketRevisionService:
                 declared_sub_niche=niche_digest.category_sub_niche,
                 declared_category_id=niche_digest.category_id,
                 declared_content_pillar_key=niche_digest.content_pillar_key,
-                addressed_audience_pain_points=[
-                    niche_digest.audience_pain_points[0]
-                ],
+                addressed_audience_pain_points=[niche_digest.audience_pain_points[0]],
                 addressed_audience_desired_outcomes=[
                     niche_digest.audience_desired_outcomes[0]
                 ],
@@ -2547,15 +2474,10 @@ class PKG1MarketRevisionService:
                         ),
                         NicheCriterion.VISUAL_MEANING_FIDELITY: (
                             len(scene_intents) == len(visual_decisions)
-                            and {
-                                item["scene_id"] for item in scene_intents
-                            }
-                            == {
-                                item["scene_id"] for item in visual_decisions
-                            }
+                            and {item["scene_id"] for item in scene_intents}
+                            == {item["scene_id"] for item in visual_decisions}
                             and all(
-                                item.get("semantic_intent")
-                                for item in visual_decisions
+                                item.get("semantic_intent") for item in visual_decisions
                             ),
                             "Every scene has one semantic source decision with matching ID.",
                         ),
@@ -2657,9 +2579,8 @@ class PKG1MarketRevisionService:
                         ),
                         NicheCriterion.CLAIM_SCOPE_FIT: (
                             "illustrative" in metadata["description"].lower()
-                            and "not a measured result" in metadata[
-                                "description"
-                            ].lower(),
+                            and "not a measured result"
+                            in metadata["description"].lower(),
                             "Description labels the scenario illustrative and unmeasured.",
                         ),
                         NicheCriterion.CTA_FIT: (
@@ -2678,7 +2599,7 @@ class PKG1MarketRevisionService:
                 tags=metadata["tags"],
                 chapters=metadata["chapters"],
                 summary_copy=metadata["description"],
-                upload_card_copy=metadata["upload_card_copy"],
+                manual_publishing_copy=metadata["manual_publishing_copy"],
                 cta=metadata["cta"],
                 declared_category_id=niche_digest.category_id,
                 declared_content_pillar_key=niche_digest.content_pillar_key,
@@ -2697,10 +2618,7 @@ class PKG1MarketRevisionService:
         channel_fit = evaluate_channel_fit(
             score=(
                 1.0
-                if all(
-                    item.verdict == NicheGateVerdict.PASS
-                    for item in gate_results
-                )
+                if all(item.verdict == NicheGateVerdict.PASS for item in gate_results)
                 else 0.0
             ),
             compiled_policy=snapshot,
@@ -2762,20 +2680,18 @@ class PKG1MarketRevisionService:
         snapshot: CompiledChannelPolicySnapshot,
     ) -> dict[str, Any]:
         idea_lineage = historical_artifacts["idea_admission_lineage"].content
-        idea_id = uuid.UUID(idea_lineage["daily_idea_decision_id"])
-        idea = self.session.get(DailyIdeaDecision, idea_id)
+        idea_id = uuid.UUID(idea_lineage["editorial_idea_candidate_id"])
+        idea = self.session.get(EditorialIdeaCandidate, idea_id)
         if idea is None:
-            raise ValidationFailureError("HISTORICAL_DAILY_IDEA_DECISION_MISSING")
-        idea_ref = f"daily-idea-decision://{idea.id}"
+            raise ValidationFailureError("HISTORICAL_EDITORIAL_CANDIDATE_MISSING")
+        idea_ref = f"editorial-idea-candidate://{idea.id}"
         research_content = revision_artifacts["research_pack"].content
         claims_content = revision_artifacts["claim_evidence_ledger"].content
         script_content = historical_artifacts["script"].content
         voice_content = revision_artifacts["voice_policy"].content
         visual_content = revision_artifacts["visual_plan"].content
         thumbnail_content = revision_artifacts["thumbnail_brief"].content
-        metadata_content = revision_artifacts[
-            "publishing_metadata_package"
-        ].content
+        metadata_content = revision_artifacts["publishing_metadata_package"].content
         idea_text = f"{idea.proposed_title} {idea.proposed_angle}".lower()
         preflight_criteria = {
             "topic_demand_market_scope": (
@@ -2810,7 +2726,7 @@ class PKG1MarketRevisionService:
             ),
         }
         preflight: IdeaMarketPreflightResult = IdeaMarketPreflightEvaluator().evaluate(
-            daily_idea_decision_ref=idea_ref,
+            editorial_idea_candidate_ref=idea_ref,
             niche_contract_digest_ref=niche_digest_ref["artifact_version_ref"],
             niche_contract_digest_hash=niche_digest_ref["content_hash"],
             target_market_digest=market_digest,
@@ -2846,9 +2762,7 @@ class PKG1MarketRevisionService:
                 date_format=market_profile.date_format,
                 foreign_source_context_disclosed=False,
                 evidence_sensitive_claim=False,
-                evidence_refs=[
-                    self._version_ref(revision_artifacts["research_pack"])
-                ],
+                evidence_refs=[self._version_ref(revision_artifacts["research_pack"])],
             ),
             subject_ref=(
                 f"artifact-version://{revision_artifacts['research_pack'].id}"
@@ -2889,18 +2803,13 @@ class PKG1MarketRevisionService:
             digest=market_digest,
             data=VisualMarketAlignmentInput(
                 market_contexts=sorted(
-                    {
-                        item["target_market"]
-                        for item in visual_content["scenes"]
-                    }
+                    {item["target_market"] for item in visual_content["scenes"]}
                 ),
                 currencies=sorted(
                     {item["currency"] for item in visual_content["scenes"]}
                 ),
                 date_format=visual_content["scenes"][0]["date_format"],
-                workplace_context=visual_content["scenes"][0][
-                    "workplace_context"
-                ],
+                workplace_context=visual_content["scenes"][0]["workplace_context"],
                 evidence_authentic=all(
                     item["generated_evidence_authority"] is False
                     for item in visual_content["scenes"]
@@ -2946,7 +2855,10 @@ class PKG1MarketRevisionService:
             "metadata_market_alignment_gate",
         }
         actual_gate_keys = {str(item.gate_key) for item in components}
-        if len(components) != len(actual_gate_keys) or actual_gate_keys != expected_gate_keys:
+        if (
+            len(components) != len(actual_gate_keys)
+            or actual_gate_keys != expected_gate_keys
+        ):
             raise ValidationFailureError("MARKET_GATE_EVIDENCE_SET_INVALID")
         if any(
             item.verdict != MarketVerdict.PASS
@@ -2986,9 +2898,7 @@ class PKG1MarketRevisionService:
             },
             "script_market_alignment_gate": {
                 "gate_subject_contract_hash": script.subject_hash,
-                "evidence_artifact": self._version_ref(
-                    historical_artifacts["script"]
-                ),
+                "evidence_artifact": self._version_ref(historical_artifacts["script"]),
             },
             "voice_locale_alignment_gate": {
                 "gate_subject_contract_hash": voice.subject_hash,
@@ -3072,14 +2982,10 @@ class PKG1MarketRevisionService:
             "source_jurisdiction_match": any(
                 item["gate_key"] == "research_jurisdiction_gate"
                 and item["verdict"] == "PASS"
-                for item in market_evidence["gate_results"][
-                    "component_results"
-                ]
+                for item in market_evidence["gate_results"]["component_results"]
             ),
             "topic_market_demand_match": (
-                market_evidence["gate_results"]["idea_market_preflight"][
-                    "decision"
-                ]
+                market_evidence["gate_results"]["idea_market_preflight"]["decision"]
                 == "PASS"
                 and market_evidence["gate_results"][
                     "idea_market_preflight_criteria_source"
@@ -3130,13 +3036,62 @@ class PKG1MarketRevisionService:
                 "lpro1_production_contract_version"
             ],
             "stages": [
-                {"order": 1, "provider": "elevenlabs", "operation": "narration", "planned_requests": 1, "attempt_cap": 1, "state": "NOT_AUTHORIZED"},
-                {"order": 2, "provider": "forced_alignment", "operation": "verified_alignment", "planned_requests": 1, "attempt_cap": 1, "state": "WAITING_FOR_FINAL_AUDIO"},
-                {"order": 3, "provider": "pexels_api", "operation": "supporting_assets", "planned_requests": pexels_count, "attempt_cap_per_scene": 1, "state": "NOT_AUTHORIZED", "automatic_ai_fallback": False},
-                {"order": 4, "provider": "google_gemini_image", "model": "gemini-3.1-flash-image", "size": "2K", "planned_requests": 0, "attempt_cap_per_scene": 1, "state": "NOT_PLANNED"},
-                {"order": 5, "provider": "google_veo", "model": "veo-3.1-fast-generate-preview", "planned_requests": 0, "attempt_cap_per_scene": 1, "state": "NOT_PLANNED"},
-                {"order": 6, "provider": "native_graphics", "planned_requests": sum(item["provider"] == "native" for item in decisions), "state": "PLANNING_ONLY"},
-                {"order": 7, "provider": "native_ffmpeg_renderer", "planned_requests": 1, "state": "WAITING_FOR_MR1"},
+                {
+                    "order": 1,
+                    "provider": "elevenlabs",
+                    "operation": "narration",
+                    "planned_requests": 1,
+                    "attempt_cap": 1,
+                    "state": "NOT_AUTHORIZED",
+                },
+                {
+                    "order": 2,
+                    "provider": "forced_alignment",
+                    "operation": "verified_alignment",
+                    "planned_requests": 1,
+                    "attempt_cap": 1,
+                    "state": "WAITING_FOR_FINAL_AUDIO",
+                },
+                {
+                    "order": 3,
+                    "provider": "pexels_api",
+                    "operation": "supporting_assets",
+                    "planned_requests": pexels_count,
+                    "attempt_cap_per_scene": 1,
+                    "state": "NOT_AUTHORIZED",
+                    "automatic_ai_fallback": False,
+                },
+                {
+                    "order": 4,
+                    "provider": "google_gemini_image",
+                    "model": "gemini-3.1-flash-image",
+                    "size": "2K",
+                    "planned_requests": 0,
+                    "attempt_cap_per_scene": 1,
+                    "state": "NOT_PLANNED",
+                },
+                {
+                    "order": 5,
+                    "provider": "google_veo",
+                    "model": "veo-3.1-fast-generate-preview",
+                    "planned_requests": 0,
+                    "attempt_cap_per_scene": 1,
+                    "state": "NOT_PLANNED",
+                },
+                {
+                    "order": 6,
+                    "provider": "native_graphics",
+                    "planned_requests": sum(
+                        item["provider"] == "native" for item in decisions
+                    ),
+                    "state": "PLANNING_ONLY",
+                },
+                {
+                    "order": 7,
+                    "provider": "native_ffmpeg_renderer",
+                    "planned_requests": 1,
+                    "state": "WAITING_FOR_MR1",
+                },
                 {
                     "order": 8,
                     "provider": "google_drive",
@@ -3149,13 +3104,22 @@ class PKG1MarketRevisionService:
                 },
             ],
             "scene_routes": [
-                {"scene_id": item["scene_id"], "route": item["preferred_source_route"], "provider": item["provider"], "attempt_cap": item["maximum_automated_attempts"], "idempotency_ref": f"provider-plan://{revision_id}/{item['scene_id']}"}
+                {
+                    "scene_id": item["scene_id"],
+                    "route": item["preferred_source_route"],
+                    "provider": item["provider"],
+                    "attempt_cap": item["maximum_automated_attempts"],
+                    "idempotency_ref": f"provider-plan://{revision_id}/{item['scene_id']}",
+                }
                 for item in decisions
             ],
             "one_route_per_scene": True,
             "automatic_pexels_to_ai_fallback": False,
             "external_ai_video_fallback": False,
-            "approval_requirements": ["EXACT_PKG1_MARKET_REVISION_PASS", "EXACT_MR1_REAPPROVAL"],
+            "approval_requirements": [
+                "EXACT_PKG1_MARKET_REVISION_PASS",
+                "EXACT_MR1_REAPPROVAL",
+            ],
             "provider_outputs": [],
         }
 
@@ -3182,9 +3146,7 @@ class PKG1MarketRevisionService:
             ),
         ]
         for loaded in loaded_catalogs:
-            record = registry.get_version(
-                loaded.catalog_key, loaded.catalog_version
-            )
+            record = registry.get_version(loaded.catalog_key, loaded.catalog_version)
             if (
                 record is None
                 or record.status != "active"
@@ -3228,12 +3190,12 @@ class PKG1MarketRevisionService:
         if gemini_item is None or veo_item is None:
             raise ValidationFailureError("PLANNED_MEDIA_COST_ROUTE_NOT_IN_CATALOG")
         gemini_unit_cost = float(gemini_item["estimated_unit_cost_usd"])
-        veo_second_cost = float(
-            veo_item["resolutions"]["720p"]["price_per_second_usd"]
-        )
+        veo_second_cost = float(veo_item["resolutions"]["720p"]["price_per_second_usd"])
         veo_unit_cost = round(8 * veo_second_cost, 6)
         characters = sum(len(item["text"]) for item in script["segments"])
-        gemini_count = sum(item["provider"] == "google_gemini_image" for item in decisions)
+        gemini_count = sum(
+            item["provider"] == "google_gemini_image" for item in decisions
+        )
         veo_count = sum(item["provider"] == "google_veo" for item in decisions)
         estimated = round(
             gemini_count * gemini_unit_cost + veo_count * veo_unit_cost, 6
@@ -3259,12 +3221,58 @@ class PKG1MarketRevisionService:
                 "provider_plan": provider_plan_ref,
             },
             "line_items": [
-                {"provider": "elevenlabs", "characters": characters, "attempt_cap": 1, "cost_class": "SUBSCRIPTION_CREDIT", "estimated_incremental_cost_usd": 0.0, "basis": "current subscription-credit planning; no billed cost invented"},
-                {"provider": "forced_alignment", "planned_requests": 1, "estimated_incremental_cost_usd": 0.0},
-                {"provider": "pexels_api", "planned_scenes": sum(item["provider"] == "pexels_api" for item in decisions), "cost_class": "FREE_API", "estimated_incremental_cost_usd": 0.0},
-                {"provider": "google_gemini_image", "model": "gemini-3.1-flash-image", "size": "2K", "aspect_ratio": "16:9", "planned_scenes": gemini_count, "attempt_cap_per_scene": 1, "unit_estimate_usd": gemini_unit_cost, "catalog_item_key": gemini_item["key"], "estimated_incremental_cost_usd": round(gemini_count * gemini_unit_cost, 6)},
-                {"provider": "google_veo", "model": "veo-3.1-fast-generate-preview", "duration_seconds": 8, "resolution": "720p", "planned_clips": veo_count, "attempt_cap_per_scene": 1, "price_per_second_usd": veo_second_cost, "unit_estimate_usd": veo_unit_cost, "estimated_incremental_cost_usd": round(veo_count * veo_unit_cost, 6)},
-                {"provider": "native_ffmpeg_renderer", "cost_class": "LOCAL", "estimated_incremental_cost_usd": 0.0},
+                {
+                    "provider": "elevenlabs",
+                    "characters": characters,
+                    "attempt_cap": 1,
+                    "cost_class": "SUBSCRIPTION_CREDIT",
+                    "estimated_incremental_cost_usd": 0.0,
+                    "basis": "current subscription-credit planning; no billed cost invented",
+                },
+                {
+                    "provider": "forced_alignment",
+                    "planned_requests": 1,
+                    "estimated_incremental_cost_usd": 0.0,
+                },
+                {
+                    "provider": "pexels_api",
+                    "planned_scenes": sum(
+                        item["provider"] == "pexels_api" for item in decisions
+                    ),
+                    "cost_class": "FREE_API",
+                    "estimated_incremental_cost_usd": 0.0,
+                },
+                {
+                    "provider": "google_gemini_image",
+                    "model": "gemini-3.1-flash-image",
+                    "size": "2K",
+                    "aspect_ratio": "16:9",
+                    "planned_scenes": gemini_count,
+                    "attempt_cap_per_scene": 1,
+                    "unit_estimate_usd": gemini_unit_cost,
+                    "catalog_item_key": gemini_item["key"],
+                    "estimated_incremental_cost_usd": round(
+                        gemini_count * gemini_unit_cost, 6
+                    ),
+                },
+                {
+                    "provider": "google_veo",
+                    "model": "veo-3.1-fast-generate-preview",
+                    "duration_seconds": 8,
+                    "resolution": "720p",
+                    "planned_clips": veo_count,
+                    "attempt_cap_per_scene": 1,
+                    "price_per_second_usd": veo_second_cost,
+                    "unit_estimate_usd": veo_unit_cost,
+                    "estimated_incremental_cost_usd": round(
+                        veo_count * veo_unit_cost, 6
+                    ),
+                },
+                {
+                    "provider": "native_ffmpeg_renderer",
+                    "cost_class": "LOCAL",
+                    "estimated_incremental_cost_usd": 0.0,
+                },
                 {
                     "provider": "google_drive",
                     "cost_class": "EXISTING_WORKSPACE_PLAN",
@@ -3292,11 +3300,37 @@ class PKG1MarketRevisionService:
         return {
             "schema_version": "pkg1.asset-provenance-plan.v1",
             "revision_hash": revision_hash,
-            "pexels": {"planned_scenes": [item["scene_id"] for item in decisions if item["provider"] == "pexels_api"], "asset_id_url_author_license_required": True, "outputs": []},
-            "gemini_image": {"provider": "google_gemini_image", "model": "gemini-3.1-flash-image", "prompt_hash_plan_required": True, "planned_scenes": [], "outputs": []},
-            "veo": {"provider": "google_veo", "model": "veo-3.1-fast-generate-preview", "planned_scenes": [], "outputs": []},
+            "pexels": {
+                "planned_scenes": [
+                    item["scene_id"]
+                    for item in decisions
+                    if item["provider"] == "pexels_api"
+                ],
+                "asset_id_url_author_license_required": True,
+                "outputs": [],
+            },
+            "gemini_image": {
+                "provider": "google_gemini_image",
+                "model": "gemini-3.1-flash-image",
+                "prompt_hash_plan_required": True,
+                "planned_scenes": [],
+                "outputs": [],
+            },
+            "veo": {
+                "provider": "google_veo",
+                "model": "veo-3.1-fast-generate-preview",
+                "planned_scenes": [],
+                "outputs": [],
+            },
             "authorized_assets": {"source_authority_required": True, "outputs": []},
-            "native_assets": {"authorship": "VCOS_NATIVE", "scene_ids": [item["scene_id"] for item in decisions if item["provider"] == "native"]},
+            "native_assets": {
+                "authorship": "VCOS_NATIVE",
+                "scene_ids": [
+                    item["scene_id"]
+                    for item in decisions
+                    if item["provider"] == "native"
+                ],
+            },
             "generated_evidence_authority": False,
             "provider_output_exists": False,
         }
@@ -3314,7 +3348,9 @@ class PKG1MarketRevisionService:
             "final_rights_state": "WAITING_FOR_ASSET_ACQUISITION",
             "claim_evidence": claims_ref,
             "asset_provenance_plan": provenance_ref,
-            "pexels_provenance_required": any(item["provider"] == "pexels_api" for item in decisions),
+            "pexels_provenance_required": any(
+                item["provider"] == "pexels_api" for item in decisions
+            ),
             "gemini_prompt_hash_and_model_required_if_executed": True,
             "veo_provider_model_required_if_executed": True,
             "authorized_asset_provenance_required": True,
@@ -3371,9 +3407,7 @@ class PKG1MarketRevisionService:
             or not all(checks.values())
         ):
             raise ValidationFailureError("PUBLISH_RISK_MARKET_CONSISTENCY_INVALID")
-        publish_window_hypothesis = (
-            market_profile.initial_publish_window_hypotheses[0]
-        )
+        publish_window_hypothesis = market_profile.initial_publish_window_hypotheses[0]
         publish_window_status = (
             "PASS"
             if publish_window_hypothesis.get("status") == "APPROVED"
@@ -3410,8 +3444,14 @@ class PKG1MarketRevisionService:
         return {
             "schema_version": "pkg1.publish-risk-dossier.v1",
             "content_risk": {"decision": "PASS", "scenario_not_measured": True},
-            "rights_provenance_risk": {"decision": "PASS_PLANNING", "rights_report": rights_ref},
-            "synthetic_media_disclosure": {"decision": "PLANNED", "receipt": disclosure_ref},
+            "rights_provenance_risk": {
+                "decision": "PASS_PLANNING",
+                "rights_report": rights_ref,
+            },
+            "synthetic_media_disclosure": {
+                "decision": "PLANNED",
+                "receipt": disclosure_ref,
+            },
             "market_alignment": {
                 **market_alignment.model_dump(mode="json"),
                 "market_alignment_dossier": market_dossier_ref,
@@ -3494,10 +3534,18 @@ class PKG1MarketRevisionService:
             "planning_schema_version": "pkg1.market-bound-publish-handoff.v1",
             "revision_hash": revision_hash,
             "authority_state": "FINAL_MARKET_PACKAGE_PENDING_MEDIA",
-            "media_output_placeholder": {"expected_from": "FUTURE_MR1", "file_ref": None, "content_hash": None},
+            "media_output_placeholder": {
+                "expected_from": "FUTURE_MR1",
+                "file_ref": None,
+                "content_hash": None,
+            },
             "thumbnail": thumbnail_ref,
             "metadata": metadata_ref,
-            "caption_plan": {"locale": "en-US", "artifact_ref": None, "state": "WAITING_FOR_FINAL_AUDIO_ALIGNMENT"},
+            "caption_plan": {
+                "locale": "en-US",
+                "artifact_ref": None,
+                "state": "WAITING_FOR_FINAL_AUDIO_ALIGNMENT",
+            },
             "disclosure": disclosure_ref,
             "destination_binding": bindings["destination_binding"],
             "target_market_profile": bindings["target_market_profile"],
@@ -3507,7 +3555,9 @@ class PKG1MarketRevisionService:
             "primary_locale": "en-US",
             "original_language": "en",
             "approved_publish_timezone": "America/New_York",
-            "publish_window_hypothesis": market_profile.initial_publish_window_hypotheses[0],
+            "publish_window_hypothesis": market_profile.initial_publish_window_hypotheses[
+                0
+            ],
             "title": title,
             "description": description,
             "destination_status": destination.destination_status,
@@ -3516,36 +3566,15 @@ class PKG1MarketRevisionService:
             "MARKET_PACKAGE_FROZEN": False,
             "publish_execution_allowed": False,
             "publish_blocker": "PENDING_PLATFORM_ID",
-            "publish_blocker_reason_code": (
-                "DESTINATION_PLATFORM_ID_NOT_VERIFIED"
-            ),
-            "freeze_requirements_pending": ["EXACT_MP4_REF_HASH", "THUMBNAIL_REF_HASH", "CAPTION_REF_HASH", "TECHNICAL_MEDIA_QC_PASS", "HUMAN_MEDIA_REVIEW_PASS", "DRIVE_ARCHIVE_STATE"],
+            "publish_blocker_reason_code": ("DESTINATION_PLATFORM_ID_NOT_VERIFIED"),
+            "freeze_requirements_pending": [
+                "EXACT_MP4_REF_HASH",
+                "THUMBNAIL_REF_HASH",
+                "CAPTION_REF_HASH",
+                "TECHNICAL_MEDIA_QC_PASS",
+                "HUMAN_MEDIA_REVIEW_PASS",
+                "DRIVE_ARCHIVE_STATE",
+            ],
         }
         payload["package_hash"] = content_hash(payload)
         return payload
-
-    @staticmethod
-    def _upload_card(
-        *,
-        destination: DestinationBinding,
-        metadata_ref: dict[str, Any],
-        title: str,
-        description: str,
-    ) -> dict[str, Any]:
-        return {
-            "schema_version": "pkg1.market-upload-card.v1",
-            "state": "DRAFT_NOT_ACTIONABLE",
-            "platform": destination.platform,
-            "channel_handle": destination.channel_handle,
-            "destination_status": destination.destination_status,
-            "metadata": metadata_ref,
-            "title": title,
-            "description": description,
-            "file_ref": None,
-            "thumbnail_ref": None,
-            "caption_ref": None,
-            "human_upload_task_created": False,
-            "publish_execution_allowed": False,
-            "blocker": "PENDING_PLATFORM_ID",
-            "blocker_reason_code": "DESTINATION_PLATFORM_ID_NOT_VERIFIED",
-        }

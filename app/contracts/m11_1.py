@@ -1,5 +1,5 @@
 import uuid
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -18,11 +18,28 @@ OperatorUserRole = Literal[
 ]
 OperatorUserStatus = Literal["ACTIVE", "DISABLED"]
 TranslationMode = Literal["HUMAN_REVIEW_REQUIRED", "MACHINE_DRAFT_ONLY", "DISABLED"]
-LocalizedSubtitleTranslationStatus = Literal["DRAFT", "MACHINE_DRAFT", "NEEDS_HUMAN_REVIEW", "APPROVED", "REJECTED", "BLOCKED"]
-LocalizedSubtitleReviewStatus = Literal["NOT_REQUIRED", "NEEDS_REVIEW", "APPROVED", "REJECTED", "BLOCKED"]
-LocalizedMetadataReviewStatus = Literal["DRAFT", "NEEDS_HUMAN_REVIEW", "APPROVED", "REJECTED", "BLOCKED"]
-LocalizationReadinessResult = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "NOT_REQUIRED"]
-PublishTimingSource = Literal["CHANNEL_CONFIG", "HUMAN_OVERRIDE", "ANALYTICS_OBSERVED_LATER"]
+LocalizedSubtitleTranslationStatus = Literal[
+    "DRAFT", "MACHINE_DRAFT", "NEEDS_HUMAN_REVIEW", "APPROVED", "REJECTED", "BLOCKED"
+]
+LocalizedSubtitleReviewStatus = Literal[
+    "NOT_REQUIRED", "NEEDS_REVIEW", "APPROVED", "REJECTED", "BLOCKED"
+]
+LocalizedMetadataReviewStatus = Literal[
+    "DRAFT", "NEEDS_HUMAN_REVIEW", "APPROVED", "REJECTED", "BLOCKED"
+]
+LocalizationReadinessResult = Literal[
+    "PASS", "REVIEW_REQUIRED", "BLOCK", "NOT_REQUIRED"
+]
+PublishTimingSource = Annotated[
+    str,
+    Field(
+        pattern=(
+            r"^(?:CHANNEL_CONFIG|HUMAN_OVERRIDE|ANALYTICS_OBSERVED_LATER|"
+            r"LP:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{12})$"
+        )
+    ),
+]
 PublishTimingConfidence = Literal["CONFIGURED", "OBSERVED", "UNKNOWN"]
 
 
@@ -169,7 +186,15 @@ class LocalizationReadinessGateRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ChannelPublishTimingPolicyCreate(BaseModel):
+class ChannelPublishTimingPolicyRead(BaseModel):
+    id: uuid.UUID
+    channel_workspace_id: uuid.UUID
+    launch_policy_version_id: uuid.UUID
+    launch_policy_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    policy_version: int = Field(gt=0)
+    authority: Literal["FIRST_CHANNEL_LAUNCH_POLICY_VERSION"]
+    state: Literal["APPROVED"]
+    read_only: Literal[True]
     primary_timezone: str
     operator_timezone: str | None = None
     target_regions: list[str] = Field(default_factory=list)
@@ -177,15 +202,8 @@ class ChannelPublishTimingPolicyCreate(BaseModel):
     preferred_publish_windows: list[dict[str, Any]] = Field(default_factory=list)
     avoid_publish_windows: list[dict[str, Any]] = Field(default_factory=list)
     publish_days: list[str] = Field(default_factory=list)
-    weekend_allowed: bool = True
+    weekend_allowed: bool
     notes: str | None = None
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class ChannelPublishTimingPolicyRead(ChannelPublishTimingPolicyCreate):
-    id: uuid.UUID
-    channel_workspace_id: uuid.UUID
     operator_summary: str
     created_at: AwareDatetime
     updated_at: AwareDatetime
@@ -206,7 +224,16 @@ class PublishTimingSuggestionRead(BaseModel):
     operator_local_time: AwareDatetime | None
     source: PublishTimingSource
     confidence_label: PublishTimingConfidence
+    launch_policy_version_id: uuid.UUID | None = None
+    launch_policy_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    launch_policy_version: int | None = Field(default=None, gt=0)
+    publish_slot_id: uuid.UUID | None = None
+    lineage_status: Literal["EXACT", "LEGACY_UNKNOWN"]
     operator_summary: str
     created_at: AwareDatetime
+    technical_appendix: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")

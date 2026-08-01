@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 from typer.testing import CliRunner
 
@@ -9,10 +8,10 @@ from app.cli.main import app as cli_app
 from app.contracts.m12_2r import BackfillUploadedVideoRequest
 from app.core.actor import authenticated_actor_context
 from app.core.config import Settings
-from app.core.errors import ConflictError, ForbiddenError, ValidationFailureError
+from app.core.errors import ConflictError, ValidationFailureError
 from app.db.models import (
-    FinalMediaRef,
     FirstScriptedVideoPackage,
+    HumanUploadTask,
     UploadedVideo,
     UploadedVideoBackfillEvent,
 )
@@ -90,13 +89,6 @@ def _ready_package(
                     {"ref": "subtitle:final", "lifecycle_state": "FINAL"}
                 ],
             },
-            "upload_card_copy": {
-                "title": "M12.2R Ledger",
-                "description": "M12.2R Ledger prepares paste-ready YouTube copy for manual upload only.",
-                "subtitle_refs": [
-                    {"ref": "subtitle:final", "lifecycle_state": "FINAL"}
-                ],
-            },
             "thumbnail_brief": {
                 "concept": "Operator ledger handoff",
                 "text_overlay": "Manual only",
@@ -114,7 +106,7 @@ def _ready_package(
             },
             "human_review_checklist": {
                 "final_human_review": "PENDING",
-                "upload_card_copy_ready": True,
+                "metadata_package_ready": True,
             },
         },
         limitations=["No upload/publish API."],
@@ -126,30 +118,40 @@ def _ready_package(
     return package
 
 
-def _add_final_media_ref(
-    db_session, scope, package: FirstScriptedVideoPackage
-) -> FinalMediaRef:
-    ref = FinalMediaRef(
+def _legacy_upload_task(
+    db_session,
+    scope,
+    package: FirstScriptedVideoPackage,
+) -> HumanUploadTask:
+    """Persist an archival v1 ledger row without reviving creation authority."""
+
+    metadata = package.artifacts["metadata_package"]
+    task = HumanUploadTask(
         company_id=scope.company.id,
         channel_workspace_id=scope.channel.id,
         video_project_id=scope.project.id,
-        uploaded_video_id=None,
-        media_type="LONG_FORM_FINAL",
-        file_ref=f"fixture://final-media/{package.id}.mp4",
-        provider_key=None,
-        provider_type=None,
+        first_scripted_video_package_id=package.id,
+        destination="YOUTUBE",
+        target_platform="YOUTUBE",
+        task_state="READY_FOR_HUMAN_UPLOAD",
+        publish_metadata_ref=f"fixture://publish-metadata/{package.id}",
+        title_snapshot=metadata["title"],
+        description_snapshot=metadata["description"],
+        thumbnail_ref=package.artifacts["thumbnail_brief"],
+        subtitle_refs=metadata["subtitle_refs"],
+        required_assets=[{"type": "LONG_FORM_FINAL"}],
+        checklist=[{"code": "MANUAL_UPLOAD_ONLY", "required": True}],
     )
-    db_session.add(ref)
+    db_session.add(task)
     db_session.flush()
-    return ref
+    return task
 
 
 def _task(db_session, qualification_factory):
     scope = qualification_factory.m2_project()
     package = _ready_package(db_session, scope)
-    _add_final_media_ref(db_session, scope, package)
     service = PublishHandoffLedgerService(db_session, settings=_settings())
-    task = service.create_upload_task_from_package(package.id)
+    task = _legacy_upload_task(db_session, scope, package)
     return scope, package, task, service
 
 
@@ -169,75 +171,6 @@ def test_m12_2r_start_upload_task_uses_publish_prepare_permission(
     assert started.status == "HUMAN_UPLOAD_IN_PROGRESS"
 
 
-def test_m12_2r_create_human_upload_task_from_ready_package_is_idempotent(
-    db_session, qualification_factory
-) -> None:
-    scope = qualification_factory.m2_project()
-    package = _ready_package(db_session, scope)
-    _add_final_media_ref(db_session, scope, package)
-    service = PublishHandoffLedgerService(db_session, settings=_settings())
-
-    first = service.create_upload_task_from_package(package.id)
-    second = service.create_upload_task_from_package(package.id)
-
-    assert first.id == second.id
-    assert first.status == "READY_FOR_HUMAN_UPLOAD"
-    assert first.channel_id == scope.channel.id
-    assert first.video_project_id == scope.project.id
-    assert first.first_scripted_video_package_id == package.id
-    assert first.destination == "YOUTUBE"
-    assert first.title_snapshot == "M12.2R Ledger"
-    assert first.required_assets
-
-
-def test_m12_2r_create_upload_task_is_company_scoped(
-    db_session, qualification_factory
-) -> None:
-    first_scope = qualification_factory.m2_project(scope_name="M12 Company Scope Actor")
-    second_scope = qualification_factory.m2_project(
-        scope_name="M12 Company Scope Target"
-    )
-    package = _ready_package(db_session, second_scope)
-    _add_final_media_ref(db_session, second_scope, package)
-    actor = authenticated_actor_context(
-        canonical_user_id=first_scope.admin.id,
-        operator_user_id=first_scope.admin.id,
-        actor_role="company_admin",
-        permissions={"publish.prepare"},
-    )
-
-    with pytest.raises(ForbiddenError, match="PERMISSION_REQUIRED:publish.prepare"):
-        PublishHandoffLedgerService(
-            db_session,
-            settings=_settings(),
-        ).create_upload_task_from_package(
-            package.id,
-            actor=actor,
-        )
-
-
-def test_m12_2r_cannot_create_upload_task_without_final_media_asset(
-    db_session, qualification_factory
-) -> None:
-    scope = qualification_factory.m2_project()
-    package = _ready_package(db_session, scope)
-    service = PublishHandoffLedgerService(db_session, settings=_settings())
-
-    with pytest.raises(ValidationFailureError, match="WAITING_FINAL_MEDIA_ASSET"):
-        service.create_upload_task_from_package(package.id)
-
-
-def test_m12_2r_cannot_create_upload_task_for_not_ready_package(
-    db_session, qualification_factory
-) -> None:
-    scope = qualification_factory.m2_project()
-    package = _ready_package(db_session, scope, status="BLOCKED")
-    service = PublishHandoffLedgerService(db_session, settings=_settings())
-
-    with pytest.raises(ValidationFailureError):
-        service.create_upload_task_from_package(package.id)
-
-
 def test_m12_2r_start_upload_task_changes_status_only(
     db_session, qualification_factory
 ) -> None:
@@ -254,7 +187,6 @@ def test_m12_2r_start_upload_task_changes_status_only(
     [
         f"https://www.youtube.com/watch?v={VALID_VIDEO_ID}",
         f"https://youtu.be/{VALID_VIDEO_ID}",
-        f"https://www.youtube.com/shorts/{VALID_VIDEO_ID}",
         VALID_VIDEO_ID,
     ],
 )
@@ -313,8 +245,7 @@ def test_m12_2r_backfill_detects_duplicate_video_id(
         data=BackfillUploadedVideoRequest(youtube_url_or_video_id=VALID_VIDEO_ID),
     )
     second_package = _ready_package(db_session, scope)
-    _add_final_media_ref(db_session, scope, second_package)
-    second_task = service.create_upload_task_from_package(second_package.id)
+    second_task = _legacy_upload_task(db_session, scope, second_package)
 
     with pytest.raises(ConflictError):
         service.backfill_uploaded_video(
@@ -380,48 +311,23 @@ def test_m12_2r_parser_normalizes_and_rejects_invalid_values() -> None:
         parse_youtube_video_id(f"https://youtu.be/{VALID_VIDEO_ID}?si=abc")
         == VALID_VIDEO_ID
     )
-    assert (
-        parse_youtube_video_id(f"https://www.youtube.com/shorts/{VALID_VIDEO_ID}")
-        == VALID_VIDEO_ID
-    )
     assert parse_youtube_video_id(VALID_VIDEO_ID) == VALID_VIDEO_ID
     with pytest.raises(ValidationFailureError):
         parse_youtube_video_id("https://example.com/watch?v=dQw4w9WgXcQ")
 
 
-def test_m12_2r_api_routes_have_no_upload_publish_api_and_no_local_paths(
-    db_session, qualification_factory
-) -> None:
-    scope, package, task, _ = _task(db_session, qualification_factory)
-    db_session.commit()
-    client = TestClient(create_app())
-
-    routes = client.get("/openapi.json").json()["paths"]
+def test_m12_2r_api_keeps_ledger_reads_without_legacy_package_routes() -> None:
+    routes = {route.path for route in create_app().routes}
     assert "/channels/{channel_id}/upload-tasks" in routes
-    assert "/video-packages/{package_id}/upload-task" in routes
-    assert "/upload-tasks/{task_id}/backfill-uploaded-video" in routes
     assert "/uploaded-videos/{uploaded_video_id}/verify" in routes
+    assert "/video-packages/{package_id}/upload-task" not in routes
+    assert "/upload-tasks/{task_id}/backfill-uploaded-video" not in routes
     forbidden_routes = [
         path
         for path in routes
         if "youtube-upload" in path or "publish-now" in path or "reupload" in path
     ]
     assert forbidden_routes == []
-
-    listed = client.get(f"/channels/{scope.channel.id}/upload-tasks")
-    created = client.post(f"/video-packages/{package.id}/upload-task")
-    backfilled = client.post(
-        f"/upload-tasks/{task.id}/backfill-uploaded-video",
-        json={"youtube_url_or_video_id": VALID_VIDEO_ID},
-    )
-    assert listed.status_code == 200
-    assert created.status_code == 401
-    assert created.json()["detail"] == "authentication required"
-    assert backfilled.status_code == 401
-    assert backfilled.json()["detail"] == "authentication required"
-    payload = backfilled.text
-    assert "/Users/" not in payload
-    assert "file_path" not in payload
 
 
 def test_m12_2r_cli_exposes_safe_commands_without_upload_publish() -> None:

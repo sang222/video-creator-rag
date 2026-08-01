@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -48,8 +49,23 @@ from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 
 
-SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
-RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_")
+SECRET_KEY_FRAGMENTS = {
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential_value",
+}
+RAW_SECRET_MARKERS = (
+    "sk-",
+    "pk_live_",
+    "BEGIN PRIVATE KEY",
+    "anthropic-",
+    "xoxb-",
+    "ghp_",
+)
 
 
 @dataclass(frozen=True)
@@ -64,7 +80,12 @@ class ProviderRegistryService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_entry(self, *, data: ProviderRegistryEntryCreate, correlation_id: str = "m4-provider-registry") -> ProviderRegistryEntry:
+    def create_entry(
+        self,
+        *,
+        data: ProviderRegistryEntryCreate,
+        correlation_id: str = "m4-provider-registry",
+    ) -> ProviderRegistryEntry:
         existing = self.get_entry(data.provider_key)
         if existing is not None:
             raise ConflictError(f"provider exists: {data.provider_key}")
@@ -82,15 +103,25 @@ class ProviderRegistryService:
             target_type="provider_registry_entry",
             target_id=entry.id,
             correlation_id=correlation_id,
-            payload={"provider_key": entry.provider_key, "provider_type": entry.provider_type, "status": entry.status},
+            payload={
+                "provider_key": entry.provider_key,
+                "provider_type": entry.provider_type,
+                "status": entry.status,
+            },
         )
         return entry
 
     def seed_mock_providers(self) -> list[ProviderRegistryEntry]:
-        raise ValidationFailureError("Runtime mock providers were removed from production. Use tests/fakes only.")
+        raise ValidationFailureError(
+            "Runtime mock providers were removed from production. Use tests/fakes only."
+        )
 
     def get_entry(self, provider_key: str) -> ProviderRegistryEntry | None:
-        return self.session.scalars(select(ProviderRegistryEntry).where(ProviderRegistryEntry.provider_key == provider_key)).one_or_none()
+        return self.session.scalars(
+            select(ProviderRegistryEntry).where(
+                ProviderRegistryEntry.provider_key == provider_key
+            )
+        ).one_or_none()
 
     def require_entry(self, provider_key: str) -> ProviderRegistryEntry:
         entry = self.get_entry(provider_key)
@@ -99,24 +130,42 @@ class ProviderRegistryService:
         return entry
 
     def list_entries(self) -> list[ProviderRegistryEntry]:
-        return list(self.session.scalars(select(ProviderRegistryEntry).order_by(ProviderRegistryEntry.provider_key.asc())).all())
+        return list(
+            self.session.scalars(
+                select(ProviderRegistryEntry).order_by(
+                    ProviderRegistryEntry.provider_key.asc()
+                )
+            ).all()
+        )
 
 
 class CredentialReferenceService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_reference(self, *, data: CredentialReferenceCreate, correlation_id: str = "m4-credential-reference") -> CredentialReference:
+    def create_reference(
+        self,
+        *,
+        data: CredentialReferenceCreate,
+        correlation_id: str = "m4-credential-reference",
+    ) -> CredentialReference:
         ProviderRegistryService(self.session).require_entry(data.provider_key)
-        if self.session.scalars(
-            select(CredentialReference).where(
-                CredentialReference.provider_key == data.provider_key,
-                CredentialReference.credential_key == data.credential_key,
+        if (
+            self.session.scalars(
+                select(CredentialReference).where(
+                    CredentialReference.provider_key == data.provider_key,
+                    CredentialReference.credential_key == data.credential_key,
+                )
+            ).one_or_none()
+            is not None
+        ):
+            raise ConflictError(
+                f"credential reference exists: {data.provider_key}/{data.credential_key}"
             )
-        ).one_or_none() is not None:
-            raise ConflictError(f"credential reference exists: {data.provider_key}/{data.credential_key}")
         _validate_secret_ref(data.secret_ref)
-        _ensure_no_secret_payload({"scope_blob": data.scope_blob, "metadata": data.metadata})
+        _ensure_no_secret_payload(
+            {"scope_blob": data.scope_blob, "metadata": data.metadata}
+        )
         payload = data.model_dump()
         metadata = payload.pop("metadata")
         reference = CredentialReference(**payload, metadata_=metadata)
@@ -140,13 +189,19 @@ class CredentialReferenceService:
         )
         return reference
 
-    def get_reference(self, credential_reference_id: uuid.UUID) -> CredentialReference | None:
+    def get_reference(
+        self, credential_reference_id: uuid.UUID
+    ) -> CredentialReference | None:
         return self.session.get(CredentialReference, credential_reference_id)
 
-    def require_reference(self, credential_reference_id: uuid.UUID) -> CredentialReference:
+    def require_reference(
+        self, credential_reference_id: uuid.UUID
+    ) -> CredentialReference:
         reference = self.get_reference(credential_reference_id)
         if reference is None:
-            raise NotFoundError(f"credential reference not found: {credential_reference_id}")
+            raise NotFoundError(
+                f"credential reference not found: {credential_reference_id}"
+            )
         return reference
 
     def check_health(
@@ -156,7 +211,9 @@ class CredentialReferenceService:
         correlation_id: str = "m4-credential-health",
     ) -> CredentialHealthSnapshot:
         reference = self.require_reference(data.credential_reference_id)
-        state, reasons, next_action = _credential_health_from_status(reference.status, data.health_state, data.reason_codes, data.next_action)
+        state, reasons, next_action = _credential_health_from_status(
+            reference.status, data.health_state, data.reason_codes, data.next_action
+        )
         payload = data.model_dump()
         metadata = payload.pop("metadata")
         snapshot = CredentialHealthSnapshot(
@@ -189,11 +246,15 @@ class CredentialReferenceService:
         if snapshot.health_state in {"MISSING", "EXPIRED", "REVOKED", "MISCONFIGURED"}:
             ManualActionService(self.session).create_action(
                 data=ManualActionCreate(
-                    action_type="CHECK_CREDENTIAL" if snapshot.health_state != "EXPIRED" else "UPDATE_CREDENTIAL_REF",
+                    action_type="CHECK_CREDENTIAL"
+                    if snapshot.health_state != "EXPIRED"
+                    else "UPDATE_CREDENTIAL_REF",
                     target_type="credential_reference",
                     target_id=reference.id,
                     priority="HIGH",
-                    reason_code=snapshot.reason_codes[0] if snapshot.reason_codes else "PROVIDER_CREDENTIAL_MISSING",
+                    reason_code=snapshot.reason_codes[0]
+                    if snapshot.reason_codes
+                    else "PROVIDER_CREDENTIAL_MISSING",
                     next_action=snapshot.next_action or "Review credential reference.",
                 ),
                 correlation_id="m4-credential-health-action",
@@ -205,7 +266,9 @@ class QuotaService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_account(self, *, data: QuotaAccountCreate, correlation_id: str = "m4-quota-account") -> QuotaAccount:
+    def create_account(
+        self, *, data: QuotaAccountCreate, correlation_id: str = "m4-quota-account"
+    ) -> QuotaAccount:
         ProviderRegistryService(self.session).require_entry(data.provider_key)
         payload = data.model_dump()
         metadata = payload.pop("metadata")
@@ -220,7 +283,11 @@ class QuotaService:
             target_type="quota_account",
             target_id=account.id,
             correlation_id=correlation_id,
-            payload={"provider_key": account.provider_key, "unit": account.unit, "status": account.status},
+            payload={
+                "provider_key": account.provider_key,
+                "unit": account.unit,
+                "status": account.status,
+            },
         )
         return account
 
@@ -235,33 +302,75 @@ class QuotaService:
 
     def reserve_quota(self, *, data: QuotaEventRequest) -> QuotaEvent:
         account = self.require_account(data.quota_account_id)
-        if account.status in {"DISABLED", "EXHAUSTED"} or not _quota_has_capacity(account, data.amount):
-            event = self._record_event(account, data=data, event_type="REJECT", reason_code=data.reason_code or "QUOTA_EXHAUSTED")
-            account.status = "EXHAUSTED" if account.status != "DISABLED" else account.status
+        if account.status in {"DISABLED", "EXHAUSTED"} or not _quota_has_capacity(
+            account, data.amount
+        ):
+            event = self._record_event(
+                account,
+                data=data,
+                event_type="REJECT",
+                reason_code=data.reason_code or "QUOTA_EXHAUSTED",
+            )
+            account.status = (
+                "EXHAUSTED" if account.status != "DISABLED" else account.status
+            )
             self.session.flush()
             return event
         account.quota_reserved = _decimal(account.quota_reserved) + data.amount
-        return self._record_event(account, data=data, event_type="RESERVE", reason_code=data.reason_code or "QUOTA_RESERVED")
+        return self._record_event(
+            account,
+            data=data,
+            event_type="RESERVE",
+            reason_code=data.reason_code or "QUOTA_RESERVED",
+        )
 
     def consume_quota(self, *, data: QuotaEventRequest) -> QuotaEvent:
         account = self.require_account(data.quota_account_id)
-        if account.status == "DISABLED" or not _quota_has_capacity(account, data.amount, include_reserved=False):
-            return self._record_event(account, data=data, event_type="REJECT", reason_code=data.reason_code or "QUOTA_EXHAUSTED")
+        if account.status == "DISABLED" or not _quota_has_capacity(
+            account, data.amount, include_reserved=False
+        ):
+            return self._record_event(
+                account,
+                data=data,
+                event_type="REJECT",
+                reason_code=data.reason_code or "QUOTA_EXHAUSTED",
+            )
         consume_from_reserved = min(_decimal(account.quota_reserved), data.amount)
-        account.quota_reserved = _decimal(account.quota_reserved) - consume_from_reserved
+        account.quota_reserved = (
+            _decimal(account.quota_reserved) - consume_from_reserved
+        )
         account.quota_used = _decimal(account.quota_used) + data.amount
-        if account.quota_limit is not None and account.quota_used >= account.quota_limit:
+        if (
+            account.quota_limit is not None
+            and account.quota_used >= account.quota_limit
+        ):
             account.status = "EXHAUSTED"
-        return self._record_event(account, data=data, event_type="CONSUME", reason_code=data.reason_code)
+        return self._record_event(
+            account, data=data, event_type="CONSUME", reason_code=data.reason_code
+        )
 
     def release_quota(self, *, data: QuotaEventRequest) -> QuotaEvent:
         account = self.require_account(data.quota_account_id)
-        account.quota_reserved = max(Decimal("0"), _decimal(account.quota_reserved) - data.amount)
+        account.quota_reserved = max(
+            Decimal("0"), _decimal(account.quota_reserved) - data.amount
+        )
         if account.status == "EXHAUSTED" and _quota_has_capacity(account, Decimal("0")):
             account.status = "ACTIVE"
-        return self._record_event(account, data=data, event_type="RELEASE", reason_code=data.reason_code or "QUOTA_RELEASED")
+        return self._record_event(
+            account,
+            data=data,
+            event_type="RELEASE",
+            reason_code=data.reason_code or "QUOTA_RELEASED",
+        )
 
-    def _record_event(self, account: QuotaAccount, *, data: QuotaEventRequest, event_type: str, reason_code: str | None) -> QuotaEvent:
+    def _record_event(
+        self,
+        account: QuotaAccount,
+        *,
+        data: QuotaEventRequest,
+        event_type: str,
+        reason_code: str | None,
+    ) -> QuotaEvent:
         event = QuotaEvent(
             quota_account_id=account.id,
             provider_key=account.provider_key,
@@ -299,7 +408,9 @@ class CostService:
     def __init__(self, session: Session):
         self.session = session
 
-    def record_event(self, *, data: CostEventCreate, correlation_id: str = "m4-cost-event") -> CostEvent:
+    def record_event(
+        self, *, data: CostEventCreate, correlation_id: str = "m4-cost-event"
+    ) -> CostEvent:
         ProviderRegistryService(self.session).require_entry(data.provider_key)
         payload = data.model_dump()
         metadata = payload.pop("metadata")
@@ -317,7 +428,9 @@ class CostService:
             payload={
                 "provider_key": event.provider_key,
                 "cost_scope_type": event.cost_scope_type,
-                "cost_scope_id": str(event.cost_scope_id) if event.cost_scope_id else None,
+                "cost_scope_id": str(event.cost_scope_id)
+                if event.cost_scope_id
+                else None,
                 "amount": str(event.amount),
                 "currency": event.currency,
                 "cost_type": event.cost_type,
@@ -333,7 +446,9 @@ class CostService:
         cost_scope_type: str | None = None,
         cost_scope_id: uuid.UUID | None = None,
     ) -> list[CostEvent]:
-        statement: Select[tuple[CostEvent]] = select(CostEvent).order_by(CostEvent.created_at.asc())
+        statement: Select[tuple[CostEvent]] = select(CostEvent).order_by(
+            CostEvent.created_at.asc()
+        )
         if provider_key is not None:
             statement = statement.where(CostEvent.provider_key == provider_key)
         if cost_scope_type is not None:
@@ -342,13 +457,24 @@ class CostService:
             statement = statement.where(CostEvent.cost_scope_id == cost_scope_id)
         return list(self.session.scalars(statement).all())
 
-    def actual_cash_total(self, *, cost_scope_type: str, cost_scope_id: uuid.UUID | None = None) -> Decimal:
+    def actual_cash_total(
+        self,
+        *,
+        cost_scope_type: str,
+        cost_scope_id: uuid.UUID | None = None,
+        currency: str | None = None,
+        created_at_from: datetime | None = None,
+    ) -> Decimal:
         statement = select(func.coalesce(func.sum(CostEvent.amount), 0)).where(
             CostEvent.cost_scope_type == cost_scope_type,
             CostEvent.cost_type.in_(["ACTUAL", "ADJUSTED", "REFUNDED"]),
         )
         if cost_scope_id is not None:
             statement = statement.where(CostEvent.cost_scope_id == cost_scope_id)
+        if currency is not None:
+            statement = statement.where(CostEvent.currency == currency)
+        if created_at_from is not None:
+            statement = statement.where(CostEvent.created_at >= created_at_from)
         return _decimal(self.session.scalar(statement) or 0)
 
 
@@ -356,8 +482,15 @@ class BudgetGateService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_policy(self, *, data: BudgetPolicyCreate, correlation_id: str = "m4-budget-policy") -> BudgetPolicy:
-        if self.session.scalars(select(BudgetPolicy).where(BudgetPolicy.policy_key == data.policy_key)).one_or_none() is not None:
+    def create_policy(
+        self, *, data: BudgetPolicyCreate, correlation_id: str = "m4-budget-policy"
+    ) -> BudgetPolicy:
+        if (
+            self.session.scalars(
+                select(BudgetPolicy).where(BudgetPolicy.policy_key == data.policy_key)
+            ).one_or_none()
+            is not None
+        ):
             raise ConflictError(f"budget policy exists: {data.policy_key}")
         policy = BudgetPolicy(**data.model_dump())
         self.session.add(policy)
@@ -370,14 +503,22 @@ class BudgetGateService:
             target_type="budget_policy",
             target_id=policy.id,
             correlation_id=correlation_id,
-            payload={"policy_key": policy.policy_key, "scope_type": policy.scope_type, "status": policy.status},
+            payload={
+                "policy_key": policy.policy_key,
+                "scope_type": policy.scope_type,
+                "status": policy.status,
+            },
         )
         return policy
 
     def get_policy(self, policy_key: str) -> BudgetPolicy | None:
-        return self.session.scalars(select(BudgetPolicy).where(BudgetPolicy.policy_key == policy_key)).one_or_none()
+        return self.session.scalars(
+            select(BudgetPolicy).where(BudgetPolicy.policy_key == policy_key)
+        ).one_or_none()
 
-    def check(self, *, data: BudgetGateCheckRequest, correlation_id: str = "m4-budget-gate") -> BudgetGateDecisionRead:
+    def check(
+        self, *, data: BudgetGateCheckRequest, correlation_id: str = "m4-budget-gate"
+    ) -> BudgetGateDecisionRead:
         policy = self.get_policy(data.policy_key)
         if policy is None:
             raise NotFoundError(f"budget policy not found: {data.policy_key}")
@@ -404,14 +545,22 @@ class BudgetGateService:
                 reasons = ["QUOTA_EXHAUSTED"]
                 next_action = "Release quota, raise quota, or choose another provider."
         estimated_cost = _decimal(data.estimated_cost or 0)
-        manual_threshold = _optional_decimal(blob.get("require_manual_approval_above_usd"))
-        if decision == "PASS" and manual_threshold is not None and estimated_cost > manual_threshold:
+        manual_threshold = _optional_decimal(
+            blob.get("require_manual_approval_above_usd")
+        )
+        if (
+            decision == "PASS"
+            and manual_threshold is not None
+            and estimated_cost > manual_threshold
+        ):
             decision = "REVIEW_REQUIRED"
             reasons = ["BUDGET_REVIEW_REQUIRED"]
             next_action = "Manual approval required before spending above threshold."
         max_project = _optional_decimal(blob.get("max_project_usd"))
         if max_project is not None and data.scope_type == "PROJECT":
-            actual = CostService(self.session).actual_cash_total(cost_scope_type="PROJECT", cost_scope_id=data.scope_id)
+            actual = CostService(self.session).actual_cash_total(
+                cost_scope_type="PROJECT", cost_scope_id=data.scope_id
+            )
             if actual + estimated_cost > max_project:
                 decision = "BLOCK"
                 reasons = ["COST_LIMIT_REACHED"]
@@ -444,13 +593,31 @@ class ProviderHealthService:
     def __init__(self, session: Session):
         self.session = session
 
-    def check_provider(self, *, provider_key: str, mode: str = "success", next_action: str | None = None, metadata: dict[str, Any] | None = None) -> ProviderHealthSnapshot:
+    def check_provider(
+        self,
+        *,
+        provider_key: str,
+        mode: str = "success",
+        next_action: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ProviderHealthSnapshot:
         entry = ProviderRegistryService(self.session).require_entry(provider_key)
         if provider_key.startswith("mock_"):
-            raise ValidationFailureError("Runtime mock providers were removed from production. Use tests/fakes only.")
-        health_state = "UNKNOWN" if entry.status in {"ACTIVE", "EXPERIMENTAL"} else "UNAVAILABLE"
-        reasons = ["PROVIDER_HEALTH_NOT_CHECKED"] if health_state == "UNKNOWN" else ["PROVIDER_DISABLED"]
-        action = next_action or "Run provider-specific readiness checks before production execution."
+            raise ValidationFailureError(
+                "Runtime mock providers were removed from production. Use tests/fakes only."
+            )
+        health_state = (
+            "UNKNOWN" if entry.status in {"ACTIVE", "EXPERIMENTAL"} else "UNAVAILABLE"
+        )
+        reasons = (
+            ["PROVIDER_HEALTH_NOT_CHECKED"]
+            if health_state == "UNKNOWN"
+            else ["PROVIDER_DISABLED"]
+        )
+        action = (
+            next_action
+            or "Run provider-specific readiness checks before production execution."
+        )
         snapshot = ProviderHealthSnapshot(
             provider_key=provider_key,
             provider_type=entry.provider_type,
@@ -483,7 +650,11 @@ class ProviderHealthService:
             data=ComponentHealthSnapshotCreate(
                 component_type="PROVIDER",
                 component_key=provider_key,
-                health_state="HEALTHY" if health_state == "HEALTHY" else "DEGRADED" if health_state in {"DEGRADED", "RATE_LIMITED", "QUOTA_EXHAUSTED"} else "UNAVAILABLE",
+                health_state="HEALTHY"
+                if health_state == "HEALTHY"
+                else "DEGRADED"
+                if health_state in {"DEGRADED", "RATE_LIMITED", "QUOTA_EXHAUSTED"}
+                else "UNAVAILABLE",
                 reason_codes=reasons,
                 next_action=action,
                 metadata={"provider_health_snapshot_id": str(snapshot.id)},
@@ -506,9 +677,16 @@ class ComponentHealthService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_snapshot(self, *, data: ComponentHealthSnapshotCreate, correlation_id: str = "m4-component-health") -> ComponentHealthSnapshot:
+    def create_snapshot(
+        self,
+        *,
+        data: ComponentHealthSnapshotCreate,
+        correlation_id: str = "m4-component-health",
+    ) -> ComponentHealthSnapshot:
         if data.health_state in {"DEGRADED", "UNAVAILABLE"} and not data.next_action:
-            raise ValidationFailureError("next_action is required for degraded/unavailable component health")
+            raise ValidationFailureError(
+                "next_action is required for degraded/unavailable component health"
+            )
         payload = data.model_dump()
         metadata = payload.pop("metadata")
         snapshot = ComponentHealthSnapshot(**payload, metadata_=metadata)
@@ -532,7 +710,13 @@ class ComponentHealthService:
         return snapshot
 
     def latest_snapshots(self) -> list[ComponentHealthSnapshot]:
-        rows = list(self.session.scalars(select(ComponentHealthSnapshot).order_by(ComponentHealthSnapshot.checked_at.desc())).all())
+        rows = list(
+            self.session.scalars(
+                select(ComponentHealthSnapshot).order_by(
+                    ComponentHealthSnapshot.checked_at.desc()
+                )
+            ).all()
+        )
         latest: dict[tuple[str, str], ComponentHealthSnapshot] = {}
         for row in rows:
             key = (row.component_type, row.component_key)
@@ -545,10 +729,27 @@ class SystemHealthService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_snapshot(self, *, metadata: dict[str, Any] | None = None, correlation_id: str = "m4-system-health") -> SystemHealthSnapshot:
+    def create_snapshot(
+        self,
+        *,
+        metadata: dict[str, Any] | None = None,
+        correlation_id: str = "m4-system-health",
+    ) -> SystemHealthSnapshot:
         components = ComponentHealthService(self.session).latest_snapshots()
-        active_incident_count = self.session.scalar(select(func.count()).select_from(OpsIncident).where(OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"]))) or 0
-        counts: dict[str, int] = {"HEALTHY": 0, "DEGRADED": 0, "UNAVAILABLE": 0, "UNKNOWN": 0}
+        active_incident_count = (
+            self.session.scalar(
+                select(func.count())
+                .select_from(OpsIncident)
+                .where(OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"]))
+            )
+            or 0
+        )
+        counts: dict[str, int] = {
+            "HEALTHY": 0,
+            "DEGRADED": 0,
+            "UNAVAILABLE": 0,
+            "UNKNOWN": 0,
+        }
         for component in components:
             counts[component.health_state] = counts.get(component.health_state, 0) + 1
         if active_incident_count or counts.get("UNAVAILABLE", 0):
@@ -597,15 +798,26 @@ class SystemHealthService:
         return snapshot
 
     def latest(self) -> SystemHealthSnapshot | None:
-        return self.session.scalars(select(SystemHealthSnapshot).order_by(SystemHealthSnapshot.captured_at.desc()).limit(1)).one_or_none()
+        return self.session.scalars(
+            select(SystemHealthSnapshot)
+            .order_by(SystemHealthSnapshot.captured_at.desc())
+            .limit(1)
+        ).one_or_none()
 
 
 class RetryOpsService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_policy(self, *, data: RetryPolicyCreate, correlation_id: str = "m4-retry-policy") -> RetryPolicy:
-        if self.session.scalars(select(RetryPolicy).where(RetryPolicy.policy_key == data.policy_key)).one_or_none() is not None:
+    def create_policy(
+        self, *, data: RetryPolicyCreate, correlation_id: str = "m4-retry-policy"
+    ) -> RetryPolicy:
+        if (
+            self.session.scalars(
+                select(RetryPolicy).where(RetryPolicy.policy_key == data.policy_key)
+            ).one_or_none()
+            is not None
+        ):
             raise ConflictError(f"retry policy exists: {data.policy_key}")
         policy = RetryPolicy(**data.model_dump())
         self.session.add(policy)
@@ -618,12 +830,18 @@ class RetryOpsService:
             target_type="retry_policy",
             target_id=policy.id,
             correlation_id=correlation_id,
-            payload={"policy_key": policy.policy_key, "status": policy.status, "provider_key": policy.provider_key},
+            payload={
+                "policy_key": policy.policy_key,
+                "status": policy.status,
+                "provider_key": policy.provider_key,
+            },
         )
         return policy
 
     def record_mock_attempt(self, *args: Any, **kwargs: Any) -> ProviderAttempt:
-        raise ValidationFailureError("Runtime mock provider attempts were removed from production. Use tests/fakes only.")
+        raise ValidationFailureError(
+            "Runtime mock provider attempts were removed from production. Use tests/fakes only."
+        )
 
     def get_attempt(self, attempt_id: uuid.UUID) -> ProviderAttempt | None:
         return self.session.get(ProviderAttempt, attempt_id)
@@ -632,7 +850,10 @@ class RetryOpsService:
         policy = self.session.scalars(
             select(RetryPolicy)
             .where(RetryPolicy.status == "ACTIVE")
-            .where((RetryPolicy.provider_key == provider_key) | (RetryPolicy.provider_key.is_(None)))
+            .where(
+                (RetryPolicy.provider_key == provider_key)
+                | (RetryPolicy.provider_key.is_(None))
+            )
             .order_by(RetryPolicy.provider_key.desc().nullslast())
             .limit(1)
         ).one_or_none()
@@ -645,7 +866,9 @@ class DeadLetterService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_job(self, *, data: DeadLetterJobCreate, correlation_id: str = "m4-dead-letter") -> DeadLetterJob:
+    def create_job(
+        self, *, data: DeadLetterJobCreate, correlation_id: str = "m4-dead-letter"
+    ) -> DeadLetterJob:
         payload = data.model_dump()
         metadata = payload.pop("metadata")
         job = DeadLetterJob(**payload, metadata_=metadata)
@@ -659,7 +882,12 @@ class DeadLetterService:
             target_type="dead_letter_job",
             target_id=job.id,
             correlation_id=correlation_id,
-            payload={"queue_name": job.queue_name, "job_type": job.job_type, "replay_state": job.replay_state, "reason_code": job.reason_code},
+            payload={
+                "queue_name": job.queue_name,
+                "job_type": job.job_type,
+                "replay_state": job.replay_state,
+                "reason_code": job.reason_code,
+            },
         )
         if job.next_action:
             ManualActionService(self.session).create_action(
@@ -678,12 +906,16 @@ class DeadLetterService:
     def get_job(self, job_id: uuid.UUID) -> DeadLetterJob | None:
         return self.session.get(DeadLetterJob, job_id)
 
-    def replay_job(self, job_id: uuid.UUID, correlation_id: str = "m4-dead-letter-replay") -> DeadLetterJob:
+    def replay_job(
+        self, job_id: uuid.UUID, correlation_id: str = "m4-dead-letter-replay"
+    ) -> DeadLetterJob:
         job = self.get_job(job_id)
         if job is None:
             raise NotFoundError(f"dead letter job not found: {job_id}")
         if job.replay_state != "REPLAYABLE":
-            raise ValidationFailureError(f"dead letter job is not replayable: {job.replay_state}")
+            raise ValidationFailureError(
+                f"dead letter job is not replayable: {job.replay_state}"
+            )
         job.replay_state = "REPLAYED"
         self.session.flush()
         _record_ops_event(
@@ -703,7 +935,9 @@ class OpsIncidentService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_incident(self, *, data: OpsIncidentCreate, correlation_id: str = "m4-ops-incident") -> OpsIncident:
+    def create_incident(
+        self, *, data: OpsIncidentCreate, correlation_id: str = "m4-ops-incident"
+    ) -> OpsIncident:
         payload = data.model_dump()
         metadata = payload.pop("metadata")
         incident = OpsIncident(**payload, metadata_=metadata)
@@ -717,14 +951,29 @@ class OpsIncidentService:
             target_type="ops_incident",
             target_id=incident.id,
             correlation_id=correlation_id,
-            payload={"incident_type": incident.incident_type, "severity": incident.severity, "state": incident.state, "reason_codes": incident.reason_codes},
+            payload={
+                "incident_type": incident.incident_type,
+                "severity": incident.severity,
+                "state": incident.state,
+                "reason_codes": incident.reason_codes,
+            },
         )
         return incident
 
     def list_incidents(self) -> list[OpsIncident]:
-        return list(self.session.scalars(select(OpsIncident).order_by(OpsIncident.created_at.desc())).all())
+        return list(
+            self.session.scalars(
+                select(OpsIncident).order_by(OpsIncident.created_at.desc())
+            ).all()
+        )
 
-    def transition(self, incident_id: uuid.UUID, state: str, *, correlation_id: str = "m4-ops-incident-state") -> OpsIncident:
+    def transition(
+        self,
+        incident_id: uuid.UUID,
+        state: str,
+        *,
+        correlation_id: str = "m4-ops-incident-state",
+    ) -> OpsIncident:
         incident = self.session.get(OpsIncident, incident_id)
         if incident is None:
             raise NotFoundError(f"ops incident not found: {incident_id}")
@@ -736,7 +985,9 @@ class OpsIncidentService:
             event_type = "ops_incident.acknowledged"
         elif state == "RESOLVED":
             if incident.state not in {"OPEN", "ACKNOWLEDGED"}:
-                raise ValidationFailureError("only OPEN/ACKNOWLEDGED incidents can be resolved")
+                raise ValidationFailureError(
+                    "only OPEN/ACKNOWLEDGED incidents can be resolved"
+                )
             incident.state = state
             incident.resolved_at = utc_now()
             event_type = "ops_incident.resolved"
@@ -760,7 +1011,9 @@ class ManualActionService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_action(self, *, data: ManualActionCreate, correlation_id: str = "m4-manual-action") -> ManualAction:
+    def create_action(
+        self, *, data: ManualActionCreate, correlation_id: str = "m4-manual-action"
+    ) -> ManualAction:
         action = ManualAction(**data.model_dump())
         self.session.add(action)
         self.session.flush()
@@ -772,14 +1025,25 @@ class ManualActionService:
             target_type="manual_action",
             target_id=action.id,
             correlation_id=correlation_id,
-            payload={"action_type": action.action_type, "priority": action.priority, "state": action.state, "reason_code": action.reason_code},
+            payload={
+                "action_type": action.action_type,
+                "priority": action.priority,
+                "state": action.state,
+                "reason_code": action.reason_code,
+            },
         )
         return action
 
     def list_actions(self) -> list[ManualAction]:
-        return list(self.session.scalars(select(ManualAction).order_by(ManualAction.created_at.desc())).all())
+        return list(
+            self.session.scalars(
+                select(ManualAction).order_by(ManualAction.created_at.desc())
+            ).all()
+        )
 
-    def complete_action(self, action_id: uuid.UUID, *, correlation_id: str = "m4-manual-action-complete") -> ManualAction:
+    def complete_action(
+        self, action_id: uuid.UUID, *, correlation_id: str = "m4-manual-action-complete"
+    ) -> ManualAction:
         action = self.session.get(ManualAction, action_id)
         if action is None:
             raise NotFoundError(f"manual action not found: {action_id}")
@@ -832,19 +1096,52 @@ def _credential_health_from_status(
     return state, reasons, action
 
 
-def _provider_health_from_response(response: Any, next_action: str | None) -> tuple[str, list[str], str | None]:
+def _provider_health_from_response(
+    response: Any, next_action: str | None
+) -> tuple[str, list[str], str | None]:
     if response.ok:
         return "HEALTHY", ["SYSTEM_OK"], None
     mapping = {
-        "PROVIDER_TIMEOUT": ("DEGRADED", ["PROVIDER_DEGRADED"], "Retry provider health check or inspect provider status."),
-        "PROVIDER_QUOTA_EXCEEDED": ("QUOTA_EXHAUSTED", ["PROVIDER_QUOTA_EXHAUSTED"], "Review quota account and provider plan."),
-        "MALFORMED_OUTPUT": ("DEGRADED", ["PROVIDER_DEGRADED"], "Inspect provider contract output."),
-        "PROVIDER_UNAVAILABLE": ("UNAVAILABLE", ["PROVIDER_UNAVAILABLE"], "Investigate provider outage."),
-        "RETRYABLE_PROVIDER_ERROR": ("DEGRADED", ["RETRYABLE_PROVIDER_ERROR"], "Retry after backoff."),
-        "NON_RETRYABLE_PROVIDER_ERROR": ("UNAVAILABLE", ["NON_RETRYABLE_PROVIDER_ERROR"], "Manual provider investigation required."),
-        "CIRCUIT_BREAKER_OPEN": ("UNAVAILABLE", ["CIRCUIT_BREAKER_OPEN"], "Wait for cool-down or inspect failures."),
+        "PROVIDER_TIMEOUT": (
+            "DEGRADED",
+            ["PROVIDER_DEGRADED"],
+            "Retry provider health check or inspect provider status.",
+        ),
+        "PROVIDER_QUOTA_EXCEEDED": (
+            "QUOTA_EXHAUSTED",
+            ["PROVIDER_QUOTA_EXHAUSTED"],
+            "Review quota account and provider plan.",
+        ),
+        "MALFORMED_OUTPUT": (
+            "DEGRADED",
+            ["PROVIDER_DEGRADED"],
+            "Inspect provider contract output.",
+        ),
+        "PROVIDER_UNAVAILABLE": (
+            "UNAVAILABLE",
+            ["PROVIDER_UNAVAILABLE"],
+            "Investigate provider outage.",
+        ),
+        "RETRYABLE_PROVIDER_ERROR": (
+            "DEGRADED",
+            ["RETRYABLE_PROVIDER_ERROR"],
+            "Retry after backoff.",
+        ),
+        "NON_RETRYABLE_PROVIDER_ERROR": (
+            "UNAVAILABLE",
+            ["NON_RETRYABLE_PROVIDER_ERROR"],
+            "Manual provider investigation required.",
+        ),
+        "CIRCUIT_BREAKER_OPEN": (
+            "UNAVAILABLE",
+            ["CIRCUIT_BREAKER_OPEN"],
+            "Wait for cool-down or inspect failures.",
+        ),
     }
-    state, reasons, action = mapping.get(response.error_code, ("UNKNOWN", ["PROVIDER_DEGRADED"], "Investigate provider health."))
+    state, reasons, action = mapping.get(
+        response.error_code,
+        ("UNKNOWN", ["PROVIDER_DEGRADED"], "Investigate provider health."),
+    )
     return state, reasons, next_action or action
 
 
@@ -852,15 +1149,37 @@ def _classify_attempt(response: Any, mode: str) -> AttemptClassification:
     if response.ok:
         return AttemptClassification("SUCCESS", None, None, None)
     if mode == "quota_exceeded":
-        return AttemptClassification("QUOTA_REJECTED", response.error_code, "redacted provider error", "QUOTA_EXHAUSTED")
+        return AttemptClassification(
+            "QUOTA_REJECTED",
+            response.error_code,
+            "redacted provider error",
+            "QUOTA_EXHAUSTED",
+        )
     if mode == "circuit_open":
-        return AttemptClassification("CIRCUIT_OPEN", response.error_code, "redacted provider error", "CIRCUIT_BREAKER_OPEN")
+        return AttemptClassification(
+            "CIRCUIT_OPEN",
+            response.error_code,
+            "redacted provider error",
+            "CIRCUIT_BREAKER_OPEN",
+        )
     if response.retryable:
-        return AttemptClassification("RETRYABLE_FAILURE", response.error_code, "redacted provider error", "RETRYABLE_PROVIDER_ERROR")
-    return AttemptClassification("NON_RETRYABLE_FAILURE", response.error_code, "redacted provider error", "NON_RETRYABLE_PROVIDER_ERROR")
+        return AttemptClassification(
+            "RETRYABLE_FAILURE",
+            response.error_code,
+            "redacted provider error",
+            "RETRYABLE_PROVIDER_ERROR",
+        )
+    return AttemptClassification(
+        "NON_RETRYABLE_FAILURE",
+        response.error_code,
+        "redacted provider error",
+        "NON_RETRYABLE_PROVIDER_ERROR",
+    )
 
 
-def _quota_has_capacity(account: QuotaAccount, amount: Decimal, *, include_reserved: bool = True) -> bool:
+def _quota_has_capacity(
+    account: QuotaAccount, amount: Decimal, *, include_reserved: bool = True
+) -> bool:
     if account.status in {"DISABLED", "EXHAUSTED"}:
         return False
     if account.quota_limit is None:
@@ -892,9 +1211,16 @@ def _validate_secret_ref(secret_ref: str | None) -> None:
 def _ensure_no_secret_payload(value: Any) -> None:
     for key, item in _walk_items(value):
         normalized = key.lower().replace("-", "_")
-        if any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS) and normalized != "secret_ref":
-            raise ValidationFailureError(f"secret-like payload key is not allowed: {key}")
-        if isinstance(item, str) and any(marker in item for marker in RAW_SECRET_MARKERS):
+        if (
+            any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS)
+            and normalized != "secret_ref"
+        ):
+            raise ValidationFailureError(
+                f"secret-like payload key is not allowed: {key}"
+            )
+        if isinstance(item, str) and any(
+            marker in item for marker in RAW_SECRET_MARKERS
+        ):
             raise ValidationFailureError("raw secret-like value is not allowed")
 
 

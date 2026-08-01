@@ -17,7 +17,6 @@ from app.contracts.m11_1 import (
     AuthSessionRead,
     ChannelLocalizationConfig,
     ChannelLocalizationConfigUpdate,
-    ChannelPublishTimingPolicyCreate,
     ChannelPublishTimingPolicyRead,
     CurrentOperatorUserRead,
     LocalizationReadinessGateRead,
@@ -35,11 +34,12 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationFailureErro
 from app.core.time import utc_now
 from app.db.models import (
     ChannelProfileVersion,
-    ChannelPublishTimingPolicy,
     ChannelWorkspace,
     CloudMediaRef,
+    FirstChannelLaunchPolicyVersion,
     LocalizedMetadataPackage,
     LocalizedSubtitlePackage,
+    LongFormPublishSlot,
     OperatorAuthSession,
     OperatorUser,
     PublishHandoffPackage,
@@ -73,7 +73,9 @@ DAYS = {
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
+    )
     return f"{PASSWORD_ALGORITHM}${PASSWORD_ITERATIONS}${salt.hex()}${digest.hex()}"
 
 
@@ -82,7 +84,9 @@ def verify_password(password: str, stored_hash: str) -> bool:
         algorithm, iterations, salt_hex, digest_hex = stored_hash.split("$", 3)
         if algorithm != PASSWORD_ALGORITHM:
             return False
-        expected = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations)).hex()
+        expected = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations)
+        ).hex()
         return hmac.compare_digest(expected, digest_hex)
     except Exception:
         return False
@@ -98,10 +102,15 @@ class AuthService:
         self.settings = settings
 
     def bootstrap_admin_if_needed(self) -> tuple[OperatorUser | None, bool]:
-        existing_count = int(self.session.scalar(select(func.count()).select_from(OperatorUser)) or 0)
+        existing_count = int(
+            self.session.scalar(select(func.count()).select_from(OperatorUser)) or 0
+        )
         if existing_count > 0:
             return None, False
-        if not self.settings.bootstrap_admin_email or self.settings.bootstrap_admin_password is None:
+        if (
+            not self.settings.bootstrap_admin_email
+            or self.settings.bootstrap_admin_password is None
+        ):
             return None, False
         role = self.settings.bootstrap_admin_role
         if role not in {
@@ -119,7 +128,9 @@ class AuthService:
             raise ValidationFailureError("bootstrap admin role is invalid")
         user = OperatorUser(
             email=self.settings.bootstrap_admin_email.lower(),
-            password_hash=hash_password(self.settings.bootstrap_admin_password.get_secret_value()),
+            password_hash=hash_password(
+                self.settings.bootstrap_admin_password.get_secret_value()
+            ),
             display_name="VCOS Admin",
             role=role,
             status="ACTIVE",
@@ -133,16 +144,28 @@ class AuthService:
             target_type="operator_user",
             target_id=user.id,
             reason_code="BOOTSTRAP_ADMIN_CREATED",
-            payload={"email": user.email, "role": user.role, "password_plaintext_stored": False},
+            payload={
+                "email": user.email,
+                "role": user.role,
+                "password_plaintext_stored": False,
+            },
         )
         return user, True
 
-    def login(self, *, email: str, password: str) -> tuple[AuthSessionRead, str, datetime]:
+    def login(
+        self, *, email: str, password: str
+    ) -> tuple[AuthSessionRead, str, datetime]:
         if self.settings.auth_mode != "local_password":
             raise ValidationFailureError("auth_mode hiện chưa hỗ trợ")
         self.bootstrap_admin_if_needed()
-        user = self.session.scalars(select(OperatorUser).where(OperatorUser.email == email.lower())).one_or_none()
-        if user is None or user.status != "ACTIVE" or not verify_password(password, user.password_hash):
+        user = self.session.scalars(
+            select(OperatorUser).where(OperatorUser.email == email.lower())
+        ).one_or_none()
+        if (
+            user is None
+            or user.status != "ACTIVE"
+            or not verify_password(password, user.password_hash)
+        ):
             _audit(
                 self.session,
                 action="auth.login_failed",
@@ -155,7 +178,11 @@ class AuthService:
         self._ensure_canonical_principal(user)
         token = secrets.token_urlsafe(48)
         expires_at = utc_now() + timedelta(hours=self.settings.auth_session_ttl_hours)
-        auth_session = OperatorAuthSession(user_id=user.id, session_token_hash=hash_session_token(token), expires_at=expires_at)
+        auth_session = OperatorAuthSession(
+            user_id=user.id,
+            session_token_hash=hash_session_token(token),
+            expires_at=expires_at,
+        )
         self.session.add(auth_session)
         self.session.flush()
         _audit(
@@ -198,9 +225,15 @@ class AuthService:
         if not token:
             raise ForbiddenError("Phiên đăng nhập đã hết hạn.")
         auth_session = self.session.scalars(
-            select(OperatorAuthSession).where(OperatorAuthSession.session_token_hash == hash_session_token(token)).limit(1)
+            select(OperatorAuthSession)
+            .where(OperatorAuthSession.session_token_hash == hash_session_token(token))
+            .limit(1)
         ).one_or_none()
-        if auth_session is None or auth_session.revoked_at is not None or auth_session.expires_at <= utc_now():
+        if (
+            auth_session is None
+            or auth_session.revoked_at is not None
+            or auth_session.expires_at <= utc_now()
+        ):
             raise ForbiddenError("Phiên đăng nhập đã hết hạn.")
         user = self.session.get(OperatorUser, auth_session.user_id)
         if user is None or user.status != "ACTIVE":
@@ -211,7 +244,9 @@ class AuthService:
     def actor_context(self, token: str | None) -> ActorContext:
         user = self.authenticated_operator(token)
         if user.canonical_user_id is None:
-            raise ForbiddenError("Tài khoản chưa được liên kết với định danh người dùng.")
+            raise ForbiddenError(
+                "Tài khoản chưa được liên kết với định danh người dùng."
+            )
         permissions = RBACService(self.session).permissions_for_user(
             user_id=user.canonical_user_id,
         )
@@ -226,7 +261,9 @@ class AuthService:
         if not token:
             return
         auth_session = self.session.scalars(
-            select(OperatorAuthSession).where(OperatorAuthSession.session_token_hash == hash_session_token(token)).limit(1)
+            select(OperatorAuthSession)
+            .where(OperatorAuthSession.session_token_hash == hash_session_token(token))
+            .limit(1)
         ).one_or_none()
         if auth_session is not None and auth_session.revoked_at is None:
             auth_session.revoked_at = utc_now()
@@ -280,7 +317,9 @@ class AuthService:
         role_key = OPERATOR_ROLE_TO_ROLE_KEY.get(operator_user.role)
         if role_key is None:
             raise ForbiddenError("Vai trò tài khoản không hợp lệ.")
-        role = self.session.scalars(select(Role).where(Role.key == role_key).limit(1)).one_or_none()
+        role = self.session.scalars(
+            select(Role).where(Role.key == role_key).limit(1)
+        ).one_or_none()
         if role is None:
             role = Role(
                 key=role_key,
@@ -326,9 +365,13 @@ class LocalizationConfigService:
 
     def get(self, channel_id: uuid.UUID) -> ChannelLocalizationConfig:
         channel = self._channel(channel_id)
-        return _localization_config_read(channel, technical_appendix={"source": "channel_workspaces"})
+        return _localization_config_read(
+            channel, technical_appendix={"source": "channel_workspaces"}
+        )
 
-    def update(self, channel_id: uuid.UUID, data: ChannelLocalizationConfigUpdate) -> ChannelLocalizationConfig:
+    def update(
+        self, channel_id: uuid.UUID, data: ChannelLocalizationConfigUpdate
+    ) -> ChannelLocalizationConfig:
         if data.actor_role not in {"OWNER_ADMIN", "CHANNEL_MANAGER"}:
             raise ForbiddenError("Bạn chưa có quyền thực hiện thao tác này.")
         channel = self._channel(channel_id)
@@ -344,7 +387,9 @@ class LocalizationConfigService:
         channel.target_metadata_languages = sorted(set(data.target_metadata_languages))
         channel.target_regions = sorted(set(data.target_regions))
         channel.translation_mode = data.translation_mode
-        channel.localization_required_for_publish = data.localization_required_for_publish
+        channel.localization_required_for_publish = (
+            data.localization_required_for_publish
+        )
         channel.localized_metadata_required = data.localized_metadata_required
         technical: dict[str, Any] = {"profile_snapshot_created": False}
         latest_profile = self.session.scalars(
@@ -361,11 +406,19 @@ class LocalizationConfigService:
             profile_input = ChannelProfileInput.model_validate(payload)
             profile = ChannelProfileService(self.session).create_profile_version(
                 channel_id=channel.id,
-                data=ChannelProfileVersionCreate(profile_input=profile_input, created_by=data.edited_by_user_id),
+                data=ChannelProfileVersionCreate(
+                    profile_input=profile_input, created_by=data.edited_by_user_id
+                ),
                 correlation_id="m11-1-localization-config",
             )
-            compiled = ChannelProfileCompiler(self.session).compile(profile_version_id=profile.id, correlation_id="m11-1-localization-config")
-            ChannelProfileService(self.session).activate_snapshot(snapshot_id=compiled.snapshot_id, correlation_id="m11-1-localization-config")
+            compiled = ChannelProfileCompiler(self.session).compile(
+                profile_version_id=profile.id,
+                correlation_id="m11-1-localization-config",
+            )
+            ChannelProfileService(self.session).activate_snapshot(
+                snapshot_id=compiled.snapshot_id,
+                correlation_id="m11-1-localization-config",
+            )
             technical = {
                 "profile_snapshot_created": True,
                 "channel_profile_version_id": str(profile.id),
@@ -378,7 +431,11 @@ class LocalizationConfigService:
             target_type="channel_workspace",
             target_id=channel.id,
             reason_code="LOCALIZATION_CONFIG_UPDATED",
-            payload={"human_config_only": True, "no_auto_country_targeting": True, "translation_mode": data.translation_mode},
+            payload={
+                "human_config_only": True,
+                "no_auto_country_targeting": True,
+                "translation_mode": data.translation_mode,
+            },
             company_id=channel.company_id,
         )
         _event(
@@ -387,7 +444,10 @@ class LocalizationConfigService:
             aggregate_type="channel_workspace",
             aggregate_id=channel.id,
             company_id=channel.company_id,
-            payload={"target_subtitle_languages": channel.target_subtitle_languages, "target_metadata_languages": channel.target_metadata_languages},
+            payload={
+                "target_subtitle_languages": channel.target_subtitle_languages,
+                "target_metadata_languages": channel.target_metadata_languages,
+            },
         )
         return _localization_config_read(channel, technical_appendix=technical)
 
@@ -402,13 +462,21 @@ class LocalizedSubtitlePackageService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create(self, video_project_id: uuid.UUID, data: LocalizedSubtitlePackageCreate) -> LocalizedSubtitlePackageRead:
+    def create(
+        self, video_project_id: uuid.UUID, data: LocalizedSubtitlePackageCreate
+    ) -> LocalizedSubtitlePackageRead:
         project = _project(self.session, video_project_id)
         _validate_language(data.source_language)
         _validate_language(data.target_language)
         for ref_id in [data.srt_cloud_media_ref_id, data.vtt_cloud_media_ref_id]:
             if ref_id is not None:
-                _drive_ref(self.session, ref_id, project.video_project_id if hasattr(project, "video_project_id") else project.id)
+                _drive_ref(
+                    self.session,
+                    ref_id,
+                    project.video_project_id
+                    if hasattr(project, "video_project_id")
+                    else project.id,
+                )
         package = LocalizedSubtitlePackage(
             company_id=project.company_id,
             channel_workspace_id=project.channel_workspace_id,
@@ -426,7 +494,15 @@ class LocalizedSubtitlePackageService:
         )
         self.session.add(package)
         self.session.flush()
-        _audit(self.session, action="localization.subtitle_package_created", target_type="localized_subtitle_package", target_id=package.id, reason_code="LOCALIZED_SUBTITLE_PACKAGE_CREATED", payload={"drive_cta_only": True}, company_id=project.company_id)
+        _audit(
+            self.session,
+            action="localization.subtitle_package_created",
+            target_type="localized_subtitle_package",
+            target_id=package.id,
+            reason_code="LOCALIZED_SUBTITLE_PACKAGE_CREATED",
+            payload={"drive_cta_only": True},
+            company_id=project.company_id,
+        )
         return localized_subtitle_package_read(self.session, package)
 
     def get(self, package_id: uuid.UUID) -> LocalizedSubtitlePackageRead:
@@ -440,11 +516,17 @@ class LocalizedMetadataPackageService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create(self, video_project_id: uuid.UUID, data: LocalizedMetadataPackageCreate) -> LocalizedMetadataPackageRead:
+    def create(
+        self, video_project_id: uuid.UUID, data: LocalizedMetadataPackageCreate
+    ) -> LocalizedMetadataPackageRead:
         project = _project(self.session, video_project_id)
         _validate_language(data.language)
-        if data.human_review_status == "APPROVED" and _looks_like_keyword_stuffing(data.localized_tags):
-            raise ValidationFailureError("Metadata theo ngôn ngữ có dấu hiệu keyword stuffing.")
+        if data.human_review_status == "APPROVED" and _looks_like_keyword_stuffing(
+            data.localized_tags
+        ):
+            raise ValidationFailureError(
+                "Metadata theo ngôn ngữ có dấu hiệu keyword stuffing."
+            )
         package = LocalizedMetadataPackage(
             company_id=project.company_id,
             channel_workspace_id=project.channel_workspace_id,
@@ -462,7 +544,15 @@ class LocalizedMetadataPackageService:
         )
         self.session.add(package)
         self.session.flush()
-        _audit(self.session, action="localization.metadata_package_created", target_type="localized_metadata_package", target_id=package.id, reason_code="LOCALIZED_METADATA_PACKAGE_CREATED", payload={"human_review_required": True}, company_id=project.company_id)
+        _audit(
+            self.session,
+            action="localization.metadata_package_created",
+            target_type="localized_metadata_package",
+            target_id=package.id,
+            reason_code="LOCALIZED_METADATA_PACKAGE_CREATED",
+            payload={"human_review_required": True},
+            company_id=project.company_id,
+        )
         return localized_metadata_package_read(package)
 
     def get(self, package_id: uuid.UUID) -> LocalizedMetadataPackageRead:
@@ -476,15 +566,22 @@ class LocalizationReadinessGateService:
     def __init__(self, session: Session):
         self.session = session
 
-    def video_localization(self, video_project_id: uuid.UUID) -> VideoProjectLocalizationRead:
+    def video_localization(
+        self, video_project_id: uuid.UUID
+    ) -> VideoProjectLocalizationRead:
         project = _project(self.session, video_project_id)
         subtitles = self._subtitle_packages(project.id)
         metadata = self._metadata_packages(project.id)
         readiness = self.check(video_project_id)
         return VideoProjectLocalizationRead(
             video_project_id=project.id,
-            subtitle_packages=[localized_subtitle_package_read(self.session, item) for item in subtitles],
-            metadata_packages=[localized_metadata_package_read(item) for item in metadata],
+            subtitle_packages=[
+                localized_subtitle_package_read(self.session, item)
+                for item in subtitles
+            ],
+            metadata_packages=[
+                localized_metadata_package_read(item) for item in metadata
+            ],
             readiness=readiness.model_dump(mode="json"),
             operator_summary=readiness.operator_summary,
         )
@@ -494,7 +591,10 @@ class LocalizationReadinessGateService:
         channel = self.session.get(ChannelWorkspace, project.channel_workspace_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {project.channel_workspace_id}")
-        if channel.translation_mode == "DISABLED" and not channel.localization_required_for_publish:
+        if (
+            channel.translation_mode == "DISABLED"
+            and not channel.localization_required_for_publish
+        ):
             return LocalizationReadinessGateRead(
                 video_project_id=project.id,
                 result="NOT_REQUIRED",
@@ -503,31 +603,70 @@ class LocalizationReadinessGateService:
                 next_action="Có thể publish bản tiếng Anh trước; phụ đề dịch có thể bổ sung sau.",
                 technical_appendix={"translation_mode": channel.translation_mode},
             )
-        subtitle_by_lang = {item.target_language: item for item in self._subtitle_packages(project.id)}
-        metadata_by_lang = {item.language: item for item in self._metadata_packages(project.id)}
-        missing_subtitles = [lang for lang in channel.target_subtitle_languages if lang not in subtitle_by_lang]
-        missing_metadata = [lang for lang in channel.target_metadata_languages if lang not in metadata_by_lang]
+        subtitle_by_lang = {
+            item.target_language: item for item in self._subtitle_packages(project.id)
+        }
+        metadata_by_lang = {
+            item.language: item for item in self._metadata_packages(project.id)
+        }
+        missing_subtitles = [
+            lang
+            for lang in channel.target_subtitle_languages
+            if lang not in subtitle_by_lang
+        ]
+        missing_metadata = [
+            lang
+            for lang in channel.target_metadata_languages
+            if lang not in metadata_by_lang
+        ]
         unreviewed_subtitles = [
             lang
             for lang, item in subtitle_by_lang.items()
-            if lang in channel.target_subtitle_languages and item.human_review_status not in {"APPROVED", "NOT_REQUIRED"}
+            if lang in channel.target_subtitle_languages
+            and item.human_review_status not in {"APPROVED", "NOT_REQUIRED"}
         ]
         unreviewed_metadata = [
             lang
             for lang, item in metadata_by_lang.items()
-            if lang in channel.target_metadata_languages and item.human_review_status != "APPROVED"
+            if lang in channel.target_metadata_languages
+            and item.human_review_status != "APPROVED"
         ]
-        has_blocker = bool(missing_subtitles or unreviewed_subtitles or (channel.localized_metadata_required and (missing_metadata or unreviewed_metadata)))
-        result = "BLOCK" if channel.localization_required_for_publish and has_blocker else "REVIEW_REQUIRED" if has_blocker else "PASS"
+        has_blocker = bool(
+            missing_subtitles
+            or unreviewed_subtitles
+            or (
+                channel.localized_metadata_required
+                and (missing_metadata or unreviewed_metadata)
+            )
+        )
+        result = (
+            "BLOCK"
+            if channel.localization_required_for_publish and has_blocker
+            else "REVIEW_REQUIRED"
+            if has_blocker
+            else "PASS"
+        )
         if result == "PASS":
             summary = "Gói localization đã đủ phần người duyệt theo cấu hình kênh."
             next_action = "Có thể tiếp tục gói publish thủ công; không auto publish."
         elif result == "BLOCK":
-            summary = _readiness_summary(missing_subtitles, missing_metadata, unreviewed_subtitles, unreviewed_metadata)
+            summary = _readiness_summary(
+                missing_subtitles,
+                missing_metadata,
+                unreviewed_subtitles,
+                unreviewed_metadata,
+            )
             next_action = "Hoàn tất subtitle/metadata còn thiếu trước khi publish vì policy kênh yêu cầu localization."
         else:
-            summary = _readiness_summary(missing_subtitles, missing_metadata, unreviewed_subtitles, unreviewed_metadata)
-            next_action = "Có thể publish bản tiếng Anh trước; phụ đề dịch có thể bổ sung sau."
+            summary = _readiness_summary(
+                missing_subtitles,
+                missing_metadata,
+                unreviewed_subtitles,
+                unreviewed_metadata,
+            )
+            next_action = (
+                "Có thể publish bản tiếng Anh trước; phụ đề dịch có thể bổ sung sau."
+            )
         return LocalizationReadinessGateRead(
             video_project_id=project.id,
             result=result,
@@ -535,7 +674,9 @@ class LocalizationReadinessGateService:
             missing_metadata_languages=missing_metadata,
             unreviewed_subtitle_languages=unreviewed_subtitles,
             unreviewed_metadata_languages=unreviewed_metadata,
-            disclosure_translation_status="REVIEW_REQUIRED" if unreviewed_metadata else "READY",
+            disclosure_translation_status="REVIEW_REQUIRED"
+            if unreviewed_metadata
+            else "READY",
             operator_summary=summary,
             next_action=next_action,
             technical_appendix={
@@ -547,17 +688,25 @@ class LocalizationReadinessGateService:
             },
         )
 
-    def _subtitle_packages(self, video_project_id: uuid.UUID) -> list[LocalizedSubtitlePackage]:
+    def _subtitle_packages(
+        self, video_project_id: uuid.UUID
+    ) -> list[LocalizedSubtitlePackage]:
         return list(
             self.session.scalars(
-                select(LocalizedSubtitlePackage).where(LocalizedSubtitlePackage.video_project_id == video_project_id).order_by(LocalizedSubtitlePackage.created_at.desc())
+                select(LocalizedSubtitlePackage)
+                .where(LocalizedSubtitlePackage.video_project_id == video_project_id)
+                .order_by(LocalizedSubtitlePackage.created_at.desc())
             ).all()
         )
 
-    def _metadata_packages(self, video_project_id: uuid.UUID) -> list[LocalizedMetadataPackage]:
+    def _metadata_packages(
+        self, video_project_id: uuid.UUID
+    ) -> list[LocalizedMetadataPackage]:
         return list(
             self.session.scalars(
-                select(LocalizedMetadataPackage).where(LocalizedMetadataPackage.video_project_id == video_project_id).order_by(LocalizedMetadataPackage.created_at.desc())
+                select(LocalizedMetadataPackage)
+                .where(LocalizedMetadataPackage.video_project_id == video_project_id)
+                .order_by(LocalizedMetadataPackage.created_at.desc())
             ).all()
         )
 
@@ -567,41 +716,10 @@ class PublishTimingPolicyService:
         self.session = session
 
     def get(self, channel_id: uuid.UUID) -> ChannelPublishTimingPolicyRead:
-        policy = self.session.scalars(select(ChannelPublishTimingPolicy).where(ChannelPublishTimingPolicy.channel_workspace_id == channel_id)).one_or_none()
-        if policy is None:
-            channel = self.session.get(ChannelWorkspace, channel_id)
-            if channel is None:
-                raise NotFoundError(f"channel not found: {channel_id}")
-            policy = ChannelPublishTimingPolicy(channel_workspace_id=channel.id, primary_timezone=channel.primary_timezone or channel.default_timezone or "UTC")
-            self.session.add(policy)
-            self.session.flush()
-        return publish_timing_policy_read(policy)
-
-    def update(self, channel_id: uuid.UUID, data: ChannelPublishTimingPolicyCreate) -> ChannelPublishTimingPolicyRead:
         channel = self.session.get(ChannelWorkspace, channel_id)
         if channel is None:
             raise NotFoundError(f"channel not found: {channel_id}")
-        _validate_timezone(data.primary_timezone)
-        if data.operator_timezone:
-            _validate_timezone(data.operator_timezone)
-        _validate_windows(data.preferred_publish_windows)
-        policy = self.session.scalars(select(ChannelPublishTimingPolicy).where(ChannelPublishTimingPolicy.channel_workspace_id == channel_id)).one_or_none()
-        if policy is None:
-            policy = ChannelPublishTimingPolicy(channel_workspace_id=channel_id, primary_timezone=data.primary_timezone)
-            self.session.add(policy)
-        policy.primary_timezone = data.primary_timezone
-        policy.operator_timezone = data.operator_timezone
-        policy.target_regions = data.target_regions
-        policy.primary_audience_country = data.primary_audience_country
-        policy.preferred_publish_windows = data.preferred_publish_windows
-        policy.avoid_publish_windows = data.avoid_publish_windows
-        policy.publish_days = data.publish_days
-        policy.weekend_allowed = data.weekend_allowed
-        policy.notes = data.notes
-        channel.primary_timezone = data.primary_timezone
-        channel.default_timezone = data.primary_timezone
-        self.session.flush()
-        _audit(self.session, action="publish_timing.policy_updated", target_type="channel_workspace", target_id=channel.id, reason_code="PUBLISH_TIMING_POLICY_UPDATED", payload={"no_auto_schedule": True}, company_id=channel.company_id)
+        policy = _approved_launch_policy(self.session, channel_id)
         return publish_timing_policy_read(policy)
 
 
@@ -613,41 +731,118 @@ class PublishTimingSuggestionService:
         handoff = self.session.get(PublishHandoffPackage, handoff_id)
         if handoff is None:
             raise NotFoundError(f"publish handoff not found: {handoff_id}")
-        policy = PublishTimingPolicyService(self.session).get(handoff.channel_workspace_id)
-        local_dt, utc_dt, operator_dt = _suggest_time(policy)
+        policy, publish_slot = _timing_authority_for_handoff(self.session, handoff)
+        source = _launch_policy_source(policy.id)
+        existing_criteria = [
+            PublishTimingSuggestion.publish_handoff_package_id == handoff.id,
+            PublishTimingSuggestion.source == source,
+        ]
+        if publish_slot is not None:
+            existing_criteria.append(
+                PublishTimingSuggestion.suggested_publish_at_utc
+                == publish_slot.intended_publish_at
+            )
+        existing = self.session.scalar(
+            select(PublishTimingSuggestion)
+            .where(*existing_criteria)
+            .order_by(PublishTimingSuggestion.created_at.desc())
+        )
+        if existing is not None:
+            return publish_timing_suggestion_read(
+                existing,
+                launch_policy=policy,
+                publish_slot=publish_slot,
+            )
+        if publish_slot is None:
+            local_dt, utc_dt = _suggest_time(policy)
+        else:
+            utc_dt = publish_slot.intended_publish_at.astimezone(UTC)
+            local_dt = utc_dt.astimezone(ZoneInfo(policy.timezone))
         suggestion = PublishTimingSuggestion(
             channel_workspace_id=handoff.channel_workspace_id,
             video_project_id=handoff.video_project_id,
             publish_handoff_package_id=handoff.id,
-            target_timezone=policy.primary_timezone,
-            operator_timezone=policy.operator_timezone,
+            target_timezone=policy.timezone,
+            operator_timezone=None,
             suggested_publish_at_local=local_dt,
             suggested_publish_at_utc=utc_dt,
-            operator_local_time=operator_dt,
-            source="CHANNEL_CONFIG",
-            confidence_label="CONFIGURED" if policy.preferred_publish_windows else "UNKNOWN",
-            operator_summary="Khung giờ publish đã cấu hình. Human vẫn quyết định giờ publish thực tế; VCOS không auto-schedule.",
+            operator_local_time=None,
+            source=source,
+            confidence_label="CONFIGURED",
+            operator_summary=(
+                f"Giờ publish được suy ra từ launch policy v{policy.policy_version}. "
+                "Human vẫn quyết định publish thực tế; VCOS không auto-schedule."
+            ),
         )
         self.session.add(suggestion)
         self.session.flush()
-        _audit(self.session, action="publish_timing.suggestion_created", target_type="publish_handoff_package", target_id=handoff.id, reason_code="PUBLISH_TIMING_SUGGESTION_CREATED", payload={"source": "CHANNEL_CONFIG", "no_auto_schedule": True}, company_id=handoff.company_id)
-        return publish_timing_suggestion_read(suggestion)
+        _audit(
+            self.session,
+            action="publish_timing.suggestion_created",
+            target_type="publish_handoff_package",
+            target_id=handoff.id,
+            reason_code="PUBLISH_TIMING_SUGGESTION_CREATED",
+            payload={
+                "source": source,
+                "launch_policy_version_id": str(policy.id),
+                "launch_policy_hash": policy.canonical_hash,
+                "publish_slot_id": str(publish_slot.id) if publish_slot else None,
+                "no_auto_schedule": True,
+            },
+            company_id=handoff.company_id,
+        )
+        return publish_timing_suggestion_read(
+            suggestion,
+            launch_policy=policy,
+            publish_slot=publish_slot,
+        )
 
     def get(self, suggestion_id: uuid.UUID) -> PublishTimingSuggestionRead:
         suggestion = self.session.get(PublishTimingSuggestion, suggestion_id)
         if suggestion is None:
             raise NotFoundError(f"publish timing suggestion not found: {suggestion_id}")
-        return publish_timing_suggestion_read(suggestion)
+        policy = _launch_policy_from_source(
+            self.session,
+            source=suggestion.source,
+            channel_id=suggestion.channel_workspace_id,
+        )
+        publish_slot = (
+            _publish_slot_for_project(
+                self.session,
+                channel_id=suggestion.channel_workspace_id,
+                video_project_id=suggestion.video_project_id,
+                launch_policy_version_id=policy.id,
+                intended_publish_at=suggestion.suggested_publish_at_utc,
+            )
+            if policy is not None and suggestion.video_project_id is not None
+            else None
+        )
+        return publish_timing_suggestion_read(
+            suggestion,
+            launch_policy=policy,
+            publish_slot=publish_slot,
+        )
 
 
-def localized_subtitle_package_read(session: Session, package: LocalizedSubtitlePackage) -> LocalizedSubtitlePackageRead:
+def localized_subtitle_package_read(
+    session: Session, package: LocalizedSubtitlePackage
+) -> LocalizedSubtitlePackageRead:
     ctas = []
-    for ref_id, label in [(package.srt_cloud_media_ref_id, "SRT"), (package.vtt_cloud_media_ref_id, "VTT")]:
+    for ref_id, label in [
+        (package.srt_cloud_media_ref_id, "SRT"),
+        (package.vtt_cloud_media_ref_id, "VTT"),
+    ]:
         if ref_id is None:
             continue
         ref = session.get(CloudMediaRef, ref_id)
         if ref is not None:
-            ctas.append({"label": f"Mở file phụ đề {label} trên Google Drive", "web_view_link": ref.web_view_link, "file_name": ref.file_name})
+            ctas.append(
+                {
+                    "label": f"Mở file phụ đề {label} trên Google Drive",
+                    "web_view_link": ref.web_view_link,
+                    "file_name": ref.file_name,
+                }
+            )
     return LocalizedSubtitlePackageRead(
         id=package.id,
         company_id=package.company_id,
@@ -664,14 +859,18 @@ def localized_subtitle_package_read(session: Session, package: LocalizedSubtitle
         quality_notes=package.quality_notes,
         disclosure_notes=package.disclosure_notes,
         google_drive_ctas=ctas,
-        operator_summary=f"Phụ đề {package.target_language} đang ở trạng thái cần người duyệt." if package.human_review_status != "APPROVED" else f"Phụ đề {package.target_language} đã được duyệt.",
+        operator_summary=f"Phụ đề {package.target_language} đang ở trạng thái cần người duyệt."
+        if package.human_review_status != "APPROVED"
+        else f"Phụ đề {package.target_language} đã được duyệt.",
         created_at=package.created_at,
         updated_at=package.updated_at,
         technical_appendix={"no_local_path": True, "drive_cta_only": True},
     )
 
 
-def localized_metadata_package_read(package: LocalizedMetadataPackage) -> LocalizedMetadataPackageRead:
+def localized_metadata_package_read(
+    package: LocalizedMetadataPackage,
+) -> LocalizedMetadataPackageRead:
     return LocalizedMetadataPackageRead(
         id=package.id,
         company_id=package.company_id,
@@ -687,34 +886,81 @@ def localized_metadata_package_read(package: LocalizedMetadataPackage) -> Locali
         human_review_status=package.human_review_status,
         reviewer_id=package.reviewer_id,
         quality_notes=package.quality_notes,
-        operator_summary=f"Metadata {package.language} cần người duyệt trước khi dùng." if package.human_review_status != "APPROVED" else f"Metadata {package.language} đã được duyệt.",
+        operator_summary=f"Metadata {package.language} cần người duyệt trước khi dùng."
+        if package.human_review_status != "APPROVED"
+        else f"Metadata {package.language} đã được duyệt.",
         created_at=package.created_at,
         updated_at=package.updated_at,
         technical_appendix={"no_keyword_stuffing": True, "no_auto_publish": True},
     )
 
 
-def publish_timing_policy_read(policy: ChannelPublishTimingPolicy) -> ChannelPublishTimingPolicyRead:
+def publish_timing_policy_read(
+    policy: FirstChannelLaunchPolicyVersion,
+) -> ChannelPublishTimingPolicyRead:
+    publish_days = list(policy.publish_weekdays or [])
+    preferred_publish_windows = [
+        {
+            "day_of_week": day,
+            "local_time": policy.publish_local_time,
+            "timezone": policy.timezone,
+            "authority": "FIRST_CHANNEL_LAUNCH_POLICY_VERSION",
+        }
+        for day in publish_days
+    ]
     return ChannelPublishTimingPolicyRead(
         id=policy.id,
         channel_workspace_id=policy.channel_workspace_id,
-        primary_timezone=policy.primary_timezone,
-        operator_timezone=policy.operator_timezone,
-        target_regions=policy.target_regions,
-        primary_audience_country=policy.primary_audience_country,
-        preferred_publish_windows=policy.preferred_publish_windows,
-        avoid_publish_windows=policy.avoid_publish_windows,
-        publish_days=policy.publish_days,
-        weekend_allowed=policy.weekend_allowed,
-        notes=policy.notes,
-        operator_summary="Khung giờ publish đã cấu hình theo timezone kênh. Đây không phải khuyến nghị algorithm.",
+        launch_policy_version_id=policy.id,
+        launch_policy_hash=policy.canonical_hash,
+        policy_version=policy.policy_version,
+        authority="FIRST_CHANNEL_LAUNCH_POLICY_VERSION",
+        state="APPROVED",
+        read_only=True,
+        primary_timezone=policy.timezone,
+        operator_timezone=None,
+        target_regions=[],
+        primary_audience_country=None,
+        preferred_publish_windows=preferred_publish_windows,
+        avoid_publish_windows=[],
+        publish_days=publish_days,
+        weekend_allowed=any(day in {"SATURDAY", "SUNDAY"} for day in publish_days),
+        notes="Read-only projection of the approved immutable first-channel launch policy.",
+        operator_summary=(
+            f"Lịch publish đang dùng launch policy đã duyệt v{policy.policy_version}. "
+            "Đây là dữ liệu chỉ đọc và VCOS không auto-schedule."
+        ),
         created_at=policy.created_at,
         updated_at=policy.updated_at,
-        technical_appendix={"no_auto_schedule": True, "iana_timezone_required": True},
+        technical_appendix={
+            "authority": "first_channel_launch_policy_versions",
+            "launch_policy_version_id": str(policy.id),
+            "launch_policy_hash": policy.canonical_hash,
+            "read_only": True,
+            "legacy_channel_publish_timing_policy_ignored": True,
+            "no_auto_schedule": True,
+            "iana_timezone_required": True,
+        },
     )
 
 
-def publish_timing_suggestion_read(suggestion: PublishTimingSuggestion) -> PublishTimingSuggestionRead:
+def publish_timing_suggestion_read(
+    suggestion: PublishTimingSuggestion,
+    *,
+    launch_policy: FirstChannelLaunchPolicyVersion | None = None,
+    publish_slot: LongFormPublishSlot | None = None,
+) -> PublishTimingSuggestionRead:
+    if suggestion.source.startswith("LP:"):
+        if launch_policy is None:
+            raise ValidationFailureError("PUBLISH_TIMING_LAUNCH_POLICY_LINEAGE_MISSING")
+        expected_source = _launch_policy_source(launch_policy.id)
+        if suggestion.source != expected_source:
+            raise ValidationFailureError(
+                "PUBLISH_TIMING_LAUNCH_POLICY_LINEAGE_MISMATCH"
+            )
+        lineage_status = "EXACT"
+    else:
+        lineage_status = "LEGACY_UNKNOWN"
     return PublishTimingSuggestionRead(
         id=suggestion.id,
         channel_workspace_id=suggestion.channel_workspace_id,
@@ -727,12 +973,30 @@ def publish_timing_suggestion_read(suggestion: PublishTimingSuggestion) -> Publi
         operator_local_time=suggestion.operator_local_time,
         source=suggestion.source,
         confidence_label=suggestion.confidence_label,
+        launch_policy_version_id=launch_policy.id if launch_policy else None,
+        launch_policy_hash=(launch_policy.canonical_hash if launch_policy else None),
+        launch_policy_version=(launch_policy.policy_version if launch_policy else None),
+        publish_slot_id=publish_slot.id if publish_slot else None,
+        lineage_status=lineage_status,
         operator_summary=suggestion.operator_summary,
         created_at=suggestion.created_at,
+        technical_appendix={
+            "authority": (
+                "first_channel_launch_policy_versions"
+                if launch_policy
+                else "legacy_channel_publish_timing_policy"
+            ),
+            "source_ref": suggestion.source,
+            "exact_lineage": launch_policy is not None,
+            "legacy_historical_read_only": launch_policy is None,
+            "no_auto_schedule": True,
+        },
     )
 
 
-def _localization_config_read(channel: ChannelWorkspace, *, technical_appendix: dict[str, Any]) -> ChannelLocalizationConfig:
+def _localization_config_read(
+    channel: ChannelWorkspace, *, technical_appendix: dict[str, Any]
+) -> ChannelLocalizationConfig:
     return ChannelLocalizationConfig(
         channel_workspace_id=channel.id,
         primary_language=channel.primary_language,
@@ -771,12 +1035,16 @@ def _project(session: Session, project_id: uuid.UUID) -> VideoProject:
     return project
 
 
-def _drive_ref(session: Session, ref_id: uuid.UUID, project_id: uuid.UUID) -> CloudMediaRef:
+def _drive_ref(
+    session: Session, ref_id: uuid.UUID, project_id: uuid.UUID
+) -> CloudMediaRef:
     ref = session.get(CloudMediaRef, ref_id)
     if ref is None:
         raise NotFoundError(f"cloud media ref not found: {ref_id}")
     if ref.storage_provider != "GOOGLE_DRIVE":
-        raise ValidationFailureError("Subtitle file phải dùng CloudMediaRef trên Google Drive.")
+        raise ValidationFailureError(
+            "Subtitle file phải dùng CloudMediaRef trên Google Drive."
+        )
     if ref.video_project_id not in {None, project_id}:
         raise ValidationFailureError("CloudMediaRef không thuộc video project này.")
     return ref
@@ -828,22 +1096,132 @@ def _readiness_summary(
     return "Chưa đủ dữ liệu để kết luận."
 
 
-def _suggest_time(policy: ChannelPublishTimingPolicyRead) -> tuple[datetime, datetime, datetime | None]:
-    window = policy.preferred_publish_windows[0] if policy.preferred_publish_windows else {}
-    timezone_name = str(window.get("timezone") or policy.primary_timezone)
-    target_tz = ZoneInfo(timezone_name)
-    now = datetime.now(target_tz)
-    day_name = str(window.get("day_of_week") or (policy.publish_days[0] if policy.publish_days else "")).upper()
-    target_day = DAYS.get(day_name, now.weekday())
-    start = _parse_hhmm(str(window.get("local_time_start") or "09:00"))
-    days_ahead = (target_day - now.weekday()) % 7
-    candidate_date = now.date() + timedelta(days=days_ahead)
+def _approved_launch_policy(
+    session: Session,
+    channel_id: uuid.UUID,
+) -> FirstChannelLaunchPolicyVersion:
+    policy = session.scalar(
+        select(FirstChannelLaunchPolicyVersion).where(
+            FirstChannelLaunchPolicyVersion.channel_workspace_id == channel_id,
+            FirstChannelLaunchPolicyVersion.state == "APPROVED",
+        )
+    )
+    if policy is None:
+        raise NotFoundError(
+            f"approved first-channel launch policy not found: {channel_id}"
+        )
+    return policy
+
+
+def _launch_policy_source(policy_id: uuid.UUID) -> str:
+    source = f"LP:{policy_id}"
+    if len(source) > 40:
+        raise ValidationFailureError("PUBLISH_TIMING_SOURCE_REF_TOO_LONG")
+    return source
+
+
+def _launch_policy_from_source(
+    session: Session,
+    *,
+    source: str,
+    channel_id: uuid.UUID,
+) -> FirstChannelLaunchPolicyVersion | None:
+    if not source.startswith("LP:"):
+        return None
+    try:
+        policy_id = uuid.UUID(source.removeprefix("LP:"))
+    except ValueError as exc:
+        raise ValidationFailureError(
+            "PUBLISH_TIMING_LAUNCH_POLICY_SOURCE_INVALID"
+        ) from exc
+    policy = session.get(FirstChannelLaunchPolicyVersion, policy_id)
+    if (
+        policy is None
+        or policy.channel_workspace_id != channel_id
+        or policy.approved_at is None
+        or policy.state not in {"APPROVED", "SUPERSEDED", "ARCHIVED"}
+    ):
+        raise ValidationFailureError("PUBLISH_TIMING_LAUNCH_POLICY_LINEAGE_INVALID")
+    return policy
+
+
+def _publish_slot_for_project(
+    session: Session,
+    *,
+    channel_id: uuid.UUID,
+    video_project_id: uuid.UUID,
+    launch_policy_version_id: uuid.UUID | None = None,
+    intended_publish_at: datetime | None = None,
+) -> LongFormPublishSlot | None:
+    criteria = [
+        LongFormPublishSlot.channel_workspace_id == channel_id,
+        LongFormPublishSlot.admitted_video_project_id == video_project_id,
+        LongFormPublishSlot.state.in_(("OPEN", "RESERVED", "FULFILLED")),
+    ]
+    if launch_policy_version_id is not None:
+        criteria.append(
+            LongFormPublishSlot.launch_policy_version_id == launch_policy_version_id
+        )
+    if intended_publish_at is not None:
+        criteria.append(LongFormPublishSlot.intended_publish_at == intended_publish_at)
+    statement = (
+        select(LongFormPublishSlot)
+        .where(*criteria)
+        .order_by(LongFormPublishSlot.created_at.desc())
+        .limit(1)
+    )
+    return session.scalar(statement)
+
+
+def _timing_authority_for_handoff(
+    session: Session,
+    handoff: PublishHandoffPackage,
+) -> tuple[FirstChannelLaunchPolicyVersion, LongFormPublishSlot | None]:
+    publish_slot = (
+        _publish_slot_for_project(
+            session,
+            channel_id=handoff.channel_workspace_id,
+            video_project_id=handoff.video_project_id,
+        )
+        if handoff.video_project_id is not None
+        else None
+    )
+    if publish_slot is None:
+        return _approved_launch_policy(session, handoff.channel_workspace_id), None
+    policy = session.get(
+        FirstChannelLaunchPolicyVersion,
+        publish_slot.launch_policy_version_id,
+    )
+    if (
+        policy is None
+        or policy.channel_workspace_id != handoff.channel_workspace_id
+        or policy.company_id != handoff.company_id
+        or policy.approved_at is None
+        or policy.state not in {"APPROVED", "SUPERSEDED", "ARCHIVED"}
+    ):
+        raise ValidationFailureError("PUBLISH_TIMING_SLOT_POLICY_LINEAGE_INVALID")
+    return policy, publish_slot
+
+
+def _suggest_time(
+    policy: FirstChannelLaunchPolicyVersion,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    target_tz = ZoneInfo(policy.timezone)
+    current = (now or utc_now()).astimezone(target_tz)
+    day_name = str(
+        policy.publish_weekdays[0] if policy.publish_weekdays else ""
+    ).upper()
+    target_day = DAYS.get(day_name, current.weekday())
+    start = _parse_hhmm(policy.publish_local_time)
+    days_ahead = (target_day - current.weekday()) % 7
+    candidate_date = current.date() + timedelta(days=days_ahead)
     local_dt = datetime.combine(candidate_date, start, tzinfo=target_tz)
-    if local_dt <= now:
+    if local_dt <= current:
         local_dt += timedelta(days=7 if day_name else 1)
     utc_dt = local_dt.astimezone(UTC)
-    operator_dt = utc_dt.astimezone(ZoneInfo(policy.operator_timezone)) if policy.operator_timezone else None
-    return local_dt, utc_dt, operator_dt
+    return local_dt, utc_dt
 
 
 def _parse_hhmm(value: str) -> time:

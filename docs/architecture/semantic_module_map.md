@@ -6,7 +6,7 @@ DX1 chuẩn hóa cách tìm runtime theo domain. Phase reports vẫn là audit h
 
 | Domain | Service module | Owns |
 | --- | --- | --- |
-| Daily Operations | `app.services.daily_operations` | Daily run, channel state pack, calendar slot, run execution. |
+| Editorial Research | `app.services.editorial_research` | Research run, evidence-bound candidate, and auditable runway stages. |
 | Context Resolver | `app.services.context_resolver` | Retrieval plan, context pack, scoped resource resolution. |
 | Project Admission | `app.services.project_admission` | Admission decision, budget/readiness gates before project execution. |
 | Post-Publish Diagnostics | `app.services.post_publish_diagnostics` | No-view/retention/packaging diagnostics, failure trace, recovery proposal. |

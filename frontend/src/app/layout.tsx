@@ -6,8 +6,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "Bảng điều hành VCOS",
-  description: "Buồng lái vận hành thủ công cho VCOS"
+  title: "LONG-FORM YOUTUBE OPERATING DASHBOARD",
+  description: "Buồng lái vận hành YouTube long-form cho VCOS"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

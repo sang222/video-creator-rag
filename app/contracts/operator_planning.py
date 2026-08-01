@@ -9,8 +9,8 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
-PlanningLane = Literal["DAILY_SHORT", "LONG_FORM"]
-PlanningSourceKind = Literal["DAILY_SLOT", "DAILY_IDEA", "LONG_FORM_PLAN"]
+PlanningLane = Literal["LONG_FORM"]
+PlanningSourceKind = Literal["LONG_FORM_PLAN"]
 PlanningOptionState = Literal[
     "READY",
     "ALREADY_ADMITTED",
@@ -44,7 +44,6 @@ class OperatorPlanningOptionRead(BaseModel):
 
 class OperatorPlanningCatalogRead(BaseModel):
     generated_at: AwareDatetime
-    daily_short_options: list[OperatorPlanningOptionRead] = Field(default_factory=list)
     long_form_options: list[OperatorPlanningOptionRead] = Field(default_factory=list)
     safety_notice: str = (
         "Thao tác này đóng băng support authority qua LLMRouter trong trần ngân "
@@ -53,15 +52,6 @@ class OperatorPlanningCatalogRead(BaseModel):
         "publish/upload."
     )
     technical_appendix: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class DailyShortPlanningLaunchRequest(BaseModel):
-    daily_idea_decision_id: uuid.UUID
-    max_attempts: int = Field(default=5, ge=1, le=5)
-    max_budget_usd: Decimal = Field(default=Decimal("0"), ge=0, le=250)
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
     model_config = ConfigDict(extra="forbid")
 

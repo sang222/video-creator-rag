@@ -181,6 +181,7 @@ class ProductionPublishService:
             run.company_id != project.company_id
             or run.channel_workspace_id != project.channel_workspace_id
             or run.production_lane != project.production_lane
+            or run.production_lane != "LONG_FORM"
         ):
             raise ValidationFailureError("FINAL_REVIEW_WORKFLOW_SCOPE_MISMATCH")
 
@@ -311,8 +312,6 @@ class ProductionPublishService:
             "series_run_id": project.series_run_id,
             "episode_number": project.episode_number,
             "standalone_reason_code": project.standalone_reason_code,
-            "parent_video_project_id": project.parent_video_project_id,
-            "parent_final_media_ref_id": project.parent_final_media_ref_id,
             "publish_metadata_snapshot": data.publish_metadata_snapshot,
             "disclosure_snapshot": data.disclosure_snapshot,
             "materiality_policy_snapshot": data.materiality_policy_snapshot,
@@ -395,8 +394,6 @@ class ProductionPublishService:
             series_run_id=project.series_run_id,
             episode_number=project.episode_number,
             standalone_reason_code=project.standalone_reason_code,
-            parent_video_project_id=project.parent_video_project_id,
-            parent_final_media_ref_id=project.parent_final_media_ref_id,
             publish_metadata_snapshot=dict(data.publish_metadata_snapshot),
             disclosure_snapshot=dict(data.disclosure_snapshot),
             materiality_policy_snapshot=dict(data.materiality_policy_snapshot),
@@ -418,7 +415,7 @@ class ProductionPublishService:
         actor: ActorContext,
     ) -> FinalReviewCandidate:
         candidate = self.session.get(FinalReviewCandidate, candidate_id)
-        if candidate is None:
+        if candidate is None or candidate.production_lane != "LONG_FORM":
             raise NotFoundError(f"final review candidate not found: {candidate_id}")
         require_company_permission(
             self.session,
@@ -1019,9 +1016,6 @@ class ProductionPublishService:
             "series_plan_id": _optional_uuid(candidate.series_plan_id),
             "series_run_id": _optional_uuid(candidate.series_run_id),
             "episode_number": candidate.episode_number,
-            "parent_video_project_id": _optional_uuid(
-                candidate.parent_video_project_id
-            ),
         }
         self._append_event_once(
             event_id=verified_event_id,
@@ -1106,8 +1100,6 @@ class ProductionPublishService:
             series_run_id=candidate.series_run_id,
             episode_number=candidate.episode_number,
             standalone_reason_code=candidate.standalone_reason_code,
-            parent_video_project_id=candidate.parent_video_project_id,
-            parent_final_media_ref_id=candidate.parent_final_media_ref_id,
             target_market_lineage=dict(candidate.target_market_lineage),
             archive_supplement=archive_supplement,
             archive_supplement_ref=archive_supplement_ref,
@@ -1282,14 +1274,15 @@ class ProductionPublishService:
         task = HumanUploadTask(
             company_id=candidate.company_id,
             channel_workspace_id=candidate.channel_workspace_id,
-            upload_card_id=None,
             video_project_id=candidate.video_project_id,
             first_scripted_video_package_id=None,
             publish_package_id=None,
             destination=candidate.target_platform,
             target_platform=candidate.target_platform,
             task_state="READY_FOR_OPERATOR",
-            upload_card_ref=None,
+            publish_metadata_ref=(
+                f"final_review_candidate:{candidate.id}:publish_metadata_snapshot"
+            ),
             title_snapshot=str(candidate.publish_metadata_snapshot.get("title") or ""),
             description_snapshot=candidate.publish_metadata_snapshot.get("description"),
             thumbnail_ref=candidate.publish_metadata_snapshot.get("thumbnail_ref"),
@@ -1342,8 +1335,6 @@ class ProductionPublishService:
             series_run_id=candidate.series_run_id,
             episode_number=candidate.episode_number,
             standalone_reason_code=candidate.standalone_reason_code,
-            parent_video_project_id=candidate.parent_video_project_id,
-            parent_final_media_ref_id=candidate.parent_final_media_ref_id,
             archive_object_ref=candidate.archive_object_ref,
         )
         self.session.add(task)
@@ -1605,13 +1596,13 @@ class ProductionPublishService:
             != project.channel_profile_version_id
             or candidate.policy_snapshot_id != project.policy_snapshot_id
             or candidate.production_lane != project.production_lane
+            or candidate.production_lane != "LONG_FORM"
+            or project.production_lane != "LONG_FORM"
             or candidate.content_mode != project.content_mode
             or candidate.series_plan_id != project.series_plan_id
             or candidate.series_run_id != project.series_run_id
             or candidate.episode_number != project.episode_number
             or candidate.standalone_reason_code != project.standalone_reason_code
-            or candidate.parent_video_project_id != project.parent_video_project_id
-            or candidate.parent_final_media_ref_id != project.parent_final_media_ref_id
         ):
             raise ValidationFailureError("FINAL_REVIEW_CANDIDATE_PROJECT_SPLICE")
 
@@ -1620,8 +1611,8 @@ class ProductionPublishService:
         if (
             project.schema_version != "v2"
             or project.channel_profile_version_id is None
-            or project.production_lane
-            not in {"DAILY_SHORT", "LONG_FORM", "LONG_DERIVED_SHORT"}
+            or project.production_lane != "LONG_FORM"
+            or project.planning_source_type != "LONG_FORM_PLAN"
             or project.content_mode not in {"SERIES_EPISODE", "STANDALONE"}
         ):
             raise ValidationFailureError("FINAL_REVIEW_V2_PROJECT_REQUIRED")
@@ -1633,7 +1624,11 @@ class ProductionPublishService:
         if for_update:
             statement = statement.with_for_update()
         task = self.session.scalar(statement)
-        if task is None or task.schema_version != "v2":
+        if (
+            task is None
+            or task.schema_version != "v2"
+            or task.production_lane != "LONG_FORM"
+        ):
             raise NotFoundError(f"v2 human upload task not found: {task_id}")
         return task
 

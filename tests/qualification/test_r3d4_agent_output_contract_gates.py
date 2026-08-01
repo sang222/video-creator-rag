@@ -16,7 +16,6 @@ from app.services.r3d4 import (
     CharacterRuntimeComplianceGate,
     DisclosureConsistencyGate,
     GATE_BLOCK,
-    GATE_PASS,
     GATE_REVIEW,
     GateBatchResult,
     GateResult,
@@ -74,23 +73,37 @@ def _ctx(
             "character_image_branch_id": "branch-1" if character_profile_id else None,
             "reference_asset_pack_id": "pack-1" if character_profile_id else None,
         },
-        visual_style_context_json={"allowed_visual_sources": allowed_sources or ["DIAGRAM", "CARD", "SCREENSHOT"]},
+        visual_style_context_json={
+            "allowed_visual_sources": allowed_sources
+            or ["DIAGRAM", "CARD", "SCREENSHOT"]
+        },
         voice_audio_context_json={"voice_profile_id": voice_profile_id},
         thumbnail_style_context_json={"text_overlay_language": language},
         metadata_seo_policy_context_json={"language": language},
         publish_timing_context_json={"manual_publish_only": True},
-        source_rights_disclosure_context_json={"required_disclosure_blocks": ["AI_ASSISTED_DRAFT"]},
-        monetization_cta_context_json={"unsupported_asset_offer_forbidden": True, "forbidden_cta_types": ["fake urgency"]},
+        source_rights_disclosure_context_json={
+            "required_disclosure_blocks": ["AI_ASSISTED_DRAFT"]
+        },
+        monetization_cta_context_json={
+            "unsupported_asset_offer_forbidden": True,
+            "forbidden_cta_types": ["fake urgency"],
+        },
         cost_provider_policy_context_json={},
         safety_forbidden_claims_context_json={},
     )
 
 
-def _script(seconds: list[int], *, declared: int | None = None, language: str = "vi") -> dict[str, Any]:
+def _script(
+    seconds: list[int], *, declared: int | None = None, language: str = "vi"
+) -> dict[str, Any]:
     payload = {
         "language": language,
         "sentences": [
-            {"sentence_id": f"S{index + 1}", "text": f"Sentence {index + 1}", "approx_seconds": seconds_value}
+            {
+                "sentence_id": f"S{index + 1}",
+                "text": f"Sentence {index + 1}",
+                "approx_seconds": seconds_value,
+            }
             for index, seconds_value in enumerate(seconds)
         ],
     }
@@ -137,15 +150,27 @@ def _batch(status: str, fail_codes: list[str] | None = None) -> GateBatchResult:
     )
 
 
-def test_agent_output_missing_applied_context_refs_blocks_package_critical(db_session) -> None:
+def test_agent_output_missing_applied_context_refs_blocks_package_critical(
+    db_session,
+) -> None:
     service = AgentOutputValidationService(db_session)
 
     result = service.validate(
         package_id=uuid.uuid4(),
         video_project_id=None,
         agent_key="ScriptWriterAgent",
-        raw_output={"artifact": {"sentences": [{"sentence_id": "S1", "text": "x", "approx_seconds": 10}]}},
-        parsed_output={"agent_key": "ScriptWriterAgent", "status": "OK", "artifact": {"sentences": [{"sentence_id": "S1", "text": "x", "approx_seconds": 10}]}},
+        raw_output={
+            "artifact": {
+                "sentences": [{"sentence_id": "S1", "text": "x", "approx_seconds": 10}]
+            }
+        },
+        parsed_output={
+            "agent_key": "ScriptWriterAgent",
+            "status": "OK",
+            "artifact": {
+                "sentences": [{"sentence_id": "S1", "text": "x", "approx_seconds": 10}]
+            },
+        },
         prompt_validation_result={"valid": True},
         runtime_context_refs={},
         prompt_render_run_id=None,
@@ -159,12 +184,20 @@ def test_agent_output_missing_applied_context_refs_blocks_package_critical(db_se
 
 def test_canonicalizer_preserves_raw_hash_ref_and_does_not_invent_truth() -> None:
     contract = AgentOutputContractRegistry().resolve("ScriptWriterAgent")
-    raw_output = {"artifact": {"sentences": [{"sentence_id": "S1", "text": "x", "approx_seconds": 10}]}}
+    raw_output = {
+        "artifact": {
+            "sentences": [{"sentence_id": "S1", "text": "x", "approx_seconds": 10}]
+        }
+    }
 
     result = ArtifactCanonicalizer().canonicalize(
         contract=contract,
         raw_output=raw_output,
-        parsed_output={"agent_key": "ScriptWriterAgent", "status": "OK", "artifact": raw_output["artifact"]},
+        parsed_output={
+            "agent_key": "ScriptWriterAgent",
+            "status": "OK",
+            "artifact": raw_output["artifact"],
+        },
         runtime_context_refs={},
         raw_output_ref="prompt-output:abc",
     )
@@ -175,7 +208,9 @@ def test_canonicalizer_preserves_raw_hash_ref_and_does_not_invent_truth() -> Non
     assert "duration_policy" not in result.canonical_artifact
 
 
-def test_schema_violation_ledger_records_missing_required_artifact_fields(db_session) -> None:
+def test_schema_violation_ledger_records_missing_required_artifact_fields(
+    db_session,
+) -> None:
     service = AgentOutputValidationService(db_session)
 
     result = service.validate(
@@ -183,7 +218,11 @@ def test_schema_violation_ledger_records_missing_required_artifact_fields(db_ses
         video_project_id=None,
         agent_key="ScriptWriterAgent",
         raw_output={"artifact": {}},
-        parsed_output={"agent_key": "ScriptWriterAgent", "status": "OK", "artifact": {}},
+        parsed_output={
+            "agent_key": "ScriptWriterAgent",
+            "status": "OK",
+            "artifact": {},
+        },
         prompt_validation_result={"valid": True},
         runtime_context_refs=RUNTIME_REFS,
         prompt_render_run_id=None,
@@ -196,7 +235,9 @@ def test_schema_violation_ledger_records_missing_required_artifact_fields(db_ses
     assert db_session.query(AgentOutputValidationRun).count() == 1
 
 
-def test_media_qc_artifact_status_alias_is_repaired_before_required_field_check(db_session) -> None:
+def test_media_qc_artifact_status_alias_is_repaired_before_required_field_check(
+    db_session,
+) -> None:
     service = AgentOutputValidationService(db_session)
 
     result = service.validate(
@@ -207,7 +248,10 @@ def test_media_qc_artifact_status_alias_is_repaired_before_required_field_check(
         parsed_output={
             "agent_key": "MediaQCExplanationAgent",
             "status": "OK",
-            "artifact": {"artifact.status": "NOT_AVAILABLE", "details": "Waiting for media generation."},
+            "artifact": {
+                "artifact.status": "NOT_AVAILABLE",
+                "details": "Waiting for media generation.",
+            },
         },
         prompt_validation_result={"valid": True},
         runtime_context_refs=RUNTIME_REFS,
@@ -225,7 +269,10 @@ def test_unknown_empty_gatekeeper_result_becomes_review_required(db_session) -> 
     service = FirstScriptedVideoPackageService(db_session)
 
     assert service._gatekeeper_result({"artifact": {"result": ""}}) == "REVIEW_REQUIRED"
-    assert service._gatekeeper_result({"artifact": {"result": "maybe"}}) == "REVIEW_REQUIRED"
+    assert (
+        service._gatekeeper_result({"artifact": {"result": "maybe"}})
+        == "REVIEW_REQUIRED"
+    )
 
 
 def test_gatekeeper_pass_cannot_override_deterministic_block() -> None:
@@ -249,11 +296,19 @@ def test_required_gate_missing_blocks_and_persists(db_session) -> None:
 
     assert batch.status == "BLOCK"
     assert "REQUIRED_GATE_MISSING" in batch.fail_codes
-    assert db_session.query(R3D4GateRun).filter(R3D4GateRun.gate_key == "missing_required_gate").count() == 1
+    assert (
+        db_session.query(R3D4GateRun)
+        .filter(R3D4GateRun.gate_key == "missing_required_gate")
+        .count()
+        == 1
+    )
 
 
 def test_script_duration_gate_catches_short_long_form_script() -> None:
-    result = ScriptDurationGate().run(artifacts={"narration_script": _script([88, 88], declared=176)}, effective_context=_ctx(duration=480))
+    result = ScriptDurationGate().run(
+        artifacts={"narration_script": _script([88, 88], declared=176)},
+        effective_context=_ctx(duration=480),
+    )
 
     assert result.status == "BLOCK"
     assert "SCRIPT_DURATION_BELOW_MINIMUM" in result.fail_codes
@@ -261,7 +316,14 @@ def test_script_duration_gate_catches_short_long_form_script() -> None:
 
 def test_script_duration_gate_blocks_450_target_with_71_second_script() -> None:
     result = ScriptDurationGate().run(
-        artifacts={"duration_model": {"target_format": "long_form", "target_duration_seconds": 450, "allowed_duration_range_seconds": {"min": 405, "max": 495}}, "narration_script": _script([35, 36], declared=71)},
+        artifacts={
+            "duration_model": {
+                "target_format": "long_form",
+                "target_duration_seconds": 450,
+                "allowed_duration_range_seconds": {"min": 405, "max": 495},
+            },
+            "narration_script": _script([35, 36], declared=71),
+        },
         effective_context=_ctx(duration=450),
     )
 
@@ -301,7 +363,14 @@ def test_script_duration_gate_blocks_450_target_with_1506_words() -> None:
 
 def test_script_duration_gate_passes_long_form_range() -> None:
     result = ScriptDurationGate().run(
-        artifacts={"duration_model": {"target_format": "long_form", "target_duration_seconds": 450, "allowed_duration_range_seconds": {"min": 405, "max": 495}}, "narration_script": _script([225, 225], declared=450)},
+        artifacts={
+            "duration_model": {
+                "target_format": "long_form",
+                "target_duration_seconds": 450,
+                "allowed_duration_range_seconds": {"min": 405, "max": 495},
+            },
+            "narration_script": _script([225, 225], declared=450),
+        },
         effective_context=_ctx(duration=450),
     )
 
@@ -310,7 +379,10 @@ def test_script_duration_gate_passes_long_form_range() -> None:
 
 
 def test_script_duration_gate_catches_declared_duration_mismatch() -> None:
-    result = ScriptDurationGate().run(artifacts={"narration_script": _script([88, 88], declared=600)}, effective_context=_ctx(duration=176))
+    result = ScriptDurationGate().run(
+        artifacts={"narration_script": _script([88, 88], declared=600)},
+        effective_context=_ctx(duration=176),
+    )
 
     assert result.status == "BLOCK"
     assert "SCRIPT_DECLARED_DURATION_MISMATCH" in result.fail_codes
@@ -319,7 +391,9 @@ def test_script_duration_gate_catches_declared_duration_mismatch() -> None:
 def test_srt_timing_gate_catches_overlap_and_bad_numbering() -> None:
     srt = "2\n00:00:00,000 --> 00:00:04,000\nA\n\n3\n00:00:03,000 --> 00:00:05,000\nB\n"
 
-    result = SRTTimingGate().run(artifacts={"srt": {"content": srt}, "narration_script": _script([5])})
+    result = SRTTimingGate().run(
+        artifacts={"srt": {"content": srt}, "narration_script": _script([5])}
+    )
 
     assert result.status == "BLOCK"
     assert "SRT_NUMBERING_NOT_SEQUENTIAL" in result.fail_codes
@@ -330,7 +404,14 @@ def test_draft_srt_cannot_be_treated_as_final() -> None:
     srt = "1\n00:00:00,000 --> 00:00:05,000\nA\n"
 
     result = SRTTimingGate().run(
-        artifacts={"srt": {"content": srt, "lifecycle_state": "DRAFT_SCRIPT_TIMING", "final": True}, "narration_script": _script([5])}
+        artifacts={
+            "srt": {
+                "content": srt,
+                "lifecycle_state": "DRAFT_SCRIPT_TIMING",
+                "final": True,
+            },
+            "narration_script": _script([5]),
+        }
     )
 
     assert result.status == "BLOCK"
@@ -358,7 +439,9 @@ def test_hook_3s_gate_reviews_high_clickbait_and_passes_valid_hook() -> None:
     assert review.status == "REVIEW_REQUIRED"
     assert "HOOK_CLICKBAIT_RISK_HIGH" in review.fail_codes
 
-    passed = HookSpecGate().run(artifacts={"narration_script": {"hook_spec": _valid_hook()}})
+    passed = HookSpecGate().run(
+        artifacts={"narration_script": {"hook_spec": _valid_hook()}}
+    )
     assert passed.status == "PASS"
 
 
@@ -366,7 +449,9 @@ def test_visual_coverage_gate_catches_missing_sentence_ids() -> None:
     result = VisualCoverageGate().run(
         artifacts={
             "narration_script": _script([5, 5]),
-            "visual_plan": {"scenes": [{"sentence_id": "S1", "intended_visual_source": "DIAGRAM"}]},
+            "visual_plan": {
+                "scenes": [{"sentence_id": "S1", "intended_visual_source": "DIAGRAM"}]
+            },
         },
         effective_context=_ctx(),
     )
@@ -379,7 +464,9 @@ def test_visual_coverage_gate_catches_unknown_sentence_refs() -> None:
     result = VisualCoverageGate().run(
         artifacts={
             "narration_script": _script([5]),
-            "visual_plan": {"scenes": [{"sentence_id": "S9", "intended_visual_source": "DIAGRAM"}]},
+            "visual_plan": {
+                "scenes": [{"sentence_id": "S9", "intended_visual_source": "DIAGRAM"}]
+            },
         },
         effective_context=_ctx(),
     )
@@ -396,7 +483,10 @@ def test_visual_coverage_gate_accepts_covers_sentence_ids_alias() -> None:
                 "scenes": [
                     {"sentence_range": ["S1"], "intended_visual_source": "DIAGRAM"},
                     {"covers_sentence_ids": ["S2"], "intended_visual_source": "CARD"},
-                    {"narration_sentence_ids": ["S3"], "intended_visual_source": "CARD"},
+                    {
+                        "narration_sentence_ids": ["S3"],
+                        "intended_visual_source": "CARD",
+                    },
                 ]
             },
         },
@@ -414,8 +504,16 @@ def test_visual_coverage_gate_catches_large_duration_mismatch() -> None:
             "narration_script": _script([100, 100]),
             "visual_plan": {
                 "scenes": [
-                    {"sentence_id": "S1", "intended_visual_source": "DIAGRAM", "duration_seconds": 10},
-                    {"sentence_id": "S2", "intended_visual_source": "CARD", "duration_seconds": 10},
+                    {
+                        "sentence_id": "S1",
+                        "intended_visual_source": "DIAGRAM",
+                        "duration_seconds": 10,
+                    },
+                    {
+                        "sentence_id": "S2",
+                        "intended_visual_source": "CARD",
+                        "duration_seconds": 10,
+                    },
                 ]
             },
         },
@@ -430,7 +528,14 @@ def test_visual_coverage_gate_rejects_disallowed_source_type() -> None:
     result = VisualCoverageGate().run(
         artifacts={
             "narration_script": _script([5]),
-            "visual_plan": {"scenes": [{"sentence_id": "S1", "intended_visual_source": "AI_HERO_CANDIDATE_ONLY"}]},
+            "visual_plan": {
+                "scenes": [
+                    {
+                        "sentence_id": "S1",
+                        "intended_visual_source": "AI_HERO_CANDIDATE_ONLY",
+                    }
+                ]
+            },
         },
         effective_context=_ctx(allowed_sources=["DIAGRAM", "CARD"]),
     )
@@ -441,7 +546,10 @@ def test_visual_coverage_gate_rejects_disallowed_source_type() -> None:
 
 def test_artifact_consistency_gate_catches_duration_mismatch() -> None:
     result = ArtifactConsistencyGate().run(
-        artifacts={"narration_script": _script([100, 100]), "metadata_package": {"duration_seconds": 600}}
+        artifacts={
+            "narration_script": _script([100, 100]),
+            "metadata_package": {"duration_seconds": 600},
+        }
     )
 
     assert result.status == "BLOCK"
@@ -461,9 +569,13 @@ def test_disclosure_consistency_gate_catches_ai_media_wording_mismatch() -> None
     assert "AI_MEDIA_DISCLOSURE_FALSE_PRESENT_TENSE" in result.fail_codes
 
 
-def test_upload_copy_truthfulness_gate_catches_unsupported_freebie_cta() -> None:
+def test_metadata_truthfulness_gate_catches_unsupported_freebie_cta() -> None:
     result = UploadCopyTruthfulnessGate().run(
-        artifacts={"upload_card_copy": {"description": "Download the free checklist and product demo now."}}
+        artifacts={
+            "metadata_package": {
+                "description": "Download the free checklist and product demo now."
+            }
+        }
     )
 
     assert result.status == "BLOCK"
@@ -487,7 +599,9 @@ def test_provider_boundary_gate_blocks_provider_attempts_when_disabled() -> None
     assert "FORBIDDEN_PROVIDER_OR_UPLOAD_ATTEMPT" in result.fail_codes
 
 
-def test_provider_boundary_gate_passes_without_upload_publish_or_media_attempts() -> None:
+def test_provider_boundary_gate_passes_without_upload_publish_or_media_attempts() -> (
+    None
+):
     readiness = {
         "provider_summaries": [
             {"provider_key": "elevenlabs", "readiness_state": "PASS"},
@@ -495,7 +609,9 @@ def test_provider_boundary_gate_passes_without_upload_publish_or_media_attempts(
         ]
     }
 
-    result = ProviderBoundaryGate().run(artifacts={}, provider_readiness_state=readiness)
+    result = ProviderBoundaryGate().run(
+        artifacts={}, provider_readiness_state=readiness
+    )
 
     assert result.status == "PASS"
     assert result.fail_codes == []
@@ -512,7 +628,9 @@ def test_no_character_category_blocks_character_refs() -> None:
 
 
 def test_required_character_category_blocks_missing_binding() -> None:
-    result = CharacterRuntimeComplianceGate().run(artifacts={}, effective_context=_ctx(character_mode="REQUIRED_CHARACTER"))
+    result = CharacterRuntimeComplianceGate().run(
+        artifacts={}, effective_context=_ctx(character_mode="REQUIRED_CHARACTER")
+    )
 
     assert result.status == "BLOCK"
     assert "REQUIRED_CHARACTER_BINDING_MISSING" in result.fail_codes
@@ -521,7 +639,9 @@ def test_required_character_category_blocks_missing_binding() -> None:
 def test_character_refs_must_match_frozen_effective_context() -> None:
     result = CharacterConsistencyGate().run(
         artifacts={"thumbnail_brief": {"character_refs": ["char-2"]}},
-        effective_context=_ctx(character_mode="REQUIRED_CHARACTER", character_profile_id="char-1"),
+        effective_context=_ctx(
+            character_mode="REQUIRED_CHARACTER", character_profile_id="char-1"
+        ),
     )
 
     assert result.status == "BLOCK"
@@ -531,7 +651,11 @@ def test_character_refs_must_match_frozen_effective_context() -> None:
 def test_voice_profile_missing_blocks_when_character_requires_voice() -> None:
     result = VoiceProfileReadinessGate().run(
         artifacts={},
-        effective_context=_ctx(character_mode="REQUIRED_CHARACTER", character_profile_id="char-1", voice_profile_id=None),
+        effective_context=_ctx(
+            character_mode="REQUIRED_CHARACTER",
+            character_profile_id="char-1",
+            voice_profile_id=None,
+        ),
     )
 
     assert result.status == "BLOCK"
@@ -540,7 +664,10 @@ def test_voice_profile_missing_blocks_when_character_requires_voice() -> None:
 
 def test_market_locale_mismatch_causes_review_required() -> None:
     result = MarketRuntimeComplianceGate().run(
-        artifacts={"narration_script": _script([10], language="en"), "metadata_package": {"language": "vi"}},
+        artifacts={
+            "narration_script": _script([10], language="en"),
+            "metadata_package": {"language": "vi"},
+        },
         effective_context=_ctx(language="vi"),
     )
 
@@ -551,7 +678,9 @@ def test_market_locale_mismatch_causes_review_required() -> None:
 def test_package_with_deterministic_block_cannot_be_media_ready() -> None:
     decision = PackageStatusReducer().resolve(
         current_status="READY_FOR_MEDIA_PROVIDERS",
-        deterministic_batch=_batch(GATE_BLOCK, ["VISUAL_COVERAGE_MISSING_SENTENCE_IDS"]),
+        deterministic_batch=_batch(
+            GATE_BLOCK, ["VISUAL_COVERAGE_MISSING_SENTENCE_IDS"]
+        ),
         gatekeeper_result="PASS",
     )
 
@@ -560,14 +689,30 @@ def test_package_with_deterministic_block_cannot_be_media_ready() -> None:
 
 
 def test_r3d4_adds_no_provider_media_or_upload_calls() -> None:
-    source = (Path("app/services/r3d4.py").read_text(encoding="utf-8") + Path("app/services/m12_2.py").read_text(encoding="utf-8"))
-    forbidden = ["GoogleDriveUploadService(", "YouTubeUpload", "ElevenLabsProvider(", "VeoProvider("]
+    source = Path("app/services/r3d4.py").read_text(encoding="utf-8") + Path(
+        "app/services/m12_2.py"
+    ).read_text(encoding="utf-8")
+    forbidden = [
+        "GoogleDriveUploadService(",
+        "YouTubeUpload",
+        "ElevenLabsProvider(",
+        "VeoProvider(",
+    ]
 
     assert [token for token in forbidden if token in source] == []
 
 
 def test_r3d4_adds_no_vector_rag_or_memory_retrieval() -> None:
-    source = (Path("app/services/r3d4.py").read_text(encoding="utf-8") + Path("app/services/m12_2.py").read_text(encoding="utf-8")).lower()
-    forbidden = ["similarity_search", "vectorstore", "memory_lake", "embedding_model", "controlled memory"]
+    source = (
+        Path("app/services/r3d4.py").read_text(encoding="utf-8")
+        + Path("app/services/m12_2.py").read_text(encoding="utf-8")
+    ).lower()
+    forbidden = [
+        "similarity_search",
+        "vectorstore",
+        "memory_lake",
+        "embedding_model",
+        "controlled memory",
+    ]
 
     assert [token for token in forbidden if token in source] == []

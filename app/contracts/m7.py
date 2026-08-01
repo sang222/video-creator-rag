@@ -12,12 +12,8 @@ from app.contracts.geo_delivery import (
 )
 
 
-PublishTargetPlatform = Literal[
-    "YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"
-]
-PublishTargetSurface = Literal[
-    "LONG_FORM", "SHORT_FORM", "REELS", "FEED", "STORY", "GENERIC"
-]
+PublishTargetPlatform = Literal["YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
+PublishTargetSurface = Literal["LONG_FORM", "FEED", "GENERIC"]
 PublishHandoffState = Literal[
     "DRAFT", "READY_FOR_OPERATOR", "BLOCKED", "CONFIRMED_PUBLISHED", "CANCELLED"
 ]

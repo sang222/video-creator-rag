@@ -91,7 +91,7 @@ class IdeaMarketPreflightEvaluator:
     def evaluate(
         self,
         *,
-        daily_idea_decision_ref: str,
+        editorial_idea_candidate_ref: str,
         niche_contract_digest_ref: str,
         niche_contract_digest_hash: str,
         target_market_digest: TargetMarketDigest,
@@ -135,7 +135,7 @@ class IdeaMarketPreflightEvaluator:
         else:
             verdict = MarketVerdict.PASS
         return IdeaMarketPreflightResult(
-            daily_idea_decision_ref=daily_idea_decision_ref,
+            editorial_idea_candidate_ref=editorial_idea_candidate_ref,
             niche_contract_digest_ref=niche_contract_digest_ref,
             niche_contract_digest_hash=niche_contract_digest_hash,
             target_market_digest_ref=target_market_digest_ref_from_digest(
@@ -259,7 +259,11 @@ class ResearchJurisdictionGate(_MarketGate):
             and profile.primary_market not in sources
         ) or mismatched_specific_claim:
             reasons.append(MarketReasonCode.SOURCE_JURISDICTION_MISMATCH)
-        if foreign and profile.foreign_source_context_required and not data.foreign_source_context_disclosed:
+        if (
+            foreign
+            and profile.foreign_source_context_required
+            and not data.foreign_source_context_disclosed
+        ):
             reasons.append(MarketReasonCode.FOREIGN_CONTEXT_NOT_DISCLOSED)
         if data.evidence_sensitive_claim and not data.claim_jurisdiction:
             reasons.append(MarketReasonCode.SOURCE_JURISDICTION_MISMATCH)
@@ -311,15 +315,25 @@ class ScriptMarketAlignmentGate(_MarketGate):
             reasons.append(MarketReasonCode.UNITS_POLICY_MISMATCH)
         if data.date_format and data.date_format != profile.date_format:
             reasons.append(MarketReasonCode.DATE_FORMAT_MISMATCH)
-        if data.workplace_context and data.workplace_context != profile.workplace_context:
+        if (
+            data.workplace_context
+            and data.workplace_context != profile.workplace_context
+        ):
             reasons.append(MarketReasonCode.SCRIPT_MARKET_CONTEXT_MISMATCH)
-        if data.audience_market_context and data.audience_market_context != profile.audience_market_context:
+        if (
+            data.audience_market_context
+            and data.audience_market_context != profile.audience_market_context
+        ):
             reasons.append(MarketReasonCode.SCRIPT_MARKET_CONTEXT_MISMATCH)
         if data.foreign_legal_assumption_without_context:
             reasons.append(MarketReasonCode.SCRIPT_MARKET_CONTEXT_MISMATCH)
         if data.translated_sounding_language_risk:
             reasons.append(MarketReasonCode.TRANSLATED_SOUNDING_LANGUAGE_RISK)
-        hard = [reason for reason in reasons if reason != MarketReasonCode.TRANSLATED_SOUNDING_LANGUAGE_RISK]
+        hard = [
+            reason
+            for reason in reasons
+            if reason != MarketReasonCode.TRANSLATED_SOUNDING_LANGUAGE_RISK
+        ]
         verdict = (
             MarketVerdict.BLOCK
             if hard
@@ -378,15 +392,23 @@ class VisualMarketAlignmentGate(_MarketGate):
     ) -> MarketGateResult:
         reasons: list[MarketReasonCode] = []
         allowed = {profile.primary_market, *profile.allowed_market_contexts}
-        if data.market_contexts and any(item not in allowed for item in data.market_contexts):
+        if data.market_contexts and any(
+            item not in allowed for item in data.market_contexts
+        ):
             reasons.append(MarketReasonCode.VISUAL_MARKET_CONTEXT_MISMATCH)
-        if data.actual_ui_or_product_jurisdiction and data.actual_ui_or_product_jurisdiction not in allowed:
+        if (
+            data.actual_ui_or_product_jurisdiction
+            and data.actual_ui_or_product_jurisdiction not in allowed
+        ):
             reasons.append(MarketReasonCode.VISUAL_MARKET_CONTEXT_MISMATCH)
         if any(value != profile.currency for value in data.currencies):
             reasons.append(MarketReasonCode.CURRENCY_MISMATCH)
         if data.date_format and data.date_format != profile.date_format:
             reasons.append(MarketReasonCode.DATE_FORMAT_MISMATCH)
-        if data.workplace_context and data.workplace_context != profile.workplace_context:
+        if (
+            data.workplace_context
+            and data.workplace_context != profile.workplace_context
+        ):
             reasons.append(MarketReasonCode.VISUAL_MARKET_CONTEXT_MISMATCH)
         if not data.evidence_authentic:
             reasons.append(MarketReasonCode.VISUAL_MARKET_CONTEXT_MISMATCH)
@@ -413,7 +435,10 @@ class ThumbnailMarketAlignmentGate(_MarketGate):
         subject_ref: str = "thumbnail-brief",
     ) -> MarketGateResult:
         reasons: list[MarketReasonCode] = []
-        if data.text_locale != profile.thumbnail_text_locale or data.foreign_market_bait:
+        if (
+            data.text_locale != profile.thumbnail_text_locale
+            or data.foreign_market_bait
+        ):
             reasons.append(MarketReasonCode.THUMBNAIL_LOCALE_MISMATCH)
         if any(value != profile.currency for value in data.currencies):
             reasons.append(MarketReasonCode.CURRENCY_MISMATCH)
@@ -478,9 +503,7 @@ class TargetMarketAlignmentGateRegistry:
 
     @property
     def registered_keys(self) -> tuple[MarketGateKey, ...]:
-        return tuple(
-            key for key in MARKET_GATE_STRICT_ORDER if key in self._gates
-        )
+        return tuple(key for key in MARKET_GATE_STRICT_ORDER if key in self._gates)
 
     def get(self, key: MarketGateKey) -> Any:
         if key == MarketGateKey.IDEA_MARKET_PREFLIGHT:
@@ -510,9 +533,7 @@ class MarketAlignmentDossierBuilder:
         actual = {result.gate_key for result in component_results}
         missing = expected - actual
         reasons = [
-            reason
-            for result in component_results
-            for reason in result.reason_codes
+            reason for result in component_results for reason in result.reason_codes
         ]
         human = [
             item
@@ -622,7 +643,9 @@ class MarketChannelGovernanceService:
         self.session = session
         self.router = router or OfflineMarketResearchRouter()
 
-    def create_minimal_channel(self, data: MinimalMarketChannelInit) -> ChannelWorkspace:
+    def create_minimal_channel(
+        self, data: MinimalMarketChannelInit
+    ) -> ChannelWorkspace:
         metadata = {
             TARGET_MARKET_METADATA_KEY: {
                 "minimal_input": data.model_dump(mode="json"),
@@ -686,12 +709,8 @@ class MarketChannelGovernanceService:
             "audience_market_context": proposed["audience_market_context"],
             "workplace_context": proposed["workplace_context"],
             "source_jurisdiction_policy": proposed["source_jurisdiction_policy"],
-            "prohibited_market_mismatches": proposed[
-                "prohibited_market_mismatches"
-            ],
-            "initial_publish_window_hypotheses": proposed[
-                "publish_window_hypotheses"
-            ],
+            "prohibited_market_mismatches": proposed["prohibited_market_mismatches"],
+            "initial_publish_window_hypotheses": proposed["publish_window_hypotheses"],
             "market_terminology_notes": proposed.get("market_terminology_notes", []),
         }
         suggestions = [
@@ -701,7 +720,9 @@ class MarketChannelGovernanceService:
                 confidence=confidence,
                 evidence_refs=evidence,
                 rationale=f"Offline market policy suggestion for {minimal['primary_market']}.",
-                missing_information=[] if confidence >= 0.8 else ["operator_confirmation"],
+                missing_information=[]
+                if confidence >= 0.8
+                else ["operator_confirmation"],
             )
             for field, value in suggestion_values.items()
         ]
@@ -733,17 +754,11 @@ class MarketChannelGovernanceService:
             audience_market_context=proposed["audience_market_context"],
             workplace_context=proposed["workplace_context"],
             source_jurisdiction_policy=proposed["source_jurisdiction_policy"],
-            preferred_source_jurisdictions=proposed[
-                "preferred_source_jurisdictions"
-            ],
+            preferred_source_jurisdictions=proposed["preferred_source_jurisdictions"],
             foreign_source_context_required=True,
             allowed_market_contexts=[market, *proposed.get("secondary_geos", [])],
-            prohibited_market_mismatches=proposed[
-                "prohibited_market_mismatches"
-            ],
-            initial_publish_window_hypotheses=proposed[
-                "publish_window_hypotheses"
-            ],
+            prohibited_market_mismatches=proposed["prohibited_market_mismatches"],
+            initial_publish_window_hypotheses=proposed["publish_window_hypotheses"],
             minimum_comparable_videos=3,
             video_geo_evaluation_window_days=7,
             channel_geo_review_window_days=30,
@@ -823,7 +838,13 @@ class MarketChannelGovernanceService:
             **draft.model_dump(
                 mode="python",
                 include=set(TargetMarketProfile.model_fields)
-                - {"schema_version", "profile_version", "approval_ref", "approved_draft_ref", "content_hash"},
+                - {
+                    "schema_version",
+                    "profile_version",
+                    "approval_ref",
+                    "approved_draft_ref",
+                    "content_hash",
+                },
             ),
             profile_version=len(governance["profiles"]) + 1,
             approval_ref=approval.approval_ref,
@@ -855,7 +876,9 @@ class MarketChannelGovernanceService:
         profile_raw = governance["profiles"][-1] if governance["profiles"] else None
         digest_raw = governance["digests"][-1] if governance["digests"] else None
         draft_raw = governance["drafts"][-1] if governance["drafts"] else None
-        profile = TargetMarketProfile.model_validate(profile_raw) if profile_raw else None
+        profile = (
+            TargetMarketProfile.model_validate(profile_raw) if profile_raw else None
+        )
         digest = TargetMarketDigest.model_validate(digest_raw) if digest_raw else None
         blockers = []
         if profile is None:
@@ -868,7 +891,9 @@ class MarketChannelGovernanceService:
             "draft": draft_raw,
             "profile": profile.model_dump(mode="json") if profile else None,
             "digest": digest.model_dump(mode="json") if digest else None,
-            "target_market": profile.primary_market if profile else channel.target_market,
+            "target_market": profile.primary_market
+            if profile
+            else channel.target_market,
             "primary_locale": profile.primary_locale if profile else None,
             "component_gate_states": {},
             "reason_codes": blockers,
@@ -888,7 +913,9 @@ class MarketChannelGovernanceService:
         if binding.channel_id != channel.id or binding.channel_key != channel.key:
             raise ValidationFailureError("DESTINATION_BINDING_CHANNEL_MISMATCH")
         governance = self._market_metadata(channel)
-        profiles = [TargetMarketProfile.model_validate(item) for item in governance["profiles"]]
+        profiles = [
+            TargetMarketProfile.model_validate(item) for item in governance["profiles"]
+        ]
         profile = next(
             (
                 item
@@ -920,7 +947,9 @@ class MarketChannelGovernanceService:
         self.session.flush()
         return binding
 
-    def latest_destination_binding(self, channel_id: uuid.UUID) -> DestinationBinding | None:
+    def latest_destination_binding(
+        self, channel_id: uuid.UUID
+    ) -> DestinationBinding | None:
         channel = self._channel(channel_id)
         destination = (channel.metadata_ or {}).get(DESTINATION_METADATA_KEY) or {}
         rows = destination.get("bindings") or []
@@ -1015,13 +1044,17 @@ class MarketPackageFreezeService:
             or approval.expected_package_version != package.package_version
             or approval.expected_package_hash != current_hash
             or approval.expected_destination_binding_hash != destination.content_hash
-            or approval.expected_market_profile_hash != package.target_market_profile_hash
+            or approval.expected_market_profile_hash
+            != package.target_market_profile_hash
         ):
             raise ValidationFailureError("MARKET_PACKAGE_APPROVAL_TARGET_MISMATCH")
         reasons: list[MarketReasonCode] = []
         if not package.media_file_ref or not package.media_file_hash:
             reasons.append(MarketReasonCode.MEDIA_FILE_MISSING)
-        if package.technical_media_qc != "PASS" or package.creative_human_review != "PASS":
+        if (
+            package.technical_media_qc != "PASS"
+            or package.creative_human_review != "PASS"
+        ):
             reasons.append(MarketReasonCode.MARKET_PACKAGE_APPROVAL_MISSING)
         if dossier.overall_verdict != MarketVerdict.PASS:
             reasons.append(MarketReasonCode.MARKET_ALIGNMENT_EVIDENCE_MISSING)
@@ -1042,7 +1075,12 @@ class MarketPackageFreezeService:
             )
         raw = package.model_dump(
             mode="json",
-            exclude={"content_hash", "approved_package_hash", "approval_ref", "package_state"},
+            exclude={
+                "content_hash",
+                "approved_package_hash",
+                "approval_ref",
+                "package_state",
+            },
         )
         raw.update(
             {

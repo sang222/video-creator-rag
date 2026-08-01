@@ -57,7 +57,7 @@ class GoogleVeoGenerationRequest(BaseModel):
     prompt_hash: str
     duration_seconds: int
     resolution: str
-    aspect_ratio: Literal["16:9", "9:16"]
+    aspect_ratio: Literal["16:9"]
     output_count: int
     negative_prompt: str | None = None
     reference_image_refs: list[str] = Field(default_factory=list, max_length=3)
@@ -77,7 +77,10 @@ class GoogleVeoGenerationRequest(BaseModel):
 
     @model_validator(mode="after")
     def approved_contract(self):
-        if self.model_id in VEO_FORBIDDEN_MODEL_IDS or self.model_id not in VEO_APPROVED_MODEL_IDS:
+        if (
+            self.model_id in VEO_FORBIDDEN_MODEL_IDS
+            or self.model_id not in VEO_APPROVED_MODEL_IDS
+        ):
             raise ValueError("VEO_MODEL_NOT_APPROVED")
         if self.duration_seconds != 8:
             raise ValueError("VEO_DURATION_NOT_APPROVED")
@@ -90,11 +93,27 @@ class GoogleVeoGenerationRequest(BaseModel):
             raise ValueError("VEO_RESOLUTION_NOT_SUPPORTED")
         if self.output_count != 1:
             raise ValueError("VEO_PA1R_OUTPUT_COUNT_MUST_EQUAL_ONE")
-        if self.character_policy_mode != "NO_CHARACTER" or self.human_likeness_requested:
+        if (
+            self.character_policy_mode != "NO_CHARACTER"
+            or self.human_likeness_requested
+        ):
             raise ValueError("VEO_NO_CHARACTER_POLICY_CONFLICT")
-        if self.hero_reason not in {"HOOK", "METAPHOR", "EMOTIONAL_PAYOFF", "VISUAL_SIGNATURE", "NATIVE_MOTION_INSUFFICIENT"}:
+        if self.hero_reason not in {
+            "HOOK",
+            "METAPHOR",
+            "EMOTIONAL_PAYOFF",
+            "VISUAL_SIGNATURE",
+            "NATIVE_MOTION_INSUFFICIENT",
+        }:
             raise ValueError("VEO_HERO_REASON_NOT_APPROVED")
-        if not all((self.cost_catalog_ref, self.approval_ref, self.approval_scope, self.idempotency_key)):
+        if not all(
+            (
+                self.cost_catalog_ref,
+                self.approval_ref,
+                self.approval_scope,
+                self.idempotency_key,
+            )
+        ):
             raise ValueError("VEO_APPROVAL_BUDGET_IDEMPOTENCY_REQUIRED")
         return self
 
@@ -160,7 +179,9 @@ class GoogleVeoOutputDownloadPlan(BaseModel):
 
     @model_validator(mode="after")
     def durable_reference_is_safe(self):
-        if self.raw_url_persisted or self.volatile_output_reference.startswith(("http://", "https://")):
+        if self.raw_url_persisted or self.volatile_output_reference.startswith(
+            ("http://", "https://")
+        ):
             raise ValueError("VEO_RAW_OUTPUT_URL_FORBIDDEN")
         return self
 
@@ -226,7 +247,9 @@ class ProviderAudioNormalizationReceipt(BaseModel):
 class AIHeroUnavailableDecision(BaseModel):
     original_ai_hero_intent_ref: str
     unavailable_reason: str
-    frozen_policy_behavior: Literal["NATIVE_VISUAL_OR_REVIEW", "REVIEW_REQUIRED", "BLOCK"]
+    frozen_policy_behavior: Literal[
+        "NATIVE_VISUAL_OR_REVIEW", "REVIEW_REQUIRED", "BLOCK"
+    ]
     decision: Literal["NATIVE_VISUAL_REQUIRED", "REVIEW_REQUIRED", "BLOCK"]
     human_review_required: bool
     resulting_source_role: Literal["NATIVE_VISUAL", "AI_HERO_UNRESOLVED"]

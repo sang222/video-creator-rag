@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.contracts.production_workflow import (
@@ -29,6 +29,10 @@ from app.db.models.production_workflow import (
     WorkflowCommandReceipt,
 )
 from app.services.company_access import require_company_permission
+from app.services.cadence_events import (
+    CADENCE_AGGREGATE_TYPE,
+    CADENCE_EVALUATION_EVENT_TYPE,
+)
 from app.services.production_workflow import (
     WORKFLOW_EVENT_TYPE,
     WorkflowStageError,
@@ -62,7 +66,7 @@ class OutboxExecutionDeadlineExceeded(OutboxLeaseLostError):
 @dataclass(frozen=True, slots=True)
 class ClaimedWorkflowEvent:
     event_id: uuid.UUID
-    workflow_run_id: uuid.UUID
+    workflow_run_id: uuid.UUID | None
     command_id: str
     worker_id: str
     attempt_number: int
@@ -124,8 +128,18 @@ class DurableOutboxDispatcher:
             event = self.session.scalar(
                 select(DomainEvent)
                 .where(
-                    DomainEvent.event_type == WORKFLOW_EVENT_TYPE,
-                    DomainEvent.workflow_run_id.is_not(None),
+                    or_(
+                        and_(
+                            DomainEvent.event_type == WORKFLOW_EVENT_TYPE,
+                            DomainEvent.workflow_run_id.is_not(None),
+                            DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
+                        ),
+                        and_(
+                            DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                            DomainEvent.aggregate_type == CADENCE_AGGREGATE_TYPE,
+                            DomainEvent.workflow_run_id.is_(None),
+                        ),
+                    ),
                     DomainEvent.delivered_at.is_(None),
                     DomainEvent.published_at.is_(None),
                     DomainEvent.dead_lettered_at.is_(None),
@@ -149,30 +163,53 @@ class DurableOutboxDispatcher:
             )
             if event is None:
                 return None
-            run = self._lock_run(event.workflow_run_id)
-            if run is None:
-                self._dead_letter_orphan(event, now=now)
-                continue
-            if run.state == ProductionWorkflowState.CANCELED.value:
-                self._settle_canceled_event(event, now=now)
-                continue
-            if event.attempt_count >= event.max_attempts:
-                failure = WorkflowStageError(
-                    classification=(
-                        WorkflowFailureClassification.AUTO_RETRY_WITHIN_POLICY
-                    ),
-                    error_code="STAGE_RETRY_EXHAUSTED",
-                    summary="event reached its attempt limit before another claim",
-                    incident_type="STAGE_RETRY_EXHAUSTED",
-                    retry_eligible=True,
-                )
-                self._dead_letter_locked(event, run, failure, now=now)
-                continue
+            cadence_event = event.event_type == CADENCE_EVALUATION_EVENT_TYPE
+            if cadence_event:
+                if event.command_id is None or not isinstance(event.payload, dict):
+                    self._dead_letter_cadence_event(
+                        event,
+                        now=now,
+                        error_code="CADENCE_EVENT_IDENTITY_INVALID",
+                        summary="cadence command identity or payload is invalid",
+                    )
+                    continue
+                if event.attempt_count >= event.max_attempts:
+                    self._dead_letter_cadence_event(
+                        event,
+                        now=now,
+                        error_code="CADENCE_RETRY_EXHAUSTED",
+                        summary="cadence event reached its bounded attempt limit",
+                    )
+                    continue
+                run = None
+            else:
+                run = self._lock_run(event.workflow_run_id)
+                if run is None:
+                    self._dead_letter_orphan(event, now=now)
+                    continue
+                if run.state == ProductionWorkflowState.CANCELED.value:
+                    self._settle_canceled_event(event, now=now)
+                    continue
+                if event.attempt_count >= event.max_attempts:
+                    failure = WorkflowStageError(
+                        classification=(
+                            WorkflowFailureClassification.AUTO_RETRY_WITHIN_POLICY
+                        ),
+                        error_code="STAGE_RETRY_EXHAUSTED",
+                        summary=(
+                            "event reached its attempt limit before another claim"
+                        ),
+                        incident_type="STAGE_RETRY_EXHAUSTED",
+                        retry_eligible=True,
+                    )
+                    self._dead_letter_locked(event, run, failure, now=now)
+                    continue
 
             previous_owner = event.lease_owner
             previous_expiry = event.lease_expires_at
             if (
-                previous_owner is not None
+                not cadence_event
+                and previous_owner is not None
                 and previous_expiry is not None
                 and previous_expiry <= now
             ):
@@ -221,7 +258,6 @@ class DurableOutboxDispatcher:
             event.last_error_code = None
             event.last_error_summary = None
             self.session.flush()
-            assert event.workflow_run_id is not None
             assert event.command_id is not None
             return ClaimedWorkflowEvent(
                 event_id=event.id,
@@ -320,6 +356,12 @@ class DurableOutboxDispatcher:
             # it; row locking plus owner identity preserves that race boundary.
             allow_expired=True,
         )
+        if event.event_type == CADENCE_EVALUATION_EVENT_TYPE:
+            return self._record_cadence_failure(
+                event=event,
+                error=error,
+                now=now,
+            )
         run = self._lock_run(event.workflow_run_id)
         if run is None:
             self._dead_letter_orphan(event, now=now)
@@ -406,6 +448,48 @@ class DurableOutboxDispatcher:
         return FailureDisposition(
             event_id=event.id,
             classification=normalized.classification,
+            retry_scheduled=False,
+            next_attempt_at=None,
+            dead_letter_job_id=job.id,
+            incident_id=incident.id,
+        )
+
+    def _record_cadence_failure(
+        self,
+        *,
+        event: DomainEvent,
+        error: WorkflowStageError | Exception,
+        now: datetime,
+    ) -> FailureDisposition:
+        summary = _redact_summary(str(error) or type(error).__name__)
+        event.last_error_code = "CADENCE_EVALUATION_FAILED"
+        event.last_error_summary = summary
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        if event.attempt_count < event.max_attempts:
+            next_attempt_at = now + timedelta(
+                seconds=self.retry_delay_seconds(event.attempt_count)
+            )
+            event.next_attempt_at = next_attempt_at
+            self.session.flush()
+            return FailureDisposition(
+                event_id=event.id,
+                classification=(WorkflowFailureClassification.AUTO_RETRY_WITHIN_POLICY),
+                retry_scheduled=True,
+                next_attempt_at=next_attempt_at,
+                dead_letter_job_id=None,
+                incident_id=None,
+            )
+        job, incident = self._dead_letter_cadence_event(
+            event,
+            now=now,
+            error_code="CADENCE_RETRY_EXHAUSTED",
+            summary=summary,
+        )
+        return FailureDisposition(
+            event_id=event.id,
+            classification=(WorkflowFailureClassification.FAIL_PERMANENT_POLICY),
             retry_scheduled=False,
             next_attempt_at=None,
             dead_letter_job_id=job.id,
@@ -525,7 +609,13 @@ class DurableOutboxDispatcher:
         events = self.session.scalars(
             select(DomainEvent)
             .where(
-                DomainEvent.event_type == WORKFLOW_EVENT_TYPE,
+                or_(
+                    and_(
+                        DomainEvent.event_type == WORKFLOW_EVENT_TYPE,
+                        DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
+                    ),
+                    DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                ),
                 DomainEvent.lease_owner == worker_id,
                 DomainEvent.delivered_at.is_(None),
                 DomainEvent.published_at.is_(None),
@@ -554,7 +644,13 @@ class DurableOutboxDispatcher:
         events = self.session.scalars(
             select(DomainEvent)
             .where(
-                DomainEvent.event_type == WORKFLOW_EVENT_TYPE,
+                or_(
+                    and_(
+                        DomainEvent.event_type == WORKFLOW_EVENT_TYPE,
+                        DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
+                    ),
+                    DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                ),
                 DomainEvent.delivered_at.is_(None),
                 DomainEvent.published_at.is_(None),
                 DomainEvent.dead_lettered_at.is_(None),
@@ -567,6 +663,17 @@ class DurableOutboxDispatcher:
         ).all()
         reclaimed = 0
         for event in events:
+            if event.event_type == CADENCE_EVALUATION_EVENT_TYPE:
+                event.lease_owner = None
+                event.lease_expires_at = None
+                event.heartbeat_at = None
+                event.next_attempt_at = now
+                event.last_error_code = "WORKER_LEASE_EXPIRED"
+                event.last_error_summary = (
+                    "expired cadence lease was released for deterministic replay"
+                )
+                reclaimed += 1
+                continue
             run = self._lock_run(event.workflow_run_id, skip_locked=True)
             if run is None:
                 continue
@@ -839,6 +946,88 @@ class DurableOutboxDispatcher:
             )
         self.session.flush()
 
+    def _dead_letter_cadence_event(
+        self,
+        event: DomainEvent,
+        *,
+        now: datetime,
+        error_code: str,
+        summary: str,
+    ) -> tuple[DeadLetterJob, OpsIncident]:
+        event.dead_lettered_at = now
+        event.next_attempt_at = None
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        event.last_error_code = error_code
+        event.last_error_summary = _redact_summary(summary)
+        job = self.session.scalar(
+            select(DeadLetterJob).where(DeadLetterJob.domain_event_id == event.id)
+        )
+        if job is None:
+            job = DeadLetterJob(
+                queue_name=self.queue_name,
+                job_type=event.event_type,
+                payload_ref=f"domain-event:{event.id}",
+                target_type=event.aggregate_type,
+                target_id=event.aggregate_id,
+                domain_event_id=event.id,
+                workflow_run_id=None,
+                command_id=event.command_id,
+                fail_count=event.attempt_count,
+                first_failed_at=now,
+                last_failed_at=now,
+                replay_state="NOT_REPLAYABLE",
+                retry_eligible=False,
+                reason_code=error_code,
+                next_action=(
+                    "Inspect launch policy, candidate authority, and cadence "
+                    "evidence before requesting a new deterministic evaluation."
+                ),
+                metadata_={"learning_excluded": True},
+            )
+            self.session.add(job)
+            self.session.flush()
+        incident = self.session.scalar(
+            select(OpsIncident)
+            .where(
+                OpsIncident.domain_event_id == event.id,
+                OpsIncident.incident_type == "DEAD_LETTER_JOB",
+                OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"]),
+            )
+            .order_by(OpsIncident.created_at)
+        )
+        if incident is None:
+            incident = OpsIncident(
+                incident_type="DEAD_LETTER_JOB",
+                severity="ERROR",
+                state="OPEN",
+                workflow_run_id=None,
+                stage="CADENCE_EVALUATION",
+                domain_event_id=event.id,
+                command_id=event.command_id,
+                retry_eligible=False,
+                learning_excluded=True,
+                operator_visible_blocker=_redact_summary(summary),
+                resolution_evidence={},
+                impacted_refs=[
+                    {"type": "launch_run", "id": str(event.aggregate_id)},
+                    {"type": "domain_event", "id": str(event.id)},
+                ],
+                reason_codes=[error_code],
+                next_action=job.next_action or "Inspect cadence authority.",
+                metadata_={
+                    "channel_workspace_id": (
+                        str(event.channel_workspace_id)
+                        if event.channel_workspace_id
+                        else None
+                    )
+                },
+            )
+            self.session.add(incident)
+        self.session.flush()
+        return job, incident
+
     def _settle_canceled_event(self, event: DomainEvent, *, now: datetime) -> None:
         event.delivered_at = now
         event.published_at = now
@@ -946,7 +1135,11 @@ class DurableOutboxDispatcher:
             return None
         return self.session.scalar(
             select(ProductionWorkflowRun)
-            .where(ProductionWorkflowRun.id == workflow_run_id)
+            .where(
+                ProductionWorkflowRun.id == workflow_run_id,
+                ProductionWorkflowRun.production_lane == "LONG_FORM",
+                ProductionWorkflowRun.planning_source_type == "LONG_FORM_PLAN",
+            )
             .with_for_update(skip_locked=skip_locked)
             .execution_options(populate_existing=True)
         )
@@ -965,6 +1158,13 @@ TERMINAL_STATES_FOR_RECLAIM = frozenset(
         ProductionWorkflowState.DEAD_LETTERED.value,
     }
 )
+
+
+def _long_form_run_ids() -> Any:
+    return select(ProductionWorkflowRun.id).where(
+        ProductionWorkflowRun.production_lane == "LONG_FORM",
+        ProductionWorkflowRun.planning_source_type == "LONG_FORM_PLAN",
+    )
 
 
 def normalize_stage_error(

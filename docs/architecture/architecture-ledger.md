@@ -16,13 +16,16 @@ VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow e
 - M2 builds artifact workflow, review, revision, approval, decision rights, audit, and allowance schema backbone only.
 - M3 builds policy catalog, deterministic gates, evidence contracts, review-required integration, policy revalidation, and readiness inspection only.
 - M4 builds provider registry, mock provider interfaces, credential references, quota/cost ledgers, budget gates, health snapshots, retry/dead-letter, incident, and manual-action foundation only.
-- M5 builds daily run, ResourceResolver MVP, ContextPack, ChannelStatePack, safe search-demand evidence, mock LLM proposal capture, deterministic preflight, and budgeted project admission only.
+- M5 builds EditorialResearchRun, ResourceResolver MVP, ContextPack,
+  ChannelStatePack, safe search-demand evidence, deterministic preflight, and
+  budgeted project admission only.
 - M6 builds production artifact runs, script/narration/caption contracts, voice-as-master visual plans, scene/source manifests, RenderSpec, platform render variants, local/mock render package foundation, and MediaQC/AccessibilityQC only.
 - M7 builds manual publish handoff packages, operator checklists/instructions, human-entered publish confirmations, uploaded video records, lineage, and publication summaries only.
 - M8 builds analytics sync runs, local mock/manual/import analytics snapshots, metric definitions/availability, traffic/retention/engagement snapshots, and uploaded video metrics summaries only.
 - M9 builds deterministic post-publish observation windows, no-view/packaging/retention/engagement/policy diagnostics, failure trace reports, recovery proposals, and manual review actions only.
 - M10 builds evidence-backed learning candidates, evidence bundles, deterministic promotion eligibility runs, M11-ready learning review queue items, and playbook candidate drafts only.
-- M10.1 builds guarded real Ollama LLMRouter lanes plus derivative/reuse/shorts/cross-platform funnel backend contracts only.
+- M10.1 builds guarded real Ollama LLMRouter lanes and immutable route-attempt
+  evidence only.
 - M10.2 builds the Quality-First $250 media provider role matrix, provider capability matrix, render routing decisions, media provider gates, and render package planning only.
 - M10.3 builds YouTube PublicMonitorMode, OAuth-backed OwnerAnalyticsMode, safe credential references, YouTube sync runs/snapshots, M8 truth-layer integration, and dashboard-ready UploadedVideo follow read models only.
 - M10.4 binds Google Veo as the only AI hero provider and externalizes media/provider routing, capability, budget, and Veo defaults into config/env only.
@@ -54,9 +57,16 @@ M3 does not build M5 ResourceResolver/RAG/vector/ContextPack/RetrievalPlan, M6 m
 
 M4 adds ProviderRegistryEntry, CredentialReference, CredentialHealthSnapshot, QuotaAccount, QuotaEvent, CostEvent, BudgetPolicy, ProviderHealthSnapshot, ComponentHealthSnapshot, SystemHealthSnapshot, RetryPolicy, ProviderAttempt, DeadLetterJob, OpsIncident, ManualActionQueue, deterministic mock providers, and API/CLI read paths.
 
-M4 does not build M5 ResourceResolver/RAG/vector/ContextPack/RetrievalPlan, M5 DailyRun/Authority execution/project admission, M6 media/render/QC pipeline, M7 publish/upload/manual publish, M8 analytics/semantic layer, M9 no-view/recovery/self-funding, M10 memory promotion, M11 dashboard/operator cockpit, source scraping/parser, OPA/Cedar/general policy engine, or Algorithm/Growth/View agents.
+M4 does not build M5 ResourceResolver/RAG/vector/ContextPack/RetrievalPlan,
+editorial-research/project admission, M6 media/render/QC pipeline, M7
+publish/manual-publish, M8 analytics/semantic layer, M9 recovery, M10 memory
+promotion, M11 dashboard/operator cockpit, source scraping/parser,
+OPA/Cedar/general policy engine, or Algorithm/Growth/View agents.
 
-M5 adds EditorialCalendarSlot, ChannelDailyRun, RetrievalPlanSnapshot, ContextPackSnapshot, ChannelStatePackSnapshot, SearchDemandEvidence, SearchIntentMap, AudienceTargetPack, IdeaMarketPreflight, DailyIdeaDecision, and ProjectAdmissionDecision.
+M5 adds EditorialCalendarSlot, EditorialResearchRun, RetrievalPlanSnapshot,
+ContextPackSnapshot, ChannelStatePackSnapshot, SearchDemandEvidence,
+SearchIntentMap, AudienceTargetPack, EditorialIdeaCandidate,
+IdeaMarketPreflight, and ProjectAdmissionDecision.
 
 M5 does not build M6 media/render/QC pipeline, thumbnail compositor, TTS/audio/video generation, asset ingestion, M7 publish/upload/manual publish, M8 analytics/semantic layer, M9 no-view/recovery/self-funding, M10 memory promotion, M11 dashboard/operator cockpit, real provider integrations, external network calls, source scraping/parser, vector/RAG engine, OPA/Cedar/general policy engine, or Algorithm/Growth/View agents.
 
@@ -79,7 +89,9 @@ M9 does not build analytics sync, dashboard/operator cockpit UI, memory promotio
 M10 adds LearningCandidateGenerationRun, LearningCandidate, LearningEvidenceBundle, LearningPromotionEligibilityRun, LearningReviewQueueItem, and PlaybookCandidateDraft.
 
 
-M10.1 adds LLMRouterProfile, LLMRouterLane, LLMModelProfile, LLMRouteAttempt, ContentDerivativeGraphEdge, ShortCandidate, ShortCandidateScore, ShortRenderPlan, PromoteShortToLongCandidate, ReusableArtifact, AssetReuseIndexEntry, DerivativeOriginalityCheck, OriginalityBudget, DerivativeReleasePlan, CrossPlatformFunnelPackage, UploadCard, HumanUploadTask, and UsageSavingsLedgerEntry.
+M10.1 adds LLMRouterProfile, LLMRouterLane, LLMModelProfile, LLMRouteAttempt,
+ProviderAttempt, LLMRunSnapshot, and the guarded agent-to-lane mappings used by
+the active long-form product.
 
 
 
@@ -124,7 +136,9 @@ text/number authority.
 - Retrieval/Memory Governance maps to M3 privacy contracts, M5 retrieval objects, M8 metric truth, and M10 learning review governance.
 - M11 dashboard remains M11 only; M3 only supplies future readiness output shape.
 - M4 complete means provider/cost/quota/ops health rails exist.
-- M5 complete means daily run/admission/context foundation exists with mock-first LLM proposal capture.
+- M5 complete means editorial research/admission/context foundations exist with
+  an offline-safe LLM proposal boundary and no research-to-production side
+  effect.
 - M6 complete means an admitted project can produce validated production artifact snapshots, RenderSpec, local/mock media package refs, and QC reports. A playable dummy MP4 smoke requires local FFmpeg/ffprobe.
 - M6 can use mock/local fixture providers for media tests.
 - Pre-M7 M0-M6 Qualification Gate will be required after M6.
@@ -132,7 +146,8 @@ text/number authority.
 - M8 complete means UploadedVideo has local analytics snapshots, metric availability, freshness/confidence, traffic/retention/engagement snapshots, and a latest metrics read model.
 - M9 complete means VCOS can diagnose uploaded video health and propose human-approved actions without automatic recovery.
 - M10 complete means VCOS can create evidence-backed learning candidates and queue them for M11 review without approval or promotion.
-- M10.1 complete means VCOS can real-smoke guarded local Ollama routing and prepare derivative/reuse/shorts/cross-platform funnel backend contracts without media provider routing or publishing.
+- M10.1 complete means VCOS can real-smoke guarded local Ollama routing and
+  persist route/run evidence without media provider routing or publishing.
 - M10.2 complete means VCOS can route media production jobs by provider role and safely block unsupported long-form final rendering when no final assembly renderer is configured.
 - M10.3 complete means VCOS can follow uploaded YouTube videos through public stats and owner analytics when OAuth is connected, then expose dashboard-ready UploadedVideo follow payloads.
 - M10.4 complete means VCOS routes AI hero/metaphor jobs only to Google Veo, keeps real execution guarded, and has provider config externalized/audited.
@@ -142,8 +157,16 @@ text/number authority.
 - M12 complete means VCOS can validate credentials/provider readiness, display hard-env AI budget caps, show the Cloud Final Renderer required gap, and run guarded real smoke tests before production. Next milestones can focus on production dry-run, first real video package, or final renderer selection.
 - M12.1 complete means VCOS can render deterministic, versioned, channel-contract-bound chat prompts for production agents, persist prompt audit snapshots, validate BaseEnvelope JSON outputs, and run prompt eval cases without real provider calls.
 - CH1-FLEX v1 remains the immutable historical/rollback baseline. CH1-FLEX v2 complete means the exact `small-team-ai` profile/snapshot lifecycle binds VSR1, Gemini Image planning, VQC1, canary and Drive evidence; publishes the niche channel-fit threshold; records diff/compiler/approval/activation receipts; and keeps provider execution, rendering, Drive upload, and YouTube actions outside the profile task.
-- NICH1 complete means strict v2 daily work compiles a semantic `NicheContractDigest`, validates category/pillar/series/goal, routes `DailyIdeaAgent` through Prompt Registry/LLMRouter with an allowlisted context pack, derives channel fit from compiled policy, freezes admission lineage, and requires Topic/Script/Visual/Thumbnail/Metadata niche evidence plus `NicheAlignmentDossier`.
-- D2P1 complete means one immutable admissible DailyIdeaDecision receives or reuses an immutable M5 ADMIT receipt and idempotently resumes through the existing project, Effective Context, approved research workflow, and M12.2 scripted package. Durable receipts expose the state machine/read-only status and cannot reach ready-for-human-review without all mandatory niche gates; provider/media/render/publish calls remain zero in this bridge.
+- NICH1 complete means strict v2 editorial research compiles a semantic
+  `NicheContractDigest`, validates category/pillar/goal, routes
+  `EditorialIdeaResearchAgent` through Prompt Registry/LLMRouter with an
+  allowlisted context pack, derives channel fit from compiled policy, freezes
+  admission lineage, and requires Topic/Script/Visual/Thumbnail/Metadata niche
+  evidence plus `NicheAlignmentDossier`.
+- Long-form package admission complete means one strict, immutable
+  EditorialIdeaCandidate and preflight receive or reuse an M5 v2 ADMIT receipt,
+  then resume through the existing project, Effective Context, approved
+  research workflow, and M12.2 package without ambiguous latest lookups.
 - VSR1 complete means each strict scene can produce one auditable,
   provider-neutral preferred source decision without a provider call or
   automatic Pexels-to-paid fallback.

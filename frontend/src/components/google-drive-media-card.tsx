@@ -52,7 +52,6 @@ export function GoogleDriveMediaCard({ media }: { media: GoogleDriveMedia }) {
 function mediaTypeLabel(value: string) {
   return {
     LONG_FORM_FINAL: "Video dài hoàn chỉnh",
-    SHORT_FINAL: "Video ngắn",
     THUMBNAIL: "Thumbnail",
     CAPTION_FILE: "Tệp phụ đề",
     SOURCE_ASSET: "Tệp nguồn"

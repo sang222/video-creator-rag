@@ -27,12 +27,9 @@ from app.contracts import (
     CostEventCreate,
     CredentialHealthSnapshotCreate,
     CredentialReferenceCreate,
-    DailyIdeaDecisionCreate,
-    DailyRunExecuteRequest,
     DeadLetterJobCreate,
     EditorialCalendarSlotCreate,
     GateRunCreate,
-    IdeaMarketPreflightCreate,
     ManualActionCreate,
     ManualAnalyticsImportContract,
     ManualPublishConfirmationCreate,
@@ -53,7 +50,6 @@ from app.contracts import (
     ReviewTaskCreate,
     RevisionRequestCreate,
     SearchDemandEvidenceCreate,
-    ChannelDailyRunCreate,
     ChannelStatePackSnapshotCreate,
     ContextPackSnapshotCreate,
     YouTubeOwnerAnalyticsSyncRequest,
@@ -89,8 +85,6 @@ from app.services import (
     ArtifactService,
     AuditService,
     BudgetGateService,
-    ChannelAuthorityService,
-    ChannelDailyRunService,
     ChannelStatePackService,
     ChannelProfileCompiler,
     ChannelProfileService,
@@ -104,7 +98,6 @@ from app.services import (
     EditorialCalendarService,
     GateDefinitionService,
     GateRunnerService,
-    IdeaMarketPreflightService,
     LocalFixtureRendererService,
     MediaQCService,
     ManualActionService,
@@ -177,8 +170,6 @@ calendar_app = typer.Typer(no_args_is_help=True)
 search_app = typer.Typer(no_args_is_help=True)
 context_app = typer.Typer(no_args_is_help=True)
 channel_state_app = typer.Typer(no_args_is_help=True)
-daily_app = typer.Typer(no_args_is_help=True)
-idea_app = typer.Typer(no_args_is_help=True)
 provider_app = typer.Typer(no_args_is_help=True)
 credential_app = typer.Typer(no_args_is_help=True)
 quota_app = typer.Typer(no_args_is_help=True)
@@ -227,8 +218,6 @@ app.add_typer(calendar_app, name="calendar")
 app.add_typer(search_app, name="search")
 app.add_typer(context_app, name="context")
 app.add_typer(channel_state_app, name="channel-state")
-app.add_typer(daily_app, name="daily")
-app.add_typer(idea_app, name="idea")
 app.add_typer(provider_app, name="provider")
 app.add_typer(credential_app, name="credential")
 app.add_typer(quota_app, name="quota")
@@ -289,10 +278,16 @@ def data_purge_mock_runtime(
 
 @learning_loop_app.command("promote")
 def learning_loop_promote(
-    approved_playbook_entry_id: uuid.UUID = typer.Option(..., "--approved-playbook-entry-id"),
+    approved_playbook_entry_id: uuid.UUID = typer.Option(
+        ..., "--approved-playbook-entry-id"
+    ),
     evidence_bundle_id: uuid.UUID | None = typer.Option(None, "--evidence-bundle-id"),
-    source_uploaded_video_id: uuid.UUID | None = typer.Option(None, "--source-uploaded-video-id"),
-    embedding_eligible: bool = typer.Option(True, "--embedding-eligible/--no-embedding-eligible"),
+    source_uploaded_video_id: uuid.UUID | None = typer.Option(
+        None, "--source-uploaded-video-id"
+    ),
+    embedding_eligible: bool = typer.Option(
+        True, "--embedding-eligible/--no-embedding-eligible"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
@@ -304,17 +299,25 @@ def learning_loop_promote(
                     embedding_eligible=embedding_eligible,
                 )
             )
-            typer.echo(LearningToMemoryPromotionRunRead.model_validate(run).model_dump_json())
+            typer.echo(
+                LearningToMemoryPromotionRunRead.model_validate(run).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"learning-loop promote failed: {exc}")
 
 
 @learning_loop_app.command("attribution-run")
 def learning_loop_attribution_run(
-    source_memory_influence_manifest_id: uuid.UUID = typer.Option(..., "--source-memory-influence-manifest-id"),
+    source_memory_influence_manifest_id: uuid.UUID = typer.Option(
+        ..., "--source-memory-influence-manifest-id"
+    ),
     expected_metric_family: str = typer.Option(..., "--expected-metric-family"),
-    target_uploaded_video_id: uuid.UUID | None = typer.Option(None, "--target-uploaded-video-id"),
-    target_video_project_id: uuid.UUID | None = typer.Option(None, "--target-video-project-id"),
+    target_uploaded_video_id: uuid.UUID | None = typer.Option(
+        None, "--target-uploaded-video-id"
+    ),
+    target_video_project_id: uuid.UUID | None = typer.Option(
+        None, "--target-video-project-id"
+    ),
     baseline_json: str | None = typer.Option(None, "--baseline-json"),
     observed_json: str | None = typer.Option(None, "--observed-json"),
     direction: str = typer.Option("HIGHER", "--direction"),
@@ -334,7 +337,11 @@ def learning_loop_attribution_run(
                     observed_snapshot_ref=observed,
                 )
             )
-            typer.echo(QualityDeltaAttributionRead.model_validate(attribution).model_dump_json())
+            typer.echo(
+                QualityDeltaAttributionRead.model_validate(
+                    attribution
+                ).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"learning-loop attribution-run failed: {exc}")
 
@@ -342,11 +349,20 @@ def learning_loop_attribution_run(
 @learning_loop_app.command("status")
 def learning_loop_status(
     uploaded_video_id: uuid.UUID | None = typer.Option(None, "--uploaded-video-id"),
-    target_video_project_id: uuid.UUID | None = typer.Option(None, "--target-video-project-id"),
+    target_video_project_id: uuid.UUID | None = typer.Option(
+        None, "--target-video-project-id"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
-            typer.echo(json.dumps(ClosedLearningLoopService(session).status(uploaded_video_id=uploaded_video_id, target_video_project_id=target_video_project_id)))
+            typer.echo(
+                json.dumps(
+                    ClosedLearningLoopService(session).status(
+                        uploaded_video_id=uploaded_video_id,
+                        target_video_project_id=target_video_project_id,
+                    )
+                )
+            )
     except Exception as exc:
         _fail(f"learning-loop status failed: {exc}")
 
@@ -366,17 +382,32 @@ def memory_influence_list(
                 agent_key=agent_key,
                 limit=limit,
             )
-            typer.echo(json.dumps([MemoryInfluenceManifestRead.model_validate(row).model_dump(mode="json") for row in rows]))
+            typer.echo(
+                json.dumps(
+                    [
+                        MemoryInfluenceManifestRead.model_validate(row).model_dump(
+                            mode="json"
+                        )
+                        for row in rows
+                    ]
+                )
+            )
     except Exception as exc:
         _fail(f"memory-influence list failed: {exc}")
 
 
 @memory_influence_app.command("read")
-def memory_influence_read(manifest_id: uuid.UUID = typer.Option(..., "--manifest-id")) -> None:
+def memory_influence_read(
+    manifest_id: uuid.UUID = typer.Option(..., "--manifest-id"),
+) -> None:
     try:
         with session_scope() as session:
-            manifest = MemoryInfluenceManifestService(session).require_manifest(manifest_id)
-            typer.echo(MemoryInfluenceManifestRead.model_validate(manifest).model_dump_json())
+            manifest = MemoryInfluenceManifestService(session).require_manifest(
+                manifest_id
+            )
+            typer.echo(
+                MemoryInfluenceManifestRead.model_validate(manifest).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"memory-influence read failed: {exc}")
 
@@ -410,9 +441,13 @@ def cost_firewall_estimate(
     try:
         with session_scope() as session:
             estimate = CostEstimateService(session).create(
-                CostEstimateCreateRequest(render_revision_id=render_revision_id, currency=currency)
+                CostEstimateCreateRequest(
+                    render_revision_id=render_revision_id, currency=currency
+                )
             )
-            typer.echo(CostEstimateSnapshotRead.model_validate(estimate).model_dump_json())
+            typer.echo(
+                CostEstimateSnapshotRead.model_validate(estimate).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"cost-firewall estimate failed: {exc}")
 
@@ -435,7 +470,9 @@ def cost_firewall_approval_create(
                     rationale=rationale,
                 )
             )
-            typer.echo(HumanPaidRenderApprovalRead.model_validate(approval).model_dump_json())
+            typer.echo(
+                HumanPaidRenderApprovalRead.model_validate(approval).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"cost-firewall approval-create failed: {exc}")
 
@@ -457,7 +494,9 @@ def cost_firewall_approval_approve(
                     rationale="Human paid provider boundary approved.",
                 ),
             )
-            typer.echo(HumanPaidRenderApprovalRead.model_validate(approval).model_dump_json())
+            typer.echo(
+                HumanPaidRenderApprovalRead.model_validate(approval).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"cost-firewall approval-approve failed: {exc}")
 
@@ -480,7 +519,9 @@ def cost_firewall_idempotency(
                     request_payload_json=payload,
                 )
             )
-            typer.echo(ProviderIdempotencyKeyRead.model_validate(record).model_dump_json())
+            typer.echo(
+                ProviderIdempotencyKeyRead.model_validate(record).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"cost-firewall idempotency failed: {exc}")
 
@@ -491,7 +532,9 @@ def cost_firewall_preflight(
     provider_key: str = typer.Option(..., "--provider-key"),
     provider_stage: str = typer.Option(..., "--provider-stage"),
     request_json: str = typer.Option("{}", "--request-json"),
-    cost_estimate_snapshot_id: uuid.UUID | None = typer.Option(None, "--cost-estimate-snapshot-id"),
+    cost_estimate_snapshot_id: uuid.UUID | None = typer.Option(
+        None, "--cost-estimate-snapshot-id"
+    ),
     human_approval_id: uuid.UUID | None = typer.Option(None, "--human-approval-id"),
 ) -> None:
     try:
@@ -552,7 +595,9 @@ def cost_firewall_proxy_flag(
                     source_type=source_type,
                 )
             )
-            typer.echo(ProxyPreviewArtifactFlagRead.model_validate(flag).model_dump_json())
+            typer.echo(
+                ProxyPreviewArtifactFlagRead.model_validate(flag).model_dump_json()
+            )
     except Exception as exc:
         _fail(f"cost-firewall proxy-flag failed: {exc}")
 
@@ -590,12 +635,25 @@ def company_list(limit: int = typer.Option(100, "--limit", min=1, max=1000)) -> 
     try:
         with session_scope() as session:
             companies = CompanyService(session).list_companies(limit=limit)
-            typer.echo(json.dumps([
-                {"id": str(c.id), "name": c.name, "slug": c.slug, "description": c.description, "status": c.status, "default_currency": c.default_currency, "created_at": c.created_at.isoformat()}
-                for c in companies
-            ]))
+            typer.echo(
+                json.dumps(
+                    [
+                        {
+                            "id": str(c.id),
+                            "name": c.name,
+                            "slug": c.slug,
+                            "description": c.description,
+                            "status": c.status,
+                            "default_currency": c.default_currency,
+                            "created_at": c.created_at.isoformat(),
+                        }
+                        for c in companies
+                    ]
+                )
+            )
     except Exception as exc:
         _fail(f"company list failed: {exc}")
+
 
 @company_app.command("create")
 def company_create(
@@ -612,10 +670,13 @@ def company_create(
                 description=description,
                 default_currency=default_currency,
             )
-            typer.echo(json.dumps({"id": str(company.id), "name": company.name, "slug": company.slug}))
+            typer.echo(
+                json.dumps(
+                    {"id": str(company.id), "name": company.name, "slug": company.slug}
+                )
+            )
     except Exception as exc:
         _fail(f"company create failed: {exc}")
-
 
 
 @company_app.command("bootstrap")
@@ -664,10 +725,13 @@ def _bootstrap_company(
                 default_currency=default_currency,
             )
             session.commit()
-            typer.echo(f"Company ready: {company.name} ({company.slug}) id={company.id}")
+            typer.echo(
+                f"Company ready: {company.name} ({company.slug}) id={company.id}"
+            )
             typer.echo(f"COMPANY_ID={company.id}")
     except Exception as exc:
         _fail(f"company bootstrap failed: {exc}")
+
 
 @channel_app.command("create")
 def channel_create(
@@ -734,10 +798,14 @@ def profile_compile(
 
 
 @profile_app.command("activate")
-def profile_activate(snapshot_id: uuid.UUID = typer.Option(..., "--snapshot-id")) -> None:
+def profile_activate(
+    snapshot_id: uuid.UUID = typer.Option(..., "--snapshot-id"),
+) -> None:
     try:
         with session_scope() as session:
-            snapshot = ChannelProfileService(session).activate_snapshot(snapshot_id=snapshot_id)
+            snapshot = ChannelProfileService(session).activate_snapshot(
+                snapshot_id=snapshot_id
+            )
             typer.echo(
                 json.dumps(
                     {
@@ -755,7 +823,9 @@ def profile_activate(snapshot_id: uuid.UUID = typer.Option(..., "--snapshot-id")
 def profile_active(channel_id: uuid.UUID = typer.Option(..., "--channel-id")) -> None:
     try:
         with session_scope() as session:
-            snapshot = PolicySnapshotService(session).get_active_snapshot_for_channel(channel_id)
+            snapshot = PolicySnapshotService(session).get_active_snapshot_for_channel(
+                channel_id
+            )
             if snapshot is None:
                 typer.echo("null")
             else:
@@ -794,6 +864,7 @@ def project_create(
     except Exception as exc:
         _fail(f"project create failed: {exc}")
 
+
 @artifact_app.command("create")
 def artifact_create(
     project_id: uuid.UUID = typer.Option(..., "--project-id"),
@@ -809,9 +880,14 @@ def artifact_create(
                     created_by_user_id=created_by_user_id,
                 )
             )
-            typer.echo(json.dumps({"id": str(artifact.id), "artifact_type": artifact.artifact_type}))
+            typer.echo(
+                json.dumps(
+                    {"id": str(artifact.id), "artifact_type": artifact.artifact_type}
+                )
+            )
     except Exception as exc:
         _fail(f"artifact create failed: {exc}")
+
 
 @artifact_app.command("version-create")
 def artifact_version_create(
@@ -830,9 +906,18 @@ def artifact_version_create(
                     created_by_user_id=created_by_user_id,
                 )
             )
-            typer.echo(json.dumps({"id": str(version.id), "version_number": version.version_number, "content_hash": version.content_hash}))
+            typer.echo(
+                json.dumps(
+                    {
+                        "id": str(version.id),
+                        "version_number": version.version_number,
+                        "content_hash": version.content_hash,
+                    }
+                )
+            )
     except Exception as exc:
         _fail(f"artifact version create failed: {exc}")
+
 
 @review_app.command("create-task")
 def review_create_task(
@@ -841,7 +926,9 @@ def review_create_task(
     target_id: uuid.UUID = typer.Option(..., "--target-id"),
     review_type: str = typer.Option(..., "--review-type"),
     requested_by_user_id: uuid.UUID = typer.Option(..., "--requested-by-user-id"),
-    target_artifact_version_id: uuid.UUID | None = typer.Option(None, "--target-artifact-version-id"),
+    target_artifact_version_id: uuid.UUID | None = typer.Option(
+        None, "--target-artifact-version-id"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
@@ -855,9 +942,12 @@ def review_create_task(
                     requested_by_user_id=requested_by_user_id,
                 )
             )
-            typer.echo(json.dumps({"id": str(task.id), "target_id": str(task.target_id)}))
+            typer.echo(
+                json.dumps({"id": str(task.id), "target_id": str(task.target_id)})
+            )
     except Exception as exc:
         _fail(f"review task create failed: {exc}")
+
 
 @review_app.command("add-finding")
 def review_add_finding(
@@ -880,14 +970,19 @@ def review_add_finding(
                     evidence_refs=_json_list(evidence_json),
                 )
             )
-            typer.echo(json.dumps({"id": str(finding.id), "severity": finding.severity}))
+            typer.echo(
+                json.dumps({"id": str(finding.id), "severity": finding.severity})
+            )
     except Exception as exc:
         _fail(f"review finding create failed: {exc}")
+
 
 @revision_app.command("create")
 def revision_create(
     review_task_id: uuid.UUID = typer.Option(..., "--review-task-id"),
-    target_artifact_version_id: uuid.UUID = typer.Option(..., "--target-artifact-version-id"),
+    target_artifact_version_id: uuid.UUID = typer.Option(
+        ..., "--target-artifact-version-id"
+    ),
     requested_by_user_id: uuid.UUID = typer.Option(..., "--requested-by-user-id"),
     reason: str = typer.Option(..., "--reason"),
 ) -> None:
@@ -905,10 +1000,13 @@ def revision_create(
     except Exception as exc:
         _fail(f"revision create failed: {exc}")
 
+
 @revision_app.command("resolve")
 def revision_resolve(
     revision_request_id: uuid.UUID = typer.Option(..., "--revision-request-id"),
-    resolved_by_artifact_version_id: uuid.UUID = typer.Option(..., "--resolved-by-artifact-version-id"),
+    resolved_by_artifact_version_id: uuid.UUID = typer.Option(
+        ..., "--resolved-by-artifact-version-id"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
@@ -920,13 +1018,16 @@ def revision_resolve(
     except Exception as exc:
         _fail(f"revision resolve failed: {exc}")
 
+
 @approval_app.command("decide")
 def approval_decide(
     target_type: str = typer.Option(..., "--target-type"),
     target_id: uuid.UUID = typer.Option(..., "--target-id"),
     decision: str = typer.Option(..., "--decision"),
     decided_by_user_id: uuid.UUID = typer.Option(..., "--decided-by-user-id"),
-    target_artifact_version_id: uuid.UUID | None = typer.Option(None, "--target-artifact-version-id"),
+    target_artifact_version_id: uuid.UUID | None = typer.Option(
+        None, "--target-artifact-version-id"
+    ),
     rationale: str | None = typer.Option(None, "--rationale"),
 ) -> None:
     try:
@@ -945,6 +1046,7 @@ def approval_decide(
     except Exception as exc:
         _fail(f"approval decision failed: {exc}")
 
+
 @workflow_app.command("inspect")
 def workflow_inspect(project_id: uuid.UUID = typer.Option(..., "--project-id")) -> None:
     try:
@@ -953,6 +1055,7 @@ def workflow_inspect(project_id: uuid.UUID = typer.Option(..., "--project-id")) 
             typer.echo(json.dumps(state))
     except Exception as exc:
         _fail(f"workflow inspect failed: {exc}")
+
 
 @gate_app.command("seed-definitions")
 def gate_seed_definitions() -> None:
@@ -964,12 +1067,15 @@ def gate_seed_definitions() -> None:
     except Exception as exc:
         _fail(f"gate definition seed failed: {exc}")
 
+
 @gate_app.command("run")
 def gate_run(
     gate_key: str = typer.Option(..., "--gate-key"),
     target_type: str = typer.Option(..., "--target-type"),
     target_id: uuid.UUID = typer.Option(..., "--target-id"),
-    gate_definition_version_id: uuid.UUID | None = typer.Option(None, "--gate-definition-version-id"),
+    gate_definition_version_id: uuid.UUID | None = typer.Option(
+        None, "--gate-definition-version-id"
+    ),
     created_by_user_id: uuid.UUID | None = typer.Option(None, "--created-by-user-id"),
 ) -> None:
     try:
@@ -987,6 +1093,7 @@ def gate_run(
     except Exception as exc:
         _fail(f"gate run failed: {exc}")
 
+
 @gate_app.command("inspect")
 def gate_inspect(gate_run_id: uuid.UUID = typer.Option(..., "--gate-run-id")) -> None:
     try:
@@ -998,6 +1105,7 @@ def gate_inspect(gate_run_id: uuid.UUID = typer.Option(..., "--gate-run-id")) ->
     except Exception as exc:
         _fail(f"gate inspect failed: {exc}")
 
+
 @policy_app.command("catalog-create")
 def policy_catalog_create(
     catalog_key: str = typer.Option(..., "--catalog-key"),
@@ -1007,11 +1115,18 @@ def policy_catalog_create(
     try:
         with session_scope() as session:
             catalog = PolicyCatalogService(session).create_catalog(
-                data=PlatformPolicyCatalogCreate(catalog_key=catalog_key, platform=platform, policy_domain=policy_domain)
+                data=PlatformPolicyCatalogCreate(
+                    catalog_key=catalog_key,
+                    platform=platform,
+                    policy_domain=policy_domain,
+                )
             )
-            typer.echo(json.dumps({"id": str(catalog.id), "catalog_key": catalog.catalog_key}))
+            typer.echo(
+                json.dumps({"id": str(catalog.id), "catalog_key": catalog.catalog_key})
+            )
     except Exception as exc:
         _fail(f"policy catalog create failed: {exc}")
+
 
 @policy_app.command("version-create")
 def policy_version_create(
@@ -1030,12 +1145,23 @@ def policy_version_create(
                     created_by_user_id=created_by_user_id,
                 )
             )
-            typer.echo(json.dumps({"id": str(record.id), "version": record.version, "status": record.status}))
+            typer.echo(
+                json.dumps(
+                    {
+                        "id": str(record.id),
+                        "version": record.version,
+                        "status": record.status,
+                    }
+                )
+            )
     except Exception as exc:
         _fail(f"policy version create failed: {exc}")
 
+
 @policy_app.command("version-activate")
-def policy_version_activate(policy_version_id: uuid.UUID = typer.Option(..., "--policy-version-id")) -> None:
+def policy_version_activate(
+    policy_version_id: uuid.UUID = typer.Option(..., "--policy-version-id"),
+) -> None:
     try:
         with session_scope() as session:
             record = PolicyCatalogService(session).activate_version(policy_version_id)
@@ -1043,12 +1169,15 @@ def policy_version_activate(policy_version_id: uuid.UUID = typer.Option(..., "--
     except Exception as exc:
         _fail(f"policy version activate failed: {exc}")
 
+
 @policy_app.command("source-ref-create")
 def policy_source_ref_create(
     source_type: str = typer.Option(..., "--source-type"),
     reliability: str = typer.Option("UNKNOWN", "--reliability"),
     policy_version_id: uuid.UUID | None = typer.Option(None, "--policy-version-id"),
-    policy_change_record_id: uuid.UUID | None = typer.Option(None, "--policy-change-record-id"),
+    policy_change_record_id: uuid.UUID | None = typer.Option(
+        None, "--policy-change-record-id"
+    ),
     source_title: str | None = typer.Option(None, "--source-title"),
     source_url: str | None = typer.Option(None, "--source-url"),
 ) -> None:
@@ -1067,6 +1196,7 @@ def policy_source_ref_create(
             typer.echo(json.dumps({"id": str(ref.id), "source_type": ref.source_type}))
     except Exception as exc:
         _fail(f"policy source ref create failed: {exc}")
+
 
 @policy_app.command("change-create")
 def policy_change_create(
@@ -1091,11 +1221,16 @@ def policy_change_create(
     except Exception as exc:
         _fail(f"policy change create failed: {exc}")
 
+
 @policy_app.command("revalidate")
 def policy_revalidate(
     scope_json: str = typer.Option(..., "--scope-json"),
-    gate_definition_version_id: uuid.UUID | None = typer.Option(None, "--gate-definition-version-id"),
-    policy_change_record_id: uuid.UUID | None = typer.Option(None, "--policy-change-record-id"),
+    gate_definition_version_id: uuid.UUID | None = typer.Option(
+        None, "--gate-definition-version-id"
+    ),
+    policy_change_record_id: uuid.UUID | None = typer.Option(
+        None, "--policy-change-record-id"
+    ),
     created_by_user_id: uuid.UUID | None = typer.Option(None, "--created-by-user-id"),
 ) -> None:
     try:
@@ -1110,18 +1245,30 @@ def policy_revalidate(
                 )
             )
             batch = service.run_batch(batch.id)
-            typer.echo(json.dumps({"id": str(batch.id), "status": batch.status, "counts": batch.counts}))
+            typer.echo(
+                json.dumps(
+                    {
+                        "id": str(batch.id),
+                        "status": batch.status,
+                        "counts": batch.counts,
+                    }
+                )
+            )
     except Exception as exc:
         _fail(f"policy revalidate failed: {exc}")
 
+
 @readiness_app.command("inspect")
-def readiness_inspect(project_id: uuid.UUID = typer.Option(..., "--project-id")) -> None:
+def readiness_inspect(
+    project_id: uuid.UUID = typer.Option(..., "--project-id"),
+) -> None:
     try:
         with session_scope() as session:
             state = WorkflowReadinessService(session).inspect_project(project_id)
             typer.echo(json.dumps(state))
     except Exception as exc:
         _fail(f"readiness inspect failed: {exc}")
+
 
 @provider_app.command("register")
 def provider_register(
@@ -1146,6 +1293,7 @@ def provider_register(
     except Exception as exc:
         _fail(f"provider register failed: {exc}")
 
+
 @provider_app.command("list")
 def provider_list() -> None:
     try:
@@ -1155,6 +1303,7 @@ def provider_list() -> None:
     except Exception as exc:
         _fail(f"provider list failed: {exc}")
 
+
 @provider_app.command("health-check")
 def provider_health_check(
     provider_key: str = typer.Option(..., "--provider-key"),
@@ -1162,10 +1311,13 @@ def provider_health_check(
 ) -> None:
     try:
         with session_scope() as session:
-            snapshot = ProviderHealthService(session).check_provider(provider_key=provider_key, mode=mode)
+            snapshot = ProviderHealthService(session).check_provider(
+                provider_key=provider_key, mode=mode
+            )
             typer.echo(json.dumps(_provider_health_to_dict(snapshot)))
     except Exception as exc:
         _fail(f"provider health-check failed: {exc}")
+
 
 @credential_app.command("ref-create")
 def credential_ref_create(
@@ -1190,6 +1342,7 @@ def credential_ref_create(
     except Exception as exc:
         _fail(f"credential ref-create failed: {exc}")
 
+
 @credential_app.command("health-check")
 def credential_health_check(
     credential_reference_id: uuid.UUID = typer.Option(..., "--credential-reference-id"),
@@ -1209,6 +1362,7 @@ def credential_health_check(
     except Exception as exc:
         _fail(f"credential health-check failed: {exc}")
 
+
 @quota_app.command("account-create")
 def quota_account_create(
     provider_key: str = typer.Option(..., "--provider-key"),
@@ -1224,13 +1378,16 @@ def quota_account_create(
                     provider_key=provider_key,
                     quota_scope_type=quota_scope_type,
                     quota_window=quota_window,
-                    quota_limit=Decimal(quota_limit) if quota_limit is not None else None,
+                    quota_limit=Decimal(quota_limit)
+                    if quota_limit is not None
+                    else None,
                     unit=unit,
                 )
             )
             typer.echo(json.dumps(_quota_account_to_dict(account)))
     except Exception as exc:
         _fail(f"quota account-create failed: {exc}")
+
 
 @quota_app.command("reserve")
 def quota_reserve(
@@ -1239,12 +1396,14 @@ def quota_reserve(
 ) -> None:
     _quota_event_command("reserve", quota_account_id, Decimal(amount))
 
+
 @quota_app.command("consume")
 def quota_consume(
     quota_account_id: uuid.UUID = typer.Option(..., "--quota-account-id"),
     amount: str = typer.Option(..., "--amount"),
 ) -> None:
     _quota_event_command("consume", quota_account_id, Decimal(amount))
+
 
 @quota_app.command("release")
 def quota_release(
@@ -1253,11 +1412,16 @@ def quota_release(
 ) -> None:
     _quota_event_command("release", quota_account_id, Decimal(amount))
 
-def _quota_event_command(kind: str, quota_account_id: uuid.UUID, amount: Decimal) -> None:
+
+def _quota_event_command(
+    kind: str, quota_account_id: uuid.UUID, amount: Decimal
+) -> None:
     try:
         with session_scope() as session:
             service = QuotaService(session)
-            request = QuotaEventRequest(quota_account_id=quota_account_id, amount=amount)
+            request = QuotaEventRequest(
+                quota_account_id=quota_account_id, amount=amount
+            )
             if kind == "reserve":
                 event = service.reserve_quota(data=request)
             elif kind == "consume":
@@ -1267,6 +1431,7 @@ def _quota_event_command(kind: str, quota_account_id: uuid.UUID, amount: Decimal
             typer.echo(json.dumps(_quota_event_to_dict(event)))
     except Exception as exc:
         _fail(f"quota {kind} failed: {exc}")
+
 
 @cost_app.command("record")
 def cost_record(
@@ -1291,6 +1456,7 @@ def cost_record(
     except Exception as exc:
         _fail(f"cost record failed: {exc}")
 
+
 @budget_app.command("policy-create")
 def budget_policy_create(
     policy_key: str = typer.Option(..., "--policy-key"),
@@ -1308,9 +1474,18 @@ def budget_policy_create(
                     status=status,
                 )
             )
-            typer.echo(json.dumps({"id": str(policy.id), "policy_key": policy.policy_key, "status": policy.status}))
+            typer.echo(
+                json.dumps(
+                    {
+                        "id": str(policy.id),
+                        "policy_key": policy.policy_key,
+                        "status": policy.status,
+                    }
+                )
+            )
     except Exception as exc:
         _fail(f"budget policy-create failed: {exc}")
+
 
 @budget_app.command("check")
 def budget_check(
@@ -1324,14 +1499,19 @@ def budget_check(
             decision = BudgetGateService(session).check(
                 data=BudgetGateCheckRequest(
                     policy_key=policy_key,
-                    estimated_cost=Decimal(estimated_cost) if estimated_cost is not None else None,
+                    estimated_cost=Decimal(estimated_cost)
+                    if estimated_cost is not None
+                    else None,
                     quota_account_id=quota_account_id,
-                    quota_amount=Decimal(quota_amount) if quota_amount is not None else None,
+                    quota_amount=Decimal(quota_amount)
+                    if quota_amount is not None
+                    else None,
                 )
             )
             typer.echo(json.dumps(decision.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"budget check failed: {exc}")
+
 
 @dead_letter_app.command("create")
 def dead_letter_create(
@@ -1340,7 +1520,9 @@ def dead_letter_create(
     payload_ref: str | None = typer.Option(None, "--payload-ref"),
     fail_count: int = typer.Option(1, "--fail-count"),
     reason_code: str | None = typer.Option("DEAD_LETTER_CREATED", "--reason-code"),
-    next_action: str | None = typer.Option("Review and replay if safe.", "--next-action"),
+    next_action: str | None = typer.Option(
+        "Review and replay if safe.", "--next-action"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
@@ -1358,6 +1540,7 @@ def dead_letter_create(
     except Exception as exc:
         _fail(f"dead-letter create failed: {exc}")
 
+
 @dead_letter_app.command("replay")
 def dead_letter_replay(job_id: uuid.UUID = typer.Option(..., "--job-id")) -> None:
     try:
@@ -1366,6 +1549,7 @@ def dead_letter_replay(job_id: uuid.UUID = typer.Option(..., "--job-id")) -> Non
             typer.echo(json.dumps(_dead_letter_to_dict(job)))
     except Exception as exc:
         _fail(f"dead-letter replay failed: {exc}")
+
 
 @incident_app.command("create")
 def incident_create(
@@ -1388,21 +1572,34 @@ def incident_create(
     except Exception as exc:
         _fail(f"incident create failed: {exc}")
 
+
 @incident_app.command("list")
 def incident_list() -> None:
     try:
         with session_scope() as session:
-            typer.echo(json.dumps([_incident_to_dict(item) for item in OpsIncidentService(session).list_incidents()]))
+            typer.echo(
+                json.dumps(
+                    [
+                        _incident_to_dict(item)
+                        for item in OpsIncidentService(session).list_incidents()
+                    ]
+                )
+            )
     except Exception as exc:
         _fail(f"incident list failed: {exc}")
+
 
 @incident_app.command("ack")
 def incident_ack(incident_id: uuid.UUID = typer.Option(..., "--incident-id")) -> None:
     _incident_transition_command(incident_id, "ACKNOWLEDGED")
 
+
 @incident_app.command("resolve")
-def incident_resolve(incident_id: uuid.UUID = typer.Option(..., "--incident-id")) -> None:
+def incident_resolve(
+    incident_id: uuid.UUID = typer.Option(..., "--incident-id"),
+) -> None:
     _incident_transition_command(incident_id, "RESOLVED")
+
 
 def _incident_transition_command(incident_id: uuid.UUID, state: str) -> None:
     try:
@@ -1411,6 +1608,7 @@ def _incident_transition_command(incident_id: uuid.UUID, state: str) -> None:
             typer.echo(json.dumps(_incident_to_dict(incident)))
     except Exception as exc:
         _fail(f"incident transition failed: {exc}")
+
 
 @manual_action_app.command("create")
 def manual_action_create(
@@ -1435,22 +1633,34 @@ def manual_action_create(
     except Exception as exc:
         _fail(f"manual-action create failed: {exc}")
 
+
 @manual_action_app.command("list")
 def manual_action_list() -> None:
     try:
         with session_scope() as session:
-            typer.echo(json.dumps([_manual_action_to_dict(item) for item in ManualActionService(session).list_actions()]))
+            typer.echo(
+                json.dumps(
+                    [
+                        _manual_action_to_dict(item)
+                        for item in ManualActionService(session).list_actions()
+                    ]
+                )
+            )
     except Exception as exc:
         _fail(f"manual-action list failed: {exc}")
 
+
 @manual_action_app.command("complete")
-def manual_action_complete(action_id: uuid.UUID = typer.Option(..., "--action-id")) -> None:
+def manual_action_complete(
+    action_id: uuid.UUID = typer.Option(..., "--action-id"),
+) -> None:
     try:
         with session_scope() as session:
             action = ManualActionService(session).complete_action(action_id)
             typer.echo(json.dumps(_manual_action_to_dict(action)))
     except Exception as exc:
         _fail(f"manual-action complete failed: {exc}")
+
 
 @system_health_app.command("component")
 def system_health_component(
@@ -1469,9 +1679,14 @@ def system_health_component(
                     next_action=next_action,
                 )
             )
-            typer.echo(json.dumps({"id": str(snapshot.id), "health_state": snapshot.health_state}))
+            typer.echo(
+                json.dumps(
+                    {"id": str(snapshot.id), "health_state": snapshot.health_state}
+                )
+            )
     except Exception as exc:
         _fail(f"system-health component failed: {exc}")
+
 
 @system_health_app.command("snapshot")
 def system_health_snapshot() -> None:
@@ -1482,14 +1697,20 @@ def system_health_snapshot() -> None:
     except Exception as exc:
         _fail(f"system-health snapshot failed: {exc}")
 
+
 @system_health_app.command("latest")
 def system_health_latest() -> None:
     try:
         with session_scope() as session:
             snapshot = SystemHealthService(session).latest()
-            typer.echo("null" if snapshot is None else json.dumps(_system_health_to_dict(snapshot)))
+            typer.echo(
+                "null"
+                if snapshot is None
+                else json.dumps(_system_health_to_dict(snapshot))
+            )
     except Exception as exc:
         _fail(f"system-health latest failed: {exc}")
+
 
 @calendar_app.command("slot-create")
 def calendar_slot_create(
@@ -1498,7 +1719,7 @@ def calendar_slot_create(
     policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
     slot_date: str = typer.Option(..., "--slot-date"),
     production_goal: str | None = typer.Option(None, "--production-goal"),
-    slot_type: str = typer.Option("DAILY", "--slot-type"),
+    slot_type: str = typer.Option("RESEARCH", "--slot-type"),
     target_platforms_json: str = typer.Option("[]", "--target-platforms-json"),
     created_by_user_id: uuid.UUID | None = typer.Option(None, "--created-by-user-id"),
 ) -> None:
@@ -1520,6 +1741,7 @@ def calendar_slot_create(
     except Exception as exc:
         _fail(f"calendar slot-create failed: {exc}")
 
+
 @search_app.command("evidence-create")
 def search_evidence_create(
     company_id: uuid.UUID = typer.Option(..., "--company-id"),
@@ -1528,7 +1750,9 @@ def search_evidence_create(
     source_type: str = typer.Option("MANUAL_RESEARCH", "--source-type"),
     platform: str = typer.Option("YOUTUBE", "--platform"),
     search_volume_30d: int | None = typer.Option(None, "--search-volume-30d"),
-    relative_interest_index: str | None = typer.Option(None, "--relative-interest-index"),
+    relative_interest_index: str | None = typer.Option(
+        None, "--relative-interest-index"
+    ),
     competition_index: str | None = typer.Option(None, "--competition-index"),
     confidence: str = typer.Option("UNKNOWN", "--confidence"),
 ) -> None:
@@ -1542,8 +1766,12 @@ def search_evidence_create(
                     query=query,
                     platform=platform,
                     search_volume_30d=search_volume_30d,
-                    relative_interest_index=Decimal(relative_interest_index) if relative_interest_index is not None else None,
-                    competition_index=Decimal(competition_index) if competition_index is not None else None,
+                    relative_interest_index=Decimal(relative_interest_index)
+                    if relative_interest_index is not None
+                    else None,
+                    competition_index=Decimal(competition_index)
+                    if competition_index is not None
+                    else None,
                     evidence_confidence=confidence,
                 )
             )
@@ -1551,9 +1779,10 @@ def search_evidence_create(
     except Exception as exc:
         _fail(f"search evidence-create failed: {exc}")
 
+
 @context_app.command("plan-create")
 def context_plan_create(
-    purpose: str = typer.Option("DAILY_IDEA", "--purpose"),
+    purpose: str = typer.Option("EDITORIAL_RESEARCH", "--purpose"),
     company_id: uuid.UUID = typer.Option(..., "--company-id"),
     channel_id: uuid.UUID | None = typer.Option(None, "--channel-id"),
     policy_snapshot_id: uuid.UUID | None = typer.Option(None, "--policy-snapshot-id"),
@@ -1578,32 +1807,42 @@ def context_plan_create(
     except Exception as exc:
         _fail(f"context plan-create failed: {exc}")
 
+
 @context_app.command("pack-create")
 def context_pack_create(
-    retrieval_plan_snapshot_id: uuid.UUID = typer.Option(..., "--retrieval-plan-snapshot-id"),
+    retrieval_plan_snapshot_id: uuid.UUID = typer.Option(
+        ..., "--retrieval-plan-snapshot-id"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
             pack = ResourceResolverService(session).build_context_pack(
-                data=ContextPackSnapshotCreate(retrieval_plan_snapshot_id=retrieval_plan_snapshot_id)
+                data=ContextPackSnapshotCreate(
+                    retrieval_plan_snapshot_id=retrieval_plan_snapshot_id
+                )
             )
             typer.echo(json.dumps(_context_pack_to_dict(pack)))
     except Exception as exc:
         _fail(f"context pack-create failed: {exc}")
+
 
 @channel_state_app.command("build")
 def channel_state_build(
     company_id: uuid.UUID = typer.Option(..., "--company-id"),
     channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
     policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
-    context_pack_snapshot_id: uuid.UUID | None = typer.Option(None, "--context-pack-snapshot-id"),
-    daily_run_id: uuid.UUID | None = typer.Option(None, "--daily-run-id"),
+    context_pack_snapshot_id: uuid.UUID | None = typer.Option(
+        None, "--context-pack-snapshot-id"
+    ),
+    editorial_research_run_id: uuid.UUID | None = typer.Option(
+        None, "--editorial-research-run-id"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
             snapshot = ChannelStatePackService(session).build_snapshot(
                 data=ChannelStatePackSnapshotCreate(
-                    channel_daily_run_id=daily_run_id,
+                    editorial_research_run_id=editorial_research_run_id,
                     company_id=company_id,
                     channel_workspace_id=channel_id,
                     policy_snapshot_id=policy_snapshot_id,
@@ -1614,133 +1853,13 @@ def channel_state_build(
     except Exception as exc:
         _fail(f"channel-state build failed: {exc}")
 
-@daily_app.command("run-create")
-def daily_run_create(
-    company_id: uuid.UUID = typer.Option(..., "--company-id"),
-    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
-    policy_snapshot_id: uuid.UUID = typer.Option(..., "--policy-snapshot-id"),
-    run_date: str = typer.Option(..., "--run-date"),
-    slot_id: uuid.UUID | None = typer.Option(None, "--slot-id"),
-    trigger_type: str = typer.Option("MANUAL", "--trigger-type"),
-) -> None:
-    try:
-        with session_scope() as session:
-            daily_run = ChannelDailyRunService(session).create_run(
-                data=ChannelDailyRunCreate(
-                    company_id=company_id,
-                    channel_workspace_id=channel_id,
-                    policy_snapshot_id=policy_snapshot_id,
-                    editorial_calendar_slot_id=slot_id,
-                    run_date=date.fromisoformat(run_date),
-                    trigger_type=trigger_type,
-                )
-            )
-            typer.echo(json.dumps(_daily_run_to_dict(daily_run)))
-    except Exception as exc:
-        _fail(f"daily run-create failed: {exc}")
-
-@daily_app.command("execute")
-def daily_execute(
-    daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
-    quota_account_id: uuid.UUID | None = typer.Option(None, "--quota-account-id"),
-    budget_policy_key: str | None = typer.Option(None, "--budget-policy-key"),
-    estimated_cost: str = typer.Option("0", "--estimated-cost"),
-) -> None:
-    try:
-        with session_scope() as session:
-            daily_run = ChannelDailyRunService(session).execute_run(
-                daily_run_id=daily_run_id,
-                data=DailyRunExecuteRequest(
-                    quota_account_id=quota_account_id,
-                    budget_policy_key=budget_policy_key,
-                    estimated_cost=Decimal(estimated_cost),
-                ),
-            )
-            typer.echo(json.dumps(_daily_run_to_dict(daily_run)))
-    except Exception as exc:
-        _fail(f"daily execute failed: {exc}")
-
-@daily_app.command("inspect")
-def daily_inspect(daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id")) -> None:
-    try:
-        with session_scope() as session:
-            daily_run = ChannelDailyRunService(session).get_run(daily_run_id)
-            if daily_run is None:
-                _fail(f"daily run not found: {daily_run_id}")
-            typer.echo(json.dumps(_daily_run_to_dict(daily_run)))
-    except Exception as exc:
-        _fail(f"daily inspect failed: {exc}")
-
-@idea_app.command("decide")
-def idea_decide(
-    daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
-    context_pack_snapshot_id: uuid.UUID = typer.Option(..., "--context-pack-snapshot-id"),
-    channel_state_pack_snapshot_id: uuid.UUID | None = typer.Option(None, "--channel-state-pack-snapshot-id"),
-) -> None:
-    try:
-        with session_scope() as session:
-            decision = ChannelAuthorityService(session).create_decision(
-                data=DailyIdeaDecisionCreate(
-                    channel_daily_run_id=daily_run_id,
-                    context_pack_snapshot_id=context_pack_snapshot_id,
-                    channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
-                )
-            )
-            typer.echo(json.dumps(_daily_idea_to_dict(decision)))
-    except Exception as exc:
-        _fail(f"idea decide failed: {exc}")
-
-@idea_app.command("preflight")
-def idea_preflight(
-    company_id: uuid.UUID = typer.Option(..., "--company-id"),
-    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
-    daily_run_id: uuid.UUID | None = typer.Option(None, "--daily-run-id"),
-    daily_idea_decision_id: uuid.UUID | None = typer.Option(None, "--daily-idea-decision-id"),
-    evidence_json: str = typer.Option("{}", "--evidence-json"),
-) -> None:
-    try:
-        with session_scope() as session:
-            preflight = IdeaMarketPreflightService(session).create_preflight(
-                data=IdeaMarketPreflightCreate(
-                    company_id=company_id,
-                    channel_workspace_id=channel_id,
-                    channel_daily_run_id=daily_run_id,
-                    daily_idea_decision_id=daily_idea_decision_id,
-                    evidence_blob=_json_object(evidence_json),
-                )
-            )
-            typer.echo(json.dumps(_idea_preflight_to_dict(preflight)))
-    except Exception as exc:
-        _fail(f"idea preflight failed: {exc}")
-
-@project_app.command("admit")
-def project_admit(
-    daily_run_id: uuid.UUID = typer.Option(..., "--daily-run-id"),
-    daily_idea_decision_id: uuid.UUID = typer.Option(..., "--daily-idea-decision-id"),
-    created_by_user_id: uuid.UUID = typer.Option(..., "--created-by-user-id"),
-    idea_market_preflight_id: uuid.UUID | None = typer.Option(None, "--idea-market-preflight-id"),
-    budget_policy_key: str | None = typer.Option(None, "--budget-policy-key"),
-    quota_account_id: uuid.UUID | None = typer.Option(None, "--quota-account-id"),
-    estimated_cost: str = typer.Option("0", "--estimated-cost"),
-) -> None:
-    try:
-        del (
-            daily_run_id,
-            daily_idea_decision_id,
-            created_by_user_id,
-            idea_market_preflight_id,
-            budget_policy_key,
-            quota_account_id,
-            estimated_cost,
-        )
-        raise ValidationFailureError("V2_PROJECT_ADMISSION_REQUIRED")
-    except Exception as exc:
-        _fail(f"project admit failed: {exc}")
 
 @production_app.command("run-create")
 def production_run_create(
     project_id: uuid.UUID = typer.Option(..., "--project-id"),
-    source_project_admission_decision_id: uuid.UUID | None = typer.Option(None, "--source-project-admission-decision-id"),
+    source_project_admission_decision_id: uuid.UUID | None = typer.Option(
+        None, "--source-project-admission-decision-id"
+    ),
     run_mode: str = typer.Option("REAL_DISABLED", "--run-mode"),
 ) -> None:
     try:
@@ -1755,6 +1874,7 @@ def production_run_create(
             typer.echo(json.dumps(_production_run_to_dict(run)))
     except Exception as exc:
         _fail(f"production run-create failed: {exc}")
+
 
 @production_app.command("execute")
 def production_execute(
@@ -1771,6 +1891,7 @@ def production_execute(
     except Exception as exc:
         _fail(f"production execute failed: {exc}")
 
+
 @production_app.command("inspect")
 def production_inspect(
     production_run_id: uuid.UUID = typer.Option(..., "--production-run-id"),
@@ -1784,13 +1905,16 @@ def production_inspect(
     except Exception as exc:
         _fail(f"production inspect failed: {exc}")
 
+
 @media_app.command("qc-run")
 def media_qc_run(
     render_package_id: uuid.UUID = typer.Option(..., "--render-package-id"),
 ) -> None:
     try:
         with session_scope() as session:
-            package = LocalFixtureRendererService(session).get_package(render_package_id)
+            package = LocalFixtureRendererService(session).get_package(
+                render_package_id
+            )
             if package is None:
                 _fail(f"render package not found: {render_package_id}")
             report = MediaQCService(session).run_qc(render_package_snapshot=package)
@@ -1798,18 +1922,22 @@ def media_qc_run(
     except Exception as exc:
         _fail(f"media qc-run failed: {exc}")
 
+
 @media_app.command("package-inspect")
 def media_package_inspect(
     render_package_id: uuid.UUID = typer.Option(..., "--render-package-id"),
 ) -> None:
     try:
         with session_scope() as session:
-            package = LocalFixtureRendererService(session).get_package(render_package_id)
+            package = LocalFixtureRendererService(session).get_package(
+                render_package_id
+            )
             if package is None:
                 _fail(f"render package not found: {render_package_id}")
             typer.echo(json.dumps(_render_package_to_dict(package)))
     except Exception as exc:
         _fail(f"media package-inspect failed: {exc}")
+
 
 @media_app.command("ai-hero-generate")
 def media_ai_hero_generate(
@@ -1826,9 +1954,12 @@ def media_ai_hero_generate(
     except Exception as exc:
         _fail(f"media ai-hero-generate failed: {exc}")
 
+
 @captions_app.command("export-srt")
 def captions_export_srt(
-    caption_track_snapshot_id: uuid.UUID = typer.Option(..., "--caption-track-snapshot-id"),
+    caption_track_snapshot_id: uuid.UUID = typer.Option(
+        ..., "--caption-track-snapshot-id"
+    ),
 ) -> None:
     try:
         with session_scope() as session:
@@ -1841,23 +1972,33 @@ def captions_export_srt(
     except Exception as exc:
         _fail(f"captions export-srt failed: {exc}")
 
+
 @render_spec_app.command("validate")
 def render_spec_validate(
     render_spec_snapshot_id: uuid.UUID = typer.Option(..., "--render-spec-snapshot-id"),
 ) -> None:
     try:
         with session_scope() as session:
-            render_spec = RenderSpecCompilerService(session).validate_snapshot(render_spec_snapshot_id)
-            typer.echo(json.dumps({"status": "PASS", "render_spec_hash": render_spec.render_spec_hash}))
+            render_spec = RenderSpecCompilerService(session).validate_snapshot(
+                render_spec_snapshot_id
+            )
+            typer.echo(
+                json.dumps(
+                    {"status": "PASS", "render_spec_hash": render_spec.render_spec_hash}
+                )
+            )
     except Exception as exc:
         _fail(f"render-spec validate failed: {exc}")
+
 
 @publish_app.command("handoff-create")
 def publish_handoff_create(
     render_package_id: uuid.UUID = typer.Option(..., "--render-package-id"),
     target_platform: str = typer.Option("YOUTUBE", "--target-platform"),
     target_surface: str = typer.Option("LONG_FORM", "--target-surface"),
-    destination_binding_id: uuid.UUID | None = typer.Option(None, "--destination-binding-id"),
+    destination_binding_id: uuid.UUID | None = typer.Option(
+        None, "--destination-binding-id"
+    ),
     render_variant_id: str | None = typer.Option(None, "--render-variant-id"),
     created_by_user_id: uuid.UUID | None = typer.Option(None, "--created-by-user-id"),
     planned_metadata_json: str = typer.Option("{}", "--planned-metadata-json"),
@@ -1879,8 +2020,11 @@ def publish_handoff_create(
     except Exception as exc:
         _fail(f"publish handoff-create failed: {exc}")
 
+
 @publish_app.command("handoff-inspect")
-def publish_handoff_inspect(handoff_id: uuid.UUID = typer.Option(..., "--handoff-id")) -> None:
+def publish_handoff_inspect(
+    handoff_id: uuid.UUID = typer.Option(..., "--handoff-id"),
+) -> None:
     try:
         with session_scope() as session:
             handoff = PublishHandoffService(session).require(handoff_id)
@@ -1888,14 +2032,18 @@ def publish_handoff_inspect(handoff_id: uuid.UUID = typer.Option(..., "--handoff
     except Exception as exc:
         _fail(f"publish handoff-inspect failed: {exc}")
 
+
 @publish_app.command("handoff-ready")
-def publish_handoff_ready(handoff_id: uuid.UUID = typer.Option(..., "--handoff-id")) -> None:
+def publish_handoff_ready(
+    handoff_id: uuid.UUID = typer.Option(..., "--handoff-id"),
+) -> None:
     try:
         with session_scope() as session:
             handoff = PublishHandoffService(session).mark_ready(handoff_id=handoff_id)
             typer.echo(json.dumps(_publish_handoff_to_dict(handoff)))
     except Exception as exc:
         _fail(f"publish handoff-ready failed: {exc}")
+
 
 @publish_app.command("confirm-manual")
 def publish_confirm_manual(
@@ -1906,12 +2054,16 @@ def publish_confirm_manual(
     actual_metadata_json: str = typer.Option(..., "--actual-metadata-json"),
     actual_disclosures_json: str = typer.Option(..., "--actual-disclosures-json"),
     actual_files_json: str = typer.Option("{}", "--actual-files-json"),
-    confirmed_by_user_id: uuid.UUID | None = typer.Option(None, "--confirmed-by-user-id"),
+    confirmed_by_user_id: uuid.UUID | None = typer.Option(
+        None, "--confirmed-by-user-id"
+    ),
     operator_notes: str | None = typer.Option(None, "--operator-notes"),
 ) -> None:
     try:
         with session_scope() as session:
-            confirmation = ManualPublishConfirmationService(session).create_confirmation(
+            confirmation = ManualPublishConfirmationService(
+                session
+            ).create_confirmation(
                 data=ManualPublishConfirmationCreate(
                     publish_handoff_package_id=handoff_id,
                     confirmed_by_user_id=confirmed_by_user_id,
@@ -1928,54 +2080,80 @@ def publish_confirm_manual(
     except Exception as exc:
         _fail(f"publish confirm-manual failed: {exc}")
 
+
 @publish_app.command("confirmation-inspect")
-def publish_confirmation_inspect(confirmation_id: uuid.UUID = typer.Option(..., "--confirmation-id")) -> None:
+def publish_confirmation_inspect(
+    confirmation_id: uuid.UUID = typer.Option(..., "--confirmation-id"),
+) -> None:
     try:
         with session_scope() as session:
-            confirmation = ManualPublishConfirmationService(session).require_confirmation(confirmation_id)
+            confirmation = ManualPublishConfirmationService(
+                session
+            ).require_confirmation(confirmation_id)
             typer.echo(json.dumps(_manual_publish_confirmation_to_dict(confirmation)))
     except Exception as exc:
         _fail(f"publish confirmation-inspect failed: {exc}")
 
+
 @publish_app.command("confirmation-accept")
-def publish_confirmation_accept(confirmation_id: uuid.UUID = typer.Option(..., "--confirmation-id")) -> None:
+def publish_confirmation_accept(
+    confirmation_id: uuid.UUID = typer.Option(..., "--confirmation-id"),
+) -> None:
     try:
         with session_scope() as session:
-            uploaded = ManualPublishConfirmationService(session).accept_confirmation(confirmation_id=confirmation_id)
+            uploaded = ManualPublishConfirmationService(session).accept_confirmation(
+                confirmation_id=confirmation_id
+            )
             typer.echo(json.dumps(_uploaded_video_to_dict(uploaded)))
     except Exception as exc:
         _fail(f"publish confirmation-accept failed: {exc}")
 
+
 @uploaded_video_app.command("inspect")
-def uploaded_video_inspect(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def uploaded_video_inspect(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            uploaded = ManualPublishConfirmationService(session).get_uploaded_video(uploaded_video_id)
+            uploaded = ManualPublishConfirmationService(session).get_uploaded_video(
+                uploaded_video_id
+            )
             if uploaded is None:
                 _fail(f"uploaded video not found: {uploaded_video_id}")
             typer.echo(json.dumps(_uploaded_video_to_dict(uploaded)))
     except Exception as exc:
         _fail(f"uploaded-video inspect failed: {exc}")
 
+
 @uploaded_video_app.command("list-by-project")
-def uploaded_video_list_by_project(project_id: uuid.UUID = typer.Option(..., "--project-id")) -> None:
+def uploaded_video_list_by_project(
+    project_id: uuid.UUID = typer.Option(..., "--project-id"),
+) -> None:
     try:
         with session_scope() as session:
-            uploaded = ManualPublishConfirmationService(session).list_uploaded_videos_by_project(project_id)
+            uploaded = ManualPublishConfirmationService(
+                session
+            ).list_uploaded_videos_by_project(project_id)
             typer.echo(json.dumps([_uploaded_video_to_dict(item) for item in uploaded]))
     except Exception as exc:
         _fail(f"uploaded-video list-by-project failed: {exc}")
 
+
 @uploaded_video_app.command("summary")
-def uploaded_video_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def uploaded_video_summary(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            summary = ManualPublishConfirmationService(session).get_publication_summary(uploaded_video_id)
+            summary = ManualPublishConfirmationService(session).get_publication_summary(
+                uploaded_video_id
+            )
             if summary is None:
                 _fail(f"uploaded video summary not found: {uploaded_video_id}")
             typer.echo(json.dumps(_uploaded_video_summary_to_dict(summary)))
     except Exception as exc:
         _fail(f"uploaded-video summary failed: {exc}")
+
 
 @analytics_app.command("sync-create")
 def analytics_sync_create(
@@ -2002,6 +2180,7 @@ def analytics_sync_create(
     except Exception as exc:
         _fail(f"analytics sync-create failed: {exc}")
 
+
 @analytics_app.command("sync-execute")
 def analytics_sync_execute(
     sync_run_id: uuid.UUID = typer.Option(..., "--sync-run-id"),
@@ -2016,14 +2195,18 @@ def analytics_sync_execute(
     except Exception as exc:
         _fail(f"analytics sync-execute failed: {exc}")
 
+
 @analytics_app.command("sync-inspect")
-def analytics_sync_inspect(sync_run_id: uuid.UUID = typer.Option(..., "--sync-run-id")) -> None:
+def analytics_sync_inspect(
+    sync_run_id: uuid.UUID = typer.Option(..., "--sync-run-id"),
+) -> None:
     try:
         with session_scope() as session:
             run = AnalyticsSyncService(session).require_sync_run(sync_run_id)
             typer.echo(json.dumps(_analytics_sync_run_to_dict(run)))
     except Exception as exc:
         _fail(f"analytics sync-inspect failed: {exc}")
+
 
 @analytics_app.command("import-manual")
 def analytics_import_manual(
@@ -2070,8 +2253,11 @@ def analytics_import_manual(
     except Exception as exc:
         _fail(f"analytics import-manual failed: {exc}")
 
+
 @analytics_app.command("snapshot-inspect")
-def analytics_snapshot_inspect(snapshot_id: uuid.UUID = typer.Option(..., "--snapshot-id")) -> None:
+def analytics_snapshot_inspect(
+    snapshot_id: uuid.UUID = typer.Option(..., "--snapshot-id"),
+) -> None:
     try:
         with session_scope() as session:
             snapshot = AnalyticsSyncService(session).require_snapshot(snapshot_id)
@@ -2079,26 +2265,43 @@ def analytics_snapshot_inspect(snapshot_id: uuid.UUID = typer.Option(..., "--sna
     except Exception as exc:
         _fail(f"analytics snapshot-inspect failed: {exc}")
 
+
 @analytics_app.command("list-by-uploaded-video")
-def analytics_list_by_uploaded_video(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def analytics_list_by_uploaded_video(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            snapshots = AnalyticsSyncService(session).list_snapshots_by_uploaded_video(uploaded_video_id)
-            typer.echo(json.dumps([_analytics_snapshot_to_dict(snapshot) for snapshot in snapshots]))
+            snapshots = AnalyticsSyncService(session).list_snapshots_by_uploaded_video(
+                uploaded_video_id
+            )
+            typer.echo(
+                json.dumps(
+                    [_analytics_snapshot_to_dict(snapshot) for snapshot in snapshots]
+                )
+            )
     except Exception as exc:
         _fail(f"analytics list-by-uploaded-video failed: {exc}")
 
+
 @analytics_app.command("metrics-summary")
-def analytics_metrics_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def analytics_metrics_summary(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            summary = AnalyticsSyncService(session).get_metrics_summary(uploaded_video_id)
+            summary = AnalyticsSyncService(session).get_metrics_summary(
+                uploaded_video_id
+            )
             typer.echo(json.dumps(_uploaded_video_metrics_summary_to_dict(summary)))
     except Exception as exc:
         _fail(f"analytics metrics-summary failed: {exc}")
 
+
 @analytics_app.command("retention")
-def analytics_retention(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def analytics_retention(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
             snapshot = AnalyticsSyncService(session).latest_retention(uploaded_video_id)
@@ -2108,16 +2311,22 @@ def analytics_retention(uploaded_video_id: uuid.UUID = typer.Option(..., "--uplo
     except Exception as exc:
         _fail(f"analytics retention failed: {exc}")
 
+
 @analytics_app.command("traffic-sources")
-def analytics_traffic_sources(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def analytics_traffic_sources(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            snapshot = AnalyticsSyncService(session).latest_traffic_sources(uploaded_video_id)
+            snapshot = AnalyticsSyncService(session).latest_traffic_sources(
+                uploaded_video_id
+            )
             if snapshot is None:
                 _fail(f"traffic source snapshot not found: {uploaded_video_id}")
             typer.echo(json.dumps(_traffic_source_snapshot_to_dict(snapshot)))
     except Exception as exc:
         _fail(f"analytics traffic-sources failed: {exc}")
+
 
 @youtube_app.command("connection-status")
 def youtube_connection_status() -> None:
@@ -2128,14 +2337,20 @@ def youtube_connection_status() -> None:
     except Exception as exc:
         _fail(f"youtube connection-status failed: {exc}")
 
+
 @youtube_app.command("public-sync")
-def youtube_public_sync(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def youtube_public_sync(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            run = YouTubePublicStatsSyncService(session).sync_uploaded_video(uploaded_video_id=uploaded_video_id)
+            run = YouTubePublicStatsSyncService(session).sync_uploaded_video(
+                uploaded_video_id=uploaded_video_id
+            )
             typer.echo(json.dumps(_youtube_public_sync_run_to_dict(run)))
     except Exception as exc:
         _fail(f"youtube public-sync failed: {exc}")
+
 
 @youtube_app.command("owner-sync")
 def youtube_owner_sync(
@@ -2156,23 +2371,32 @@ def youtube_owner_sync(
     except Exception as exc:
         _fail(f"youtube owner-sync failed: {exc}")
 
+
 @youtube_app.command("follow-summary")
-def youtube_follow_summary(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def youtube_follow_summary(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            summary = UploadedVideoYouTubeFollowReadService(session).get_summary(uploaded_video_id)
+            summary = UploadedVideoYouTubeFollowReadService(session).get_summary(
+                uploaded_video_id
+            )
             typer.echo(json.dumps(summary.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"youtube follow-summary failed: {exc}")
+
 
 @drive_app.command("connection-status")
 def drive_connection_status() -> None:
     try:
         with session_scope() as session:
-            status_read = GoogleDriveCredentialHealthService(session).connection_status()
+            status_read = GoogleDriveCredentialHealthService(
+                session
+            ).connection_status()
             typer.echo(json.dumps(status_read.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"drive connection-status failed: {exc}")
+
 
 @drive_app.command("offload")
 def drive_offload(
@@ -2204,11 +2428,14 @@ def drive_offload(
             )
             executed = service.execute_job(
                 job_id=job.id,
-                data=MediaOffloadExecuteRequest(local_source_path=str(path), keep_local=keep_local),
+                data=MediaOffloadExecuteRequest(
+                    local_source_path=str(path), keep_local=keep_local
+                ),
             )
             typer.echo(json.dumps(_media_offload_job_to_dict(executed)))
     except Exception as exc:
         _fail(f"drive offload failed: {exc}")
+
 
 @drive_app.command("offload-job")
 def drive_offload_job(job_id: uuid.UUID = typer.Option(..., "--job-id")) -> None:
@@ -2219,17 +2446,23 @@ def drive_offload_job(job_id: uuid.UUID = typer.Option(..., "--job-id")) -> None
     except Exception as exc:
         _fail(f"drive offload-job failed: {exc}")
 
+
 @drive_app.command("cloud-ref")
 def drive_cloud_ref(cloud_media_ref_id: uuid.UUID = typer.Option(..., "--id")) -> None:
     try:
         with session_scope() as session:
-            payload = MediaCloudReadService(session).dashboard_payload(cloud_media_ref_id)
+            payload = MediaCloudReadService(session).dashboard_payload(
+                cloud_media_ref_id
+            )
             typer.echo(json.dumps(payload.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"drive cloud-ref failed: {exc}")
 
+
 @integrations_app.command("readiness")
-def integrations_readiness(run_snapshot: bool = typer.Option(False, "--run-snapshot")) -> None:
+def integrations_readiness(
+    run_snapshot: bool = typer.Option(False, "--run-snapshot"),
+) -> None:
     try:
         with session_scope() as session:
             service = ProviderReadinessService(session)
@@ -2252,10 +2485,13 @@ def integrations_provider_wiring() -> None:
 def integrations_smoke(provider: str = typer.Option(..., "--provider")) -> None:
     try:
         with session_scope() as session:
-            run = RealSmokeOrchestratorService(session).run_provider(provider, ProviderSmokeRequest())
+            run = RealSmokeOrchestratorService(session).run_provider(
+                provider, ProviderSmokeRequest()
+            )
             typer.echo(json.dumps(run.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"integrations smoke failed: {exc}")
+
 
 @package_app.command("first-video")
 def package_first_video(
@@ -2264,10 +2500,14 @@ def package_first_video(
     research_pack: Path | None = typer.Option(None, "--research-pack"),
     video_project_id: uuid.UUID | None = typer.Option(None, "--video-project-id"),
     no_media: bool = typer.Option(True, "--no-media/--allow-media"),
-    human_review_only: bool = typer.Option(True, "--human-review-only/--allow-non-review"),
+    human_review_only: bool = typer.Option(
+        True, "--human-review-only/--allow-non-review"
+    ),
 ) -> None:
     try:
-        research_pack_text = research_pack.read_text(encoding="utf-8") if research_pack else None
+        research_pack_text = (
+            research_pack.read_text(encoding="utf-8") if research_pack else None
+        )
         research_pack_ref = "operator_provided_research_pack" if research_pack else None
         with session_scope() as session:
             package = FirstScriptedVideoPackageService(session).create(
@@ -2297,9 +2537,13 @@ def package_rehearse_full(
     stop_at: str = typer.Option("video-generation", "--stop-at"),
 ) -> None:
     if stop_at != "video-generation":
-        _fail("package rehearse-full chỉ hỗ trợ --stop-at video-generation trong M12.2S")
+        _fail(
+            "package rehearse-full chỉ hỗ trợ --stop-at video-generation trong M12.2S"
+        )
     try:
-        research_pack_text = research_pack.read_text(encoding="utf-8") if research_pack else None
+        research_pack_text = (
+            research_pack.read_text(encoding="utf-8") if research_pack else None
+        )
         research_pack_ref = str(research_pack) if research_pack else None
         with session_scope() as session:
             package = FirstScriptedVideoPackageService(session).rehearse_full(
@@ -2326,7 +2570,9 @@ def package_rehearse_full_preflight(
 ) -> None:
     try:
         with session_scope() as session:
-            preflight = FirstScriptedVideoPackageService(session).preflight_full_rehearsal(
+            preflight = FirstScriptedVideoPackageService(
+                session
+            ).preflight_full_rehearsal(
                 channel_id=channel_id,
             )
             typer.echo(json.dumps(preflight.model_dump(mode="json")))
@@ -2335,23 +2581,17 @@ def package_rehearse_full_preflight(
 
 
 @upload_tasks_app.command("list")
-def upload_tasks_list(channel_id: uuid.UUID = typer.Option(..., "--channel-id")) -> None:
+def upload_tasks_list(
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+) -> None:
     try:
         with session_scope() as session:
-            payload = PublishHandoffLedgerService(session).list_upload_tasks(channel_id=channel_id)
+            payload = PublishHandoffLedgerService(session).list_upload_tasks(
+                channel_id=channel_id
+            )
             typer.echo(json.dumps(payload.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"upload-tasks list failed: {exc}")
-
-
-@upload_tasks_app.command("create")
-def upload_tasks_create(package_id: uuid.UUID = typer.Option(..., "--package-id")) -> None:
-    try:
-        with session_scope() as session:
-            task = PublishHandoffLedgerService(session).create_upload_task_from_package(package_id)
-            typer.echo(json.dumps(task.model_dump(mode="json")))
-    except Exception as exc:
-        _fail(f"upload-tasks create failed: {exc}")
 
 
 @upload_tasks_app.command("start")
@@ -2390,20 +2630,28 @@ def upload_tasks_backfill(
 
 
 @uploaded_videos_app.command("list")
-def uploaded_videos_list(channel_id: uuid.UUID = typer.Option(..., "--channel-id")) -> None:
+def uploaded_videos_list(
+    channel_id: uuid.UUID = typer.Option(..., "--channel-id"),
+) -> None:
     try:
         with session_scope() as session:
-            payload = PublishHandoffLedgerService(session).list_uploaded_videos(channel_id=channel_id)
+            payload = PublishHandoffLedgerService(session).list_uploaded_videos(
+                channel_id=channel_id
+            )
             typer.echo(json.dumps(payload.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"uploaded-videos list failed: {exc}")
 
 
 @uploaded_videos_app.command("verify")
-def uploaded_videos_verify(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def uploaded_videos_verify(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            payload = PublishHandoffLedgerService(session).verify_uploaded_video(uploaded_video_id)
+            payload = PublishHandoffLedgerService(session).verify_uploaded_video(
+                uploaded_video_id
+            )
             typer.echo(json.dumps(payload.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"uploaded-videos verify failed: {exc}")
@@ -2413,10 +2661,13 @@ def uploaded_videos_verify(uploaded_video_id: uuid.UUID = typer.Option(..., "--u
 def media_cleanup_local(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
     try:
         with session_scope() as session:
-            result = LocalMediaCleanupService(session).run_pending_cleanup(dry_run=dry_run)
+            result = LocalMediaCleanupService(session).run_pending_cleanup(
+                dry_run=dry_run
+            )
             typer.echo(json.dumps(result.model_dump(mode="json")))
     except Exception as exc:
         _fail(f"media cleanup-local failed: {exc}")
+
 
 @post_publish_app.command("health-create")
 def post_publish_health_create(
@@ -2426,23 +2677,34 @@ def post_publish_health_create(
     try:
         with session_scope() as session:
             run = PostPublishHealthMonitorService(session).create_health_run(
-                data=PostPublishHealthRunCreate(uploaded_video_id=uploaded_video_id, observation_window=observation_window)  # type: ignore[arg-type]
+                data=PostPublishHealthRunCreate(
+                    uploaded_video_id=uploaded_video_id,
+                    observation_window=observation_window,
+                )  # type: ignore[arg-type]
             )
             typer.echo(json.dumps(_post_publish_health_run_to_dict(run)))
     except Exception as exc:
         _fail(f"post-publish health-create failed: {exc}")
 
+
 @post_publish_app.command("health-execute")
-def post_publish_health_execute(run_id: uuid.UUID = typer.Option(..., "--run-id")) -> None:
+def post_publish_health_execute(
+    run_id: uuid.UUID = typer.Option(..., "--run-id"),
+) -> None:
     try:
         with session_scope() as session:
-            run = PostPublishHealthMonitorService(session).execute_health_run(run_id=run_id)
+            run = PostPublishHealthMonitorService(session).execute_health_run(
+                run_id=run_id
+            )
             typer.echo(json.dumps(_post_publish_health_run_to_dict(run)))
     except Exception as exc:
         _fail(f"post-publish health-execute failed: {exc}")
 
+
 @post_publish_app.command("health-inspect")
-def post_publish_health_inspect(run_id: uuid.UUID = typer.Option(..., "--run-id")) -> None:
+def post_publish_health_inspect(
+    run_id: uuid.UUID = typer.Option(..., "--run-id"),
+) -> None:
     try:
         with session_scope() as session:
             run = PostPublishHealthMonitorService(session).require_health_run(run_id)
@@ -2450,50 +2712,84 @@ def post_publish_health_inspect(run_id: uuid.UUID = typer.Option(..., "--run-id"
     except Exception as exc:
         _fail(f"post-publish health-inspect failed: {exc}")
 
+
 @post_publish_app.command("reports-by-video")
-def post_publish_reports_by_video(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def post_publish_reports_by_video(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            reports = PostPublishHealthMonitorService(session).list_failure_trace_reports_by_uploaded_video(uploaded_video_id)
-            typer.echo(json.dumps([_failure_trace_report_to_dict(report) for report in reports]))
+            reports = PostPublishHealthMonitorService(
+                session
+            ).list_failure_trace_reports_by_uploaded_video(uploaded_video_id)
+            typer.echo(
+                json.dumps(
+                    [_failure_trace_report_to_dict(report) for report in reports]
+                )
+            )
     except Exception as exc:
         _fail(f"post-publish reports-by-video failed: {exc}")
 
+
 @post_publish_app.command("report-inspect")
-def post_publish_report_inspect(report_id: uuid.UUID = typer.Option(..., "--report-id")) -> None:
+def post_publish_report_inspect(
+    report_id: uuid.UUID = typer.Option(..., "--report-id"),
+) -> None:
     try:
         with session_scope() as session:
-            report = PostPublishHealthMonitorService(session).require_failure_trace_report(report_id)
+            report = PostPublishHealthMonitorService(
+                session
+            ).require_failure_trace_report(report_id)
             typer.echo(json.dumps(_failure_trace_report_to_dict(report)))
     except Exception as exc:
         _fail(f"post-publish report-inspect failed: {exc}")
 
+
 @post_publish_app.command("proposals-by-video")
-def post_publish_proposals_by_video(uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id")) -> None:
+def post_publish_proposals_by_video(
+    uploaded_video_id: uuid.UUID = typer.Option(..., "--uploaded-video-id"),
+) -> None:
     try:
         with session_scope() as session:
-            proposals = PostPublishHealthMonitorService(session).list_recovery_proposals_by_uploaded_video(uploaded_video_id)
-            typer.echo(json.dumps([_recovery_proposal_to_dict(proposal) for proposal in proposals]))
+            proposals = PostPublishHealthMonitorService(
+                session
+            ).list_recovery_proposals_by_uploaded_video(uploaded_video_id)
+            typer.echo(
+                json.dumps(
+                    [_recovery_proposal_to_dict(proposal) for proposal in proposals]
+                )
+            )
     except Exception as exc:
         _fail(f"post-publish proposals-by-video failed: {exc}")
 
+
 @post_publish_app.command("proposal-accept")
-def post_publish_proposal_accept(proposal_id: uuid.UUID = typer.Option(..., "--proposal-id")) -> None:
+def post_publish_proposal_accept(
+    proposal_id: uuid.UUID = typer.Option(..., "--proposal-id"),
+) -> None:
     try:
         with session_scope() as session:
-            proposal = PostPublishHealthMonitorService(session).accept_recovery_proposal(proposal_id=proposal_id)
+            proposal = PostPublishHealthMonitorService(
+                session
+            ).accept_recovery_proposal(proposal_id=proposal_id)
             typer.echo(json.dumps(_recovery_proposal_to_dict(proposal)))
     except Exception as exc:
         _fail(f"post-publish proposal-accept failed: {exc}")
 
+
 @post_publish_app.command("proposal-reject")
-def post_publish_proposal_reject(proposal_id: uuid.UUID = typer.Option(..., "--proposal-id")) -> None:
+def post_publish_proposal_reject(
+    proposal_id: uuid.UUID = typer.Option(..., "--proposal-id"),
+) -> None:
     try:
         with session_scope() as session:
-            proposal = PostPublishHealthMonitorService(session).reject_recovery_proposal(proposal_id=proposal_id)
+            proposal = PostPublishHealthMonitorService(
+                session
+            ).reject_recovery_proposal(proposal_id=proposal_id)
             typer.echo(json.dumps(_recovery_proposal_to_dict(proposal)))
     except Exception as exc:
         _fail(f"post-publish proposal-reject failed: {exc}")
+
 
 @audit_app.command("tail")
 def audit_tail(
@@ -2503,7 +2799,11 @@ def audit_tail(
     try:
         with session_scope() as session:
             events = AuditService(session).tail(limit=limit, company_id=company_id)
-            typer.echo(json.dumps([_audit_event_to_dict(event) for event in events], default=str))
+            typer.echo(
+                json.dumps(
+                    [_audit_event_to_dict(event) for event in events], default=str
+                )
+            )
     except Exception as exc:
         _fail(f"audit tail failed: {exc}")
 
@@ -2532,10 +2832,18 @@ def _gate_run_to_dict(gate_run: Any) -> dict[str, Any]:
         "gate_key": gate_run.gate_key,
         "target_type": gate_run.target_type,
         "target_id": str(gate_run.target_id),
-        "video_project_id": str(gate_run.video_project_id) if gate_run.video_project_id else None,
-        "artifact_version_id": str(gate_run.artifact_version_id) if gate_run.artifact_version_id else None,
-        "review_task_id": str(gate_run.review_task_id) if gate_run.review_task_id else None,
-        "policy_snapshot_id": str(gate_run.policy_snapshot_id) if gate_run.policy_snapshot_id else None,
+        "video_project_id": str(gate_run.video_project_id)
+        if gate_run.video_project_id
+        else None,
+        "artifact_version_id": str(gate_run.artifact_version_id)
+        if gate_run.artifact_version_id
+        else None,
+        "review_task_id": str(gate_run.review_task_id)
+        if gate_run.review_task_id
+        else None,
+        "policy_snapshot_id": str(gate_run.policy_snapshot_id)
+        if gate_run.policy_snapshot_id
+        else None,
         "input_snapshot_hash": gate_run.input_snapshot_hash,
         "result": gate_run.result,
         "reason_codes": gate_run.reason_codes,
@@ -2545,9 +2853,12 @@ def _gate_run_to_dict(gate_run: Any) -> dict[str, Any]:
         "confidence_level": gate_run.confidence_level,
         "confidence_reason_codes": gate_run.confidence_reason_codes,
         "decision_basis": gate_run.decision_basis,
-        "created_review_task_id": str(gate_run.created_review_task_id) if gate_run.created_review_task_id else None,
+        "created_review_task_id": str(gate_run.created_review_task_id)
+        if gate_run.created_review_task_id
+        else None,
         "created_at": gate_run.created_at.isoformat(),
     }
+
 
 def _provider_to_dict(entry: Any) -> dict[str, Any]:
     return {
@@ -2558,6 +2869,7 @@ def _provider_to_dict(entry: Any) -> dict[str, Any]:
         "status": entry.status,
     }
 
+
 def _provider_health_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
         "id": str(snapshot.id),
@@ -2567,6 +2879,7 @@ def _provider_health_to_dict(snapshot: Any) -> dict[str, Any]:
         "next_action": snapshot.next_action,
         "checked_at": snapshot.checked_at.isoformat(),
     }
+
 
 def _provider_attempt_to_dict(attempt: Any) -> dict[str, Any]:
     return {
@@ -2579,6 +2892,7 @@ def _provider_attempt_to_dict(attempt: Any) -> dict[str, Any]:
         "error_message_redacted": attempt.error_message_redacted,
     }
 
+
 def _credential_to_dict(reference: Any) -> dict[str, Any]:
     return {
         "id": str(reference.id),
@@ -2588,6 +2902,7 @@ def _credential_to_dict(reference: Any) -> dict[str, Any]:
         "secret_ref": reference.secret_ref,
         "status": reference.status,
     }
+
 
 def _credential_health_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
@@ -2599,27 +2914,34 @@ def _credential_health_to_dict(snapshot: Any) -> dict[str, Any]:
         "next_action": snapshot.next_action,
     }
 
+
 def _quota_account_to_dict(account: Any) -> dict[str, Any]:
     return {
         "id": str(account.id),
         "provider_key": account.provider_key,
-        "quota_limit": str(account.quota_limit) if account.quota_limit is not None else None,
+        "quota_limit": str(account.quota_limit)
+        if account.quota_limit is not None
+        else None,
         "quota_used": str(account.quota_used),
         "quota_reserved": str(account.quota_reserved),
         "unit": account.unit,
         "status": account.status,
     }
 
+
 def _quota_event_to_dict(event: Any) -> dict[str, Any]:
     return {
         "id": str(event.id),
-        "quota_account_id": str(event.quota_account_id) if event.quota_account_id else None,
+        "quota_account_id": str(event.quota_account_id)
+        if event.quota_account_id
+        else None,
         "provider_key": event.provider_key,
         "event_type": event.event_type,
         "amount": str(event.amount),
         "unit": event.unit,
         "reason_code": event.reason_code,
     }
+
 
 def _cost_event_to_dict(event: Any) -> dict[str, Any]:
     return {
@@ -2630,6 +2952,7 @@ def _cost_event_to_dict(event: Any) -> dict[str, Any]:
         "currency": event.currency,
         "cost_type": event.cost_type,
     }
+
 
 def _dead_letter_to_dict(job: Any) -> dict[str, Any]:
     return {
@@ -2642,6 +2965,7 @@ def _dead_letter_to_dict(job: Any) -> dict[str, Any]:
         "next_action": job.next_action,
     }
 
+
 def _incident_to_dict(incident: Any) -> dict[str, Any]:
     return {
         "id": str(incident.id),
@@ -2651,6 +2975,7 @@ def _incident_to_dict(incident: Any) -> dict[str, Any]:
         "reason_codes": incident.reason_codes,
         "next_action": incident.next_action,
     }
+
 
 def _manual_action_to_dict(action: Any) -> dict[str, Any]:
     return {
@@ -2663,6 +2988,7 @@ def _manual_action_to_dict(action: Any) -> dict[str, Any]:
         "next_action": action.next_action,
     }
 
+
 def _system_health_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
         "id": str(snapshot.id),
@@ -2673,6 +2999,7 @@ def _system_health_to_dict(snapshot: Any) -> dict[str, Any]:
         "reason_codes": snapshot.reason_codes,
         "next_action": snapshot.next_action,
     }
+
 
 def _editorial_slot_to_dict(slot: Any) -> dict[str, Any]:
     return {
@@ -2685,6 +3012,7 @@ def _editorial_slot_to_dict(slot: Any) -> dict[str, Any]:
         "status": slot.status,
     }
 
+
 def _search_evidence_to_dict(evidence: Any) -> dict[str, Any]:
     return {
         "id": str(evidence.id),
@@ -2695,16 +3023,22 @@ def _search_evidence_to_dict(evidence: Any) -> dict[str, Any]:
         "evidence_confidence": evidence.evidence_confidence,
     }
 
+
 def _retrieval_plan_to_dict(plan: Any) -> dict[str, Any]:
     return {
         "id": str(plan.id),
         "purpose": plan.purpose,
         "company_id": str(plan.company_id),
-        "channel_workspace_id": str(plan.channel_workspace_id) if plan.channel_workspace_id else None,
-        "policy_snapshot_id": str(plan.policy_snapshot_id) if plan.policy_snapshot_id else None,
+        "channel_workspace_id": str(plan.channel_workspace_id)
+        if plan.channel_workspace_id
+        else None,
+        "policy_snapshot_id": str(plan.policy_snapshot_id)
+        if plan.policy_snapshot_id
+        else None,
         "allowed_sources": plan.allowed_sources,
         "plan_hash": plan.plan_hash,
     }
+
 
 def _context_pack_to_dict(pack: Any) -> dict[str, Any]:
     return {
@@ -2718,57 +3052,33 @@ def _context_pack_to_dict(pack: Any) -> dict[str, Any]:
         "metric_refs": pack.metric_refs,
     }
 
+
 def _channel_state_pack_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
         "id": str(snapshot.id),
-        "channel_daily_run_id": str(snapshot.channel_daily_run_id) if snapshot.channel_daily_run_id else None,
+        "editorial_research_run_id": (
+            str(snapshot.editorial_research_run_id)
+            if snapshot.editorial_research_run_id
+            else None
+        ),
         "state_hash": snapshot.state_hash,
         "freshness_state": snapshot.freshness_state,
         "confidence_level": snapshot.confidence_level,
         "evidence_summary": snapshot.evidence_summary,
     }
 
-def _daily_run_to_dict(daily_run: Any) -> dict[str, Any]:
-    return {
-        "id": str(daily_run.id),
-        "status": daily_run.status,
-        "run_mode": daily_run.run_mode,
-        "run_date": daily_run.run_date.isoformat(),
-        "context_pack_snapshot_id": str(daily_run.context_pack_snapshot_id) if daily_run.context_pack_snapshot_id else None,
-        "channel_state_pack_snapshot_id": str(daily_run.channel_state_pack_snapshot_id) if daily_run.channel_state_pack_snapshot_id else None,
-        "daily_idea_decision_id": str(daily_run.daily_idea_decision_id) if daily_run.daily_idea_decision_id else None,
-        "project_admission_decision_id": str(daily_run.project_admission_decision_id) if daily_run.project_admission_decision_id else None,
-        "reason_codes": daily_run.reason_codes,
-    }
-
-def _daily_idea_to_dict(decision: Any) -> dict[str, Any]:
-    return {
-        "id": str(decision.id),
-        "channel_daily_run_id": str(decision.channel_daily_run_id),
-        "llm_run_snapshot_id": str(decision.llm_run_snapshot_id) if decision.llm_run_snapshot_id else None,
-        "decision_status": decision.decision_status,
-        "proposed_title": decision.proposed_title,
-        "confidence_level": decision.confidence_level,
-        "reason_codes": decision.reason_codes,
-    }
-
-def _idea_preflight_to_dict(preflight: Any) -> dict[str, Any]:
-    return {
-        "id": str(preflight.id),
-        "decision": preflight.decision,
-        "demand_score": str(preflight.demand_score) if preflight.demand_score is not None else None,
-        "confidence_state": preflight.confidence_state,
-        "reason_codes": preflight.reason_codes,
-    }
 
 def _project_admission_to_dict(decision: Any) -> dict[str, Any]:
     return {
         "id": str(decision.id),
         "decision": decision.decision,
         "reason_codes": decision.reason_codes,
-        "admitted_video_project_id": str(decision.admitted_video_project_id) if decision.admitted_video_project_id else None,
+        "admitted_video_project_id": str(decision.admitted_video_project_id)
+        if decision.admitted_video_project_id
+        else None,
         "created_artifact_refs": decision.created_artifact_refs,
     }
+
 
 def _production_run_to_dict(run: Any) -> dict[str, Any]:
     return {
@@ -2777,24 +3087,49 @@ def _production_run_to_dict(run: Any) -> dict[str, Any]:
         "policy_snapshot_id": str(run.policy_snapshot_id),
         "run_mode": run.run_mode,
         "status": run.status,
-        "script_artifact_version_id": str(run.script_artifact_version_id) if run.script_artifact_version_id else None,
-        "voice_timeline_snapshot_id": str(run.voice_timeline_snapshot_id) if run.voice_timeline_snapshot_id else None,
-        "caption_track_snapshot_id": str(run.caption_track_snapshot_id) if run.caption_track_snapshot_id else None,
-        "visual_plan_snapshot_id": str(run.visual_plan_snapshot_id) if run.visual_plan_snapshot_id else None,
-        "scene_manifest_snapshot_id": str(run.scene_manifest_snapshot_id) if run.scene_manifest_snapshot_id else None,
-        "render_spec_snapshot_id": str(run.render_spec_snapshot_id) if run.render_spec_snapshot_id else None,
-        "asset_manifest_snapshot_id": str(run.asset_manifest_snapshot_id) if run.asset_manifest_snapshot_id else None,
-        "source_manifest_snapshot_id": str(run.source_manifest_snapshot_id) if run.source_manifest_snapshot_id else None,
-        "render_package_snapshot_id": str(run.render_package_snapshot_id) if run.render_package_snapshot_id else None,
-        "media_qc_report_id": str(run.media_qc_report_id) if run.media_qc_report_id else None,
-        "accessibility_qc_report_id": str(run.accessibility_qc_report_id) if run.accessibility_qc_report_id else None,
+        "script_artifact_version_id": str(run.script_artifact_version_id)
+        if run.script_artifact_version_id
+        else None,
+        "voice_timeline_snapshot_id": str(run.voice_timeline_snapshot_id)
+        if run.voice_timeline_snapshot_id
+        else None,
+        "caption_track_snapshot_id": str(run.caption_track_snapshot_id)
+        if run.caption_track_snapshot_id
+        else None,
+        "visual_plan_snapshot_id": str(run.visual_plan_snapshot_id)
+        if run.visual_plan_snapshot_id
+        else None,
+        "scene_manifest_snapshot_id": str(run.scene_manifest_snapshot_id)
+        if run.scene_manifest_snapshot_id
+        else None,
+        "render_spec_snapshot_id": str(run.render_spec_snapshot_id)
+        if run.render_spec_snapshot_id
+        else None,
+        "asset_manifest_snapshot_id": str(run.asset_manifest_snapshot_id)
+        if run.asset_manifest_snapshot_id
+        else None,
+        "source_manifest_snapshot_id": str(run.source_manifest_snapshot_id)
+        if run.source_manifest_snapshot_id
+        else None,
+        "render_package_snapshot_id": str(run.render_package_snapshot_id)
+        if run.render_package_snapshot_id
+        else None,
+        "media_qc_report_id": str(run.media_qc_report_id)
+        if run.media_qc_report_id
+        else None,
+        "accessibility_qc_report_id": str(run.accessibility_qc_report_id)
+        if run.accessibility_qc_report_id
+        else None,
         "reason_codes": run.reason_codes,
     }
+
 
 def _render_job_to_dict(job: Any) -> dict[str, Any]:
     return {
         "id": str(job.id),
-        "production_artifact_run_id": str(job.production_artifact_run_id) if job.production_artifact_run_id else None,
+        "production_artifact_run_id": str(job.production_artifact_run_id)
+        if job.production_artifact_run_id
+        else None,
         "render_spec_snapshot_id": str(job.render_spec_snapshot_id),
         "renderer_key": job.renderer_key,
         "status": job.status,
@@ -2804,19 +3139,25 @@ def _render_job_to_dict(job: Any) -> dict[str, Any]:
         "reason_codes": job.reason_codes,
     }
 
+
 def _render_package_to_dict(package: Any) -> dict[str, Any]:
     return {
         "id": str(package.id),
-        "production_artifact_run_id": str(package.production_artifact_run_id) if package.production_artifact_run_id else None,
+        "production_artifact_run_id": str(package.production_artifact_run_id)
+        if package.production_artifact_run_id
+        else None,
         "render_spec_snapshot_id": str(package.render_spec_snapshot_id),
         "media_render_job_id": str(package.media_render_job_id),
         "final_video_ref": package.final_video_ref,
         "caption_ref": package.caption_ref,
         "manifest_ref": package.manifest_ref,
         "checksum_manifest": package.checksum_manifest,
-        "duration_seconds": str(package.duration_seconds) if package.duration_seconds is not None else None,
+        "duration_seconds": str(package.duration_seconds)
+        if package.duration_seconds is not None
+        else None,
         "package_state": package.package_state,
     }
+
 
 def _media_qc_to_dict(report: Any) -> dict[str, Any]:
     return {
@@ -2828,17 +3169,28 @@ def _media_qc_to_dict(report: Any) -> dict[str, Any]:
         "manifest_check": report.manifest_check,
     }
 
+
 def _publish_handoff_to_dict(handoff: Any) -> dict[str, Any]:
     return {
         "id": str(handoff.id),
         "video_project_id": str(handoff.video_project_id),
         "policy_snapshot_id": str(handoff.policy_snapshot_id),
         "render_package_snapshot_id": str(handoff.render_package_snapshot_id),
-        "render_spec_snapshot_id": str(handoff.render_spec_snapshot_id) if handoff.render_spec_snapshot_id else None,
-        "media_qc_report_id": str(handoff.media_qc_report_id) if handoff.media_qc_report_id else None,
-        "accessibility_qc_report_id": str(handoff.accessibility_qc_report_id) if handoff.accessibility_qc_report_id else None,
-        "source_manifest_snapshot_id": str(handoff.source_manifest_snapshot_id) if handoff.source_manifest_snapshot_id else None,
-        "asset_manifest_snapshot_id": str(handoff.asset_manifest_snapshot_id) if handoff.asset_manifest_snapshot_id else None,
+        "render_spec_snapshot_id": str(handoff.render_spec_snapshot_id)
+        if handoff.render_spec_snapshot_id
+        else None,
+        "media_qc_report_id": str(handoff.media_qc_report_id)
+        if handoff.media_qc_report_id
+        else None,
+        "accessibility_qc_report_id": str(handoff.accessibility_qc_report_id)
+        if handoff.accessibility_qc_report_id
+        else None,
+        "source_manifest_snapshot_id": str(handoff.source_manifest_snapshot_id)
+        if handoff.source_manifest_snapshot_id
+        else None,
+        "asset_manifest_snapshot_id": str(handoff.asset_manifest_snapshot_id)
+        if handoff.asset_manifest_snapshot_id
+        else None,
         "target_platform": handoff.target_platform,
         "target_surface": handoff.target_surface,
         "package_state": handoff.package_state,
@@ -2853,6 +3205,7 @@ def _publish_handoff_to_dict(handoff: Any) -> dict[str, Any]:
         "next_action": handoff.next_action,
     }
 
+
 def _manual_publish_confirmation_to_dict(confirmation: Any) -> dict[str, Any]:
     return {
         "id": str(confirmation.id),
@@ -2864,7 +3217,9 @@ def _manual_publish_confirmation_to_dict(confirmation: Any) -> dict[str, Any]:
         "confirmation_state": confirmation.confirmation_state,
         "actual_video_id": confirmation.actual_video_id,
         "actual_video_url": confirmation.actual_video_url,
-        "actual_published_at": confirmation.actual_published_at.isoformat() if confirmation.actual_published_at else None,
+        "actual_published_at": confirmation.actual_published_at.isoformat()
+        if confirmation.actual_published_at
+        else None,
         "actual_metadata": confirmation.actual_metadata,
         "actual_disclosures": confirmation.actual_disclosures,
         "actual_files": confirmation.actual_files,
@@ -2874,6 +3229,7 @@ def _manual_publish_confirmation_to_dict(confirmation: Any) -> dict[str, Any]:
         "next_action": confirmation.next_action,
     }
 
+
 def _uploaded_video_to_dict(uploaded: Any) -> dict[str, Any]:
     return {
         "id": str(uploaded.id),
@@ -2882,7 +3238,9 @@ def _uploaded_video_to_dict(uploaded: Any) -> dict[str, Any]:
         "publish_handoff_package_id": str(uploaded.publish_handoff_package_id),
         "manual_publish_confirmation_id": str(uploaded.manual_publish_confirmation_id),
         "render_package_snapshot_id": str(uploaded.render_package_snapshot_id),
-        "source_manifest_snapshot_id": str(uploaded.source_manifest_snapshot_id) if uploaded.source_manifest_snapshot_id else None,
+        "source_manifest_snapshot_id": str(uploaded.source_manifest_snapshot_id)
+        if uploaded.source_manifest_snapshot_id
+        else None,
         "rights_envelope_ref": uploaded.rights_envelope_ref,
         "platform": uploaded.platform,
         "platform_video_id": uploaded.platform_video_id,
@@ -2895,6 +3253,7 @@ def _uploaded_video_to_dict(uploaded: Any) -> dict[str, Any]:
         "monitoring_state": uploaded.monitoring_state,
         "operator_summary": uploaded.operator_summary,
     }
+
 
 def _uploaded_video_summary_to_dict(summary: Any) -> dict[str, Any]:
     return {
@@ -2914,6 +3273,7 @@ def _uploaded_video_summary_to_dict(summary: Any) -> dict[str, Any]:
         "freshness_state": summary.freshness_state,
     }
 
+
 def _analytics_sync_run_to_dict(run: Any) -> dict[str, Any]:
     return {
         "id": str(run.id),
@@ -2931,14 +3291,19 @@ def _analytics_sync_run_to_dict(run: Any) -> dict[str, Any]:
         "observed_from": run.observed_from.isoformat() if run.observed_from else None,
         "observed_to": run.observed_to.isoformat() if run.observed_to else None,
         "provider_key": run.provider_key,
-        "provider_attempt_id": str(run.provider_attempt_id) if run.provider_attempt_id else None,
-        "analytics_snapshot_id": str(run.analytics_snapshot_id) if run.analytics_snapshot_id else None,
+        "provider_attempt_id": str(run.provider_attempt_id)
+        if run.provider_attempt_id
+        else None,
+        "analytics_snapshot_id": str(run.analytics_snapshot_id)
+        if run.analytics_snapshot_id
+        else None,
         "reason_codes": run.reason_codes,
         "next_action": run.next_action,
         "metadata": run.metadata_,
         "created_at": run.created_at.isoformat(),
         "updated_at": run.updated_at.isoformat(),
     }
+
 
 def _analytics_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
@@ -2952,8 +3317,12 @@ def _analytics_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
         "platform": snapshot.platform,
         "platform_video_id": snapshot.platform_video_id,
         "captured_at": snapshot.captured_at.isoformat(),
-        "observed_from": snapshot.observed_from.isoformat() if snapshot.observed_from else None,
-        "observed_to": snapshot.observed_to.isoformat() if snapshot.observed_to else None,
+        "observed_from": snapshot.observed_from.isoformat()
+        if snapshot.observed_from
+        else None,
+        "observed_to": snapshot.observed_to.isoformat()
+        if snapshot.observed_to
+        else None,
         "observation_window": snapshot.observation_window,
         "metrics_blob": snapshot.metrics_blob,
         "normalized_metrics_blob": snapshot.normalized_metrics_blob,
@@ -2964,6 +3333,7 @@ def _analytics_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
         "reason_codes": snapshot.reason_codes,
         "created_at": snapshot.created_at.isoformat(),
     }
+
 
 def _traffic_source_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
@@ -2980,13 +3350,16 @@ def _traffic_source_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
         "created_at": snapshot.created_at.isoformat(),
     }
 
+
 def _retention_curve_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
         "id": str(snapshot.id),
         "analytics_snapshot_id": str(snapshot.analytics_snapshot_id),
         "uploaded_video_id": str(snapshot.uploaded_video_id),
         "video_project_id": str(snapshot.video_project_id),
-        "render_package_snapshot_id": str(snapshot.render_package_snapshot_id) if snapshot.render_package_snapshot_id else None,
+        "render_package_snapshot_id": str(snapshot.render_package_snapshot_id)
+        if snapshot.render_package_snapshot_id
+        else None,
         "platform": snapshot.platform,
         "platform_video_id": snapshot.platform_video_id,
         "captured_at": snapshot.captured_at.isoformat(),
@@ -2999,6 +3372,7 @@ def _retention_curve_snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
         "created_at": snapshot.created_at.isoformat(),
     }
 
+
 def _uploaded_video_metrics_summary_to_dict(summary: Any) -> dict[str, Any]:
     return {
         "id": str(summary.id),
@@ -3008,11 +3382,25 @@ def _uploaded_video_metrics_summary_to_dict(summary: Any) -> dict[str, Any]:
         "video_project_id": str(summary.video_project_id),
         "platform": summary.platform,
         "platform_video_id": summary.platform_video_id,
-        "latest_analytics_snapshot_id": str(summary.latest_analytics_snapshot_id) if summary.latest_analytics_snapshot_id else None,
-        "latest_retention_curve_snapshot_id": str(summary.latest_retention_curve_snapshot_id) if summary.latest_retention_curve_snapshot_id else None,
-        "latest_traffic_source_snapshot_id": str(summary.latest_traffic_source_snapshot_id) if summary.latest_traffic_source_snapshot_id else None,
-        "latest_engagement_snapshot_id": str(summary.latest_engagement_snapshot_id) if summary.latest_engagement_snapshot_id else None,
-        "latest_captured_at": summary.latest_captured_at.isoformat() if summary.latest_captured_at else None,
+        "latest_analytics_snapshot_id": str(summary.latest_analytics_snapshot_id)
+        if summary.latest_analytics_snapshot_id
+        else None,
+        "latest_retention_curve_snapshot_id": str(
+            summary.latest_retention_curve_snapshot_id
+        )
+        if summary.latest_retention_curve_snapshot_id
+        else None,
+        "latest_traffic_source_snapshot_id": str(
+            summary.latest_traffic_source_snapshot_id
+        )
+        if summary.latest_traffic_source_snapshot_id
+        else None,
+        "latest_engagement_snapshot_id": str(summary.latest_engagement_snapshot_id)
+        if summary.latest_engagement_snapshot_id
+        else None,
+        "latest_captured_at": summary.latest_captured_at.isoformat()
+        if summary.latest_captured_at
+        else None,
         "metrics_summary": summary.metrics_summary,
         "availability_summary": summary.availability_summary,
         "freshness_state": summary.freshness_state,
@@ -3024,12 +3412,15 @@ def _uploaded_video_metrics_summary_to_dict(summary: Any) -> dict[str, Any]:
         "updated_at": summary.updated_at.isoformat(),
     }
 
+
 def _youtube_public_sync_run_to_dict(run: Any) -> dict[str, Any]:
     return {
         "id": str(run.id),
         "uploaded_video_id": str(run.uploaded_video_id),
         "company_id": str(run.company_id),
-        "channel_workspace_id": str(run.channel_workspace_id) if run.channel_workspace_id else None,
+        "channel_workspace_id": str(run.channel_workspace_id)
+        if run.channel_workspace_id
+        else None,
         "platform_video_id": run.platform_video_id,
         "run_state": run.run_state,
         "source": run.source,
@@ -3039,19 +3430,26 @@ def _youtube_public_sync_run_to_dict(run: Any) -> dict[str, Any]:
         "error_code": run.error_code,
         "error_message": run.error_message,
         "metrics_found": run.metrics_found,
-        "created_snapshot_id": str(run.created_snapshot_id) if run.created_snapshot_id else None,
+        "created_snapshot_id": str(run.created_snapshot_id)
+        if run.created_snapshot_id
+        else None,
         "created_at": run.created_at.isoformat(),
         "updated_at": run.updated_at.isoformat(),
     }
+
 
 def _youtube_owner_sync_run_to_dict(run: Any) -> dict[str, Any]:
     return {
         "id": str(run.id),
         "uploaded_video_id": str(run.uploaded_video_id),
         "company_id": str(run.company_id),
-        "channel_workspace_id": str(run.channel_workspace_id) if run.channel_workspace_id else None,
+        "channel_workspace_id": str(run.channel_workspace_id)
+        if run.channel_workspace_id
+        else None,
         "platform_video_id": run.platform_video_id,
-        "credential_reference_id": str(run.credential_reference_id) if run.credential_reference_id else None,
+        "credential_reference_id": str(run.credential_reference_id)
+        if run.credential_reference_id
+        else None,
         "run_state": run.run_state,
         "source": run.source,
         "start_date": run.start_date.isoformat(),
@@ -3062,26 +3460,39 @@ def _youtube_owner_sync_run_to_dict(run: Any) -> dict[str, Any]:
         "error_code": run.error_code,
         "error_message": run.error_message,
         "metrics_found": run.metrics_found,
-        "created_snapshot_id": str(run.created_snapshot_id) if run.created_snapshot_id else None,
+        "created_snapshot_id": str(run.created_snapshot_id)
+        if run.created_snapshot_id
+        else None,
         "created_at": run.created_at.isoformat(),
         "updated_at": run.updated_at.isoformat(),
     }
+
 
 def _media_offload_job_to_dict(job: Any) -> dict[str, Any]:
     return {
         "id": str(job.id),
         "company_id": str(job.company_id) if job.company_id else None,
-        "channel_workspace_id": str(job.channel_workspace_id) if job.channel_workspace_id else None,
+        "channel_workspace_id": str(job.channel_workspace_id)
+        if job.channel_workspace_id
+        else None,
         "video_project_id": str(job.video_project_id) if job.video_project_id else None,
-        "uploaded_video_id": str(job.uploaded_video_id) if job.uploaded_video_id else None,
-        "source_media_ref_id": str(job.source_media_ref_id) if job.source_media_ref_id else None,
-        "render_package_id": str(job.render_package_id) if job.render_package_id else None,
+        "uploaded_video_id": str(job.uploaded_video_id)
+        if job.uploaded_video_id
+        else None,
+        "source_media_ref_id": str(job.source_media_ref_id)
+        if job.source_media_ref_id
+        else None,
+        "render_package_id": str(job.render_package_id)
+        if job.render_package_id
+        else None,
         "local_source_path_hash": job.local_source_path_hash,
         "target_provider": job.target_provider,
         "target_folder_policy": job.target_folder_policy,
         "target_media_type": job.target_media_type,
         "job_state": job.job_state,
-        "cloud_media_ref_id": str(job.cloud_media_ref_id) if job.cloud_media_ref_id else None,
+        "cloud_media_ref_id": str(job.cloud_media_ref_id)
+        if job.cloud_media_ref_id
+        else None,
         "retry_count": job.retry_count,
         "error_code": job.error_code,
         "error_message": job.error_message,
@@ -3090,6 +3501,7 @@ def _media_offload_job_to_dict(job: Any) -> dict[str, Any]:
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
     }
+
 
 def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:
     return {
@@ -3102,11 +3514,21 @@ def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:
         "platform": run.platform,
         "platform_video_id": run.platform_video_id,
         "observation_window": run.observation_window,
-        "analytics_snapshot_id": str(run.analytics_snapshot_id) if run.analytics_snapshot_id else None,
-        "uploaded_video_metrics_summary_id": str(run.uploaded_video_metrics_summary_id) if run.uploaded_video_metrics_summary_id else None,
-        "retention_curve_snapshot_id": str(run.retention_curve_snapshot_id) if run.retention_curve_snapshot_id else None,
-        "traffic_source_snapshot_id": str(run.traffic_source_snapshot_id) if run.traffic_source_snapshot_id else None,
-        "engagement_snapshot_id": str(run.engagement_snapshot_id) if run.engagement_snapshot_id else None,
+        "analytics_snapshot_id": str(run.analytics_snapshot_id)
+        if run.analytics_snapshot_id
+        else None,
+        "uploaded_video_metrics_summary_id": str(run.uploaded_video_metrics_summary_id)
+        if run.uploaded_video_metrics_summary_id
+        else None,
+        "retention_curve_snapshot_id": str(run.retention_curve_snapshot_id)
+        if run.retention_curve_snapshot_id
+        else None,
+        "traffic_source_snapshot_id": str(run.traffic_source_snapshot_id)
+        if run.traffic_source_snapshot_id
+        else None,
+        "engagement_snapshot_id": str(run.engagement_snapshot_id)
+        if run.engagement_snapshot_id
+        else None,
         "run_state": run.run_state,
         "health_state": run.health_state,
         "severity": run.severity,
@@ -3119,6 +3541,7 @@ def _post_publish_health_run_to_dict(run: Any) -> dict[str, Any]:
         "technical_appendix": run.technical_appendix,
         "created_at": run.created_at.isoformat(),
     }
+
 
 def _failure_trace_report_to_dict(report: Any) -> dict[str, Any]:
     return {
@@ -3143,6 +3566,7 @@ def _failure_trace_report_to_dict(report: Any) -> dict[str, Any]:
         "created_at": report.created_at.isoformat(),
     }
 
+
 def _recovery_proposal_to_dict(proposal: Any) -> dict[str, Any]:
     return {
         "id": str(proposal.id),
@@ -3161,11 +3585,13 @@ def _recovery_proposal_to_dict(proposal: Any) -> dict[str, Any]:
         "updated_at": proposal.updated_at.isoformat(),
     }
 
+
 def _json_object(value: str) -> dict[str, Any]:
     parsed = json.loads(value)
     if not isinstance(parsed, dict):
         raise ValueError("expected JSON object")
     return parsed
+
 
 def _json_list(value: str) -> list[dict[str, Any]]:
     parsed = json.loads(value)
@@ -3173,14 +3599,19 @@ def _json_list(value: str) -> list[dict[str, Any]]:
         raise ValueError("expected JSON list")
     return parsed
 
+
 def _json_string_list(value: str) -> list[str]:
     parsed = json.loads(value)
-    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+    if not isinstance(parsed, list) or not all(
+        isinstance(item, str) for item in parsed
+    ):
         raise ValueError("expected JSON string list")
     return parsed
 
+
 def _optional_datetime(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
+
 
 def main() -> None:
     app()

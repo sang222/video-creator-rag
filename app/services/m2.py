@@ -17,7 +17,10 @@ from app.contracts.m2 import (
 from app.core.config import Settings, get_settings
 from app.core.time import utc_now
 from app.services.r3d3 import stable_hash
-from app.services.provider_stack import normalize_provider_key, provider_key_rejection_reasons
+from app.services.provider_stack import (
+    normalize_provider_key,
+    provider_key_rejection_reasons,
+)
 
 
 LOCKED_PROVIDERS = {
@@ -37,10 +40,14 @@ PAID_CAPABILITIES = {
     "TEMPLATE_RENDER",
     "CARD_RENDER",
     "THUMBNAIL_COMPOSITION",
-    "SHORT_RENDER",
 }
 
-PEXELS_ALLOWED_ROLES = ["background_visual", "short_broll", "thumbnail_background", "mood_support"]
+PEXELS_ALLOWED_ROLES = [
+    "background_visual",
+    "brief_broll",
+    "thumbnail_background",
+    "mood_support",
+]
 PEXELS_BLOCKED_ROLES = [
     "factual_evidence",
     "fake_testimonial",
@@ -67,14 +74,22 @@ class ProviderConfigRegistry:
 
     def configured_provider_by_role(self) -> dict[str, str | None]:
         return {
-            "VOICE_PROVIDER": _norm(self.settings.voice_provider) or LOCKED_PROVIDERS["VOICE_PROVIDER"],
-            "AI_VIDEO_HERO_PROVIDER": _norm(self.settings.ai_video_hero_provider) or LOCKED_PROVIDERS["AI_VIDEO_HERO_PROVIDER"],
-            "AI_IMAGE_GENERATION_PROVIDER": LOCKED_PROVIDERS["AI_IMAGE_GENERATION_PROVIDER"],
+            "VOICE_PROVIDER": _norm(self.settings.voice_provider)
+            or LOCKED_PROVIDERS["VOICE_PROVIDER"],
+            "AI_VIDEO_HERO_PROVIDER": _norm(self.settings.ai_video_hero_provider)
+            or LOCKED_PROVIDERS["AI_VIDEO_HERO_PROVIDER"],
+            "AI_IMAGE_GENERATION_PROVIDER": LOCKED_PROVIDERS[
+                "AI_IMAGE_GENERATION_PROVIDER"
+            ],
             "FINAL_ASSEMBLY_RENDERER": LOCKED_PROVIDERS["FINAL_ASSEMBLY_RENDERER"],
             "TEMPLATE_RENDERER": LOCKED_PROVIDERS["TEMPLATE_RENDERER"],
-            "FREE_VISUAL_FALLBACK_PROVIDER": _norm(self.settings.free_visual_fallback_provider)
+            "FREE_VISUAL_FALLBACK_PROVIDER": _norm(
+                self.settings.free_visual_fallback_provider
+            )
             or LOCKED_PROVIDERS["FREE_VISUAL_FALLBACK_PROVIDER"],
-            "GOOGLE_DRIVE_ARCHIVE": "google_drive" if self.settings.google_drive_archive_enabled else None,
+            "GOOGLE_DRIVE_ARCHIVE": "google_drive"
+            if self.settings.google_drive_archive_enabled
+            else None,
             "YOUTUBE": "read_only_verification_analytics",
         }
 
@@ -85,13 +100,55 @@ class ProviderConfigRegistry:
             provider_real_calls_enabled_by_default=False,
             no_provider_network_call_by_default=True,
             env_keys={
-                "elevenlabs": ["VOICE_PROVIDER", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL_ID"],
-                "google_veo": ["VCOS_AI_VIDEO_HERO_PROVIDER", "GEMINI_API_KEY", "VEO_MODEL_ID", "VEO_DEFAULT_DURATION_SECONDS", "VEO_DEFAULT_RESOLUTION", "VEO_DEFAULT_ASPECT_RATIO", "VEO_DEFAULT_OUTPUT_COUNT", "VCOS_VEO_REAL_GENERATION_ENABLED", "VCOS_PA1R_VEO_SMOKE_ENABLED"],
-                "google_gemini_image": ["GEMINI_API_KEY", "GEMINI_IMAGE_MODEL_ID", "GEMINI_IMAGE_DEFAULT_SIZE", "GEMINI_IMAGE_DEFAULT_ASPECT_RATIO", "GEMINI_IMAGE_MAX_OUTPUTS", "GEMINI_IMAGE_MAX_ATTEMPTS_PER_SCENE", "VCOS_GEMINI_IMAGE_PROVIDER_ROUTE_APPROVED", "VCOS_GEMINI_IMAGE_REAL_GENERATION_ENABLED", "VCOS_IMG1_FIXTURE_ONLY"],
-                "native_ffmpeg_renderer": ["VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED", "VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED"],
-                "pexels_api": ["FREE_VISUAL_FALLBACK_PROVIDER", "PEXELS_API_KEY", "PEXELS_ATTRIBUTION_REQUIRED", "PEXELS_MAX_CLIPS_PER_LONG", "PEXELS_MAX_RUNTIME_PCT_PER_LONG", "PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS"],
-                "google_drive_archive": ["GOOGLE_DRIVE_ARCHIVE_ENABLED", "GOOGLE_DRIVE_ROOT_FOLDER_ID"],
-                "youtube_readonly": ["YOUTUBE_PUBLIC_MONITOR_ENABLED", "YOUTUBE_OWNER_ANALYTICS_ENABLED"],
+                "elevenlabs": [
+                    "VOICE_PROVIDER",
+                    "ELEVENLABS_API_KEY",
+                    "ELEVENLABS_VOICE_ID",
+                    "ELEVENLABS_MODEL_ID",
+                ],
+                "google_veo": [
+                    "VCOS_AI_VIDEO_HERO_PROVIDER",
+                    "GEMINI_API_KEY",
+                    "VEO_MODEL_ID",
+                    "VEO_DEFAULT_DURATION_SECONDS",
+                    "VEO_DEFAULT_RESOLUTION",
+                    "VEO_DEFAULT_ASPECT_RATIO",
+                    "VEO_DEFAULT_OUTPUT_COUNT",
+                    "VCOS_VEO_REAL_GENERATION_ENABLED",
+                    "VCOS_PA1R_VEO_SMOKE_ENABLED",
+                ],
+                "google_gemini_image": [
+                    "GEMINI_API_KEY",
+                    "GEMINI_IMAGE_MODEL_ID",
+                    "GEMINI_IMAGE_DEFAULT_SIZE",
+                    "GEMINI_IMAGE_DEFAULT_ASPECT_RATIO",
+                    "GEMINI_IMAGE_MAX_OUTPUTS",
+                    "GEMINI_IMAGE_MAX_ATTEMPTS_PER_SCENE",
+                    "VCOS_GEMINI_IMAGE_PROVIDER_ROUTE_APPROVED",
+                    "VCOS_GEMINI_IMAGE_REAL_GENERATION_ENABLED",
+                    "VCOS_IMG1_FIXTURE_ONLY",
+                ],
+                "native_ffmpeg_renderer": [
+                    "VCOS_NATIVE_RENDER_WORKSPACE_ROOT",
+                    "VCOS_NATIVE_FFMPEG_LOCAL_SMOKE_ENABLED",
+                    "VCOS_NATIVE_FFMPEG_PRODUCTION_ENABLED",
+                ],
+                "pexels_api": [
+                    "FREE_VISUAL_FALLBACK_PROVIDER",
+                    "PEXELS_API_KEY",
+                    "PEXELS_ATTRIBUTION_REQUIRED",
+                    "PEXELS_MAX_CLIPS_PER_LONG",
+                    "PEXELS_MAX_RUNTIME_PCT_PER_LONG",
+                    "PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS",
+                ],
+                "google_drive_archive": [
+                    "GOOGLE_DRIVE_ARCHIVE_ENABLED",
+                    "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+                ],
+                "youtube_readonly": [
+                    "YOUTUBE_PUBLIC_MONITOR_ENABLED",
+                    "YOUTUBE_OWNER_ANALYTICS_ENABLED",
+                ],
             },
         )
 
@@ -117,10 +174,20 @@ class ProviderCapabilityMatrix:
                 provider_name="Google Veo API",
                 provider_type="AI_VIDEO_HERO_PROVIDER",
                 capabilities=["AI_HERO_VIDEO"],
-                requires=["Gemini API key", "approved Veo 3.1 model", "8 seconds", "one output"],
+                requires=[
+                    "Gemini API key",
+                    "approved Veo 3.1 model",
+                    "8 seconds",
+                    "one output",
+                ],
                 future_execution="R3D8 only",
                 no_call_in_m2=True,
-                limits={"allowed_durations_seconds": [8], "resolutions": ["720p", "1080p", "4k"], "aspect_ratios": ["16:9", "9:16"], "output_count": 1},
+                limits={
+                    "allowed_durations_seconds": [8],
+                    "resolutions": ["720p", "1080p", "4k"],
+                    "aspect_ratios": ["16:9"],
+                    "output_count": 1,
+                },
             ),
             ProviderCapabilityMatrixEntryRead(
                 provider_key="google_gemini_image",
@@ -140,7 +207,7 @@ class ProviderCapabilityMatrix:
                     "sizes": ["1K", "2K", "4K"],
                     "default_size": self.settings.gemini_image_default_size,
                     "minimum_effective_resolution": "1080p",
-                    "aspect_ratios": ["16:9", "9:16", "1:1"],
+                    "aspect_ratios": ["16:9", "1:1"],
                     "output_count": 1,
                     "max_attempts_per_scene": 1,
                     "provider_fallback_allowed": False,
@@ -150,8 +217,16 @@ class ProviderCapabilityMatrix:
                 provider_key="native_ffmpeg_renderer",
                 provider_name="NativeFFmpegRenderer",
                 provider_type="LOCAL_RENDERER_CAPABILITY",
-                capabilities=["FINAL_ASSEMBLY_RENDER", "TEMPLATE_RENDER", "CARD_RENDER", "SHORT_RENDER"],
-                requires=["ffmpeg-full", "approved render plan", "local execution boundary"],
+                capabilities=[
+                    "FINAL_ASSEMBLY_RENDER",
+                    "TEMPLATE_RENDER",
+                    "CARD_RENDER",
+                ],
+                requires=[
+                    "ffmpeg-full",
+                    "approved render plan",
+                    "local execution boundary",
+                ],
                 future_execution="local renderer; production disabled by default",
                 no_call_in_m2=True,
             ),
@@ -160,7 +235,11 @@ class ProviderCapabilityMatrix:
                 provider_name="Pexels API",
                 provider_type="FREE_VISUAL_FALLBACK_PROVIDER",
                 capabilities=["FREE_VISUAL_FALLBACK"],
-                requires=["API key", "asset manifest", "attribution block when required"],
+                requires=[
+                    "API key",
+                    "asset manifest",
+                    "attribution block when required",
+                ],
                 future_execution="R3D8 only",
                 no_call_in_m2=True,
                 allowed_roles=list(PEXELS_ALLOWED_ROLES),
@@ -173,7 +252,11 @@ class ProviderCapabilityMatrix:
                 provider_name="Google Drive Archive",
                 provider_type="ARCHIVE_STORAGE",
                 capabilities=["ARCHIVE_STORAGE"],
-                requires=["archive flag", "root folder id", "connected Drive auth in later phase"],
+                requires=[
+                    "archive flag",
+                    "root folder id",
+                    "connected Drive auth in later phase",
+                ],
                 future_execution="storage/archive only; no source of truth",
                 no_call_in_m2=True,
             ),
@@ -193,7 +276,9 @@ class ProviderCapabilityMatrix:
 
 
 class ProviderCostEstimatePlaceholder:
-    def for_provider(self, provider_key: str, *, provider_configured: bool) -> ProviderCostEstimatePlaceholderRead:
+    def for_provider(
+        self, provider_key: str, *, provider_configured: bool
+    ) -> ProviderCostEstimatePlaceholderRead:
         if not provider_configured:
             return ProviderCostEstimatePlaceholderRead(
                 provider_key=provider_key,
@@ -245,7 +330,11 @@ class ProviderEnvValidator:
             readiness_state=_readiness_from_missing(
                 missing,
                 all_missing_state="NOT_CONFIGURED",
-                priority=[("ELEVENLABS_API_KEY", "CREDENTIAL_MISSING"), ("ELEVENLABS_VOICE_ID", "NEEDS_VOICE"), ("ELEVENLABS_MODEL_ID", "NEEDS_MODEL")],
+                priority=[
+                    ("ELEVENLABS_API_KEY", "CREDENTIAL_MISSING"),
+                    ("ELEVENLABS_VOICE_ID", "NEEDS_VOICE"),
+                    ("ELEVENLABS_MODEL_ID", "NEEDS_MODEL"),
+                ],
             ),
             next_action="Cấu hình ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID và ELEVENLABS_MODEL_ID; M2 vẫn không sinh voice.",
             safe_config={
@@ -268,7 +357,10 @@ class ProviderEnvValidator:
         readiness = _readiness_from_missing(
             missing,
             all_missing_state="NOT_CONFIGURED",
-            priority=[("GEMINI_API_KEY", "CREDENTIAL_MISSING"), ("VEO_MODEL_ID", "NEEDS_MODEL")],
+            priority=[
+                ("GEMINI_API_KEY", "CREDENTIAL_MISSING"),
+                ("VEO_MODEL_ID", "NEEDS_MODEL"),
+            ],
         )
         return self._item(
             provider_key="google_veo",
@@ -294,7 +386,9 @@ class ProviderEnvValidator:
             },
         )
 
-    def _google_gemini_image(self, role: dict[str, str | None]) -> ProviderReadinessItemRead:
+    def _google_gemini_image(
+        self, role: dict[str, str | None]
+    ) -> ProviderReadinessItemRead:
         selected = role["AI_IMAGE_GENERATION_PROVIDER"]
         provider_mismatch = selected != "google_gemini_image"
         missing = _missing(
@@ -364,7 +458,9 @@ class ProviderEnvValidator:
     def _pexels(self, role: dict[str, str | None]) -> ProviderReadinessItemRead:
         selected = role["FREE_VISUAL_FALLBACK_PROVIDER"]
         provider_mismatch = selected != "pexels_api"
-        missing = _missing(("PEXELS_API_KEY", _secret_present(self.settings.pexels_api_key)))
+        missing = _missing(
+            ("PEXELS_API_KEY", _secret_present(self.settings.pexels_api_key))
+        )
         reason_codes = _missing_codes(missing, "PEXELS")
         if provider_mismatch:
             reason_codes.append("FREE_VISUAL_FALLBACK_PROVIDER_NOT_PEXELS_API")
@@ -399,9 +495,19 @@ class ProviderEnvValidator:
                 reason_codes=["GOOGLE_DRIVE_ARCHIVE_DISABLED"],
                 readiness_state="DISABLED",
                 next_action="Bật GOOGLE_DRIVE_ARCHIVE_ENABLED và cấu hình root folder ở phase archive sau; M2 không upload Drive.",
-                safe_config={"archive_enabled": False, "root_folder_configured": bool(self.settings.google_drive_root_folder_id)},
+                safe_config={
+                    "archive_enabled": False,
+                    "root_folder_configured": bool(
+                        self.settings.google_drive_root_folder_id
+                    ),
+                },
             )
-        missing = _missing(("GOOGLE_DRIVE_ROOT_FOLDER_ID", _configured(self.settings.google_drive_root_folder_id)))
+        missing = _missing(
+            (
+                "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+                _configured(self.settings.google_drive_root_folder_id),
+            )
+        )
         return self._item(
             provider_key="google_drive_archive",
             configured_provider=role["GOOGLE_DRIVE_ARCHIVE"],
@@ -409,13 +515,23 @@ class ProviderEnvValidator:
             credential_present=bool(self.settings.google_drive_root_folder_id),
             missing_env_keys=missing,
             reason_codes=["GOOGLE_DRIVE_ROOT_FOLDER_ID_MISSING"] if missing else [],
-            readiness_state="NOT_CONFIGURED" if missing else "READY_FOR_FUTURE_EXECUTION",
+            readiness_state="NOT_CONFIGURED"
+            if missing
+            else "READY_FOR_FUTURE_EXECUTION",
             next_action="Google Drive chỉ archive/storage; M2 không upload mặc định.",
-            safe_config={"archive_enabled": True, "root_folder_configured": bool(self.settings.google_drive_root_folder_id)},
+            safe_config={
+                "archive_enabled": True,
+                "root_folder_configured": bool(
+                    self.settings.google_drive_root_folder_id
+                ),
+            },
         )
 
     def _youtube_readonly(self) -> ProviderReadinessItemRead:
-        enabled = self.settings.youtube_public_monitor_enabled or self.settings.youtube_owner_analytics_enabled
+        enabled = (
+            self.settings.youtube_public_monitor_enabled
+            or self.settings.youtube_owner_analytics_enabled
+        )
         return self._item(
             provider_key="youtube_readonly",
             configured_provider="read_only_verification_analytics" if enabled else None,
@@ -448,12 +564,38 @@ class ProviderEnvValidator:
         matrix = self.matrix[provider_key]
         if not selected_ok and readiness_state not in {"DISABLED"}:
             readiness_state = "BLOCKED_PROVIDER_NOT_CONFIGURED"
-        configured = readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
-        if not missing_env_keys and selected_ok and readiness_state not in {"DISABLED", "BLOCKED_PROVIDER_NOT_CONFIGURED"}:
-            readiness_state = "READY_FOR_HUMAN_PAID_APPROVAL" if any(cap in PAID_CAPABILITIES for cap in matrix.capabilities) else "READY_FOR_FUTURE_EXECUTION"
-        credential_state = _credential_state(readiness_state, credential_present, missing_env_keys)
-        generic_blocker = "NEEDS_CREDENTIAL" if missing_env_keys and not credential_present else readiness_state
-        blockers = sorted(set(reason_codes + ([] if configured or readiness_state == "DISABLED" else [generic_blocker])))
+        configured = readiness_state in {
+            "READY_FOR_HUMAN_PAID_APPROVAL",
+            "READY_FOR_FUTURE_EXECUTION",
+        }
+        if (
+            not missing_env_keys
+            and selected_ok
+            and readiness_state not in {"DISABLED", "BLOCKED_PROVIDER_NOT_CONFIGURED"}
+        ):
+            readiness_state = (
+                "READY_FOR_HUMAN_PAID_APPROVAL"
+                if any(cap in PAID_CAPABILITIES for cap in matrix.capabilities)
+                else "READY_FOR_FUTURE_EXECUTION"
+            )
+        credential_state = _credential_state(
+            readiness_state, credential_present, missing_env_keys
+        )
+        generic_blocker = (
+            "NEEDS_CREDENTIAL"
+            if missing_env_keys and not credential_present
+            else readiness_state
+        )
+        blockers = sorted(
+            set(
+                reason_codes
+                + (
+                    []
+                    if configured or readiness_state == "DISABLED"
+                    else [generic_blocker]
+                )
+            )
+        )
         return ProviderReadinessItemRead(
             provider_key=provider_key,
             provider_name=matrix.provider_name,
@@ -469,7 +611,14 @@ class ProviderEnvValidator:
                 validation_probe_enabled=self.settings.provider_real_readiness_probe_enabled,
                 validation_probe_state="CREDENTIAL_VALIDATION_SKIPPED",
             ),
-            capability_status="CAPABILITY_READY" if readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION", "DISABLED"} else readiness_state,  # type: ignore[arg-type]
+            capability_status="CAPABILITY_READY"
+            if readiness_state
+            in {
+                "READY_FOR_HUMAN_PAID_APPROVAL",
+                "READY_FOR_FUTURE_EXECUTION",
+                "DISABLED",
+            }
+            else readiness_state,  # type: ignore[arg-type]
             capabilities=matrix.capabilities,
             blocker_reason_codes=blockers,
             missing_env_keys=missing_env_keys,
@@ -497,7 +646,12 @@ class ProviderReadinessM2Service:
                 "next_action": item.future_required_next_action,
             }
             for item in providers
-            if item.readiness_state not in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION", "DISABLED"}
+            if item.readiness_state
+            not in {
+                "READY_FOR_HUMAN_PAID_APPROVAL",
+                "READY_FOR_FUTURE_EXECUTION",
+                "DISABLED",
+            }
         ]
         return ProviderReadinessSnapshotM2Read(
             generated_at=utc_now(),
@@ -505,7 +659,13 @@ class ProviderReadinessM2Service:
             providers=providers,
             capability_matrix=self.matrix.entries(),
             blocking_items=blocking,
-            next_actions=[{"provider_key": item.provider_key, "next_action": item.future_required_next_action} for item in providers],
+            next_actions=[
+                {
+                    "provider_key": item.provider_key,
+                    "next_action": item.future_required_next_action,
+                }
+                for item in providers
+            ],
             integration_settings=self.registry.integration_settings(),
             pexels_policy=pexels_policy(self.settings),
             real_network_probe_enabled=self.settings.provider_real_readiness_probe_enabled,
@@ -540,7 +700,11 @@ class ProviderBoundaryPreflight:
         providers = self.readiness.provider_map()
         provider = providers.get(provider_key)
         reason_codes: list[str] = provider_key_rejection_reasons(provider_key)
-        if not reason_codes and (provider is None or provider.readiness_state not in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}):
+        if not reason_codes and (
+            provider is None
+            or provider.readiness_state
+            not in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
+        ):
             reason_codes.append("BLOCKED_PROVIDER_NOT_CONFIGURED")
             if provider is not None:
                 reason_codes.extend(provider.blocker_reason_codes)
@@ -555,7 +719,9 @@ class ProviderBoundaryPreflight:
                 reason_codes.append("COST_ESTIMATE_REQUIRED_R3D8")
             if not paid_attempt_limit_ref:
                 reason_codes.append("PAID_ATTEMPT_LIMIT_REQUIRED_R3D8")
-        reason_codes.extend(self._provider_specific_blocks(provider_key, payload, usage_metrics))
+        reason_codes.extend(
+            self._provider_specific_blocks(provider_key, payload, usage_metrics)
+        )
         reason_codes = sorted(set(reason_codes))
         return ProviderBoundaryPreflightResultRead(
             provider_key=provider_key,
@@ -563,24 +729,37 @@ class ProviderBoundaryPreflight:
             status="BLOCK" if reason_codes else "PASS",
             blocked=bool(reason_codes),
             reason_codes=reason_codes,
-            next_action="Dừng trước provider boundary; cần cấu hình provider, approval người thật và R3D8 execution ledger." if reason_codes else "Validation-only payload sẵn sàng cho future execution.",
+            next_action="Dừng trước provider boundary; cần cấu hình provider, approval người thật và R3D8 execution ledger."
+            if reason_codes
+            else "Validation-only payload sẵn sàng cho future execution.",
             human_paid_approval_required=provider_capability in PAID_CAPABILITIES,
             real_call_requested=real_call_requested,
             no_network_call_made=True,
             technical_appendix={
                 "m2_wiring_only": True,
-                "provider_readiness_state": provider.readiness_state if provider else "UNKNOWN",
+                "provider_readiness_state": provider.readiness_state
+                if provider
+                else "UNKNOWN",
             },
         )
 
-    def _provider_specific_blocks(self, provider_key: str, payload: dict[str, Any], usage_metrics: dict[str, Any]) -> list[str]:
+    def _provider_specific_blocks(
+        self, provider_key: str, payload: dict[str, Any], usage_metrics: dict[str, Any]
+    ) -> list[str]:
         codes: list[str] = []
         if provider_key == "pexels_api":
-            codes.extend(validate_pexels_policy(payload.get("usage_role"), self.settings, usage_metrics))
+            codes.extend(
+                validate_pexels_policy(
+                    payload.get("usage_role"), self.settings, usage_metrics
+                )
+            )
         if provider_key == "google_veo" and _int(payload.get("duration_seconds")) != 8:
             codes.append("VEO_DURATION_NOT_ALLOWED")
         if provider_key == "google_gemini_image":
-            if self.settings.img1_fixture_only or not self.settings.gemini_image_real_generation_enabled:
+            if (
+                self.settings.img1_fixture_only
+                or not self.settings.gemini_image_real_generation_enabled
+            ):
                 codes.append("GEMINI_IMAGE_EXECUTION_DISABLED")
             if not self.settings.gemini_image_provider_route_approved:
                 codes.append("GEMINI_IMAGE_PROVIDER_ROUTE_APPROVAL_MISSING")
@@ -609,12 +788,24 @@ class _BaseRequestBuilder:
         invalid_fields: list[str] | None = None,
         human_paid_approval_required: bool = True,
     ) -> ProviderRequestValidationResultRead:
-        missing_fields = [field for field in required_fields if not _present(payload.get(field))]
+        missing_fields = [
+            field for field in required_fields if not _present(payload.get(field))
+        ]
         invalid_fields = invalid_fields or []
         reason_codes = list(reason_codes or [])
-        reason_codes.extend(_request_missing_code(self.provider_key, field) for field in missing_fields)
-        provider = ProviderReadinessM2Service(self.settings).provider_map().get(self.provider_key)
-        provider_configured = bool(provider and provider.readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"})
+        reason_codes.extend(
+            _request_missing_code(self.provider_key, field) for field in missing_fields
+        )
+        provider = (
+            ProviderReadinessM2Service(self.settings)
+            .provider_map()
+            .get(self.provider_key)
+        )
+        provider_configured = bool(
+            provider
+            and provider.readiness_state
+            in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
+        )
         return ProviderRequestValidationResultRead(
             provider_key=self.provider_key,
             provider_capability=self.capability,
@@ -627,7 +818,9 @@ class _BaseRequestBuilder:
             effective_context_snapshot_id=payload.get("effective_context_snapshot_id"),
             video_project_id=payload.get("video_project_id"),
             package_id=payload.get("package_id"),
-            cost_estimate=self.costs.for_provider(self.provider_key, provider_configured=provider_configured),
+            cost_estimate=self.costs.for_provider(
+                self.provider_key, provider_configured=provider_configured
+            ),
             human_paid_approval_required=human_paid_approval_required,
             will_execute=False,
             no_network_call_made=True,
@@ -649,13 +842,16 @@ class ElevenLabsVoiceRequestBuilder(_BaseRequestBuilder):
             "spoken_text_hash": data.get("spoken_text_hash"),
             "voice_settings": data.get("voice_settings") or {},
             "seed": data.get("seed"),
-            "pronunciation_dictionary_refs": data.get("pronunciation_dictionary_refs") or [],
+            "pronunciation_dictionary_refs": data.get("pronunciation_dictionary_refs")
+            or [],
             "effective_context_snapshot_id": data.get("effective_context_snapshot_id"),
             "video_project_id": data.get("video_project_id"),
             "package_id": data.get("package_id"),
             "provider_capability": self.capability,
         }
-        return self._result(payload=payload, required_fields=["text", "voice_id", "model_id"])
+        return self._result(
+            payload=payload, required_fields=["text", "voice_id", "model_id"]
+        )
 
 
 class GoogleVeoRequestBuilder(_BaseRequestBuilder):
@@ -663,7 +859,9 @@ class GoogleVeoRequestBuilder(_BaseRequestBuilder):
     capability: ProviderCapability = "AI_HERO_VIDEO"
 
     def build(self, data: dict[str, Any]) -> ProviderRequestValidationResultRead:
-        duration = _int(data.get("duration_seconds") or self.settings.veo_default_duration_seconds)
+        duration = _int(
+            data.get("duration_seconds") or self.settings.veo_default_duration_seconds
+        )
         invalid = []
         reason_codes = []
         if duration != 8:
@@ -680,7 +878,12 @@ class GoogleVeoRequestBuilder(_BaseRequestBuilder):
             "package_id": data.get("package_id"),
             "provider_capability": self.capability,
         }
-        return self._result(payload=payload, required_fields=["prompt", "model"], invalid_fields=invalid, reason_codes=reason_codes)
+        return self._result(
+            payload=payload,
+            required_fields=["prompt", "model"],
+            invalid_fields=invalid,
+            reason_codes=reason_codes,
+        )
 
 
 class PexelsSearchRequestBuilder(_BaseRequestBuilder):
@@ -699,8 +902,15 @@ class PexelsSearchRequestBuilder(_BaseRequestBuilder):
             "provider_capability": self.capability,
             "required_manifest": list(PEXELS_REQUIRED_MANIFEST),
         }
-        reason_codes = validate_pexels_policy(payload.get("usage_role"), self.settings, data.get("usage_metrics") or {})
-        return self._result(payload=payload, required_fields=["query", "usage_role"], reason_codes=reason_codes, human_paid_approval_required=False)
+        reason_codes = validate_pexels_policy(
+            payload.get("usage_role"), self.settings, data.get("usage_metrics") or {}
+        )
+        return self._result(
+            payload=payload,
+            required_fields=["query", "usage_role"],
+            reason_codes=reason_codes,
+            human_paid_approval_required=False,
+        )
 
 
 class DriveArchiveRequestBuilder(_BaseRequestBuilder):
@@ -711,13 +921,18 @@ class DriveArchiveRequestBuilder(_BaseRequestBuilder):
         payload = {
             "provider": self.provider_key,
             "source_ref": data.get("source_ref"),
-            "root_folder_id": data.get("root_folder_id") or self.settings.google_drive_root_folder_id,
+            "root_folder_id": data.get("root_folder_id")
+            or self.settings.google_drive_root_folder_id,
             "effective_context_snapshot_id": data.get("effective_context_snapshot_id"),
             "video_project_id": data.get("video_project_id"),
             "package_id": data.get("package_id"),
             "provider_capability": self.capability,
         }
-        return self._result(payload=payload, required_fields=["source_ref", "root_folder_id"], human_paid_approval_required=False)
+        return self._result(
+            payload=payload,
+            required_fields=["source_ref", "root_folder_id"],
+            human_paid_approval_required=False,
+        )
 
 
 class ElevenLabsVoiceAdapter:
@@ -759,7 +974,11 @@ class GoogleDriveArchiveAdapter:
         return self.builder.build(data)
 
 
-def validate_pexels_policy(usage_role: Any, settings: Settings | None = None, usage_metrics: dict[str, Any] | None = None) -> list[str]:
+def validate_pexels_policy(
+    usage_role: Any,
+    settings: Settings | None = None,
+    usage_metrics: dict[str, Any] | None = None,
+) -> list[str]:
     settings = settings or get_settings()
     usage_metrics = usage_metrics or {}
     role = str(usage_role or "")
@@ -770,9 +989,15 @@ def validate_pexels_policy(usage_role: Any, settings: Settings | None = None, us
         codes.append("PEXELS_USAGE_ROLE_NOT_ALLOWED")
     if _int(usage_metrics.get("clips_per_long")) > settings.pexels_max_clips_per_long:
         codes.append("PEXELS_MAX_CLIPS_EXCEEDED")
-    if _int(usage_metrics.get("runtime_pct_per_long")) > settings.pexels_max_runtime_pct_per_long:
+    if (
+        _int(usage_metrics.get("runtime_pct_per_long"))
+        > settings.pexels_max_runtime_pct_per_long
+    ):
         codes.append("PEXELS_RUNTIME_PCT_EXCEEDED")
-    if _int(usage_metrics.get("same_asset_reuse_per_30_days")) > settings.pexels_max_same_asset_reuse_per_30_days:
+    if (
+        _int(usage_metrics.get("same_asset_reuse_per_30_days"))
+        > settings.pexels_max_same_asset_reuse_per_30_days
+    ):
         codes.append("PEXELS_REUSE_LIMIT_EXCEEDED")
     return codes
 
@@ -796,7 +1021,9 @@ def _pexels_limits(settings: Settings) -> dict[str, int]:
     }
 
 
-def _credential_state(readiness_state: str, credential_present: bool, missing_env_keys: list[str]) -> str:
+def _credential_state(
+    readiness_state: str, credential_present: bool, missing_env_keys: list[str]
+) -> str:
     if readiness_state == "DISABLED":
         return "DISABLED"
     if not credential_present and missing_env_keys:
@@ -806,7 +1033,9 @@ def _credential_state(readiness_state: str, credential_present: bool, missing_en
     return "CREDENTIAL_PRESENT"
 
 
-def _readiness_from_missing(missing: list[str], *, all_missing_state: str, priority: list[tuple[str, str]]) -> str:
+def _readiness_from_missing(
+    missing: list[str], *, all_missing_state: str, priority: list[tuple[str, str]]
+) -> str:
     if not missing:
         return "READY_FOR_HUMAN_PAID_APPROVAL"
     if len(missing) == len(priority):
@@ -823,7 +1052,12 @@ def _missing(*pairs: tuple[str, bool]) -> list[str]:
 
 
 def _missing_codes(missing_env_keys: list[str], provider_prefix: str) -> list[str]:
-    return [f"{key}_MISSING" if key.startswith(provider_prefix) else f"{provider_prefix}_{key}_MISSING" for key in missing_env_keys]
+    return [
+        f"{key}_MISSING"
+        if key.startswith(provider_prefix)
+        else f"{provider_prefix}_{key}_MISSING"
+        for key in missing_env_keys
+    ]
 
 
 def _request_missing_code(provider_key: str, field: str) -> str:

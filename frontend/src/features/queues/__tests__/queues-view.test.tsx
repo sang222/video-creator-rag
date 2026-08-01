@@ -96,7 +96,7 @@ describe("QueuesView", () => {
       /Upload YouTube/i,
       /^Publish$/i,
       /Auto publish/i,
-      /Run daily/i,
+      /Run scheduled generation/i,
       /Run vector/i,
       /Run NoView scanner/i
     ].forEach((name) => {

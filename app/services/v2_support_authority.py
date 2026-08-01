@@ -37,8 +37,6 @@ from app.db.models.m10_2 import (
 )
 from app.db.models.m5 import (
     AudienceTargetPack,
-    ChannelDailyRun,
-    DailyIdeaDecision,
     EditorialCalendarSlot,
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
@@ -64,7 +62,7 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _MEDIA_ROUTING_POLICY_CATALOG = Path(
     "config/media_provider_routing_policy_catalog.yaml"
 )
-_SOURCE_TYPES = ("DAILY_IDEA", "LONG_FORM_PLAN")
+_SOURCE_TYPES = ("LONG_FORM_PLAN",)
 _LOCAL_PROVIDER_BY_STAGE = {
     "MEDIA": "vcos_caption_timeline",
     "RENDER": "native_ffmpeg_renderer",
@@ -72,11 +70,6 @@ _LOCAL_PROVIDER_BY_STAGE = {
     "ARCHIVE": "vcos_storage",
 }
 _JOB_TYPES_BY_LANE = {
-    "DAILY_SHORT": {
-        "MEDIA": "SHORT_CAPTION_TIMELINE",
-        "RENDER": "SHORT_RENDER",
-        "QC": "SHORT_MEDIA_QC",
-    },
     "LONG_FORM": {
         "MEDIA": "LONG_CAPTION_TIMELINE",
         "RENDER": "LONG_FORM_FINAL_RENDER",
@@ -109,7 +102,7 @@ class V2SupportAuthorityPrepareCommand(_StrictFrozenModel):
     """Only values an authenticated launcher may pass into this boundary."""
 
     video_project_id: uuid.UUID
-    source_type: Literal["DAILY_IDEA", "LONG_FORM_PLAN"]
+    source_type: Literal["LONG_FORM_PLAN"]
     source_id: uuid.UUID
     actor_user_id: uuid.UUID
     idempotency_key: str = Field(min_length=1, max_length=160)
@@ -183,7 +176,7 @@ class V2SupportProductionContext(_StrictFrozenModel):
         "vcos.v2-support-production-context.v1"
     )
     video_project_id: uuid.UUID
-    production_lane: Literal["DAILY_SHORT", "LONG_FORM"]
+    production_lane: Literal["LONG_FORM"]
     title: str = Field(min_length=1)
     expected_language: str = Field(min_length=2)
     duration_contract: ProductionDurationContractV2
@@ -534,7 +527,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     profile_ref: V2ExactAuthorityRef
     compiled_policy_ref: V2ExactAuthorityRef
     effective_context_ref: V2ExactAuthorityRef
-    production_lane: Literal["DAILY_SHORT", "LONG_FORM"]
+    production_lane: Literal["LONG_FORM"]
     duration_contract: ProductionDurationContractV2
     frozen_sources: list[V2FrozenSourceRef] = Field(min_length=2)
     approved_script: V2ApprovedScriptProvenance
@@ -616,7 +609,7 @@ class _ResolvedSupportAuthority(_StrictFrozenModel):
     profile_ref: V2ExactAuthorityRef
     compiled_policy_ref: V2ExactAuthorityRef
     effective_context_ref: V2ExactAuthorityRef
-    production_lane: Literal["DAILY_SHORT", "LONG_FORM"]
+    production_lane: Literal["LONG_FORM"]
     title: str
     expected_language: str
     duration_contract: ProductionDurationContractV2
@@ -741,6 +734,8 @@ class V2SupportAuthorityService:
             or project.planning_source_type not in _SOURCE_TYPES
             or project.production_lane not in _JOB_TYPES_BY_LANE
             or str(project.planning_source_type) != command.source_type
+            or project.planning_source_type != "LONG_FORM_PLAN"
+            or project.production_lane != "LONG_FORM"
         ):
             raise ValidationFailureError("V2_SUPPORT_SOURCE_PROJECT_MISMATCH")
         admission = (
@@ -767,10 +762,7 @@ class V2SupportAuthorityService:
             or not _valid_sha256(admission.decision_hash)
         ):
             raise ValidationFailureError("V2_SUPPORT_ADMISSION_NOT_ADMITTED")
-        if command.source_type == "DAILY_IDEA":
-            source_matches = admission.daily_idea_decision_id == command.source_id
-        else:
-            source_matches = admission.editorial_calendar_slot_id == command.source_id
+        source_matches = admission.editorial_calendar_slot_id == command.source_id
         if not source_matches:
             raise ValidationFailureError("V2_SUPPORT_SOURCE_PROJECT_MISMATCH")
 
@@ -931,44 +923,7 @@ class V2SupportAuthorityService:
         admission: ProjectAdmissionDecision,
         project: VideoProject,
     ) -> list[V2FrozenSourceRef]:
-        slot: EditorialCalendarSlot | None
-        idea: DailyIdeaDecision | None = None
-        daily_run: ChannelDailyRun | None = None
-        if command.source_type == "DAILY_IDEA":
-            idea = self.session.get(DailyIdeaDecision, command.source_id)
-            daily_run = (
-                self.session.get(ChannelDailyRun, idea.channel_daily_run_id)
-                if idea is not None
-                else None
-            )
-            slot = (
-                self.session.get(
-                    EditorialCalendarSlot,
-                    daily_run.editorial_calendar_slot_id,
-                )
-                if daily_run is not None
-                and daily_run.editorial_calendar_slot_id is not None
-                else None
-            )
-            if (
-                idea is None
-                or daily_run is None
-                or slot is None
-                or idea.schema_version != "v2"
-                or idea.production_lane != "DAILY_SHORT"
-                or idea.decision_status not in {"PROPOSED", "ADMITTED"}
-                or idea.company_id != project.company_id
-                or idea.channel_workspace_id != project.channel_workspace_id
-                or idea.policy_snapshot_id != project.policy_snapshot_id
-                or daily_run.company_id != project.company_id
-                or daily_run.channel_workspace_id != project.channel_workspace_id
-                or daily_run.policy_snapshot_id != project.policy_snapshot_id
-                or admission.daily_idea_decision_id != idea.id
-                or admission.channel_daily_run_id != daily_run.id
-            ):
-                raise ValidationFailureError("V2_SUPPORT_SOURCE_PROJECT_MISMATCH")
-        else:
-            slot = self.session.get(EditorialCalendarSlot, command.source_id)
+        slot = self.session.get(EditorialCalendarSlot, command.source_id)
         if (
             slot is None
             or slot.schema_version != "v2"
@@ -994,32 +949,13 @@ class V2SupportAuthorityService:
             or preflight.editorial_calendar_slot_id != slot.id
             or preflight.decision != "PASS"
             or preflight.policy_fit_state != "PASS"
-            or (
-                command.source_type == "DAILY_IDEA"
-                and (
-                    preflight.daily_idea_decision_id != command.source_id
-                    or preflight.channel_daily_run_id != admission.channel_daily_run_id
-                )
-            )
-            or (
-                command.source_type == "LONG_FORM_PLAN"
-                and (
-                    preflight.daily_idea_decision_id is not None
-                    or preflight.channel_daily_run_id is not None
-                )
-            )
         ):
             raise ValidationFailureError("V2_SUPPORT_PREFLIGHT_NOT_PASS")
 
-        sources: list[V2FrozenSourceRef] = []
-        if idea is not None:
-            sources.append(_daily_idea_source(idea))
-        sources.extend(
-            [
-                _editorial_slot_source(slot),
-                _preflight_source(preflight),
-            ]
-        )
+        sources: list[V2FrozenSourceRef] = [
+            _editorial_slot_source(slot),
+            _preflight_source(preflight),
+        ]
         if preflight.search_intent_map_id is not None:
             search_intent = self.session.get(
                 SearchIntentMap,
@@ -1029,10 +965,6 @@ class V2SupportAuthorityService:
                 search_intent is None
                 or search_intent.company_id != project.company_id
                 or search_intent.channel_workspace_id != project.channel_workspace_id
-                or (
-                    command.source_type == "DAILY_IDEA"
-                    and search_intent.daily_idea_decision_id != command.source_id
-                )
             ):
                 raise ValidationFailureError("V2_SUPPORT_TYPED_SOURCE_MISMATCH")
             sources.append(_search_intent_source(search_intent))
@@ -1045,10 +977,6 @@ class V2SupportAuthorityService:
                 audience is None
                 or audience.company_id != project.company_id
                 or audience.channel_workspace_id != project.channel_workspace_id
-                or (
-                    command.source_type == "DAILY_IDEA"
-                    and audience.daily_idea_decision_id != command.source_id
-                )
             ):
                 raise ValidationFailureError("V2_SUPPORT_TYPED_SOURCE_MISMATCH")
             sources.append(_audience_source(audience))
@@ -1535,60 +1463,6 @@ def _source_ref(
     )
 
 
-def _daily_idea_source(idea: DailyIdeaDecision) -> V2FrozenSourceRef:
-    payload = {
-        "schema_version": idea.schema_version,
-        "id": str(idea.id),
-        "channel_daily_run_id": str(idea.channel_daily_run_id),
-        "company_id": str(idea.company_id),
-        "channel_workspace_id": str(idea.channel_workspace_id),
-        "policy_snapshot_id": str(idea.policy_snapshot_id),
-        "context_pack_snapshot_id": str(idea.context_pack_snapshot_id),
-        "llm_run_snapshot_id": (
-            str(idea.llm_run_snapshot_id)
-            if idea.llm_run_snapshot_id is not None
-            else None
-        ),
-        "production_lane": idea.production_lane,
-        "proposed_content_mode": idea.proposed_content_mode,
-        "assignment_input_ref": idea.assignment_input_ref,
-        "decision_status": idea.decision_status,
-        "proposed_title": idea.proposed_title,
-        "proposed_angle": idea.proposed_angle,
-        "proposed_format": idea.proposed_format,
-        "proposed_pillar": idea.proposed_pillar,
-        "rationale": idea.rationale,
-        "evidence_refs": idea.evidence_refs,
-        "reason_codes": idea.reason_codes,
-        "confidence_level": idea.confidence_level,
-    }
-    return _source_ref(
-        source_type="daily_idea_decision",
-        source_kind="FROZEN_DAILY_IDEA",
-        source_id=idea.id,
-        payload=payload,
-        fact_statements=[
-            f"Approved topic title: {idea.proposed_title}",
-            (
-                f"Approved topic angle: {idea.proposed_angle}"
-                if idea.proposed_angle
-                else None
-            ),
-            (
-                f"Approved content format: {idea.proposed_format}"
-                if idea.proposed_format
-                else None
-            ),
-            (
-                f"Approved content pillar: {idea.proposed_pillar}"
-                if idea.proposed_pillar
-                else None
-            ),
-            f"Daily idea confidence: {idea.confidence_level}",
-        ],
-    )
-
-
 def _editorial_slot_source(
     slot: EditorialCalendarSlot,
 ) -> V2FrozenSourceRef:
@@ -1650,16 +1524,6 @@ def _preflight_source(
             if preflight.editorial_calendar_slot_id
             else None
         ),
-        "channel_daily_run_id": (
-            str(preflight.channel_daily_run_id)
-            if preflight.channel_daily_run_id
-            else None
-        ),
-        "daily_idea_decision_id": (
-            str(preflight.daily_idea_decision_id)
-            if preflight.daily_idea_decision_id
-            else None
-        ),
         "search_intent_map_id": (
             str(preflight.search_intent_map_id)
             if preflight.search_intent_map_id
@@ -1714,14 +1578,6 @@ def _search_intent_source(search: SearchIntentMap) -> V2FrozenSourceRef:
         "id": str(search.id),
         "company_id": str(search.company_id),
         "channel_workspace_id": str(search.channel_workspace_id),
-        "channel_daily_run_id": (
-            str(search.channel_daily_run_id) if search.channel_daily_run_id else None
-        ),
-        "daily_idea_decision_id": (
-            str(search.daily_idea_decision_id)
-            if search.daily_idea_decision_id
-            else None
-        ),
         "primary_search_intent": search.primary_search_intent,
         "secondary_search_intents": search.secondary_search_intents,
         "keyword_cluster": search.keyword_cluster,
@@ -1765,16 +1621,6 @@ def _audience_source(audience: AudienceTargetPack) -> V2FrozenSourceRef:
         "id": str(audience.id),
         "company_id": str(audience.company_id),
         "channel_workspace_id": str(audience.channel_workspace_id),
-        "channel_daily_run_id": (
-            str(audience.channel_daily_run_id)
-            if audience.channel_daily_run_id
-            else None
-        ),
-        "daily_idea_decision_id": (
-            str(audience.daily_idea_decision_id)
-            if audience.daily_idea_decision_id
-            else None
-        ),
         "target_audience": audience.target_audience,
         "audience_problem": audience.audience_problem,
         "audience_language": audience.audience_language,

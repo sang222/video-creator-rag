@@ -12,14 +12,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.contracts import ChannelProfileVersionCreate, ChannelWorkspaceCreate
-from app.contracts.m10_1 import (
-    BuildUploadCardsRequest,
-    CrossPlatformFunnelPackageCreate,
-)
 from app.contracts.mr1 import (
     MR1StartCommand,
     MR1V2AutomatedAdmissionRequest,
 )
+from app.contracts.ofv0 import FormatIdentityContractDraftRequest
 from app.contracts.profile import ChannelProfileInput
 from app.contracts.production_package import (
     DURATION_CONTRACT_VERSION_V2,
@@ -46,13 +43,9 @@ from app.db.models import (
     ApprovalDecision,
     Artifact,
     ArtifactVersion,
-    CrossPlatformFunnelPackage,
     FirstScriptedVideoPackage,
     GateRun,
-    HumanUploadTask,
     ReviewTask,
-    ShortCandidate,
-    UploadCard,
 )
 from app.db.models.channel import (
     ChannelProfileVersion,
@@ -72,9 +65,8 @@ from app.services.channel_workspace import ChannelWorkspaceService
 from app.services.company import CompanyService
 from app.services.config_registry import ConfigRegistryService, content_hash
 from app.services.m12_2 import _expand_script_to_word_budget
-from app.services.m12_2r import PublishHandoffLedgerService
+from app.services.ofv0 import FormatIdentityContractService
 from app.services.long_production import LongProductionOrchestrator
-from app.services.m10_1 import CrossPlatformFunnelPackageService
 from app.services.m6 import LocalFixtureRendererService
 from app.services.mr1_real_production import (
     MR1ProviderGateways,
@@ -169,7 +161,10 @@ def _scope(
     channel = ChannelWorkspaceService(session).create_channel(
         company_id=company.id,
         data=ChannelWorkspaceCreate(
-            key=f"phase3-{uuid.uuid4().hex[:8]}",
+            # Phase 3's trusted production fixture must compile the active
+            # channel-scoped budget/provider authority.  That authority is
+            # intentionally declared only for the canonical long-form lane.
+            key="small-team-ai",
             name="Phase 3 Channel",
         ),
     )
@@ -211,6 +206,18 @@ def _scope(
     profile.profile_input_hash = content_hash(profile_payload)
     session.flush()
 
+    format_contract = FormatIdentityContractService(session).draft(
+        FormatIdentityContractDraftRequest(
+            channel_id=channel.id,
+            channel_profile_version_id=profile.id,
+            created_by="phase3-trusted-fixture",
+        )
+    )
+    FormatIdentityContractService(session).approve(
+        format_contract.id,
+        decided_by="phase3-trusted-fixture",
+    )
+
     compiler = ChannelProfileCompiler(session)
     parsed_profile = ChannelProfileInput.model_validate(profile_payload)
     catalogs = compiler.load_catalogs(parsed_profile.template_key)
@@ -228,7 +235,7 @@ def _scope(
         channel_profile_version_id=profile.id,
         compile_run_id=None,
         snapshot_version=1,
-        status="compiled",
+        status="approved",
         compiler_version=catalogs.compiler_policy.compiler_version,
         capability_matrix_version=catalogs.capability_catalog.catalog_version,
         compiled_payload=policy_payload,
@@ -283,7 +290,13 @@ def _scope(
         editorial_calendar_slot_id=slot.id,
         policy_fit_state="PASS",
         confidence_state="HIGH",
-        evidence_blob={"authority": "phase3-test"},
+        evidence_blob={
+            "authority": "phase3-test",
+            "niche_contract_digest_hash": "a" * 64,
+            "target_market_digest_hash": "b" * 64,
+        },
+        niche_contract_digest_hash="a" * 64,
+        target_market_digest_hash="b" * 64,
         reason_codes=["SYSTEM_OK"],
         decision="PASS",
     )
@@ -301,11 +314,13 @@ def _scope(
             title="Exact channel-scoped duration",
             description="Canonical Phase 3 package fixture",
             category_id=category.id,
+            niche_gate_passed=True,
+            market_gate_passed=True,
             duration_contract=duration,
             created_by_user_id=operator.id,
         )
     )
-    assert admission.admitted_video_project_id is not None
+    assert admission.admitted_video_project_id is not None, admission.reason_codes
     project = session.get(VideoProject, admission.admitted_video_project_id)
     assert project is not None
     effective = EffectiveChannelRuntimeContextCompiler(session).ensure_for_project(
@@ -377,7 +392,6 @@ def _content(
         "supported_claim_count": 5,
         "distinct_editorial_section_count": 4,
         "research_coverage_ratio": 0.9,
-        "shorter_format_permitted": True,
         "script_duration_ms": scope.duration.target_duration_ms,
         "anti_padding_pass": True,
         "padding_phrase_hits": 0,
@@ -420,20 +434,6 @@ def _content(
         ],
         "research_coverage_ratio": float(evidence["research_coverage_ratio"]),
     }
-    parent_derivative_lineage = None
-    if scope.admission.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-        parent_package = getattr(scope, "parent_package", None)
-        if parent_package is None:
-            raise AssertionError(
-                "derived Phase 3 fixture requires a ready parent package"
-            )
-        parent_derivative_lineage = ExactContentRefV2(
-            type="parent_derivative_lineage",
-            ref=f"artifact-version://{parent_package.artifact_version_id}",
-            artifact_version_id=parent_package.artifact_version_id,
-            version=parent_package.version_number,
-            content_hash=parent_package.canonical_hash,
-        )
     return ProductionPackageContentV2(
         company_id=scope.company.id,
         channel_workspace_id=scope.channel.id,
@@ -459,7 +459,6 @@ def _content(
         episode_number=scope.admission.episode_number,
         episode_role=scope.admission.episode_role,
         standalone_reason_code=scope.admission.standalone_reason_code,
-        parent_derivative_lineage=parent_derivative_lineage,
         duration_contract=ProductionDurationContractV2.model_validate(
             scope.duration.model_dump(mode="python")
         ),
@@ -901,13 +900,6 @@ def test_v2_long_production_resolves_only_current_ready_package(
     db_session.flush()
     with pytest.raises(
         ValidationFailureError,
-        match="FINAL_MEDIA_DECISION_REQUIRED",
-    ):
-        PublishHandoffLedgerService(db_session).create_upload_task_from_package(
-            legacy.id
-        )
-    with pytest.raises(
-        ValidationFailureError,
         match="PRODUCTION_PACKAGE_V2_PROJECTION_VERSION_MISMATCH",
     ):
         orchestrator._authority_from_db(scope.project.id, legacy.id)
@@ -1165,9 +1157,7 @@ def test_materiality_revision_hashes_and_automated_reruns(
     assert "MATERIAL_CHANGE_REQUIRES_NEW_PLANNING_CYCLE" in blocked.blocker_reason_codes
 
 
-def test_padding_is_neutralized_and_v2_upload_bypass_is_blocked(
-    db_session: Session,
-) -> None:
+def test_padding_is_neutralized_without_fabricating_depth() -> None:
     script = {
         "hook_spec": {"promise_made": "Research-backed promise"},
         "sentences": [
@@ -1186,55 +1176,6 @@ def test_padding_is_neutralized_and_v2_upload_bypass_is_blocked(
     assert repaired == script
     assert repaired is not script
     assert patches == []
-
-    scope = _scope(db_session)
-    package = _create_package(db_session, scope)
-    with pytest.raises(
-        ValidationFailureError,
-        match="FINAL_MEDIA_DECISION_REQUIRED",
-    ):
-        PublishHandoffLedgerService(db_session).create_upload_task_from_package(
-            package.artifact_version_id
-        )
-
-    candidate = ShortCandidate(
-        company_id=scope.company.id,
-        channel_workspace_id=scope.channel.id,
-        parent_video_project_id=scope.project.id,
-        start_time_ms=0,
-        end_time_ms=30_000,
-        duration_ms=30_000,
-        caption_ids=[],
-        core_idea="Exact derivative candidate",
-        hook_line="Exact derivative hook",
-        standalone_summary="Exact derivative summary",
-        crop_strategy="VERTICAL_9_16",
-        visual_source="PARENT_SCENE_REUSE",
-        candidate_state="GENERATED",
-        production_cost_estimate={},
-    )
-    db_session.add(candidate)
-    db_session.flush()
-    funnel = CrossPlatformFunnelPackageService(db_session).create(
-        data=CrossPlatformFunnelPackageCreate(
-            parent_video_project_id=scope.project.id,
-            selected_short_candidate_ids=[candidate.id],
-        )
-    )
-    with pytest.raises(
-        ValidationFailureError,
-        match="FINAL_MEDIA_DECISION_REQUIRED",
-    ):
-        CrossPlatformFunnelPackageService(db_session).build_upload_cards(
-            package_id=funnel.id,
-            data=BuildUploadCardsRequest(),
-        )
-    assert (
-        db_session.scalar(select(func.count()).select_from(CrossPlatformFunnelPackage))
-        == 1
-    )
-    assert db_session.scalar(select(func.count()).select_from(UploadCard)) == 0
-    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
 
 
 def test_v2_local_renderer_checks_readiness_before_side_effects() -> None:

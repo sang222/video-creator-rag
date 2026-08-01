@@ -6,7 +6,7 @@ DX1 giữ phase reports làm lịch sử audit. Runtime nên đọc theo semanti
 
 | Phase-coded module | Semantic domain | Semantic module | Status |
 | --- | --- | --- | --- |
-| `app.services.m5` | Daily Operations | `app.services.daily_operations` | Facade re-export; old import kept. |
+| `app.services.editorial_research` | Editorial Research | `app.services.editorial_research` | Active research/runway authority. |
 | `app.services.m5` | Context Resolver | `app.services.context_resolver` | Facade re-export; old import kept. |
 | `app.services.m5` | Project Admission | `app.services.project_admission` | Facade re-export; old import kept. |
 | `app.services.m9` | Post-Publish Diagnostics | `app.services.post_publish_diagnostics` | Facade re-export; old import kept. |

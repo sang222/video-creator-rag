@@ -106,9 +106,7 @@ def _revision_scope(session, tmp_path: Path):
         decided_by_user_id=operator.id,
         approval_ref="operator-approval://pkg1/test/final-and-mr1",
     )
-    explicit_contract = deepcopy(
-        snapshot_v1.compiled_payload["channel_contract_json"]
-    )
+    explicit_contract = deepcopy(snapshot_v1.compiled_payload["channel_contract_json"])
     explicit_contract["channel_identity"]["brand_promise"] = (
         "Practical, bounded AI workflows for small-team operators."
     )
@@ -138,15 +136,15 @@ def _revision_scope(session, tmp_path: Path):
         approval_ref=V3_APPROVAL,
         approved_by=operator.id,
     )
-    profile = profile_service.get_profile_version(activated["channel_profile_version_id"])
+    profile = profile_service.get_profile_version(
+        activated["channel_profile_version_id"]
+    )
     snapshot = session.get(
         CompiledChannelPolicySnapshot,
         uuid.UUID(str(activated["compiled_policy_snapshot_id"])),
     )
     _category(session, company=company, channel=channel, snapshot=snapshot)
-    reports = _reports(
-        tmp_path, channel=channel, profile=profile, snapshot=snapshot
-    )
+    reports = _reports(tmp_path, channel=channel, profile=profile, snapshot=snapshot)
     return company, operator, channel, historical, profile, snapshot, reports
 
 
@@ -181,7 +179,12 @@ def _historical_state(session, project_id) -> dict:
             "snapshot": str(project.policy_snapshot_id),
         },
         "artifacts": sorted(
-            (str(item.id), item.artifact_type, str(item.current_version_id), item.status)
+            (
+                str(item.id),
+                item.artifact_type,
+                str(item.current_version_id),
+                item.status,
+            )
             for item in artifacts
         ),
         "versions": sorted(
@@ -244,7 +247,9 @@ def test_market_revision_supersedes_v1_exactly_and_waits_for_human_review(
     assert package["PUBLISH_EXECUTION_READY"] is False
     assert package["destination_status"] == "PENDING_PLATFORM_ID"
     assert package["publish_blocker"] == "PENDING_PLATFORM_ID"
-    assert package["publish_blocker_reason_code"] == "DESTINATION_PLATFORM_ID_NOT_VERIFIED"
+    assert (
+        package["publish_blocker_reason_code"] == "DESTINATION_PLATFORM_ID_NOT_VERIFIED"
+    )
     assert package["MR1_EXECUTION"] == "ON_HOLD"
     assert package["PROCEED_TO_MR1"] is False
     assert package["PROCEED_TO_MR1_REAPPROVAL"] is False
@@ -265,17 +270,29 @@ def test_market_revision_supersedes_v1_exactly_and_waits_for_human_review(
     assert bindings["destination_binding"]["content_hash"] == (
         active_policy.destination_binding_policy.destination.content_hash
     )
-    assert bindings["destination_binding"]["destination_status"] == "PENDING_PLATFORM_ID"
-    assert bindings["content_category"]["pillar"] == (
-        snapshot.compiled_payload["channel_contract_json"]["editorial_strategy"][
-            "content_pillars"
-        ][0]
+    assert (
+        bindings["destination_binding"]["destination_status"] == "PENDING_PLATFORM_ID"
     )
-    assert bindings["content_category"]["series"] == profile.profile_input[
-        "series_plan"
-    ][0]["key"]
-    assert bindings["lpro1_production_orchestrator_version"] == "lpro1.long-production-orchestrator/1.0.0"
-    assert bindings["lpro1_production_contract_version"] == "lpro1.long-form-render-package.v1"
+    assert (
+        bindings["content_category"]["pillar"]
+        == (
+            snapshot.compiled_payload["channel_contract_json"]["editorial_strategy"][
+                "content_pillars"
+            ][0]
+        )
+    )
+    assert (
+        bindings["content_category"]["series"]
+        == profile.profile_input["series_plan"][0]["key"]
+    )
+    assert (
+        bindings["lpro1_production_orchestrator_version"]
+        == "lpro1.long-production-orchestrator/1.0.0"
+    )
+    assert (
+        bindings["lpro1_production_contract_version"]
+        == "lpro1.long-form-render-package.v1"
+    )
     assert bindings["niche_alignment_dossier"]["content_hash"]
     assert bindings["market_alignment_dossier"]["content_hash"]
     assert package["no_execution_proof"]["all_deltas_zero"] is True
@@ -283,24 +300,32 @@ def test_market_revision_supersedes_v1_exactly_and_waits_for_human_review(
 
     assert _historical_state(db_session, historical.video_project_id) == history_before
     assert _external_counts(db_session) == external_before
-    assert db_session.scalar(select(func.count()).select_from(ApprovalDecision)) == approval_count_before
-    assert db_session.scalar(
-        select(func.count()).select_from(ReviewTask).where(
-            ReviewTask.video_project_id == uuid.UUID(result["video_project_id"]),
-            ReviewTask.status == "open",
-            ReviewTask.target_artifact_version_id
-            == uuid.UUID(result["package_artifact_version_id"]),
+    assert (
+        db_session.scalar(select(func.count()).select_from(ApprovalDecision))
+        == approval_count_before
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ReviewTask)
+            .where(
+                ReviewTask.video_project_id == uuid.UUID(result["video_project_id"]),
+                ReviewTask.status == "open",
+                ReviewTask.target_artifact_version_id
+                == uuid.UUID(result["package_artifact_version_id"]),
+            )
         )
-    ) == 1
+        == 1
+    )
 
 
 def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_policy(
     db_session, tmp_path
 ) -> None:
     _, operator, channel, _, _, _, reports = _revision_scope(db_session, tmp_path)
-    result = PKG1MarketRevisionService(
-        db_session, report_paths=reports
-    ).build_revision(channel_id=channel.id, created_by_user_id=operator.id)
+    result = PKG1MarketRevisionService(db_session, report_paths=reports).build_revision(
+        channel_id=channel.id, created_by_user_id=operator.id
+    )
     artifacts = result["artifacts"]
 
     gates = artifacts["market_gate_results"]["content"]
@@ -331,7 +356,10 @@ def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_poli
         f"video-project://{result['video_project_id']}"
     )
     assert artifacts["niche_alignment_dossier"]["content"]["overall_verdict"] == "PASS"
-    assert artifacts["target_market_consistency_check"]["content"]["overall_decision"] == "PASS"
+    assert (
+        artifacts["target_market_consistency_check"]["content"]["overall_decision"]
+        == "PASS"
+    )
 
     destination = artifacts["destination_binding"]["content"]["destination"]
     assert destination["platform"] == "YOUTUBE"
@@ -370,9 +398,10 @@ def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_poli
     assert thumbnail["target_market"] == "US"
     assert thumbnail["text_locale"] == "en-US"
     assert artifacts["thumbnail_brief"]["version_number"] == 2
-    assert thumbnail["market_alignment_dossier"]["content_hash"] == artifacts[
-        "market_alignment_dossier"
-    ]["content_hash"]
+    assert (
+        thumbnail["market_alignment_dossier"]["content_hash"]
+        == artifacts["market_alignment_dossier"]["content_hash"]
+    )
     assert thumbnail["market_alignment_evidence_subject"]["version_number"] == 1
     assert metadata["locale"] == "en-US"
     assert metadata["market"] == "US"
@@ -398,7 +427,10 @@ def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_poli
     }
     cost = artifacts["cost_estimate_snapshot"]["content"]
     assert "config://media_provider_budget_policy_catalog/1.0.2" in cost["catalog_refs"]
-    assert "config://google_gemini_image_model_price_catalog/2026-07-17" in cost["catalog_refs"]
+    assert (
+        "config://google_gemini_image_model_price_catalog/2026-07-17"
+        in cost["catalog_refs"]
+    )
     assert "config://google_veo_model_price_catalog/2026-07-12" in cost["catalog_refs"]
     assert all(item["content_hash"] for item in cost["catalog_bindings"])
     assert cost["actual_cost"] is None
@@ -432,7 +464,6 @@ def test_market_revision_artifacts_preserve_market_visual_provider_and_cost_poli
     assert risk["package_integrity"]["final_package_integrity"] == (
         "PENDING_PACKAGE_HASH"
     )
-    assert artifacts["upload_card"]["content"]["human_upload_task_created"] is False
 
 
 def test_market_revision_is_idempotent_and_revision_hash_is_stable(
@@ -444,14 +475,14 @@ def test_market_revision_is_idempotent_and_revision_hash_is_stable(
         channel_id=channel.id, created_by_user_id=operator.id
     )
     project_count = db_session.scalar(
-        select(func.count()).select_from(VideoProject).where(
-            VideoProject.project_type == PROJECT_TYPE
-        )
+        select(func.count())
+        .select_from(VideoProject)
+        .where(VideoProject.project_type == PROJECT_TYPE)
     )
     artifact_count = db_session.scalar(
-        select(func.count()).select_from(Artifact).where(
-            Artifact.video_project_id == uuid.UUID(first["video_project_id"])
-        )
+        select(func.count())
+        .select_from(Artifact)
+        .where(Artifact.video_project_id == uuid.UUID(first["video_project_id"]))
     )
     second = service.build_revision(
         channel_id=channel.id, created_by_user_id=operator.id
@@ -460,28 +491,30 @@ def test_market_revision_is_idempotent_and_revision_hash_is_stable(
     assert second["package_artifact_version_id"] == first["package_artifact_version_id"]
     assert second["revision_id"] == first["revision_id"]
     assert second["revision_hash"] == first["revision_hash"]
-    assert db_session.scalar(
-        select(func.count()).select_from(VideoProject).where(
-            VideoProject.project_type == PROJECT_TYPE
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(VideoProject)
+            .where(VideoProject.project_type == PROJECT_TYPE)
         )
-    ) == project_count
-    assert db_session.scalar(
-        select(func.count()).select_from(Artifact).where(
-            Artifact.video_project_id == uuid.UUID(first["video_project_id"])
-        )
-    ) == artifact_count
-    assert content_hash({"b": 2, "a": 1}) == content_hash({"a": 1, "b": 2})
-    assert content_hash({"scenes": ["a", "b"]}) != content_hash(
-        {"scenes": ["b", "a"]}
+        == project_count
     )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Artifact)
+            .where(Artifact.video_project_id == uuid.UUID(first["video_project_id"]))
+        )
+        == artifact_count
+    )
+    assert content_hash({"b": 2, "a": 1}) == content_hash({"a": 1, "b": 2})
+    assert content_hash({"scenes": ["a", "b"]}) != content_hash({"scenes": ["b", "a"]})
 
 
 def test_market_revision_rerun_rejects_non_pending_human_review(
     db_session, tmp_path
 ) -> None:
-    _, operator, channel, _, _, _, reports = _revision_scope(
-        db_session, tmp_path
-    )
+    _, operator, channel, _, _, _, reports = _revision_scope(db_session, tmp_path)
     service = PKG1MarketRevisionService(db_session, report_paths=reports)
     first = service.build_revision(
         channel_id=channel.id, created_by_user_id=operator.id
@@ -499,9 +532,7 @@ def test_market_revision_rerun_rejects_non_pending_human_review(
         ValidationFailureError,
         match="EXISTING_REVISION_EXACT_OPEN_REVIEW_MISSING",
     ):
-        service.build_revision(
-            channel_id=channel.id, created_by_user_id=operator.id
-        )
+        service.build_revision(channel_id=channel.id, created_by_user_id=operator.id)
 
 
 def test_repository_entry_reports_pin_canonical_production_ids_and_hashes() -> None:
@@ -514,8 +545,17 @@ def test_repository_entry_reports_pin_canonical_production_ids_and_hashes() -> N
     activation = summary["production_activation"]
     assert activation["profile_v3_id"] == "d0d16fc5-0dc9-4022-bfd3-7f9a47c3a711"
     assert activation["snapshot_v3_id"] == "e6c33d80-f5d8-4f72-9abc-87de3601b89e"
-    assert activation["target_market_profile_hash"] == "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e"
-    assert activation["target_market_digest_hash"] == "244989186381a71c4eda812743b3b095426397ae0cdfb791641b2875918014f0"
-    assert activation["destination_binding_hash"] == "411aae66418315da8e6a0bf2cd23e896e89e7cd4827a5b54c36c0437ad63efab"
+    assert (
+        activation["target_market_profile_hash"]
+        == "d456033a947408f671b328f9c5f5589ae86ea4529caf60b18c3d913058d1bb9e"
+    )
+    assert (
+        activation["target_market_digest_hash"]
+        == "244989186381a71c4eda812743b3b095426397ae0cdfb791641b2875918014f0"
+    )
+    assert (
+        activation["destination_binding_hash"]
+        == "411aae66418315da8e6a0bf2cd23e896e89e7cd4827a5b54c36c0437ad63efab"
+    )
     assert activation["destination_status"] == "PENDING_PLATFORM_ID"
     assert activation["publish_execution_allowed"] is False

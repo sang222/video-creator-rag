@@ -28,7 +28,6 @@ def test_config_yaml_validates(db_session) -> None:
         "creative_quality_policy_catalog",
         "channel_scoped_policy_catalog",
         "context_pack_purpose_catalog",
-        "daily_run_status_catalog",
         "decision_rights_policy",
         "diagnostic_confidence_catalog",
         "diagnostic_severity_catalog",
@@ -44,26 +43,23 @@ def test_config_yaml_validates(db_session) -> None:
         "cost_event_type_catalog",
         "credential_status_catalog",
         "credential_type_catalog",
-        "cta_type_catalog",
-        "derivative_type_catalog",
         "gate_definition_catalog",
-            "google_drive_connection_state_catalog",
-            "google_drive_oauth_session_status_catalog",
-            "google_gemini_image_model_price_catalog",
-            "google_veo_model_price_catalog",
-            "dashboard_language_catalog",
-            "operator_user_role_catalog",
-            "operator_user_status_catalog",
-            "auth_session_status_catalog",
-            "translation_mode_catalog",
-            "localization_translation_status_catalog",
-            "localization_human_review_status_catalog",
-            "localization_readiness_result_catalog",
-            "publish_timing_source_catalog",
-            "publish_timing_confidence_catalog",
-            "health_state_catalog",
+        "google_drive_connection_state_catalog",
+        "google_drive_oauth_session_status_catalog",
+        "google_gemini_image_model_price_catalog",
+        "google_veo_model_price_catalog",
+        "dashboard_language_catalog",
+        "operator_user_role_catalog",
+        "operator_user_status_catalog",
+        "auth_session_status_catalog",
+        "translation_mode_catalog",
+        "localization_translation_status_catalog",
+        "localization_human_review_status_catalog",
+        "localization_readiness_result_catalog",
+        "publish_timing_source_catalog",
+        "publish_timing_confidence_catalog",
+        "health_state_catalog",
         "human_upload_task_state_catalog",
-        "idea_decision_status_catalog",
         "license_state_catalog",
         "m4_reason_code_catalog",
         "m5_reason_code_catalog",
@@ -74,9 +70,9 @@ def test_config_yaml_validates(db_session) -> None:
         "m10_reason_code_catalog",
         "m10_1_reason_code_catalog",
         "m10_2_reason_code_catalog",
-            "m10_3_reason_code_catalog",
-            "m10_5_reason_code_catalog",
-            "m11_1_reason_code_catalog",
+        "m10_3_reason_code_catalog",
+        "m10_5_reason_code_catalog",
+        "m11_1_reason_code_catalog",
         "media_provider_type_catalog",
         "media_provider_recommendation_catalog",
         "media_job_type_catalog",
@@ -90,7 +86,6 @@ def test_config_yaml_validates(db_session) -> None:
         "media_budget_state_catalog",
         "media_budget_enforcement_catalog",
         "long_form_render_package_state_catalog",
-        "short_render_package_state_catalog",
         "ai_hero_asset_state_catalog",
         "thumbnail_variant_state_catalog",
         "final_media_type_catalog",
@@ -117,10 +112,8 @@ def test_config_yaml_validates(db_session) -> None:
         "media_qc_state_catalog",
         "media_render_job_status_catalog",
         "media_offload_job_state_catalog",
-        "music_policy_catalog",
         "niche_profile_templates",
         "ops_incident_type_catalog",
-        "originality_check_result_catalog",
         "platform_policy_catalog",
         "platform_surface_catalog",
         "playbook_candidate_category_catalog",
@@ -142,9 +135,6 @@ def test_config_yaml_validates(db_session) -> None:
         "quota_unit_catalog",
         "recovery_proposal_state_catalog",
         "recovery_proposal_type_catalog",
-        "release_plan_state_catalog",
-        "reusable_artifact_state_catalog",
-        "reusable_artifact_type_catalog",
         "reason_code_catalog",
         "reason_codes",
         "render_intent_catalog",
@@ -158,15 +148,11 @@ def test_config_yaml_validates(db_session) -> None:
         "scene_importance_catalog",
         "scene_type_catalog",
         "search_demand_source_type_catalog",
-        "short_candidate_state_catalog",
-        "short_crop_strategy_catalog",
-        "short_visual_source_catalog",
         "slot_type_catalog",
         "source_decision_catalog",
         "target_market_profile_catalog",
         "uploaded_video_monitoring_state_catalog",
         "uploaded_video_publish_status_catalog",
-        "upload_card_state_catalog",
         "youtube_auth_mode_catalog",
         "youtube_connection_state_catalog",
         "youtube_follow_freshness_state_catalog",
@@ -181,8 +167,14 @@ def test_config_yaml_validates(db_session) -> None:
 
 def test_config_seed_deterministic(db_session) -> None:
     service = ConfigRegistryService(db_session)
-    first = {catalog.catalog_key: catalog.content_hash for catalog in service.load_catalog_files([ROOT / "config"])}
-    second = {catalog.catalog_key: catalog.content_hash for catalog in service.load_catalog_files([ROOT / "config"])}
+    first = {
+        catalog.catalog_key: catalog.content_hash
+        for catalog in service.load_catalog_files([ROOT / "config"])
+    }
+    second = {
+        catalog.catalog_key: catalog.content_hash
+        for catalog in service.load_catalog_files([ROOT / "config"])
+    }
     assert first == second
 
 
@@ -190,9 +182,13 @@ def test_config_seed_idempotent(db_session) -> None:
     service = ConfigRegistryService(db_session)
     service.seed([ROOT / "config"])
     service.seed([ROOT / "config"])
-    catalog_count = db_session.scalar(select(func.count()).select_from(ConfigCatalogVersion))
+    catalog_count = db_session.scalar(
+        select(func.count()).select_from(ConfigCatalogVersion)
+    )
     role_count = db_session.scalar(select(func.count()).select_from(Role))
-    metric_definition_count = db_session.scalar(select(func.count()).select_from(MetricDefinitionVersion))
+    metric_definition_count = db_session.scalar(
+        select(func.count()).select_from(MetricDefinitionVersion)
+    )
     assert catalog_count == 163
     assert role_count == 13
     assert metric_definition_count == 16

@@ -8,14 +8,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 
 REQUIRED_TAGS = {
-    "m5-daily-run-context-admission",
     "m6-production-media-qc-foundation",
     "pre-m7-m0-m6-qualification-pass",
     "m7-manual-publish-handoff",
     "m8-analytics-sync-foundation",
     "m9-post-publish-diagnostics",
     "m10-learning-review-queue",
-    "m10-1-router-derivative-funnel",
     "m10-2-media-provider-routing",
     "m10-3-youtube-follow",
     "m10-5-google-drive-media-offload",
@@ -23,7 +21,7 @@ REQUIRED_TAGS = {
     "m11-1-localized-dashboard-polish",
 }
 
-EXPECTED_ALEMBIC_HEAD = "0043_vcos_phase123"
+EXPECTED_ALEMBIC_HEAD = "0049_vcos_long_form_cadence"
 
 REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "README.md",
@@ -34,13 +32,13 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "docs/architecture/m2-artifact-workflow.md",
     "docs/architecture/m3-policy-gate-readiness.md",
     "docs/architecture/m4-ops-foundation.md",
-    "docs/architecture/m5-daily-run-context-admission.md",
+    "docs/architecture/m5-editorial-research-context-admission.md",
     "docs/architecture/m6-production-artifacts.md",
     "docs/architecture/m7-manual-publish-handoff.md",
     "docs/architecture/m8-analytics-sync.md",
     "docs/architecture/m9-post-publish-diagnostics.md",
     "docs/architecture/m10-learning-review-queue.md",
-    "docs/architecture/m10-1-llm-router-derivative-funnel.md",
+    "docs/architecture/m10-1-llm-router.md",
     "docs/architecture/m10-2-media-provider-role-matrix.md",
     "docs/architecture/m10-3-youtube-follow.md",
     "docs/architecture/google_veo_provider.md",
@@ -63,7 +61,6 @@ REQUIRED_SOURCE_OF_TRUTH_PATHS = {
     "reports/m10_1-final-report.md",
     "reports/m10_2-final-report.md",
     "reports/m10_3-final-report.md",
-    "reports/m10_4-final-report.md",
     "reports/m10_5-final-report.md",
     "reports/m11-final-report.md",
     "reports/m11_1-final-report.md",
@@ -136,7 +133,7 @@ EXPECTED_M0_M6_TABLES = {
     "ops_incidents",
     "manual_action_queue",
     "editorial_calendar_slots",
-    "channel_daily_runs",
+    "editorial_research_runs",
     "retrieval_plan_snapshots",
     "context_pack_snapshots",
     "channel_state_pack_snapshots",
@@ -144,7 +141,7 @@ EXPECTED_M0_M6_TABLES = {
     "search_intent_maps",
     "audience_target_packs",
     "idea_market_preflights",
-    "daily_idea_decisions",
+    "editorial_idea_candidates",
     "project_admission_decisions",
     "production_artifact_runs",
     "voice_timeline_snapshots",
@@ -212,7 +209,9 @@ def missing_paths(paths: set[str], *, root: Path = ROOT) -> list[str]:
 
 
 def m0_m1_evidence_status(*, root: Path = ROOT) -> dict[str, Any]:
-    final_reports = sorted(path for path in M0_M1_FINAL_REPORTS if (root / path).exists())
+    final_reports = sorted(
+        path for path in M0_M1_FINAL_REPORTS if (root / path).exists()
+    )
     waiver_docs = sorted(path for path in M0_M1_WAIVER_DOCS if (root / path).exists())
     return {
         "final_reports_present": final_reports,
@@ -233,7 +232,11 @@ def assert_no_secret_payload(payload: Any) -> None:
 
 
 def assert_operator_signal(payload: dict[str, Any]) -> None:
-    assert payload.get("reason_codes") or payload.get("reason_code") or payload.get("next_action")
+    assert (
+        payload.get("reason_codes")
+        or payload.get("reason_code")
+        or payload.get("next_action")
+    )
     if payload.get("overall_state") in {"DEGRADED", "BLOCKED"}:
         assert payload.get("next_action")
 
@@ -247,4 +250,6 @@ def assert_file_ref_is_verified(file_ref: dict[str, Any]) -> None:
 
 
 def assert_artifact_types(actual: set[str], expected: set[str]) -> None:
-    assert actual == expected, f"artifact types mismatch: expected {sorted(expected)}, got {sorted(actual)}"
+    assert actual == expected, (
+        f"artifact types mismatch: expected {sorted(expected)}, got {sorted(actual)}"
+    )

@@ -157,12 +157,28 @@ PATCH_TYPE_RERUN_GATES: dict[str, list[str]] = {
     "HOOK_SPEC": ["HookTruthfulnessGate", "HookPayoffGate", "VisualHookRelevanceGate"],
     "VISUAL_HOOK": ["VisualHookRelevanceGate"],
     "SCRIPT_STYLE_PATCH": ["script_style_compliance_gate"],
-    "METADATA": ["TitlePromiseGate", "MetadataTruthfulnessGate", "DescriptionCompletenessGate"],
-    "THUMBNAIL_BRIEF": ["ThumbnailTruthfulnessGate", "MobileThumbnailLegibilityGate", "CharacterThumbnailConsistencyGate"],
+    "METADATA": [
+        "TitlePromiseGate",
+        "MetadataTruthfulnessGate",
+        "DescriptionCompletenessGate",
+    ],
+    "THUMBNAIL_BRIEF": [
+        "ThumbnailTruthfulnessGate",
+        "MobileThumbnailLegibilityGate",
+        "CharacterThumbnailConsistencyGate",
+    ],
     "SUBTITLE_HANDOFF": ["CaptionCoverageGate"],
     "PUBLISH_TIMING_OVERRIDE": ["PublishTimingComplianceGate"],
-    "DISCLOSURE_COPY": ["DisclosureConsistencyGate", "UploadCopyTruthfulnessGate", "ManualPublishOnlyGate"],
-    "UPLOAD_COPY": ["DisclosureConsistencyGate", "UploadCopyTruthfulnessGate", "ManualPublishOnlyGate"],
+    "DISCLOSURE_COPY": [
+        "DisclosureConsistencyGate",
+        "UploadCopyTruthfulnessGate",
+        "ManualPublishOnlyGate",
+    ],
+    "UPLOAD_COPY": [
+        "DisclosureConsistencyGate",
+        "UploadCopyTruthfulnessGate",
+        "ManualPublishOnlyGate",
+    ],
 }
 
 
@@ -195,34 +211,122 @@ class PackagingPatchInventory:
 
 class PackagingPatchRouter:
     ROUTES: dict[str, PackagingPatchRoute] = {
-        "SCRIPT_FORBIDDEN_STYLE_USED": PackagingPatchRoute("DETERMINISTIC_SERVICE", "SCRIPT_STYLE_PATCH", "ScriptRewriteAgent", "script_rewrite_agent.patch_proposal", True),
-        "HOOK_PROMISE_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "HOOK_SPEC", "ScriptRewriteAgent", "script_rewrite_agent.patch_proposal", True),
-        "HOOK_VISUAL_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "VISUAL_HOOK", "VisualPlanningAgent", "visual_planning_agent.patch_proposal", True),
-        "TITLE_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "METADATA", "PublishingMetadataAgent", "publishing_metadata_agent.patch_proposal", True),
-        "TITLE_OVER_PROMISE_UNSUPPORTED_CLAIM": PackagingPatchRoute("EXISTING_AGENT", "METADATA", "PublishingMetadataAgent", "publishing_metadata_agent.patch_proposal"),
-        "DESCRIPTION_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "METADATA", "PublishingMetadataAgent", "publishing_metadata_agent.patch_proposal", True),
-        "THUMBNAIL_BRIEF_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "THUMBNAIL_BRIEF", "ThumbnailBriefAgent", "thumbnail_brief_agent.patch_proposal", True),
-        "SUBTITLE_REFS_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "SUBTITLE_HANDOFF", None, "subtitle_handoff_service.patch_proposal", True),
-        "PUBLISH_WINDOW_MISSING": PackagingPatchRoute("DETERMINISTIC_SERVICE", "PUBLISH_TIMING_OVERRIDE", None, "publish_timing_service.patch_proposal", True),
-        "DISCLOSURE_CONFLICT": PackagingPatchRoute("EXISTING_AGENT", "DISCLOSURE_COPY", "RightsDisclosureReviewer+UploadCardCopyAgent", "rights_disclosure_upload_copy.patch_proposal"),
-        "UNSUPPORTED_CTA": PackagingPatchRoute("EXISTING_AGENT", "UPLOAD_COPY", "UploadCardCopyAgent", "upload_card_copy_agent.patch_proposal"),
-        "FAKE_CHECKLIST": PackagingPatchRoute("EXISTING_AGENT", "UPLOAD_COPY", "UploadCardCopyAgent", "upload_card_copy_agent.patch_proposal"),
-        "FAKE_DEMO": PackagingPatchRoute("EXISTING_AGENT", "UPLOAD_COPY", "UploadCardCopyAgent", "upload_card_copy_agent.patch_proposal"),
+        "SCRIPT_FORBIDDEN_STYLE_USED": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "SCRIPT_STYLE_PATCH",
+            "ScriptRewriteAgent",
+            "script_rewrite_agent.patch_proposal",
+            True,
+        ),
+        "HOOK_PROMISE_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "HOOK_SPEC",
+            "ScriptRewriteAgent",
+            "script_rewrite_agent.patch_proposal",
+            True,
+        ),
+        "HOOK_VISUAL_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "VISUAL_HOOK",
+            "VisualPlanningAgent",
+            "visual_planning_agent.patch_proposal",
+            True,
+        ),
+        "TITLE_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "METADATA",
+            "PublishingMetadataAgent",
+            "publishing_metadata_agent.patch_proposal",
+            True,
+        ),
+        "TITLE_OVER_PROMISE_UNSUPPORTED_CLAIM": PackagingPatchRoute(
+            "EXISTING_AGENT",
+            "METADATA",
+            "PublishingMetadataAgent",
+            "publishing_metadata_agent.patch_proposal",
+        ),
+        "DESCRIPTION_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "METADATA",
+            "PublishingMetadataAgent",
+            "publishing_metadata_agent.patch_proposal",
+            True,
+        ),
+        "THUMBNAIL_BRIEF_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "THUMBNAIL_BRIEF",
+            "ThumbnailBriefAgent",
+            "thumbnail_brief_agent.patch_proposal",
+            True,
+        ),
+        "SUBTITLE_REFS_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "SUBTITLE_HANDOFF",
+            None,
+            "subtitle_handoff_service.patch_proposal",
+            True,
+        ),
+        "PUBLISH_WINDOW_MISSING": PackagingPatchRoute(
+            "DETERMINISTIC_SERVICE",
+            "PUBLISH_TIMING_OVERRIDE",
+            None,
+            "publish_timing_service.patch_proposal",
+            True,
+        ),
+        "DISCLOSURE_CONFLICT": PackagingPatchRoute(
+            "EXISTING_AGENT",
+            "DISCLOSURE_COPY",
+            "RightsDisclosureReviewer+PublishingMetadataAgent",
+            "rights_disclosure_metadata.patch_proposal",
+        ),
+        "UNSUPPORTED_CTA": PackagingPatchRoute(
+            "EXISTING_AGENT",
+            "PUBLISH_METADATA",
+            "PublishingMetadataAgent",
+            "publishing_metadata_agent.patch_proposal",
+        ),
+        "FAKE_CHECKLIST": PackagingPatchRoute(
+            "EXISTING_AGENT",
+            "PUBLISH_METADATA",
+            "PublishingMetadataAgent",
+            "publishing_metadata_agent.patch_proposal",
+        ),
+        "FAKE_DEMO": PackagingPatchRoute(
+            "EXISTING_AGENT",
+            "PUBLISH_METADATA",
+            "PublishingMetadataAgent",
+            "publishing_metadata_agent.patch_proposal",
+        ),
     }
 
-    def route(self, *, issue_code: str, gate_key: str | None = None) -> PackagingPatchRoute | None:
+    def route(
+        self, *, issue_code: str, gate_key: str | None = None
+    ) -> PackagingPatchRoute | None:
         if issue_code in self.ROUTES:
             return self.ROUTES[issue_code]
-        if gate_key in {"HookTruthfulnessGate", "HookPayoffGate", "VisualHookRelevanceGate"}:
-            return PackagingPatchRoute("EXISTING_AGENT", "HOOK_SPEC", "ScriptPlanningAgent", "script_planning_agent.patch_proposal")
+        if gate_key in {
+            "HookTruthfulnessGate",
+            "HookPayoffGate",
+            "VisualHookRelevanceGate",
+        }:
+            return PackagingPatchRoute(
+                "EXISTING_AGENT",
+                "HOOK_SPEC",
+                "ScriptPlanningAgent",
+                "script_planning_agent.patch_proposal",
+            )
         return None
 
 
-def _patch_inventory_for_package(session: Session, package_id: uuid.UUID) -> PackagingPatchInventory:
+def _patch_inventory_for_package(
+    session: Session, package_id: uuid.UUID
+) -> PackagingPatchInventory:
     items = session.scalars(
         select(PackagingReviewQueueItem)
         .where(PackagingReviewQueueItem.package_id == package_id)
-        .order_by(PackagingReviewQueueItem.created_at.asc(), PackagingReviewQueueItem.id.asc())
+        .order_by(
+            PackagingReviewQueueItem.created_at.asc(), PackagingReviewQueueItem.id.asc()
+        )
     ).all()
     patches: list[PackagingProposedPatch] = []
     states_by_patch_id: dict[uuid.UUID, PackagingReviewQueueItem] = {}
@@ -233,8 +337,12 @@ def _patch_inventory_for_package(session: Session, package_id: uuid.UUID) -> Pac
         patches.append(patch)
         states_by_patch_id[patch.id] = item
 
-    latest_decisions = _latest_decisions_for_patches(session, [patch.id for patch in patches])
-    applied_runs = _latest_applied_runs_for_patches(session, [patch.id for patch in patches])
+    latest_decisions = _latest_decisions_for_patches(
+        session, [patch.id for patch in patches]
+    )
+    applied_runs = _latest_applied_runs_for_patches(
+        session, [patch.id for patch in patches]
+    )
     states = [
         PackagingPatchReviewState(
             item=states_by_patch_id[patch.id],
@@ -247,36 +355,51 @@ def _patch_inventory_for_package(session: Session, package_id: uuid.UUID) -> Pac
     return PackagingPatchInventory(
         states=states,
         approved_count=sum(1 for state in states if _state_is_human_approved(state)),
-        ready_for_review_count=sum(1 for state in states if state.patch.status == "READY_FOR_REVIEW"),
+        ready_for_review_count=sum(
+            1 for state in states if state.patch.status == "READY_FOR_REVIEW"
+        ),
         rejected_count=sum(1 for state in states if _state_is_rejected(state)),
-        request_changes_count=sum(1 for state in states if _state_is_request_changes(state)),
+        request_changes_count=sum(
+            1 for state in states if _state_is_request_changes(state)
+        ),
         applied_count=sum(1 for state in states if _state_is_applied(state)),
     )
 
 
-def _latest_patch_for_item(session: Session, queue_item_id: uuid.UUID) -> PackagingProposedPatch | None:
+def _latest_patch_for_item(
+    session: Session, queue_item_id: uuid.UUID
+) -> PackagingProposedPatch | None:
     return session.scalars(
         select(PackagingProposedPatch)
         .where(PackagingProposedPatch.queue_item_id == queue_item_id)
-        .order_by(desc(PackagingProposedPatch.created_at), desc(PackagingProposedPatch.id))
+        .order_by(
+            desc(PackagingProposedPatch.created_at), desc(PackagingProposedPatch.id)
+        )
         .limit(1)
     ).one_or_none()
 
 
-def _latest_decisions_for_patches(session: Session, patch_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+def _latest_decisions_for_patches(
+    session: Session, patch_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
     if not patch_ids:
         return {}
     decisions: dict[uuid.UUID, str] = {}
     for decision in session.scalars(
         select(PackagingPatchApprovalDecision)
         .where(PackagingPatchApprovalDecision.proposed_patch_id.in_(patch_ids))
-        .order_by(desc(PackagingPatchApprovalDecision.created_at), desc(PackagingPatchApprovalDecision.id))
+        .order_by(
+            desc(PackagingPatchApprovalDecision.created_at),
+            desc(PackagingPatchApprovalDecision.id),
+        )
     ).all():
         decisions.setdefault(decision.proposed_patch_id, decision.decision)
     return decisions
 
 
-def _latest_applied_runs_for_patches(session: Session, patch_ids: list[uuid.UUID]) -> dict[uuid.UUID, PackagingPatchApplyRun]:
+def _latest_applied_runs_for_patches(
+    session: Session, patch_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, PackagingPatchApplyRun]:
     if not patch_ids:
         return {}
     runs: dict[uuid.UUID, PackagingPatchApplyRun] = {}
@@ -286,7 +409,9 @@ def _latest_applied_runs_for_patches(session: Session, patch_ids: list[uuid.UUID
             PackagingPatchApplyRun.proposed_patch_id.in_(patch_ids),
             PackagingPatchApplyRun.apply_status == "APPLIED",
         )
-        .order_by(desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id))
+        .order_by(
+            desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id)
+        )
     ).all():
         runs.setdefault(run.proposed_patch_id, run)
     return runs
@@ -301,7 +426,11 @@ def _state_is_rejected(state: PackagingPatchReviewState) -> bool:
 
 
 def _state_is_request_changes(state: PackagingPatchReviewState) -> bool:
-    return state.patch.status == "REQUEST_CHANGES" or state.latest_decision == "REQUEST_CHANGES" or state.item.status == "NEEDS_CHANGES"
+    return (
+        state.patch.status == "REQUEST_CHANGES"
+        or state.latest_decision == "REQUEST_CHANGES"
+        or state.item.status == "NEEDS_CHANGES"
+    )
 
 
 def _state_is_applied(state: PackagingPatchReviewState) -> bool:
@@ -337,7 +466,9 @@ class PackagingReviewQueueService:
                     source_gate_run_id=run.id,
                     source_gate_batch_id=run.gate_batch_run_id,
                 )
-                active_keys.add((item.gate_key, item.issue_code, item.target_artifact_ref))
+                active_keys.add(
+                    (item.gate_key, item.issue_code, item.target_artifact_ref)
+                )
                 PackagingPatchProposalService(self.session).ensure_proposal(item.id)
 
         latest_r3d4_by_gate: dict[str, str] = {}
@@ -363,11 +494,21 @@ class PackagingReviewQueueService:
                     source_gate_run_id=None,
                     source_gate_batch_id=None,
                 )
-                active_keys.add((item.gate_key, item.issue_code, item.target_artifact_ref))
+                active_keys.add(
+                    (item.gate_key, item.issue_code, item.target_artifact_ref)
+                )
                 PackagingPatchProposalService(self.session).ensure_proposal(item.id)
 
-        pass_gates = {gate.gate_key for gate in handoff.packaging_gate_summary.gate_results if gate.status == "PASS"}
-        pass_gates.update(gate_key for gate_key, status in latest_r3d4_by_gate.items() if status == "PASS")
+        pass_gates = {
+            gate.gate_key
+            for gate in handoff.packaging_gate_summary.gate_results
+            if gate.status == "PASS"
+        }
+        pass_gates.update(
+            gate_key
+            for gate_key, status in latest_r3d4_by_gate.items()
+            if status == "PASS"
+        )
         self._close_passed_gates(package.id, pass_gates, active_keys)
         self.session.flush()
         return self.read(package.id)
@@ -377,21 +518,36 @@ class PackagingReviewQueueService:
         items = self.session.scalars(
             select(PackagingReviewQueueItem)
             .where(PackagingReviewQueueItem.package_id == package.id)
-            .order_by(PackagingReviewQueueItem.created_at.asc(), PackagingReviewQueueItem.id.asc())
+            .order_by(
+                PackagingReviewQueueItem.created_at.asc(),
+                PackagingReviewQueueItem.id.asc(),
+            )
         ).all()
         handoff = PackagingHandoffReadService(self.session).build(package.id)
-        unresolved = [item for item in items if item.status in UNRESOLVED_QUEUE_STATUSES]
-        gate_status = self._combined_gate_status(package.id, handoff.packaging_gate_summary)
+        unresolved = [
+            item for item in items if item.status in UNRESOLVED_QUEUE_STATUSES
+        ]
+        gate_status = self._combined_gate_status(
+            package.id, handoff.packaging_gate_summary
+        )
         has_uploadable_final_media = _has_uploadable_final_media(self.session, package)
-        verdict = self._review_verdict(package, unresolved, gate_status, has_uploadable_final_media)
-        upload_allowed = verdict == "READY_FOR_MANUAL_UPLOAD" and has_uploadable_final_media
+        verdict = self._review_verdict(
+            package, unresolved, gate_status, has_uploadable_final_media
+        )
+        upload_allowed = (
+            verdict == "READY_FOR_MANUAL_UPLOAD" and has_uploadable_final_media
+        )
         inventory = _patch_inventory_for_package(self.session, package.id)
         apply_state = _apply_approved_changes_state(inventory, unresolved)
         return PackagingReviewQueueRead(
             package_id=package.id,
             review_verdict=verdict,
             plain_language_status=_verdict_label(verdict),
-            must_fix_count=sum(1 for item in unresolved if item.severity in {"BLOCK", "REVIEW_REQUIRED"}),
+            must_fix_count=sum(
+                1
+                for item in unresolved
+                if item.severity in {"BLOCK", "REVIEW_REQUIRED"}
+            ),
             next_safe_action=_next_safe_action(verdict, unresolved),
             upload_task_creation_allowed=upload_allowed,
             approved_patch_count=inventory.approved_count,
@@ -402,7 +558,9 @@ class PackagingReviewQueueService:
             can_apply_approved_changes=apply_state["can_apply"],
             apply_approved_changes_label=apply_state["label"],
             apply_approved_changes_disabled_reason=apply_state["disabled_reason"],
-            last_apply_recheck_result=_last_apply_recheck_result(self.session, package.id),
+            last_apply_recheck_result=_last_apply_recheck_result(
+                self.session, package.id
+            ),
             items=[self._read_item(item) for item in items],
             technical_appendix={
                 "source": "PackagingReviewQueueService",
@@ -437,9 +595,13 @@ class PackagingReviewQueueService:
         package = self._require_package(package_id)
         queue = self.read(package.id)
         if not queue.upload_task_creation_allowed:
-            raise ValidationFailureError(f"PACKAGING_REVIEW_UNRESOLVED: {queue.review_verdict}")
+            raise ValidationFailureError(
+                f"PACKAGING_REVIEW_UNRESOLVED: {queue.review_verdict}"
+            )
 
-    def close_item(self, item_id: uuid.UUID, *, reason_code: str = "GATE_PASS_AFTER_RERUN") -> PackagingReviewQueueItem:
+    def close_item(
+        self, item_id: uuid.UUID, *, reason_code: str = "GATE_PASS_AFTER_RERUN"
+    ) -> PackagingReviewQueueItem:
         item = self.session.get(PackagingReviewQueueItem, item_id)
         if item is None:
             raise NotFoundError(f"packaging review queue item not found: {item_id}")
@@ -469,10 +631,19 @@ class PackagingReviewQueueService:
                 PackagingReviewQueueItem.issue_code == issue_code,
                 PackagingReviewQueueItem.target_artifact_ref == target_ref,
             )
-            .order_by(desc(PackagingReviewQueueItem.created_at), desc(PackagingReviewQueueItem.id))
+            .order_by(
+                desc(PackagingReviewQueueItem.created_at),
+                desc(PackagingReviewQueueItem.id),
+            )
             .limit(1)
         ).one_or_none()
-        severity = "BLOCK" if gate_status == "BLOCK" else "REVIEW_REQUIRED" if gate_status == "REVIEW_REQUIRED" else "WARNING"
+        severity = (
+            "BLOCK"
+            if gate_status == "BLOCK"
+            else "REVIEW_REQUIRED"
+            if gate_status == "REVIEW_REQUIRED"
+            else "WARNING"
+        )
         if existing is None:
             existing = PackagingReviewQueueItem(
                 package_id=package.id,
@@ -495,13 +666,23 @@ class PackagingReviewQueueService:
         else:
             existing.severity = severity
             existing.target_artifact_type = target_type
-            existing.source_gate_run_id = source_gate_run_id or existing.source_gate_run_id
-            existing.source_gate_batch_id = source_gate_batch_id or existing.source_gate_batch_id
+            existing.source_gate_run_id = (
+                source_gate_run_id or existing.source_gate_run_id
+            )
+            existing.source_gate_batch_id = (
+                source_gate_batch_id or existing.source_gate_batch_id
+            )
             existing.human_readable_title = copy["title"]
             existing.human_readable_why = copy["why"]
             existing.human_readable_fix = copy["fix"]
-            latest_patch = PackagingPatchProposalService(self.session).latest_patch_for_item(existing.id)
-            if latest_patch is not None and latest_patch.status == "APPLIED" and source_gate_run_id is not None:
+            latest_patch = PackagingPatchProposalService(
+                self.session
+            ).latest_patch_for_item(existing.id)
+            if (
+                latest_patch is not None
+                and latest_patch.status == "APPLIED"
+                and source_gate_run_id is not None
+            ):
                 existing.status = "APPLIED"
                 existing.next_action_code = "RECHECK_STILL_REQUIRES_REVIEW"
             elif existing.status == "CLOSED":
@@ -526,12 +707,20 @@ class PackagingReviewQueueService:
             )
         ).all()
         for item in rows:
-            if (item.gate_key, item.issue_code, item.target_artifact_ref) not in active_keys:
+            if (
+                item.gate_key,
+                item.issue_code,
+                item.target_artifact_ref,
+            ) not in active_keys:
                 item.status = "CLOSED"
                 item.next_action_code = "GATE_PASS_AFTER_RERUN"
 
-    def _read_item(self, item: PackagingReviewQueueItem) -> PackagingReviewQueueItemRead:
-        patch = PackagingPatchProposalService(self.session).latest_patch_for_item(item.id)
+    def _read_item(
+        self, item: PackagingReviewQueueItem
+    ) -> PackagingReviewQueueItemRead:
+        patch = PackagingPatchProposalService(self.session).latest_patch_for_item(
+            item.id
+        )
         return PackagingReviewQueueItemRead(
             id=item.id,
             package_id=item.package_id,
@@ -550,7 +739,9 @@ class PackagingReviewQueueService:
             human_readable_why=item.human_readable_why,
             human_readable_fix=item.human_readable_fix,
             section=_issue_copy(item.issue_code)["section"],
-            proposed_patch=PackagingProposedPatchRead.model_validate(patch) if patch else None,
+            proposed_patch=PackagingProposedPatchRead.model_validate(patch)
+            if patch
+            else None,
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
@@ -564,7 +755,10 @@ class PackagingReviewQueueService:
     ) -> str:
         if package.package_status == "WAITING_PROVIDER_CONFIG":
             return "WAITING_PROVIDER_CONFIG"
-        if any(item.severity == "BLOCK" for item in unresolved) or gate_status == "BLOCK":
+        if (
+            any(item.severity == "BLOCK" for item in unresolved)
+            or gate_status == "BLOCK"
+        ):
             return "BLOCKED"
         if unresolved or gate_status == "REVIEW_REQUIRED":
             return "REVIEW_REQUIRED"
@@ -604,7 +798,9 @@ class PackagingPatchProposalService:
         self.settings = settings or get_settings()
         self.router = PackagingPatchRouter()
 
-    def ensure_proposal(self, queue_item_id: uuid.UUID) -> PackagingProposedPatch | None:
+    def ensure_proposal(
+        self, queue_item_id: uuid.UUID
+    ) -> PackagingProposedPatch | None:
         item = self._require_item(queue_item_id)
         existing = self.latest_patch_for_item(item.id)
         if existing and existing.status not in {"REJECTED", "SUPERSEDED"}:
@@ -621,18 +817,26 @@ class PackagingPatchProposalService:
         item.next_action_code = "NEEDS_PROPOSED_PATCH"
         return None
 
-    def latest_patch_for_item(self, queue_item_id: uuid.UUID) -> PackagingProposedPatch | None:
+    def latest_patch_for_item(
+        self, queue_item_id: uuid.UUID
+    ) -> PackagingProposedPatch | None:
         return self.session.scalars(
             select(PackagingProposedPatch)
             .where(PackagingProposedPatch.queue_item_id == queue_item_id)
-            .order_by(desc(PackagingProposedPatch.created_at), desc(PackagingProposedPatch.id))
+            .order_by(
+                desc(PackagingProposedPatch.created_at), desc(PackagingProposedPatch.id)
+            )
             .limit(1)
         ).one_or_none()
 
-    def _create_deterministic_patch(self, item: PackagingReviewQueueItem, route: PackagingPatchRoute) -> PackagingProposedPatch:
+    def _create_deterministic_patch(
+        self, item: PackagingReviewQueueItem, route: PackagingPatchRoute
+    ) -> PackagingProposedPatch:
         package = self.session.get(FirstScriptedVideoPackage, item.package_id)
         if package is None:
-            raise NotFoundError(f"first scripted video package not found: {item.package_id}")
+            raise NotFoundError(
+                f"first scripted video package not found: {item.package_id}"
+            )
         payload = self._deterministic_payload(item, route, package)
         patch_hash = stable_hash(payload)
         patch = PackagingProposedPatch(
@@ -668,12 +872,22 @@ class PackagingPatchProposalService:
                 "subtitle_state": "SUBTITLE_NOT_READY",
                 "reason_code": item.issue_code,
                 "operator_note_vi": "Subtitle chưa sẵn sàng; không được ghi là final khi chưa có refs.",
-                "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+                "does_not_mutate": [
+                    "Channel Contract",
+                    "EffectiveChannelRuntimeContextSnapshot",
+                    "ChannelProfileVersion",
+                ],
             }
             return {
                 "proposed_patch_json": proposed,
-                "after_preview_json": {"subtitle_handoff": proposed, "upload_copy_warning": "subtitle_not_ready"},
-                "affected_artifact_refs_json": [{"artifact_key": "subtitle_package"}, {"artifact_key": "upload_card_copy"}],
+                "after_preview_json": {
+                    "subtitle_handoff": proposed,
+                    "upload_copy_warning": "subtitle_not_ready",
+                },
+                "affected_artifact_refs_json": [
+                    {"artifact_key": "subtitle_package"},
+                    {"artifact_key": "metadata_package"},
+                ],
                 "risk_level": "LOW",
             }
         if route.patch_type == "PUBLISH_TIMING_OVERRIDE":
@@ -683,8 +897,16 @@ class PackagingPatchProposalService:
                 "publish_window_state": "NEEDS_HUMAN_SELECTION",
                 "reason_code": item.issue_code,
                 "package_id": str(package.id),
-                "effective_context_snapshot_id": str(package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None,
-                "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+                "effective_context_snapshot_id": str(
+                    package.effective_context_snapshot_id
+                )
+                if package.effective_context_snapshot_id
+                else None,
+                "does_not_mutate": [
+                    "Channel Contract",
+                    "EffectiveChannelRuntimeContextSnapshot",
+                    "ChannelProfileVersion",
+                ],
             }
             return {
                 "proposed_patch_json": proposed,
@@ -692,7 +914,10 @@ class PackagingPatchProposalService:
                     "manual_publish_timing_override": proposed,
                     "next_operator_action_vi": "Chọn khung giờ publish thủ công cho package này; không sửa policy/snapshot.",
                 },
-                "affected_artifact_refs_json": [{"artifact_key": "publish_timing"}, {"artifact_key": "manual_publish_handoff"}],
+                "affected_artifact_refs_json": [
+                    {"artifact_key": "publish_timing"},
+                    {"artifact_key": "manual_publish_handoff"},
+                ],
                 "risk_level": "LOW",
             }
         if route.patch_type == "SCRIPT_STYLE_PATCH":
@@ -708,9 +933,15 @@ class PackagingPatchProposalService:
         if route.patch_type == "THUMBNAIL_BRIEF":
             return self._thumbnail_brief_patch_payload(item, route, package)
         return {
-            "proposed_patch_json": {"operation": "route_to_existing_agent", "route_key": route.route_key, "reason_code": item.issue_code},
+            "proposed_patch_json": {
+                "operation": "route_to_existing_agent",
+                "route_key": route.route_key,
+                "reason_code": item.issue_code,
+            },
             "after_preview_json": {},
-            "affected_artifact_refs_json": [{"artifact_key": item.target_artifact_ref or item.target_artifact_type}],
+            "affected_artifact_refs_json": [
+                {"artifact_key": item.target_artifact_ref or item.target_artifact_type}
+            ],
             "risk_level": "MEDIUM",
         }
 
@@ -723,7 +954,13 @@ class PackagingPatchProposalService:
         artifacts = package.artifacts or {}
         script = _dict(artifacts.get("narration_script"))
         effective_context = self._effective_context(package)
-        forbidden_terms = _strings(_dict(effective_context.brand_voice_persona_context_json if effective_context else {}).get("forbidden_style"))
+        forbidden_terms = _strings(
+            _dict(
+                effective_context.brand_voice_persona_context_json
+                if effective_context
+                else {}
+            ).get("forbidden_style")
+        )
         sentence_patches: list[dict[str, str | None]] = []
         for sentence in _list(script.get("sentences")):
             if not isinstance(sentence, dict):
@@ -733,7 +970,9 @@ class PackagingPatchProposalService:
             if after != before:
                 sentence_patches.append(
                     {
-                        "sentence_id": str(sentence.get("sentence_id") or len(sentence_patches) + 1),
+                        "sentence_id": str(
+                            sentence.get("sentence_id") or len(sentence_patches) + 1
+                        ),
                         "before_text": before,
                         "after_text": after,
                     }
@@ -746,10 +985,21 @@ class PackagingPatchProposalService:
             "target_artifact_key": "narration_script",
             "forbidden_style_terms": forbidden_terms,
             "sentence_patches": sentence_patches,
-            "preserve": ["topic", "claim", "duration_target", "audience", "evidence_refs", "sentence_order"],
+            "preserve": [
+                "topic",
+                "claim",
+                "duration_target",
+                "audience",
+                "evidence_refs",
+                "sentence_order",
+            ],
             "requires_human_approval": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         return {
             "proposed_patch_json": proposed,
@@ -770,10 +1020,16 @@ class PackagingPatchProposalService:
         artifacts = package.artifacts or {}
         hook = _existing_hook_payload(artifacts)
         topic = _topic_from_package(self.session, package)
-        first_script = _first_sentence_text(artifacts) or _clean_text(hook.get("first_3_seconds_script")) or _shorten(topic, 96)
+        first_script = (
+            _first_sentence_text(artifacts)
+            or _clean_text(hook.get("first_3_seconds_script"))
+            or _shorten(topic, 96)
+        )
         payoff_location = _payoff_location(artifacts)
         promise = _safe_promise(topic)
-        visual = _clean_text(hook.get("first_3_seconds_visual")) or _first_visual_scene(artifacts)
+        visual = _clean_text(hook.get("first_3_seconds_visual")) or _first_visual_scene(
+            artifacts
+        )
         proposed_hook = {
             "promise_made": promise,
             "payoff_location": payoff_location,
@@ -790,12 +1046,19 @@ class PackagingPatchProposalService:
             "hook_spec_patch": proposed_hook,
             "requires_human_approval": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         return {
             "proposed_patch_json": proposed,
             "after_preview_json": {"hook_spec": {**hook, **proposed_hook}},
-            "affected_artifact_refs_json": [{"artifact_key": "hook_spec"}, {"artifact_key": "narration_script"}],
+            "affected_artifact_refs_json": [
+                {"artifact_key": "hook_spec"},
+                {"artifact_key": "narration_script"},
+            ],
             "risk_level": "LOW",
         }
 
@@ -808,15 +1071,21 @@ class PackagingPatchProposalService:
         artifacts = package.artifacts or {}
         effective_context = self._effective_context(package)
         hook = _existing_hook_payload(artifacts)
-        first_script = _clean_text(hook.get("first_3_seconds_script")) or _first_sentence_text(artifacts)
+        first_script = _clean_text(
+            hook.get("first_3_seconds_script")
+        ) or _first_sentence_text(artifacts)
         topic = _topic_from_package(self.session, package)
         character_policy = (
             effective_context.character_policy_mode
-            or _dict(effective_context.character_identity_context_json).get("character_policy_mode")
+            or _dict(effective_context.character_identity_context_json).get(
+                "character_policy_mode"
+            )
             if effective_context
             else None
         )
-        visual = _visual_hook_idea(first_script=first_script, topic=topic, character_policy=character_policy)
+        visual = _visual_hook_idea(
+            first_script=first_script, topic=topic, character_policy=character_policy
+        )
         proposed = {
             "operation": "create_visual_hook_patch",
             "reason_code": item.issue_code,
@@ -828,12 +1097,21 @@ class PackagingPatchProposalService:
             "character_policy_note": _character_policy_note(character_policy),
             "requires_human_approval": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         return {
             "proposed_patch_json": proposed,
-            "after_preview_json": {"hook_spec": {**hook, "first_3_seconds_visual": visual}},
-            "affected_artifact_refs_json": [{"artifact_key": "hook_spec"}, {"artifact_key": "visual_plan"}],
+            "after_preview_json": {
+                "hook_spec": {**hook, "first_3_seconds_visual": visual}
+            },
+            "affected_artifact_refs_json": [
+                {"artifact_key": "hook_spec"},
+                {"artifact_key": "visual_plan"},
+            ],
             "risk_level": "LOW",
         }
 
@@ -857,12 +1135,21 @@ class PackagingPatchProposalService:
             "promise_payoff_alignment_note": "Title giữ đúng topic/script hiện có và không hứa asset, demo, kết quả bảo đảm.",
             "requires_human_approval": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         return {
             "proposed_patch_json": proposed,
-            "after_preview_json": {"metadata_package": {"title": recommended, "title_candidates": candidates}},
-            "affected_artifact_refs_json": [{"artifact_key": "metadata_package"}, {"artifact_key": "upload_card_copy"}],
+            "after_preview_json": {
+                "metadata_package": {
+                    "title": recommended,
+                    "title_candidates": candidates,
+                }
+            },
+            "affected_artifact_refs_json": [{"artifact_key": "metadata_package"}],
             "risk_level": "LOW",
         }
 
@@ -891,12 +1178,16 @@ class PackagingPatchProposalService:
             "unsupported_cta_guard": "Không thêm fake resource, demo, checklist, limited-time CTA, hoặc asset chưa có manifest.",
             "requires_human_approval": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         return {
             "proposed_patch_json": proposed,
-            "after_preview_json": {"metadata_package": {"description": description}, "upload_card_copy": {"description": description}},
-            "affected_artifact_refs_json": [{"artifact_key": "metadata_package"}, {"artifact_key": "upload_card_copy"}],
+            "after_preview_json": {"metadata_package": {"description": description}},
+            "affected_artifact_refs_json": [{"artifact_key": "metadata_package"}],
             "risk_level": "LOW",
         }
 
@@ -911,7 +1202,9 @@ class PackagingPatchProposalService:
         effective_context = self._effective_context(package)
         character_policy = (
             effective_context.character_policy_mode
-            or _dict(effective_context.character_identity_context_json).get("character_policy_mode")
+            or _dict(effective_context.character_identity_context_json).get(
+                "character_policy_mode"
+            )
             if effective_context
             else None
         )
@@ -924,7 +1217,9 @@ class PackagingPatchProposalService:
             "mobile_readability_notes": "Overlay is 2-4 words, high contrast, readable at small size.",
             "truthfulness_note": "Thumbnail repeats only topic/hook framing already present; no new proof/result claim.",
             "character_policy_note": _character_policy_note(character_policy),
-            "aligned_hook": _clean_text(hook.get("promise_made") or hook.get("first_3_seconds_script")),
+            "aligned_hook": _clean_text(
+                hook.get("promise_made") or hook.get("first_3_seconds_script")
+            ),
             "rendered": False,
         }
         proposed = {
@@ -936,7 +1231,11 @@ class PackagingPatchProposalService:
             "thumbnail_brief": brief,
             "requires_human_approval": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         return {
             "proposed_patch_json": proposed,
@@ -945,18 +1244,28 @@ class PackagingPatchProposalService:
             "risk_level": "LOW",
         }
 
-    def _effective_context(self, package: FirstScriptedVideoPackage) -> EffectiveChannelRuntimeContextSnapshot | None:
+    def _effective_context(
+        self, package: FirstScriptedVideoPackage
+    ) -> EffectiveChannelRuntimeContextSnapshot | None:
         if not package.effective_context_snapshot_id:
             return None
-        return self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id)
+        return self.session.get(
+            EffectiveChannelRuntimeContextSnapshot,
+            package.effective_context_snapshot_id,
+        )
 
     def _llm_patch_proposal_enabled(self) -> bool:
-        return bool(self.settings.llm_real_execution_enabled and self.settings.real_llm_package_run_enabled)
+        return bool(
+            self.settings.llm_real_execution_enabled
+            and self.settings.real_llm_package_run_enabled
+        )
 
     def _require_item(self, queue_item_id: uuid.UUID) -> PackagingReviewQueueItem:
         item = self.session.get(PackagingReviewQueueItem, queue_item_id)
         if item is None:
-            raise NotFoundError(f"packaging review queue item not found: {queue_item_id}")
+            raise NotFoundError(
+                f"packaging review queue item not found: {queue_item_id}"
+            )
         return item
 
 
@@ -964,14 +1273,41 @@ class PackagingPatchApprovalService:
     def __init__(self, session: Session):
         self.session = session
 
-    def approve(self, patch_id: uuid.UUID, *, decided_by: str = "operator", rationale: str | None = None) -> PackagingPatchApprovalDecisionRead:
-        return self._decide(patch_id, decision="APPROVE", decided_by=decided_by, rationale=rationale)
+    def approve(
+        self,
+        patch_id: uuid.UUID,
+        *,
+        decided_by: str = "operator",
+        rationale: str | None = None,
+    ) -> PackagingPatchApprovalDecisionRead:
+        return self._decide(
+            patch_id, decision="APPROVE", decided_by=decided_by, rationale=rationale
+        )
 
-    def reject(self, patch_id: uuid.UUID, *, decided_by: str = "operator", rationale: str | None = None) -> PackagingPatchApprovalDecisionRead:
-        return self._decide(patch_id, decision="REJECT", decided_by=decided_by, rationale=rationale)
+    def reject(
+        self,
+        patch_id: uuid.UUID,
+        *,
+        decided_by: str = "operator",
+        rationale: str | None = None,
+    ) -> PackagingPatchApprovalDecisionRead:
+        return self._decide(
+            patch_id, decision="REJECT", decided_by=decided_by, rationale=rationale
+        )
 
-    def request_changes(self, patch_id: uuid.UUID, *, decided_by: str = "operator", rationale: str | None = None) -> PackagingPatchApprovalDecisionRead:
-        return self._decide(patch_id, decision="REQUEST_CHANGES", decided_by=decided_by, rationale=rationale)
+    def request_changes(
+        self,
+        patch_id: uuid.UUID,
+        *,
+        decided_by: str = "operator",
+        rationale: str | None = None,
+    ) -> PackagingPatchApprovalDecisionRead:
+        return self._decide(
+            patch_id,
+            decision="REQUEST_CHANGES",
+            decided_by=decided_by,
+            rationale=rationale,
+        )
 
     def _decide(
         self,
@@ -1039,21 +1375,32 @@ class PackagingPatchApplyService:
             self.session.flush()
             return _apply_run_read(existing_run, apply_status="ALREADY_APPLIED")
         if patch.status == "APPLIED":
-            return PackagingPatchApplyRunRead.model_validate(self._already_applied_run(patch, ["PATCH_STATUS_ALREADY_APPLIED"]))
+            return PackagingPatchApplyRunRead.model_validate(
+                self._already_applied_run(patch, ["PATCH_STATUS_ALREADY_APPLIED"])
+            )
         if patch.status != "APPROVED":
-            return PackagingPatchApplyRunRead.model_validate(self._blocked_run(patch, ["PATCH_NOT_APPROVED"]))
+            return PackagingPatchApplyRunRead.model_validate(
+                self._blocked_run(patch, ["PATCH_NOT_APPROVED"])
+            )
         package = self.session.get(FirstScriptedVideoPackage, patch.package_id)
         if package is None or package.video_project_id is None:
-            return PackagingPatchApplyRunRead.model_validate(self._blocked_run(patch, ["PACKAGE_OR_PROJECT_MISSING"]))
+            return PackagingPatchApplyRunRead.model_validate(
+                self._blocked_run(patch, ["PACKAGE_OR_PROJECT_MISSING"])
+            )
         project = self.session.get(VideoProject, package.video_project_id)
         if project is None:
-            return PackagingPatchApplyRunRead.model_validate(self._blocked_run(patch, ["PROJECT_MISSING"]))
+            return PackagingPatchApplyRunRead.model_validate(
+                self._blocked_run(patch, ["PROJECT_MISSING"])
+            )
         effective_actor_user_id = actor_user_id or project.created_by_user_id
 
         artifact_type = _artifact_type_for_patch(patch.patch_type)
         artifact = self.session.scalars(
             select(Artifact)
-            .where(Artifact.video_project_id == project.id, Artifact.artifact_type == artifact_type)
+            .where(
+                Artifact.video_project_id == project.id,
+                Artifact.artifact_type == artifact_type,
+            )
             .order_by(desc(Artifact.created_at), desc(Artifact.id))
             .limit(1)
         ).one_or_none()
@@ -1068,9 +1415,14 @@ class PackagingPatchApplyService:
             self.session.add(artifact)
             self.session.flush()
         parent_version_id = artifact.current_version_id
-        current_max = self.session.scalar(
-            select(func.max(ArtifactVersion.version_number)).where(ArtifactVersion.artifact_id == artifact.id)
-        ) or 0
+        current_max = (
+            self.session.scalar(
+                select(func.max(ArtifactVersion.version_number)).where(
+                    ArtifactVersion.artifact_id == artifact.id
+                )
+            )
+            or 0
+        )
         content = {
             "patch_id": str(patch.id),
             "queue_item_id": str(patch.queue_item_id),
@@ -1085,7 +1437,11 @@ class PackagingPatchApplyService:
             ),
             "manual_approval_required": True,
             "no_provider_media_upload_execution": True,
-            "does_not_mutate": ["Channel Contract", "EffectiveChannelRuntimeContextSnapshot", "ChannelProfileVersion"],
+            "does_not_mutate": [
+                "Channel Contract",
+                "EffectiveChannelRuntimeContextSnapshot",
+                "ChannelProfileVersion",
+            ],
         }
         version_hash = stable_hash(content)
         version = ArtifactVersion(
@@ -1096,10 +1452,21 @@ class PackagingPatchApplyService:
             content_hash=version_hash,
             status="approved",
             created_by_user_id=effective_actor_user_id,
-            external_entity_refs=[{"package_id": str(package.id), "proposed_patch_id": str(patch.id)}],
-            packaging_metadata={"patch_type": patch.patch_type, "requires_gate_rerun": True},
+            external_entity_refs=[
+                {"package_id": str(package.id), "proposed_patch_id": str(patch.id)}
+            ],
+            packaging_metadata={
+                "patch_type": patch.patch_type,
+                "requires_gate_rerun": True,
+            },
             evidence_refs=patch.affected_artifact_refs_json,
-            context_refs=[{"effective_context_snapshot_id": str(package.effective_context_snapshot_id)}]
+            context_refs=[
+                {
+                    "effective_context_snapshot_id": str(
+                        package.effective_context_snapshot_id
+                    )
+                }
+            ]
             if package.effective_context_snapshot_id
             else [],
         )
@@ -1111,7 +1478,11 @@ class PackagingPatchApplyService:
             item.status = "GATE_RERUN_REQUIRED"
             item.next_action_code = "RERUN_PACKAGING_GATES"
         patch.status = "APPLIED"
-        handoff_ref = f"artifact_version:{version.id}" if patch.patch_type in {"PUBLISH_TIMING_OVERRIDE", "SUBTITLE_HANDOFF"} else None
+        handoff_ref = (
+            f"artifact_version:{version.id}"
+            if patch.patch_type in {"PUBLISH_TIMING_OVERRIDE", "SUBTITLE_HANDOFF"}
+            else None
+        )
         run = PackagingPatchApplyRun(
             proposed_patch_id=patch.id,
             package_id=patch.package_id,
@@ -1119,7 +1490,10 @@ class PackagingPatchApplyService:
             created_artifact_ref=f"artifact_version:{version.id}",
             created_handoff_override_ref=handoff_ref,
             created_version_hash=version_hash,
-            reason_codes_json=["VERSIONED_PATCH_CREATED", "NO_IN_PLACE_PACKAGE_MUTATION"],
+            reason_codes_json=[
+                "VERSIONED_PATCH_CREATED",
+                "NO_IN_PLACE_PACKAGE_MUTATION",
+            ],
         )
         self.session.add(run)
         self.session.flush()
@@ -1127,18 +1501,24 @@ class PackagingPatchApplyService:
             PackagingGateRerunService(self.session).rerun_for_patch(patch.id)
         return PackagingPatchApplyRunRead.model_validate(run)
 
-    def _existing_applied_run(self, patch_id: uuid.UUID) -> PackagingPatchApplyRun | None:
+    def _existing_applied_run(
+        self, patch_id: uuid.UUID
+    ) -> PackagingPatchApplyRun | None:
         return self.session.scalars(
             select(PackagingPatchApplyRun)
             .where(
                 PackagingPatchApplyRun.proposed_patch_id == patch_id,
                 PackagingPatchApplyRun.apply_status == "APPLIED",
             )
-            .order_by(desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id))
+            .order_by(
+                desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id)
+            )
             .limit(1)
         ).one_or_none()
 
-    def _blocked_run(self, patch: PackagingProposedPatch, reason_codes: list[str]) -> PackagingPatchApplyRun:
+    def _blocked_run(
+        self, patch: PackagingProposedPatch, reason_codes: list[str]
+    ) -> PackagingPatchApplyRun:
         run = PackagingPatchApplyRun(
             proposed_patch_id=patch.id,
             package_id=patch.package_id,
@@ -1152,7 +1532,9 @@ class PackagingPatchApplyService:
         self.session.flush()
         return run
 
-    def _already_applied_run(self, patch: PackagingProposedPatch, reason_codes: list[str]) -> PackagingPatchApplyRun:
+    def _already_applied_run(
+        self, patch: PackagingProposedPatch, reason_codes: list[str]
+    ) -> PackagingPatchApplyRun:
         run = PackagingPatchApplyRun(
             proposed_patch_id=patch.id,
             package_id=patch.package_id,
@@ -1180,7 +1562,11 @@ class PackagingApprovedPatchApplyAndRecheckService:
         package = PackagingReviewQueueService(self.session)._require_package(package_id)
         queue_before = PackagingReviewQueueService(self.session).read(package.id)
         inventory = _patch_inventory_for_package(self.session, package.id)
-        skipped_patch_ids = [state.patch.id for state in inventory.states if not _state_is_human_approved(state)]
+        skipped_patch_ids = [
+            state.patch.id
+            for state in inventory.states
+            if not _state_is_human_approved(state)
+        ]
 
         if inventory.approved_count == 0:
             status = (
@@ -1206,7 +1592,9 @@ class PackagingApprovedPatchApplyAndRecheckService:
                 queue=queue_before,
             )
 
-        approved_states = [state for state in inventory.states if _state_is_human_approved(state)]
+        approved_states = [
+            state for state in inventory.states if _state_is_human_approved(state)
+        ]
         validation_errors = self._validate_approved_patch_eligibility(approved_states)
         if validation_errors:
             return self._result(
@@ -1240,10 +1628,14 @@ class PackagingApprovedPatchApplyAndRecheckService:
                 status="APPLY_FAILED",
                 package_id=package.id,
                 applied_patch_ids=applied_patch_ids,
-                skipped_patch_ids=skipped_patch_ids + already_applied_patch_ids + failed_patch_ids,
+                skipped_patch_ids=skipped_patch_ids
+                + already_applied_patch_ids
+                + failed_patch_ids,
                 gate_rerun_record_ids=[],
                 queue=queue_before,
-                extra_proof={"failed_patch_ids": [str(patch_id) for patch_id in failed_patch_ids]},
+                extra_proof={
+                    "failed_patch_ids": [str(patch_id) for patch_id in failed_patch_ids]
+                },
             )
         if not applied_patch_ids:
             return self._result(
@@ -1259,7 +1651,9 @@ class PackagingApprovedPatchApplyAndRecheckService:
         for patch_id in applied_patch_ids:
             rerun = PackagingGateRerunService(self.session).rerun_for_patch(patch_id)
             gate_rerun_record_ids.append(rerun.id)
-        queue_after = PackagingReviewQueueService(self.session).build_from_gates(package.id)
+        queue_after = PackagingReviewQueueService(self.session).build_from_gates(
+            package.id
+        )
         return self._result(
             status="APPLIED_AND_RECHECKED",
             package_id=package.id,
@@ -1269,14 +1663,18 @@ class PackagingApprovedPatchApplyAndRecheckService:
             queue=queue_after,
         )
 
-    def _validate_approved_patch_eligibility(self, approved_states: list[PackagingPatchReviewState]) -> list[str]:
+    def _validate_approved_patch_eligibility(
+        self, approved_states: list[PackagingPatchReviewState]
+    ) -> list[str]:
         reason_codes: list[str] = []
         for state in approved_states:
             if state.patch.status != "APPROVED" or state.latest_decision != "APPROVE":
                 reason_codes.append(f"{state.patch.id}:PATCH_NOT_HUMAN_APPROVED")
             if not state.patch.requires_human_approval:
                 reason_codes.append(f"{state.patch.id}:PATCH_APPROVAL_BOUNDARY_INVALID")
-            package = self.session.get(FirstScriptedVideoPackage, state.patch.package_id)
+            package = self.session.get(
+                FirstScriptedVideoPackage, state.patch.package_id
+            )
             if package is None or package.video_project_id is None:
                 reason_codes.append(f"{state.patch.id}:PACKAGE_OR_PROJECT_MISSING")
                 continue
@@ -1327,13 +1725,18 @@ class PackagingGateRerunService:
         existing = self.session.scalars(
             select(PackagingGateRerunRecord)
             .where(PackagingGateRerunRecord.proposed_patch_id == patch.id)
-            .order_by(desc(PackagingGateRerunRecord.created_at), desc(PackagingGateRerunRecord.id))
+            .order_by(
+                desc(PackagingGateRerunRecord.created_at),
+                desc(PackagingGateRerunRecord.id),
+            )
             .limit(1)
         ).one_or_none()
         if existing is not None and existing.gate_batch_run_id is not None:
             return PackagingGateRerunRecordRead.model_validate(existing)
         gate_keys = PATCH_TYPE_RERUN_GATES.get(patch.patch_type, [])
-        package = PackagingReviewQueueService(self.session)._require_package(patch.package_id)
+        package = PackagingReviewQueueService(self.session)._require_package(
+            patch.package_id
+        )
         batch_ids, rerun_status, reason_codes = self._run_relevant_gates(
             package=package,
             gate_keys=gate_keys,
@@ -1358,7 +1761,13 @@ class PackagingGateRerunService:
     def rerun_for_package(self, package_id: uuid.UUID) -> PackagingGateRerunRecordRead:
         package = PackagingReviewQueueService(self.session)._require_package(package_id)
         queue = PackagingReviewQueueService(self.session).read(package_id)
-        gate_keys = sorted({item.gate_key for item in queue.items if item.status in UNRESOLVED_QUEUE_STATUSES})
+        gate_keys = sorted(
+            {
+                item.gate_key
+                for item in queue.items
+                if item.status in UNRESOLVED_QUEUE_STATUSES
+            }
+        )
         batch_ids, rerun_status, reason_codes = self._run_relevant_gates(
             package=package,
             gate_keys=gate_keys,
@@ -1388,7 +1797,10 @@ class PackagingGateRerunService:
             return [], "PASS", ["NO_UNRESOLVED_QUEUE_ITEMS"]
         if package.effective_context_snapshot_id is None:
             return [], "BLOCK", ["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"]
-        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id)
+        effective = self.session.get(
+            EffectiveChannelRuntimeContextSnapshot,
+            package.effective_context_snapshot_id,
+        )
         if effective is None:
             return [], "BLOCK", ["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"]
 
@@ -1396,7 +1808,9 @@ class PackagingGateRerunService:
         batch_ids: list[uuid.UUID] = []
         statuses: list[str] = []
         m1_gate_keys = [key for key in gate_keys if key in PACKAGING_GATE_ORDER]
-        r3d4_gate_keys = [key for key in gate_keys if key in R3D4GateService.GATES_BY_KEY]
+        r3d4_gate_keys = [
+            key for key in gate_keys if key in R3D4GateService.GATES_BY_KEY
+        ]
 
         m1_batch = _run_packaging_gate_batch(
             self.session,
@@ -1423,7 +1837,9 @@ class PackagingGateRerunService:
                 batch_ids.append(r3d4_batch.gate_batch_run_id)
             statuses.append(r3d4_batch.status)
 
-        unknown_gate_keys = sorted(set(gate_keys) - set(m1_gate_keys) - set(r3d4_gate_keys))
+        unknown_gate_keys = sorted(
+            set(gate_keys) - set(m1_gate_keys) - set(r3d4_gate_keys)
+        )
         if unknown_gate_keys:
             statuses.append("REVIEW_REQUIRED")
         status = _reduce_statuses(statuses)
@@ -1440,18 +1856,30 @@ def _artifacts_with_applied_patch_overlays(
     artifacts = deepcopy(_dict(package.artifacts))
     patches = session.scalars(
         select(PackagingProposedPatch)
-        .where(PackagingProposedPatch.package_id == package.id, PackagingProposedPatch.status == "APPLIED")
-        .order_by(PackagingProposedPatch.created_at.asc(), PackagingProposedPatch.id.asc())
+        .where(
+            PackagingProposedPatch.package_id == package.id,
+            PackagingProposedPatch.status == "APPLIED",
+        )
+        .order_by(
+            PackagingProposedPatch.created_at.asc(), PackagingProposedPatch.id.asc()
+        )
     ).all()
     for patch in patches:
         _apply_patch_overlay(artifacts, patch)
     return artifacts
 
 
-def _apply_patch_overlay(artifacts: dict[str, Any], patch: PackagingProposedPatch) -> None:
+def _apply_patch_overlay(
+    artifacts: dict[str, Any], patch: PackagingProposedPatch
+) -> None:
     preview = _dict(patch.after_preview_json)
     proposed = _dict(patch.proposed_patch_json)
-    for artifact_key in ("hook_spec", "metadata_package", "upload_card_copy", "thumbnail_brief", "visual_plan"):
+    for artifact_key in (
+        "hook_spec",
+        "metadata_package",
+        "thumbnail_brief",
+        "visual_plan",
+    ):
         payload = _dict(preview.get(artifact_key))
         if payload:
             artifacts[artifact_key] = {**_dict(artifacts.get(artifact_key)), **payload}
@@ -1459,7 +1887,9 @@ def _apply_patch_overlay(artifacts: dict[str, Any], patch: PackagingProposedPatc
     if patch.patch_type == "SCRIPT_STYLE_PATCH":
         script = deepcopy(_dict(artifacts.get("narration_script")))
         sentences = _list(script.get("sentences"))
-        patch_rows = _list(proposed.get("sentence_patches") or preview.get("before_after_preview"))
+        patch_rows = _list(
+            proposed.get("sentence_patches") or preview.get("before_after_preview")
+        )
         for row in patch_rows:
             row_dict = _dict(row)
             sentence_id = str(row_dict.get("sentence_id") or "")
@@ -1469,7 +1899,10 @@ def _apply_patch_overlay(artifacts: dict[str, Any], patch: PackagingProposedPatc
                 continue
             for sentence in sentences:
                 sentence_dict = _dict(sentence)
-                if str(sentence_dict.get("sentence_id") or "") == sentence_id or str(sentence_dict.get("text") or "") == before_text:
+                if (
+                    str(sentence_dict.get("sentence_id") or "") == sentence_id
+                    or str(sentence_dict.get("text") or "") == before_text
+                ):
                     sentence_dict["text"] = str(after_text)
         script["sentences"] = sentences
         artifacts["narration_script"] = script
@@ -1487,7 +1920,10 @@ def _apply_patch_overlay(artifacts: dict[str, Any], patch: PackagingProposedPatc
         override = _dict(preview.get("manual_publish_timing_override") or proposed)
         if override:
             artifacts["manual_publish_timing_override"] = override
-            artifacts["publish_timing"] = {**_dict(artifacts.get("publish_timing")), **override}
+            artifacts["publish_timing"] = {
+                **_dict(artifacts.get("publish_timing")),
+                **override,
+            }
 
 
 def _run_packaging_gate_batch(
@@ -1529,7 +1965,11 @@ def _run_packaging_gate_batch(
         hard_block_count=hard_blocks,
         review_required_count=reviews,
         gate_results_json=[_packaging_gate_result_dict(result) for result in results],
-        reducer_decision_json={"status": status, "hard_block_count": hard_blocks, "review_required_count": reviews},
+        reducer_decision_json={
+            "status": status,
+            "hard_block_count": hard_blocks,
+            "review_required_count": reviews,
+        },
     )
     session.add(batch)
     session.flush()
@@ -1609,7 +2049,9 @@ def _target_from_refs(refs: list[dict[str, Any]]) -> tuple[str, str | None]:
     return "package_artifact", None
 
 
-def _has_uploadable_final_media(session: Session, package: FirstScriptedVideoPackage) -> bool:
+def _has_uploadable_final_media(
+    session: Session, package: FirstScriptedVideoPackage
+) -> bool:
     if package.video_project_id is None:
         return False
     final_media_count = (
@@ -1660,12 +2102,15 @@ def _next_safe_action(verdict: str, unresolved: list[PackagingReviewQueueItem]) 
     if verdict == "WAITING_PROVIDER_CONFIG":
         return "Kiểm tra provider/cost boundary; không chạy provider từ dashboard."
     if unresolved:
-        if all(item.status in {"APPLIED", "GATE_RERUN_REQUIRED"} for item in unresolved):
+        if all(
+            item.status in {"APPLIED", "GATE_RERUN_REQUIRED"} for item in unresolved
+        ):
             return "Patch đã apply; xem blocker còn lại sau recheck hoặc request patch mới nếu gate vẫn fail."
         needs_patch = sum(
             1
             for item in unresolved
-            if item.next_action_code in {"NEEDS_PROPOSED_PATCH", "ROUTE_NOT_AVAILABLE", "LLM_PROPOSAL_DISABLED"}
+            if item.next_action_code
+            in {"NEEDS_PROPOSED_PATCH", "ROUTE_NOT_AVAILABLE", "LLM_PROPOSAL_DISABLED"}
         )
         if needs_patch:
             return "Tạo hoặc chờ proposed patch cho các gate đang fail."
@@ -1708,17 +2153,23 @@ def _apply_approved_changes_state(
     }
 
 
-def _last_apply_recheck_result(session: Session, package_id: uuid.UUID) -> dict[str, Any] | None:
+def _last_apply_recheck_result(
+    session: Session, package_id: uuid.UUID
+) -> dict[str, Any] | None:
     latest_apply = session.scalars(
         select(PackagingPatchApplyRun)
         .where(PackagingPatchApplyRun.package_id == package_id)
-        .order_by(desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id))
+        .order_by(
+            desc(PackagingPatchApplyRun.created_at), desc(PackagingPatchApplyRun.id)
+        )
         .limit(1)
     ).one_or_none()
     latest_rerun = session.scalars(
         select(PackagingGateRerunRecord)
         .where(PackagingGateRerunRecord.package_id == package_id)
-        .order_by(desc(PackagingGateRerunRecord.created_at), desc(PackagingGateRerunRecord.id))
+        .order_by(
+            desc(PackagingGateRerunRecord.created_at), desc(PackagingGateRerunRecord.id)
+        )
         .limit(1)
     ).one_or_none()
     if latest_apply is None and latest_rerun is None:
@@ -1732,7 +2183,9 @@ def _last_apply_recheck_result(session: Session, package_id: uuid.UUID) -> dict[
     }
 
 
-def _apply_run_read(run: PackagingPatchApplyRun, *, apply_status: str | None = None) -> PackagingPatchApplyRunRead:
+def _apply_run_read(
+    run: PackagingPatchApplyRun, *, apply_status: str | None = None
+) -> PackagingPatchApplyRunRead:
     return PackagingPatchApplyRunRead(
         id=run.id,
         proposed_patch_id=run.proposed_patch_id,
@@ -1761,7 +2214,9 @@ def _remaining_blockers(queue: PackagingReviewQueueRead) -> list[dict[str, Any]]
     ]
 
 
-def _no_execution_proof(*, status: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+def _no_execution_proof(
+    *, status: str, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
     proof: dict[str, Any] = {
         "status": status,
         "no_provider_media_upload_execution": True,
@@ -1770,7 +2225,13 @@ def _no_execution_proof(*, status: str, extra: dict[str, Any] | None = None) -> 
         "no_real_video_or_media_generation": True,
         "no_provider_render_job": True,
         "no_paid_provider_execution": True,
-        "providers_not_called": ["ElevenLabs", "Google Veo", "Pexels", "Google Drive upload", "YouTube"],
+        "providers_not_called": [
+            "ElevenLabs",
+            "Google Veo",
+            "Pexels",
+            "Google Drive upload",
+            "YouTube",
+        ],
         "does_not_mutate": [
             "Channel Contract",
             "ChannelProfileVersion",
@@ -1844,7 +2305,12 @@ def _remove_forbidden_terms(text: str, forbidden_terms: list[str]) -> str:
     for term in sorted(forbidden_terms, key=len, reverse=True):
         if not term:
             continue
-        rewritten = re.sub(re.escape(term), _neutral_style_replacement(term), rewritten, flags=re.IGNORECASE)
+        rewritten = re.sub(
+            re.escape(term),
+            _neutral_style_replacement(term),
+            rewritten,
+            flags=re.IGNORECASE,
+        )
     rewritten = re.sub(r"\s+", " ", rewritten).strip()
     return rewritten or text
 
@@ -1886,14 +2352,20 @@ def _first_visual_scene(artifacts: dict[str, Any]) -> str | None:
     visual = _dict(artifacts.get("visual_plan"))
     for scene in _list(visual.get("scenes")):
         if isinstance(scene, dict):
-            text = _clean_text(scene.get("description") or scene.get("visual") or scene.get("kind"))
+            text = _clean_text(
+                scene.get("description") or scene.get("visual") or scene.get("kind")
+            )
             if text:
                 return text
     return None
 
 
 def _topic_from_package(session: Session, package: FirstScriptedVideoPackage) -> str:
-    project = session.get(VideoProject, package.video_project_id) if package.video_project_id else None
+    project = (
+        session.get(VideoProject, package.video_project_id)
+        if package.video_project_id
+        else None
+    )
     artifacts = package.artifacts or {}
     outline = _dict(artifacts.get("script_outline"))
     metadata = _dict(artifacts.get("metadata_package"))
@@ -1910,7 +2382,9 @@ def _topic_from_package(session: Session, package: FirstScriptedVideoPackage) ->
 
 def _payoff_location(artifacts: dict[str, Any]) -> str:
     script = _dict(artifacts.get("narration_script"))
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
     if len(sentences) >= 2:
         return str(sentences[min(1, len(sentences) - 1)].get("sentence_id") or "S2")
     if sentences:
@@ -1922,9 +2396,15 @@ def _safe_promise(topic: str) -> str:
     return f"Explain {_shorten(topic, 90)} with evidence-aware steps and human-reviewable limits."
 
 
-def _visual_hook_idea(*, first_script: str | None, topic: str, character_policy: Any) -> str:
+def _visual_hook_idea(
+    *, first_script: str | None, topic: str, character_policy: Any
+) -> str:
     base = _shorten(first_script or topic, 96)
-    character_note = "without stock faces or recurring characters" if str(character_policy or "").upper() != "REQUIRED_CHARACTER" else "using only the frozen character branch if approved"
+    character_note = (
+        "without stock faces or recurring characters"
+        if str(character_policy or "").upper() != "REQUIRED_CHARACTER"
+        else "using only the frozen character branch if approved"
+    )
     return f"First 3-5 seconds: fast operator-dashboard/workflow close-up for '{base}', {character_note}; no media/provider render."
 
 
@@ -1938,7 +2418,9 @@ def _title_candidates(topic: str) -> list[str]:
     base = _shorten(topic, 82).rstrip(".")
     candidates = [
         base,
-        f"Practical Workflow: {base}" if len(base) <= 58 else f"Practical Workflow: {_shorten(base, 58)}",
+        f"Practical Workflow: {base}"
+        if len(base) <= 58
+        else f"Practical Workflow: {_shorten(base, 58)}",
         f"What Operators Should Check: {_shorten(base, 56)}",
     ]
     deduped: list[str] = []

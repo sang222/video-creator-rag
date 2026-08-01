@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.db.models import CloudMediaRef, OperatorAuthSession, OperatorUser
 from app.main import create_app
 from app.services import PublishHandoffService
+from tests.test_long_form_launch_cadence import _approved_launch_policy
 
 
 def _auth_client(monkeypatch) -> TestClient:
@@ -22,10 +23,15 @@ def _auth_client(monkeypatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_m11_1_auth_bootstraps_hashes_and_uses_http_only_cookie(db_session, monkeypatch) -> None:
+def test_m11_1_auth_bootstraps_hashes_and_uses_http_only_cookie(
+    db_session, monkeypatch
+) -> None:
     client = _auth_client(monkeypatch)
 
-    login = client.post("/auth/login", json={"email": "admin@local.vcos", "password": "correct-local-password"})
+    login = client.post(
+        "/auth/login",
+        json={"email": "admin@local.vcos", "password": "correct-local-password"},
+    )
     assert login.status_code == 200, login.text
     assert db_session.query(OperatorUser).count() == 1
 
@@ -34,7 +40,9 @@ def test_m11_1_auth_bootstraps_hashes_and_uses_http_only_cookie(db_session, monk
     assert user.password_hash.startswith("pbkdf2_sha256$")
     assert not hasattr(user, "password")
 
-    default_login = client.post("/auth/login", json={"email": "admin@local.vcos", "password": "admin"})
+    default_login = client.post(
+        "/auth/login", json={"email": "admin@local.vcos", "password": "admin"}
+    )
     assert default_login.status_code == 401
     assert login.json()["user"]["role"] == "OWNER_ADMIN"
     assert "httponly" in login.headers["set-cookie"].lower()
@@ -46,10 +54,17 @@ def test_m11_1_auth_bootstraps_hashes_and_uses_http_only_cookie(db_session, monk
     logout = client.post("/auth/logout")
     assert logout.status_code == 200
     db_session.expire_all()
-    assert db_session.query(OperatorAuthSession).filter(OperatorAuthSession.revoked_at.isnot(None)).count() == 1
+    assert (
+        db_session.query(OperatorAuthSession)
+        .filter(OperatorAuthSession.revoked_at.isnot(None))
+        .count()
+        == 1
+    )
 
 
-def test_m11_1_localization_packages_gate_and_drive_cta(db_session, qualification_factory) -> None:
+def test_m11_1_localization_packages_gate_and_drive_cta(
+    db_session, qualification_factory
+) -> None:
     scope = qualification_factory.m2_project()
     cloud_ref = CloudMediaRef(
         company_id=scope.company.id,
@@ -87,7 +102,9 @@ def test_m11_1_localization_packages_gate_and_drive_cta(db_session, qualificatio
     assert config.status_code == 200, config.text
     assert config.json()["operator_summary"].startswith("Cấu hình localization")
 
-    first_gate = client.post(f"/video-projects/{scope.project.id}/localization-readiness/check")
+    first_gate = client.post(
+        f"/video-projects/{scope.project.id}/localization-readiness/check"
+    )
     assert first_gate.status_code == 200, first_gate.text
     assert first_gate.json()["result"] == "BLOCK"
     assert "Đang thiếu phụ đề" in first_gate.json()["operator_summary"]
@@ -103,7 +120,9 @@ def test_m11_1_localization_packages_gate_and_drive_cta(db_session, qualificatio
         },
     )
     assert subtitle.status_code == 200, subtitle.text
-    assert subtitle.json()["google_drive_ctas"][0]["web_view_link"].startswith("https://drive.google.com/")
+    assert subtitle.json()["google_drive_ctas"][0]["web_view_link"].startswith(
+        "https://drive.google.com/"
+    )
     assert "local_source_path" not in subtitle.text
 
     metadata = client.post(
@@ -119,51 +138,61 @@ def test_m11_1_localization_packages_gate_and_drive_cta(db_session, qualificatio
     assert metadata.status_code == 200, metadata.text
     assert metadata.json()["operator_summary"].startswith("Metadata de cần người duyệt")
 
-    second_gate = client.post(f"/video-projects/{scope.project.id}/localization-readiness/check")
+    second_gate = client.post(
+        f"/video-projects/{scope.project.id}/localization-readiness/check"
+    )
     assert second_gate.status_code == 200, second_gate.text
     assert second_gate.json()["result"] == "BLOCK"
     assert second_gate.json()["unreviewed_metadata_languages"] == ["de"]
 
 
-def test_m11_1_publish_timing_policy_and_suggestion(db_session, qualification_factory, tmp_path) -> None:
+def test_m11_1_publish_timing_policy_and_suggestion(
+    db_session, qualification_factory, tmp_path
+) -> None:
     flow = qualification_factory.m6_full_flow(output_dir=tmp_path)
+    launch_policy, _, _ = _approved_launch_policy(
+        db_session,
+        flow,
+        timezone_name="America/New_York",
+        weekdays=["MONDAY"],
+    )
     handoff = PublishHandoffService(db_session).create_from_render_package(
-        data=PublishHandoffCreate(render_package_snapshot_id=flow.production_run.render_package_snapshot_id)
+        data=PublishHandoffCreate(
+            render_package_snapshot_id=flow.production_run.render_package_snapshot_id
+        )
     )
     db_session.commit()
     client = TestClient(create_app())
 
-    policy = client.post(
+    policy = client.get(
         f"/channels/{flow.channel.id}/publish-timing-policy",
-        json={
-            "primary_timezone": "America/New_York",
-            "operator_timezone": "Asia/Ho_Chi_Minh",
-            "target_regions": ["US"],
-            "primary_audience_country": "US",
-            "preferred_publish_windows": [
-                {
-                    "day_of_week": "MONDAY",
-                    "local_time_start": "09:00",
-                    "local_time_end": "11:00",
-                    "timezone": "America/New_York",
-                    "target_region": "US",
-                }
-            ],
-            "publish_days": ["MONDAY"],
-            "weekend_allowed": False,
-            "notes": "Human configured window.",
-        },
     )
     assert policy.status_code == 200, policy.text
-    assert policy.json()["operator_summary"].startswith("Khung giờ publish đã cấu hình")
+    policy_payload = policy.json()
+    assert policy_payload["read_only"] is True
+    assert policy_payload["authority"] == "FIRST_CHANNEL_LAUNCH_POLICY_VERSION"
+    assert policy_payload["launch_policy_version_id"] == str(launch_policy.id)
+    assert policy_payload["launch_policy_hash"] == launch_policy.canonical_hash
+    assert policy_payload["primary_timezone"] == "America/New_York"
+    assert (
+        "post"
+        not in create_app().openapi()["paths"][
+            "/channels/{channel_id}/publish-timing-policy"
+        ]
+    )
 
-    suggestion = client.post(f"/publish-handoffs/{handoff.id}/publish-timing-suggestion")
+    suggestion = client.post(
+        f"/publish-handoffs/{handoff.id}/publish-timing-suggestion"
+    )
     assert suggestion.status_code == 200, suggestion.text
     payload = suggestion.json()
-    assert payload["source"] == "CHANNEL_CONFIG"
+    assert payload["source"] == f"LP:{launch_policy.id}"
     assert payload["confidence_label"] == "CONFIGURED"
     assert payload["target_timezone"] == "America/New_York"
-    assert payload["operator_timezone"] == "Asia/Ho_Chi_Minh"
+    assert payload["operator_timezone"] is None
+    assert payload["launch_policy_version_id"] == str(launch_policy.id)
+    assert payload["launch_policy_hash"] == launch_policy.canonical_hash
+    assert payload["lineage_status"] == "EXACT"
     assert "auto-schedule" in payload["operator_summary"]
 
 

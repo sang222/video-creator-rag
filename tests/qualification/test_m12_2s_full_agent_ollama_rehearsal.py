@@ -101,7 +101,10 @@ def _project_with_effective_context(db_session, scope) -> VideoProject:
             channel_workspace_id=scope.channel.id,
             category_key=f"m122s-{uuid.uuid4().hex[:8]}",
             name="M12.2S Category",
-            default_format_policy_json={"target_duration_seconds": 540, "structure": ["hook", "problem", "mechanism", "takeaway"]},
+            default_format_policy_json={
+                "target_duration_seconds": 540,
+                "structure": ["hook", "problem", "mechanism", "takeaway"],
+            },
             default_visual_style_json={"style_note": "operator dashboard cards"},
             default_voice_style_json={"tone": "calm"},
             default_thumbnail_style_json={"style": "clear operator board"},
@@ -123,12 +126,16 @@ def _project_with_effective_context(db_session, scope) -> VideoProject:
         )
     )
     project = db_session.get(VideoProject, project_read.id)
-    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(
+        project.id
+    )
     assert snapshot.compile_status == "PASS"
     return project
 
 
-def _request(channel_id: uuid.UUID, *, video_project_id: uuid.UUID | None = None) -> FirstScriptedVideoPackageRequest:
+def _request(
+    channel_id: uuid.UUID, *, video_project_id: uuid.UUID | None = None
+) -> FirstScriptedVideoPackageRequest:
     return FirstScriptedVideoPackageRequest(
         channel_id=channel_id,
         video_project_id=video_project_id,
@@ -143,7 +150,9 @@ def _request(channel_id: uuid.UUID, *, video_project_id: uuid.UUID | None = None
     )
 
 
-def _envelope(agent_key: str, artifact: dict[str, Any], *, status: str = "OK") -> dict[str, Any]:
+def _envelope(
+    agent_key: str, artifact: dict[str, Any], *, status: str = "OK"
+) -> dict[str, Any]:
     return {
         "contract_version": "m12.1.0",
         "agent_key": agent_key,
@@ -164,24 +173,38 @@ def _long_script_sentences(count: int = 36) -> list[dict[str, Any]]:
         "avoids provider execution, preserves channel contract references, explains operator safeguards, and remains long enough "
         "for deterministic duration validation without adding claims or media."
     )
-    return [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 15} for index in range(1, count + 1)]
-
-
-def _underlong_script_sentences(count: int = 42) -> list[dict[str, Any]]:
-    text = "This narration keeps review boundaries clear, preserves the hook promise, and avoids provider execution today."
-    return [{"sentence_id": f"S{index}", "text": text, "approx_seconds": 4.7} for index in range(1, count + 1)]
-
-
-def _visual_scenes(count: int = 36) -> list[dict[str, Any]]:
     return [
-        {"sentence_id": f"S{index}", "intended_visual_source": "DIAGRAM" if index % 2 else "CARD"}
+        {"sentence_id": f"S{index}", "text": text, "approx_seconds": 15}
         for index in range(1, count + 1)
     ]
 
 
-def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = None) -> list[dict[str, Any]]:
+def _underlong_script_sentences(count: int = 42) -> list[dict[str, Any]]:
+    text = "This narration keeps review boundaries clear, preserves the hook promise, and avoids provider execution today."
+    return [
+        {"sentence_id": f"S{index}", "text": text, "approx_seconds": 4.7}
+        for index in range(1, count + 1)
+    ]
+
+
+def _visual_scenes(count: int = 36) -> list[dict[str, Any]]:
+    return [
+        {
+            "sentence_id": f"S{index}",
+            "intended_visual_source": "DIAGRAM" if index % 2 else "CARD",
+        }
+        for index in range(1, count + 1)
+    ]
+
+
+def _outputs(
+    *, gatekeeper_result: str = "PASS", invalid_agent: str | None = None
+) -> list[dict[str, Any]]:
     artifacts: dict[str, dict[str, Any]] = {
-        "ChannelAuthorityAgent": {"decision": "ADMIT", "reason": "Fits COMPLETE channel contract."},
+        "ChannelAuthorityAgent": {
+            "decision": "ADMIT",
+            "reason": "Fits COMPLETE channel contract.",
+        },
         "TopicIdeaScoringAgent": {"score": 88, "risk": "LOW", "cost": "LOW"},
         "ResearchPackSummarizer": {
             "facts": ["VCOS routes agent calls through LLMRouter."],
@@ -256,7 +279,13 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "media_provider_calls": "NONE",
         },
         "ThumbnailBriefAgent": {
-            "variants": [{"concept": "Boundary stop", "text": "Dừng đúng chỗ", "style": "clear operator board"}],
+            "variants": [
+                {
+                    "concept": "Boundary stop",
+                    "text": "Dừng đúng chỗ",
+                    "style": "clear operator board",
+                }
+            ],
             "rendered": False,
         },
         "RightsDisclosureReviewer": {
@@ -267,12 +296,6 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "disclosure_notes": "Future generated media still needs source/provider manifest review.",
         },
         "GatekeeperSoftReviewAgent": {"result": gatekeeper_result, "findings": []},
-        "UploadCardCopyAgent": {
-            "title": "VCOS M12.2S",
-            "description": "Paste-ready only. Disclosure: AI-assisted draft; future generated media still needs provider review.",
-            "not_uploaded": True,
-            "disclosure_refs": ["rights_disclosure_review"],
-        },
         "ProviderReadinessSummaryAgent": {
             "providers": {
                 "elevenlabs": "NEEDS_CREDENTIAL",
@@ -294,31 +317,55 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
     return outputs
 
 
-def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_session, qualification_factory) -> None:
+def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     router = FakeRouter(_outputs())
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert len(router.calls) == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert {call["messages"][0]["role"] for call in router.calls} == {"system"}
     assert {call["messages"][1]["role"] for call in router.calls} == {"user"}
-    assert all("previous_artifacts" not in call["messages"][1]["content"] for call in router.calls)
-    assert all("channel_contract_json:" not in call["messages"][1]["content"] for call in router.calls)
-    assert all("compiled_policy_snapshot_json:" not in call["messages"][1]["content"] for call in router.calls)
+    assert all(
+        "previous_artifacts" not in call["messages"][1]["content"]
+        for call in router.calls
+    )
+    assert all(
+        "channel_contract_json:" not in call["messages"][1]["content"]
+        for call in router.calls
+    )
+    assert all(
+        "compiled_policy_snapshot_json:" not in call["messages"][1]["content"]
+        for call in router.calls
+    )
     assert len(package.prompt_render_run_refs) == len(FULL_REHEARSAL_AGENT_CHAIN)
     assert len(package.prompt_audit_snapshot_refs) >= len(FULL_REHEARSAL_AGENT_CHAIN)
-    assert any(ref["agent_key"] == "ScriptRewriteAgent" and ref["route_status"] == "SKIPPED_SAFE" for ref in package.agent_run_refs)
-    assert package.artifacts["visual_plan"]["scenes"][0]["intended_visual_source"] == "DIAGRAM"
+    assert any(
+        ref["agent_key"] == "ScriptRewriteAgent"
+        and ref["route_status"] == "SKIPPED_SAFE"
+        for ref in package.agent_run_refs
+    )
+    assert (
+        package.artifacts["visual_plan"]["scenes"][0]["intended_visual_source"]
+        == "DIAGRAM"
+    )
     assert package.artifacts["thumbnail_brief"]["rendered"] is False
-    assert package.artifacts["media_qc_explanation"]["status"] == "WAITING_MEDIA_GENERATION"
+    assert (
+        package.artifacts["media_qc_explanation"]["status"]
+        == "WAITING_MEDIA_GENERATION"
+    )
     assert package.artifacts["provider_plan_dry_validation"]["status"] == "REACHED"
     assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
-    assert package.artifacts["provider_plan_dry_validation"]["no_network_call_made"] is True
+    assert (
+        package.artifacts["provider_plan_dry_validation"]["no_network_call_made"]
+        is True
+    )
     assert package.artifacts["srt"]["artifact_type"] == "SRT_CAPTION_FILE"
     assert package.artifacts["srt"]["not_final_media"] is True
     assert package.artifacts["srt"]["not_publishable"] is True
@@ -326,22 +373,40 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert package.artifacts["srt"]["upload_publish_made"] is False
     assert Path(package.artifacts["srt"]["local_path"]).exists()
     assert package.artifacts["srt"]["srt"].startswith("1\n00:00:00,000 --> ")
-    assert package.artifacts["srt"]["caption_count"] == len(package.artifacts["srt"]["cues"])
+    assert package.artifacts["srt"]["caption_count"] == len(
+        package.artifacts["srt"]["cues"]
+    )
     assert package.artifacts["srt"]["checksum_sha256"]
     assert package.artifacts["duration_model"]["read_only"] is True
     assert package.artifacts["duration_model"]["target_duration_seconds"] == 540.0
-    assert sum(item["word_target"] for item in package.artifacts["script_word_budget"]["section_word_budgets"]) == 1260
+    assert (
+        sum(
+            item["word_target"]
+            for item in package.artifacts["script_word_budget"]["section_word_budgets"]
+        )
+        == 1260
+    )
     assert package.artifacts["script_word_budget"]["minimum_word_count"] == 1134
     assert package.artifacts["script_word_budget"]["maximum_word_count"] == 1386
     assert package.risk_limitations_summary["mock_fallback_used"] is False
     assert package.risk_limitations_summary["dry_run_success_used"] is False
     assert package.risk_limitations_summary["media_provider_calls_made"] is False
     assert package.risk_limitations_summary["upload_or_publish_calls_made"] is False
-    assert db_session.query(AgentContextPackSnapshot).count() == len(FULL_REHEARSAL_AGENT_CHAIN)
-    provider_pack = db_session.query(AgentContextPackSnapshot).filter(AgentContextPackSnapshot.agent_key == "ProviderReadinessSummaryAgent").one()
+    assert db_session.query(AgentContextPackSnapshot).count() == len(
+        FULL_REHEARSAL_AGENT_CHAIN
+    )
+    provider_pack = (
+        db_session.query(AgentContextPackSnapshot)
+        .filter(AgentContextPackSnapshot.agent_key == "ProviderReadinessSummaryAgent")
+        .one()
+    )
     assert "provider_readiness_digest" in provider_pack.context_pack_json["digests"]
     assert "script_digest" not in provider_pack.context_pack_json["digests"]
-    media_pack = db_session.query(AgentContextPackSnapshot).filter(AgentContextPackSnapshot.agent_key == "MediaQCExplanationAgent").one()
+    media_pack = (
+        db_session.query(AgentContextPackSnapshot)
+        .filter(AgentContextPackSnapshot.agent_key == "MediaQCExplanationAgent")
+        .one()
+    )
     assert "package_summary_digest" in media_pack.context_pack_json["digests"]
     assert "script_digest" not in media_pack.context_pack_json["digests"]
 
@@ -349,29 +414,40 @@ def test_m12_2s_complete_contract_runs_full_rehearsal_to_provider_boundary(db_se
     assert boundary.package_id == package.id
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
     assert boundary.no_provider_calls_confirmed is True
-    assert boundary.provider_readiness["elevenlabs"]["status"] in {"NEEDS_CREDENTIAL", "NOT_CONFIGURED"}
+    assert boundary.provider_readiness["elevenlabs"]["status"] in {
+        "NEEDS_CREDENTIAL",
+        "NOT_CONFIGURED",
+    }
     assert boundary.provider_readiness["google_veo"]["required"] is False
     assert boundary.operator_summary_vi == (
         "Gói nội dung đã sẵn sàng tới bước tạo media, nhưng chưa thể generate video vì chưa cấu hình provider voice/render/AI hero."
     )
-    assert "ElevenLabs" in boundary.next_action and "NativeFFmpeg" in boundary.next_action
+    assert (
+        "ElevenLabs" in boundary.next_action and "NativeFFmpeg" in boundary.next_action
+    )
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
     assert db_session.query(RealSmokeRun).count() == 0
 
 
-def test_m12_2s_rights_disclosure_conditional_wording_repair_reaches_provider_boundary(db_session, qualification_factory) -> None:
+def test_m12_2s_rights_disclosure_conditional_wording_repair_reaches_provider_boundary(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[5]["artifact"].pop("disclosure_notes", None)
-    outputs[5]["artifact"]["description"] = "Paste-ready metadata, no upload. Content is generated using AI tools."
-    outputs[8]["artifact"]["ai_disclosure_needed"] = True
-    outputs[8]["artifact"]["disclosure_notes"] = "Future generated media still needs source/provider manifest review."
-
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
+    outputs[5]["artifact"]["description"] = (
+        "Paste-ready metadata, no upload. Content is generated using AI tools."
     )
+    outputs[8]["artifact"]["ai_disclosure_needed"] = True
+    outputs[8]["artifact"]["disclosure_notes"] = (
+        "Future generated media still needs source/provider manifest review."
+    )
+
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(outputs)
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     repair = package.artifacts["disclosure_wording_repair_attempt"]
@@ -379,14 +455,22 @@ def test_m12_2s_rights_disclosure_conditional_wording_repair_reaches_provider_bo
     assert repair["repaired"] is True
     assert repair["semantic_change_allowed"] is False
     assert repair["reason_codes"] == ["AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING"]
-    assert "Future generated media" in package.artifacts["metadata_package"]["disclosure_notes"]
-    assert "AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING" not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "Future generated media"
+        in package.artifacts["metadata_package"]["disclosure_notes"]
+    )
+    assert (
+        "AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING"
+        not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
 
 
-def test_m12_2s_partial_contract_blocks_before_llm(db_session, qualification_factory) -> None:
+def test_m12_2s_partial_contract_blocks_before_llm(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     payload = dict(scope.snapshot.compiled_payload)
     contract = dict(payload["channel_contract_json"])
@@ -410,35 +494,49 @@ def test_m12_2s_partial_contract_blocks_before_llm(db_session, qualification_fac
     db_session.flush()
     router = FakeRouter([])
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(_request(scope.channel.id))
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id))
 
     assert package.package_status == "BLOCKED"
-    assert package.artifacts["channel_contract_review"]["reason_codes"] == ["CHANNEL_CONTRACT_INCOMPLETE"]
+    assert package.artifacts["channel_contract_review"]["reason_codes"] == [
+        "CHANNEL_CONTRACT_INCOMPLETE"
+    ]
     assert package.prompt_render_run_refs == []
     assert router.calls == []
 
 
-def test_m12_2s_missing_topic_blocks_before_llm(db_session, qualification_factory) -> None:
+def test_m12_2s_missing_topic_blocks_before_llm(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
-    request = _request(scope.channel.id, video_project_id=project.id).model_copy(update={"topic": None})
+    request = _request(scope.channel.id, video_project_id=project.id).model_copy(
+        update={"topic": None}
+    )
     router = FakeRouter([])
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(request)
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(request)
 
     assert package.package_status == "BLOCKED"
     assert package.artifacts["topic"]["status"] == "NEEDS_TOPIC"
     assert router.calls == []
 
 
-def test_m12_2s_real_ollama_disabled_returns_not_configured(db_session, qualification_factory) -> None:
+def test_m12_2s_real_ollama_disabled_returns_not_configured(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     router = FakeRouter([])
 
     package = FirstScriptedVideoPackageService(
         db_session,
-        settings=_settings(real_ollama_agent_run_enabled=False, llm_real_execution_enabled=False),
+        settings=_settings(
+            real_ollama_agent_run_enabled=False, llm_real_execution_enabled=False
+        ),
         llm_router=router,
     ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
@@ -449,7 +547,9 @@ def test_m12_2s_real_ollama_disabled_returns_not_configured(db_session, qualific
     assert router.calls == []
 
 
-def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_session, qualification_factory, monkeypatch) -> None:
+def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(
+    db_session, qualification_factory, monkeypatch
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -457,7 +557,9 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
     monkeypatch.setenv("VCOS_LLM_REAL_EXECUTION_ENABLED", "true")
     monkeypatch.setenv("VCOS_LLM_PROVIDER", "ollama")
 
-    def transport(method: str, url: str, payload: dict[str, Any] | None, timeout_seconds: int) -> tuple[int, dict[str, Any]]:
+    def transport(
+        method: str, url: str, payload: dict[str, Any] | None, timeout_seconds: int
+    ) -> tuple[int, dict[str, Any]]:
         assert method == "POST"
         assert url.endswith("/api/chat")
         assert payload is not None
@@ -475,21 +577,36 @@ def test_m12_2s_llmrouter_real_path_creates_provider_and_llm_snapshots(db_sessio
     provider = OllamaLLMProvider(base_url="http://ollama.test", transport=transport)
     router = LLMRouterService(db_session, provider=provider)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
-    assert db_session.query(ProviderAttempt).filter(ProviderAttempt.provider_key == "OLLAMA").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
-    assert db_session.query(LLMRunSnapshot).filter(LLMRunSnapshot.provider == "ollama").count() == len(FULL_REHEARSAL_AGENT_CHAIN)
-    forbidden_attempts = db_session.query(ProviderAttempt).filter(
-        ProviderAttempt.provider_key.in_(["ELEVENLABS", "GOOGLE_VEO", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"])
-    ).all()
+    assert db_session.query(ProviderAttempt).filter(
+        ProviderAttempt.provider_key == "OLLAMA"
+    ).count() == len(FULL_REHEARSAL_AGENT_CHAIN)
+    assert db_session.query(LLMRunSnapshot).filter(
+        LLMRunSnapshot.provider == "ollama"
+    ).count() == len(FULL_REHEARSAL_AGENT_CHAIN)
+    forbidden_attempts = (
+        db_session.query(ProviderAttempt)
+        .filter(
+            ProviderAttempt.provider_key.in_(
+                ["ELEVENLABS", "GOOGLE_VEO", "PEXELS_API", "GOOGLE_DRIVE", "YOUTUBE"]
+            )
+        )
+        .all()
+    )
     assert forbidden_attempts == []
 
 
-@pytest.mark.parametrize("gatekeeper_result, expected_status", [("BLOCK", "BLOCKED"), ("REVIEW_REQUIRED", "REVIEW_REQUIRED")])
-def test_m12_2s_gatekeeper_stops_or_marks_review_required(db_session, qualification_factory, gatekeeper_result, expected_status) -> None:
+@pytest.mark.parametrize(
+    "gatekeeper_result, expected_status",
+    [("BLOCK", "BLOCKED"), ("REVIEW_REQUIRED", "REVIEW_REQUIRED")],
+)
+def test_m12_2s_gatekeeper_stops_or_marks_review_required(
+    db_session, qualification_factory, gatekeeper_result, expected_status
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
 
@@ -500,11 +617,13 @@ def test_m12_2s_gatekeeper_stops_or_marks_review_required(db_session, qualificat
     ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == expected_status
-    assert "upload_card_copy" not in package.artifacts
+    assert "metadata_package" in package.artifacts
     assert db_session.query(HumanUploadTask).count() == 0
 
 
-def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qualification_factory) -> None:
+def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -525,13 +644,18 @@ def test_m12_2s_provider_readiness_block_is_deferred_to_boundary(db_session, qua
         "PROVIDER_GAP_DEFERRED_TO_VIDEO_GENERATION_BOUNDARY"
     ]
     assert package.artifacts["provider_readiness_summary"]["providers"]
-    assert package.artifacts["media_qc_explanation"]["status"] == "WAITING_MEDIA_GENERATION"
+    assert (
+        package.artifacts["media_qc_explanation"]["status"]
+        == "WAITING_MEDIA_GENERATION"
+    )
     boundary = db_session.query(VideoGenerationBoundary).one()
     assert boundary.boundary_status == "BLOCKED_PROVIDER_NOT_CONFIGURED"
     assert "GATEKEEPER_BLOCK" not in boundary.blocked_reasons
 
 
-def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_factory) -> None:
+def test_m12_2s_invalid_output_sets_review_required(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
 
@@ -547,7 +671,9 @@ def test_m12_2s_invalid_output_sets_review_required(db_session, qualification_fa
     assert db_session.query(PromptAuditSnapshot).count() >= 5
 
 
-def test_m12_2s_topic_idea_missing_artifact_triggers_schema_retry(db_session, qualification_factory) -> None:
+def test_m12_2s_topic_idea_missing_artifact_triggers_schema_retry(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -555,14 +681,17 @@ def test_m12_2s_topic_idea_missing_artifact_triggers_schema_retry(db_session, qu
     bad_topic.pop("artifact")
     retry_topic = _envelope(
         "TopicIdeaScoringAgent",
-        {"topic_score": {"score": "UNKNOWN"}, "risk_assessment": {"risk_level": "MEDIUM"}},
+        {
+            "topic_score": {"score": "UNKNOWN"},
+            "risk_assessment": {"risk_level": "MEDIUM"},
+        },
         status="REVIEW_REQUIRED",
     )
     router = FakeRouter([outputs[0], bad_topic, retry_topic, *outputs[2:]])
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     retry_audit = package.artifacts["topic_idea_schema_retry_attempt"]
@@ -574,7 +703,9 @@ def test_m12_2s_topic_idea_missing_artifact_triggers_schema_retry(db_session, qu
     assert len(router.calls) == len(FULL_REHEARSAL_AGENT_CHAIN) + 1
 
 
-def test_m12_2s_topic_idea_missing_artifact_retry_failure_blocks(db_session, qualification_factory) -> None:
+def test_m12_2s_topic_idea_missing_artifact_retry_failure_blocks(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -583,20 +714,25 @@ def test_m12_2s_topic_idea_missing_artifact_retry_failure_blocks(db_session, qua
     retry_bad_topic = dict(bad_topic)
     router = FakeRouter([outputs[0], bad_topic, retry_bad_topic])
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "REVIEW_REQUIRED"
     assert package.artifacts["topic_idea_schema_retry_attempt"]["attempted"] is True
     assert package.artifacts["topic_scores"]["validation_result"]["valid"] is False
-    assert any("artifact" in error for error in package.artifacts["topic_scores"]["validation_result"]["errors"])
+    assert any(
+        "artifact" in error
+        for error in package.artifacts["topic_scores"]["validation_result"]["errors"]
+    )
     assert "research_digest" not in package.artifacts
     assert "provider_plan_dry_validation" not in package.artifacts
     assert len(router.calls) == 3
 
 
-def test_m12_2s_duration_gate_blocks_before_visual_or_provider_plan(db_session, qualification_factory) -> None:
+def test_m12_2s_duration_gate_blocks_before_visual_or_provider_plan(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -607,18 +743,25 @@ def test_m12_2s_duration_gate_blocks_before_visual_or_provider_plan(db_session, 
     outputs[4]["artifact"]["total_approx_seconds"] = 71
     router = FakeRouter(outputs)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "BLOCKED"
-    assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "SCRIPT_DURATION_BELOW_MINIMUM"
+        in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert "visual_plan" not in package.artifacts
     assert "provider_plan_dry_validation" not in package.artifacts
-    assert [call["requested_task_type"] for call in router.calls][-1] == "long_form_script"
+    assert [call["requested_task_type"] for call in router.calls][
+        -1
+    ] == "long_form_script"
 
 
-def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(db_session, qualification_factory) -> None:
+def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -634,9 +777,9 @@ def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(db_session
     original_hook = dict(outputs[4]["artifact"]["hook_spec"])
     router = FakeRouter(outputs)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     repair = package.artifacts["script_duration_repair_attempt"]
@@ -647,7 +790,10 @@ def test_m12_2s_overlong_script_triggers_bounded_duration_trim_repair(db_session
     assert repair["hook_preserved"] is True
     assert repair["payoff_location_preserved"] is True
     assert package.artifacts["narration_script"]["hook_spec"] == original_hook
-    assert "SCRIPT_DURATION_ABOVE_MAXIMUM" not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "SCRIPT_DURATION_ABOVE_MAXIMUM"
+        not in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert package.artifacts["provider_plan_dry_validation"]["will_execute"] is False
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
@@ -667,9 +813,9 @@ def test_m12_2s_underlong_script_blocks_without_padding(
     outputs[6]["artifact"]["scenes"] = _visual_scenes(42)
     original_hook = dict(outputs[4]["artifact"]["hook_spec"])
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(outputs)
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "BLOCKED"
     repair = package.artifacts["script_duration_repair_attempt"]
@@ -681,25 +827,31 @@ def test_m12_2s_underlong_script_blocks_without_padding(
     assert repair["padding_performed"] is False
     assert "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH" in repair["reason_codes"]
     assert package.artifacts["narration_script"]["hook_spec"] == original_hook
-    assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts[
-        "deterministic_gate_report"
-    ]["fail_codes"]
+    assert (
+        "SCRIPT_DURATION_BELOW_MINIMUM"
+        in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert "provider_plan_dry_validation" not in package.artifacts
     assert db_session.query(MediaRenderJob).count() == 0
     assert db_session.query(HumanUploadTask).count() == 0
 
 
-def test_m12_2s_duration_expansion_failure_keeps_package_blocked(db_session, qualification_factory, monkeypatch) -> None:
+def test_m12_2s_duration_expansion_failure_keeps_package_blocked(
+    db_session, qualification_factory, monkeypatch
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[4]["artifact"]["sentences"] = _underlong_script_sentences()
     outputs[4]["artifact"]["total_approx_seconds"] = 276
-    monkeypatch.setattr("app.services.m12_2._expand_script_to_word_budget", lambda script, duration_model, budget: (script, []))
-
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
+    monkeypatch.setattr(
+        "app.services.m12_2._expand_script_to_word_budget",
+        lambda script, duration_model, budget: (script, []),
     )
+
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(outputs)
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "BLOCKED"
     repair = package.artifacts["script_duration_repair_attempt"]
@@ -708,12 +860,17 @@ def test_m12_2s_duration_expansion_failure_keeps_package_blocked(db_session, qua
     assert repair["repaired"] is False
     assert repair["padding_performed"] is False
     assert "BLOCK_INSUFFICIENT_EDITORIAL_DEPTH" in repair["reason_codes"]
-    assert "SCRIPT_DURATION_BELOW_MINIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "SCRIPT_DURATION_BELOW_MINIMUM"
+        in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert "visual_plan" not in package.artifacts
     assert "provider_plan_dry_validation" not in package.artifacts
 
 
-def test_m12_2s_duration_repair_failure_keeps_package_blocked(db_session, qualification_factory, monkeypatch) -> None:
+def test_m12_2s_duration_repair_failure_keeps_package_blocked(
+    db_session, qualification_factory, monkeypatch
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
@@ -725,33 +882,44 @@ def test_m12_2s_duration_repair_failure_keeps_package_blocked(db_session, qualif
         {"sentence_id": f"S{index}", "text": overlong_text, "approx_seconds": 9.0}
         for index in range(1, 96)
     ]
-    monkeypatch.setattr("app.services.m12_2._trim_script_to_word_budget", lambda script, duration_model, budget: (script, []))
-
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
+    monkeypatch.setattr(
+        "app.services.m12_2._trim_script_to_word_budget",
+        lambda script, duration_model, budget: (script, []),
     )
+
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(outputs)
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "BLOCKED"
     assert package.artifacts["script_duration_repair_attempt"]["attempted"] is True
     assert package.artifacts["script_duration_repair_attempt"]["repaired"] is False
-    assert "SCRIPT_DURATION_ABOVE_MAXIMUM" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "SCRIPT_DURATION_ABOVE_MAXIMUM"
+        in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert "visual_plan" not in package.artifacts
     assert "provider_plan_dry_validation" not in package.artifacts
 
 
-def test_m12_2s_missing_hook_fields_block_before_visual_or_provider_plan(db_session, qualification_factory) -> None:
+def test_m12_2s_missing_hook_fields_block_before_visual_or_provider_plan(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[4]["artifact"]["hook_spec"].pop("first_3_seconds_visual")
     router = FakeRouter(outputs)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "BLOCKED"
-    assert "HOOK_FIRST_3_SECONDS_VISUAL_MISSING" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "HOOK_FIRST_3_SECONDS_VISUAL_MISSING"
+        in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
     assert "visual_plan" not in package.artifacts
     assert "provider_plan_dry_validation" not in package.artifacts
 
@@ -770,12 +938,29 @@ def test_m12_2s_visual_source_scan_ignores_evidence_source_type() -> None:
 
 
 def test_m12_2s_visual_unknown_sentence_ref_repair_is_bounded() -> None:
-    script = {"sentences": [{"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1} for index in range(1, 4)]}
+    script = {
+        "sentences": [
+            {"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1}
+            for index in range(1, 4)
+        ]
+    }
     visual = {
         "scenes": [
-            {"scene_id": "SCN01", "sentence_ids": ["S1", "S2"], "intended_visual_source": "DIAGRAM"},
-            {"scene_id": "SCN02", "sentence_ids": ["S3", "S4"], "intended_visual_source": "CARD"},
-            {"scene_id": "SCN03", "sentence_ids": ["S5"], "intended_visual_source": "CARD"},
+            {
+                "scene_id": "SCN01",
+                "sentence_ids": ["S1", "S2"],
+                "intended_visual_source": "DIAGRAM",
+            },
+            {
+                "scene_id": "SCN02",
+                "sentence_ids": ["S3", "S4"],
+                "intended_visual_source": "CARD",
+            },
+            {
+                "scene_id": "SCN03",
+                "sentence_ids": ["S5"],
+                "intended_visual_source": "CARD",
+            },
         ]
     }
 
@@ -800,16 +985,35 @@ def test_m12_2s_visual_unknown_sentence_ref_repair_is_bounded() -> None:
 
 
 def test_m12_2s_visual_repair_normalizes_covers_refs_and_candidate_source() -> None:
-    script = {"sentences": [{"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1} for index in range(1, 4)]}
+    script = {
+        "sentences": [
+            {"sentence_id": f"S{index}", "text": "ok", "approx_seconds": 1}
+            for index in range(1, 4)
+        ]
+    }
     visual = {
         "scenes": [
-            {"scene_id": "SCN01", "sentence_range": ["S1"], "intended_visual_source": "AI_HERO_CANDIDATE_ONLY"},
-            {"scene_id": "SCN02", "sentence_ids_covered": ["S2"], "intended_visual_source": "CARD"},
-            {"scene_id": "SCN03", "narration_sentence_ids": ["S3"], "intended_visual_source": "CARD"},
+            {
+                "scene_id": "SCN01",
+                "sentence_range": ["S1"],
+                "intended_visual_source": "AI_HERO_CANDIDATE_ONLY",
+            },
+            {
+                "scene_id": "SCN02",
+                "sentence_ids_covered": ["S2"],
+                "intended_visual_source": "CARD",
+            },
+            {
+                "scene_id": "SCN03",
+                "narration_sentence_ids": ["S3"],
+                "intended_visual_source": "CARD",
+            },
         ]
     }
 
-    repaired, patches = _repair_visual_unknown_sentence_refs(visual, script, allowed_sources={"DIAGRAM", "CARD"})
+    repaired, patches = _repair_visual_unknown_sentence_refs(
+        visual, script, allowed_sources={"DIAGRAM", "CARD"}
+    )
 
     assert repaired["scenes"][0]["sentence_ids"] == ["S1"]
     assert repaired["scenes"][0]["intended_visual_source"] == "DIAGRAM"
@@ -824,83 +1028,117 @@ def test_m12_2s_visual_repair_normalizes_covers_refs_and_candidate_source() -> N
     }
 
 
-def test_m12_2s_bounded_style_repair_can_remove_forbidden_style(db_session, qualification_factory) -> None:
+def test_m12_2s_bounded_style_repair_can_remove_forbidden_style(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
-    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(
+        project.id
+    )
     effective.brand_voice_persona_context_json = {"forbidden_style": ["hype bait"]}
     db_session.flush()
     outputs = _outputs()
-    outputs[4]["artifact"]["sentences"][0]["text"] = "This hype bait line still describes the COMPLETE channel contract."
+    outputs[4]["artifact"]["sentences"][0]["text"] = (
+        "This hype bait line still describes the COMPLETE channel contract."
+    )
     router = FakeRouter(outputs)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "WAITING_PROVIDER_CONFIG"
     assert package.artifacts["script_style_repair_attempt"]["attempted"] is True
     assert package.artifacts["script_style_repair_attempt"]["sentence_patches"]
-    repaired_text = package.artifacts["narration_script"]["sentences"][0]["text"].lower()
+    repaired_text = package.artifacts["narration_script"]["sentences"][0][
+        "text"
+    ].lower()
     assert "hype bait" not in repaired_text
 
 
-def test_m12_2s_style_gate_still_blocks_if_repair_fails(db_session, qualification_factory, monkeypatch) -> None:
+def test_m12_2s_style_gate_still_blocks_if_repair_fails(
+    db_session, qualification_factory, monkeypatch
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
-    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(
+        project.id
+    )
     effective.brand_voice_persona_context_json = {"forbidden_style": ["hype bait"]}
     db_session.flush()
-    monkeypatch.setattr("app.services.m12_2._repair_forbidden_style_terms", lambda script, terms: (script, []))
-    outputs = _outputs()
-    outputs[4]["artifact"]["sentences"][0]["text"] = "This hype bait line still describes the COMPLETE channel contract."
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
+    monkeypatch.setattr(
+        "app.services.m12_2._repair_forbidden_style_terms",
+        lambda script, terms: (script, []),
     )
+    outputs = _outputs()
+    outputs[4]["artifact"]["sentences"][0]["text"] = (
+        "This hype bait line still describes the COMPLETE channel contract."
+    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(outputs)
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "BLOCKED"
     assert package.artifacts["script_style_repair_attempt"]["attempted"] is True
-    assert "SCRIPT_FORBIDDEN_STYLE_USED" in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    assert (
+        "SCRIPT_FORBIDDEN_STYLE_USED"
+        in package.artifacts["deterministic_gate_report"]["fail_codes"]
+    )
 
 
-def test_m12_2s_channel_authority_requires_decision(db_session, qualification_factory) -> None:
+def test_m12_2s_channel_authority_requires_decision(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[0]["artifact"] = {"reason": "Missing machine-readable decision."}
     router = FakeRouter(outputs)
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "REVIEW_REQUIRED"
-    assert package.artifacts["admission_decision"]["reason_codes"] == ["REQUIRED_ARTIFACT_FIELDS_MISSING"]
+    assert package.artifacts["admission_decision"]["reason_codes"] == [
+        "REQUIRED_ARTIFACT_FIELDS_MISSING"
+    ]
     assert package.artifacts["admission_decision"]["missing_fields"] == ["decision"]
     assert len(router.calls) == 1
     assert db_session.query(MediaRenderJob).count() == 0
 
 
-def test_m12_2s_thumbnail_and_media_qc_schema_guards(db_session, qualification_factory) -> None:
+def test_m12_2s_thumbnail_and_media_qc_schema_guards(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     outputs = _outputs()
     outputs[7]["artifact"]["image_url"] = "https://example.invalid/rendered.png"
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(outputs)).rehearse_full(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(outputs)
+    ).rehearse_full(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "REVIEW_REQUIRED"
-    assert package.artifacts["thumbnail_brief_review"]["reason_codes"] == ["THUMBNAIL_RENDER_NOT_ALLOWED"]
+    assert package.artifacts["thumbnail_brief_review"]["reason_codes"] == [
+        "THUMBNAIL_RENDER_NOT_ALLOWED"
+    ]
     assert db_session.query(MediaRenderJob).count() == 0
 
 
-def test_m12_2s_package_retrieval_agent_runs_and_boundary(db_session, qualification_factory) -> None:
+def test_m12_2s_package_retrieval_agent_runs_and_boundary(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
-    service = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter(_outputs()))
-    package = service.rehearse_full(_request(scope.channel.id, video_project_id=project.id))
+    service = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter(_outputs())
+    )
+    package = service.rehearse_full(
+        _request(scope.channel.id, video_project_id=project.id)
+    )
 
     retrieved = service.get(package.id)
     agent_runs = service.agent_runs(package.id)
@@ -922,6 +1160,11 @@ def test_m12_2s_api_routes_exist_and_no_old_provider_smoke_path(db_session) -> N
     assert "/video-packages/{package_id}/agent-runs" in paths
     assert "/video-packages/{package_id}/generation-boundary" in paths
     source = Path("app/services/m12_2.py").read_text(encoding="utf-8")
-    forbidden = ["app.providers.mock", "RealSmokeOrchestratorService", "GoogleDriveUploadService", "YouTubeUpload"]
+    forbidden = [
+        "app.providers.mock",
+        "RealSmokeOrchestratorService",
+        "GoogleDriveUploadService",
+        "YouTubeUpload",
+    ]
     assert [token for token in forbidden if token in source] == []
     assert db_session.query(PromptRenderRun).count() == 0

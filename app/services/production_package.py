@@ -137,6 +137,8 @@ class ChannelDurationContractResolver:
             if isinstance(production_lane, ProductionLane)
             else production_lane
         )
+        if lane_key != ProductionLane.LONG_FORM.value:
+            raise ValidationFailureError("LONG_FORM_DURATION_CONTRACT_REQUIRED")
         profile_values = _profile_duration_values(
             profile.profile_input or {}, production_lane=lane_key
         )
@@ -192,7 +194,6 @@ class ProductionPackageService:
             return self.read_package(current.id)
         if (
             canonical.support_envelope_ref is None
-            and canonical.production_lane != ProductionLane.LONG_DERIVED_SHORT
             and not self.allow_legacy_envelope_free_write
         ):
             raise ValidationFailureError("PRODUCTION_PACKAGE_SUPPORT_ENVELOPE_REQUIRED")
@@ -405,6 +406,8 @@ class ProductionPackageService:
         return current, content
 
     def _validate_live_authority(self, content: ProductionPackageContentV2) -> None:
+        if content.production_lane != ProductionLane.LONG_FORM:
+            raise ValidationFailureError("PRODUCTION_PACKAGE_LONG_FORM_REQUIRED")
         project = self.session.get(VideoProject, content.video_project_id)
         if project is None:
             raise NotFoundError(f"video project not found: {content.video_project_id}")
@@ -544,17 +547,6 @@ class ProductionPackageService:
                 if version is not None
                 else None
             )
-            ready_parent_package = bool(
-                field_name == "parent_derivative_lineage"
-                and version is not None
-                and artifact is not None
-                and artifact.artifact_type == PRODUCTION_PACKAGE_ARTIFACT_TYPE
-                and self._receipt_for_package(
-                    version.id,
-                    version.content_hash,
-                )
-                is not None
-            )
             if (
                 version is None
                 or artifact is None
@@ -569,9 +561,7 @@ class ProductionPackageService:
                 raise ValidationFailureError(
                     f"PRODUCTION_PACKAGE_ARTIFACT_REF_MISMATCH:{field_name}"
                 )
-            if not ready_parent_package and (
-                artifact.status != "approved" or version.status != "approved"
-            ):
+            if artifact.status != "approved" or version.status != "approved":
                 raise ValidationFailureError(
                     f"PRODUCTION_PACKAGE_ARTIFACT_NOT_APPROVED:{field_name}"
                 )
@@ -1101,8 +1091,13 @@ def _admission_hash(admission: ProjectAdmissionDecision) -> str:
     if isinstance(exact, str) and len(exact) == 64:
         return exact
     stable = {
-        "channel_daily_run_id": str(admission.channel_daily_run_id),
-        "daily_idea_decision_id": str(admission.daily_idea_decision_id),
+        "editorial_calendar_slot_id": (
+            str(admission.editorial_calendar_slot_id)
+            if admission.editorial_calendar_slot_id
+            else None
+        ),
+        "planning_source_type": admission.planning_source_type,
+        "production_lane": admission.production_lane,
         "idea_market_preflight_id": (
             str(admission.idea_market_preflight_id)
             if admission.idea_market_preflight_id
@@ -1221,13 +1216,6 @@ def _artifact_ref_bindings(
         [content.destination_binding_ref],
         {"destination_binding"},
     )
-    if content.parent_derivative_lineage is not None:
-        add(
-            "parent_derivative_lineage",
-            [content.parent_derivative_lineage],
-            {"production_package", "mr1_final_media_lineage_receipt"},
-            same_project=False,
-        )
     return bindings
 
 
@@ -1528,11 +1516,6 @@ def _all_bound_refs(
         content.provider_execution_plan_ref,
         content.budget_scope_ref,
         content.destination_binding_ref,
-        *(
-            [content.parent_derivative_lineage]
-            if content.parent_derivative_lineage is not None
-            else []
-        ),
     ]
 
 

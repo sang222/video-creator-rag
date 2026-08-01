@@ -2,7 +2,11 @@
 
 VCOS is a budgeted, self-funding, multi-channel, artifact-first media workflow engine.
 
-This repository contains M0 foundation, M1 channel profile/policy snapshot backbone, M2 artifact workflow backbone, M3 policy/gate/readiness foundation, M4 provider/cost/quota/ops health foundation, M5 daily run/context/admission foundation, M6 production artifact/local media QC foundation, M7 manual publish handoff foundation, M8 analytics sync foundation, M9 post-publish diagnostic foundation, M10 learning review queue foundation, M10.1 guarded Ollama router plus derivative/reuse/funnel backend foundation, M10.2 media provider role/routing foundation, M10.3 YouTube public/owner analytics follow foundation, M10.4 Google Veo AI hero binding/config externalization foundation, M10.5 Google Drive media offload/cloud archive foundation, M11 Operator Dashboard foundation, M11.1 Vietnamese dashboard/auth/localization/publish timing foundation, and M12 production credential readiness/guarded smoke foundation.
+This repository contains the long-form-only VCOS runtime: channel-scoped
+profile/policy authority, editorial research and strict admission, immutable
+ProductionPackage lineage, durable orchestration, native media rendering/QC,
+controlled launch cadence, final-video decision, manual publish verification,
+analytics evidence, and the operator dashboard.
 
 ## Stack
 
@@ -155,22 +159,12 @@ M4 adds provider registry, mock provider interfaces, credential references, quot
 
 M4 performs no real provider calls and no LLM/content workflow execution.
 
-## M5 Commands
+## Editorial research and admission
 
-```bash
-vcos calendar slot-create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --slot-date 2026-06-24 --production-goal "Idea envelope"
-vcos search evidence-create --company-id <company-id> --channel-id <channel-id> --query "audience query" --source-type MOCK --platform YOUTUBE --search-volume-30d 500
-vcos context plan-create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --slot-id <slot-id> --allowed-sources-json '["channel_profile","policy_snapshot","editorial_slot","search_demand_evidence"]'
-vcos context pack-create --retrieval-plan-snapshot-id <plan-id>
-vcos channel-state build --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --context-pack-snapshot-id <context-pack-id>
-vcos daily run-create --company-id <company-id> --channel-id <channel-id> --policy-snapshot-id <snapshot-id> --slot-id <slot-id> --run-date 2026-06-24
-vcos daily execute --daily-run-id <daily-run-id> --mock-mode success
-vcos daily inspect --daily-run-id <daily-run-id>
-vcos idea preflight --company-id <company-id> --channel-id <channel-id> --daily-run-id <daily-run-id> --daily-idea-decision-id <decision-id> --evidence-json '{"search_demand_evidence_ids":["<evidence-id>"]}'
-vcos project admit --daily-run-id <daily-run-id> --daily-idea-decision-id <decision-id> --idea-market-preflight-id <preflight-id> --created-by-user-id <user-id>
-```
-
-M5 adds manual daily runs, ResourceResolver MVP, immutable context/state snapshots, safe search-demand evidence, mock LLM proposal capture, deterministic market preflight, and budgeted project admission. M5 uses MockLLMProvider only. LLM output is proposal/draft/rationale only and is captured in `llm_run_snapshots`.
+Authenticated APIs create editorial research runs, bounded evidence, idea
+candidates, and strict niche/market preflights. Research has no production side
+effect. The cadence authority may select one deterministic greenlit candidate
+and delegate Series/Standalone assignment to ProjectAdmissionService.
 
 ## M6 Commands
 
@@ -248,7 +242,10 @@ GET /learning-review-queue/{queue_item_id}
 GET /playbook-candidate-drafts/{draft_id}
 ```
 
-M10 reads M8/M9 evidence and creates learning candidates, evidence bundles, eligibility gate results, review queue items, and playbook candidate drafts for M11 human review. M10 does not approve learning, promote playbooks, mutate channel profile/policy config, build dashboard UI, add approve/reject CLI, call real providers, or change daily workflow behavior.
+M10 reads M8/M9 evidence and creates learning candidates, evidence bundles,
+eligibility gate results, review queue items, and playbook candidate drafts for
+human review. M10 does not approve learning, promote playbooks, mutate channel
+profile/policy config, call real providers, or change production authority.
 
 ## M10.1 API
 
@@ -257,30 +254,14 @@ GET /llm-router/profiles
 GET /llm-router/profiles/{profile_key}
 GET /llm-router/lanes
 POST /llm-router/smoke-test
-POST /video-projects/{video_project_id}/short-candidates/extract
-GET /video-projects/{video_project_id}/short-candidates
-GET /short-candidates/{short_candidate_id}
-POST /short-candidates/{short_candidate_id}/rank
-GET /video-projects/{video_project_id}/derivative-graph
-GET /derivative-graph/edges/{edge_id}
-POST /derivative-originality-checks
-GET /derivative-originality-checks/{check_id}
-GET /reusable-artifacts
-POST /reusable-artifacts
-GET /reusable-artifacts/{artifact_id}
-POST /asset-reuse-index/search
-POST /cross-platform-funnel-packages
-GET /cross-platform-funnel-packages/{package_id}
-POST /cross-platform-funnel-packages/{package_id}/build-upload-cards
-GET /upload-cards/{upload_card_id}
 GET /human-upload-tasks
 GET /human-upload-tasks/{task_id}
-POST /promote-short-to-long-candidates
-GET /promote-short-to-long-candidates
-GET /promote-short-to-long-candidates/{candidate_id}
 ```
 
-M10.1 adds guarded Ollama LLMRouter lanes, route attempts, ProviderAttempt/LLMRunSnapshot logging, long-form to selected Shorts candidates, deterministic ShortValueScore, derivative originality checks, reusable artifact rights/reuse governance, cross-platform funnel packages, upload cards, and manual human upload tasks. Real Ollama execution is disabled by default and real smoke is skipped unless explicitly enabled. `UploadedVideo` remains canonical published video truth. YouTube analytics remains the learning authority; TikTok/Facebook are export/support surfaces only in M10.1.
+M10.1 adds guarded Ollama LLMRouter lanes, route attempts, and
+ProviderAttempt/LLMRunSnapshot logging. Real Ollama execution is disabled by
+default and real smoke is skipped unless explicitly enabled. `UploadedVideo`
+remains canonical published video truth.
 
 ## M10.2 API
 
@@ -293,8 +274,6 @@ POST /media-render-routing/decide
 GET /media-render-routing/decisions/{decision_id}
 POST /video-projects/{video_project_id}/long-form-render-package
 GET /long-form-render-packages/{package_id}
-POST /short-candidates/{short_candidate_id}/short-render-package
-GET /short-render-packages/{package_id}
 POST /video-projects/{video_project_id}/ai-hero-assets/plan
 GET /ai-hero-assets/{asset_id}
 POST /video-projects/{video_project_id}/thumbnail-variants/plan
@@ -308,7 +287,10 @@ POST /media-provider-gates/reused-content/check
 POST /media-provider-gates/media-qc/check
 ```
 
-M10.2 adds provider role/capability metadata, provider/budget/license/reuse/QC gates, long-form and Short package planning, AI hero planning, thumbnail planning and license evidence records. Final MP4 assembly belongs exclusively to the NativeFFmpeg compiled local boundary.
+M10.2 adds provider role/capability metadata, provider/budget/license/reuse/QC
+gates, long-form package planning, AI hero planning, thumbnail planning and
+license evidence records. Final MP4 assembly belongs exclusively to the
+NativeFFmpeg compiled local boundary.
 
 ## M10.3 API
 

@@ -49,7 +49,6 @@ from app.core.config import (
     Settings,
 )
 from app.providers.google_gemini_image import (
-    GeminiImageTransientOutput,
     GoogleGeminiImageAdapter,
     build_fixture_png,
 )
@@ -69,7 +68,10 @@ from app.services.r3d8 import (
     PAID_PROVIDER_KEYS,
     derive_google_gemini_image_catalog_cost,
 )
-from app.services.visual_source_routing import VisualSourceRouter, stable_hash as visual_hash
+from app.services.visual_source_routing import (
+    VisualSourceRouter,
+    stable_hash as visual_hash,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -285,7 +287,9 @@ def _gates(
         "provider_idempotency_key_ref": request.idempotency_key,
         "global_kill_switch_ref": "kill-switch://providers/global",
         "provider_kill_switch_ref": "kill-switch://google-gemini-image",
-        "request_fingerprint": GoogleGeminiImageAdapter.idempotency_fingerprint(request),
+        "request_fingerprint": GoogleGeminiImageAdapter.idempotency_fingerprint(
+            request
+        ),
     }
     values.update(overrides)
     return GeminiImageExecutionGates(
@@ -295,7 +299,9 @@ def _gates(
 
 
 class _FixtureClient:
-    def __init__(self, *, image_bytes: bytes | None = None, failure: Exception | None = None):
+    def __init__(
+        self, *, image_bytes: bytes | None = None, failure: Exception | None = None
+    ):
         self.image_bytes = image_bytes or build_fixture_png()
         self.failure = failure
         self.submit_count = 0
@@ -320,7 +326,10 @@ def img1_context() -> dict[str, Any]:
         requirements,
         rights_policy_allows_generation=True,
     )
-    assert decision.preferred_source_route == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+    assert (
+        decision.preferred_source_route
+        == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+    )
     direction = _visual_direction()
     overlay = _overlay_plan(
         decision,
@@ -394,7 +403,9 @@ def test_provider_route_secret_defaults_and_readiness_are_fail_closed() -> None:
     assert "google_gemini_image" in CANONICAL_PROVIDER_KEYS
     assert "google_veo" in CANONICAL_PROVIDER_KEYS
     assert normalize_provider_key("gemini_image") == "google_gemini_image"
-    assert normalize_provider_key("gemini_image") != normalize_provider_key("google_veo")
+    assert normalize_provider_key("gemini_image") != normalize_provider_key(
+        "google_veo"
+    )
 
     secret_owners = [
         name
@@ -426,7 +437,9 @@ def test_provider_route_secret_defaults_and_readiness_are_fail_closed() -> None:
         and node.func.attr in {"get", "post", "put", "patch", "delete"}
     ]
     assert route_methods == ["get"]
-    assert "/providers/google-gemini-image/readiness" in ROUTE_PATH.read_text(encoding="utf-8")
+    assert "/providers/google-gemini-image/readiness" in ROUTE_PATH.read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.parametrize(
@@ -450,7 +463,9 @@ def test_grounding_and_4k_require_explicit_review_approval(
     img1_context: dict[str, Any],
 ) -> None:
     request = img1_context["provider_request"]
-    with pytest.raises(ValidationError, match="GEMINI_IMAGE_GROUNDING_APPROVAL_REQUIRED"):
+    with pytest.raises(
+        ValidationError, match="GEMINI_IMAGE_GROUNDING_APPROVAL_REQUIRED"
+    ):
         _rebuild_provider_request(
             request,
             grounding_enabled=True,
@@ -464,7 +479,9 @@ def test_grounding_and_4k_require_explicit_review_approval(
     assert grounded.grounding_enabled is True
     assert grounded.grounding_approval_ref
 
-    with pytest.raises(ValidationError, match="GEMINI_IMAGE_4K_REVIEW_APPROVAL_REQUIRED"):
+    with pytest.raises(
+        ValidationError, match="GEMINI_IMAGE_4K_REVIEW_APPROVAL_REQUIRED"
+    ):
         _rebuild_provider_request(
             request,
             image_size="4K",
@@ -485,13 +502,18 @@ def test_ai_image_request_is_bound_to_the_real_vsr1_decision(
     request = img1_context["request"]
     decision = img1_context["decision"]
     assert request.visual_source_decision_hash == decision.content_hash
-    assert request.visual_source_route == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+    assert (
+        request.visual_source_route
+        == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+    )
     assert request.minimum_effective_resolution == "1080p"
     assert request.production_eligible is False
     assert request.not_publishable is True
 
     tampered = decision.model_copy(update={"content_hash": "tampered-decision-hash"})
-    with pytest.raises(ValueError, match="AI_IMAGE_VISUAL_SOURCE_DECISION_HASH_MISMATCH"):
+    with pytest.raises(
+        ValueError, match="AI_IMAGE_VISUAL_SOURCE_DECISION_HASH_MISMATCH"
+    ):
         _build_request(
             img1_context["requirements"],
             tampered,
@@ -534,7 +556,10 @@ def test_prompt_reserves_safe_regions_and_forbids_generated_authority(
     mandatory = set(MANDATORY_IMAGE_NEGATIVE_CONSTRAINTS)
     assert mandatory <= set(prompt.negative_constraints)
     assert {"no letters", "no numbers", "no logos", "no fake software UI"} <= mandatory
-    assert "Reserve clean negative space for native overlay" in prompt.negative_space_requirement
+    assert (
+        "Reserve clean negative space for native overlay"
+        in prompt.negative_space_requirement
+    )
     assert "headline-safe(" in prompt.negative_space_requirement
     assert prompt.provider_call_made is False
 
@@ -542,7 +567,9 @@ def test_prompt_reserves_safe_regions_and_forbids_generated_authority(
     payload["negative_constraints"] = [
         item for item in payload["negative_constraints"] if item != "no letters"
     ]
-    with pytest.raises(ValidationError, match="AI_IMAGE_PROMPT_MANDATORY_NEGATIVE_CONSTRAINT_MISSING"):
+    with pytest.raises(
+        ValidationError, match="AI_IMAGE_PROMPT_MANDATORY_NEGATIVE_CONSTRAINT_MISSING"
+    ):
         CompiledImagePrompt(**payload, content_hash=ai_image_stable_hash(payload))
 
 
@@ -569,7 +596,9 @@ def test_reference_assets_require_rights_and_reject_style_uploads(
     assert request.reference_asset_refs == [reference.asset_ref]
     assert request.reference_asset_hashes == [checksum]
 
-    with pytest.raises(ValidationError, match="AI_IMAGE_STYLE_REFERENCE_UPLOADS_DISABLED"):
+    with pytest.raises(
+        ValidationError, match="AI_IMAGE_STYLE_REFERENCE_UPLOADS_DISABLED"
+    ):
         AIImageReferenceAsset(
             asset_ref="fixture://style/001",
             asset_hash=checksum,
@@ -579,7 +608,9 @@ def test_reference_assets_require_rights_and_reject_style_uploads(
             checksum=checksum,
             authorization_ref="rights://style/001",
         )
-    with pytest.raises(ValidationError, match="AI_IMAGE_REFERENCE_HASH_CHECKSUM_MISMATCH"):
+    with pytest.raises(
+        ValidationError, match="AI_IMAGE_REFERENCE_HASH_CHECKSUM_MISMATCH"
+    ):
         AIImageReferenceAsset(
             asset_ref="fixture://subject/bad-hash",
             asset_hash=checksum,
@@ -617,16 +648,19 @@ def test_versioned_cost_and_approval_idempotency_attempt_guards(
         hard_cap=Decimal("1.00"),
         approval_amount=Decimal("1.00"),
     )
-    assert validate_gemini_image_cost_snapshot_integrity(
-        estimate,
-        provider_key="google_gemini_image",
-        model_id="gemini-3.1-flash-image",
-        image_size="2K",
-        aspect_ratio="16:9",
-        output_count=1,
-        attempt_count=1,
-        catalog_estimate=canonical_estimate,
-    ) is estimate
+    assert (
+        validate_gemini_image_cost_snapshot_integrity(
+            estimate,
+            provider_key="google_gemini_image",
+            model_id="gemini-3.1-flash-image",
+            image_size="2K",
+            aspect_ratio="16:9",
+            output_count=1,
+            attempt_count=1,
+            catalog_estimate=canonical_estimate,
+        )
+        is estimate
+    )
     with pytest.raises(ValidationError, match="frozen"):
         estimate.estimated_amount = Decimal("0.001")
 
@@ -671,7 +705,7 @@ def test_versioned_cost_and_approval_idempotency_attempt_guards(
             "GEMINI_IMAGE_COST_MODEL_BINDING_MISMATCH",
         ),
         (
-            {"aspect_ratio": "9:16"},
+            {"aspect_ratio": "1:1"},
             "GEMINI_IMAGE_COST_OUTPUT_BINDING_MISMATCH",
         ),
         (
@@ -703,7 +737,9 @@ def test_versioned_cost_and_approval_idempotency_attempt_guards(
                 attempt_count=1,
                 catalog_estimate=canonical_estimate,
             )
-    with pytest.raises(ValueError, match="GEMINI_IMAGE_EFFECTIVE_RESOLUTION_BELOW_1080P"):
+    with pytest.raises(
+        ValueError, match="GEMINI_IMAGE_EFFECTIVE_RESOLUTION_BELOW_1080P"
+    ):
         catalog.estimate(
             model_id="gemini-3.1-flash-image",
             image_size="1K",
@@ -775,7 +811,9 @@ def test_versioned_cost_and_approval_idempotency_attempt_guards(
         assert blocked.generation_attempts_consumed == 0
 
     disabled_client = _FixtureClient()
-    disabled_adapter = GoogleGeminiImageAdapter(_settings(), fixture_client=disabled_client)
+    disabled_adapter = GoogleGeminiImageAdapter(
+        _settings(), fixture_client=disabled_client
+    )
     disabled = disabled_adapter.submit_generation(
         provider_request,
         gates=_gates(
@@ -793,7 +831,10 @@ def test_versioned_cost_and_approval_idempotency_attempt_guards(
 
     invalid_attempt = disabled.model_dump(mode="json", exclude={"state_hash"})
     invalid_attempt["generation_attempts_consumed"] = 1
-    with pytest.raises(ValidationError, match="GEMINI_IMAGE_NON_NETWORK_FLOW_MUST_CONSUME_ZERO_ATTEMPTS"):
+    with pytest.raises(
+        ValidationError,
+        match="GEMINI_IMAGE_NON_NETWORK_FLOW_MUST_CONSUME_ZERO_ATTEMPTS",
+    ):
         GeminiImageOperationReceipt(
             **invalid_attempt,
             state_hash=ai_image_stable_hash(invalid_attempt),
@@ -848,8 +889,12 @@ def test_fixture_is_zero_network_idempotent_transient_and_atomically_materialize
     adapter = GoogleGeminiImageAdapter(_settings(), fixture_client=fixture_client)
     request = img1_context["provider_request"]
 
-    receipt = adapter.submit_generation(request, gates=_gates(request), fixture_only=True)
-    duplicate = adapter.submit_generation(request, gates=_gates(request), fixture_only=True)
+    receipt = adapter.submit_generation(
+        request, gates=_gates(request), fixture_only=True
+    )
+    duplicate = adapter.submit_generation(
+        request, gates=_gates(request), fixture_only=True
+    )
     assert duplicate.state_hash == receipt.state_hash
     assert fixture_client.submit_count == 1
     assert receipt.provider_call_made is False
@@ -898,7 +943,9 @@ def test_fixture_is_zero_network_idempotent_transient_and_atomically_materialize
     monkeypatch.setattr(gemini_image_provider_module.os, "replace", recording_replace)
     monkeypatch.setattr(gemini_image_provider_module.os, "fsync", recording_fsync)
     materialized = adapter.materialize_output(plan, transient=transient)
-    assert replacements == [(destination.with_name(destination.name + ".part"), destination)]
+    assert replacements == [
+        (destination.with_name(destination.name + ".part"), destination)
+    ]
     assert fsync_targets == ["file", "directory"]
     assert destination.read_bytes() == fixture_png
     assert materialized["sha256"] == hashlib.sha256(fixture_png).hexdigest()
@@ -920,7 +967,9 @@ def test_materialization_failure_cleans_part_and_provider_failure_has_no_fallbac
     request = img1_context["provider_request"]
     invalid_client = _FixtureClient(image_bytes=b"\x89PNG\r\n\x1a\n" + b"truncated")
     adapter = GoogleGeminiImageAdapter(_settings(), fixture_client=invalid_client)
-    receipt = adapter.submit_generation(request, gates=_gates(request), fixture_only=True)
+    receipt = adapter.submit_generation(
+        request, gates=_gates(request), fixture_only=True
+    )
     workspace = tmp_path / "invalid-workspace"
     destination = workspace / "invalid.png"
     plan = adapter.build_output_download_plan(
@@ -929,12 +978,16 @@ def test_materialization_failure_cleans_part_and_provider_failure_has_no_fallbac
         destination_path=destination,
     )
     with pytest.raises(ValueError, match="GEMINI_IMAGE_PNG_TRUNCATED"):
-        adapter.materialize_output(plan, transient=adapter.transient_output_for(receipt))
+        adapter.materialize_output(
+            plan, transient=adapter.transient_output_for(receipt)
+        )
     assert not destination.exists()
     assert not destination.with_name(destination.name + ".part").exists()
 
     conflict_client = _FixtureClient()
-    conflict_adapter = GoogleGeminiImageAdapter(_settings(), fixture_client=conflict_client)
+    conflict_adapter = GoogleGeminiImageAdapter(
+        _settings(), fixture_client=conflict_client
+    )
     conflict_receipt = conflict_adapter.submit_generation(
         request,
         gates=_gates(request),
@@ -949,19 +1002,27 @@ def test_materialization_failure_cleans_part_and_provider_failure_has_no_fallbac
         workspace_root=conflict_workspace,
         destination_path=conflict_destination,
     )
-    with pytest.raises(FileExistsError, match="GEMINI_IMAGE_OUTPUT_DESTINATION_ALREADY_EXISTS"):
+    with pytest.raises(
+        FileExistsError, match="GEMINI_IMAGE_OUTPUT_DESTINATION_ALREADY_EXISTS"
+    ):
         conflict_adapter.materialize_output(
             conflict_plan,
             transient=conflict_adapter.transient_output_for(conflict_receipt),
         )
     assert conflict_destination.read_bytes() == b"operator-owned-existing-content"
-    assert not conflict_destination.with_name(conflict_destination.name + ".part").exists()
+    assert not conflict_destination.with_name(
+        conflict_destination.name + ".part"
+    ).exists()
 
     failure = RuntimeError("fixture provider failure")
     failing_client = _FixtureClient(failure=failure)
-    failing_adapter = GoogleGeminiImageAdapter(_settings(), fixture_client=failing_client)
+    failing_adapter = GoogleGeminiImageAdapter(
+        _settings(), fixture_client=failing_client
+    )
     with pytest.raises(RuntimeError, match="fixture provider failure"):
-        failing_adapter.submit_generation(request, gates=_gates(request), fixture_only=True)
+        failing_adapter.submit_generation(
+            request, gates=_gates(request), fixture_only=True
+        )
     assert failing_client.submit_count == 1
     assert not failing_adapter._operations_by_fingerprint
 
@@ -1004,7 +1065,9 @@ def test_normalization_and_native_overlay_binding_validate(
     assert normalization.upscale_applied is False
     assert normalization.execution_allowed is False
     assert normalization.checksum == checksum
-    with pytest.raises(ValidationError, match="AI_IMAGE_EFFECTIVE_RESOLUTION_BELOW_1080P"):
+    with pytest.raises(
+        ValidationError, match="AI_IMAGE_EFFECTIVE_RESOLUTION_BELOW_1080P"
+    ):
         ImageNormalizationPlanner().plan(
             source_ref="fixture://img1/too-small.png",
             source_checksum=checksum,
@@ -1024,7 +1087,9 @@ def test_normalization_and_native_overlay_binding_validate(
     assert binding.authoritative_content_kinds == ["HEADLINE"]
     assert binding.text_safe_regions == img1_context["request"].text_safe_regions
     assert binding.production_eligible is False
-    wrong_overlay = img1_context["overlay"].model_copy(update={"content_hash": "wrong-overlay-hash"})
+    wrong_overlay = img1_context["overlay"].model_copy(
+        update={"content_hash": "wrong-overlay-hash"}
+    )
     with pytest.raises(ValueError, match="AI_IMAGE_NATIVE_OVERLAY_PLAN_HASH_MISMATCH"):
         NativeOverlayImageBindingBuilder().build(
             request=img1_context["request"],
@@ -1047,15 +1112,13 @@ def test_offline_rehearsal_passes_without_mutating_historical_artifacts(
         REPO_ROOT / "config" / "visual_source_routing_policy_catalog.yaml",
     ]
     before = {
-        path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in historical_paths
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in historical_paths
     }
     summary = GoogleGeminiImageLocalFixtureRehearsal(_settings()).run(
         workspace_root=tmp_path,
     )
     after = {
-        path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in historical_paths
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in historical_paths
     }
     assert after == before
 
@@ -1107,7 +1170,9 @@ def test_offline_rehearsal_passes_without_mutating_historical_artifacts(
     assert generation_manifest.output_reference.startswith(
         "volatile://google-gemini-image/"
     )
-    assert generation_manifest.local_path == "source/ai-image/knowledge-silos-fixture.png"
+    assert (
+        generation_manifest.local_path == "source/ai-image/knowledge-silos-fixture.png"
+    )
     assert generation_manifest.image_width == 2752
     assert generation_manifest.image_height == 1536
     assert generation_manifest.image_format == "PNG"

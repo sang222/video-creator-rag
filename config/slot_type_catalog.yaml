@@ -1,12 +1,12 @@
 catalog_key: slot_type_catalog
-catalog_version: "1.0.0"
+catalog_version: "2.0.0"
 schema_version: catalog.v1
 status: active
 items:
-  - key: DAILY
-    description: Daily production slot.
-  - key: WEEKLY
-    description: Weekly production slot.
+  - key: PUBLISH
+    description: Long-form publication slot.
+  - key: RESEARCH
+    description: Editorial research and runway slot.
   - key: CAMPAIGN
     description: Campaign slot.
   - key: EVERGREEN

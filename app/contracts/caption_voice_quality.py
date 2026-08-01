@@ -22,9 +22,15 @@ class ThresholdBand(BaseModel):
 
     @model_validator(mode="after")
     def ordered(self) -> "ThresholdBand":
-        if self.pass_range[0] > self.pass_range[1] or self.review_range[0] > self.review_range[1]:
+        if (
+            self.pass_range[0] > self.pass_range[1]
+            or self.review_range[0] > self.review_range[1]
+        ):
             raise ValueError("POLICY_THRESHOLD_RANGE_INVALID")
-        if self.review_range[0] > self.pass_range[0] or self.review_range[1] < self.pass_range[1]:
+        if (
+            self.review_range[0] > self.pass_range[0]
+            or self.review_range[1] < self.pass_range[1]
+        ):
             raise ValueError("POLICY_REVIEW_RANGE_MUST_CONTAIN_PASS_RANGE")
         return self
 
@@ -91,9 +97,17 @@ class CaptionFormatPolicy(BaseModel):
             <= self.block_outside[1]
         ):
             raise ValueError("CAPTION_FONT_SCALE_POLICY_INVALID")
-        if not self.max_chars_per_line_pass <= self.max_chars_per_line_review <= self.max_chars_per_line_block:
+        if (
+            not self.max_chars_per_line_pass
+            <= self.max_chars_per_line_review
+            <= self.max_chars_per_line_block
+        ):
             raise ValueError("CAPTION_CPL_POLICY_INVALID")
-        if not self.max_block_width_pass <= self.max_block_width_review <= self.max_block_width_block:
+        if (
+            not self.max_block_width_pass
+            <= self.max_block_width_review
+            <= self.max_block_width_block
+        ):
             raise ValueError("CAPTION_BLOCK_WIDTH_POLICY_INVALID")
         if self.bottom_safe_margin_review_min > self.bottom_safe_margin_pass:
             raise ValueError("CAPTION_SAFE_MARGIN_POLICY_INVALID")
@@ -146,7 +160,6 @@ class CaptionStylePolicy(BaseModel):
     policy_hash: str | None = None
     channel_id: str | None = None
     longform_16_9: CaptionFormatPolicy
-    shorts_9_16: CaptionFormatPolicy
     global_policy: CaptionGlobalPolicy = Field(alias="global")
     font_family: str = Field(default="Arial", min_length=1)
     primary_colour: str = "&H00FFFFFF"
@@ -168,8 +181,10 @@ class CaptionStylePolicy(BaseModel):
     @field_validator("primary_colour", "outline_colour")
     @classmethod
     def ass_safe_colour(cls, value: str) -> str:
-        if len(value) != 10 or not value.startswith("&H") or any(
-            character not in "0123456789abcdefABCDEF" for character in value[2:]
+        if (
+            len(value) != 10
+            or not value.startswith("&H")
+            or any(character not in "0123456789abcdefABCDEF" for character in value[2:])
         ):
             raise ValueError("CAPTION_ASS_COLOUR_INVALID")
         return value
@@ -254,7 +269,10 @@ class FinalCueTrailingHoldEvidence(BaseModel):
             raise ValueError("CAPTION_TRAILING_HOLD_ALIGNMENT_ENDPOINT_INVALID")
         if self.caption_end_after_ms != self.canonical_audio_end_ms:
             raise ValueError("CAPTION_TRAILING_HOLD_CANONICAL_ENDPOINT_INVALID")
-        if self.hold_duration_ms != self.caption_end_after_ms - self.caption_end_before_ms:
+        if (
+            self.hold_duration_ms
+            != self.caption_end_after_ms - self.caption_end_before_ms
+        ):
             raise ValueError("CAPTION_TRAILING_HOLD_DURATION_INVALID")
         if self.hold_duration_ms > self.maximum_hold_ms:
             raise ValueError("CAPTION_TRAILING_HOLD_EXCEEDS_POLICY")
@@ -272,7 +290,9 @@ class PauseSpan(BaseModel):
     source: Literal["AUDIO_SILENCE_ANALYSIS", "VERIFIED_WORD_GAP", "AUDIO_BOUNDARY"]
     after_spoken_token_id: str | None = None
     before_spoken_token_id: str | None = None
-    boundary_kind: Literal["COMMA", "SENTENCE", "SECTION", "OTHER", "BOUNDARY"] = "OTHER"
+    boundary_kind: Literal["COMMA", "SENTENCE", "SECTION", "OTHER", "BOUNDARY"] = (
+        "OTHER"
+    )
     detected_in_audio: bool = False
 
     model_config = ConfigDict(extra="forbid")
@@ -371,12 +391,18 @@ class NarrationPacingCorrectionPlan(BaseModel):
     @model_validator(mode="after")
     def correction_boundary_is_consistent(self) -> "NarrationPacingCorrectionPlan":
         if self.action == "ONE_CONTROLLED_SPEED_REGENERATION":
-            if self.provider_speed_regeneration_count != 1 or not self.provider_regeneration_authorized:
+            if (
+                self.provider_speed_regeneration_count != 1
+                or not self.provider_regeneration_authorized
+            ):
                 raise ValueError("PACING_REGENERATION_SCOPE_INVALID")
         elif self.provider_speed_regeneration_count:
             raise ValueError("PACING_REGENERATION_SCOPE_INVALID")
         if self.action == "EMERGENCY_ATEMPO":
-            if not self.ffmpeg_atempo_allowed or self.emergency_atempo_delta_percent is None:
+            if (
+                not self.ffmpeg_atempo_allowed
+                or self.emergency_atempo_delta_percent is None
+            ):
                 raise ValueError("PACING_ATEMPO_SCOPE_INVALID")
         elif self.ffmpeg_atempo_allowed:
             raise ValueError("PACING_ATEMPO_SCOPE_INVALID")

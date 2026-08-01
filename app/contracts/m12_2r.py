@@ -15,7 +15,9 @@ HumanUploadTaskStatus = Literal[
     "BLOCKED",
     "CANCELLED",
 ]
-UploadedVideoVisibility = Literal["PUBLIC", "UNLISTED", "PRIVATE", "SCHEDULED", "UNKNOWN"]
+UploadedVideoVisibility = Literal[
+    "PUBLIC", "UNLISTED", "PRIVATE", "SCHEDULED", "UNKNOWN"
+]
 UploadedVideoVerificationStatus = Literal[
     "NOT_VERIFIED",
     "VERIFIED_PUBLIC",
@@ -23,7 +25,9 @@ UploadedVideoVerificationStatus = Literal[
     "VERIFICATION_UNAVAILABLE",
     "VERIFICATION_FAILED",
 ]
-UploadedVideoAnalyticsSyncStatus = Literal["NOT_STARTED", "NOT_CONFIGURED", "PENDING", "SYNCED", "FAILED"]
+UploadedVideoAnalyticsSyncStatus = Literal[
+    "NOT_STARTED", "NOT_CONFIGURED", "PENDING", "SYNCED", "FAILED"
+]
 BackfillParseStatus = Literal["PARSED", "INVALID", "DUPLICATE", "ERROR"]
 
 
@@ -35,7 +39,7 @@ class HumanUploadTaskLedgerRead(BaseModel):
     publish_package_id: uuid.UUID | None = None
     destination: UploadDestination = "YOUTUBE"
     status: HumanUploadTaskStatus
-    upload_card_ref: str | None = None
+    publish_metadata_ref: str | None = None
     title_snapshot: str
     description_snapshot: str | None = None
     thumbnail_ref: Any | None = None

@@ -31,8 +31,8 @@ export function CommandCenterView() {
     <div className="space-y-6 p-4 md:p-8">
       <section>
         <PageHeader
-          title="Trung tâm điều hành"
-          subtitle="Xem việc cần xử lý trước, rồi hành động dựa trên bằng chứng. Bảng điều hành không tự publish/upload/reupload."
+          title="LONG-FORM YOUTUBE OPERATING DASHBOARD"
+          subtitle="Theo dõi launch cadence, sản xuất long-form, final review và publish thủ công dựa trên bằng chứng."
           meta={<span className="text-xs text-muted-foreground">Cập nhật lúc {new Date(data.generated_at).toLocaleTimeString("vi-VN")}</span>}
         />
         <div className="mt-5">

@@ -6,7 +6,6 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 CloudMediaStorageProvider = Literal["GOOGLE_DRIVE"]
 CloudMediaType = Literal[
     "LONG_FORM_FINAL",
-    "SHORT_FINAL",
     "THUMBNAIL",
     "CAPTION",
     "AI_HERO",
@@ -19,12 +18,32 @@ CloudMediaType = Literal[
     "QC_EXPORT",
     "OTHER",
 ]
-CloudMediaUploadStatus = Literal["PENDING", "UPLOADING", "VERIFIED", "FAILED", "CANCELLED"]
-CloudMediaVerificationStatus = Literal["NOT_STARTED", "SIZE_VERIFIED", "CHECKSUM_VERIFIED", "CHECKSUM_UNAVAILABLE", "FAILED"]
+CloudMediaUploadStatus = Literal[
+    "PENDING", "UPLOADING", "VERIFIED", "FAILED", "CANCELLED"
+]
+CloudMediaVerificationStatus = Literal[
+    "NOT_STARTED",
+    "SIZE_VERIFIED",
+    "CHECKSUM_VERIFIED",
+    "CHECKSUM_UNAVAILABLE",
+    "FAILED",
+]
 LocalCleanupStatus = Literal["NOT_ELIGIBLE", "PENDING", "CLEANED", "SKIPPED", "FAILED"]
-MediaOffloadJobState = Literal["PENDING", "UPLOADING", "VERIFIED", "CLEANED_LOCAL", "FAILED", "CANCELLED", "SKIPPED"]
-GoogleDriveConnectionState = Literal["NOT_CONFIGURED", "CONFIGURED", "CONNECTED", "NEEDS_REAUTH", "REVOKED", "ERROR"]
-GoogleDriveOAuthSessionStatus = Literal["STARTED", "CALLBACK_RECEIVED", "TOKEN_EXCHANGED", "FAILED", "CANCELLED"]
+MediaOffloadJobState = Literal[
+    "PENDING",
+    "UPLOADING",
+    "VERIFIED",
+    "CLEANED_LOCAL",
+    "FAILED",
+    "CANCELLED",
+    "SKIPPED",
+]
+GoogleDriveConnectionState = Literal[
+    "NOT_CONFIGURED", "CONFIGURED", "CONNECTED", "NEEDS_REAUTH", "REVOKED", "ERROR"
+]
+GoogleDriveOAuthSessionStatus = Literal[
+    "STARTED", "CALLBACK_RECEIVED", "TOKEN_EXCHANGED", "FAILED", "CANCELLED"
+]
 LocalRetentionPolicyState = Literal["ACTIVE", "DISABLED"]
 
 

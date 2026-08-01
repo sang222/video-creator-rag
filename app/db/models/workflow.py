@@ -87,14 +87,6 @@ class VideoProject(Base):
             initially="DEFERRED",
         ),
     )
-    parent_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("video_projects.id")
-    )
-    parent_final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
-    )
-    canonical_timeline_ref: Mapped[str | None] = mapped_column(Text)
-    canonical_timeline_hash: Mapped[str | None] = mapped_column(String(64))
     duration_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     render_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     priority: Mapped[str | None] = mapped_column(String(40))
@@ -129,10 +121,8 @@ class VideoProject(Base):
             "(schema_version = 'v2' "
             "and channel_profile_version_id is not null "
             "and project_admission_decision_id is not null "
-            "and planning_source_type in "
-            "('DAILY_IDEA','LONG_FORM_PLAN','DERIVED_SHORT') "
-            "and production_lane in "
-            "('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT') "
+            "and planning_source_type = 'LONG_FORM_PLAN' "
+            "and production_lane = 'LONG_FORM' "
             "and content_mode in ('SERIES_EPISODE','STANDALONE') "
             "and assignment_mode in "
             "('SERIES_REQUIRED','SERIES_PREFERRED',"
@@ -153,18 +143,8 @@ class VideoProject(Base):
         ),
         CheckConstraint(
             "(schema_version = 'v1') or "
-            "((planning_source_type = 'DAILY_IDEA' "
-            "and production_lane = 'DAILY_SHORT') "
-            "or (planning_source_type = 'LONG_FORM_PLAN' "
-            "and production_lane = 'LONG_FORM') "
-            "or (planning_source_type = 'DERIVED_SHORT' "
-            "and production_lane = 'LONG_DERIVED_SHORT' "
-            "and content_mode = 'STANDALONE' "
-            "and assignment_mode = 'STANDALONE_REQUIRED' "
-            "and parent_video_project_id is not null "
-            "and canonical_timeline_ref is not null "
-            "and canonical_timeline_hash ~ '^[0-9a-f]{64}$' "
-            "and render_eligible = false))",
+            "(planning_source_type = 'LONG_FORM_PLAN' "
+            "and production_lane = 'LONG_FORM')",
             name="ck_video_projects_v2_lane_source",
         ),
         Index("ix_video_projects_company_id", "company_id"),
@@ -190,7 +170,6 @@ class VideoProject(Base):
             "project_admission_decision_id",
             unique=True,
         ),
-        Index("ix_video_projects_parent_video_project_id", "parent_video_project_id"),
         UniqueConstraint(
             "series_run_id",
             "episode_number",

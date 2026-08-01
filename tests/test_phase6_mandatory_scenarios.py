@@ -29,9 +29,7 @@ from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.contracts.vcos_v2 import (
     AssignmentMode,
     ContentMode,
-    PlanningSourceType,
     ProductionLane,
-    ProjectAdmissionV2Request,
 )
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
@@ -54,7 +52,6 @@ from app.services.r3d5 import ControlledMemoryService
 from app.services.r3d7 import QualityDeltaAttributionService
 from app.services.vcos_v2 import (
     LongFormPlanningService,
-    ProjectAdmissionV2Service,
 )
 from app.services.workflow import ArtifactService
 from tests.qualification.conftest import QualificationFactory
@@ -69,60 +66,27 @@ _COCKPIT = runpy.run_path(str(ROOT / "tests/test_phase6_operator_cockpit.py"))
 _R3D7 = runpy.run_path(str(ROOT / "tests/test_r3d7_closed_learning_retrieval_loop.py"))
 
 
-@pytest.mark.parametrize(
-    ("scenario_id", "lane", "assignment_mode", "expected_content_mode"),
-    [
-        (
-            "Q1",
-            ProductionLane.DAILY_SHORT,
-            AssignmentMode.STANDALONE_REQUIRED,
-            ContentMode.STANDALONE,
-        ),
-        (
-            "Q2",
-            ProductionLane.DAILY_SHORT,
-            AssignmentMode.SERIES_REQUIRED,
-            ContentMode.SERIES_EPISODE,
-        ),
-        (
-            "Q4",
-            ProductionLane.LONG_FORM,
-            AssignmentMode.SERIES_REQUIRED,
-            ContentMode.SERIES_EPISODE,
-        ),
-    ],
-)
-def test_q1_q2_q4_typed_authority_reaches_final_review_ready(
+def test_q4_long_form_typed_authority_reaches_final_review_ready(
     db_session: Session,
-    scenario_id: str,
-    lane: ProductionLane,
-    assignment_mode: AssignmentMode,
-    expected_content_mode: ContentMode,
 ) -> None:
     scope, series_run = _admitted_scope(
         db_session,
-        lane=lane,
-        assignment_mode=assignment_mode,
+        assignment_mode=AssignmentMode.SERIES_REQUIRED,
     )
     candidate, workflow = _create_final_review_ready(db_session, scope)
 
-    assert scope.project.production_lane == lane
-    assert scope.project.content_mode == expected_content_mode
+    assert scope.project.production_lane == ProductionLane.LONG_FORM
+    assert scope.project.content_mode == ContentMode.SERIES_EPISODE
     assert workflow.state == "FINAL_REVIEW_READY"
     assert workflow.final_review_candidate_id == candidate.id
-    assert candidate.production_lane == lane
-    assert candidate.content_mode == expected_content_mode
-
-    if scenario_id == "Q1":
-        assert scope.project.series_run_id is None
-        assert scope.project.episode_number is None
-    else:
-        assert series_run is not None
-        assert scope.project.series_run_id == series_run.id
-        assert scope.project.episode_number == 1
-        assert series_run.next_episode_number == 2
-        assert series_run.reserved_episode_count == 1
-        assert series_run.published_episode_count == 0
+    assert candidate.production_lane == ProductionLane.LONG_FORM
+    assert candidate.content_mode == ContentMode.SERIES_EPISODE
+    assert series_run is not None
+    assert scope.project.series_run_id == series_run.id
+    assert scope.project.episode_number == 1
+    assert series_run.next_episode_number == 2
+    assert series_run.reserved_episode_count == 1
+    assert series_run.published_episode_count == 0
 
 
 def test_q6_upload_creates_task_and_verified_uploaded_video(
@@ -291,7 +255,6 @@ def test_q12_mature_comparable_learning_is_proposal_only(
 def _admitted_scope(
     session: Session,
     *,
-    lane: ProductionLane,
     assignment_mode: AssignmentMode,
 ) -> tuple[SimpleNamespace, object | None]:
     authority = _PHASE2["_authority"](session)
@@ -301,12 +264,12 @@ def _admitted_scope(
         series_plan, series_run = _PHASE2["_series"](
             session,
             authority,
-            lane=lane,
+            lane=ProductionLane.LONG_FORM,
         )
     slot = _PHASE2["_slot"](
         session,
         authority,
-        lane=lane,
+        lane=ProductionLane.LONG_FORM,
         assignment_mode=assignment_mode,
         preferred_plan_id=series_plan.id if series_plan else None,
         preferred_run_id=series_run.id if series_run else None,
@@ -334,51 +297,22 @@ def _admitted_scope(
     session.flush()
     duration = _PHASE2["_duration"](
         authority,
-        production_lane=lane,
+        production_lane=ProductionLane.LONG_FORM,
     )
-
-    if lane == ProductionLane.DAILY_SHORT:
-        daily_run, idea, preflight = _PHASE2["_daily_source"](
-            session,
-            authority,
-            slot,
-        )
-        admission = ProjectAdmissionV2Service(session).create_decision(
-            data=ProjectAdmissionV2Request(
-                planning_source_type=PlanningSourceType.DAILY_IDEA,
-                company_id=authority.company.id,
-                channel_workspace_id=authority.channel.id,
-                channel_profile_version_id=authority.profile.id,
-                policy_snapshot_id=authority.policy.id,
-                editorial_calendar_slot_id=slot.id,
-                channel_daily_run_id=daily_run.id,
-                daily_idea_decision_id=idea.id,
-                idea_market_preflight_id=preflight.id,
-                production_lane=lane,
-                assignment_mode=assignment_mode,
-                preferred_series_plan_id=(series_plan.id if series_plan else None),
-                preferred_series_run_id=(series_run.id if series_run else None),
-                title=idea.proposed_title,
-                category_id=category.id,
-                duration_contract=duration,
-                created_by_user_id=authority.operator.id,
-            )
-        )
-    else:
-        preflight = _PHASE2["_preflight"](
-            session,
-            authority,
-            editorial_calendar_slot_id=slot.id,
-        )
-        request = _PHASE2["_long_request"](
-            authority,
-            slot,
-            preflight,
-            assignment_mode=assignment_mode,
-            preferred_plan_id=series_plan.id if series_plan else None,
-            preferred_run_id=series_run.id if series_run else None,
-        ).model_copy(update={"category_id": category.id})
-        admission = LongFormPlanningService(session).admit(request)
+    preflight = _PHASE2["_preflight"](
+        session,
+        authority,
+        editorial_calendar_slot_id=slot.id,
+    )
+    request = _PHASE2["_long_request"](
+        authority,
+        slot,
+        preflight,
+        assignment_mode=assignment_mode,
+        preferred_plan_id=series_plan.id if series_plan else None,
+        preferred_run_id=series_run.id if series_run else None,
+    ).model_copy(update={"category_id": category.id})
+    admission = LongFormPlanningService(session).admit(request)
 
     assert admission.decision == "ADMIT"
     project = session.get(VideoProject, admission.admitted_video_project_id)
@@ -428,12 +362,11 @@ def _create_final_review_ready(
     drive_file_id = f"phase6-{uuid.uuid4().hex}"
     archive_object_ref = f"drive://{drive_file_id}/final.mp4"
     archive_receipt_hash = "5" * 64
-    short = scope.project.production_lane == ProductionLane.DAILY_SHORT
     cloud = CloudMediaRef(
         company_id=scope.company.id,
         channel_workspace_id=scope.channel.id,
         video_project_id=scope.project.id,
-        media_type="SHORT_FINAL" if short else "LONG_FORM_FINAL",
+        media_type="LONG_FORM_FINAL",
         storage_provider="GOOGLE_DRIVE",
         drive_file_id=drive_file_id,
         drive_folder_id="phase6-scenario-fixtures",
@@ -505,11 +438,11 @@ def _create_final_review_ready(
         production_package_artifact_version_id=package.artifact_version_id,
         production_package_hash=package.canonical_hash,
         duration_contract=scope.duration.model_dump(mode="json"),
-        media_type="SHORT_FINAL" if short else "LONG_FORM_FINAL",
+        media_type="LONG_FORM_FINAL",
         file_ref=archive_object_ref,
         duration_seconds=(Decimal(scope.duration.target_duration_ms) / Decimal(1000)),
-        aspect_ratio="9:16" if short else "16:9",
-        resolution="1080x1920" if short else "1920x1080",
+        aspect_ratio="16:9",
+        resolution="1920x1080",
         provider_key="native-ffmpeg",
         provider_type="LOCAL_RENDERER_CAPABILITY",
         checksum_sha256=checksum,
@@ -521,11 +454,7 @@ def _create_final_review_ready(
     destination_id = destination_version.id
     destination_fingerprint = destination_version.content_hash
     admission = scope.admission
-    source_id = (
-        admission.daily_idea_decision_id
-        if admission.planning_source_type == PlanningSourceType.DAILY_IDEA
-        else admission.editorial_calendar_slot_id
-    )
+    source_id = admission.editorial_calendar_slot_id
     assert source_id is not None
     workflow = ProductionWorkflowRun(
         company_id=scope.company.id,

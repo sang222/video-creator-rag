@@ -14,7 +14,14 @@ from app.contracts.workflow import VideoProjectCreate
 from app.core.config import Settings
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
-from app.db.models import AgentContextPackSnapshot, FirstScriptedVideoPackage, MediaRenderJob, PromptRenderRun, RealSmokeRun, VideoProject
+from app.db.models import (
+    AgentContextPackSnapshot,
+    FirstScriptedVideoPackage,
+    MediaRenderJob,
+    PromptRenderRun,
+    RealSmokeRun,
+    VideoProject,
+)
 from app.main import create_app
 from app.services import R3D1AdminService, VideoProjectService
 from app.services.m12_2 import (
@@ -84,7 +91,10 @@ def _project_with_effective_context(db_session, scope) -> VideoProject:
             channel_workspace_id=scope.channel.id,
             category_key=f"m122-{uuid.uuid4().hex[:8]}",
             name="M12.2 Category",
-            default_format_policy_json={"target_duration_seconds": 480, "structure": ["hook", "body", "takeaway"]},
+            default_format_policy_json={
+                "target_duration_seconds": 480,
+                "structure": ["hook", "body", "takeaway"],
+            },
             default_visual_style_json={"style_note": "clean cards"},
             default_voice_style_json={"tone": "calm"},
             default_thumbnail_style_json={"style": "clear"},
@@ -106,12 +116,16 @@ def _project_with_effective_context(db_session, scope) -> VideoProject:
         )
     )
     project = db_session.get(VideoProject, project_read.id)
-    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    snapshot = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(
+        project.id
+    )
     assert snapshot.compile_status == "PASS"
     return project
 
 
-def _request(channel_id: uuid.UUID, *, video_project_id: uuid.UUID | None = None) -> FirstScriptedVideoPackageRequest:
+def _request(
+    channel_id: uuid.UUID, *, video_project_id: uuid.UUID | None = None
+) -> FirstScriptedVideoPackageRequest:
     return FirstScriptedVideoPackageRequest(
         channel_id=channel_id,
         video_project_id=video_project_id,
@@ -149,22 +163,37 @@ def _long_script_sentences(count: int = 32) -> list[dict]:
         "for deterministic duration validation without adding claims or media."
     )
     return [
-        {"sentence_id": f"S{index}", "text": hook_text if index == 1 else base_text, "approx_seconds": 15}
+        {
+            "sentence_id": f"S{index}",
+            "text": hook_text if index == 1 else base_text,
+            "approx_seconds": 15,
+        }
         for index in range(1, count + 1)
     ]
 
 
 def _visual_scenes(count: int = 32) -> list[dict]:
     return [
-        {"sentence_id": f"S{index}", "intended_visual_source": "DIAGRAM" if index % 2 else "CARD"}
+        {
+            "sentence_id": f"S{index}",
+            "intended_visual_source": "DIAGRAM" if index % 2 else "CARD",
+        }
         for index in range(1, count + 1)
     ]
 
 
-def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = None) -> list[dict]:
+def _outputs(
+    *, gatekeeper_result: str = "PASS", invalid_agent: str | None = None
+) -> list[dict]:
     artifacts = {
-        "ChannelAuthorityAgent": {"decision": "ADMIT", "reason": "Fits channel contract."},
-        "TopicIdeaScoringAgent": {"topic_score": {"topic": "VCOS M12.2", "score": 86}, "risk_assessment": {"risk_level": "LOW"}},
+        "ChannelAuthorityAgent": {
+            "decision": "ADMIT",
+            "reason": "Fits channel contract.",
+        },
+        "TopicIdeaScoringAgent": {
+            "topic_score": {"topic": "VCOS M12.2", "score": 86},
+            "risk_assessment": {"risk_level": "LOW"},
+        },
         "ResearchPackSummarizer": {
             "summary": "M12.2 activates production prompts for a human-review package.",
             "source_notes": ["operator research pack"],
@@ -236,7 +265,6 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
             "visual_language": "clean contract-to-package diagram",
             "thumbnail_promise": "VCOS M12.2 production prompt activation",
         },
-        "UploadCardCopyAgent": {"title": "VCOS M12.2", "description": "Paste-ready copy.", "not_uploaded": True},
         "GatekeeperSoftReviewAgent": {"result": gatekeeper_result, "findings": []},
     }
     outputs = []
@@ -249,7 +277,9 @@ def _outputs(*, gatekeeper_result: str = "PASS", invalid_agent: str | None = Non
 
 
 def test_m12_2_preflight_tags_required(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.m12_2.subprocess.run", lambda *args, **kwargs: CompletedTags())
+    monkeypatch.setattr(
+        "app.services.m12_2.subprocess.run", lambda *args, **kwargs: CompletedTags()
+    )
 
     result = verify_m12_2_required_tags(Path("/tmp"))
 
@@ -258,7 +288,9 @@ def test_m12_2_preflight_tags_required(monkeypatch) -> None:
 
 
 def test_m12_2_missing_channel_returns_needs_channel_init(db_session) -> None:
-    service = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=FakeRouter([]))
+    service = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=FakeRouter([])
+    )
 
     with pytest.raises(ValidationFailureError) as exc:
         service.create(_request(uuid.uuid4()))
@@ -266,16 +298,23 @@ def test_m12_2_missing_channel_returns_needs_channel_init(db_session) -> None:
     assert "BLOCKED: NEEDS_CHANNEL_INIT" in str(exc.value)
 
 
-def test_m12_2_missing_channel_contract_blocks_before_llm(db_session, qualification_factory) -> None:
+def test_m12_2_missing_channel_contract_blocks_before_llm(
+    db_session, qualification_factory
+) -> None:
     scope = qualification_factory.channel_scope(name="M12.2 Contract Missing")
     scope.channel.active_policy_snapshot_id = None
     db_session.flush()
     router = FakeRouter([])
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).create(_request(scope.channel.id))
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).create(_request(scope.channel.id))
 
     assert package.package_status == "BLOCKED"
-    assert package.next_action == "Bổ sung hoặc compile lại ChannelProfileVersion trước khi chạy video package production."
+    assert (
+        package.next_action
+        == "Bổ sung hoặc compile lại ChannelProfileVersion trước khi chạy video package production."
+    )
     assert package.prompt_render_run_refs == []
     assert router.calls == []
 
@@ -290,46 +329,63 @@ def test_m12_2_activation_flag_false_blocks(db_session, qualification_factory) -
     ).create(_request(scope.channel.id))
 
     assert package.package_status == "BLOCKED"
-    assert "VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION" in package.artifacts["runtime_mode"]["missing_or_invalid_flags"]
+    assert (
+        "VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION"
+        in package.artifacts["runtime_mode"]["missing_or_invalid_flags"]
+    )
 
 
-def test_m12_2_missing_llm_readiness_returns_not_configured_no_fallback(db_session, qualification_factory) -> None:
+def test_m12_2_missing_llm_readiness_returns_not_configured_no_fallback(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     router = FakeRouter([])
 
     package = FirstScriptedVideoPackageService(
         db_session,
-        settings=_settings(real_llm_package_run_enabled=False, llm_real_execution_enabled=False),
+        settings=_settings(
+            real_llm_package_run_enabled=False, llm_real_execution_enabled=False
+        ),
         llm_router=router,
     ).create(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "NOT_CONFIGURED"
-    assert package.artifacts["llm_readiness"]["reason_codes"] == ["LLM_PROVIDER_NOT_CONFIGURED"]
+    assert package.artifacts["llm_readiness"]["reason_codes"] == [
+        "LLM_PROVIDER_NOT_CONFIGURED"
+    ]
     assert package.risk_limitations_summary["mock_fallback_used"] is False
     assert router.calls == []
 
 
-def test_m12_2_first_package_uses_prompt_registry_and_reaches_human_review(db_session, qualification_factory) -> None:
+def test_m12_2_first_package_uses_prompt_registry_and_reaches_human_review(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     router = FakeRouter(_outputs())
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).create(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).create(_request(scope.channel.id, video_project_id=project.id))
 
-    assert package.package_status == "READY_FOR_HUMAN_REVIEW", package.artifacts.get("deterministic_gate_report")
+    assert package.package_status == "READY_FOR_HUMAN_REVIEW", package.artifacts.get(
+        "deterministic_gate_report"
+    )
     assert len(router.calls) == len(PACKAGE_AGENT_CHAIN)
     assert len(package.agent_run_refs) == len(PACKAGE_AGENT_CHAIN)
     assert len(package.prompt_render_run_refs) == len(PACKAGE_AGENT_CHAIN)
     assert package.prompt_audit_snapshot_refs
     assert package.provider_readiness_snapshot_id is not None
-    assert package.artifacts["channel_contract_snapshot_ref"]["compiled_policy_snapshot_id"] == str(scope.snapshot.id)
+    assert package.artifacts["channel_contract_snapshot_ref"][
+        "compiled_policy_snapshot_id"
+    ] == str(scope.snapshot.id)
     assert package.artifacts["admission_decision"]["decision"] == "ADMIT"
     assert package.artifacts["narration_script"]["sentences"][0]["sentence_id"] == "S1"
-    assert package.artifacts["upload_card_copy"]["not_uploaded"] is True
-    assert package.artifacts["human_review_checklist"]["final_statement"].startswith("Human final approval required")
+    assert package.artifacts["metadata_package"]["title"].startswith("VCOS M12.2")
+    assert package.artifacts["human_review_checklist"]["final_statement"].startswith(
+        "Human final approval required"
+    )
     assert package.risk_limitations_summary["media_provider_calls_made"] is False
     assert package.risk_limitations_summary["upload_or_publish_calls_made"] is False
     assert db_session.query(RealSmokeRun).count() == 0
@@ -344,30 +400,48 @@ def test_m12_2_first_package_uses_prompt_registry_and_reaches_human_review(db_se
     assert first_run.compiled_policy_snapshot_id == scope.snapshot.id
     assert "previous_artifacts" not in first_run.rendered_messages[1]["content"]
     assert "channel_contract_json:" not in first_run.rendered_messages[1]["content"]
-    assert "compiled_policy_snapshot_json:" not in first_run.rendered_messages[1]["content"]
-    assert db_session.query(AgentContextPackSnapshot).count() == len(PACKAGE_AGENT_CHAIN)
-    first_pack = db_session.query(AgentContextPackSnapshot).filter(AgentContextPackSnapshot.agent_key == "ScriptWriterAgent").one()
-    assert first_pack.effective_context_snapshot_id == project.effective_context_snapshot_id
+    assert (
+        "compiled_policy_snapshot_json:"
+        not in first_run.rendered_messages[1]["content"]
+    )
+    assert db_session.query(AgentContextPackSnapshot).count() == len(
+        PACKAGE_AGENT_CHAIN
+    )
+    first_pack = (
+        db_session.query(AgentContextPackSnapshot)
+        .filter(AgentContextPackSnapshot.agent_key == "ScriptWriterAgent")
+        .one()
+    )
+    assert (
+        first_pack.effective_context_snapshot_id
+        == project.effective_context_snapshot_id
+    )
     assert first_pack.prompt_render_run_id is not None
     assert "script_contract_digest" in first_pack.context_pack_json["digests"]
-    assert {call["lane_name"] for call in router.calls} == {step.router_lane for step in PACKAGE_AGENT_CHAIN}
+    assert {call["lane_name"] for call in router.calls} == {
+        step.router_lane for step in PACKAGE_AGENT_CHAIN
+    }
 
 
-def test_m12_2_invalid_agent_output_stops_for_review(db_session, qualification_factory) -> None:
+def test_m12_2_invalid_agent_output_stops_for_review(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     router = FakeRouter(_outputs(invalid_agent="ScriptWriterAgent"))
 
-    package = FirstScriptedVideoPackageService(db_session, settings=_settings(), llm_router=router).create(
-        _request(scope.channel.id, video_project_id=project.id)
-    )
+    package = FirstScriptedVideoPackageService(
+        db_session, settings=_settings(), llm_router=router
+    ).create(_request(scope.channel.id, video_project_id=project.id))
 
     assert package.package_status == "REVIEW_REQUIRED"
     assert "validation_result" in package.artifacts["narration_script"]
     assert len(router.calls) == 5
 
 
-def test_m12_2_gatekeeper_result_controls_final_status(db_session, qualification_factory) -> None:
+def test_m12_2_gatekeeper_result_controls_final_status(
+    db_session, qualification_factory
+) -> None:
     scope = _complete_scope(qualification_factory)
     project = _project_with_effective_context(db_session, scope)
     review = FirstScriptedVideoPackageService(

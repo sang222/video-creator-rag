@@ -29,7 +29,7 @@ Write full narration beats, not outline bullets.
 artifact.duration_self_check.actual_total_seconds must match the deterministic word-count estimate: narration_word_count / words_per_minute_assumption * 60. Keep sentence approx_seconds plausible, but do not use sentence approx_seconds to hide word-count duration.
 Include artifact.duration_self_check with actual_total_seconds, target_seconds, min_seconds, max_seconds, coverage_ratio, sentence_count, narration_word_count, and minimum_word_count.
 Return only strict JSON literals. If you include assumptions such as seconds_per_word_assumption in technical_appendix, write the computed number as a JSON number, for example 0.4286, never an expression such as 60 / 140.
-Do not downgrade long_form to short_form or change target_duration_seconds to make the script pass.
+Do not change the long-form production lane or target_duration_seconds to make the script pass.
 Include artifact.hook_spec before downstream visual/provider planning with hook_type, first_3_seconds_script, first_3_seconds_visual, promise_made, payoff_location, clickbait_risk, visual_hook_relevance, and title_hook_alignment.
 Keep hook_spec fields intact from the plan unless the plan is missing a required field.
 Do not use forbidden style terms from the channel voice/style policy, even inside phrases like "no hype", "avoid hype", or "not hype". Write "no overstatement" or "avoid overpromising" instead. Prefer calm, specific, evidence-bound narration; avoid fake urgency, fake demos, fake results, and unsupported asset claims.

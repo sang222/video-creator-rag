@@ -516,13 +516,13 @@ describe("PackageReviewView", () => {
       /Upload YouTube/i,
       /^Publish$/i,
       /Auto publish/i,
-      /Run daily/i,
+      /Run scheduled generation/i,
       /Run vector/i,
       /Run NoView scanner/i
     ].forEach((name) => {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: /daily/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /scheduled generation/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /NoView/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /vector/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /render/i })).not.toBeInTheDocument();

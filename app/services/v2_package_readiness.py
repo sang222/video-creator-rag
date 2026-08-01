@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from sqlalchemy import select
 
-from app.contracts.geo_market import DestinationBinding
 from app.contracts.production_package import (
     ExactContentRefV2,
     ProductionDurationContractV2,
@@ -24,7 +22,7 @@ from app.contracts.production_workflow import (
     WorkflowFailureClassification,
     WorkflowStageResult,
 )
-from app.contracts.vcos_v2 import PlanningSourceType, ProductionLane
+from app.contracts.vcos_v2 import ProductionLane
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.errors import ValidationFailureError
 from app.db.models.channel import (
@@ -32,10 +30,8 @@ from app.db.models.channel import (
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
 )
-from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m5 import (
     AudienceTargetPack,
-    DailyIdeaDecision,
     EditorialCalendarSlot,
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
@@ -59,7 +55,6 @@ from app.services.v2_support_authority import (
     V2ClaimSourceBinding,
     V2FrozenSupportEnvelope,
     _audience_source,
-    _daily_idea_source,
     _editorial_slot_source,
     _effective_context_hash,
     _preflight_source,
@@ -125,11 +120,9 @@ class _SupportAuthority:
 class CanonicalV2SupportCompiler:
     """Project an approved frozen-support envelope into package support.
 
-    Daily and Long-form projects must already carry the exact immutable
-    envelope produced by ``V2SupportAuthorityService``.  This compiler never
-    calls an LLM and never treats a caller-authored planning description or
-    preflight blob as approved script authority.  Derived Shorts retain their
-    deterministic, ready-parent lineage path.
+    Long-form projects must already carry the exact immutable envelope
+    produced by ``V2SupportAuthorityService``. This compiler never calls an
+    LLM and never treats caller-authored planning prose as script authority.
     """
 
     def produce_support(self, context: WorkflowStageContext) -> WorkflowStageResult:
@@ -153,7 +146,6 @@ class CanonicalV2SupportCompiler:
         authority = _support_authority(context)
         versions = _ensure_support_versions(context, authority)
         admission = authority.admission
-        parent_lineage = _parent_derivative_lineage(context, authority)
         script = versions["script"].content
         claims = list(script.get("supported_claims") or [])
         sections = list(script.get("sections") or [])
@@ -183,7 +175,6 @@ class CanonicalV2SupportCompiler:
                 episode_number=admission.episode_number,
                 episode_role=admission.episode_role,
                 standalone_reason_code=admission.standalone_reason_code,
-                parent_derivative_lineage=parent_lineage,
                 duration_contract=authority.duration,
                 support_envelope_ref=(
                     _exact_ref(
@@ -238,10 +229,6 @@ class CanonicalV2SupportCompiler:
                     supported_claim_count=len(claims),
                     distinct_editorial_section_count=len(sections),
                     research_coverage_ratio=float(script["research_coverage_ratio"]),
-                    shorter_format_permitted=(
-                        authority.project.production_lane
-                        != ProductionLane.LONG_FORM.value
-                    ),
                     script_duration_ms=int(script["estimated_duration_ms"]),
                     anti_padding_pass=True,
                     padding_phrase_hits=0,
@@ -275,7 +262,7 @@ class V2PackageReadinessGateway:
         PreReadinessProductionGatewayDescriptor(
             gateway_id="v2-package",
             version="1.0.0",
-            supported_lanes=frozenset(ProductionLane),
+            supported_lanes=frozenset({ProductionLane.LONG_FORM}),
             production_eligible=True,
             fixture_only=False,
             invokes_mr1=False,
@@ -464,64 +451,45 @@ def _support_authority(
     ):
         raise ValidationFailureError("V2_SUPPORT_DURATION_AUTHORITY_MISMATCH")
 
-    support_envelope_artifact: Artifact | None = None
-    support_envelope_version: ArtifactVersion | None = None
-    support_envelope: V2FrozenSupportEnvelope | None = None
-    if project.production_lane == ProductionLane.LONG_DERIVED_SHORT.value:
-        source_payload, source_refs = _planning_source(
-            context,
-            project,
-            admission,
-        )
-        approved_script = _approved_script_text(
-            source_payload=source_payload,
-            duration=duration,
-        )
-        destination = _verified_destination(channel)
-    else:
-        (
-            support_envelope_artifact,
-            support_envelope_version,
-            support_envelope,
-        ) = _require_frozen_support_envelope(
-            context=context,
-            project=project,
-            admission=admission,
-            channel=channel,
-            profile=profile,
-            policy=policy,
-            effective=effective,
-            duration=duration,
-        )
-        source_refs = [
-            source.model_dump(mode="json") for source in support_envelope.frozen_sources
-        ]
-        source_payload = {
-            "schema_version": "vcos.frozen-support-source-projection.v1",
-            "support_envelope_ref": {
-                "type": V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
-                "id": str(support_envelope_artifact.id),
-                "artifact_version_id": str(support_envelope_version.id),
-                "version": support_envelope_version.version_number,
-                "content_hash": support_envelope_version.content_hash,
-            },
-            "frozen_sources": source_refs,
-            "claim_source_bindings": [
-                binding.model_dump(mode="json")
-                for binding in support_envelope.claim_source_bindings
-            ],
-        }
-        approved_script = support_envelope.approved_script.approved_script_text
-        destination = {
-            **support_envelope.verified_destination.binding.model_dump(mode="json"),
-            "active_binding_ref": (
-                support_envelope.verified_destination.active_binding_ref
-            ),
-            "destination_authority_hash": (
-                support_envelope.verified_destination.content_hash
-            ),
-            "publish_execution_allowed": True,
-        }
+    (
+        support_envelope_artifact,
+        support_envelope_version,
+        support_envelope,
+    ) = _require_frozen_support_envelope(
+        context=context,
+        project=project,
+        admission=admission,
+        channel=channel,
+        profile=profile,
+        policy=policy,
+        effective=effective,
+        duration=duration,
+    )
+    source_refs = [
+        source.model_dump(mode="json") for source in support_envelope.frozen_sources
+    ]
+    source_payload = {
+        "schema_version": "vcos.frozen-support-source-projection.v1",
+        "support_envelope_ref": {
+            "type": V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
+            "id": str(support_envelope_artifact.id),
+            "artifact_version_id": str(support_envelope_version.id),
+            "version": support_envelope_version.version_number,
+            "content_hash": support_envelope_version.content_hash,
+        },
+        "frozen_sources": source_refs,
+        "claim_source_bindings": [
+            binding.model_dump(mode="json")
+            for binding in support_envelope.claim_source_bindings
+        ],
+    }
+    approved_script = support_envelope.approved_script.approved_script_text
+    destination = {
+        **support_envelope.verified_destination.binding.model_dump(mode="json"),
+        "active_binding_ref": support_envelope.verified_destination.active_binding_ref,
+        "destination_authority_hash": support_envelope.verified_destination.content_hash,
+        "publish_execution_allowed": True,
+    }
     return _SupportAuthority(
         project=project,
         admission=admission,
@@ -678,8 +646,6 @@ def _validate_frozen_source_refs(
         "editorial_calendar_slot": admission.editorial_calendar_slot_id,
         "idea_market_preflight": admission.idea_market_preflight_id,
     }
-    if admission.daily_idea_decision_id is not None:
-        required_ids["daily_idea_decision"] = admission.daily_idea_decision_id
     source_by_type = {source.type: source for source in envelope.frozen_sources}
     if len(source_by_type) != len(envelope.frozen_sources) or any(
         source_by_type.get(source_type) is None
@@ -712,7 +678,6 @@ def _validate_frozen_source_refs(
         )
 
     builders: dict[str, tuple[type[Any], Any]] = {
-        "daily_idea_decision": (DailyIdeaDecision, _daily_idea_source),
         "editorial_calendar_slot": (
             EditorialCalendarSlot,
             _editorial_slot_source,
@@ -846,485 +811,6 @@ def _support_envelope_integrity_error(code: str) -> WorkflowStageError:
             "không được tự fallback hoặc tự chứng nhận lại."
         ),
     )
-
-
-def _planning_source(
-    context: WorkflowStageContext,
-    project: VideoProject,
-    admission: ProjectAdmissionDecision,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    source_payload: dict[str, Any]
-    refs: list[dict[str, Any]]
-    if admission.daily_idea_decision_id is not None:
-        idea = context.session.get(DailyIdeaDecision, admission.daily_idea_decision_id)
-        preflight = (
-            context.session.get(
-                IdeaMarketPreflight,
-                admission.idea_market_preflight_id,
-            )
-            if admission.idea_market_preflight_id is not None
-            else None
-        )
-        if (
-            idea is None
-            or preflight is None
-            or idea.schema_version != "v2"
-            or idea.company_id != project.company_id
-            or idea.channel_workspace_id != project.channel_workspace_id
-            or idea.policy_snapshot_id != project.policy_snapshot_id
-            or idea.production_lane != ProductionLane.DAILY_SHORT.value
-            or idea.decision_status != "ADMITTED"
-            or preflight.company_id != project.company_id
-            or preflight.channel_workspace_id != project.channel_workspace_id
-            or preflight.channel_daily_run_id != admission.channel_daily_run_id
-            or preflight.daily_idea_decision_id != idea.id
-            or preflight.editorial_calendar_slot_id
-            != admission.editorial_calendar_slot_id
-            or preflight.decision != "PASS"
-            or preflight.policy_fit_state != "PASS"
-        ):
-            raise ValidationFailureError("V2_SUPPORT_DAILY_SOURCE_MISMATCH")
-        source_payload = {
-            "source_type": "DAILY_IDEA",
-            "source_id": str(idea.id),
-            "title": idea.proposed_title,
-            "angle": idea.proposed_angle,
-            "format": idea.proposed_format,
-            "pillar": idea.proposed_pillar,
-            "rationale": idea.rationale,
-            "evidence_refs": idea.evidence_refs,
-            "reason_codes": idea.reason_codes,
-            "preflight_id": str(preflight.id),
-            "preflight_evidence": preflight.evidence_blob,
-            "preflight_reasons": preflight.reason_codes,
-        }
-        refs = [
-            {
-                "type": "daily_idea_decision",
-                "id": str(idea.id),
-                "content_hash": semantic_hash(source_payload),
-            },
-            {
-                "type": "idea_market_preflight",
-                "id": str(preflight.id),
-                "content_hash": semantic_hash(
-                    {
-                        "decision": preflight.decision,
-                        "policy_fit_state": preflight.policy_fit_state,
-                        "confidence_state": preflight.confidence_state,
-                        "evidence_blob": preflight.evidence_blob,
-                        "reason_codes": preflight.reason_codes,
-                    }
-                ),
-            },
-        ]
-    elif (
-        str(admission.planning_source_type) == PlanningSourceType.LONG_FORM_PLAN.value
-        and admission.production_lane == ProductionLane.LONG_FORM.value
-    ):
-        slot = (
-            context.session.get(
-                EditorialCalendarSlot,
-                admission.editorial_calendar_slot_id,
-            )
-            if admission.editorial_calendar_slot_id is not None
-            else None
-        )
-        preflight = (
-            context.session.get(
-                IdeaMarketPreflight,
-                admission.idea_market_preflight_id,
-            )
-            if admission.idea_market_preflight_id is not None
-            else None
-        )
-        if (
-            slot is None
-            or preflight is None
-            or slot.schema_version != "v2"
-            or slot.company_id != project.company_id
-            or slot.channel_workspace_id != project.channel_workspace_id
-            or slot.policy_snapshot_id != project.policy_snapshot_id
-            or str(slot.production_lane) != project.production_lane
-            or str(slot.assignment_mode) != project.assignment_mode
-            or preflight.company_id != project.company_id
-            or preflight.channel_workspace_id != project.channel_workspace_id
-            or preflight.editorial_calendar_slot_id != slot.id
-            or preflight.decision != "PASS"
-            or preflight.policy_fit_state != "PASS"
-        ):
-            raise ValidationFailureError("V2_SUPPORT_LONG_SOURCE_MISMATCH")
-        source_payload = {
-            "source_type": str(admission.planning_source_type),
-            "slot_id": str(slot.id),
-            "preflight_id": str(preflight.id),
-            "title": project.title,
-            "description": project.description,
-            "production_goal": slot.production_goal,
-            "content_pillar": slot.content_pillar,
-            "target_platforms": slot.target_platforms,
-            "preflight_evidence": preflight.evidence_blob,
-            "preflight_reasons": preflight.reason_codes,
-        }
-        refs = [
-            {
-                "type": "editorial_calendar_slot",
-                "id": str(slot.id),
-                "content_hash": semantic_hash(
-                    {
-                        "schema_version": slot.schema_version,
-                        "production_lane": str(slot.production_lane),
-                        "assignment_mode": str(slot.assignment_mode),
-                        "category_id": str(slot.category_id),
-                        "production_goal": slot.production_goal,
-                        "target_platforms": slot.target_platforms,
-                    }
-                ),
-            },
-            {
-                "type": "idea_market_preflight",
-                "id": str(preflight.id),
-                "content_hash": semantic_hash(
-                    {
-                        "decision": preflight.decision,
-                        "policy_fit_state": preflight.policy_fit_state,
-                        "confidence_state": preflight.confidence_state,
-                        "evidence_blob": preflight.evidence_blob,
-                        "reason_codes": preflight.reason_codes,
-                    }
-                ),
-            },
-        ]
-    elif (
-        str(admission.planning_source_type) == PlanningSourceType.DERIVED_SHORT.value
-        and admission.production_lane == ProductionLane.LONG_DERIVED_SHORT.value
-    ):
-        parent_script, parent_script_version, parent_lineage_version = (
-            _derived_parent_authorities(context, project)
-        )
-        derived_script = _deterministic_derived_short_script(
-            parent_script,
-            ProductionDurationContractV2.model_validate(project.duration_contract),
-        )
-        source_payload = {
-            "source_type": PlanningSourceType.DERIVED_SHORT.value,
-            "parent_video_project_id": str(project.parent_video_project_id),
-            "parent_final_media_ref_id": str(project.parent_final_media_ref_id),
-            "canonical_timeline_ref": project.canonical_timeline_ref,
-            "canonical_timeline_hash": project.canonical_timeline_hash,
-            "approved_script": derived_script,
-            "derivative_method": (
-                "DETERMINISTIC_PARENT_APPROVED_SCRIPT_SENTENCE_PREFIX"
-            ),
-        }
-        refs = [
-            {
-                "type": "parent_approved_script",
-                "id": str(parent_script_version.id),
-                "content_hash": parent_script_version.content_hash,
-            },
-            {
-                "type": "parent_final_media_lineage",
-                "id": str(parent_lineage_version.id),
-                "content_hash": parent_lineage_version.content_hash,
-            },
-        ]
-    else:
-        raise ValidationFailureError("V2_SUPPORT_PLANNING_SOURCE_INVALID")
-    refs.append(
-        {
-            "type": "project_admission_decision",
-            "id": str(admission.id),
-            "content_hash": str(admission.decision_hash),
-        }
-    )
-    return source_payload, refs
-
-
-def _derived_parent_authorities(
-    context: WorkflowStageContext,
-    project: VideoProject,
-) -> tuple[str, ArtifactVersion, ArtifactVersion]:
-    parent_id = project.parent_video_project_id
-    final_media_id = project.parent_final_media_ref_id
-    timeline_hash = project.canonical_timeline_hash
-    if (
-        parent_id is None
-        or final_media_id is None
-        or not project.canonical_timeline_ref
-        or not timeline_hash
-    ):
-        raise ValidationFailureError("V2_SUPPORT_DERIVATIVE_PARENT_AUTHORITY_REQUIRED")
-    parent = context.session.get(VideoProject, parent_id)
-    final_media = context.session.get(FinalMediaRef, final_media_id)
-    current_final_media = context.session.scalars(
-        select(FinalMediaRef)
-        .where(FinalMediaRef.video_project_id == parent_id)
-        .order_by(
-            FinalMediaRef.created_at.desc(),
-            FinalMediaRef.id.desc(),
-        )
-    ).first()
-    if (
-        parent is None
-        or parent.company_id != project.company_id
-        or parent.channel_workspace_id != project.channel_workspace_id
-        or parent.production_lane != ProductionLane.LONG_FORM.value
-        or parent.canonical_timeline_ref != project.canonical_timeline_ref
-        or parent.canonical_timeline_hash != timeline_hash
-        or final_media is None
-        or final_media.video_project_id != parent.id
-        or current_final_media is None
-        or current_final_media.id != final_media.id
-        or final_media.checksum_sha256 is None
-    ):
-        raise ValidationFailureError("V2_SUPPORT_DERIVATIVE_PARENT_AUTHORITY_MISMATCH")
-
-    script_artifact = context.session.scalars(
-        select(Artifact)
-        .where(
-            Artifact.video_project_id == parent.id,
-            Artifact.artifact_type == "script",
-        )
-        .order_by(Artifact.created_at.desc())
-    ).first()
-    script_version = (
-        context.session.get(
-            ArtifactVersion,
-            script_artifact.current_version_id,
-        )
-        if script_artifact is not None
-        and script_artifact.current_version_id is not None
-        else None
-    )
-    lineage_artifact = context.session.scalars(
-        select(Artifact)
-        .where(
-            Artifact.video_project_id == parent.id,
-            Artifact.artifact_type == "mr1_final_media_lineage_receipt",
-        )
-        .order_by(Artifact.created_at.desc())
-    ).first()
-    lineage_version = (
-        context.session.get(
-            ArtifactVersion,
-            lineage_artifact.current_version_id,
-        )
-        if lineage_artifact is not None
-        and lineage_artifact.current_version_id is not None
-        else None
-    )
-    script_content = script_version.content if script_version is not None else None
-    script_lineage = (
-        script_content.get("lineage") if isinstance(script_content, dict) else None
-    )
-    script_domain = (
-        (script_version.packaging_metadata or {}).get("_vcos_domain_authority")
-        if script_version is not None
-        else None
-    )
-    lineage_content = lineage_version.content if lineage_version is not None else None
-    lineage_domain = (
-        (lineage_version.packaging_metadata or {}).get("_vcos_domain_authority")
-        if lineage_version is not None
-        else None
-    )
-    parent_script = (
-        script_content.get("narration_text")
-        if isinstance(script_content, dict)
-        else None
-    )
-    if (
-        script_artifact is None
-        or script_version is None
-        or script_artifact.status != "approved"
-        or script_version.status != "approved"
-        or not isinstance(script_content, dict)
-        or script_content.get("schema_version") != "vcos.approved-script.v2"
-        or semantic_hash(script_content) != script_version.content_hash
-        or not isinstance(script_lineage, dict)
-        or str(script_lineage.get("video_project_id")) != str(parent.id)
-        or not isinstance(script_domain, dict)
-        or script_domain.get("writer") != "server_domain_service"
-        or script_domain.get("artifact_type") != "script"
-        or script_domain.get("content_hash") != script_version.content_hash
-        or not isinstance(parent_script, str)
-        or not parent_script.strip()
-        or lineage_artifact is None
-        or lineage_version is None
-        or lineage_artifact.status != "approved"
-        or lineage_version.status != "approved"
-        or final_media.lineage_artifact_version_id != lineage_version.id
-        or not isinstance(lineage_content, dict)
-        or semantic_hash(lineage_content) != lineage_version.content_hash
-        or lineage_content.get("schema_version") != "vcos.native-final-media-lineage.v2"
-        or str(lineage_content.get("video_project_id")) != str(parent.id)
-        or lineage_content.get("render_output_checksum") != final_media.checksum_sha256
-        or lineage_content.get("canonical_media_timeline_hash") != timeline_hash
-        or not isinstance(lineage_domain, dict)
-        or lineage_domain.get("writer") != "server_domain_service"
-        or lineage_domain.get("artifact_type") != "mr1_final_media_lineage_receipt"
-        or lineage_domain.get("content_hash") != lineage_version.content_hash
-    ):
-        raise ValidationFailureError("V2_SUPPORT_DERIVATIVE_PARENT_LINEAGE_MISMATCH")
-    return parent_script.strip(), script_version, lineage_version
-
-
-def _deterministic_derived_short_script(
-    parent_script: str,
-    duration: ProductionDurationContractV2,
-) -> str:
-    minimum_words = (duration.minimum_duration_ms * 150 + 59_999) // 60_000
-    maximum_words = duration.maximum_duration_ms * 150 // 60_000
-    target_words = min(
-        maximum_words,
-        max(
-            minimum_words,
-            round(duration.target_duration_ms * 150 / 60_000),
-        ),
-    )
-    selected: list[str] = []
-    selected_words = 0
-    for sentence in _sentences(parent_script):
-        sentence_words = len(re.findall(r"\b[\w'-]+\b", sentence, flags=re.UNICODE))
-        if selected_words + sentence_words > maximum_words:
-            break
-        selected.append(sentence)
-        selected_words += sentence_words
-        if selected_words >= target_words and len(selected) >= 3:
-            break
-    if (
-        len(selected) < 3
-        or selected_words < minimum_words
-        or selected_words > maximum_words
-    ):
-        raise WorkflowStageError(
-            classification=(WorkflowFailureClassification.FAIL_PERMANENT_POLICY),
-            error_code="V2_SUPPORT_DERIVED_SCRIPT_DURATION_INVALID",
-            summary=(
-                "The approved parent script cannot yield a complete "
-                "sentence-bound Short inside the frozen duration contract."
-            ),
-            incident_type="INTEGRITY_MISMATCH",
-            retry_eligible=False,
-        )
-    return " ".join(selected)
-
-
-def _approved_script_text(
-    *,
-    source_payload: dict[str, Any],
-    duration: ProductionDurationContractV2,
-) -> str:
-    candidates = [
-        *_values_for_keys(
-            source_payload,
-            {
-                "approved_script",
-                "approved_script_text",
-                "narration_text",
-                "script_text",
-            },
-        ),
-    ]
-    text = max(
-        (value.strip() for value in candidates if value.strip()),
-        key=len,
-        default="",
-    )
-    words = re.findall(r"\b[\w'-]+\b", text, flags=re.UNICODE)
-    # Use the frozen 150-wpm production timing model.  Refuse to invent or
-    # repeat prose simply to reach the channel duration.
-    estimated_duration_ms = round(len(words) / 150 * 60_000)
-    if (
-        len(words) < 24
-        or estimated_duration_ms < duration.minimum_duration_ms
-        or estimated_duration_ms > duration.maximum_duration_ms
-    ):
-        raise WorkflowStageError(
-            classification=(WorkflowFailureClassification.FAIL_PERMANENT_POLICY),
-            error_code="V2_SUPPORT_APPROVED_SCRIPT_DURATION_INVALID",
-            summary=(
-                "The frozen planning source does not carry an approved "
-                "non-padded script inside the channel duration contract."
-            ),
-            incident_type="INTEGRITY_MISMATCH",
-            retry_eligible=False,
-            operator_visible_blocker=(
-                "Tạo planning source mới có approved_script đủ bằng chứng "
-                "và đúng duration contract; VCOS không tự chèn filler."
-            ),
-        )
-    return text
-
-
-def _values_for_keys(
-    value: Any,
-    keys: set[str],
-) -> Iterable[str]:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if key in keys and isinstance(child, str):
-                yield child
-            yield from _values_for_keys(child, keys)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _values_for_keys(child, keys)
-
-
-def _verified_destination(channel: ChannelWorkspace) -> dict[str, Any]:
-    governance = (channel.metadata_ or {}).get("destination_governance")
-    bindings = governance.get("bindings") if isinstance(governance, dict) else None
-    active_ref = (
-        str(governance.get("active_binding_ref") or "")
-        if isinstance(governance, dict)
-        else ""
-    )
-    candidates = bindings if isinstance(bindings, list) else []
-    active = next(
-        (
-            item
-            for item in candidates
-            if isinstance(item, dict)
-            and active_ref
-            == (f"destination-binding://{channel.key}/v{item.get('binding_version')}")
-        ),
-        None,
-    )
-    try:
-        validated = (
-            DestinationBinding.model_validate(active)
-            if isinstance(active, dict)
-            else None
-        )
-    except Exception as exc:
-        raise ValidationFailureError("V2_SUPPORT_DESTINATION_BINDING_INVALID") from exc
-    if (
-        validated is None
-        or validated.channel_id != channel.id
-        or validated.destination_status != "VERIFIED"
-        or validated.verification_state != "VERIFIED"
-        or not validated.platform_channel_id
-        or not validated.platform_account_ref
-    ):
-        raise WorkflowStageError(
-            classification=(WorkflowFailureClassification.FAIL_PERMANENT_POLICY),
-            error_code="V2_SUPPORT_VERIFIED_DESTINATION_REQUIRED",
-            summary=(
-                "The active channel has no exact verified manual-publish "
-                "destination binding."
-            ),
-            incident_type="INTEGRITY_MISMATCH",
-            retry_eligible=False,
-            operator_visible_blocker=(
-                "Hoàn tất destination verification trong Channel Profile."
-            ),
-        )
-    return {
-        **validated.model_dump(mode="json"),
-        "active_binding_ref": active_ref,
-        "publish_execution_allowed": True,
-    }
 
 
 def _ensure_support_versions(
@@ -1469,11 +955,7 @@ def _support_payloads(
         "QC": "AUTOMATED_NATIVE_QC",
         "ARCHIVE": "LOCAL_VERIFIED_ARCHIVE",
     }
-    audio_strategy = (
-        "LOCAL_OS_TTS_SCRIPT_BOUND"
-        if authority.project.production_lane == ProductionLane.LONG_FORM.value
-        else "SILENT_STEREO_TEXT_LED"
-    )
+    audio_strategy = "LOCAL_OS_TTS_SCRIPT_BOUND"
     route_by_stage = (
         {route.stage: route for route in authority.support_envelope.native_routes}
         if authority.support_envelope is not None
@@ -1535,11 +1017,7 @@ def _support_payloads(
             "max_cost_usd": "0",
             **({"route_hash": route.route_hash} if route is not None else {}),
         }
-    target_surface = (
-        "LONG_FORM"
-        if authority.project.production_lane == ProductionLane.LONG_FORM.value
-        else "SHORTS"
-    )
+    target_surface = "LONG_FORM"
     destination = authority.destination
     envelope = authority.support_envelope
     gate_receipts = {
@@ -1633,7 +1111,7 @@ def _support_payloads(
                 }
                 for index, section in enumerate(sections)
             ],
-            "aspect_ratio": ("16:9" if target_surface == "LONG_FORM" else "9:16"),
+            "aspect_ratio": "16:9",
             "lineage": lineage,
         },
         "thumbnail_brief": {
@@ -2002,19 +1480,6 @@ def _exact_ref(
     )
 
 
-def _parent_derivative_lineage(
-    context: WorkflowStageContext,
-    authority: _SupportAuthority,
-) -> ExactContentRefV2 | None:
-    if authority.project.production_lane != ProductionLane.LONG_DERIVED_SHORT.value:
-        return None
-    _, _, lineage_version = _derived_parent_authorities(
-        context,
-        authority.project,
-    )
-    return _exact_ref("parent_derivative_lineage", lineage_version)
-
-
 def _project(context: WorkflowStageContext) -> VideoProject:
     project = (
         context.session.get(VideoProject, context.run.video_project_id)
@@ -2025,6 +1490,8 @@ def _project(context: WorkflowStageContext) -> VideoProject:
         project is None
         or getattr(project, "schema_version", "v1") != "v2"
         or project.production_lane != context.run.production_lane
+        or project.production_lane != ProductionLane.LONG_FORM.value
+        or project.planning_source_type != "LONG_FORM_PLAN"
     ):
         raise ValidationFailureError("V2_PACKAGE_PROJECT_AUTHORITY_MISMATCH")
     return project

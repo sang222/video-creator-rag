@@ -1,13 +1,20 @@
 from fastapi import APIRouter, Request
 from pathlib import Path
 
-from app.contracts.d2p1 import DailyToPackageRunRequest, DailyToPackageStatusRead
 from app.contracts.long_production import (
     LongProductionOrchestrationReceipt,
     LongProductionRunRequest,
     LongProductionStatusRead,
 )
-from app.services.d2p1 import DailyToPackageOrchestrator
+from app.contracts.m5 import (
+    EditorialIdeaCandidateCreate,
+    EditorialIdeaCandidateRead,
+    EditorialIdeaCandidateTransition,
+    EditorialResearchRunCreate,
+    EditorialResearchRunRead,
+)
+from app.services.editorial_research import EditorialResearchService
+from app.services.company_access import require_company_permission
 from app.services.long_production import LongProductionOrchestrator
 from app.services.security_boundary import actor_from_request
 from app.db.models import VideoProject
@@ -15,18 +22,11 @@ from app.db.models import VideoProject
 from app.api.routes.imports import (
     AccessibilityQCService,
     Any,
-    ChannelAuthorityService,
-    ChannelDailyRunCreate,
-    ChannelDailyRunRead,
-    ChannelDailyRunService,
     ChannelStatePackService,
     ChannelStatePackSnapshotCreate,
     ChannelStatePackSnapshotRead,
     ContextPackSnapshotCreate,
     ContextPackSnapshotRead,
-    DailyIdeaDecisionCreate,
-    DailyIdeaDecisionRead,
-    DailyRunExecuteRequest,
     EditorialCalendarService,
     EditorialCalendarSlotCreate,
     EditorialCalendarSlotRead,
@@ -39,7 +39,6 @@ from app.api.routes.imports import (
     ProductionArtifactRunCreate,
     ProductionArtifactRunRead,
     ProductionArtifactRunService,
-    ProjectAdmissionDecisionCreate,
     ProjectAdmissionDecisionRead,
     ProjectAdmissionService,
     QCRunRequest,
@@ -56,10 +55,8 @@ from app.api.routes.imports import (
 
 from app.api.routes.serializers_core import (
     _accessibility_qc_report,
-    _channel_daily_run,
     _channel_state_pack,
     _context_pack,
-    _daily_idea_decision,
     _editorial_slot,
     _idea_market_preflight,
     _media_qc_report,
@@ -74,7 +71,6 @@ from app.api.routes.serializers_core import (
 from app.api.routes.serializers_publish_learning import (
     _as_http_error,
 )
-
 
 
 def create_router() -> APIRouter:
@@ -123,7 +119,9 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/editorial-calendar-slots", response_model=EditorialCalendarSlotRead)
-    def create_editorial_calendar_slot(data: EditorialCalendarSlotCreate) -> EditorialCalendarSlotRead:
+    def create_editorial_calendar_slot(
+        data: EditorialCalendarSlotCreate,
+    ) -> EditorialCalendarSlotRead:
         try:
             with session_scope() as session:
                 slot = EditorialCalendarService(session).create_slot(data=data)
@@ -131,7 +129,9 @@ def create_router() -> APIRouter:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
-    @router.get("/editorial-calendar-slots/{slot_id}", response_model=EditorialCalendarSlotRead)
+    @router.get(
+        "/editorial-calendar-slots/{slot_id}", response_model=EditorialCalendarSlotRead
+    )
     def get_editorial_calendar_slot(slot_id: uuid.UUID) -> EditorialCalendarSlotRead:
         try:
             with session_scope() as session:
@@ -143,16 +143,24 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/search-demand-evidence", response_model=SearchDemandEvidenceRead)
-    def create_search_demand_evidence(data: SearchDemandEvidenceCreate) -> SearchDemandEvidenceRead:
+    def create_search_demand_evidence(
+        data: SearchDemandEvidenceCreate,
+    ) -> SearchDemandEvidenceRead:
         try:
             with session_scope() as session:
-                evidence = SearchDemandEvidenceService(session).create_evidence(data=data)
-                return SearchDemandEvidenceRead.model_validate(_search_demand_evidence(evidence))
+                evidence = SearchDemandEvidenceService(session).create_evidence(
+                    data=data
+                )
+                return SearchDemandEvidenceRead.model_validate(
+                    _search_demand_evidence(evidence)
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/context/retrieval-plans", response_model=RetrievalPlanSnapshotRead)
-    def create_retrieval_plan(data: RetrievalPlanSnapshotCreate) -> RetrievalPlanSnapshotRead:
+    def create_retrieval_plan(
+        data: RetrievalPlanSnapshotCreate,
+    ) -> RetrievalPlanSnapshotRead:
         try:
             with session_scope() as session:
                 plan = ResourceResolverService(session).create_retrieval_plan(data=data)
@@ -169,11 +177,16 @@ def create_router() -> APIRouter:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
-    @router.get("/context/context-packs/{context_pack_id}", response_model=ContextPackSnapshotRead)
+    @router.get(
+        "/context/context-packs/{context_pack_id}",
+        response_model=ContextPackSnapshotRead,
+    )
     def get_context_pack(context_pack_id: uuid.UUID) -> ContextPackSnapshotRead:
         try:
             with session_scope() as session:
-                pack = ResourceResolverService(session).get_context_pack(context_pack_id)
+                pack = ResourceResolverService(session).get_context_pack(
+                    context_pack_id
+                )
                 if pack is None:
                     raise NotFoundError(f"context pack not found: {context_pack_id}")
                 return ContextPackSnapshotRead.model_validate(_context_pack(pack))
@@ -181,96 +194,166 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/channel-state-packs", response_model=ChannelStatePackSnapshotRead)
-    def create_channel_state_pack(data: ChannelStatePackSnapshotCreate) -> ChannelStatePackSnapshotRead:
+    def create_channel_state_pack(
+        data: ChannelStatePackSnapshotCreate,
+    ) -> ChannelStatePackSnapshotRead:
         try:
             with session_scope() as session:
                 snapshot = ChannelStatePackService(session).build_snapshot(data=data)
-                return ChannelStatePackSnapshotRead.model_validate(_channel_state_pack(snapshot))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.post("/channel-daily-runs", response_model=ChannelDailyRunRead)
-    def create_channel_daily_run(data: ChannelDailyRunCreate) -> ChannelDailyRunRead:
-        try:
-            with session_scope() as session:
-                daily_run = ChannelDailyRunService(session).create_run(data=data)
-                return ChannelDailyRunRead.model_validate(_channel_daily_run(daily_run))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.post("/channel-daily-runs/{daily_run_id}/execute", response_model=ChannelDailyRunRead)
-    def execute_channel_daily_run(daily_run_id: uuid.UUID, data: DailyRunExecuteRequest | None = None) -> ChannelDailyRunRead:
-        try:
-            with session_scope() as session:
-                daily_run = ChannelDailyRunService(session).execute_run(
-                    daily_run_id=daily_run_id,
-                    data=data or DailyRunExecuteRequest(),
+                return ChannelStatePackSnapshotRead.model_validate(
+                    _channel_state_pack(snapshot)
                 )
-                return ChannelDailyRunRead.model_validate(_channel_daily_run(daily_run))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.get("/channel-daily-runs/{daily_run_id}", response_model=ChannelDailyRunRead)
-    def get_channel_daily_run(daily_run_id: uuid.UUID) -> ChannelDailyRunRead:
-        try:
-            with session_scope() as session:
-                daily_run = ChannelDailyRunService(session).get_run(daily_run_id)
-                if daily_run is None:
-                    raise NotFoundError(f"daily run not found: {daily_run_id}")
-                return ChannelDailyRunRead.model_validate(_channel_daily_run(daily_run))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.post("/daily-idea-decisions", response_model=DailyIdeaDecisionRead)
-    def create_daily_idea_decision(data: DailyIdeaDecisionCreate) -> DailyIdeaDecisionRead:
-        try:
-            with session_scope() as session:
-                decision = ChannelAuthorityService(session).create_decision(data=data)
-                return DailyIdeaDecisionRead.model_validate(_daily_idea_decision(decision))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.get("/daily-idea-decisions/{decision_id}", response_model=DailyIdeaDecisionRead)
-    def get_daily_idea_decision(decision_id: uuid.UUID) -> DailyIdeaDecisionRead:
-        try:
-            with session_scope() as session:
-                from app.db.models import DailyIdeaDecision
-
-                decision = session.get(DailyIdeaDecision, decision_id)
-                if decision is None:
-                    raise NotFoundError(f"daily idea decision not found: {decision_id}")
-                return DailyIdeaDecisionRead.model_validate(_daily_idea_decision(decision))
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.get(
-        "/daily-idea-decisions/{decision_id}/production-handoff",
-        response_model=DailyToPackageStatusRead,
-    )
-    def get_daily_idea_production_handoff(decision_id: uuid.UUID) -> DailyToPackageStatusRead:
-        """Read durable D2P1 state; this endpoint never runs providers or media."""
-
-        try:
-            with session_scope() as session:
-                return DailyToPackageOrchestrator(session).status(decision_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post(
-        "/daily-idea-decisions/{decision_id}/production-handoff/run",
-        response_model=DailyToPackageStatusRead,
+        "/editorial-research-runs",
+        response_model=EditorialResearchRunRead,
     )
-    def run_daily_idea_production_handoff(
-        decision_id: uuid.UUID,
-        data: DailyToPackageRunRequest | None = None,
-    ) -> DailyToPackageStatusRead:
-        """Retained route name; new execution must use typed v2 admission."""
-
+    def create_editorial_research_run(
+        data: EditorialResearchRunCreate,
+        request: Request,
+    ) -> EditorialResearchRunRead:
         try:
-            del decision_id, data
-            raise ValidationFailureError(
-                "V2_PROJECT_ADMISSION_REQUIRED"
-            )
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                record = EditorialResearchService(session).create_run(
+                    data=data,
+                    actor=actor,
+                )
+                return EditorialResearchRunRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/editorial-research-runs/{run_id}/start",
+        response_model=EditorialResearchRunRead,
+    )
+    def start_editorial_research_run(
+        run_id: uuid.UUID,
+        request: Request,
+    ) -> EditorialResearchRunRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                record = EditorialResearchService(session).start_run(
+                    run_id=run_id,
+                    actor=actor,
+                )
+                return EditorialResearchRunRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/editorial-research-runs/{run_id}/complete",
+        response_model=EditorialResearchRunRead,
+    )
+    def complete_editorial_research_run(
+        run_id: uuid.UUID,
+        request: Request,
+    ) -> EditorialResearchRunRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                record = EditorialResearchService(session).complete_run(
+                    run_id=run_id,
+                    actor=actor,
+                )
+                return EditorialResearchRunRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get(
+        "/editorial-research-runs/{run_id}",
+        response_model=EditorialResearchRunRead,
+    )
+    def get_editorial_research_run(
+        run_id: uuid.UUID,
+        request: Request,
+    ) -> EditorialResearchRunRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                from app.db.models import EditorialResearchRun
+
+                record = session.get(EditorialResearchRun, run_id)
+                if record is None:
+                    raise NotFoundError(f"editorial research run not found: {run_id}")
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=record.company_id,
+                )
+                return EditorialResearchRunRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/editorial-idea-candidates",
+        response_model=EditorialIdeaCandidateRead,
+    )
+    def create_editorial_idea_candidate(
+        data: EditorialIdeaCandidateCreate,
+        request: Request,
+    ) -> EditorialIdeaCandidateRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                record = EditorialResearchService(session).add_candidate(
+                    data=data,
+                    actor=actor,
+                )
+                return EditorialIdeaCandidateRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.post(
+        "/editorial-idea-candidates/{candidate_id}/transition",
+        response_model=EditorialIdeaCandidateRead,
+    )
+    def transition_editorial_idea_candidate(
+        candidate_id: uuid.UUID,
+        data: EditorialIdeaCandidateTransition,
+        request: Request,
+    ) -> EditorialIdeaCandidateRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                record = EditorialResearchService(session).transition_candidate(
+                    candidate_id=candidate_id,
+                    data=data,
+                    actor=actor,
+                )
+                return EditorialIdeaCandidateRead.model_validate(record)
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
+
+    @router.get(
+        "/editorial-idea-candidates/{candidate_id}",
+        response_model=EditorialIdeaCandidateRead,
+    )
+    def get_editorial_idea_candidate(
+        candidate_id: uuid.UUID,
+        request: Request,
+    ) -> EditorialIdeaCandidateRead:
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                from app.db.models import EditorialIdeaCandidate
+
+                record = session.get(EditorialIdeaCandidate, candidate_id)
+                if record is None:
+                    raise NotFoundError(
+                        f"editorial idea candidate not found: {candidate_id}"
+                    )
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=record.company_id,
+                )
+                return EditorialIdeaCandidateRead.model_validate(record)
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
@@ -278,11 +361,24 @@ def create_router() -> APIRouter:
         "/video-projects/{project_id}/long-production",
         response_model=LongProductionStatusRead,
     )
-    def get_long_production_status(project_id: uuid.UUID) -> LongProductionStatusRead:
+    def get_long_production_status(
+        project_id: uuid.UUID,
+        request: Request,
+    ) -> LongProductionStatusRead:
         """Read the durable LPRO1 lifecycle without executing media or providers."""
 
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
+                project = session.get(VideoProject, project_id)
+                if project is None:
+                    raise NotFoundError(f"video project not found: {project_id}")
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=project.company_id,
+                )
                 return LongProductionOrchestrator.status(session, project_id)
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -316,37 +412,78 @@ def create_router() -> APIRouter:
             raise _as_http_error(exc) from exc
 
     @router.post("/idea-market-preflights", response_model=IdeaMarketPreflightRead)
-    def create_idea_market_preflight(data: IdeaMarketPreflightCreate) -> IdeaMarketPreflightRead:
+    def create_idea_market_preflight(
+        data: IdeaMarketPreflightCreate,
+        request: Request,
+    ) -> IdeaMarketPreflightRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
-                preflight = IdeaMarketPreflightService(session).create_preflight(data=data)
-                return IdeaMarketPreflightRead.model_validate(_idea_market_preflight(preflight))
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="editorial.manage",
+                    company_id=data.company_id,
+                )
+                preflight = IdeaMarketPreflightService(session).create_preflight(
+                    data=data
+                )
+                return IdeaMarketPreflightRead.model_validate(
+                    _idea_market_preflight(preflight)
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
-    @router.post("/project-admission-decisions", response_model=ProjectAdmissionDecisionRead)
-    def create_project_admission_decision(data: ProjectAdmissionDecisionCreate) -> ProjectAdmissionDecisionRead:
+    @router.get(
+        "/project-admission-decisions/{decision_id}",
+        response_model=ProjectAdmissionDecisionRead,
+    )
+    def get_project_admission_decision(
+        decision_id: uuid.UUID,
+        request: Request,
+    ) -> ProjectAdmissionDecisionRead:
         try:
-            del data
-            raise ValidationFailureError(
-                "V2_PROJECT_ADMISSION_REQUIRED"
-            )
-        except Exception as exc:
-            raise _as_http_error(exc) from exc
-
-    @router.get("/project-admission-decisions/{decision_id}", response_model=ProjectAdmissionDecisionRead)
-    def get_project_admission_decision(decision_id: uuid.UUID) -> ProjectAdmissionDecisionRead:
-        try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 decision = ProjectAdmissionService(session).get_decision(decision_id)
                 if decision is None:
-                    raise NotFoundError(f"project admission decision not found: {decision_id}")
-                return ProjectAdmissionDecisionRead.model_validate(_project_admission_decision(decision))
+                    raise NotFoundError(
+                        f"project admission decision not found: {decision_id}"
+                    )
+                company_id = decision.company_id
+                if (
+                    company_id is None
+                    and decision.admitted_video_project_id is not None
+                ):
+                    admitted_project = session.get(
+                        VideoProject,
+                        decision.admitted_video_project_id,
+                    )
+                    company_id = (
+                        admitted_project.company_id
+                        if admitted_project is not None
+                        else None
+                    )
+                if company_id is None:
+                    raise ValidationFailureError(
+                        "PROJECT_ADMISSION_COMPANY_SCOPE_MISSING"
+                    )
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=company_id,
+                )
+                return ProjectAdmissionDecisionRead.model_validate(
+                    _project_admission_decision(decision)
+                )
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.post("/production-runs", response_model=ProductionArtifactRunRead)
-    def create_production_run(data: ProductionArtifactRunCreate) -> ProductionArtifactRunRead:
+    def create_production_run(
+        data: ProductionArtifactRunCreate,
+    ) -> ProductionArtifactRunRead:
         try:
             with session_scope() as session:
                 run = ProductionArtifactRunService(session).create_run(data=data)
@@ -354,22 +491,36 @@ def create_router() -> APIRouter:
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
-    @router.post("/production-runs/{run_id}/execute", response_model=ProductionArtifactRunRead)
+    @router.post(
+        "/production-runs/{run_id}/execute", response_model=ProductionArtifactRunRead
+    )
     def execute_production_run(run_id: uuid.UUID) -> ProductionArtifactRunRead:
         try:
             with session_scope() as session:
-                run = ProductionArtifactRunService(session).execute_real_provider_flow(run_id=run_id)
+                run = ProductionArtifactRunService(session).execute_real_provider_flow(
+                    run_id=run_id
+                )
                 return ProductionArtifactRunRead.model_validate(_production_run(run))
         except Exception as exc:
             raise _as_http_error(exc) from exc
 
     @router.get("/production-runs/{run_id}", response_model=ProductionArtifactRunRead)
-    def get_production_run(run_id: uuid.UUID) -> ProductionArtifactRunRead:
+    def get_production_run(
+        run_id: uuid.UUID,
+        request: Request,
+    ) -> ProductionArtifactRunRead:
         try:
+            actor = actor_from_request(request)
             with session_scope() as session:
                 run = ProductionArtifactRunService(session).get_run(run_id)
                 if run is None:
                     raise NotFoundError(f"production artifact run not found: {run_id}")
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.read",
+                    company_id=run.company_id,
+                )
                 return ProductionArtifactRunRead.model_validate(_production_run(run))
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -389,9 +540,13 @@ def create_router() -> APIRouter:
     def get_render_package(render_package_id: uuid.UUID) -> dict[str, Any]:
         try:
             with session_scope() as session:
-                package = LocalFixtureRendererService(session).get_package(render_package_id)
+                package = LocalFixtureRendererService(session).get_package(
+                    render_package_id
+                )
                 if package is None:
-                    raise NotFoundError(f"render package not found: {render_package_id}")
+                    raise NotFoundError(
+                        f"render package not found: {render_package_id}"
+                    )
                 return _render_package(package)
         except Exception as exc:
             raise _as_http_error(exc) from exc
@@ -401,10 +556,16 @@ def create_router() -> APIRouter:
         try:
             with session_scope() as session:
                 if data.render_package_snapshot_id is None:
-                    raise ValidationFailureError("render_package_snapshot_id is required for media QC API")
-                package = LocalFixtureRendererService(session).get_package(data.render_package_snapshot_id)
+                    raise ValidationFailureError(
+                        "render_package_snapshot_id is required for media QC API"
+                    )
+                package = LocalFixtureRendererService(session).get_package(
+                    data.render_package_snapshot_id
+                )
                 if package is None:
-                    raise NotFoundError(f"render package not found: {data.render_package_snapshot_id}")
+                    raise NotFoundError(
+                        f"render package not found: {data.render_package_snapshot_id}"
+                    )
                 report = MediaQCService(session).run_qc(render_package_snapshot=package)
                 return _media_qc_report(report)
         except Exception as exc:
@@ -417,11 +578,21 @@ def create_router() -> APIRouter:
                 from app.db.models import CaptionTrackSnapshot, RenderPackageSnapshot
 
                 if data.caption_track_snapshot_id is None:
-                    raise ValidationFailureError("caption_track_snapshot_id is required for accessibility QC API")
-                caption = session.get(CaptionTrackSnapshot, data.caption_track_snapshot_id)
+                    raise ValidationFailureError(
+                        "caption_track_snapshot_id is required for accessibility QC API"
+                    )
+                caption = session.get(
+                    CaptionTrackSnapshot, data.caption_track_snapshot_id
+                )
                 if caption is None:
-                    raise NotFoundError(f"caption track snapshot not found: {data.caption_track_snapshot_id}")
-                package = session.get(RenderPackageSnapshot, data.render_package_snapshot_id) if data.render_package_snapshot_id else None
+                    raise NotFoundError(
+                        f"caption track snapshot not found: {data.caption_track_snapshot_id}"
+                    )
+                package = (
+                    session.get(RenderPackageSnapshot, data.render_package_snapshot_id)
+                    if data.render_package_snapshot_id
+                    else None
+                )
                 report = AccessibilityQCService(session).run_qc(
                     caption_track_snapshot=caption,
                     render_package_snapshot=package,
@@ -429,6 +600,5 @@ def create_router() -> APIRouter:
                 return _accessibility_qc_report(report)
         except Exception as exc:
             raise _as_http_error(exc) from exc
-
 
     return router

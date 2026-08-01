@@ -190,7 +190,10 @@ class OperatorCockpitService:
         channel_workspace_id: uuid.UUID | None,
         permitted_company_ids: set[uuid.UUID] | None,
     ) -> tuple[VideoProject | None, ProductionWorkflowRun | None]:
-        run_statement = select(ProductionWorkflowRun)
+        run_statement = select(ProductionWorkflowRun).where(
+            ProductionWorkflowRun.production_lane == "LONG_FORM",
+            ProductionWorkflowRun.planning_source_type == "LONG_FORM_PLAN",
+        )
         if permitted_company_ids is not None:
             if not permitted_company_ids:
                 return None, None
@@ -225,7 +228,9 @@ class OperatorCockpitService:
             return self.session.get(VideoProject, run.video_project_id), run
 
         project_statement = select(VideoProject).where(
-            VideoProject.schema_version == "v2"
+            VideoProject.schema_version == "v2",
+            VideoProject.production_lane == "LONG_FORM",
+            VideoProject.planning_source_type == "LONG_FORM_PLAN",
         )
         if permitted_company_ids is not None:
             project_statement = project_statement.where(
@@ -281,7 +286,7 @@ class OperatorCockpitService:
         return NextVideoRead(
             project_id=project.id,
             workflow_run_id=run.id if run is not None else None,
-            lane=project.production_lane or (run.production_lane if run else "UNKNOWN"),
+            lane="LONG_FORM",
             content_mode=project.content_mode or "UNKNOWN",
             assignment_mode=project.assignment_mode or "UNKNOWN",
             title=project.title,
@@ -528,7 +533,7 @@ class OperatorCockpitService:
             state="DECIDED" if decision is not None else "READY_FOR_FINAL_REVIEW",
             title=title,
             description=description,
-            lane=candidate.production_lane,
+            lane="LONG_FORM",
             content_mode=candidate.content_mode,
             series_title=series_plan.display_name if series_plan is not None else None,
             run_label=(
@@ -759,11 +764,14 @@ class OperatorCockpitService:
                 FinalReviewCandidate,
                 run.final_review_candidate_id,
             )
-            if candidate is not None:
+            if candidate is not None and candidate.production_lane == "LONG_FORM":
                 return candidate
         return self.session.scalars(
             select(FinalReviewCandidate)
-            .where(FinalReviewCandidate.video_project_id == project.id)
+            .where(
+                FinalReviewCandidate.video_project_id == project.id,
+                FinalReviewCandidate.production_lane == "LONG_FORM",
+            )
             .order_by(FinalReviewCandidate.created_at.desc())
         ).first()
 
@@ -790,6 +798,7 @@ class OperatorCockpitService:
             .where(
                 HumanUploadTask.schema_version == "v2",
                 HumanUploadTask.video_project_id == project.id,
+                HumanUploadTask.production_lane == "LONG_FORM",
             )
             .order_by(HumanUploadTask.created_at.desc())
         )
@@ -824,11 +833,12 @@ class OperatorCockpitService:
             return None
         if task.actual_uploaded_video_id is not None:
             uploaded = self.session.get(UploadedVideo, task.actual_uploaded_video_id)
-            if uploaded is not None:
+            if uploaded is not None and uploaded.production_lane == "LONG_FORM":
                 return uploaded
         statement = select(UploadedVideo).where(
             UploadedVideo.schema_version == "v2",
             UploadedVideo.human_upload_task_id == task.id,
+            UploadedVideo.production_lane == "LONG_FORM",
         )
         if confirmation is not None:
             statement = statement.where(
@@ -1132,8 +1142,6 @@ def _why_selected(project: VideoProject, metadata: dict[str, Any]) -> str:
         return (
             "Đây là tập tiếp theo đã được giữ chỗ nguyên tử trong chuỗi đang hoạt động."
         )
-    if project.production_lane == "LONG_DERIVED_SHORT":
-        return "Được tạo từ đúng video cha và timeline đã chốt để mở rộng phân phối."
     return "Được chọn theo ưu tiên lịch nội dung và admission v2 đã chốt."
 
 
@@ -1144,7 +1152,6 @@ def _friendly_standalone_reason(reason: str | None) -> str:
         "SERIES_NOT_REQUIRED": "Chủ đề này không cần ràng buộc vào một chuỗi.",
         "NO_ELIGIBLE_SERIES": "Chưa có chuỗi phù hợp với chủ đề và luồng sản xuất.",
         "STANDALONE_REQUIRED": "Chính sách nội dung yêu cầu video độc lập.",
-        "DERIVED_SHORT": "Video ngắn được dẫn xuất trực tiếp từ video dài đã chốt.",
     }
     return labels.get(
         reason,

@@ -42,6 +42,7 @@ from app.db.models.production_publish import (
 )
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
+from app.main import create_app
 from app.services.m12_2r import PublishHandoffLedgerService
 from app.services.m7 import ManualPublishConfirmationService, PublishHandoffService
 from app.services.production_package import ProductionReadinessService
@@ -766,12 +767,18 @@ def test_06_task_binds_exact_final_media_package_and_destination(
     assert task.first_scripted_video_package_id is None
 
 
-def test_07_m12_2r_remains_legacy_only_for_v2_task_creation() -> None:
-    source = inspect.getsource(
-        PublishHandoffLedgerService.create_upload_task_from_package
-    )
-    assert "FINAL_MEDIA_DECISION_REQUIRED" in source
-    assert "ProductionPublishService" not in source
+def test_07_legacy_pre_render_publish_entrypoint_and_routes_are_absent() -> None:
+    removed_method = "_".join(("create", "upload", "task", "from", "package"))
+    assert not hasattr(PublishHandoffLedgerService, removed_method)
+    route_paths = {route.path for route in create_app().routes}
+    removed_routes = {
+        "/video-packages/{package_id}/review",
+        "/video-packages/{package_id}/packaging-review-queue",
+        "/video-packages/{package_id}/packaging-review-queue/build-from-gates",
+        "/video-packages/{package_id}/upload-task",
+        "/upload-tasks/{task_id}/backfill-uploaded-video",
+    }
+    assert route_paths.isdisjoint(removed_routes)
 
 
 def test_07a_m12_2r_backfill_cannot_mutate_a_v2_upload_task(
@@ -1131,19 +1138,6 @@ def test_16_standalone_upload_does_not_touch_series_run(
     assert (
         db_session.scalar(select(func.count()).select_from(SeriesEpisodePublication))
         == 0
-    )
-
-
-def test_17_derived_short_parent_lineage_is_copied_to_all_v2_entities() -> None:
-    task_source = inspect.getsource(ProductionPublishService._create_upload_task_once)
-    verify_source = inspect.getsource(ProductionPublishService.verify_confirmation)
-    assert "parent_video_project_id=candidate.parent_video_project_id" in task_source
-    assert (
-        "parent_final_media_ref_id=candidate.parent_final_media_ref_id" in task_source
-    )
-    assert "parent_video_project_id=candidate.parent_video_project_id" in verify_source
-    assert (
-        "parent_final_media_ref_id=candidate.parent_final_media_ref_id" in verify_source
     )
 
 

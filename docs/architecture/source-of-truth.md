@@ -39,11 +39,23 @@ Channel state truth is derived snapshot truth. ChannelStatePackSnapshot is deriv
 
 Search demand truth is evidence-reference truth. SearchDemandEvidence can be manual, CSV, internal, official, or mock evidence; M5 does not scrape or use autosuggest as truth.
 
-Idea and admission truth is decision artifact truth. DailyIdeaDecision stores proposal/rationale/evidence refs/context refs/LLM run refs. For strict CH1-FLEX v2 work, its proposal is rendered through registered `DailyIdeaAgent`/Prompt Registry/LLMRouter and includes bounded channel-fit evidence; deterministic policy, not the LLM or caller, decides fit. ProjectAdmissionDecision stores deterministic admission outcome and the admitted VideoProject/artifact refs when ADMIT occurs.
+Idea and admission truth is editorial-candidate plus decision truth.
+`EditorialIdeaCandidate` stores proposal, evidence, research-run lineage,
+experiment metadata, and deterministic readiness states.
+`EditorialIdeaResearchAgent` receives only its bounded Prompt
+Registry/LLMRouter context; deterministic preflight and policy, not the LLM or
+caller, decide fit. `ProjectAdmissionDecision` stores the production outcome
+and admitted VideoProject refs when ADMIT occurs.
 
 Niche governance truth is frozen semantic-digest truth. `NicheContractDigest` is compiled from the active Channel Contract/profile/snapshot plus exact ContentCategory and EditorialCalendarSlot. It carries semantic content and refs/hashes; a bare hash is not sufficient. Topic, Script, Visual, Thumbnail, and Metadata niche gates bind exact subject/digest/snapshot evidence. `NicheAlignmentDossier` aggregates those results and cannot report production PASS with a missing mandatory gate.
 
-Daily-to-package truth is receipt/version truth. D2P1 resolves an immutable admissible DailyIdeaDecision through an immutable M5 `ProjectAdmissionDecision=ADMIT` receipt, the existing project, Effective Context, approved research workflow, and M12.2 package. Each durable transition creates an immutable `idea_admission_lineage` ArtifactVersion receipt. Its fingerprint binds the decision, admission/project, profile/snapshot, digest, slot, research, and package-builder version; it never treats “latest” state as frozen lineage. `AWAITING_RESEARCH` is resumable truth. `PACKAGE_READY_FOR_HUMAN_REVIEW` requires the package and all mandatory niche-gate evidence and never implies media/render/publish execution.
+Candidate-to-package truth is exact lineage truth. Cadence selects one strict
+`GREENLIT` candidate and delegates assignment to the existing v2 admission
+authority. The resulting project and M12.2 package bind candidate, preflight,
+admission/project, profile/snapshot, niche/market digests, slot, research,
+assignment, destination, duration, and builder version; they never treat
+“latest” state as frozen lineage. A package never implies media execution,
+render completion, or upload permission.
 
 Production artifact truth is snapshot-backed. ProductionArtifactRun binds exact `video_project_id` and `policy_snapshot_id`; it does not look up latest policy. `VoiceTimelineSnapshot` is historical M6 lineage and may contain estimated timing. New `CANONICAL_STRICT` work uses final narration audio, `VerifiedNarrationAlignment`, and `CanonicalMediaTimeline` as the sole timing truth for captions, visual scenes and rendering. RenderSpecSnapshot must validate before MediaRenderJob creation. RenderPackageSnapshot stores refs/manifests/checksums only, not binary blobs. Technical MediaQC, CreativePerceptual MediaQC and human watchability are separate truths; none may infer another layer's PASS.
 
@@ -57,24 +69,43 @@ Cloud media offload truth is DB-first and Drive-as-blob truth. `cloud_media_refs
 
 Post-publish diagnostic truth is deterministic and evidence-bound. PostPublishObservationWindow stores fixed check windows derived from UploadedVideo.published_at. PostPublishHealthRun reads only M7 UploadedVideo lineage and M8 analytics snapshots/summaries; it does not sync analytics or call providers. NoViewDiagnosticRun, PackagingDiagnosticRun, RetentionDiagnosticRun, EngagementDiagnosticRun, and PolicyRightsDiagnosticRun preserve metric availability and reason codes separately from conclusions. FailureTraceReport is the operator-friendly diagnostic report with technical appendix and evidence refs. RecoveryProposal is proposal truth only and always requires human approval. M9 distinguishes zero metrics from unavailable metrics and returns INSUFFICIENT_DATA when evidence is not enough. M9 performs no dashboard, memory promotion, auto publish/upload, auto reupload, platform edit, scraping, fake engagement, bot traffic, or platform evasion.
 
-Learning review truth is evidence-bound. LearningCandidateGenerationRun reads stored M8/M9 evidence and records whether deterministic candidate generation completed or was blocked. LearningCandidate stores a hypothesis, confidence, risk, recommended review scope, source refs, limitations, counter-evidence, and technical appendix. LearningEvidenceBundle preserves supporting evidence, unavailable or unknown metrics, freshness, confidence, policy/rights summary, limitations, and counter-evidence. LearningPromotionEligibilityRun deterministically classifies a candidate as eligible for review, needs more evidence, blocked, or ineligible. LearningReviewQueueItem is a dashboard-ready read model. PlaybookCandidateDraft is draft text. M11 `learning_review_decisions` records human approve/reject/request-more-evidence/suppress/expire decisions, and `approved_playbook_entries` stores approved guidance with evidence refs. M11 approval does not mutate ChannelProfileVersion, CompiledPolicySnapshot, production workflow, daily workflow, platform metadata, or channel config.
+Learning review truth is evidence-bound. LearningCandidateGenerationRun reads stored M8/M9 evidence and records whether deterministic candidate generation completed or was blocked. LearningCandidate stores a hypothesis, confidence, risk, recommended review scope, source refs, limitations, counter-evidence, and technical appendix. LearningEvidenceBundle preserves supporting evidence, unavailable or unknown metrics, freshness, confidence, policy/rights summary, limitations, and counter-evidence. LearningPromotionEligibilityRun deterministically classifies a candidate as eligible for review, needs more evidence, blocked, or ineligible. LearningReviewQueueItem is a dashboard-ready read model. PlaybookCandidateDraft is draft text. M11 `learning_review_decisions` records human approve/reject/request-more-evidence/suppress/expire decisions, and `approved_playbook_entries` stores approved guidance with evidence refs. M11 approval does not mutate ChannelProfileVersion, CompiledPolicySnapshot, production workflow, editorial research, platform metadata, or channel config.
 
-Dashboard truth is read-model and human-decision truth. M11 dashboard aggregates existing DB truth into action-first Command Center, queues, channel workspaces, uploaded video dashboards, media cards, and provider/ops summaries. `channel_lifecycle_decisions` records human lifecycle actions. Health status does not auto-change lifecycle; daily generation is allowed only when the human-decided lifecycle state is ACTIVE. Dashboard read paths must not call real providers, scrape pages, upload/publish/reupload, or expose local media paths.
+Dashboard truth is read-model and human-decision truth. The long-form operator
+dashboard aggregates launch mode/day, runway, public-ready buffer, series,
+publish slots, production state, QC/archive state, blockers, final decisions,
+and publication verification. Health status does not auto-change lifecycle or
+force production. Dashboard read paths must not call real providers, scrape
+pages, upload/publish/reupload, or expose local media paths.
 
 M11.1 auth truth is local/dev operator auth shell truth. `operator_users.password_hash` stores hashed passwords only, `operator_auth_sessions.session_token_hash` stores hashed session tokens only, and the frontend uses httpOnly cookies rather than localStorage tokens. Bootstrap admin comes from env only when no operator user exists.
 
 M11.1 localization truth is canonical-video language-package truth. One `UploadedVideo`/YouTube video can have many `localized_subtitle_packages` and `localized_metadata_packages`; VCOS does not reupload country-specific copies. Subtitle files use `CloudMediaRef`/Google Drive CTA when present. Localized metadata is human-reviewed before use.
 
-M11.1 publish timing truth is configured-window truth. `channel_publish_timing_policies` stores IANA timezones and human-owned windows. `publish_timing_suggestions` stores target local time, UTC equivalent, and operator local time. VCOS does not auto-schedule or auto-publish.
+Publish timing truth is the approved immutable
+`FirstChannelLaunchPolicyVersion`. Its IANA timezone, weekdays, local time,
+minimum interval, version, and canonical hash are the only active configured
+window authority. `publish_timing_suggestions` stores target local time, UTC
+equivalent, operator local time, and an exact `LP:<policy-id>` lineage source.
+Legacy `channel_publish_timing_policies` rows are historical/read-only and are
+ignored by active reads. VCOS does not auto-schedule or auto-publish.
 
 
 Prompt registry truth is repo-authored and audit-snapshotted. Canonical prompt templates, common skills, agent deltas, user templates, schemas, and eval fixtures live under `app/prompts/`. `prompt_template_records`, `agent_prompt_profiles`, `prompt_contract_versions`, and `structured_output_schemas` mirror the repo state for activation, audit, and replay. `prompt_render_runs` store rendered chat messages, prompt hash, context hash, router lane, output schema ref, frozen `channel_contract_json`, frozen `compiled_policy_snapshot_json`, `channel_profile_version_id`, and `compiled_policy_snapshot_id`. `prompt_audit_snapshots` preserve validation and repair outcomes. If required channel contract data is missing, incomplete, stale, or contradictory, content agents return REVIEW_REQUIRED/BLOCK instead of guessing defaults. Prompt rendering does not mutate ChannelProfileVersion, does not choose concrete models, and does not call real providers.
 
 LLM router truth is lane-bound and guard-controlled. `llm_router_profiles`, `llm_router_lanes`, and `llm_model_profiles` define allowed Ollama routing by lane. Business services must request a lane, not a runtime model. `llm_route_attempts` records selected model, fallback level, status, hashes, usage/duration metadata, and refs to `provider_attempts` and `llm_run_snapshots` when created. Real Ollama execution is disabled unless the explicit environment guard is enabled; tests and normal runs do not require Ollama. Provider cost is not invented when Ollama returns no price.
 
-Derivative truth is originality-bound. `content_derivative_graph_edges` records parent/derivative lineage and can be publish-allowed only when originality and risk checks pass. `short_candidates` are selected standalone derivative opportunities from stored long-form artifacts; they are not fixed-count filler. `short_candidate_scores` store deterministic ShortValueScore components. `short_render_plans` are future render plans only and do not call media providers in M10.1.
+Launch policy truth is channel-scoped immutable version truth.
+`FirstChannelLaunchPolicyVersion` binds exact profile, compiled policy, initial
+approved series, controlled-evidence targets, experiment constraints, cadence,
+and human boundaries by canonical hash. Duration remains referenced from the
+channel contract.
 
-Reuse and funnel truth is manual and governed. `reusable_artifacts` preserve license state, rights envelope references, reuse scope, cooldowns, and reuse counts. Reusable artifacts do not imply unlimited rights. `derivative_originality_checks` and `originality_budgets` preserve standalone value, new value, reuse percentage, repetition risk, policy flags, rights flags, and result. `cross_platform_funnel_packages`, `upload_cards`, and `human_upload_tasks` prepare YouTube-first/manual export workflow only. They do not upload, auto-publish, schedule, or create platform posts. `UploadedVideo` remains the canonical published video record after human paste-back/confirmation. YouTube analytics remains the learning authority; TikTok/Facebook analytics learning loops are deferred.
+Cadence truth is slot plus receipt truth. `LongFormPublishSlot` records
+publication intent in the policy timezone. `CadenceEvaluationReceipt` binds the
+exact evaluation window, policy hash, buffer, active production, candidate,
+budget/rights/quality/incident evidence, decision, and hashes. It may start one
+idempotent long-form workflow but never chooses `UPLOAD` or publishes.
 
 
 ## Repo Catalogs

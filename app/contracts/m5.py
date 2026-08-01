@@ -3,7 +3,14 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.contracts.vcos_v2 import (
     AssignmentMode,
@@ -14,13 +21,22 @@ from app.contracts.vcos_v2 import (
 )
 
 
-SlotType = Literal["DAILY", "WEEKLY", "CAMPAIGN", "EVERGREEN", "EXPERIMENT", "MANUAL"]
+SlotType = Literal[
+    "PUBLISH", "RESEARCH", "CAMPAIGN", "EVERGREEN", "EXPERIMENT", "MANUAL"
+]
 SlotStatus = Literal["OPEN", "ASSIGNED", "ADMITTED", "SKIPPED", "CANCELLED"]
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
-DailyRunStatus = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
-DailyRunMode = Literal["MOCK", "REAL_DISABLED", "REAL"]
-DailyRunTriggerType = Literal["MANUAL", "SCHEDULED", "TEST"]
-ContextPackPurpose = Literal["DAILY_IDEA", "PROJECT_ADMISSION", "AUTHORITY_REVIEW", "SEARCH_DEMAND", "TEST"]
+EditorialResearchRunStatus = Literal[
+    "PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED", "ARCHIVED"
+]
+EditorialResearchTriggerType = Literal["MANUAL", "SCHEDULED", "TEST", "MIGRATED"]
+ContextPackPurpose = Literal[
+    "EDITORIAL_RESEARCH",
+    "PROJECT_ADMISSION",
+    "AUTHORITY_REVIEW",
+    "SEARCH_DEMAND",
+    "TEST",
+]
 FreshnessState = Literal["FRESH", "STALE", "UNKNOWN", "NOT_REQUIRED"]
 ConfidenceLevel = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 SearchDemandSourceType = Literal[
@@ -32,9 +48,22 @@ SearchDemandSourceType = Literal[
     "INTERNAL_ANALYTICS",
     "MANUAL_RESEARCH",
 ]
-SearchPlatform = Literal["YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GOOGLE", "GENERIC"]
+SearchPlatform = Literal[
+    "YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GOOGLE", "GENERIC"
+]
 PolicyFitState = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "UNKNOWN"]
-IdeaDecisionStatus = Literal["PROPOSED", "ADMITTED", "REVIEW_REQUIRED", "BLOCKED", "REJECTED", "SKIPPED"]
+EditorialIdeaCandidateStage = Literal[
+    "RESEARCHED",
+    "PREFLIGHT_PASS",
+    "PREFLIGHT_BLOCK",
+    "GREENLIT",
+    "SELECTED_FOR_SLOT",
+    "IN_PRODUCTION",
+    "FINAL_REVIEW_READY",
+    "PUBLISHED",
+    "REJECTED",
+    "EXPIRED",
+]
 IdeaMarketDecision = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "SKIPPED"]
 AdmissionDecision = Literal["ADMIT", "REVIEW_REQUIRED", "BLOCK", "SKIP"]
 TimecodeValue = int | float | str
@@ -46,7 +75,7 @@ class EditorialCalendarSlotCreate(BaseModel):
     policy_snapshot_id: uuid.UUID
     category_id: uuid.UUID | None = None
     slot_date: date
-    slot_type: SlotType = "DAILY"
+    slot_type: SlotType = "MANUAL"
     status: SlotStatus = "OPEN"
     schema_version: Literal["v1", "v2"] = "v1"
     production_lane: ProductionLane | None = None
@@ -69,9 +98,7 @@ class EditorialCalendarSlotCreate(BaseModel):
     def validate_typed_assignment(self) -> "EditorialCalendarSlotCreate":
         if self.schema_version == "v2":
             if self.production_lane is None or self.assignment_mode is None:
-                raise ValueError(
-                    "v2 slot requires production_lane and assignment_mode"
-                )
+                raise ValueError("v2 slot requires production_lane and assignment_mode")
             if self.series_key is not None:
                 raise ValueError(
                     "v2 slot forbids raw series_key; use preferred typed ids"
@@ -92,29 +119,29 @@ class EditorialCalendarSlotRead(EditorialCalendarSlotCreate):
     updated_at: AwareDatetime
 
 
-class ChannelDailyRunCreate(BaseModel):
+class EditorialResearchRunCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
+    channel_profile_version_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
     editorial_calendar_slot_id: uuid.UUID | None = None
     run_date: date
-    status: DailyRunStatus = "PENDING"
-    run_mode: DailyRunMode = "REAL"
-    trigger_type: DailyRunTriggerType = "MANUAL"
+    status: EditorialResearchRunStatus = "PENDING"
+    trigger_type: EditorialResearchTriggerType = "MANUAL"
     reason_codes: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 
 
-class ChannelDailyRunRead(ChannelDailyRunCreate):
+class EditorialResearchRunRead(EditorialResearchRunCreate):
     id: uuid.UUID
     started_at: AwareDatetime | None
     completed_at: AwareDatetime | None
     context_pack_snapshot_id: uuid.UUID | None
     channel_state_pack_snapshot_id: uuid.UUID | None
-    daily_idea_decision_id: uuid.UUID | None
-    project_admission_decision_id: uuid.UUID | None
+    candidate_count: int
+    created_by_user_id: uuid.UUID | None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
@@ -184,7 +211,7 @@ class ContextPackSnapshotRead(BaseModel):
 
 
 class ChannelStatePackSnapshotCreate(BaseModel):
-    channel_daily_run_id: uuid.UUID | None = None
+    editorial_research_run_id: uuid.UUID | None = None
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
@@ -238,8 +265,8 @@ class SearchDemandEvidenceRead(SearchDemandEvidenceCreate):
 class SearchIntentMapCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
-    channel_daily_run_id: uuid.UUID | None = None
-    daily_idea_decision_id: uuid.UUID | None = None
+    editorial_research_run_id: uuid.UUID | None = None
+    editorial_idea_candidate_id: uuid.UUID | None = None
     primary_search_intent: str = Field(min_length=1)
     secondary_search_intents: list[str] = Field(default_factory=list)
     keyword_cluster: list[str] = Field(default_factory=list)
@@ -262,8 +289,8 @@ class SearchIntentMapRead(SearchIntentMapCreate):
 class AudienceTargetPackCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
-    channel_daily_run_id: uuid.UUID | None = None
-    daily_idea_decision_id: uuid.UUID | None = None
+    editorial_research_run_id: uuid.UUID | None = None
+    editorial_idea_candidate_id: uuid.UUID | None = None
     target_audience: str = Field(min_length=1)
     audience_problem: str = Field(min_length=1)
     audience_language: str | None = None
@@ -285,17 +312,21 @@ class IdeaMarketPreflightCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     editorial_calendar_slot_id: uuid.UUID | None = None
-    channel_daily_run_id: uuid.UUID | None = None
-    daily_idea_decision_id: uuid.UUID | None = None
+    editorial_research_run_id: uuid.UUID | None = None
+    editorial_idea_candidate_id: uuid.UUID | None = None
     search_intent_map_id: uuid.UUID | None = None
     audience_target_pack_id: uuid.UUID | None = None
     demand_score: Decimal | None = None
     channel_fit_score: Decimal | None = None
     policy_fit_state: PolicyFitState = "UNKNOWN"
     niche_contract_digest_ref: str | None = None
-    niche_contract_digest_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    niche_contract_digest_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     target_market_digest_ref: str | None = None
-    target_market_digest_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    target_market_digest_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     editorial_slot_ref: str | None = None
     content_category_ref: str | None = None
     target_market: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
@@ -315,98 +346,103 @@ class IdeaMarketPreflightRead(IdeaMarketPreflightCreate):
     created_at: AwareDatetime
 
 
-class DailyIdeaDecisionCreate(BaseModel):
-    channel_daily_run_id: uuid.UUID
-    context_pack_snapshot_id: uuid.UUID
+class EditorialIdeaCandidateCreate(BaseModel):
+    editorial_research_run_id: uuid.UUID
+    context_pack_snapshot_id: uuid.UUID | None = None
     channel_state_pack_snapshot_id: uuid.UUID | None = None
-    schema_version: Literal["v1", "v2"] = "v1"
-    production_lane: ProductionLane | None = None
-    assignment_input_ref: dict[str, Any] | None = None
-    provider_key: str = "llm_router"
-    quota_account_id: uuid.UUID | None = None
-    budget_policy_key: str | None = None
-    estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    stage: EditorialIdeaCandidateStage = "RESEARCHED"
+    proposed_title: str = Field(min_length=1)
+    proposed_angle: str | None = None
+    proposed_format: str | None = None
+    proposed_pillar: str | None = None
+    suggested_series_plan_id: uuid.UUID | None = None
+    rationale: dict[str, Any] = Field(default_factory=dict)
+    evidence_refs: list[dict[str, Any]] = Field(min_length=1)
+    reason_codes: list[str] = Field(default_factory=list)
+    confidence_level: ConfidenceLevel = "UNKNOWN"
+    budget_readiness: Literal["READY", "BLOCKED", "UNKNOWN"] = "UNKNOWN"
+    rights_policy_state: Literal["PASS", "BLOCK", "UNKNOWN"] = "UNKNOWN"
+    quality_state: Literal["PASS", "BLOCK", "UNKNOWN"] = "UNKNOWN"
+    experiment_phase: (
+        Literal[
+            "AUDIENCE_PROMISE",
+            "SERIES_PACKAGING",
+            "ALLOCATION_PREPARATION",
+            "STEADY_STATE",
+        ]
+        | None
+    ) = None
+    primary_variable_under_test: str | None = None
+    baseline_refs: list[dict[str, Any]] = Field(default_factory=list)
+    comparison_group: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
-    def validate_typed_daily_input(self) -> "DailyIdeaDecisionCreate":
-        if self.schema_version == "v2":
-            if self.production_lane != ProductionLane.DAILY_SHORT:
-                raise ValueError(
-                    "v2 DailyIdeaDecision must freeze DAILY_SHORT"
-                )
-            if self.assignment_input_ref is None:
-                raise ValueError(
-                    "v2 DailyIdeaDecision requires assignment_input_ref"
-                )
-        elif (
-            self.production_lane is not None
-            or self.assignment_input_ref is not None
-        ):
-            raise ValueError(
-                "typed daily assignment fields require schema_version=v2"
-            )
+    def validate_experiment(self) -> "EditorialIdeaCandidateCreate":
+        if self.primary_variable_under_test and self.experiment_phase is None:
+            raise ValueError("primary experiment variable requires experiment_phase")
         return self
 
 
-class DailyIdeaDecisionRead(BaseModel):
+class EditorialIdeaCandidateRead(BaseModel):
     id: uuid.UUID
-    channel_daily_run_id: uuid.UUID
+    editorial_research_run_id: uuid.UUID
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     policy_snapshot_id: uuid.UUID
-    context_pack_snapshot_id: uuid.UUID
+    context_pack_snapshot_id: uuid.UUID | None
     channel_state_pack_snapshot_id: uuid.UUID | None
     llm_run_snapshot_id: uuid.UUID | None
-    schema_version: Literal["v1", "v2"] = "v1"
-    production_lane: ProductionLane | None = None
-    proposed_content_mode: ContentMode | None = None
-    assignment_input_ref: dict[str, Any] | None = None
-    decision_status: IdeaDecisionStatus
+    stage: EditorialIdeaCandidateStage
     proposed_title: str
     proposed_angle: str | None
     proposed_format: str | None
     proposed_pillar: str | None
-    proposed_series_key: str | None
+    suggested_series_plan_id: uuid.UUID | None
     rationale: dict[str, Any]
     evidence_refs: list[dict[str, Any]]
     reason_codes: list[str]
     confidence_level: ConfidenceLevel
+    budget_readiness: Literal["READY", "BLOCKED", "UNKNOWN"]
+    rights_policy_state: Literal["PASS", "BLOCK", "UNKNOWN"]
+    quality_state: Literal["PASS", "BLOCK", "UNKNOWN"]
+    experiment_phase: str | None
+    primary_variable_under_test: str | None
+    baseline_refs: list[dict[str, Any]]
+    comparison_group: str | None
+    canonical_hash: str
+    created_by_user_id: uuid.UUID | None
     created_at: AwareDatetime
 
     model_config = ConfigDict(extra="forbid")
 
 
-class DailyRunExecuteRequest(BaseModel):
-    provider_key: str = "llm_router"
-    fixture_mode: Literal["success", "malformed", "unavailable"] = "success"
-    quota_account_id: uuid.UUID | None = None
-    budget_policy_key: str | None = None
-    estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
-    created_by_user_id: uuid.UUID | None = None
+class EditorialResearchRunCandidateBatch(BaseModel):
+    candidates: list[EditorialIdeaCandidateCreate] = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="after")
+    def validate_single_run(self) -> "EditorialResearchRunCandidateBatch":
+        run_ids = {item.editorial_research_run_id for item in self.candidates}
+        if len(run_ids) != 1:
+            raise ValueError("candidate batch must bind one editorial research run")
+        return self
 
-class ProjectAdmissionDecisionCreate(BaseModel):
-    channel_daily_run_id: uuid.UUID
-    daily_idea_decision_id: uuid.UUID
+
+class EditorialIdeaCandidateTransition(BaseModel):
+    target_stage: EditorialIdeaCandidateStage
     idea_market_preflight_id: uuid.UUID | None = None
-    category_id: uuid.UUID | None = None
-    character_binding_id: uuid.UUID | None = None
-    budget_policy_key: str | None = None
-    quota_account_id: uuid.UUID | None = None
-    estimated_cost: Decimal = Decimal("0")
-    created_by_user_id: uuid.UUID | None = None
+    reason_codes: list[str] = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ProjectAdmissionDecisionRead(BaseModel):
     id: uuid.UUID
-    channel_daily_run_id: uuid.UUID | None = None
-    daily_idea_decision_id: uuid.UUID | None = None
+    editorial_research_run_id: uuid.UUID | None = None
+    editorial_idea_candidate_id: uuid.UUID | None = None
     idea_market_preflight_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
     character_binding_id: uuid.UUID | None = None
@@ -436,10 +472,6 @@ class ProjectAdmissionDecisionRead(BaseModel):
     episode_number: int | None = None
     episode_role: str | None = None
     standalone_reason_code: str | None = None
-    parent_video_project_id: uuid.UUID | None = None
-    parent_final_media_ref_id: uuid.UUID | None = None
-    canonical_timeline_ref: str | None = None
-    canonical_timeline_hash: str | None = None
     resolver_version: str | None = None
     resolver_input_hash: str | None = None
     decision_hash: str | None = None
@@ -448,17 +480,6 @@ class ProjectAdmissionDecisionRead(BaseModel):
     created_at: AwareDatetime
 
     model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def preserve_v1_daily_lineage(self) -> "ProjectAdmissionDecisionRead":
-        if self.schema_version == "v1" and (
-            self.channel_daily_run_id is None
-            or self.daily_idea_decision_id is None
-        ):
-            raise ValueError(
-                "v1 ProjectAdmissionDecision read requires daily lineage"
-            )
-        return self
 
 
 class MockAuthorityProposal(BaseModel):
@@ -547,7 +568,9 @@ class RenderSpecDraft(BaseModel):
     def _validate_voice_timeline_contract(self):
         if self.voice_as_master is not True:
             raise ValueError("VOICE_AS_MASTER_CONTRACT_REQUIRED")
-        ordered = sorted(self.scenes, key=lambda scene: _time_to_seconds(scene.start_time))
+        ordered = sorted(
+            self.scenes, key=lambda scene: _time_to_seconds(scene.start_time)
+        )
         for previous, current in zip(ordered, ordered[1:]):
             previous_end = _time_to_seconds(previous.end_time)
             current_start = _time_to_seconds(current.start_time)

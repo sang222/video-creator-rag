@@ -13,7 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.contracts.nich1 import NicheContractDigest, NicheDigestRef
 from app.core.config import get_settings
-from app.db.models import AgentContextPackSnapshot, EffectiveChannelRuntimeContextSnapshot, PromptRenderRun
+from app.db.models import (
+    AgentContextPackSnapshot,
+    EffectiveChannelRuntimeContextSnapshot,
+    PromptRenderRun,
+)
 
 
 R3D3_CONTEXT_PACK_VERSION = "r3d3.agent_context_pack.v1"
@@ -68,17 +72,50 @@ AGENT_MEMORY_FACET_LIMITS = {
     "MediaQCExplanationAgent": 0,
 }
 AGENT_MEMORY_FACET_TYPES = {
-    "ScriptWriterAgent": ["WINNING_HOOK", "FAILED_HOOK", "RETENTION_LESSON", "AVOID_REPEAT", "CATEGORY_STYLE"],
-    "ScriptPlanningAgent": ["RETENTION_LESSON", "PACKAGING_PATTERN", "AVOID_REPEAT", "CATEGORY_STYLE"],
-    "VisualPlanningAgent": ["VISUAL_PATTERN", "SOURCE_QUALITY_LESSON", "CHARACTER_CONTINUITY_LESSON"],
-    "ThumbnailBriefAgent": ["THUMBNAIL_PATTERN", "PACKAGING_PATTERN", "CHARACTER_CONTINUITY_LESSON"],
-    "PublishingMetadataAgent": ["METADATA_PATTERN", "MARKET_LOCALE_LESSON", "PACKAGING_PATTERN"],
-    "GatekeeperSoftReviewAgent": ["WINNING_HOOK", "FAILED_HOOK", "RETENTION_LESSON", "VISUAL_PATTERN", "THUMBNAIL_PATTERN", "METADATA_PATTERN", "AVOID_REPEAT"],
+    "ScriptWriterAgent": [
+        "WINNING_HOOK",
+        "FAILED_HOOK",
+        "RETENTION_LESSON",
+        "AVOID_REPEAT",
+        "CATEGORY_STYLE",
+    ],
+    "ScriptPlanningAgent": [
+        "RETENTION_LESSON",
+        "PACKAGING_PATTERN",
+        "AVOID_REPEAT",
+        "CATEGORY_STYLE",
+    ],
+    "VisualPlanningAgent": [
+        "VISUAL_PATTERN",
+        "SOURCE_QUALITY_LESSON",
+        "CHARACTER_CONTINUITY_LESSON",
+    ],
+    "ThumbnailBriefAgent": [
+        "THUMBNAIL_PATTERN",
+        "PACKAGING_PATTERN",
+        "CHARACTER_CONTINUITY_LESSON",
+    ],
+    "PublishingMetadataAgent": [
+        "METADATA_PATTERN",
+        "MARKET_LOCALE_LESSON",
+        "PACKAGING_PATTERN",
+    ],
+    "GatekeeperSoftReviewAgent": [
+        "WINNING_HOOK",
+        "FAILED_HOOK",
+        "RETENTION_LESSON",
+        "VISUAL_PATTERN",
+        "THUMBNAIL_PATTERN",
+        "METADATA_PATTERN",
+        "AVOID_REPEAT",
+    ],
 }
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json.dumps(
+        _jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
 
 
 def stable_hash(value: Any) -> str:
@@ -137,7 +174,9 @@ def _compact_digest(
 ) -> dict[str, Any]:
     digest = {
         "digest_type": digest_type,
-        "source_snapshot_id": str(source_snapshot_id) if source_snapshot_id is not None else None,
+        "source_snapshot_id": str(source_snapshot_id)
+        if source_snapshot_id is not None
+        else None,
         "source_ref": source_ref,
         "source_hash": source_hash or stable_hash(payload),
         "relevant_contract_paths": relevant_contract_paths or [],
@@ -267,21 +306,30 @@ def resolve_frozen_niche_authority(
             reasons.append("NICHE_CONTRACT_POLICY_SNAPSHOT_EVIDENCE_MISSING")
         elif compiled_ref.get("content_hash") != digest.compiled_policy_snapshot_hash:
             reasons.append("NICHE_CONTRACT_POLICY_SNAPSHOT_HASH_MISMATCH")
-        if effective.channel_contract_hash and digest.channel_contract_hash != effective.channel_contract_hash:
+        if (
+            effective.channel_contract_hash
+            and digest.channel_contract_hash != effective.channel_contract_hash
+        ):
             reasons.append("NICHE_CONTRACT_CHANNEL_CONTRACT_HASH_MISMATCH")
 
         supplied = artifacts or {}
         supplied_digest = supplied.get("niche_contract_digest")
         supplied_ref = supplied.get("niche_contract_digest_ref")
-        if supplied_digest is not None and supplied_digest != digest.model_dump(mode="json"):
+        if supplied_digest is not None and supplied_digest != digest.model_dump(
+            mode="json"
+        ):
             reasons.append("NICHE_CONTRACT_ARTIFACT_COPY_MISMATCH")
-        if supplied_ref is not None and supplied_ref != digest_ref.model_dump(mode="json"):
+        if supplied_ref is not None and supplied_ref != digest_ref.model_dump(
+            mode="json"
+        ):
             reasons.append("NICHE_CONTRACT_REF_ARTIFACT_COPY_MISMATCH")
 
     return FrozenNicheAuthorityResult(
         strict=True,
         digest=digest.model_dump(mode="json") if digest is not None else None,
-        digest_ref=digest_ref.model_dump(mode="json") if digest_ref is not None else None,
+        digest_ref=digest_ref.model_dump(mode="json")
+        if digest_ref is not None
+        else None,
         reason_codes=list(dict.fromkeys(reasons)),
     )
 
@@ -302,7 +350,9 @@ def _contract(
         "task_type": task_type,
         "required_context_sections": required,
         "optional_context_sections": optional or [],
-        "forbidden_context_sections": sorted(set([*(forbidden or []), *GLOBAL_FORBIDDEN_SECTIONS])),
+        "forbidden_context_sections": sorted(
+            set([*(forbidden or []), *GLOBAL_FORBIDDEN_SECTIONS])
+        ),
         "max_context_chars": max_context_chars or LANE_CONTEXT_BUDGETS.get(lane, 8000),
         "max_memory_facets": 0,
         "max_artifact_refs": max_artifact_refs,
@@ -315,10 +365,10 @@ def _contract(
 
 
 DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
-    "DailyIdeaAgent": _contract(
-        "DailyIdeaAgent",
+    "EditorialIdeaResearchAgent": _contract(
+        "EditorialIdeaResearchAgent",
         lane="cheap_structured",
-        task_type="daily_idea",
+        task_type="editorial_idea_research",
         required=[
             "niche_contract_digest",
             "editorial_slot_digest",
@@ -331,19 +381,34 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
     "ChannelAuthorityAgent": _contract(
         "ChannelAuthorityAgent",
         lane="cheap_structured",
-        required=["effective_channel_runtime_digest", "runtime_guard_digest", "evidence_digest", "common_skill_digest"],
+        required=[
+            "effective_channel_runtime_digest",
+            "runtime_guard_digest",
+            "evidence_digest",
+            "common_skill_digest",
+        ],
         optional=["package_status_digest"],
     ),
     "TopicIdeaScoringAgent": _contract(
         "TopicIdeaScoringAgent",
         lane="cheap_structured",
-        required=["effective_channel_runtime_digest", "runtime_guard_digest", "evidence_digest", "common_skill_digest"],
+        required=[
+            "effective_channel_runtime_digest",
+            "runtime_guard_digest",
+            "evidence_digest",
+            "common_skill_digest",
+        ],
         optional=["script_contract_digest", "niche_contract_digest"],
     ),
     "ResearchPackSummarizer": _contract(
         "ResearchPackSummarizer",
         lane="long_context_text",
-        required=["effective_channel_runtime_digest", "runtime_guard_digest", "evidence_digest", "common_skill_digest"],
+        required=[
+            "effective_channel_runtime_digest",
+            "runtime_guard_digest",
+            "evidence_digest",
+            "common_skill_digest",
+        ],
         optional=["script_contract_digest"],
     ),
     "ScriptPlanningAgent": _contract(
@@ -372,7 +437,7 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "common_skill_digest",
         ],
         optional=["package_status_digest", "niche_contract_digest"],
-        forbidden=["full_visual_plan", "upload_card_copy", "media_qc_report"],
+        forbidden=["full_visual_plan", "metadata_package", "media_qc_report"],
     ),
     "PublishingMetadataAgent": _contract(
         "PublishingMetadataAgent",
@@ -400,8 +465,16 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["asset_inventory_digest", "package_status_digest", "niche_contract_digest"],
-        forbidden=["full_research_pack", "full_provider_logs", "full_previous_artifacts"],
+        optional=[
+            "asset_inventory_digest",
+            "package_status_digest",
+            "niche_contract_digest",
+        ],
+        forbidden=[
+            "full_research_pack",
+            "full_provider_logs",
+            "full_previous_artifacts",
+        ],
     ),
     "ThumbnailBriefAgent": _contract(
         "ThumbnailBriefAgent",
@@ -413,8 +486,16 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "runtime_guard_digest",
             "common_skill_digest",
         ],
-        optional=["character_thumbnail_digest", "package_status_digest", "niche_contract_digest"],
-        forbidden=["full_narration_script", "raw_research_pack", "provider_readiness_snapshot_raw"],
+        optional=[
+            "character_thumbnail_digest",
+            "package_status_digest",
+            "niche_contract_digest",
+        ],
+        forbidden=[
+            "full_narration_script",
+            "raw_research_pack",
+            "provider_readiness_snapshot_raw",
+        ],
     ),
     "RightsDisclosureReviewer": _contract(
         "RightsDisclosureReviewer",
@@ -443,20 +524,6 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
         optional=["provider_media_state_digest", "package_status_digest"],
         max_artifact_refs=6,
     ),
-    "UploadCardCopyAgent": _contract(
-        "UploadCardCopyAgent",
-        lane="cheap_structured",
-        required=[
-            "publish_handoff_digest",
-            "metadata_digest",
-            "disclosure_digest",
-            "cta_eligibility_flags",
-            "runtime_guard_digest",
-            "common_skill_digest",
-        ],
-        optional=["package_status_digest"],
-        forbidden=["full_research_pack", "full_narration_script", "provider_readiness_snapshot_raw"],
-    ),
     "ProviderReadinessSummaryAgent": _contract(
         "ProviderReadinessSummaryAgent",
         lane="cheap_structured",
@@ -481,7 +548,12 @@ DEFAULT_CONTRACTS: dict[str, AgentContextContract] = {
             "common_skill_digest",
         ],
         optional=[],
-        forbidden=["full_script", "full_outline", "topic_scores", "full_previous_history"],
+        forbidden=[
+            "full_script",
+            "full_outline",
+            "topic_scores",
+            "full_previous_history",
+        ],
         max_context_chars=14000,
     ),
     "ScriptRewriteAgent": _contract(
@@ -505,13 +577,20 @@ class AgentContextContractRegistry:
     def __init__(self, contracts: dict[str, AgentContextContract] | None = None):
         self.contracts = contracts or DEFAULT_CONTRACTS
 
-    def resolve(self, agent_key: str, task_type: str | None = None, lane: str | None = None) -> AgentContextContract:
+    def resolve(
+        self, agent_key: str, task_type: str | None = None, lane: str | None = None
+    ) -> AgentContextContract:
         contract = self.contracts.get(agent_key)
         if contract is None:
             contract = _contract(
                 agent_key,
                 lane=lane or "cheap_structured",
-                required=["effective_channel_runtime_digest", "runtime_guard_digest", "evidence_digest", "common_skill_digest"],
+                required=[
+                    "effective_channel_runtime_digest",
+                    "runtime_guard_digest",
+                    "evidence_digest",
+                    "common_skill_digest",
+                ],
                 optional=["artifact_digests", "package_status_digest"],
             )
         if task_type is not None or lane is not None:
@@ -519,11 +598,18 @@ class AgentContextContractRegistry:
             payload["task_type"] = task_type
             payload["lane"] = lane or contract.lane
             payload.pop("content_hash", None)
-            contract = replace(contract, task_type=task_type, lane=lane or contract.lane, content_hash=stable_hash(payload))
+            contract = replace(
+                contract,
+                task_type=task_type,
+                lane=lane or contract.lane,
+                content_hash=stable_hash(payload),
+            )
         return contract
 
 
-def _contract_with_memory_digest(contract: AgentContextContract) -> AgentContextContract:
+def _contract_with_memory_digest(
+    contract: AgentContextContract,
+) -> AgentContextContract:
     optional = list(contract.optional_context_sections)
     if "memory_digest" not in optional:
         optional.append("memory_digest")
@@ -591,9 +677,15 @@ class PromptBudgetResult:
 
 
 class PromptBudgetGate:
-    def apply(self, *, contract: AgentContextContract, sections: dict[str, Any], initial_omitted: list[dict[str, Any]]) -> PromptBudgetResult:
+    def apply(
+        self,
+        *,
+        contract: AgentContextContract,
+        sections: dict[str, Any],
+        initial_omitted: list[dict[str, Any]],
+    ) -> PromptBudgetResult:
         required = set(contract.required_context_sections)
-        if contract.task_type != "daily_idea":
+        if contract.task_type != "editorial_idea_research":
             required.add("effective_channel_runtime_digest")
         selected = dict(sections)
         omitted = list(initial_omitted)
@@ -601,17 +693,29 @@ class PromptBudgetGate:
         total_chars = sum(item["chars"] for item in contributors)
         optional_names = [name for name in selected if name not in required]
 
-        for name in sorted(optional_names, key=lambda item: len(canonical_json(selected[item])), reverse=True):
+        for name in sorted(
+            optional_names,
+            key=lambda item: len(canonical_json(selected[item])),
+            reverse=True,
+        ):
             if total_chars <= contract.max_context_chars:
                 break
             removed = selected.pop(name)
-            omitted.append({"section": name, "reason": "OPTIONAL_CONTEXT_REMOVED_FOR_BUDGET", "chars": len(canonical_json(removed))})
+            omitted.append(
+                {
+                    "section": name,
+                    "reason": "OPTIONAL_CONTEXT_REMOVED_FOR_BUDGET",
+                    "chars": len(canonical_json(removed)),
+                }
+            )
             contributors = self._contributors(selected)
             total_chars = sum(item["chars"] for item in contributors)
 
         contributors = self._contributors(selected)
         total_chars = sum(item["chars"] for item in contributors)
-        required_chars = sum(item["chars"] for item in contributors if item["section"] in required)
+        required_chars = sum(
+            item["chars"] for item in contributors if item["section"] in required
+        )
         status = "OK" if total_chars <= contract.max_context_chars else "BLOCK"
         reason_codes = [] if status == "OK" else ["CONTEXT_BUDGET_EXCEEDED"]
         report = {
@@ -632,7 +736,10 @@ class PromptBudgetGate:
         )
 
     def _contributors(self, sections: dict[str, Any]) -> list[dict[str, Any]]:
-        rows = [{"section": name, "chars": len(canonical_json(value))} for name, value in sections.items()]
+        rows = [
+            {"section": name, "chars": len(canonical_json(value))}
+            for name, value in sections.items()
+        ]
         return sorted(rows, key=lambda item: item["chars"], reverse=True)
 
 
@@ -644,7 +751,9 @@ class ShapeGateResult:
 
 
 class ContextPackShapeGate:
-    def check(self, *, contract: AgentContextContract, context_pack: dict[str, Any]) -> ShapeGateResult:
+    def check(
+        self, *, contract: AgentContextContract, context_pack: dict[str, Any]
+    ) -> ShapeGateResult:
         errors: list[str] = []
         digests = _dict(context_pack.get("digests"))
         for section in contract.required_context_sections:
@@ -653,9 +762,15 @@ class ContextPackShapeGate:
         for section in contract.forbidden_context_sections:
             if section in digests or _contains_key(context_pack, section):
                 errors.append(f"forbidden section present: {section}")
-        if contract.task_type != "daily_idea" and "effective_channel_runtime_digest" not in digests:
+        if (
+            contract.task_type != "editorial_idea_research"
+            and "effective_channel_runtime_digest" not in digests
+        ):
             errors.append("EffectiveChannelRuntimeDigest missing")
-        if context_pack.get("agent_context_contract", {}).get("content_hash") != contract.content_hash:
+        if (
+            context_pack.get("agent_context_contract", {}).get("content_hash")
+            != contract.content_hash
+        ):
             errors.append("AgentContextContract hash mismatch")
         if context_pack.get("latest_channel_settings_read") is not False:
             errors.append("latest channel settings bypass marker missing")
@@ -682,7 +797,10 @@ class ContextPackShapeGate:
 
 def _contains_key(value: Any, key: str) -> bool:
     if isinstance(value, dict):
-        return any(str(item_key) == key or _contains_key(item_value, key) for item_key, item_value in value.items())
+        return any(
+            str(item_key) == key or _contains_key(item_value, key)
+            for item_key, item_value in value.items()
+        )
     if isinstance(value, list):
         return any(_contains_key(item, key) for item in value)
     return False
@@ -706,7 +824,6 @@ class ArtifactDigestBuilder:
         "thumbnail_brief": "thumbnail_brief",
         "rights_disclosure_review": "rights_disclosure_review",
         "provider_readiness_summary": "provider_readiness_summary",
-        "upload_card_copy": "upload_card_copy",
     }
     PRIORITY_KEYS = [
         "narration_script",
@@ -724,23 +841,34 @@ class ArtifactDigestBuilder:
         "admission_decision",
     ]
 
-    def build_many(self, *, package_id: uuid.UUID, artifacts: dict[str, Any], max_refs: int = 8) -> list[dict[str, Any]]:
+    def build_many(
+        self, *, package_id: uuid.UUID, artifacts: dict[str, Any], max_refs: int = 8
+    ) -> list[dict[str, Any]]:
         digests: list[dict[str, Any]] = []
         prioritized = [key for key in self.PRIORITY_KEYS if key in artifacts]
         prioritized_set = set(prioritized)
-        ordered_keys = [*prioritized, *(key for key in sorted(artifacts) if key not in prioritized_set)]
+        ordered_keys = [
+            *prioritized,
+            *(key for key in sorted(artifacts) if key not in prioritized_set),
+        ]
         for key in ordered_keys:
             if key in {"agent_context_pack_refs", "human_review_checklist"}:
                 continue
             value = artifacts[key]
             if not isinstance(value, dict):
                 continue
-            digests.append(self.build(package_id=package_id, artifact_key=key, artifact=value))
+            digests.append(
+                self.build(package_id=package_id, artifact_key=key, artifact=value)
+            )
         return digests[:max_refs]
 
-    def build(self, *, package_id: uuid.UUID, artifact_key: str, artifact: dict[str, Any]) -> dict[str, Any]:
+    def build(
+        self, *, package_id: uuid.UUID, artifact_key: str, artifact: dict[str, Any]
+    ) -> dict[str, Any]:
         artifact_type = self.ARTIFACT_TYPES.get(artifact_key, artifact_key)
-        artifact_hash = stable_hash({"artifact_key": artifact_key, "artifact": artifact})
+        artifact_hash = stable_hash(
+            {"artifact_key": artifact_key, "artifact": artifact}
+        )
         payload = {
             "artifact_id": artifact_key,
             "artifact_type": artifact_type,
@@ -748,7 +876,9 @@ class ArtifactDigestBuilder:
             "artifact_hash": artifact_hash,
             "validation_state": "AVAILABLE",
             "risk_flags": self._risk_flags(artifact_key, artifact),
-            "source_refs": artifact.get("source_refs") or artifact.get("evidence_refs") or [],
+            "source_refs": artifact.get("source_refs")
+            or artifact.get("evidence_refs")
+            or [],
             "full_artifact_ref": f"first_scripted_video_package:{package_id}:artifacts.{artifact_key}",
             "key_fields": self._key_fields(artifact_type, artifact),
         }
@@ -757,56 +887,106 @@ class ArtifactDigestBuilder:
 
     def _risk_flags(self, artifact_key: str, artifact: dict[str, Any]) -> list[str]:
         flags: list[str] = []
-        if artifact_key == "rights_disclosure_review" and str(artifact.get("result", "")).upper() != "PASS":
+        if (
+            artifact_key == "rights_disclosure_review"
+            and str(artifact.get("result", "")).upper() != "PASS"
+        ):
             flags.append("RIGHTS_REVIEW_REQUIRED")
-        if artifact_key == "media_qc_explanation" and str(artifact.get("status", "")).upper() in {"PASS", "QC_PASS"}:
+        if artifact_key == "media_qc_explanation" and str(
+            artifact.get("status", "")
+        ).upper() in {"PASS", "QC_PASS"}:
             flags.append("MEDIA_QC_PASS_WITHOUT_MEDIA_RISK")
         if artifact.get("ai_disclosure_needed") is True:
             flags.append("AI_DISCLOSURE_NEEDED")
         return flags
 
-    def _key_fields(self, artifact_type: str, artifact: dict[str, Any]) -> dict[str, Any]:
+    def _key_fields(
+        self, artifact_type: str, artifact: dict[str, Any]
+    ) -> dict[str, Any]:
         if artifact_type == "script_outline":
             chapters = artifact.get("chapters") or artifact.get("outline") or []
             return {
-                "chapter_ids": [str(item.get("chapter_id") or item.get("id") or index + 1) if isinstance(item, dict) else str(index + 1) for index, item in enumerate(_list(chapters))],
-                "target_duration": artifact.get("target_duration") or artifact.get("target_duration_seconds"),
-                "chapter_budgets": artifact.get("chapter_budgets") or artifact.get("duration_budgets") or [],
+                "chapter_ids": [
+                    str(item.get("chapter_id") or item.get("id") or index + 1)
+                    if isinstance(item, dict)
+                    else str(index + 1)
+                    for index, item in enumerate(_list(chapters))
+                ],
+                "target_duration": artifact.get("target_duration")
+                or artifact.get("target_duration_seconds"),
+                "chapter_budgets": artifact.get("chapter_budgets")
+                or artifact.get("duration_budgets")
+                or [],
             }
         if artifact_type == "narration_script":
-            sentences = [item for item in _list(artifact.get("sentences")) if isinstance(item, dict)]
+            sentences = [
+                item
+                for item in _list(artifact.get("sentences"))
+                if isinstance(item, dict)
+            ]
             return {
                 "sentence_count": len(sentences),
-                "total_approx_seconds": sum(float(item.get("approx_seconds") or 0) for item in sentences),
+                "total_approx_seconds": sum(
+                    float(item.get("approx_seconds") or 0) for item in sentences
+                ),
                 "chapter_totals": artifact.get("chapter_totals") or [],
-                "claim_count": len(_list(artifact.get("claims") or artifact.get("claim_refs"))),
+                "claim_count": len(
+                    _list(artifact.get("claims") or artifact.get("claim_refs"))
+                ),
                 "open_issues": artifact.get("open_issues") or [],
             }
         if artifact_type == "visual_plan":
-            scenes = [item for item in _list(artifact.get("scenes")) if isinstance(item, dict)]
-            sentence_ids = {str(item.get("sentence_id")) for item in scenes if item.get("sentence_id")}
-            source_types = sorted({str(item.get("intended_visual_source") or item.get("source_type")) for item in scenes if item.get("intended_visual_source") or item.get("source_type")})
+            scenes = [
+                item for item in _list(artifact.get("scenes")) if isinstance(item, dict)
+            ]
+            sentence_ids = {
+                str(item.get("sentence_id"))
+                for item in scenes
+                if item.get("sentence_id")
+            }
+            source_types = sorted(
+                {
+                    str(item.get("intended_visual_source") or item.get("source_type"))
+                    for item in scenes
+                    if item.get("intended_visual_source") or item.get("source_type")
+                }
+            )
             return {
                 "scene_count": len(scenes),
                 "covered_sentence_count": len(sentence_ids),
-                "uncovered_sentence_ids_count": artifact.get("uncovered_sentence_ids_count", 0),
+                "uncovered_sentence_ids_count": artifact.get(
+                    "uncovered_sentence_ids_count", 0
+                ),
                 "source_types_used": source_types,
             }
         if artifact_type == "metadata_package":
             return {
                 "title": artifact.get("title"),
-                "description_summary": _short_text(artifact.get("description"), limit=220),
-                "disclosure_flag": bool(artifact.get("disclosure_notes") or artifact.get("ai_disclosure_needed")),
+                "description_summary": _short_text(
+                    artifact.get("description"), limit=220
+                ),
+                "disclosure_flag": bool(
+                    artifact.get("disclosure_notes")
+                    or artifact.get("ai_disclosure_needed")
+                ),
                 "cta_class": artifact.get("cta_class") or artifact.get("cta_type"),
-                "language": artifact.get("language") or artifact.get("content_language"),
+                "language": artifact.get("language")
+                or artifact.get("content_language"),
             }
         if artifact_type == "thumbnail_brief":
-            variant = _list(artifact.get("variants"))[0] if _list(artifact.get("variants")) else artifact
+            variant = (
+                _list(artifact.get("variants"))[0]
+                if _list(artifact.get("variants"))
+                else artifact
+            )
             variant_dict = _dict(variant)
             return {
                 "concept": artifact.get("concept") or variant_dict.get("concept"),
-                "text_overlay": artifact.get("text_overlay") or variant_dict.get("text"),
-                "character_refs": artifact.get("character_refs") or variant_dict.get("character_refs") or [],
+                "text_overlay": artifact.get("text_overlay")
+                or variant_dict.get("text"),
+                "character_refs": artifact.get("character_refs")
+                or variant_dict.get("character_refs")
+                or [],
             }
         if artifact_type == "rights_disclosure_review":
             return {
@@ -815,18 +995,20 @@ class ArtifactDigestBuilder:
                 "rights_risk": artifact.get("rights_risk"),
             }
         if artifact_type == "provider_readiness_summary":
-            providers = artifact.get("providers") if isinstance(artifact.get("providers"), dict) else {}
+            providers = (
+                artifact.get("providers")
+                if isinstance(artifact.get("providers"), dict)
+                else {}
+            )
             return {
-                "overall_readiness": artifact.get("overall_readiness") or artifact.get("summary_status"),
-                "blocked_providers": [key for key, value in providers.items() if "NEEDS" in str(value) or "BLOCK" in str(value)],
+                "overall_readiness": artifact.get("overall_readiness")
+                or artifact.get("summary_status"),
+                "blocked_providers": [
+                    key
+                    for key, value in providers.items()
+                    if "NEEDS" in str(value) or "BLOCK" in str(value)
+                ],
                 "next_action": artifact.get("next_action"),
-            }
-        if artifact_type == "upload_card_copy":
-            return {
-                "title_ref": stable_hash({"title": artifact.get("title")}) if artifact.get("title") else None,
-                "description_ref": stable_hash({"description": artifact.get("description")}) if artifact.get("description") else None,
-                "cta_class": artifact.get("cta_class"),
-                "disclosure_refs": artifact.get("disclosure_refs") or [],
             }
         return {"summary": _short_text(artifact, limit=260)}
 
@@ -866,10 +1048,16 @@ class AgentContextPackBuilder:
         provider_readiness_state: dict[str, Any] | None = None,
         schema_requirements: dict[str, Any] | None = None,
     ) -> AgentContextPackBuildResult:
-        contract = self.contract_registry.resolve(agent_key, task_type=task_type, lane=lane)
+        contract = self.contract_registry.resolve(
+            agent_key, task_type=task_type, lane=lane
+        )
         if get_settings().controlled_memory_retrieval_enabled:
             contract = _contract_with_memory_digest(contract)
-        if video_project_id is None or effective_context_snapshot_id is None or not effective_context_hash:
+        if (
+            video_project_id is None
+            or effective_context_snapshot_id is None
+            or not effective_context_hash
+        ):
             return self._blocked(
                 reason_codes=["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"],
                 report={
@@ -879,7 +1067,9 @@ class AgentContextPackBuilder:
                 },
             )
 
-        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, effective_context_snapshot_id)
+        effective = self.session.get(
+            EffectiveChannelRuntimeContextSnapshot, effective_context_snapshot_id
+        )
         if effective is None or effective.video_project_id != video_project_id:
             return self._blocked(
                 reason_codes=["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"],
@@ -889,11 +1079,16 @@ class AgentContextPackBuilder:
                     "effective_context_snapshot_id": str(effective_context_snapshot_id),
                 },
             )
-        if effective.context_hash != effective_context_hash or effective.compile_status != "PASS":
+        if (
+            effective.context_hash != effective_context_hash
+            or effective.compile_status != "PASS"
+        ):
             return self._blocked(
                 reason_codes=["EFFECTIVE_CONTEXT_SNAPSHOT_NOT_PASS"],
                 report={
-                    "status": "BLOCK" if effective.compile_status == "BLOCK" else "REVIEW_REQUIRED",
+                    "status": "BLOCK"
+                    if effective.compile_status == "BLOCK"
+                    else "REVIEW_REQUIRED",
                     "reason_codes": ["EFFECTIVE_CONTEXT_SNAPSHOT_NOT_PASS"],
                     "effective_context_snapshot_id": str(effective.id),
                     "compile_status": effective.compile_status,
@@ -933,7 +1128,9 @@ class AgentContextPackBuilder:
         authoritative_artifacts = dict(artifacts)
         if niche_authority.strict:
             authoritative_artifacts["niche_contract_digest"] = niche_authority.digest
-            authoritative_artifacts["niche_contract_digest_ref"] = niche_authority.digest_ref
+            authoritative_artifacts["niche_contract_digest_ref"] = (
+                niche_authority.digest_ref
+            )
 
         candidate_sections = self._candidate_sections(
             package_id=package_id,
@@ -946,21 +1143,29 @@ class AgentContextPackBuilder:
             runtime_guard_state=runtime_guard_state,
             provider_readiness_state=provider_readiness_state or {},
         )
-        allowed = set(contract.required_context_sections) | set(contract.optional_context_sections) | {
-            "effective_channel_runtime_digest"
-        }
+        allowed = (
+            set(contract.required_context_sections)
+            | set(contract.optional_context_sections)
+            | {"effective_channel_runtime_digest"}
+        )
         selected: dict[str, Any] = {}
         omitted: list[dict[str, Any]] = []
         for name, value in candidate_sections.items():
             if name in contract.forbidden_context_sections:
-                omitted.append({"section": name, "reason": "FORBIDDEN_BY_AGENT_CONTEXT_CONTRACT"})
+                omitted.append(
+                    {"section": name, "reason": "FORBIDDEN_BY_AGENT_CONTEXT_CONTRACT"}
+                )
                 continue
             if name in allowed:
                 selected[name] = value
             else:
-                omitted.append({"section": name, "reason": "NOT_IN_AGENT_CONTEXT_ALLOWLIST"})
+                omitted.append(
+                    {"section": name, "reason": "NOT_IN_AGENT_CONTEXT_ALLOWLIST"}
+                )
 
-        missing = [name for name in contract.required_context_sections if name not in selected]
+        missing = [
+            name for name in contract.required_context_sections if name not in selected
+        ]
         if missing:
             return self._persist_blocking_snapshot(
                 package_id=package_id,
@@ -972,12 +1177,18 @@ class AgentContextPackBuilder:
                 channel_contract_hash=channel_contract_hash,
                 sections=selected,
                 omitted=omitted,
-                shape_gate={"status": "BLOCK", "reason_codes": ["REQUIRED_CONTEXT_MISSING"], "missing_required_sections": missing},
+                shape_gate={
+                    "status": "BLOCK",
+                    "reason_codes": ["REQUIRED_CONTEXT_MISSING"],
+                    "missing_required_sections": missing,
+                },
                 reason_codes=["REQUIRED_CONTEXT_MISSING"],
                 blocking_status="BLOCK",
             )
 
-        budget = self.budget_gate.apply(contract=contract, sections=selected, initial_omitted=omitted)
+        budget = self.budget_gate.apply(
+            contract=contract, sections=selected, initial_omitted=omitted
+        )
         if budget.status != "OK":
             return self._persist_blocking_snapshot(
                 package_id=package_id,
@@ -1023,19 +1234,39 @@ class AgentContextPackBuilder:
             budget_report=context_pack["prompt_budget_metrics"],
             omitted_items=budget.omitted_items,
             largest_context_contributors=budget.largest_context_contributors,
-            shape_gate_result={"status": shape.status, "reason_codes": shape.reason_codes, "errors": shape.errors},
+            shape_gate_result={
+                "status": shape.status,
+                "reason_codes": shape.reason_codes,
+                "errors": shape.errors,
+            },
         )
         if shape.status != "OK":
             return AgentContextPackBuildResult(
                 status="BLOCK",
                 context_pack=context_pack,
                 snapshot=snapshot,
-                blocking_report={"status": "BLOCK", "reason_codes": shape.reason_codes, "errors": shape.errors},
+                blocking_report={
+                    "status": "BLOCK",
+                    "reason_codes": shape.reason_codes,
+                    "errors": shape.errors,
+                },
                 reason_codes=shape.reason_codes,
             )
-        return AgentContextPackBuildResult(status="OK", context_pack=context_pack, snapshot=snapshot, blocking_report=None, reason_codes=[])
+        return AgentContextPackBuildResult(
+            status="OK",
+            context_pack=context_pack,
+            snapshot=snapshot,
+            blocking_report=None,
+            reason_codes=[],
+        )
 
-    def link_prompt_render_run(self, *, snapshot_id: uuid.UUID, prompt_render_run_id: uuid.UUID, prompt_context_hash: str) -> None:
+    def link_prompt_render_run(
+        self,
+        *,
+        snapshot_id: uuid.UUID,
+        prompt_render_run_id: uuid.UUID,
+        prompt_context_hash: str,
+    ) -> None:
         snapshot = self.session.get(AgentContextPackSnapshot, snapshot_id)
         if snapshot is None:
             return
@@ -1056,7 +1287,9 @@ class AgentContextPackBuilder:
                 }
             )
             run.artifact_refs = refs
-        memory_digest = _dict(_dict(snapshot.context_pack_json).get("digests")).get("memory_digest")
+        memory_digest = _dict(_dict(snapshot.context_pack_json).get("digests")).get(
+            "memory_digest"
+        )
         manifest_id = _dict(memory_digest).get("memory_influence_manifest_id")
         if manifest_id:
             from app.services.r3d7 import MemoryInfluenceManifestService
@@ -1092,7 +1325,11 @@ class AgentContextPackBuilder:
             runtime_guard_state=runtime_guard_state,
             provider_readiness_state=provider_readiness_state,
         )
-        evidence = build_evidence_digest(evidence_refs=evidence_refs, artifacts=artifacts, current_package_state=current_package_state)
+        evidence = build_evidence_digest(
+            evidence_refs=evidence_refs,
+            artifacts=artifacts,
+            current_package_state=current_package_state,
+        )
         common = build_common_skill_digest()
         niche_contract = _dict(artifacts.get("niche_contract_digest"))
         niche_contract_ref = _dict(artifacts.get("niche_contract_digest_ref"))
@@ -1104,10 +1341,18 @@ class AgentContextPackBuilder:
         thumbnail = build_thumbnail_contract_digest(effective)
         metadata = build_metadata_contract_digest(effective)
         publish = build_publish_handoff_digest(effective)
-        provider_digest = build_provider_readiness_digest(provider_readiness_state=provider_readiness_state, effective=effective)
-        package_status = build_package_status_digest(current_package_state=current_package_state, artifacts=artifacts, package_id=package_id)
+        provider_digest = build_provider_readiness_digest(
+            provider_readiness_state=provider_readiness_state, effective=effective
+        )
+        package_status = build_package_status_digest(
+            current_package_state=current_package_state,
+            artifacts=artifacts,
+            package_id=package_id,
+        )
         sections = {
-            "effective_channel_runtime_digest": build_effective_channel_runtime_digest(effective),
+            "effective_channel_runtime_digest": build_effective_channel_runtime_digest(
+                effective
+            ),
             "script_contract_digest": script,
             "voice_contract_digest": build_voice_contract_digest(effective),
             "visual_contract_digest": visual,
@@ -1119,25 +1364,48 @@ class AgentContextPackBuilder:
             "evidence_digest": evidence,
             "common_skill_digest": common,
             "duration_policy": build_duration_policy_digest(effective),
-            "script_plan_digest": artifact_by_key.get("script_outline") or unavailable_digest("script_plan_digest", "script_outline"),
-            "script_sentence_digest": build_script_sentence_digest(package_id=package_id, artifacts=artifacts),
-            "script_digest": artifact_by_key.get("narration_script") or unavailable_digest("script_digest", "narration_script"),
-            "allowed_visual_source_policy": build_allowed_visual_source_policy_digest(effective),
-            "asset_inventory_digest": build_asset_inventory_digest(artifacts=artifacts, package_id=package_id),
+            "script_plan_digest": artifact_by_key.get("script_outline")
+            or unavailable_digest("script_plan_digest", "script_outline"),
+            "script_sentence_digest": build_script_sentence_digest(
+                package_id=package_id, artifacts=artifacts
+            ),
+            "script_digest": artifact_by_key.get("narration_script")
+            or unavailable_digest("script_digest", "narration_script"),
+            "allowed_visual_source_policy": build_allowed_visual_source_policy_digest(
+                effective
+            ),
+            "asset_inventory_digest": build_asset_inventory_digest(
+                artifacts=artifacts, package_id=package_id
+            ),
             "title_hook_digest": build_title_hook_digest(artifacts=artifacts),
             "visual_style_digest": build_visual_style_digest(effective),
             "character_thumbnail_digest": build_character_thumbnail_digest(effective),
-            "metadata_digest": artifact_by_key.get("metadata_package") or unavailable_digest("metadata_digest", "metadata_package"),
-            "disclosure_digest": build_disclosure_digest(artifacts=artifacts, effective=effective),
+            "metadata_digest": artifact_by_key.get("metadata_package")
+            or unavailable_digest("metadata_digest", "metadata_package"),
+            "disclosure_digest": build_disclosure_digest(
+                artifacts=artifacts, effective=effective
+            ),
             "title_style_locale_digest": build_title_style_locale_digest(effective),
-            "source_rights_disclosure_context_digest": build_source_rights_disclosure_context_digest(effective),
-            "visual_plan_digest": artifact_by_key.get("visual_plan") or unavailable_digest("visual_plan_digest", "visual_plan"),
-            "provider_media_state_digest": build_provider_media_state_digest(provider_readiness_state=provider_readiness_state, runtime_guard=runtime_guard),
+            "source_rights_disclosure_context_digest": build_source_rights_disclosure_context_digest(
+                effective
+            ),
+            "visual_plan_digest": artifact_by_key.get("visual_plan")
+            or unavailable_digest("visual_plan_digest", "visual_plan"),
+            "provider_media_state_digest": build_provider_media_state_digest(
+                provider_readiness_state=provider_readiness_state,
+                runtime_guard=runtime_guard,
+            ),
             "cta_eligibility_flags": build_cta_eligibility_flags(effective),
             "provider_readiness_digest": provider_digest,
             "package_status_digest": package_status,
-            "package_summary_digest": build_package_summary_digest(current_package_state=current_package_state, artifacts=artifacts, package_id=package_id),
-            "media_inventory_digest": build_media_inventory_digest(artifacts=artifacts, package_id=package_id),
+            "package_summary_digest": build_package_summary_digest(
+                current_package_state=current_package_state,
+                artifacts=artifacts,
+                package_id=package_id,
+            ),
+            "media_inventory_digest": build_media_inventory_digest(
+                artifacts=artifacts, package_id=package_id
+            ),
             "gate_summary_digest": build_gate_summary_digest(artifacts=artifacts),
         }
         if niche_contract:
@@ -1178,7 +1446,9 @@ class AgentContextPackBuilder:
             ]
             if value
         )
-        return AgentMemoryDigestInjectionService(self.session).retrieve_and_record_digest(
+        return AgentMemoryDigestInjectionService(
+            self.session
+        ).retrieve_and_record_digest(
             package_id=package_id,
             effective=effective,
             agent_key=agent_key,
@@ -1234,7 +1504,9 @@ class AgentContextPackBuilder:
                 "effective_context_snapshot_id": str(effective.id),
                 "effective_context_hash": effective.context_hash,
                 "channel_contract_hash": channel_contract_hash,
-                "compiled_policy_snapshot_id": str(compiled_policy_snapshot_id) if compiled_policy_snapshot_id else None,
+                "compiled_policy_snapshot_id": str(compiled_policy_snapshot_id)
+                if compiled_policy_snapshot_id
+                else None,
                 "compiled_policy_snapshot_hash": compiled_policy_snapshot_hash,
                 "artifact_digest_refs": artifact_digest_refs,
                 "schema_requirements": schema_requirements,
@@ -1246,7 +1518,9 @@ class AgentContextPackBuilder:
             },
             "latest_channel_settings_read": False,
         }
-        pack["context_pack_hash"] = stable_hash({key: value for key, value in pack.items() if key != "context_pack_hash"})
+        pack["context_pack_hash"] = stable_hash(
+            {key: value for key, value in pack.items() if key != "context_pack_hash"}
+        )
         return pack
 
     def _persist_blocking_snapshot(
@@ -1269,7 +1543,10 @@ class AgentContextPackBuilder:
     ) -> AgentContextPackBuildResult:
         budget = budget_report or build_prompt_budget_metrics(
             sections=sections,
-            budget_report={"budget_status": blocking_status, "reason_codes": reason_codes},
+            budget_report={
+                "budget_status": blocking_status,
+                "reason_codes": reason_codes,
+            },
             omitted_items=omitted,
             largest_context_contributors=largest_context_contributors or [],
         )
@@ -1285,11 +1562,23 @@ class AgentContextPackBuilder:
             "agent_context_contract": contract.to_dict(),
             "digests": sections,
             "prompt_budget_metrics": budget,
-            "omitted_context_report": {"omitted_context_count": len(omitted), "items": omitted},
-            "audit_refs": {"effective_context_snapshot_id": str(effective.id), "effective_context_hash": effective.context_hash},
+            "omitted_context_report": {
+                "omitted_context_count": len(omitted),
+                "items": omitted,
+            },
+            "audit_refs": {
+                "effective_context_snapshot_id": str(effective.id),
+                "effective_context_hash": effective.context_hash,
+            },
             "latest_channel_settings_read": False,
         }
-        context_pack["context_pack_hash"] = stable_hash({key: value for key, value in context_pack.items() if key != "context_pack_hash"})
+        context_pack["context_pack_hash"] = stable_hash(
+            {
+                key: value
+                for key, value in context_pack.items()
+                if key != "context_pack_hash"
+            }
+        )
         snapshot = self._persist_snapshot(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -1345,10 +1634,19 @@ class AgentContextPackBuilder:
             compiled_policy_snapshot_id=compiled_policy_snapshot_id,
             compiled_policy_snapshot_hash=compiled_policy_snapshot_hash,
             context_pack_hash=str(context_pack["context_pack_hash"]),
-            artifact_digest_refs_json=_artifact_digest_refs(digests.get("artifact_digests")),
-            evidence_digest_hash=_dict(digests.get("evidence_digest")).get("digest_hash"),
-            common_skill_digest_hash=_dict(digests.get("common_skill_digest")).get("digest_hash"),
-            runtime_guard_digest_hash=str(_dict(digests.get("runtime_guard_digest")).get("digest_hash") or stable_hash({})),
+            artifact_digest_refs_json=_artifact_digest_refs(
+                digests.get("artifact_digests")
+            ),
+            evidence_digest_hash=_dict(digests.get("evidence_digest")).get(
+                "digest_hash"
+            ),
+            common_skill_digest_hash=_dict(digests.get("common_skill_digest")).get(
+                "digest_hash"
+            ),
+            runtime_guard_digest_hash=str(
+                _dict(digests.get("runtime_guard_digest")).get("digest_hash")
+                or stable_hash({})
+            ),
             budget_report_json=budget_report,
             omitted_items_json=omitted_items,
             largest_context_contributors_json=largest_context_contributors,
@@ -1360,7 +1658,9 @@ class AgentContextPackBuilder:
         self.session.flush()
         return snapshot
 
-    def _blocked(self, *, reason_codes: list[str], report: dict[str, Any]) -> AgentContextPackBuildResult:
+    def _blocked(
+        self, *, reason_codes: list[str], report: dict[str, Any]
+    ) -> AgentContextPackBuildResult:
         return AgentContextPackBuildResult(
             status="BLOCK",
             context_pack=None,
@@ -1393,26 +1693,44 @@ def unavailable_digest(digest_type: str, source_ref: str) -> dict[str, Any]:
         source_ref=source_ref,
         source_hash=stable_hash({"source_ref": source_ref, "status": "UNAVAILABLE"}),
         relevant_contract_paths=[],
-        must_follow=["Return REVIEW_REQUIRED if this required digest is needed for the requested task."],
+        must_follow=[
+            "Return REVIEW_REQUIRED if this required digest is needed for the requested task."
+        ],
         must_not_do=["Do not invent missing artifact content."],
         payload={"status": "UNAVAILABLE", "source_ref": source_ref},
     )
 
 
-def build_effective_channel_runtime_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_effective_channel_runtime_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     payload = {
         "effective_context_snapshot_id": str(snapshot.id),
         "context_hash": snapshot.context_hash,
         "company_ref": str(snapshot.company_id),
         "channel_ref": str(snapshot.channel_workspace_id),
-        "category_ref": str(snapshot.content_category_id) if snapshot.content_category_id else None,
+        "category_ref": str(snapshot.content_category_id)
+        if snapshot.content_category_id
+        else None,
         "character_refs": {
-            "character_binding_id": str(snapshot.character_binding_id) if snapshot.character_binding_id else None,
-            "character_profile_id": str(snapshot.character_profile_id) if snapshot.character_profile_id else None,
-            "character_version_id": str(snapshot.character_version_id) if snapshot.character_version_id else None,
-            "character_image_branch_id": str(snapshot.character_image_branch_id) if snapshot.character_image_branch_id else None,
-            "reference_asset_pack_id": str(snapshot.reference_asset_pack_id) if snapshot.reference_asset_pack_id else None,
-            "voice_profile_id": str(snapshot.voice_profile_id) if snapshot.voice_profile_id else None,
+            "character_binding_id": str(snapshot.character_binding_id)
+            if snapshot.character_binding_id
+            else None,
+            "character_profile_id": str(snapshot.character_profile_id)
+            if snapshot.character_profile_id
+            else None,
+            "character_version_id": str(snapshot.character_version_id)
+            if snapshot.character_version_id
+            else None,
+            "character_image_branch_id": str(snapshot.character_image_branch_id)
+            if snapshot.character_image_branch_id
+            else None,
+            "reference_asset_pack_id": str(snapshot.reference_asset_pack_id)
+            if snapshot.reference_asset_pack_id
+            else None,
+            "voice_profile_id": str(snapshot.voice_profile_id)
+            if snapshot.voice_profile_id
+            else None,
         },
         "compile_status": snapshot.compile_status,
         "reason_codes": snapshot.reason_codes_json,
@@ -1423,7 +1741,9 @@ def build_effective_channel_runtime_digest(snapshot: EffectiveChannelRuntimeCont
         source_hash=snapshot.context_hash,
         relevant_contract_paths=["effective_channel_runtime_context_snapshots"],
         must_follow=["Use this frozen snapshot as runtime source of truth."],
-        must_not_do=["Do not read latest channel settings or infer missing channel fields."],
+        must_not_do=[
+            "Do not read latest channel settings or infer missing channel fields."
+        ],
         payload=payload,
     )
 
@@ -1449,42 +1769,72 @@ def build_script_contract_digest(
         "market": market.get("primary_market"),
         "locale": market.get("locale"),
         "audience_level": audience.get("audience_level"),
-        "tone_persona": {"tone": persona.get("tone"), "persona": persona.get("persona"), "style_rules": persona.get("style_rules")},
+        "tone_persona": {
+            "tone": persona.get("tone"),
+            "persona": persona.get("persona"),
+            "style_rules": persona.get("style_rules"),
+        },
         "duration_policy": _dict(category.get("default_format_policy")),
-        "structure_policy": _dict(category.get("default_format_policy")).get("structure"),
-        "claim_evidence_policy": safety.get("evidence_required_claim_types") or safety.get("high_risk_claim_policy"),
+        "structure_policy": _dict(category.get("default_format_policy")).get(
+            "structure"
+        ),
+        "claim_evidence_policy": safety.get("evidence_required_claim_types")
+        or safety.get("high_risk_claim_policy"),
         "forbidden_style_topics_claims": {
             "forbidden_style": persona.get("forbidden_style"),
             "forbidden_topics": safety.get("forbidden_topics"),
             "forbidden_claims": safety.get("forbidden_claims"),
         },
-        "character_persona": _dict(snapshot.character_identity_context_json).get("identity"),
+        "character_persona": _dict(snapshot.character_identity_context_json).get(
+            "identity"
+        ),
         "primary_niche": niche.get("primary_niche") or category.get("primary_niche"),
         "sub_niche": niche.get("sub_niche") or category.get("sub_niche"),
         "positioning": niche.get("positioning") or category.get("positioning"),
         "brand_promise": niche.get("brand_promise") or category.get("brand_promise"),
-        "content_pillar": niche.get("content_pillar_key") or category.get("content_pillar"),
+        "content_pillar": niche.get("content_pillar_key")
+        or category.get("content_pillar"),
         "category_id": niche.get("category_id") or category.get("category_id"),
-        "category_sub_niche": niche.get("category_sub_niche") or category.get("sub_niche"),
-        "allowed_topics": niche.get("allowed_topics") or category.get("allowed_topics") or [],
-        "forbidden_topics": niche.get("forbidden_topics") or safety.get("forbidden_topics") or [],
-        "audience_pain_points": niche.get("audience_pain_points") or audience.get("audience_pain_points") or [],
-        "audience_desired_outcomes": niche.get("audience_desired_outcomes") or audience.get("audience_desired_outcomes") or [],
+        "category_sub_niche": niche.get("category_sub_niche")
+        or category.get("sub_niche"),
+        "allowed_topics": niche.get("allowed_topics")
+        or category.get("allowed_topics")
+        or [],
+        "forbidden_topics": niche.get("forbidden_topics")
+        or safety.get("forbidden_topics")
+        or [],
+        "audience_pain_points": niche.get("audience_pain_points")
+        or audience.get("audience_pain_points")
+        or [],
+        "audience_desired_outcomes": niche.get("audience_desired_outcomes")
+        or audience.get("audience_desired_outcomes")
+        or [],
         "niche_contract_digest_ref": niche_ref.get("ref") or niche.get("ref"),
-        "niche_contract_digest_hash": niche_ref.get("content_hash") or niche.get("content_hash"),
+        "niche_contract_digest_hash": niche_ref.get("content_hash")
+        or niche.get("content_hash"),
     }
     return _compact_digest(
         digest_type="ScriptContractDigest",
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
-        relevant_contract_paths=["market_locale", "target_audience", "voice_style", "format_policy", "editorial_strategy"],
-        must_follow=["Follow content language, duration, evidence, persona, and forbidden-claim policy."],
+        relevant_contract_paths=[
+            "market_locale",
+            "target_audience",
+            "voice_style",
+            "format_policy",
+            "editorial_strategy",
+        ],
+        must_follow=[
+            "Follow content language, duration, evidence, persona, and forbidden-claim policy."
+        ],
         must_not_do=["Do not add unsupported claims or override channel persona."],
         payload=payload,
     )
 
 
-def build_voice_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_voice_contract_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     voice = _dict(snapshot.voice_audio_context_json)
     payload = {
         "voice_profile_id": voice.get("voice_profile_id"),
@@ -1496,26 +1846,38 @@ def build_voice_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot
         "consent_status": voice.get("consent_status"),
         "commercial_use_status": voice.get("commercial_use_status"),
         "provider_policy": voice.get("provider_policy"),
-        "character_voice_binding": _dict(snapshot.character_identity_context_json).get("character_profile_id"),
+        "character_voice_binding": _dict(snapshot.character_identity_context_json).get(
+            "character_profile_id"
+        ),
     }
     return _compact_digest(
         digest_type="VoiceContractDigest",
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
-        relevant_contract_paths=["voice_style", "media_policy.voice_provider", "character.voice_profile"],
-        must_follow=["Voice generation remains future/human-approved provider boundary."],
+        relevant_contract_paths=[
+            "voice_style",
+            "media_policy.voice_provider",
+            "character.voice_profile",
+        ],
+        must_follow=[
+            "Voice generation remains future/human-approved provider boundary."
+        ],
         must_not_do=["Do not call TTS or claim a generated voice file exists."],
         payload=payload,
     )
 
 
-def build_visual_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_visual_contract_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     visual = _dict(snapshot.visual_style_context_json)
     payload = {
         "visual_mode": visual.get("visual_mode"),
         "allowed_visual_sources": visual.get("allowed_visual_sources"),
         "forbidden_visual_bait": visual.get("forbidden_visual_bait"),
-        "character_presence_policy": _dict(snapshot.character_identity_context_json).get("character_policy_mode"),
+        "character_presence_policy": _dict(
+            snapshot.character_identity_context_json
+        ).get("character_policy_mode"),
         "character_visual_branch": _dict(visual.get("character_visual_rules")),
         "rights_source_policy": _dict(snapshot.source_rights_disclosure_context_json),
     }
@@ -1523,14 +1885,22 @@ def build_visual_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapsho
         digest_type="VisualContractDigest",
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
-        relevant_contract_paths=["media_policy", "category.default_visual_style_json", "rights_policy"],
-        must_follow=["Use only allowed visual sources and candidate-only provider-backed assets."],
+        relevant_contract_paths=[
+            "media_policy",
+            "category.default_visual_style_json",
+            "rights_policy",
+        ],
+        must_follow=[
+            "Use only allowed visual sources and candidate-only provider-backed assets."
+        ],
         must_not_do=["Do not request media provider generation or use visual bait."],
         payload=payload,
     )
 
 
-def build_thumbnail_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_thumbnail_contract_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     thumb = _dict(snapshot.thumbnail_style_context_json)
     payload = {
         "thumbnail_style": thumb.get("thumbnail_style"),
@@ -1543,14 +1913,22 @@ def build_thumbnail_contract_digest(snapshot: EffectiveChannelRuntimeContextSnap
         digest_type="ThumbnailContractDigest",
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
-        relevant_contract_paths=["category.default_thumbnail_style_json", "media_policy", "editorial_strategy.forbidden_angles"],
-        must_follow=["Create brief only; preserve mobile readability and language rules."],
+        relevant_contract_paths=[
+            "category.default_thumbnail_style_json",
+            "media_policy",
+            "editorial_strategy.forbidden_angles",
+        ],
+        must_follow=[
+            "Create brief only; preserve mobile readability and language rules."
+        ],
         must_not_do=["Do not render or claim a thumbnail asset exists."],
         payload=payload,
     )
 
 
-def build_metadata_contract_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_metadata_contract_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     meta = _dict(snapshot.metadata_seo_policy_context_json)
     market = _dict(snapshot.market_locale_context_json)
     payload = {
@@ -1568,13 +1946,17 @@ def build_metadata_contract_digest(snapshot: EffectiveChannelRuntimeContextSnaps
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
         relevant_contract_paths=["platform_strategy", "rights_policy", "market_locale"],
-        must_follow=["Keep metadata language, title style, SEO, and disclosure placement policy."],
+        must_follow=[
+            "Keep metadata language, title style, SEO, and disclosure placement policy."
+        ],
         must_not_do=["Do not invent evidence, assets, or provider internals."],
         payload=payload,
     )
 
 
-def build_publish_handoff_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_publish_handoff_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     publish = _dict(snapshot.publish_timing_context_json)
     payload = {
         "manual_publish_only": True,
@@ -1588,7 +1970,10 @@ def build_publish_handoff_digest(snapshot: EffectiveChannelRuntimeContextSnapsho
         digest_type="PublishHandoffDigest",
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
-        relevant_contract_paths=["platform_strategy.publish_mode", "market_locale.timezone"],
+        relevant_contract_paths=[
+            "platform_strategy.publish_mode",
+            "market_locale.timezone",
+        ],
         must_follow=["Manual publish handoff only."],
         must_not_do=["Do not upload, publish, reupload, or schedule."],
         payload=payload,
@@ -1607,22 +1992,35 @@ def build_runtime_guard_digest(
         "no_provider_media_calls_unless_configured_and_human_approved_later": True,
         "no_mock_fallback": True,
         "provider_readiness_summary": provider_summary,
-        "media_boundary_state": runtime_guard_state.get("media_boundary_state") or "BLOCKED_UNTIL_HUMAN_APPROVED_PROVIDER_STAGE",
+        "media_boundary_state": runtime_guard_state.get("media_boundary_state")
+        or "BLOCKED_UNTIL_HUMAN_APPROVED_PROVIDER_STAGE",
         "google_drive_archive_only": True,
         "llm_router_only": True,
         "runtime_flags": {
             key: runtime_guard_state.get(key)
             for key in sorted(runtime_guard_state)
-            if key.startswith("no_") or key.endswith("_only") or key.endswith("_disabled")
+            if key.startswith("no_")
+            or key.endswith("_only")
+            or key.endswith("_disabled")
         },
     }
     return _compact_digest(
         digest_type="RuntimeGuardDigest",
         source_snapshot_id=effective.id,
-        source_hash=stable_hash({"effective": effective.context_hash, "runtime_guard_state": runtime_guard_state, "provider": provider_summary}),
+        source_hash=stable_hash(
+            {
+                "effective": effective.context_hash,
+                "runtime_guard_state": runtime_guard_state,
+                "provider": provider_summary,
+            }
+        ),
         relevant_contract_paths=["platform_strategy", "media_policy", "budget_policy"],
-        must_follow=["Route LLM agents through LLMRouter and stop before provider media/upload/publish."],
-        must_not_do=["Do not call media providers, Google Drive upload, or YouTube upload/publish."],
+        must_follow=[
+            "Route LLM agents through LLMRouter and stop before provider media/upload/publish."
+        ],
+        must_not_do=[
+            "Do not call media providers, Google Drive upload, or YouTube upload/publish."
+        ],
         payload=payload,
     )
 
@@ -1634,9 +2032,13 @@ def build_evidence_digest(
     current_package_state: dict[str, Any],
 ) -> dict[str, Any]:
     research_text = str(current_package_state.get("research_pack_text") or "")
-    fact_candidates = [line.strip(" -") for line in re.split(r"[\n.;]+", research_text) if line.strip()]
+    fact_candidates = [
+        line.strip(" -") for line in re.split(r"[\n.;]+", research_text) if line.strip()
+    ]
     research_notes = _dict(artifacts.get("research_notes"))
-    facts = _strings(research_notes.get("facts")) or [_short_text(item, 160) for item in fact_candidates[:6] if _short_text(item, 160)]
+    facts = _strings(research_notes.get("facts")) or [
+        _short_text(item, 160) for item in fact_candidates[:6] if _short_text(item, 160)
+    ]
     assumptions = _strings(research_notes.get("assumptions"))
     open_questions = _strings(research_notes.get("open_questions"))
     conflicts = _strings(research_notes.get("conflicts"))
@@ -1657,9 +2059,19 @@ def build_evidence_digest(
     return _compact_digest(
         digest_type="EvidenceDigest",
         source_ref="operator_research_pack",
-        source_hash=stable_hash({"evidence_refs": evidence_refs, "research_text_hash": stable_hash(research_text)}),
-        relevant_contract_paths=["editorial_strategy.claim_style", "learning_policy.min_evidence_required"],
-        must_follow=["Use only supplied evidence refs and mark unsupported claims REVIEW_REQUIRED."],
+        source_hash=stable_hash(
+            {
+                "evidence_refs": evidence_refs,
+                "research_text_hash": stable_hash(research_text),
+            }
+        ),
+        relevant_contract_paths=[
+            "editorial_strategy.claim_style",
+            "learning_policy.min_evidence_required",
+        ],
+        must_follow=[
+            "Use only supplied evidence refs and mark unsupported claims REVIEW_REQUIRED."
+        ],
         must_not_do=["Do not invent citations, metrics, assets, or rights evidence."],
         payload=payload,
     )
@@ -1671,7 +2083,13 @@ def build_common_skill_digest() -> dict[str, Any]:
     refs: list[dict[str, Any]] = []
     for path in sorted(common_dir.glob("*.md")):
         text = path.read_text(encoding="utf-8")
-        refs.append({"ref": str(path.relative_to(root)), "name": path.stem, "hash": hashlib.sha256(text.encode("utf-8")).hexdigest()})
+        refs.append(
+            {
+                "ref": str(path.relative_to(root)),
+                "name": path.stem,
+                "hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            }
+        )
     payload = {
         "hard_rule_header_inline": True,
         "hard_rule_header_hash": HARD_RULE_HEADER_HASH,
@@ -1685,25 +2103,39 @@ def build_common_skill_digest() -> dict[str, Any]:
         source_hash=stable_hash(refs),
         relevant_contract_paths=["prompt_registry.common_skill_refs"],
         must_follow=["Hard-rule header remains inline in every prompt."],
-        must_not_do=["Do not expand full common skill text into production prompts by default."],
+        must_not_do=[
+            "Do not expand full common skill text into production prompts by default."
+        ],
         payload=payload,
     )
 
 
-def build_duration_policy_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
-    policy = _dict(_dict(snapshot.category_runtime_context_json).get("default_format_policy"))
+def build_duration_policy_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
+    policy = _dict(
+        _dict(snapshot.category_runtime_context_json).get("default_format_policy")
+    )
     return _compact_digest(
         digest_type="DurationPolicyDigest",
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
-        relevant_contract_paths=["format_policy", "category.default_format_policy_json"],
+        relevant_contract_paths=[
+            "format_policy",
+            "category.default_format_policy_json",
+        ],
         must_follow=["Respect target duration and chapter budgets."],
         must_not_do=["Do not invent duration policy if unavailable."],
-        payload={"duration_policy": policy, "status": "AVAILABLE" if policy else "UNAVAILABLE"},
+        payload={
+            "duration_policy": policy,
+            "status": "AVAILABLE" if policy else "UNAVAILABLE",
+        },
     )
 
 
-def build_allowed_visual_source_policy_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_allowed_visual_source_policy_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     visual = _dict(snapshot.visual_style_context_json)
     return _compact_digest(
         digest_type="AllowedVisualSourcePolicyDigest",
@@ -1716,15 +2148,21 @@ def build_allowed_visual_source_policy_digest(snapshot: EffectiveChannelRuntimeC
     )
 
 
-def build_script_sentence_digest(*, package_id: uuid.UUID, artifacts: dict[str, Any]) -> dict[str, Any]:
+def build_script_sentence_digest(
+    *, package_id: uuid.UUID, artifacts: dict[str, Any]
+) -> dict[str, Any]:
     script = _dict(artifacts.get("narration_script"))
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
     preview_sentences = sentences[:8]
     if len(sentences) > 10:
         preview_sentences = [*preview_sentences, *sentences[-2:]]
     payload = {
         "sentence_count": len(sentences),
-        "sentence_ids": [item.get("sentence_id") for item in sentences if item.get("sentence_id")],
+        "sentence_ids": [
+            item.get("sentence_id") for item in sentences if item.get("sentence_id")
+        ],
         "timeline_slice": [
             {
                 "sentence_id": item.get("sentence_id"),
@@ -1747,10 +2185,22 @@ def build_script_sentence_digest(*, package_id: uuid.UUID, artifacts: dict[str, 
     )
 
 
-def build_asset_inventory_digest(*, artifacts: dict[str, Any], package_id: uuid.UUID) -> dict[str, Any]:
-    media_keys = [key for key in sorted(artifacts) if "asset" in key or "media" in key or "thumbnail" in key]
+def build_asset_inventory_digest(
+    *, artifacts: dict[str, Any], package_id: uuid.UUID
+) -> dict[str, Any]:
+    media_keys = [
+        key
+        for key in sorted(artifacts)
+        if "asset" in key or "media" in key or "thumbnail" in key
+    ]
     payload = {
-        "available_asset_refs": [{"artifact_key": key, "ref": f"first_scripted_video_package:{package_id}:artifacts.{key}"} for key in media_keys],
+        "available_asset_refs": [
+            {
+                "artifact_key": key,
+                "ref": f"first_scripted_video_package:{package_id}:artifacts.{key}",
+            }
+            for key in media_keys
+        ],
         "media_generation_done": False,
     }
     return _compact_digest(
@@ -1768,13 +2218,17 @@ def build_title_hook_digest(*, artifacts: dict[str, Any]) -> dict[str, Any]:
     metadata = _dict(artifacts.get("metadata_package"))
     script = _dict(artifacts.get("narration_script"))
     first_sentence = None
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
     if sentences:
         first_sentence = _short_text(sentences[0].get("text"), 160)
     payload = {
         "title": metadata.get("title"),
         "hook_preview": metadata.get("hook") or first_sentence,
-        "title_hash": stable_hash({"title": metadata.get("title")}) if metadata.get("title") else None,
+        "title_hash": stable_hash({"title": metadata.get("title")})
+        if metadata.get("title")
+        else None,
     }
     return _compact_digest(
         digest_type="TitleHookDigest",
@@ -1787,7 +2241,9 @@ def build_title_hook_digest(*, artifacts: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def build_visual_style_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_visual_style_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     visual = _dict(snapshot.visual_style_context_json)
     payload = {
         "visual_mode": visual.get("visual_mode"),
@@ -1805,7 +2261,9 @@ def build_visual_style_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) 
     )
 
 
-def build_character_thumbnail_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_character_thumbnail_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     character = _dict(snapshot.character_identity_context_json)
     thumb = _dict(snapshot.thumbnail_style_context_json)
     payload = {
@@ -1820,20 +2278,28 @@ def build_character_thumbnail_digest(snapshot: EffectiveChannelRuntimeContextSna
         source_snapshot_id=snapshot.id,
         source_hash=snapshot.context_hash,
         relevant_contract_paths=["character_identity", "thumbnail_style"],
-        must_follow=["Use character thumbnail rules only when character binding exists."],
+        must_follow=[
+            "Use character thumbnail rules only when character binding exists."
+        ],
         must_not_do=["Do not invent character likeness or assets."],
         payload=payload,
     )
 
 
-def build_disclosure_digest(*, artifacts: dict[str, Any], effective: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_disclosure_digest(
+    *, artifacts: dict[str, Any], effective: EffectiveChannelRuntimeContextSnapshot
+) -> dict[str, Any]:
     rights = _dict(artifacts.get("rights_disclosure_review"))
     source = _dict(effective.source_rights_disclosure_context_json)
     payload = {
         "rights_review_result": rights.get("result"),
-        "ai_disclosure_needed": rights.get("ai_disclosure_needed", source.get("ai_disclosure_policy")),
+        "ai_disclosure_needed": rights.get(
+            "ai_disclosure_needed", source.get("ai_disclosure_policy")
+        ),
         "rights_risk": rights.get("rights_risk"),
-        "disclosure_notes": _strings(rights.get("disclosure_notes") or source.get("required_disclosure_blocks")),
+        "disclosure_notes": _strings(
+            rights.get("disclosure_notes") or source.get("required_disclosure_blocks")
+        ),
     }
     return _compact_digest(
         digest_type="DisclosureDigest",
@@ -1846,7 +2312,9 @@ def build_disclosure_digest(*, artifacts: dict[str, Any], effective: EffectiveCh
     )
 
 
-def build_title_style_locale_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_title_style_locale_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     metadata = _dict(snapshot.metadata_seo_policy_context_json)
     market = _dict(snapshot.market_locale_context_json)
     payload = {
@@ -1866,7 +2334,9 @@ def build_title_style_locale_digest(snapshot: EffectiveChannelRuntimeContextSnap
     )
 
 
-def build_source_rights_disclosure_context_digest(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_source_rights_disclosure_context_digest(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     source = _dict(snapshot.source_rights_disclosure_context_json)
     return _compact_digest(
         digest_type="SourceRightsDisclosureContextDigest",
@@ -1879,10 +2349,16 @@ def build_source_rights_disclosure_context_digest(snapshot: EffectiveChannelRunt
     )
 
 
-def build_provider_media_state_digest(*, provider_readiness_state: dict[str, Any], runtime_guard: dict[str, Any]) -> dict[str, Any]:
+def build_provider_media_state_digest(
+    *, provider_readiness_state: dict[str, Any], runtime_guard: dict[str, Any]
+) -> dict[str, Any]:
     payload = {
-        "provider_readiness_summary": _provider_readiness_summary(provider_readiness_state),
-        "media_boundary_state": _dict(runtime_guard.get("payload")).get("media_boundary_state"),
+        "provider_readiness_summary": _provider_readiness_summary(
+            provider_readiness_state
+        ),
+        "media_boundary_state": _dict(runtime_guard.get("payload")).get(
+            "media_boundary_state"
+        ),
         "no_provider_calls_confirmed": True,
     }
     return _compact_digest(
@@ -1890,13 +2366,17 @@ def build_provider_media_state_digest(*, provider_readiness_state: dict[str, Any
         source_ref="provider_readiness_snapshot_digest",
         source_hash=stable_hash(payload),
         relevant_contract_paths=["media_policy", "runtime_guard"],
-        must_follow=["Provider gaps are boundary state, not a reason to fake media output."],
+        must_follow=[
+            "Provider gaps are boundary state, not a reason to fake media output."
+        ],
         must_not_do=["Do not call providers or claim media exists."],
         payload=payload,
     )
 
 
-def build_cta_eligibility_flags(snapshot: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_cta_eligibility_flags(
+    snapshot: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     cta = _dict(snapshot.monetization_cta_context_json)
     payload = {
         "allowed_cta_types": cta.get("allowed_cta_types"),
@@ -1915,7 +2395,11 @@ def build_cta_eligibility_flags(snapshot: EffectiveChannelRuntimeContextSnapshot
     )
 
 
-def build_provider_readiness_digest(*, provider_readiness_state: dict[str, Any], effective: EffectiveChannelRuntimeContextSnapshot) -> dict[str, Any]:
+def build_provider_readiness_digest(
+    *,
+    provider_readiness_state: dict[str, Any],
+    effective: EffectiveChannelRuntimeContextSnapshot,
+) -> dict[str, Any]:
     payload = _provider_readiness_summary(provider_readiness_state)
     return _compact_digest(
         digest_type="ProviderReadinessDigest",
@@ -1929,14 +2413,24 @@ def build_provider_readiness_digest(*, provider_readiness_state: dict[str, Any],
     )
 
 
-def _provider_readiness_summary(provider_readiness_state: dict[str, Any]) -> dict[str, Any]:
+def _provider_readiness_summary(
+    provider_readiness_state: dict[str, Any],
+) -> dict[str, Any]:
     summaries = _list(provider_readiness_state.get("provider_summaries"))
     providers: dict[str, Any] = {}
     for item in summaries:
         if not isinstance(item, dict) or not item.get("provider_key"):
             continue
         key = str(item["provider_key"])
-        if key not in {"ollama", "elevenlabs", "google_veo", "pexels_api", "google-drive", "youtube-owner", "youtube-public"}:
+        if key not in {
+            "ollama",
+            "elevenlabs",
+            "google_veo",
+            "pexels_api",
+            "google-drive",
+            "youtube-owner",
+            "youtube-public",
+        }:
             continue
         providers[key] = {
             "readiness_state": item.get("readiness_state"),
@@ -1945,17 +2439,26 @@ def _provider_readiness_summary(provider_readiness_state: dict[str, Any]) -> dic
             "next_action": item.get("next_action"),
         }
     return {
-        "provider_readiness_snapshot_id": str(provider_readiness_state.get("id")) if provider_readiness_state.get("id") else None,
+        "provider_readiness_snapshot_id": str(provider_readiness_state.get("id"))
+        if provider_readiness_state.get("id")
+        else None,
         "providers": providers,
     }
 
 
-def build_package_status_digest(*, current_package_state: dict[str, Any], artifacts: dict[str, Any], package_id: uuid.UUID) -> dict[str, Any]:
+def build_package_status_digest(
+    *,
+    current_package_state: dict[str, Any],
+    artifacts: dict[str, Any],
+    package_id: uuid.UUID,
+) -> dict[str, Any]:
     payload = {
         "package_id": str(package_id),
         "milestone": current_package_state.get("milestone"),
         "agent_task": current_package_state.get("agent_task"),
-        "artifact_keys_present": sorted(key for key, value in artifacts.items() if isinstance(value, dict)),
+        "artifact_keys_present": sorted(
+            key for key, value in artifacts.items() if isinstance(value, dict)
+        ),
         "required_stop_at": current_package_state.get("required_stop_at"),
     }
     return _compact_digest(
@@ -1969,15 +2472,35 @@ def build_package_status_digest(*, current_package_state: dict[str, Any], artifa
     )
 
 
-def build_package_summary_digest(*, current_package_state: dict[str, Any], artifacts: dict[str, Any], package_id: uuid.UUID) -> dict[str, Any]:
-    artifact_presence = {key: isinstance(value, dict) and bool(value) for key, value in sorted(artifacts.items())}
+def build_package_summary_digest(
+    *,
+    current_package_state: dict[str, Any],
+    artifacts: dict[str, Any],
+    package_id: uuid.UUID,
+) -> dict[str, Any]:
+    artifact_presence = {
+        key: isinstance(value, dict) and bool(value)
+        for key, value in sorted(artifacts.items())
+    }
     payload = {
         "package_id": str(package_id),
         "artifact_presence_summary": {
-            "present_count": sum(1 for present in artifact_presence.values() if present),
+            "present_count": sum(
+                1 for present in artifact_presence.values() if present
+            ),
             "presence_hash": stable_hash(artifact_presence),
         },
-        "text_agents_completed": [key for key in ("narration_script", "metadata_package", "visual_plan", "thumbnail_brief", "rights_disclosure_review") if artifacts.get(key)],
+        "text_agents_completed": [
+            key
+            for key in (
+                "narration_script",
+                "metadata_package",
+                "visual_plan",
+                "thumbnail_brief",
+                "rights_disclosure_review",
+            )
+            if artifacts.get(key)
+        ],
         "media_generation_done": False,
     }
     return _compact_digest(
@@ -1986,17 +2509,25 @@ def build_package_summary_digest(*, current_package_state: dict[str, Any], artif
         source_hash=stable_hash(payload),
         relevant_contract_paths=["package_state"],
         must_follow=["Explain QC boundary from package summary only."],
-        must_not_do=["Do not read full script, outline, topic scores, or previous history."],
+        must_not_do=[
+            "Do not read full script, outline, topic scores, or previous history."
+        ],
         payload=payload,
     )
 
 
-def build_media_inventory_digest(*, artifacts: dict[str, Any], package_id: uuid.UUID) -> dict[str, Any]:
+def build_media_inventory_digest(
+    *, artifacts: dict[str, Any], package_id: uuid.UUID
+) -> dict[str, Any]:
     payload = {
         "media_files_present": False,
         "media_file_refs": [],
-        "visual_plan_ref": f"first_scripted_video_package:{package_id}:artifacts.visual_plan" if artifacts.get("visual_plan") else None,
-        "thumbnail_brief_ref": f"first_scripted_video_package:{package_id}:artifacts.thumbnail_brief" if artifacts.get("thumbnail_brief") else None,
+        "visual_plan_ref": f"first_scripted_video_package:{package_id}:artifacts.visual_plan"
+        if artifacts.get("visual_plan")
+        else None,
+        "thumbnail_brief_ref": f"first_scripted_video_package:{package_id}:artifacts.thumbnail_brief"
+        if artifacts.get("thumbnail_brief")
+        else None,
         "media_qc_allowed_status": ["NOT_AVAILABLE", "WAITING_MEDIA_GENERATION"],
     }
     return _compact_digest(
@@ -2054,11 +2585,19 @@ def build_prompt_budget_metrics(
     }
 
 
-def update_prompt_budget_after_render(context_pack: dict[str, Any], *, system_chars: int, user_chars: int) -> dict[str, Any]:
+def update_prompt_budget_after_render(
+    context_pack: dict[str, Any], *, system_chars: int, user_chars: int
+) -> dict[str, Any]:
     metrics = dict(context_pack.get("prompt_budget_metrics") or {})
     metrics["prompt_chars_system"] = system_chars
     metrics["prompt_chars_user"] = user_chars
     metrics["prompt_tokens_estimated"] = max(1, (system_chars + user_chars) // 4)
     context_pack["prompt_budget_metrics"] = metrics
-    context_pack["context_pack_hash"] = stable_hash({key: value for key, value in context_pack.items() if key != "context_pack_hash"})
+    context_pack["context_pack_hash"] = stable_hash(
+        {
+            key: value
+            for key, value in context_pack.items()
+            if key != "context_pack_hash"
+        }
+    )
     return context_pack

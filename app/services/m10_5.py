@@ -58,8 +58,23 @@ DEFAULT_ALLOWED_CLEANUP_ROOTS = (
     ROOT / "var" / "generated",
 )
 
-SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
-PUBLIC_FORBIDDEN_KEY_FRAGMENTS = {"local_source_path", "absolute_path", "download", "preview", "web_content_link", *SECRET_KEY_FRAGMENTS}
+SECRET_KEY_FRAGMENTS = {
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential_value",
+}
+PUBLIC_FORBIDDEN_KEY_FRAGMENTS = {
+    "local_source_path",
+    "absolute_path",
+    "download",
+    "preview",
+    "web_content_link",
+    *SECRET_KEY_FRAGMENTS,
+}
 
 
 @dataclass(frozen=True)
@@ -118,7 +133,10 @@ class DriveArchivePathBuilder:
             if channel_workspace_id:
                 folder_path.append(f"channel_{channel_workspace_id}")
             folder_path.extend([f"uploaded_video_{uploaded_video_id}", subfolder])
-            return DriveArchivePath(mode=DRIVE_ARCHIVE_PATH_MODE_UPLOADED_VIDEO_SCOPED, folder_path=folder_path)
+            return DriveArchivePath(
+                mode=DRIVE_ARCHIVE_PATH_MODE_UPLOADED_VIDEO_SCOPED,
+                folder_path=folder_path,
+            )
         if company_id and channel_workspace_id and video_project_id:
             return DriveArchivePath(
                 mode=DRIVE_ARCHIVE_PATH_MODE_PROJECT_SCOPED,
@@ -137,15 +155,19 @@ class DriveArchivePathBuilder:
 
 
 class TokenExchanger(Protocol):
-    def exchange_code(self, *, code: str, client_config: dict[str, str], scopes: list[str]) -> dict[str, Any]:
-        ...
+    def exchange_code(
+        self, *, code: str, client_config: dict[str, str], scopes: list[str]
+    ) -> dict[str, Any]: ...
 
-    def refresh_access_token(self, *, refresh_token: str, client_config: dict[str, str]) -> dict[str, Any]:
-        ...
+    def refresh_access_token(
+        self, *, refresh_token: str, client_config: dict[str, str]
+    ) -> dict[str, Any]: ...
 
 
 class GoogleOAuthTokenExchanger:
-    def exchange_code(self, *, code: str, client_config: dict[str, str], scopes: list[str]) -> dict[str, Any]:
+    def exchange_code(
+        self, *, code: str, client_config: dict[str, str], scopes: list[str]
+    ) -> dict[str, Any]:
         payload = {
             "code": code,
             "client_id": client_config["client_id"],
@@ -155,7 +177,9 @@ class GoogleOAuthTokenExchanger:
         }
         return _post_google_token(payload)
 
-    def refresh_access_token(self, *, refresh_token: str, client_config: dict[str, str]) -> dict[str, Any]:
+    def refresh_access_token(
+        self, *, refresh_token: str, client_config: dict[str, str]
+    ) -> dict[str, Any]:
         payload = {
             "refresh_token": refresh_token,
             "client_id": client_config["client_id"],
@@ -175,8 +199,12 @@ class GoogleDriveConfigService:
         scopes = [item.strip() for item in raw.split() if item.strip()]
         if not scopes:
             return [GOOGLE_DRIVE_SCOPE]
-        if GOOGLE_DRIVE_SCOPE not in scopes or any(scope == "https://www.googleapis.com/auth/drive" for scope in scopes):
-            raise ValidationFailureError("Google Drive upload must use the drive.file OAuth scope")
+        if GOOGLE_DRIVE_SCOPE not in scopes or any(
+            scope == "https://www.googleapis.com/auth/drive" for scope in scopes
+        ):
+            raise ValidationFailureError(
+                "Google Drive upload must use the drive.file OAuth scope"
+            )
         return scopes
 
     def offload_enabled(self) -> bool:
@@ -205,7 +233,9 @@ class GoogleDriveConfigService:
         oauth_configured = self.oauth_configured()
         return {
             "offload_enabled": self.offload_enabled(),
-            "config_state": "CONFIGURED" if self.offload_enabled() and oauth_configured and self.root_folder_id() else "NOT_CONFIGURED",
+            "config_state": "CONFIGURED"
+            if self.offload_enabled() and oauth_configured and self.root_folder_id()
+            else "NOT_CONFIGURED",
             "scopes": self.scopes if oauth_configured else [],
             "root_folder_id_configured": bool(self.root_folder_id()),
             "upload_mode": self.upload_mode(),
@@ -214,16 +244,26 @@ class GoogleDriveConfigService:
 
     def _oauth_client_config_or_none(self) -> dict[str, str] | None:
         client_id = self.settings.google_drive_oauth_client_id
-        client_secret = self.settings.google_drive_oauth_client_secret.get_secret_value() if self.settings.google_drive_oauth_client_secret else None
+        client_secret = (
+            self.settings.google_drive_oauth_client_secret.get_secret_value()
+            if self.settings.google_drive_oauth_client_secret
+            else None
+        )
         redirect_uri = self.settings.google_drive_oauth_redirect_uri
         if self.settings.google_drive_oauth_client_secrets_file:
-            file_config = _read_oauth_client_file(Path(self.settings.google_drive_oauth_client_secrets_file))
+            file_config = _read_oauth_client_file(
+                Path(self.settings.google_drive_oauth_client_secrets_file)
+            )
             client_id = client_id or file_config.get("client_id")
             client_secret = client_secret or file_config.get("client_secret")
             redirect_uri = redirect_uri or file_config.get("redirect_uri")
         if not client_id or not client_secret or not redirect_uri:
             return None
-        return {"client_id": client_id, "client_secret": client_secret, "redirect_uri": redirect_uri}
+        return {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        }
 
 
 class GoogleDriveOAuthCredentialService:
@@ -251,7 +291,9 @@ class GoogleDriveOAuthCredentialService:
         refresh_value = token_response.get("refresh_token")
         access_value = token_response.get("access_token")
         if not refresh_value or not access_value:
-            raise ValidationFailureError("Google Drive OAuth requires refresh_token and access_token")
+            raise ValidationFailureError(
+                "Google Drive OAuth requires refresh_token and access_token"
+            )
         expires_at = _expires_at_from_response(token_response)
         credential_id = _new_uuid()
         storage_path = self._token_storage_path(credential_id)
@@ -316,7 +358,12 @@ class GoogleDriveOAuthCredentialService:
 
     def get_valid_access_token(self, reference: CredentialReference) -> str | None:
         if reference.status in {"MISSING", "REVOKED", "DISABLED"}:
-            self._mark_drive_state(reference.id, "NEEDS_REAUTH", "GOOGLE_DRIVE_NEEDS_REAUTH", "credential is not usable")
+            self._mark_drive_state(
+                reference.id,
+                "NEEDS_REAUTH",
+                "GOOGLE_DRIVE_NEEDS_REAUTH",
+                "credential is not usable",
+            )
             return None
         payload = self._read_token_payload(reference)
         access_token = payload.get("access_token")
@@ -324,7 +371,12 @@ class GoogleDriveOAuthCredentialService:
         expires_at = _parse_datetime(payload.get("expires_at"))
         if expires_at is not None and expires_at <= utc_now() + timedelta(seconds=60):
             if not refresh_token:
-                self._mark_drive_state(reference.id, "NEEDS_REAUTH", "GOOGLE_DRIVE_NEEDS_REAUTH", "refresh token missing")
+                self._mark_drive_state(
+                    reference.id,
+                    "NEEDS_REAUTH",
+                    "GOOGLE_DRIVE_NEEDS_REAUTH",
+                    "refresh token missing",
+                )
                 return None
             try:
                 refreshed = self.token_exchanger.refresh_access_token(
@@ -332,23 +384,44 @@ class GoogleDriveOAuthCredentialService:
                     client_config=self.config_service.oauth_client_config(),
                 )
             except Exception:
-                self._mark_drive_state(reference.id, "NEEDS_REAUTH", "GOOGLE_DRIVE_NEEDS_REAUTH", "token refresh failed")
+                self._mark_drive_state(
+                    reference.id,
+                    "NEEDS_REAUTH",
+                    "GOOGLE_DRIVE_NEEDS_REAUTH",
+                    "token refresh failed",
+                )
                 return None
             access_token = refreshed.get("access_token")
             if not access_token:
-                self._mark_drive_state(reference.id, "NEEDS_REAUTH", "GOOGLE_DRIVE_NEEDS_REAUTH", "token refresh failed")
+                self._mark_drive_state(
+                    reference.id,
+                    "NEEDS_REAUTH",
+                    "GOOGLE_DRIVE_NEEDS_REAUTH",
+                    "token refresh failed",
+                )
                 return None
             expires_at = _expires_at_from_response(refreshed)
             payload["access_token"] = access_token
             payload["expires_at"] = expires_at.isoformat() if expires_at else None
-            _write_json_secret_file(self._path_from_secret_ref(reference.secret_ref), payload)
+            _write_json_secret_file(
+                self._path_from_secret_ref(reference.secret_ref), payload
+            )
             reference.expires_at = expires_at
             reference.status = "CONFIGURED"
-            reference.metadata_ = {"storage": "LOCAL_DEV_FILE", "raw_values_in_db": False, "last_refresh_at": utc_now().isoformat()}
+            reference.metadata_ = {
+                "storage": "LOCAL_DEV_FILE",
+                "raw_values_in_db": False,
+                "last_refresh_at": utc_now().isoformat(),
+            }
             self._mark_drive_state(reference.id, "CONNECTED", None, None)
             self.session.flush()
         if not access_token:
-            self._mark_drive_state(reference.id, "NEEDS_REAUTH", "GOOGLE_DRIVE_NEEDS_REAUTH", "access token missing")
+            self._mark_drive_state(
+                reference.id,
+                "NEEDS_REAUTH",
+                "GOOGLE_DRIVE_NEEDS_REAUTH",
+                "access token missing",
+            )
             return None
         return str(access_token)
 
@@ -384,7 +457,10 @@ class GoogleDriveOAuthCredentialService:
             existing.scope_blob = {"scopes": scopes}
             existing.status = "CONFIGURED"
             existing.expires_at = expires_at
-            existing.metadata_ = {"storage": "LOCAL_DEV_FILE", "raw_values_in_db": False}
+            existing.metadata_ = {
+                "storage": "LOCAL_DEV_FILE",
+                "raw_values_in_db": False,
+            }
         self.session.flush()
         return existing
 
@@ -400,7 +476,10 @@ class GoogleDriveOAuthCredentialService:
         error_message: str | None,
     ) -> GoogleDriveMediaCredential:
         existing = self.session.scalars(
-            select(GoogleDriveMediaCredential).where(GoogleDriveMediaCredential.credential_reference_id == credential_reference_id)
+            select(GoogleDriveMediaCredential).where(
+                GoogleDriveMediaCredential.credential_reference_id
+                == credential_reference_id
+            )
         ).one_or_none()
         if existing is None:
             existing = GoogleDriveMediaCredential(
@@ -427,9 +506,18 @@ class GoogleDriveOAuthCredentialService:
         self.session.flush()
         return existing
 
-    def _mark_drive_state(self, credential_reference_id: Any, state: str, error_code: str | None, error_message: str | None) -> None:
+    def _mark_drive_state(
+        self,
+        credential_reference_id: Any,
+        state: str,
+        error_code: str | None,
+        error_message: str | None,
+    ) -> None:
         credential = self.session.scalars(
-            select(GoogleDriveMediaCredential).where(GoogleDriveMediaCredential.credential_reference_id == credential_reference_id)
+            select(GoogleDriveMediaCredential).where(
+                GoogleDriveMediaCredential.credential_reference_id
+                == credential_reference_id
+            )
         ).one_or_none()
         if credential is None:
             return
@@ -442,13 +530,20 @@ class GoogleDriveOAuthCredentialService:
     def _read_token_payload(self, reference: CredentialReference) -> dict[str, Any]:
         path = self._path_from_secret_ref(reference.secret_ref)
         if not path.exists():
-            self._mark_drive_state(reference.id, "NEEDS_REAUTH", "GOOGLE_DRIVE_NEEDS_REAUTH", "local token file missing")
+            self._mark_drive_state(
+                reference.id,
+                "NEEDS_REAUTH",
+                "GOOGLE_DRIVE_NEEDS_REAUTH",
+                "local token file missing",
+            )
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
     def _path_from_secret_ref(self, secret_ref: str | None) -> Path:
         if not secret_ref or not secret_ref.startswith("local_file://"):
-            raise ValidationFailureError("credential reference does not point to local dev token storage")
+            raise ValidationFailureError(
+                "credential reference does not point to local dev token storage"
+            )
         value = secret_ref.removeprefix("local_file://")
         path = Path(value)
         return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
@@ -467,9 +562,16 @@ class GoogleDriveOAuthSessionService:
     ):
         self.session = session
         self.config_service = config_service or GoogleDriveConfigService()
-        self.credential_service = credential_service or GoogleDriveOAuthCredentialService(session, config_service=self.config_service)
+        self.credential_service = (
+            credential_service
+            or GoogleDriveOAuthCredentialService(
+                session, config_service=self.config_service
+            )
+        )
 
-    def start(self, *, company_id: Any | None = None, channel_workspace_id: Any | None = None) -> GoogleDriveOAuthStartResult:
+    def start(
+        self, *, company_id: Any | None = None, channel_workspace_id: Any | None = None
+    ) -> GoogleDriveOAuthStartResult:
         if not self.config_service.oauth_configured():
             raise ValidationFailureError("Google Drive OAuth is not configured")
         client_config = self.config_service.oauth_client_config()
@@ -500,7 +602,9 @@ class GoogleDriveOAuthSessionService:
             authorization_url=f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}",
         )
 
-    def handle_callback(self, *, state: str, code: str | None = None, error: str | None = None) -> GoogleDriveOAuthSession:
+    def handle_callback(
+        self, *, state: str, code: str | None = None, error: str | None = None
+    ) -> GoogleDriveOAuthSession:
         oauth_session = self._require_session_for_state(state)
         oauth_session.status = "CALLBACK_RECEIVED"
         self.session.flush()
@@ -549,16 +653,25 @@ class GoogleDriveOAuthSessionService:
 
 
 class GoogleDriveCredentialHealthService:
-    def __init__(self, session: Session, *, config_service: GoogleDriveConfigService | None = None):
+    def __init__(
+        self,
+        session: Session,
+        *,
+        config_service: GoogleDriveConfigService | None = None,
+    ):
         self.session = session
         self.config_service = config_service or GoogleDriveConfigService()
 
     def connection_status(self) -> GoogleDriveConnectionStatusRead:
         config = self.config_service.safe_status()
         credential = self.session.scalars(
-            select(GoogleDriveMediaCredential).order_by(GoogleDriveMediaCredential.updated_at.desc()).limit(1)
+            select(GoogleDriveMediaCredential)
+            .order_by(GoogleDriveMediaCredential.updated_at.desc())
+            .limit(1)
         ).one_or_none()
-        connection_state = credential.connection_state if credential else config["config_state"]
+        connection_state = (
+            credential.connection_state if credential else config["config_state"]
+        )
         reasons: list[str] = []
         if config["offload_enabled"]:
             reasons.append("GOOGLE_DRIVE_OFFLOAD_CONFIGURED")
@@ -568,7 +681,9 @@ class GoogleDriveCredentialHealthService:
             reasons.append("GOOGLE_DRIVE_ROOT_FOLDER_MISSING")
         next_action = None
         if not config["offload_enabled"]:
-            next_action = "Set GOOGLE_DRIVE_OFFLOAD_ENABLED=true to enable Drive offload."
+            next_action = (
+                "Set GOOGLE_DRIVE_OFFLOAD_ENABLED=true to enable Drive offload."
+            )
         elif not config["root_folder_id_configured"]:
             next_action = "Configure GOOGLE_DRIVE_ROOT_FOLDER_ID before real upload."
         elif connection_state != "CONNECTED":
@@ -578,7 +693,9 @@ class GoogleDriveCredentialHealthService:
             config_state=config["config_state"],
             connection_state=connection_state,
             connected=connection_state == "CONNECTED",
-            credential_reference_id=credential.credential_reference_id if credential and credential.connection_state == "CONNECTED" else None,
+            credential_reference_id=credential.credential_reference_id
+            if credential and credential.connection_state == "CONNECTED"
+            else None,
             root_folder_id_configured=config["root_folder_id_configured"],
             scopes=config["scopes"],
             upload_mode=config["upload_mode"],
@@ -593,10 +710,14 @@ class GoogleDriveMediaStorageProvider:
             return "resumable"
         return "multipart" if configured_mode == "multipart" else "resumable"
 
-    def ensure_folder_path(self, *, access_token: str, root_folder_id: str, folder_path: list[str]) -> str:
+    def ensure_folder_path(
+        self, *, access_token: str, root_folder_id: str, folder_path: list[str]
+    ) -> str:
         parent_id = root_folder_id
         for folder_name in folder_path:
-            parent_id = self._ensure_child_folder(access_token=access_token, parent_id=parent_id, folder_name=folder_name)
+            parent_id = self._ensure_child_folder(
+                access_token=access_token, parent_id=parent_id, folder_name=folder_name
+            )
         return parent_id
 
     def upload_file(
@@ -609,7 +730,9 @@ class GoogleDriveMediaStorageProvider:
         mime_type: str | None,
     ) -> GoogleDriveUploadResult:
         size_bytes = local_path.stat().st_size
-        mode = self.choose_upload_mode(size_bytes=size_bytes, configured_mode=upload_mode)
+        mode = self.choose_upload_mode(
+            size_bytes=size_bytes, configured_mode=upload_mode
+        )
         if mode == "multipart":
             return self._multipart_upload(
                 access_token=access_token,
@@ -624,18 +747,28 @@ class GoogleDriveMediaStorageProvider:
             mime_type=mime_type,
         )
 
-    def get_file_metadata(self, *, access_token: str, drive_file_id: str) -> GoogleDriveUploadResult:
-        query = urllib.parse.urlencode({"fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"})
+    def get_file_metadata(
+        self, *, access_token: str, drive_file_id: str
+    ) -> GoogleDriveUploadResult:
+        query = urllib.parse.urlencode(
+            {
+                "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"
+            }
+        )
         request = urlrequest.Request(
             f"{GOOGLE_DRIVE_FILES_URL}/{urllib.parse.quote(drive_file_id)}?{query}",
             method="GET",
             headers={"Authorization": f"Bearer {access_token}"},
         )
-        with urlrequest.urlopen(request, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            request, timeout=20, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode=None)
 
-    def _ensure_child_folder(self, *, access_token: str, parent_id: str, folder_name: str) -> str:
+    def _ensure_child_folder(
+        self, *, access_token: str, parent_id: str, folder_name: str
+    ) -> str:
         escaped_name = folder_name.replace("'", "\\'")
         query = urllib.parse.urlencode(
             {
@@ -649,25 +782,43 @@ class GoogleDriveMediaStorageProvider:
             method="GET",
             headers={"Authorization": f"Bearer {access_token}"},
         )
-        with urlrequest.urlopen(request, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            request, timeout=20, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         files = payload.get("files") if isinstance(payload.get("files"), list) else []
         if files:
             return str(files[0]["id"])
         body = json.dumps(
-            {"name": folder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
+            {
+                "name": folder_name,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parent_id],
+            }
         ).encode("utf-8")
         create = urlrequest.Request(
             f"{GOOGLE_DRIVE_FILES_URL}?fields=id,name",
             method="POST",
             data=body,
-            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            },
         )
-        with urlrequest.urlopen(create, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            create, timeout=20, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             created = json.loads(response.read().decode("utf-8"))
         return str(created["id"])
 
-    def _multipart_upload(self, *, access_token: str, local_path: Path, folder_id: str, mime_type: str | None) -> GoogleDriveUploadResult:
+    def _multipart_upload(
+        self,
+        *,
+        access_token: str,
+        local_path: Path,
+        folder_id: str,
+        mime_type: str | None,
+    ) -> GoogleDriveUploadResult:
         media_type = mime_type or "application/octet-stream"
         boundary = f"vcos-{secrets.token_hex(12)}"
         metadata = {"name": local_path.name, "parents": [folder_id]}
@@ -685,21 +836,45 @@ class GoogleDriveMediaStorageProvider:
                 b"",
             ]
         )
-        query = urllib.parse.urlencode({"uploadType": "multipart", "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"})
+        query = urllib.parse.urlencode(
+            {
+                "uploadType": "multipart",
+                "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum",
+            }
+        )
         request = urlrequest.Request(
             f"{GOOGLE_DRIVE_UPLOAD_URL}?{query}",
             method="POST",
             data=body,
-            headers={"Authorization": f"Bearer {access_token}", "Content-Type": f"multipart/related; boundary={boundary}"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": f"multipart/related; boundary={boundary}",
+            },
         )
-        with urlrequest.urlopen(request, timeout=60, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            request, timeout=60, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode="multipart")
 
-    def _resumable_upload(self, *, access_token: str, local_path: Path, folder_id: str, mime_type: str | None) -> GoogleDriveUploadResult:
+    def _resumable_upload(
+        self,
+        *,
+        access_token: str,
+        local_path: Path,
+        folder_id: str,
+        mime_type: str | None,
+    ) -> GoogleDriveUploadResult:
         media_type = mime_type or "application/octet-stream"
-        metadata = json.dumps({"name": local_path.name, "parents": [folder_id]}).encode("utf-8")
-        query = urllib.parse.urlencode({"uploadType": "resumable", "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum"})
+        metadata = json.dumps({"name": local_path.name, "parents": [folder_id]}).encode(
+            "utf-8"
+        )
+        query = urllib.parse.urlencode(
+            {
+                "uploadType": "resumable",
+                "fields": "id,name,size,mimeType,webViewLink,parents,md5Checksum,sha256Checksum",
+            }
+        )
         init = urlrequest.Request(
             f"{GOOGLE_DRIVE_UPLOAD_URL}?{query}",
             method="POST",
@@ -711,10 +886,14 @@ class GoogleDriveMediaStorageProvider:
                 "X-Upload-Content-Length": str(local_path.stat().st_size),
             },
         )
-        with urlrequest.urlopen(init, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            init, timeout=20, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             location = response.headers.get("Location")
         if not location:
-            raise ValidationFailureError("Google Drive resumable upload session did not return a location")
+            raise ValidationFailureError(
+                "Google Drive resumable upload session did not return a location"
+            )
         data = local_path.read_bytes()
         upload = urlrequest.Request(
             location,
@@ -722,7 +901,9 @@ class GoogleDriveMediaStorageProvider:
             data=data,
             headers={"Content-Type": media_type, "Content-Length": str(len(data))},
         )
-        with urlrequest.urlopen(upload, timeout=120, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            upload, timeout=120, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode="resumable")
 
@@ -736,22 +917,51 @@ class GoogleDriveUploadVerifier:
         local_sha256: str,
     ) -> GoogleDriveVerificationResult:
         if not upload_result.drive_file_id or not upload_result.web_view_link:
-            return GoogleDriveVerificationResult(False, "FAILED", "MEDIA_OFFLOAD_UPLOAD_FAILED", False, False, False, "missing Drive file id or web_view_link")
-        size_verified = upload_result.size_bytes == local_size_bytes if upload_result.size_bytes is not None else False
+            return GoogleDriveVerificationResult(
+                False,
+                "FAILED",
+                "MEDIA_OFFLOAD_UPLOAD_FAILED",
+                False,
+                False,
+                False,
+                "missing Drive file id or web_view_link",
+            )
+        size_verified = (
+            upload_result.size_bytes == local_size_bytes
+            if upload_result.size_bytes is not None
+            else False
+        )
         if not size_verified:
-            return GoogleDriveVerificationResult(False, "FAILED", "MEDIA_OFFLOAD_UPLOAD_FAILED", False, False, False, "Drive size verification failed")
+            return GoogleDriveVerificationResult(
+                False,
+                "FAILED",
+                "MEDIA_OFFLOAD_UPLOAD_FAILED",
+                False,
+                False,
+                False,
+                "Drive size verification failed",
+            )
         if upload_result.checksum_sha256:
             checksum_verified = upload_result.checksum_sha256 == local_sha256
             return GoogleDriveVerificationResult(
                 checksum_verified,
                 "CHECKSUM_VERIFIED" if checksum_verified else "FAILED",
-                "MEDIA_OFFLOAD_UPLOAD_VERIFIED" if checksum_verified else "MEDIA_OFFLOAD_UPLOAD_FAILED",
+                "MEDIA_OFFLOAD_UPLOAD_VERIFIED"
+                if checksum_verified
+                else "MEDIA_OFFLOAD_UPLOAD_FAILED",
                 True,
                 checksum_verified,
                 False,
                 None if checksum_verified else "Drive checksum verification failed",
             )
-        return GoogleDriveVerificationResult(True, "CHECKSUM_UNAVAILABLE", "MEDIA_OFFLOAD_UPLOAD_VERIFIED", True, False, True)
+        return GoogleDriveVerificationResult(
+            True,
+            "CHECKSUM_UNAVAILABLE",
+            "MEDIA_OFFLOAD_UPLOAD_VERIFIED",
+            True,
+            False,
+            True,
+        )
 
 
 class CloudMediaRefService:
@@ -775,7 +985,9 @@ class CloudMediaRefService:
         retention_policy: dict[str, Any] | None = None,
     ) -> CloudMediaRef:
         if not verification.ok:
-            raise ValidationFailureError("CloudMediaRef can only be created after verified Drive upload")
+            raise ValidationFailureError(
+                "CloudMediaRef can only be created after verified Drive upload"
+            )
         ref = CloudMediaRef(
             company_id=company_id,
             channel_workspace_id=channel_workspace_id,
@@ -794,7 +1006,9 @@ class CloudMediaRefService:
             local_source_path_hash=local_source_path_hash,
             upload_status="VERIFIED",
             verification_status=verification.verification_status,
-            local_cleanup_status="PENDING" if retention_policy and retention_policy.get("cleanup_after_verified") else "NOT_ELIGIBLE",
+            local_cleanup_status="PENDING"
+            if retention_policy and retention_policy.get("cleanup_after_verified")
+            else "NOT_ELIGIBLE",
             uploaded_at=utc_now(),
             retention_policy=retention_policy or {},
             source_refs=source_refs or [],
@@ -853,11 +1067,16 @@ class LocalMediaRetentionPolicyService:
     ) -> LocalMediaRetentionPolicy:
         policy = self.session.scalars(
             select(LocalMediaRetentionPolicy)
-            .where(LocalMediaRetentionPolicy.company_id.is_(None) if company_id is None else LocalMediaRetentionPolicy.company_id == company_id)
+            .where(
+                LocalMediaRetentionPolicy.company_id.is_(None)
+                if company_id is None
+                else LocalMediaRetentionPolicy.company_id == company_id
+            )
             .where(
                 LocalMediaRetentionPolicy.channel_workspace_id.is_(None)
                 if channel_workspace_id is None
-                else LocalMediaRetentionPolicy.channel_workspace_id == channel_workspace_id
+                else LocalMediaRetentionPolicy.channel_workspace_id
+                == channel_workspace_id
             )
             .order_by(LocalMediaRetentionPolicy.updated_at.desc())
             .limit(1)
@@ -872,16 +1091,22 @@ class LocalMediaRetentionPolicyService:
             max_local_age_hours=self.settings.local_media_max_age_hours,
             max_local_storage_gb=self.settings.local_media_max_storage_gb,
             protected_paths=[],
-            allowed_cleanup_roots=[str(path.resolve()) for path in DEFAULT_ALLOWED_CLEANUP_ROOTS],
+            allowed_cleanup_roots=[
+                str(path.resolve()) for path in DEFAULT_ALLOWED_CLEANUP_ROOTS
+            ],
             state="ACTIVE",
         )
         self.session.add(policy)
         self.session.flush()
         return policy
 
-    def retention_blob(self, policy: LocalMediaRetentionPolicy, *, keep_local: bool) -> dict[str, Any]:
+    def retention_blob(
+        self, policy: LocalMediaRetentionPolicy, *, keep_local: bool
+    ) -> dict[str, Any]:
         return {
-            "keep_local_after_upload": bool(policy.keep_local_after_upload or keep_local),
+            "keep_local_after_upload": bool(
+                policy.keep_local_after_upload or keep_local
+            ),
             "cleanup_after_verified": bool(policy.cleanup_after_verified),
             "max_local_age_hours": policy.max_local_age_hours,
             "max_local_storage_gb": policy.max_local_storage_gb,
@@ -904,27 +1129,50 @@ class LocalMediaCleanupService:
         current_job_id: Any | None = None,
         dry_run: bool = False,
     ) -> str:
-        if cloud_ref.upload_status != "VERIFIED" or cloud_ref.verification_status not in {"SIZE_VERIFIED", "CHECKSUM_VERIFIED", "CHECKSUM_UNAVAILABLE"}:
+        if (
+            cloud_ref.upload_status != "VERIFIED"
+            or cloud_ref.verification_status
+            not in {"SIZE_VERIFIED", "CHECKSUM_VERIFIED", "CHECKSUM_UNAVAILABLE"}
+        ):
             cloud_ref.local_cleanup_status = "SKIPPED"
-            cloud_ref.technical_appendix = {**(cloud_ref.technical_appendix or {}), "cleanup_reason": "LOCAL_MEDIA_NOT_DELETED_UPLOAD_UNVERIFIED"}
+            cloud_ref.technical_appendix = {
+                **(cloud_ref.technical_appendix or {}),
+                "cleanup_reason": "LOCAL_MEDIA_NOT_DELETED_UPLOAD_UNVERIFIED",
+            }
             self.session.flush()
             return "LOCAL_MEDIA_NOT_DELETED_UPLOAD_UNVERIFIED"
-        if keep_local or policy.keep_local_after_upload or not policy.cleanup_after_verified:
+        if (
+            keep_local
+            or policy.keep_local_after_upload
+            or not policy.cleanup_after_verified
+        ):
             cloud_ref.local_cleanup_status = "SKIPPED"
             self.session.flush()
             return "LOCAL_MEDIA_CLEANUP_SKIPPED"
         resolved = local_path.resolve()
-        if not _path_is_under_allowed_root(resolved, [Path(item) for item in policy.allowed_cleanup_roots or []]):
+        if not _path_is_under_allowed_root(
+            resolved, [Path(item) for item in policy.allowed_cleanup_roots or []]
+        ):
             cloud_ref.local_cleanup_status = "SKIPPED"
-            cloud_ref.technical_appendix = {**(cloud_ref.technical_appendix or {}), "cleanup_reason": "LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH"}
+            cloud_ref.technical_appendix = {
+                **(cloud_ref.technical_appendix or {}),
+                "cleanup_reason": "LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH",
+            }
             self.session.flush()
             return "LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH"
-        if _path_is_under_allowed_root(resolved, [Path(item) for item in policy.protected_paths or []]):
+        if _path_is_under_allowed_root(
+            resolved, [Path(item) for item in policy.protected_paths or []]
+        ):
             cloud_ref.local_cleanup_status = "SKIPPED"
-            cloud_ref.technical_appendix = {**(cloud_ref.technical_appendix or {}), "cleanup_reason": "LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH"}
+            cloud_ref.technical_appendix = {
+                **(cloud_ref.technical_appendix or {}),
+                "cleanup_reason": "LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH",
+            }
             self.session.flush()
             return "LOCAL_MEDIA_NOT_DELETED_PROTECTED_PATH"
-        if self._has_active_job(cloud_ref.local_source_path_hash, current_job_id=current_job_id):
+        if self._has_active_job(
+            cloud_ref.local_source_path_hash, current_job_id=current_job_id
+        ):
             cloud_ref.local_cleanup_status = "SKIPPED"
             self.session.flush()
             return "LOCAL_MEDIA_CLEANUP_SKIPPED"
@@ -947,14 +1195,24 @@ class LocalMediaCleanupService:
     def run_pending_cleanup(self, *, dry_run: bool = False) -> LocalCleanupRunResult:
         refs = list(
             self.session.scalars(
-                select(CloudMediaRef).where(CloudMediaRef.local_cleanup_status == "PENDING").order_by(CloudMediaRef.created_at.asc())
+                select(CloudMediaRef)
+                .where(CloudMediaRef.local_cleanup_status == "PENDING")
+                .order_by(CloudMediaRef.created_at.asc())
             )
         )
         skipped = len(refs)
         reason_codes = ["LOCAL_MEDIA_CLEANUP_SKIPPED"] if refs else []
-        return LocalCleanupRunResult(scanned=len(refs), cleaned=0, skipped=skipped, failed=0, reason_codes=reason_codes)
+        return LocalCleanupRunResult(
+            scanned=len(refs),
+            cleaned=0,
+            skipped=skipped,
+            failed=0,
+            reason_codes=reason_codes,
+        )
 
-    def _has_active_job(self, local_source_path_hash: str | None, *, current_job_id: Any | None) -> bool:
+    def _has_active_job(
+        self, local_source_path_hash: str | None, *, current_job_id: Any | None
+    ) -> bool:
         if not local_source_path_hash:
             return False
         jobs = list(
@@ -980,7 +1238,12 @@ class GoogleDriveUploadService:
     ):
         self.session = session
         self.config_service = config_service or GoogleDriveConfigService()
-        self.credential_service = credential_service or GoogleDriveOAuthCredentialService(session, config_service=self.config_service)
+        self.credential_service = (
+            credential_service
+            or GoogleDriveOAuthCredentialService(
+                session, config_service=self.config_service
+            )
+        )
         self.provider = provider or GoogleDriveMediaStorageProvider()
         self.verifier = verifier or GoogleDriveUploadVerifier()
         self.archive_path_builder = archive_path_builder or DriveArchivePathBuilder()
@@ -1002,13 +1265,19 @@ class GoogleDriveUploadService:
             raise ValidationFailureError("Google Drive offload is disabled")
         root_folder_id = self.config_service.root_folder_id()
         if not root_folder_id:
-            raise ValidationFailureError("GOOGLE_DRIVE_ROOT_FOLDER_ID is required for real upload")
+            raise ValidationFailureError(
+                "GOOGLE_DRIVE_ROOT_FOLDER_ID is required for real upload"
+            )
         reference = self.credential_service.get_connected_reference()
         if reference is None:
-            raise ValidationFailureError("Google Drive OAuth credential is not connected")
+            raise ValidationFailureError(
+                "Google Drive OAuth credential is not connected"
+            )
         access_token = self.credential_service.get_valid_access_token(reference)
         if not access_token:
-            raise ValidationFailureError("Google Drive OAuth credential needs reauthorization")
+            raise ValidationFailureError(
+                "Google Drive OAuth credential needs reauthorization"
+            )
         local_size = local_path.stat().st_size
         local_sha256 = _sha256_file(local_path)
         archive_path = self.archive_path_builder.build(
@@ -1019,8 +1288,14 @@ class GoogleDriveUploadService:
             media_type=media_type,
         )
         folder_path = archive_path.folder_path
-        folder_id = self.provider.ensure_folder_path(access_token=access_token, root_folder_id=root_folder_id, folder_path=folder_path)
-        mime_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+        folder_id = self.provider.ensure_folder_path(
+            access_token=access_token,
+            root_folder_id=root_folder_id,
+            folder_path=folder_path,
+        )
+        mime_type = (
+            mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+        )
         upload_result = self.provider.upload_file(
             access_token=access_token,
             local_path=local_path,
@@ -1028,14 +1303,20 @@ class GoogleDriveUploadService:
             upload_mode=self.config_service.upload_mode(),
             mime_type=mime_type,
         )
-        metadata = self.provider.get_file_metadata(access_token=access_token, drive_file_id=upload_result.drive_file_id)
+        metadata = self.provider.get_file_metadata(
+            access_token=access_token, drive_file_id=upload_result.drive_file_id
+        )
         upload_result = GoogleDriveUploadResult(
             drive_file_id=metadata.drive_file_id or upload_result.drive_file_id,
-            drive_folder_id=metadata.drive_folder_id or upload_result.drive_folder_id or folder_id,
+            drive_folder_id=metadata.drive_folder_id
+            or upload_result.drive_folder_id
+            or folder_id,
             web_view_link=metadata.web_view_link or upload_result.web_view_link,
             file_name=metadata.file_name or upload_result.file_name or local_path.name,
             mime_type=metadata.mime_type or upload_result.mime_type or mime_type,
-            size_bytes=metadata.size_bytes if metadata.size_bytes is not None else upload_result.size_bytes,
+            size_bytes=metadata.size_bytes
+            if metadata.size_bytes is not None
+            else upload_result.size_bytes,
             checksum_sha256=metadata.checksum_sha256 or upload_result.checksum_sha256,
             upload_mode=upload_result.upload_mode,
             technical_appendix={
@@ -1045,9 +1326,15 @@ class GoogleDriveUploadService:
                 "root_folder_configured": True,
             },
         )
-        verification = self.verifier.verify(upload_result=upload_result, local_size_bytes=local_size, local_sha256=local_sha256)
+        verification = self.verifier.verify(
+            upload_result=upload_result,
+            local_size_bytes=local_size,
+            local_sha256=local_sha256,
+        )
         if not verification.ok:
-            raise ValidationFailureError(verification.error_message or "Google Drive upload verification failed")
+            raise ValidationFailureError(
+                verification.error_message or "Google Drive upload verification failed"
+            )
         cloud_ref = CloudMediaRefService(self.session).create_verified_ref(
             company_id=company_id,
             channel_workspace_id=channel_workspace_id,
@@ -1076,11 +1363,15 @@ class MediaOffloadJobService:
     ):
         self.session = session
         self.upload_service = upload_service or GoogleDriveUploadService(session)
-        self.retention_service = retention_service or LocalMediaRetentionPolicyService(session)
+        self.retention_service = retention_service or LocalMediaRetentionPolicyService(
+            session
+        )
         self.cleanup_service = cleanup_service or LocalMediaCleanupService(session)
 
     def create_job(self, *, data: MediaOffloadJobCreate) -> MediaOffloadJob:
-        path_hash = _hash_path(Path(data.local_source_path)) if data.local_source_path else None
+        path_hash = (
+            _hash_path(Path(data.local_source_path)) if data.local_source_path else None
+        )
         job = MediaOffloadJob(
             company_id=data.company_id,
             channel_workspace_id=data.channel_workspace_id,
@@ -1090,7 +1381,9 @@ class MediaOffloadJobService:
             render_package_id=data.render_package_id,
             local_source_path_hash=path_hash,
             target_provider="GOOGLE_DRIVE",
-            target_folder_policy=_sanitize_internal_policy({**data.target_folder_policy, "keep_local": data.keep_local}),
+            target_folder_policy=_sanitize_internal_policy(
+                {**data.target_folder_policy, "keep_local": data.keep_local}
+            ),
             target_media_type=data.target_media_type,
             job_state="PENDING",
         )
@@ -1104,7 +1397,9 @@ class MediaOffloadJobService:
             raise NotFoundError(f"media offload job not found: {job_id}")
         return job
 
-    def execute_job(self, *, job_id: Any, data: MediaOffloadExecuteRequest | None = None) -> MediaOffloadJob:
+    def execute_job(
+        self, *, job_id: Any, data: MediaOffloadExecuteRequest | None = None
+    ) -> MediaOffloadJob:
         job = self.require(job_id)
         request = data or MediaOffloadExecuteRequest()
         local_path = self._resolve_local_path(job, request.local_source_path)
@@ -1125,9 +1420,15 @@ class MediaOffloadJobService:
             job.error_code = None
             job.error_message = None
             self.session.flush()
-            policy = self.retention_service.get_or_create_default(company_id=job.company_id, channel_workspace_id=job.channel_workspace_id)
-            keep_local = bool(request.keep_local or (job.target_folder_policy or {}).get("keep_local"))
-            retention_blob = self.retention_service.retention_blob(policy, keep_local=keep_local)
+            policy = self.retention_service.get_or_create_default(
+                company_id=job.company_id, channel_workspace_id=job.channel_workspace_id
+            )
+            keep_local = bool(
+                request.keep_local or (job.target_folder_policy or {}).get("keep_local")
+            )
+            retention_blob = self.retention_service.retention_blob(
+                policy, keep_local=keep_local
+            )
             cloud_ref, _verification = self.upload_service.upload_verified(
                 local_path=resolved,
                 media_type=job.target_media_type,
@@ -1165,7 +1466,9 @@ class MediaOffloadJobService:
             self.session.flush()
             return job
 
-    def _resolve_local_path(self, job: MediaOffloadJob, local_source_path: str | None) -> Path | None:
+    def _resolve_local_path(
+        self, job: MediaOffloadJob, local_source_path: str | None
+    ) -> Path | None:
         if local_source_path:
             return Path(local_source_path)
         if job.source_media_ref_id:
@@ -1183,25 +1486,45 @@ class MediaCloudReadService:
         return CloudMediaRefService(self.session).require(cloud_media_ref_id)
 
     def dashboard_payload(self, cloud_media_ref_id: Any) -> CloudMediaReadPayload:
-        return CloudMediaRefService(self.session).dashboard_payload(self.require_ref(cloud_media_ref_id))
+        return CloudMediaRefService(self.session).dashboard_payload(
+            self.require_ref(cloud_media_ref_id)
+        )
 
-    def list_by_video_project(self, video_project_id: Any) -> list[CloudMediaReadPayload]:
+    def list_by_video_project(
+        self, video_project_id: Any
+    ) -> list[CloudMediaReadPayload]:
         refs = self.session.scalars(
-            select(CloudMediaRef).where(CloudMediaRef.video_project_id == video_project_id).order_by(CloudMediaRef.created_at.desc())
+            select(CloudMediaRef)
+            .where(CloudMediaRef.video_project_id == video_project_id)
+            .order_by(CloudMediaRef.created_at.desc())
         ).all()
-        return [CloudMediaRefService(self.session).dashboard_payload(ref) for ref in refs]
+        return [
+            CloudMediaRefService(self.session).dashboard_payload(ref) for ref in refs
+        ]
 
-    def list_by_render_package(self, render_package_id: Any) -> list[CloudMediaReadPayload]:
+    def list_by_render_package(
+        self, render_package_id: Any
+    ) -> list[CloudMediaReadPayload]:
         refs = self.session.scalars(
-            select(CloudMediaRef).where(CloudMediaRef.render_package_id == render_package_id).order_by(CloudMediaRef.created_at.desc())
+            select(CloudMediaRef)
+            .where(CloudMediaRef.render_package_id == render_package_id)
+            .order_by(CloudMediaRef.created_at.desc())
         ).all()
-        return [CloudMediaRefService(self.session).dashboard_payload(ref) for ref in refs]
+        return [
+            CloudMediaRefService(self.session).dashboard_payload(ref) for ref in refs
+        ]
 
-    def list_by_uploaded_video(self, uploaded_video_id: Any) -> list[CloudMediaReadPayload]:
+    def list_by_uploaded_video(
+        self, uploaded_video_id: Any
+    ) -> list[CloudMediaReadPayload]:
         refs = self.session.scalars(
-            select(CloudMediaRef).where(CloudMediaRef.uploaded_video_id == uploaded_video_id).order_by(CloudMediaRef.created_at.desc())
+            select(CloudMediaRef)
+            .where(CloudMediaRef.uploaded_video_id == uploaded_video_id)
+            .order_by(CloudMediaRef.created_at.desc())
         ).all()
-        return [CloudMediaRefService(self.session).dashboard_payload(ref) for ref in refs]
+        return [
+            CloudMediaRefService(self.session).dashboard_payload(ref) for ref in refs
+        ]
 
 
 class MediaOffloadReadService:
@@ -1225,10 +1548,14 @@ def _post_google_token(payload: dict[str, str]) -> dict[str, Any]:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
-        with urlrequest.urlopen(request, timeout=20, context=GOOGLE_SSL_CONTEXT) as response:
+        with urlrequest.urlopen(
+            request, timeout=20, context=GOOGLE_SSL_CONTEXT
+        ) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise ValidationFailureError(f"Google OAuth token exchange failed: HTTP {exc.code}") from exc
+        raise ValidationFailureError(
+            f"Google OAuth token exchange failed: HTTP {exc.code}"
+        ) from exc
 
 
 def _read_oauth_client_file(path: Path) -> dict[str, str]:
@@ -1236,11 +1563,17 @@ def _read_oauth_client_file(path: Path) -> dict[str, str]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     config = payload.get("installed") or payload.get("web") or payload
-    redirect_uris = config.get("redirect_uris") if isinstance(config.get("redirect_uris"), list) else []
+    redirect_uris = (
+        config.get("redirect_uris")
+        if isinstance(config.get("redirect_uris"), list)
+        else []
+    )
     return {
         "client_id": config.get("client_id"),
         "client_secret": config.get("client_secret"),
-        "redirect_uri": redirect_uris[0] if redirect_uris else config.get("redirect_uri"),
+        "redirect_uri": redirect_uris[0]
+        if redirect_uris
+        else config.get("redirect_uri"),
     }
 
 
@@ -1296,7 +1629,9 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _drive_result_from_payload(payload: dict[str, Any], *, upload_mode: str | None) -> GoogleDriveUploadResult:
+def _drive_result_from_payload(
+    payload: dict[str, Any], *, upload_mode: str | None
+) -> GoogleDriveUploadResult:
     parents = payload.get("parents") if isinstance(payload.get("parents"), list) else []
     size = payload.get("size")
     try:
@@ -1326,19 +1661,22 @@ def _default_drive_folder_path(
     video_project_id: Any | None,
     media_type: str,
 ) -> list[str]:
-    return DriveArchivePathBuilder().build(
-        company_id=company_id,
-        channel_workspace_id=channel_workspace_id,
-        video_project_id=video_project_id,
-        uploaded_video_id=None,
-        media_type=media_type,
-    ).folder_path
+    return (
+        DriveArchivePathBuilder()
+        .build(
+            company_id=company_id,
+            channel_workspace_id=channel_workspace_id,
+            video_project_id=video_project_id,
+            uploaded_video_id=None,
+            media_type=media_type,
+        )
+        .folder_path
+    )
 
 
 def _drive_media_subfolder(media_type: str) -> str:
     return {
         "LONG_FORM_FINAL": "long_form",
-        "SHORT_FINAL": "shorts",
         "THUMBNAIL": "thumbnails",
         "CAPTION": "captions",
         "AI_HERO": "ai_hero",
@@ -1361,7 +1699,11 @@ def _source_refs_for_job(job: MediaOffloadJob) -> list[dict[str, Any]]:
 
 
 def _sanitize_internal_policy(policy: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in policy.items() if "local_source_path" not in key.lower() and "absolute_path" not in key.lower()}
+    return {
+        key: value
+        for key, value in policy.items()
+        if "local_source_path" not in key.lower() and "absolute_path" not in key.lower()
+    }
 
 
 def _sanitize_public_payload(value: Any) -> Any:
@@ -1369,7 +1711,9 @@ def _sanitize_public_payload(value: Any) -> Any:
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
             normalized = str(key).lower()
-            if any(fragment in normalized for fragment in PUBLIC_FORBIDDEN_KEY_FRAGMENTS):
+            if any(
+                fragment in normalized for fragment in PUBLIC_FORBIDDEN_KEY_FRAGMENTS
+            ):
                 continue
             sanitized[key] = _sanitize_public_payload(item)
         return sanitized
@@ -1406,6 +1750,12 @@ def _error_code_for_exception(exc: Exception) -> str:
 
 def _safe_error_message(exc: Exception) -> str:
     message = str(exc) or exc.__class__.__name__
-    for marker in ("access_token", "refresh_token", "client_secret", "authorization", "Bearer "):
+    for marker in (
+        "access_token",
+        "refresh_token",
+        "client_secret",
+        "authorization",
+        "Bearer ",
+    ):
         message = message.replace(marker, "[redacted]")
     return message[:500]

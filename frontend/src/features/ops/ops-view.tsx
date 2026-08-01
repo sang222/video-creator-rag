@@ -46,7 +46,7 @@ export function OpsView() {
     <div className="space-y-6 p-4 md:p-8">
       <PageHeader
         title="Runtime Dashboard Ops"
-        subtitle="Cockpit đọc trạng thái runtime, blocker và hành động thủ công an toàn. Trang này không chạy daily, NoView, vector learning, provider hay upload YouTube."
+        subtitle="Cockpit đọc trạng thái runtime, blocker và hành động thủ công an toàn. Trang này không điều khiển scheduler, scanner, learning, provider hay upload YouTube."
         breadcrumbs={[{ label: "Trung tâm", href: "/" }, { label: "Vận hành" }]}
         meta={<span className="text-xs text-muted-foreground">Cập nhật lúc {formatDate(data.generated_at)}</span>}
       />
@@ -74,7 +74,7 @@ export function OpsView() {
 
       <TechnicalAppendix>
         <KeyValue label="Read model" value="R3D9 Runtime Dashboard Ops" />
-        <KeyValue label="Không thêm job-control" value="daily/no-view/vector/provider/upload đều không có nút chạy trên UI" />
+        <KeyValue label="Không thêm job-control" value="scheduler/scanner/learning/provider/upload đều không có nút chạy trên UI" />
         <KeyValue label="Forbidden action count" value={String(data.forbidden_actions.length)} />
         <KeyValue label="Provider/media/upload execution" value={data.technical_appendix.no_provider_media_upload_execution ? "false" : "unknown"} />
       </TechnicalAppendix>

@@ -1922,19 +1922,6 @@ class MR1LocalProductionContinuation:
                 "bottom_safe_margin_pass": 0.08,
                 "bottom_safe_margin_review_min": 0.05,
             },
-            "shorts_9_16": {
-                "font_scale_pass": [0.046, 0.054],
-                "font_scale_review": [0.042, 0.058],
-                "block_outside": [0.042, 0.058],
-                "max_chars_per_line_pass": 32,
-                "max_chars_per_line_review": 36,
-                "max_chars_per_line_block": 36,
-                "max_block_width_pass": 0.84,
-                "max_block_width_review": 0.88,
-                "max_block_width_block": 0.88,
-                "bottom_safe_margin_pass": 0.12,
-                "bottom_safe_margin_review_min": 0.08,
-            },
             "global": {
                 "max_lines_per_cue": 2,
                 "cue_duration_seconds": {

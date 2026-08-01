@@ -51,9 +51,7 @@ class SeriesPlan(Base):
     episode_role_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict
     )
-    state: Mapped[str] = mapped_column(
-        String(40), nullable=False, default="DRAFT"
-    )
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="DRAFT")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     supersedes_series_plan_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("series_plans.id")
@@ -108,9 +106,7 @@ class SeriesPlan(Base):
         ),
         CheckConstraint(
             "jsonb_typeof(allowed_production_lanes) = 'array' "
-            "and jsonb_array_length(allowed_production_lanes) > 0 "
-            "and allowed_production_lanes "
-            "<@ '[\"DAILY_SHORT\",\"LONG_FORM\"]'::jsonb",
+            "and allowed_production_lanes = '[\"LONG_FORM\"]'::jsonb",
             name="ck_series_plans_allowed_lanes",
         ),
         CheckConstraint(
@@ -150,9 +146,7 @@ class SeriesRun(Base):
     first_episode_number: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1
     )
-    next_episode_number: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1
-    )
+    next_episode_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     reserved_episode_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )
@@ -166,9 +160,7 @@ class SeriesRun(Base):
     schedule_window_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
-    state: Mapped[str] = mapped_column(
-        String(40), nullable=False, default="PROPOSED"
-    )
+    state: Mapped[str] = mapped_column(String(40), nullable=False, default="PROPOSED")
     state_reason_codes: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list
     )

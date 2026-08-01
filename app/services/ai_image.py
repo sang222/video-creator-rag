@@ -66,7 +66,9 @@ class AIImageRequestBuilder:
         provider_route_approved: bool = True,
         four_k_approval_ref: str | None = None,
     ) -> AIImageRequest:
-        self._validate_hashed_artifact(requirements, "AI_IMAGE_REQUIREMENTS_HASH_MISMATCH")
+        self._validate_hashed_artifact(
+            requirements, "AI_IMAGE_REQUIREMENTS_HASH_MISMATCH"
+        )
         self._validate_hashed_artifact(
             visual_direction,
             "AI_IMAGE_VISUAL_DIRECTION_HASH_MISMATCH",
@@ -74,7 +76,10 @@ class AIImageRequestBuilder:
         self._validate_decision(requirements, decision)
         if visual_direction.project_id.strip() == "":
             raise ValueError("AI_IMAGE_VISUAL_DIRECTION_PROJECT_REQUIRED")
-        if decision.preferred_source_route == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY:
+        if (
+            decision.preferred_source_route
+            == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        ):
             if native_overlay_plan is None:
                 raise ValueError("AI_IMAGE_NATIVE_OVERLAY_PLAN_REQUIRED")
         elif native_overlay_plan is not None:
@@ -92,7 +97,10 @@ class AIImageRequestBuilder:
                 raise ValueError("AI_IMAGE_NATIVE_OVERLAY_DECISION_REF_MISMATCH")
             if native_overlay_plan.source_decision_hash != decision.content_hash:
                 raise ValueError("AI_IMAGE_NATIVE_OVERLAY_DECISION_HASH_MISMATCH")
-            if native_overlay_plan.preferred_source_route != decision.preferred_source_route:
+            if (
+                native_overlay_plan.preferred_source_route
+                != decision.preferred_source_route
+            ):
                 raise ValueError("AI_IMAGE_NATIVE_OVERLAY_ROUTE_MISMATCH")
 
         exact_text_required = requirements.exact_text_dependency > 0.0
@@ -138,7 +146,9 @@ class AIImageRequestBuilder:
                 native_overlay_plan.plan_id if native_overlay_plan is not None else None
             ),
             "native_overlay_plan_hash": (
-                native_overlay_plan.content_hash if native_overlay_plan is not None else None
+                native_overlay_plan.content_hash
+                if native_overlay_plan is not None
+                else None
             ),
             "forbidden_generated_text": True,
             "forbidden_generated_numbers": True,
@@ -175,7 +185,10 @@ class AIImageRequestBuilder:
             decision.model_dump(mode="json", exclude={"content_hash"})
         ):
             raise ValueError("AI_IMAGE_VISUAL_SOURCE_DECISION_HASH_MISMATCH")
-        if decision.input_feature_snapshot.get("requirements_hash") != requirements.content_hash:
+        if (
+            decision.input_feature_snapshot.get("requirements_hash")
+            != requirements.content_hash
+        ):
             raise ValueError("AI_IMAGE_VISUAL_SOURCE_DECISION_INPUT_MISMATCH")
         if decision.preferred_source_route not in AI_IMAGE_ROUTES:
             raise ValueError("AI_IMAGE_VISUAL_SOURCE_DECISION_ROUTE_INVALID")
@@ -198,7 +211,9 @@ class AIImageRequestBuilder:
     def _truth_classification(
         requirements: SceneVisualRealizationRequirements,
     ) -> str:
-        normalized = requirements.scene_class.strip().lower().replace("-", "_").replace(" ", "_")
+        normalized = (
+            requirements.scene_class.strip().lower().replace("-", "_").replace(" ", "_")
+        )
         if requirements.evidence_truth_requirement >= 0.5 or normalized == "evidence":
             return "EVIDENCE"
         if normalized in {"actual_ui", "ui", "screenshot"}:
@@ -238,7 +253,10 @@ class ImagePromptCompiler:
             request.model_dump(mode="json", exclude={"request_hash"})
         ):
             raise ValueError("AI_IMAGE_PROMPT_REQUEST_HASH_MISMATCH")
-        if request.scene_id != requirements.scene_id or decision.scene_id != requirements.scene_id:
+        if (
+            request.scene_id != requirements.scene_id
+            or decision.scene_id != requirements.scene_id
+        ):
             raise ValueError("AI_IMAGE_PROMPT_SCENE_BINDING_MISMATCH")
         if request.visual_source_decision_hash != decision.content_hash:
             raise ValueError("AI_IMAGE_PROMPT_DECISION_BINDING_MISMATCH")
@@ -262,7 +280,9 @@ class ImagePromptCompiler:
             f"{visual_direction.framing_rule}; {requirements.camera_angle}"
         )
         depth = visual_direction.depth_of_field_style
-        negative_space = "Keep a balanced editorial frame with crop-safe negative space."
+        negative_space = (
+            "Keep a balanced editorial frame with crop-safe negative space."
+        )
         if request.native_overlay_required:
             regions = ", ".join(
                 f"{region.id}({region.x:.3f},{region.y:.3f},{region.width:.3f},{region.height:.3f})"
@@ -331,13 +351,17 @@ class ImagePromptCompiler:
             "prompt_hash": ai_image_stable_hash(prompt),
             "provider_call_made": False,
         }
-        return CompiledImagePrompt(**payload, content_hash=ai_image_stable_hash(payload))
+        return CompiledImagePrompt(
+            **payload, content_hash=ai_image_stable_hash(payload)
+        )
 
 
 class PostGenerationImageQC:
     """IMG1 deterministic fixture contract; VQC1 may replace detector calibration."""
 
-    def evaluate(self, evidence: GeneratedImageQCEvidence) -> PostGenerationImageQCManifest:
+    def evaluate(
+        self, evidence: GeneratedImageQCEvidence
+    ) -> PostGenerationImageQCManifest:
         generated_reasons: list[str] = []
         if evidence.generated_letters_detected:
             generated_reasons.append("GENERATED_TEXT_ARTIFACT")
@@ -356,24 +380,53 @@ class PostGenerationImageQC:
             fake_reasons.append("WATERMARK_RISK")
 
         results = [
-            self._result("GeneratedTextArtifactGate", generated_verdict, generated_reasons, evidence),
-            self._result("FakeUILogoGate", "BLOCK" if fake_reasons else "PASS", fake_reasons, evidence),
-            self._score_result("CompositionComplianceGate", evidence.composition_compliance_score),
+            self._result(
+                "GeneratedTextArtifactGate",
+                generated_verdict,
+                generated_reasons,
+                evidence,
+            ),
+            self._result(
+                "FakeUILogoGate",
+                "BLOCK" if fake_reasons else "PASS",
+                fake_reasons,
+                evidence,
+            ),
+            self._score_result(
+                "CompositionComplianceGate", evidence.composition_compliance_score
+            ),
             self._score_result("SemanticMatchGate", evidence.semantic_match_score),
-            self._score_result("VisualLanguageMatchGate", evidence.visual_language_match_score),
-            self._score_result("TechnicalImageFitnessGate", evidence.technical_image_fitness_score, pass_min=0.90, review_min=0.80),
+            self._score_result(
+                "VisualLanguageMatchGate", evidence.visual_language_match_score
+            ),
+            self._score_result(
+                "TechnicalImageFitnessGate",
+                evidence.technical_image_fitness_score,
+                pass_min=0.90,
+                review_min=0.80,
+            ),
             self._score_result("CropSafetyGate", evidence.crop_safety_score),
             self._reuse_result(evidence.reuse_similarity_score),
             self._result(
                 "RightsDisclosureCompletenessGate",
                 "PASS" if evidence.rights_disclosure_complete else "BLOCK",
-                [] if evidence.rights_disclosure_complete else ["RIGHTS_DISCLOSURE_INCOMPLETE"],
+                []
+                if evidence.rights_disclosure_complete
+                else ["RIGHTS_DISCLOSURE_INCOMPLETE"],
                 evidence,
             ),
         ]
         verdicts = {item.verdict for item in results}
-        verdict = "BLOCK" if "BLOCK" in verdicts else "REVIEW_REQUIRED" if "REVIEW_REQUIRED" in verdicts else "PASS"
-        reasons = list(dict.fromkeys(code for item in results for code in item.reason_codes))
+        verdict = (
+            "BLOCK"
+            if "BLOCK" in verdicts
+            else "REVIEW_REQUIRED"
+            if "REVIEW_REQUIRED" in verdicts
+            else "PASS"
+        )
+        reasons = list(
+            dict.fromkeys(code for item in results for code in item.reason_codes)
+        )
         payload = {
             "image_ref": evidence.image_ref,
             "image_hash": evidence.image_hash,
@@ -409,7 +462,8 @@ class PostGenerationImageQC:
             detected_region_boxes=evidence.detected_region_boxes,
             repairability=(
                 "NATIVE_OVERLAY_REPAIR"
-                if verdict == "REVIEW_REQUIRED" and evidence.artifact_repairable_by_native_overlay
+                if verdict == "REVIEW_REQUIRED"
+                and evidence.artifact_repairable_by_native_overlay
                 else "NOT_REPAIRABLE"
                 if verdict == "BLOCK"
                 else "NOT_REQUIRED"
@@ -458,7 +512,7 @@ class PostGenerationImageQC:
 
 
 class ImageNormalizationPlanner:
-    _RATIOS = {"16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1.0}
+    _RATIOS = {"16:9": 16 / 9, "1:1": 1.0}
 
     def plan(
         self,
@@ -557,10 +611,10 @@ class NativeOverlayImageBindingBuilder:
             or request.visual_source_decision_hash != overlay_plan.source_decision_hash
         ):
             raise ValueError("AI_IMAGE_NATIVE_OVERLAY_BINDING_SOURCE_MISMATCH")
-        if (
-            list(request.text_safe_regions) != list(overlay_plan.text_safe_regions)
-            or list(request.reserved_overlay_regions)
-            != list(overlay_plan.reserved_overlay_regions)
+        if list(request.text_safe_regions) != list(
+            overlay_plan.text_safe_regions
+        ) or list(request.reserved_overlay_regions) != list(
+            overlay_plan.reserved_overlay_regions
         ):
             raise ValueError("AI_IMAGE_NATIVE_OVERLAY_BINDING_REGION_MISMATCH")
         kinds = list(

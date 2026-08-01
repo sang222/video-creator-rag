@@ -28,7 +28,6 @@ from app.contracts import (
     ProviderCapabilityGateRead,
     ReusedContentRiskGateCheckRequest,
     ReusedContentRiskGateRead,
-    ShortRenderPackageCreate,
     ThumbnailVariantPlanRequest,
 )
 from app.core.errors import NotFoundError, ValidationFailureError
@@ -58,8 +57,6 @@ from app.db.models import (
     MediaQCReport,
     MediaRenderRoutingDecision,
     ProviderCapabilityMatrixEntry,
-    ShortCandidate,
-    ShortRenderPackage,
     ThumbnailVariant,
     VideoProject,
 )
@@ -82,7 +79,7 @@ CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 GOOGLE_VEO_PROVIDER_KEY = "google_veo"
 
 LONG_FORM_FINAL_RENDER = "LONG_FORM_FINAL_RENDER"
-VOICE_JOBS = {"VOICE_GENERATION", "LONG_VOICE_GENERATION", "SHORT_VOICE_GENERATION"}
+VOICE_JOBS = {"VOICE_GENERATION", "LONG_VOICE_GENERATION"}
 AI_HERO_JOBS = {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}
 MEDIA_JOB_TYPES = {
     "TOPIC_DECISION",
@@ -101,14 +98,6 @@ MEDIA_JOB_TYPES = {
     "LONG_FORM_FINAL_RENDER",
     "LONG_MEDIA_QC",
     "LONG_PUBLISH_PACKAGE",
-    "SHORT_CANDIDATE_EXTRACTION",
-    "SHORT_SCRIPT_GENERATION",
-    "SHORT_VOICE_GENERATION",
-    "SHORT_CAPTION_TIMELINE",
-    "SHORT_HERO_REUSE",
-    "SHORT_RENDER",
-    "SHORT_MEDIA_QC",
-    "SHORT_PUBLISH_PACKAGE",
     "PREVIEW_CLIP_RENDER",
     "LICENSE_EVIDENCE_CHECK",
     "BUDGET_CHECK",
@@ -1101,7 +1090,7 @@ class HumanApprovalGateService:
         return {
             "decision": "REVIEW_REQUIRED",
             "reason_codes": ["HUMAN_APPROVAL_REQUIRED"],
-            "operator_summary": "Human approval is required before publishing long-form and Shorts.",
+            "operator_summary": "Human approval is required before publishing long-form videos.",
         }
 
 
@@ -1239,72 +1228,6 @@ class LongFormRenderPackageService:
         package = self.session.get(LongFormRenderPackage, package_id)
         if package is None:
             raise NotFoundError(f"long-form render package not found: {package_id}")
-        return package
-
-
-class ShortRenderPackageService:
-    def __init__(self, session: Session):
-        self.session = session
-
-    def create(
-        self, *, short_candidate_id: uuid.UUID, data: ShortRenderPackageCreate
-    ) -> ShortRenderPackage:
-        MediaProviderRoleService(self.session).ensure_matrix()
-        candidate = self.session.get(ShortCandidate, short_candidate_id)
-        if candidate is None:
-            raise NotFoundError(f"short candidate not found: {short_candidate_id}")
-        duration = data.target_duration_seconds or Decimal(
-            candidate.duration_ms
-        ) / Decimal("1000")
-        if data.target_aspect_ratio != "9:16":
-            raise ValidationFailureError(
-                "ShortRenderPackage target_aspect_ratio must be 9:16."
-            )
-        if duration >= Decimal("59"):
-            raise ValidationFailureError(
-                "ShortRenderPackage target_duration_seconds must be under 59 seconds."
-            )
-        decision = MediaRenderJobRouterService(self.session).decide(
-            data=MediaRenderRoutingDecisionRequest(
-                company_id=candidate.company_id,
-                channel_workspace_id=candidate.channel_workspace_id,
-                video_project_id=candidate.parent_video_project_id,
-                job_type="SHORT_RENDER",
-                target_duration_seconds=duration,
-                target_aspect_ratio=data.target_aspect_ratio,
-            )
-        )
-        package = ShortRenderPackage(
-            company_id=candidate.company_id,
-            channel_workspace_id=candidate.channel_workspace_id,
-            video_project_id=candidate.parent_video_project_id,
-            short_candidate_id=candidate.id,
-            short_render_plan_id=data.short_render_plan_id,
-            voice_ref=data.voice_ref,
-            caption_track_id=data.caption_track_id,
-            hero_reuse_ref=data.hero_reuse_ref,
-            template_asset_refs=data.template_asset_refs,
-            render_manifest={
-                **data.render_manifest,
-                "routing_decision_id": str(decision.id),
-                "real_render_executed": False,
-            },
-            target_duration_seconds=duration,
-            target_aspect_ratio=data.target_aspect_ratio,
-            hard_cap_seconds=59,
-            renderer_provider_key=decision.selected_provider_key,
-            package_state="READY_FOR_TEMPLATE_RENDER"
-            if decision.routing_result == "ROUTED"
-            else "BLOCKED",
-        )
-        self.session.add(package)
-        self.session.flush()
-        return package
-
-    def require(self, package_id: uuid.UUID) -> ShortRenderPackage:
-        package = self.session.get(ShortRenderPackage, package_id)
-        if package is None:
-            raise NotFoundError(f"short render package not found: {package_id}")
         return package
 
 

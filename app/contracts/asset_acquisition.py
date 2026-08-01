@@ -26,7 +26,9 @@ AssetState = Literal[
     "NORMALIZATION_FAILED",
     "BLOCKED_POLICY",
 ]
-ArchiveState = Literal["PLANNED", "UPLOADING", "UPLOADED_UNVERIFIED", "VERIFYING", "VERIFIED", "FAILED"]
+ArchiveState = Literal[
+    "PLANNED", "UPLOADING", "UPLOADED_UNVERIFIED", "VERIFYING", "VERIFIED", "FAILED"
+]
 
 
 class ChannelVisualStrategyProfile(BaseModel):
@@ -35,7 +37,9 @@ class ChannelVisualStrategyProfile(BaseModel):
     channel_id: str
     strategy_key: str
     native_is_backbone: bool = True
-    allowed_roles: list[AssetRole] = Field(default_factory=lambda: ["NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO"])
+    allowed_roles: list[AssetRole] = Field(
+        default_factory=lambda: ["NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO"]
+    )
     character_policy_mode: str = "NO_CHARACTER"
     model_config = ConfigDict(extra="forbid")
 
@@ -43,7 +47,9 @@ class ChannelVisualStrategyProfile(BaseModel):
 class ProviderUsagePolicy(BaseModel):
     policy_ref: str
     policy_hash: str
-    supported_providers: list[str] = Field(default_factory=lambda: ["NATIVE", "PEXELS", "GOOGLE_VEO"])
+    supported_providers: list[str] = Field(
+        default_factory=lambda: ["NATIVE", "PEXELS", "GOOGLE_VEO"]
+    )
     stock_factual_evidence_forbidden: bool = True
     stock_recurring_host_forbidden: bool = True
     ai_hero_filler_forbidden: bool = True
@@ -134,7 +140,7 @@ class PexelsQueryPlan(BaseModel):
     visual_direction_ref: str | None = None
     visual_direction_hash: str | None = None
     target_duration_seconds: float | None = Field(default=None, gt=0)
-    aspect_ratio: Literal["16:9", "9:16", "1:1"] | None = None
+    aspect_ratio: Literal["16:9"] | None = None
     crop_safety_required: bool = True
     previous_scene_summary: str | None = None
     next_scene_summary: str | None = None
@@ -289,13 +295,19 @@ class AIHeroAssetRequest(BaseModel):
     scene_id: str
     source_segment_ids: list[str] = Field(min_length=1)
     visual_intent: str
-    hero_reason: Literal["HOOK", "METAPHOR", "EMOTIONAL_PAYOFF", "VISUAL_SIGNATURE", "NATIVE_MOTION_INSUFFICIENT"]
+    hero_reason: Literal[
+        "HOOK",
+        "METAPHOR",
+        "EMOTIONAL_PAYOFF",
+        "VISUAL_SIGNATURE",
+        "NATIVE_MOTION_INSUFFICIENT",
+    ]
     prompt_text: str
     prompt_hash: str
     prompt_safety_status: Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
     required_duration_seconds: float = Field(gt=0, le=120)
     preferred_resolution: str
-    required_aspect_ratio: Literal["16:9", "9:16"]
+    required_aspect_ratio: Literal["16:9"]
     character_policy_mode: str
     projected_cost_class: ProjectedCostClass
     human_approval_required: bool
@@ -360,7 +372,10 @@ class AIGenerationManifest(BaseModel):
     def bind_still_image_legacy_aliases(cls, value: Any) -> Any:
         """Expose neutral names without breaking historical video payloads."""
 
-        if not isinstance(value, dict) or value.get("media_kind", "VIDEO") != "STILL_IMAGE":
+        if (
+            not isinstance(value, dict)
+            or value.get("media_kind", "VIDEO") != "STILL_IMAGE"
+        ):
             return value
         payload = dict(value)
         alias_pairs = (
@@ -380,7 +395,9 @@ class AIGenerationManifest(BaseModel):
                 payload[legacy_name] = neutral_value
         if not payload.get("post_generation_qc_refs") and payload.get("media_qc_ref"):
             payload["post_generation_qc_refs"] = [payload["media_qc_ref"]]
-        if payload.get("media_qc_ref") is None and payload.get("post_generation_qc_refs"):
+        if payload.get("media_qc_ref") is None and payload.get(
+            "post_generation_qc_refs"
+        ):
             payload["media_qc_ref"] = payload["post_generation_qc_refs"][0]
         return payload
 
@@ -413,7 +430,10 @@ class AIGenerationManifest(BaseModel):
             (self.local_path, self.downloaded_path),
             (self.sha256, self.downloaded_sha256),
         )
-        if any(left is not None and right is not None and left != right for left, right in alias_bindings):
+        if any(
+            left is not None and right is not None and left != right
+            for left, right in alias_bindings
+        ):
             raise ValueError("AI_STILL_IMAGE_MANIFEST_ALIAS_BINDING_MISMATCH")
 
         for reference in (self.output_reference, self.output_url_reference):
@@ -424,15 +444,25 @@ class AIGenerationManifest(BaseModel):
                 raise ValueError("AI_STILL_IMAGE_LOCAL_PATH_MUST_NOT_BE_URL")
 
         local_metadata = (self.local_path, self.size_bytes, self.sha256)
-        if any(value is not None for value in local_metadata) and not all(value is not None for value in local_metadata):
+        if any(value is not None for value in local_metadata) and not all(
+            value is not None for value in local_metadata
+        ):
             raise ValueError("AI_STILL_IMAGE_LOCAL_METADATA_INCOMPLETE")
         image_metadata = (self.image_width, self.image_height, self.image_format)
-        if any(value is not None for value in image_metadata) and not all(value is not None for value in image_metadata):
+        if any(value is not None for value in image_metadata) and not all(
+            value is not None for value in image_metadata
+        ):
             raise ValueError("AI_STILL_IMAGE_DIMENSION_FORMAT_METADATA_INCOMPLETE")
         if any(value is not None for value in (*local_metadata, *image_metadata)):
-            if not all(value is not None for value in (*local_metadata, *image_metadata)):
+            if not all(
+                value is not None for value in (*local_metadata, *image_metadata)
+            ):
                 raise ValueError("AI_STILL_IMAGE_MATERIALIZATION_METADATA_INCOMPLETE")
-            if not self.output_reference or not self.completed_at or not self.post_generation_qc_refs:
+            if (
+                not self.output_reference
+                or not self.completed_at
+                or not self.post_generation_qc_refs
+            ):
                 raise ValueError("AI_STILL_IMAGE_MATERIALIZATION_EVIDENCE_INCOMPLETE")
         normalized_status = self.provider_status.strip().upper()
         submitted_statuses = {"SUBMITTED", "IN_PROGRESS", "PROCESSING"}
@@ -453,18 +483,29 @@ class AIGenerationManifest(BaseModel):
                 *local_metadata,
                 *image_metadata,
             )
-            if any(value is None for value in completed_evidence) or not self.post_generation_qc_refs:
+            if (
+                any(value is None for value in completed_evidence)
+                or not self.post_generation_qc_refs
+            ):
                 raise ValueError("AI_STILL_IMAGE_COMPLETED_EVIDENCE_INCOMPLETE")
 
         if self.native_overlay_required:
-            if not self.native_overlay_plan_ref or not self.native_overlay_plan_hash or not self.text_safe_regions:
+            if (
+                not self.native_overlay_plan_ref
+                or not self.native_overlay_plan_hash
+                or not self.text_safe_regions
+            ):
                 raise ValueError("AI_STILL_IMAGE_NATIVE_OVERLAY_BINDING_INCOMPLETE")
-        elif self.native_overlay_plan_ref or self.native_overlay_plan_hash or self.text_safe_regions:
+        elif (
+            self.native_overlay_plan_ref
+            or self.native_overlay_plan_hash
+            or self.text_safe_regions
+        ):
             raise ValueError("AI_STILL_IMAGE_NATIVE_OVERLAY_BINDING_UNEXPECTED")
 
-        if len(self.post_generation_qc_refs) != len(set(self.post_generation_qc_refs)) or any(
-            not ref.strip() for ref in self.post_generation_qc_refs
-        ):
+        if len(self.post_generation_qc_refs) != len(
+            set(self.post_generation_qc_refs)
+        ) or any(not ref.strip() for ref in self.post_generation_qc_refs):
             raise ValueError("AI_STILL_IMAGE_QC_REFERENCE_INVALID")
         if self.production_eligible or not self.not_publishable:
             raise ValueError("AI_STILL_IMAGE_IMG1_NOT_PUBLISHABLE_REQUIRED")
@@ -478,7 +519,11 @@ class AIGenerationManifest(BaseModel):
     @staticmethod
     def _is_raw_or_signed_reference(value: str) -> bool:
         normalized = value.strip().lower()
-        return normalized.startswith(("http://", "https://", "data:")) or "?" in value or "#" in value
+        return (
+            normalized.startswith(("http://", "https://", "data:"))
+            or "?" in value
+            or "#" in value
+        )
 
 
 class AssetDownloadReceipt(BaseModel):
@@ -591,7 +636,9 @@ class LocalCleanupReceipt(BaseModel):
     retained_files: list[str]
     failed_deletions: list[str]
     bytes_reclaimed: int = Field(ge=0)
-    cleanup_status: Literal["BLOCKED", "ELIGIBLE_NOT_EXECUTED", "COMPLETED", "NOOP_IDEMPOTENT", "FAILED"]
+    cleanup_status: Literal[
+        "BLOCKED", "ELIGIBLE_NOT_EXECUTED", "COMPLETED", "NOOP_IDEMPOTENT", "FAILED"
+    ]
     executed_at: datetime | None = None
     receipt_hash: str
     model_config = ConfigDict(extra="forbid")

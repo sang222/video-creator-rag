@@ -23,7 +23,10 @@ New runtime tables:
 
 Channel lifecycle decisions are human decisions. Health status observes and warns, but does not auto-pause, deactivate, archive, or reactivate a channel.
 
-Approved playbook entries preserve evidence refs, limitations, counter-evidence, and policy/rights summaries. Approval does not mutate `ChannelProfileVersion`, `CompiledChannelPolicySnapshot`, daily workflow, production workflow, or platform metadata.
+Approved playbook entries preserve evidence refs, limitations,
+counter-evidence, and policy/rights summaries. Approval does not mutate
+`ChannelProfileVersion`, `CompiledChannelPolicySnapshot`, editorial research,
+production workflow, or platform metadata.
 
 ## Dashboard Rules
 

@@ -78,8 +78,6 @@ from app.services.ops import (
 )
 from app.services.m5 import (
     AudienceTargetService,
-    ChannelAuthorityService,
-    ChannelDailyRunService,
     ChannelStatePackService,
     EditorialCalendarService,
     IdeaMarketPreflightService,
@@ -87,6 +85,14 @@ from app.services.m5 import (
     ResourceResolverService,
     SearchDemandEvidenceService,
     SearchIntentService,
+)
+from app.services.editorial_research import EditorialResearchService
+from app.services.launch_cadence import (
+    FirstChannelLaunchPolicyService,
+    LaunchDashboardService,
+    LaunchRunService,
+    LaunchRunwayService,
+    LongFormCadenceService,
 )
 from app.services.m6 import (
     AccessibilityQCService,
@@ -115,19 +121,8 @@ from app.services.m10 import (
     PromotionEligibilityGateService,
 )
 from app.services.m10_1 import (
-    AssetReuseIndexService,
-    CrossPlatformFunnelPackageService,
-    DerivativeGraphService,
-    DerivativeOriginalityService,
-    DerivativeReleasePlanService,
-    HumanUploadTaskService,
     LLMRouterConfigLoader,
     LLMRouterService,
-    PromoteShortToLongCandidateService,
-    ReusableArtifactService,
-    ShortCandidateExtractionService,
-    ShortCandidateRankingService,
-    UploadCardService,
 )
 from app.services.m1 import PackagingGateRunner, PackagingHandoffReadService
 from app.services.m2 import (
@@ -165,7 +160,6 @@ from app.services.m10_2 import (
     ProviderCapabilityGateService,
     ProviderCapabilityMatrixService,
     ReusedContentRiskGateService,
-    ShortRenderPackageService,
     ThumbnailVariantPlanningService,
     YouTubeOnlyAnalyticsGateService,
 )
@@ -294,7 +288,6 @@ from app.services.nich1 import (
     VisualNicheAlignmentGate,
     evaluate_channel_fit,
 )
-from app.services.d2p1 import DailyToPackageOrchestrator
 from app.services.controlled_memory import (
     ControlledMemoryService,
     MemoryApprovalGate,
@@ -389,7 +382,6 @@ from app.services.visual_source_routing import (
     VisualSourceRoutingPreviewService,
 )
 from app.services.vcos_v2 import (
-    DerivativeLineageValidator,
     DeterministicAssignmentResolver,
     LegacySeriesReader,
     LongFormPackageEligibilityService,
@@ -405,7 +397,6 @@ from app.services.production_package import (
 )
 
 __all__ = [
-    "DerivativeLineageValidator",
     "DeterministicAssignmentResolver",
     "LegacySeriesReader",
     "LongFormPackageEligibilityService",
@@ -451,7 +442,6 @@ __all__ = [
     "VisualMarketAlignmentGate",
     "VoiceLocaleAlignmentGate",
     "freeze_project_market_lineage",
-    "DailyToPackageOrchestrator",
     "EditorialSlotValidator",
     "MetadataNicheAlignmentGate",
     "NicheAlignmentDossierBuilder",
@@ -491,8 +481,6 @@ __all__ = [
     "RetryOpsService",
     "SystemHealthService",
     "AudienceTargetService",
-    "ChannelAuthorityService",
-    "ChannelDailyRunService",
     "ChannelStatePackService",
     "EditorialCalendarService",
     "IdeaMarketPreflightService",
@@ -500,6 +488,12 @@ __all__ = [
     "ResourceResolverService",
     "SearchDemandEvidenceService",
     "SearchIntentService",
+    "EditorialResearchService",
+    "FirstChannelLaunchPolicyService",
+    "LaunchDashboardService",
+    "LaunchRunService",
+    "LaunchRunwayService",
+    "LongFormCadenceService",
     "AccessibilityQCService",
     "AssetPlanningService",
     "CaptionCompilerService",
@@ -521,19 +515,8 @@ __all__ = [
     "LearningReviewQueueService",
     "PlaybookCandidateDraftService",
     "PromotionEligibilityGateService",
-    "AssetReuseIndexService",
-    "CrossPlatformFunnelPackageService",
-    "DerivativeGraphService",
-    "DerivativeOriginalityService",
-    "DerivativeReleasePlanService",
-    "HumanUploadTaskService",
     "LLMRouterConfigLoader",
     "LLMRouterService",
-    "PromoteShortToLongCandidateService",
-    "ReusableArtifactService",
-    "ShortCandidateExtractionService",
-    "ShortCandidateRankingService",
-    "UploadCardService",
     "PackagingGateRunner",
     "PackagingHandoffReadService",
     "ProviderConfigRegistry",
@@ -567,7 +550,6 @@ __all__ = [
     "ProviderCapabilityGateService",
     "ProviderCapabilityMatrixService",
     "ReusedContentRiskGateService",
-    "ShortRenderPackageService",
     "ThumbnailVariantPlanningService",
     "YouTubeOnlyAnalyticsGateService",
     "UploadedVideoYouTubeFollowReadService",

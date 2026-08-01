@@ -34,8 +34,23 @@ from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 
 
-SECRET_KEY_FRAGMENTS = {"secret", "password", "token", "api_key", "apikey", "private_key", "credential_value"}
-RAW_SECRET_MARKERS = ("sk-", "pk_live_", "BEGIN PRIVATE KEY", "anthropic-", "xoxb-", "ghp_")
+SECRET_KEY_FRAGMENTS = {
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential_value",
+}
+RAW_SECRET_MARKERS = (
+    "sk-",
+    "pk_live_",
+    "BEGIN PRIVATE KEY",
+    "anthropic-",
+    "xoxb-",
+    "ghp_",
+)
 
 METRIC_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -155,7 +170,6 @@ METRIC_DEFINITIONS: list[dict[str, Any]] = [
 METRIC_UNITS = {item["metric_key"]: item["unit"] for item in METRIC_DEFINITIONS}
 PLATFORM_NOT_AVAILABLE_METRICS = {
     "YOUTUBE": {"saves", "bookmarks"},
-    "YOUTUBE_SHORTS": {"bookmarks"},
     "TIKTOK": {"subscribers_lost"},
     "FACEBOOK": set(),
     "INSTAGRAM": {"subscribers_lost"},
@@ -214,25 +228,42 @@ class AnalyticsSyncService:
         uploaded = self._require_uploaded_video(data.uploaded_video_id)
         metadata = _jsonable(data.metadata)
         state = "PENDING"
-        reason_codes = ["ANALYTICS_SYNC_CREATED", "NO_DIAGNOSIS_IN_M8", "NO_NETWORK_ANALYTICS_CALL"]
+        reason_codes = [
+            "ANALYTICS_SYNC_CREATED",
+            "NO_DIAGNOSIS_IN_M8",
+            "NO_NETWORK_ANALYTICS_CALL",
+        ]
         next_action = "Run analytics sync again."
         provider_key = data.provider_key
         if data.sync_mode == "REAL_DISABLED":
             state = "BLOCKED"
-            reason_codes = ["ANALYTICS_SYNC_CREATED", "ANALYTICS_PROVIDER_REAL_DISABLED", "NO_NETWORK_ANALYTICS_CALL"]
+            reason_codes = [
+                "ANALYTICS_SYNC_CREATED",
+                "ANALYTICS_PROVIDER_REAL_DISABLED",
+                "NO_NETWORK_ANALYTICS_CALL",
+            ]
             next_action = "Check provider credentials later."
         elif data.sync_mode in {"YOUTUBE_PUBLIC_MONITOR", "YOUTUBE_OWNER_ANALYTICS"}:
             state = "BLOCKED"
-            provider_key = provider_key or ("youtube-public" if data.sync_mode == "YOUTUBE_PUBLIC_MONITOR" else "youtube-owner")
+            provider_key = provider_key or (
+                "youtube-public"
+                if data.sync_mode == "YOUTUBE_PUBLIC_MONITOR"
+                else "youtube-owner"
+            )
             reason_codes = [
                 "ANALYTICS_SYNC_CREATED",
                 "ANALYTICS_PROVIDER_NOT_CONFIGURED",
                 "NO_NETWORK_ANALYTICS_CALL",
             ]
-            next_action = "Configure YouTube analytics credentials before running provider sync."
+            next_action = (
+                "Configure YouTube analytics credentials before running provider sync."
+            )
         elif uploaded.monitoring_state != "READY_FOR_ANALYTICS":
             state = "BLOCKED"
-            reason_codes = ["ANALYTICS_SYNC_CREATED", "UPLOADED_VIDEO_NOT_READY_FOR_ANALYTICS"]
+            reason_codes = [
+                "ANALYTICS_SYNC_CREATED",
+                "UPLOADED_VIDEO_NOT_READY_FOR_ANALYTICS",
+            ]
             next_action = "Wait until uploaded video is ready for analytics."
         run = AnalyticsSyncRun(
             company_id=uploaded.company_id,
@@ -284,9 +315,15 @@ class AnalyticsSyncService:
                 company_id=run.company_id,
                 correlation_id=correlation_id,
                 reason_code=reason_codes[-1],
-                payload={"reason_codes": reason_codes, "next_action": next_action, "sync_mode": run.sync_mode},
+                payload={
+                    "reason_codes": reason_codes,
+                    "next_action": next_action,
+                    "sync_mode": run.sync_mode,
+                },
             )
-            self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
+            self._update_summary_blocked(
+                uploaded=uploaded, run=run, correlation_id=correlation_id
+            )
         return run
 
     def execute_sync_run(
@@ -307,16 +344,23 @@ class AnalyticsSyncService:
                 next_action="Wait until uploaded video is ready for analytics.",
                 correlation_id=correlation_id,
             )
-            self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
+            self._update_summary_blocked(
+                uploaded=uploaded, run=run, correlation_id=correlation_id
+            )
             return run
         if run.sync_mode == "REAL_DISABLED":
             self._block_run(
                 run,
-                reason_codes=["ANALYTICS_PROVIDER_REAL_DISABLED", "NO_NETWORK_ANALYTICS_CALL"],
+                reason_codes=[
+                    "ANALYTICS_PROVIDER_REAL_DISABLED",
+                    "NO_NETWORK_ANALYTICS_CALL",
+                ],
                 next_action="Check provider credentials later.",
                 correlation_id=correlation_id,
             )
-            self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
+            self._update_summary_blocked(
+                uploaded=uploaded, run=run, correlation_id=correlation_id
+            )
             return run
         if run.sync_mode in {"MANUAL_IMPORT", "CSV_IMPORT"}:
             self._block_run(
@@ -328,11 +372,16 @@ class AnalyticsSyncService:
             return run
         self._block_run(
             run,
-            reason_codes=["ANALYTICS_PROVIDER_NOT_CONFIGURED", "NO_NETWORK_ANALYTICS_CALL"],
+            reason_codes=[
+                "ANALYTICS_PROVIDER_NOT_CONFIGURED",
+                "NO_NETWORK_ANALYTICS_CALL",
+            ],
             next_action="Configure YouTube analytics credentials or import manual/CSV analytics.",
             correlation_id=correlation_id,
         )
-        self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
+        self._update_summary_blocked(
+            uploaded=uploaded, run=run, correlation_id=correlation_id
+        )
         return run
 
     def import_manual(
@@ -343,13 +392,19 @@ class AnalyticsSyncService:
         correlation_id: str = "m8-manual-analytics-import",
     ) -> AnalyticsSnapshot:
         uploaded = self._require_uploaded_video(data.uploaded_video_id)
-        _validate_uploaded_video_match(uploaded, platform=data.platform, platform_video_id=data.platform_video_id)
+        _validate_uploaded_video_match(
+            uploaded, platform=data.platform, platform_video_id=data.platform_video_id
+        )
         if uploaded.monitoring_state != "READY_FOR_ANALYTICS":
             run = self.create_sync_run(
-                data=AnalyticsSyncRunCreate(uploaded_video_id=uploaded.id, sync_mode=sync_mode),  # type: ignore[arg-type]
+                data=AnalyticsSyncRunCreate(
+                    uploaded_video_id=uploaded.id, sync_mode=sync_mode
+                ),  # type: ignore[arg-type]
                 correlation_id=correlation_id,
             )
-            self._update_summary_blocked(uploaded=uploaded, run=run, correlation_id=correlation_id)
+            self._update_summary_blocked(
+                uploaded=uploaded, run=run, correlation_id=correlation_id
+            )
             raise ValidationFailureError("uploaded video is not ready for analytics")
         run = self.create_sync_run(
             data=AnalyticsSyncRunCreate(
@@ -357,8 +412,15 @@ class AnalyticsSyncService:
                 sync_mode=sync_mode,  # type: ignore[arg-type]
                 observed_from=data.observed_from,
                 observed_to=data.observed_to,
-                provider_key="manual_import" if sync_mode == "MANUAL_IMPORT" else "csv_import",
-                metadata={"source_note": data.source_note, "imported_by_user_id": str(data.imported_by_user_id) if data.imported_by_user_id else None},
+                provider_key="manual_import"
+                if sync_mode == "MANUAL_IMPORT"
+                else "csv_import",
+                metadata={
+                    "source_note": data.source_note,
+                    "imported_by_user_id": str(data.imported_by_user_id)
+                    if data.imported_by_user_id
+                    else None,
+                },
             ),
             correlation_id=correlation_id,
         )
@@ -381,7 +443,9 @@ class AnalyticsSyncService:
                 "provider_key": run.provider_key,
                 "source": sync_mode,
                 "source_note": data.source_note,
-                "imported_by_user_id": str(data.imported_by_user_id) if data.imported_by_user_id else None,
+                "imported_by_user_id": str(data.imported_by_user_id)
+                if data.imported_by_user_id
+                else None,
                 "duration_seconds": data.duration_seconds,
                 "timeline_alignment": data.timeline_alignment,
                 "manual_import": True,
@@ -438,20 +502,29 @@ class AnalyticsSyncService:
             raise NotFoundError(f"analytics snapshot not found: {snapshot_id}")
         return snapshot
 
-    def list_snapshots_by_uploaded_video(self, uploaded_video_id: uuid.UUID) -> list[AnalyticsSnapshot]:
+    def list_snapshots_by_uploaded_video(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[AnalyticsSnapshot]:
         self._require_uploaded_video(uploaded_video_id)
         return list(
             self.session.scalars(
                 select(AnalyticsSnapshot)
                 .where(AnalyticsSnapshot.uploaded_video_id == uploaded_video_id)
-                .order_by(AnalyticsSnapshot.captured_at.desc(), AnalyticsSnapshot.created_at.desc())
+                .order_by(
+                    AnalyticsSnapshot.captured_at.desc(),
+                    AnalyticsSnapshot.created_at.desc(),
+                )
             ).all()
         )
 
-    def get_metrics_summary(self, uploaded_video_id: uuid.UUID) -> UploadedVideoMetricsSummary:
+    def get_metrics_summary(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoMetricsSummary:
         uploaded = self._require_uploaded_video(uploaded_video_id)
         existing = self.session.scalars(
-            select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id)
+            select(UploadedVideoMetricsSummary).where(
+                UploadedVideoMetricsSummary.uploaded_video_id == uploaded.id
+            )
         ).one_or_none()
         if existing is not None:
             return existing
@@ -474,20 +547,30 @@ class AnalyticsSyncService:
         self.session.flush()
         return summary
 
-    def latest_retention(self, uploaded_video_id: uuid.UUID) -> RetentionCurveSnapshot | None:
+    def latest_retention(
+        self, uploaded_video_id: uuid.UUID
+    ) -> RetentionCurveSnapshot | None:
         self._require_uploaded_video(uploaded_video_id)
         return self.session.scalars(
             select(RetentionCurveSnapshot)
             .where(RetentionCurveSnapshot.uploaded_video_id == uploaded_video_id)
-            .order_by(RetentionCurveSnapshot.captured_at.desc(), RetentionCurveSnapshot.created_at.desc())
+            .order_by(
+                RetentionCurveSnapshot.captured_at.desc(),
+                RetentionCurveSnapshot.created_at.desc(),
+            )
         ).first()
 
-    def latest_traffic_sources(self, uploaded_video_id: uuid.UUID) -> TrafficSourceSnapshot | None:
+    def latest_traffic_sources(
+        self, uploaded_video_id: uuid.UUID
+    ) -> TrafficSourceSnapshot | None:
         self._require_uploaded_video(uploaded_video_id)
         return self.session.scalars(
             select(TrafficSourceSnapshot)
             .where(TrafficSourceSnapshot.uploaded_video_id == uploaded_video_id)
-            .order_by(TrafficSourceSnapshot.captured_at.desc(), TrafficSourceSnapshot.created_at.desc())
+            .order_by(
+                TrafficSourceSnapshot.captured_at.desc(),
+                TrafficSourceSnapshot.created_at.desc(),
+            )
         ).first()
 
     def _create_snapshot_set(
@@ -502,20 +585,38 @@ class AnalyticsSyncService:
         timeline_alignment: dict[str, Any] | None = None,
         correlation_id: str,
     ) -> SnapshotSet:
-        _validate_uploaded_video_match(uploaded, platform=output.platform, platform_video_id=output.platform_video_id)
+        _validate_uploaded_video_match(
+            uploaded,
+            platform=output.platform,
+            platform_video_id=output.platform_video_id,
+        )
         metrics = dict(output.metrics)
-        unknown_metric_payload = {key: value for key, value in metrics.items() if key not in KNOWN_ANALYTICS_METRICS}
-        metrics = {key: value for key, value in metrics.items() if key in KNOWN_ANALYTICS_METRICS}
+        unknown_metric_payload = {
+            key: value
+            for key, value in metrics.items()
+            if key not in KNOWN_ANALYTICS_METRICS
+        }
+        metrics = {
+            key: value
+            for key, value in metrics.items()
+            if key in KNOWN_ANALYTICS_METRICS
+        }
         engagement = dict(output.engagement or {})
-        engagement = {key: value for key, value in engagement.items() if key in KNOWN_ANALYTICS_METRICS}
+        engagement = {
+            key: value
+            for key, value in engagement.items()
+            if key in KNOWN_ANALYTICS_METRICS
+        }
         computed_metrics = _compute_engagement_metrics(metrics, engagement)
         metrics_for_availability = {**metrics, **computed_metrics}
-        availability_blob, unavailable_metrics, unknown_metrics = _build_metric_availability(
-            platform=uploaded.platform,
-            metrics=metrics_for_availability,
-            explicit_availability=output.metric_availability,
-            provider_key=run.provider_key,
-            source=source,
+        availability_blob, unavailable_metrics, unknown_metrics = (
+            _build_metric_availability(
+                platform=uploaded.platform,
+                metrics=metrics_for_availability,
+                explicit_availability=output.metric_availability,
+                provider_key=run.provider_key,
+                source=source,
+            )
         )
         normalized_metrics = _normalize_metrics(
             metrics=metrics,
@@ -614,7 +715,13 @@ class AnalyticsSyncService:
         run.observed_from = output.observed_from
         run.observed_to = output.observed_to
         run.analytics_snapshot_id = snapshot.id
-        run.reason_codes = _dedupe([*run.reason_codes, "ANALYTICS_SYNC_COMPLETED", "ANALYTICS_SNAPSHOT_CREATED"])
+        run.reason_codes = _dedupe(
+            [
+                *run.reason_codes,
+                "ANALYTICS_SYNC_COMPLETED",
+                "ANALYTICS_SNAPSHOT_CREATED",
+            ]
+        )
         run.next_action = "Import latest analytics"
         summary = self._update_summary_from_snapshot(
             uploaded=uploaded,
@@ -676,7 +783,10 @@ class AnalyticsSyncService:
                 company_id=uploaded.company_id,
                 correlation_id=correlation_id,
                 reason_code="TRAFFIC_SOURCE_SNAPSHOT_CREATED",
-                payload={"analytics_snapshot_id": str(snapshot.id), "uploaded_video_id": str(uploaded.id)},
+                payload={
+                    "analytics_snapshot_id": str(snapshot.id),
+                    "uploaded_video_id": str(uploaded.id),
+                },
             )
         if retention_snapshot is not None:
             _record_m8_event(
@@ -689,7 +799,11 @@ class AnalyticsSyncService:
                 company_id=uploaded.company_id,
                 correlation_id=correlation_id,
                 reason_code="RETENTION_CURVE_SNAPSHOT_CREATED",
-                payload={"analytics_snapshot_id": str(snapshot.id), "uploaded_video_id": str(uploaded.id), "no_retention_diagnosis": True},
+                payload={
+                    "analytics_snapshot_id": str(snapshot.id),
+                    "uploaded_video_id": str(uploaded.id),
+                    "no_retention_diagnosis": True,
+                },
             )
         if engagement_snapshot is not None:
             _record_m8_event(
@@ -702,7 +816,11 @@ class AnalyticsSyncService:
                 company_id=uploaded.company_id,
                 correlation_id=correlation_id,
                 reason_code="ENGAGEMENT_SNAPSHOT_CREATED",
-                payload={"analytics_snapshot_id": str(snapshot.id), "uploaded_video_id": str(uploaded.id), "no_diagnosis_in_m8": True},
+                payload={
+                    "analytics_snapshot_id": str(snapshot.id),
+                    "uploaded_video_id": str(uploaded.id),
+                    "no_diagnosis_in_m8": True,
+                },
             )
         _record_m8_event(
             self.session,
@@ -714,7 +832,11 @@ class AnalyticsSyncService:
             company_id=run.company_id,
             correlation_id=correlation_id,
             reason_code="ANALYTICS_SYNC_COMPLETED",
-            payload={"analytics_snapshot_id": str(snapshot.id), "uploaded_video_id": str(uploaded.id), "sync_state": run.sync_state},
+            payload={
+                "analytics_snapshot_id": str(snapshot.id),
+                "uploaded_video_id": str(uploaded.id),
+                "sync_state": run.sync_state,
+            },
         )
         return SnapshotSet(
             analytics_snapshot=snapshot,
@@ -735,7 +857,12 @@ class AnalyticsSyncService:
         confidence_level: str,
     ) -> TrafficSourceSnapshot:
         if traffic_sources:
-            items = [item.model_dump(mode="json") if hasattr(item, "model_dump") else _jsonable(item) for item in traffic_sources]
+            items = [
+                item.model_dump(mode="json")
+                if hasattr(item, "model_dump")
+                else _jsonable(item)
+                for item in traffic_sources
+            ]
             total_percentage = sum(float(item.get("percentage") or 0) for item in items)
             source_summary = {
                 "state": "AVAILABLE",
@@ -784,15 +911,30 @@ class AnalyticsSyncService:
     ) -> RetentionCurveSnapshot | None:
         if not retention_curve:
             return None
-        duration = duration_seconds if duration_seconds is not None else _render_package_duration(self.session, uploaded.render_package_snapshot_id)
+        duration = (
+            duration_seconds
+            if duration_seconds is not None
+            else _render_package_duration(
+                self.session, uploaded.render_package_snapshot_id
+            )
+        )
         points = sorted(
-            [point.model_dump(mode="json") if hasattr(point, "model_dump") else _jsonable(point) for point in retention_curve],
+            [
+                point.model_dump(mode="json")
+                if hasattr(point, "model_dump")
+                else _jsonable(point)
+                for point in retention_curve
+            ],
             key=lambda item: float(item["time_seconds"]),
         )
         if duration is not None:
-            out_of_range = [point for point in points if float(point["time_seconds"]) > duration]
+            out_of_range = [
+                point for point in points if float(point["time_seconds"]) > duration
+            ]
             if out_of_range:
-                raise ValidationFailureError("retention curve point exceeds known video duration")
+                raise ValidationFailureError(
+                    "retention curve point exceeds known video duration"
+                )
         record = RetentionCurveSnapshot(
             analytics_snapshot_id=snapshot.id,
             uploaded_video_id=uploaded.id,
@@ -830,7 +972,15 @@ class AnalyticsSyncService:
         confidence_level: str,
     ) -> EngagementSnapshot | None:
         engagement_blob: dict[str, Any] = {}
-        for key in ("likes", "comments", "shares", "saves", "bookmarks", "subscribers_gained", "subscribers_lost"):
+        for key in (
+            "likes",
+            "comments",
+            "shares",
+            "saves",
+            "bookmarks",
+            "subscribers_gained",
+            "subscribers_lost",
+        ):
             if key in metrics:
                 engagement_blob[key] = {
                     "value": metrics[key],
@@ -838,10 +988,16 @@ class AnalyticsSyncService:
                     "state": "AVAILABLE",
                 }
         for key, value in engagement.items():
-            engagement_blob[key] = {"value": value, "source_metric": key, "state": "AVAILABLE"}
+            engagement_blob[key] = {
+                "value": value,
+                "source_metric": key,
+                "state": "AVAILABLE",
+            }
         if "engagement_rate" not in metrics and "engagement_rate" not in engagement:
             if "engagement_rate" in computed_metrics:
-                numerator_keys = [key for key in ENGAGEMENT_NUMERATOR_KEYS if key in metrics]
+                numerator_keys = [
+                    key for key in ENGAGEMENT_NUMERATOR_KEYS if key in metrics
+                ]
                 rate = computed_metrics["engagement_rate"]
                 engagement_blob["engagement_rate"] = {
                     "value": rate,
@@ -915,9 +1071,15 @@ class AnalyticsSyncService:
             operator_summary = "Analytics synced successfully"
             next_action = "Import latest analytics"
         summary.latest_analytics_snapshot_id = snapshot.id
-        summary.latest_retention_curve_snapshot_id = retention_snapshot.id if retention_snapshot else None
-        summary.latest_traffic_source_snapshot_id = traffic_snapshot.id if traffic_snapshot else None
-        summary.latest_engagement_snapshot_id = engagement_snapshot.id if engagement_snapshot else None
+        summary.latest_retention_curve_snapshot_id = (
+            retention_snapshot.id if retention_snapshot else None
+        )
+        summary.latest_traffic_source_snapshot_id = (
+            traffic_snapshot.id if traffic_snapshot else None
+        )
+        summary.latest_engagement_snapshot_id = (
+            engagement_snapshot.id if engagement_snapshot else None
+        )
         summary.latest_captured_at = snapshot.captured_at
         summary.metrics_summary = metric_summary
         summary.availability_summary = {
@@ -1008,7 +1170,9 @@ class AnalyticsSyncService:
     ) -> None:
         run.sync_state = "BLOCKED"
         run.completed_at = utc_now()
-        run.reason_codes = _dedupe([*run.reason_codes, "ANALYTICS_SYNC_BLOCKED", *reason_codes])
+        run.reason_codes = _dedupe(
+            [*run.reason_codes, "ANALYTICS_SYNC_BLOCKED", *reason_codes]
+        )
         run.next_action = next_action
         self.session.flush()
         _record_m8_event(
@@ -1040,7 +1204,9 @@ class AnalyticsSyncService:
         self.session.flush()
         _record_m8_event(
             self.session,
-            event_type="analytics_sync_run.blocked" if sync_state == "BLOCKED" else "analytics_sync_run.failed",
+            event_type="analytics_sync_run.blocked"
+            if sync_state == "BLOCKED"
+            else "analytics_sync_run.failed",
             aggregate_type="analytics_sync_run",
             aggregate_id=run.id,
             target_type="analytics_sync_run",
@@ -1048,7 +1214,11 @@ class AnalyticsSyncService:
             company_id=run.company_id,
             correlation_id=correlation_id,
             reason_code=reason_codes[0],
-            payload={"reason_codes": run.reason_codes, "next_action": run.next_action, "sync_state": sync_state},
+            payload={
+                "reason_codes": run.reason_codes,
+                "next_action": run.next_action,
+                "sync_state": sync_state,
+            },
         )
 
     def _require_uploaded_video(self, uploaded_video_id: uuid.UUID) -> UploadedVideo:
@@ -1130,7 +1300,9 @@ def _normalize_metrics(
     }
 
 
-def _compute_engagement_metrics(metrics: dict[str, float], engagement: dict[str, float]) -> dict[str, float]:
+def _compute_engagement_metrics(
+    metrics: dict[str, float], engagement: dict[str, float]
+) -> dict[str, float]:
     if "engagement_rate" in metrics or "engagement_rate" in engagement:
         return {}
     numerator_keys = [key for key in ENGAGEMENT_NUMERATOR_KEYS if key in metrics]
@@ -1150,7 +1322,9 @@ def _normalize_computed_metrics(
 ) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for key, value in sorted(metrics.items()):
-        source_metric_keys = [*ENGAGEMENT_NUMERATOR_KEYS, "views"] if key == "engagement_rate" else []
+        source_metric_keys = (
+            [*ENGAGEMENT_NUMERATOR_KEYS, "views"] if key == "engagement_rate" else []
+        )
         normalized[key] = {
             "value": value,
             "unit": METRIC_UNITS.get(key, "UNKNOWN"),
@@ -1166,7 +1340,9 @@ def _normalize_computed_metrics(
     return normalized
 
 
-def _validate_uploaded_video_match(uploaded: UploadedVideo, *, platform: str, platform_video_id: str) -> None:
+def _validate_uploaded_video_match(
+    uploaded: UploadedVideo, *, platform: str, platform_video_id: str
+) -> None:
     if uploaded.platform != platform or uploaded.platform_video_id != platform_video_id:
         raise ValidationFailureError("platform/video id does not match uploaded video")
 
@@ -1177,7 +1353,9 @@ def _freshness_from_window(captured_at: Any, observed_to: Any | None) -> str:
     return "FRESH" if delta_seconds <= 60 * 60 * 48 else "STALE"
 
 
-def _render_package_duration(session: Session, render_package_snapshot_id: uuid.UUID) -> float | None:
+def _render_package_duration(
+    session: Session, render_package_snapshot_id: uuid.UUID
+) -> float | None:
     package = session.get(RenderPackageSnapshot, render_package_snapshot_id)
     if package is None or package.duration_seconds is None:
         return None
@@ -1254,9 +1432,16 @@ def _record_m8_event(
 def _ensure_no_secret_payload(value: Any) -> None:
     for key, item in _walk_items(value):
         normalized = key.lower().replace("-", "_")
-        if any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS) and normalized != "secret_ref":
-            raise ValidationFailureError(f"secret-like payload key is not allowed: {key}")
-        if isinstance(item, str) and any(marker in item for marker in RAW_SECRET_MARKERS):
+        if (
+            any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS)
+            and normalized != "secret_ref"
+        ):
+            raise ValidationFailureError(
+                f"secret-like payload key is not allowed: {key}"
+            )
+        if isinstance(item, str) and any(
+            marker in item for marker in RAW_SECRET_MARKERS
+        ):
             raise ValidationFailureError("raw secret-like value is not allowed")
 
 

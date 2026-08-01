@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from app.contracts.config_catalog import CatalogDocument
 from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.geo_market import InactiveTargetMarketProfileFixture
-from app.contracts.profile import CapabilityMatrix, NicheProfileTemplate, ProfileCompilerPolicy
+from app.contracts.profile import (
+    CapabilityMatrix,
+    NicheProfileTemplate,
+    ProfileCompilerPolicy,
+)
 from app.contracts.visual_routing import VisualSourceRoutingPolicyCatalogItem
 from app.core.config import (
     GEMINI_IMAGE_APPROVED_MODEL_IDS,
@@ -54,11 +58,13 @@ class RoleCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class ArtifactTypeRegistryItem(BaseModel):
     key: str
     description: str
 
     model_config = ConfigDict(extra="forbid")
+
 
 class ReviewTypeRegistryItem(BaseModel):
     key: str
@@ -66,17 +72,20 @@ class ReviewTypeRegistryItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class SimpleKeyCatalogItem(BaseModel):
     key: str
     description: str
 
     model_config = ConfigDict(extra="forbid")
 
+
 class ConfidenceReasonCodeItem(BaseModel):
     code: str
     description: str
 
     model_config = ConfigDict(extra="forbid")
+
 
 class GateDefinitionCatalogItem(BaseModel):
     gate_key: str
@@ -91,6 +100,7 @@ class GateDefinitionCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class PlatformPolicyCatalogItem(BaseModel):
     catalog_key: str
     platform: str
@@ -99,6 +109,7 @@ class PlatformPolicyCatalogItem(BaseModel):
     description: str | None = None
 
     model_config = ConfigDict(extra="forbid")
+
 
 class ProviderRegistryCatalogItem(BaseModel):
     provider_key: str
@@ -114,6 +125,7 @@ class ProviderRegistryCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class MetricDefinitionCatalogItem(BaseModel):
     metric_key: str
     metric_name: str
@@ -127,6 +139,7 @@ class MetricDefinitionCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class DiagnosticTaxonomyCatalogItem(BaseModel):
     key: str
     description: str
@@ -136,6 +149,7 @@ class DiagnosticTaxonomyCatalogItem(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
+
 
 class LLMRouterLaneCatalogItem(BaseModel):
     lane_name: str
@@ -154,6 +168,7 @@ class LLMRouterLaneCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class LLMModelProfileCatalogItem(BaseModel):
     provider_key: str
     model_id: str
@@ -165,6 +180,7 @@ class LLMModelProfileCatalogItem(BaseModel):
     notes: str | None = None
 
     model_config = ConfigDict(extra="forbid")
+
 
 class MediaProviderRoleProfileCatalogItem(BaseModel):
     provider_key: str
@@ -180,6 +196,7 @@ class MediaProviderRoleProfileCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class MediaProviderCapabilityMatrixCatalogItem(BaseModel):
     key: str
     provider_key: str
@@ -194,6 +211,7 @@ class MediaProviderCapabilityMatrixCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class MediaProviderBudgetPolicyCatalogItem(BaseModel):
     key: str
     provider_type: str
@@ -206,6 +224,7 @@ class MediaProviderBudgetPolicyCatalogItem(BaseModel):
     enforcement: str
 
     model_config = ConfigDict(extra="forbid")
+
 
 class MediaProviderRoutingPolicyCatalogItem(BaseModel):
     key: str
@@ -287,6 +306,7 @@ class RetryPolicyCatalogItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 class DecisionRightsPolicyItem(BaseModel):
     key: str
     description: str
@@ -323,7 +343,9 @@ class ConfigRegistryService:
     def __init__(self, session: Session):
         self.session = session
 
-    def load_catalog_files(self, paths: Iterable[str | Path] | None = None) -> list[LoadedCatalog]:
+    def load_catalog_files(
+        self, paths: Iterable[str | Path] | None = None
+    ) -> list[LoadedCatalog]:
         discovered = self._discover(paths or [Path("config")])
         return [self.validate_catalog(path) for path in discovered]
 
@@ -334,11 +356,15 @@ class ConfigRegistryService:
             document = CatalogDocument.model_validate(raw)
             self._validate_items(document)
         except ValidationError as exc:
-            raise ValidationFailureError(f"invalid catalog {catalog_path}: {exc}") from exc
+            raise ValidationFailureError(
+                f"invalid catalog {catalog_path}: {exc}"
+            ) from exc
         content = document.model_dump(mode="json")
         return LoadedCatalog(catalog_path, content, content_hash(content))
 
-    def seed(self, paths: Iterable[str | Path] | None = None) -> list[ConfigCatalogVersion]:
+    def seed(
+        self, paths: Iterable[str | Path] | None = None
+    ) -> list[ConfigCatalogVersion]:
         records: list[ConfigCatalogVersion] = []
         for loaded in self.load_catalog_files(paths):
             record = self.get_version(loaded.catalog_key, loaded.catalog_version)
@@ -356,7 +382,9 @@ class ConfigRegistryService:
                     content_hash=loaded.content_hash,
                     source_path=str(loaded.path),
                     status=loaded.content["status"],
-                    activated_at=utc_now() if loaded.content["status"] == "active" else None,
+                    activated_at=utc_now()
+                    if loaded.content["status"] == "active"
+                    else None,
                 )
                 self.session.add(record)
                 self.session.flush()
@@ -379,7 +407,9 @@ class ConfigRegistryService:
         )
         return self.session.scalars(statement).one_or_none()
 
-    def role_catalog_mapping(self, path: str | Path = "config/role_catalog.yaml") -> dict[str, set[str]]:
+    def role_catalog_mapping(
+        self, path: str | Path = "config/role_catalog.yaml"
+    ) -> dict[str, set[str]]:
         loaded = self.validate_catalog(path)
         if loaded.catalog_key != "role_catalog":
             raise ValidationFailureError("catalog is not role_catalog")
@@ -433,12 +463,10 @@ class ConfigRegistryService:
             "ops_incident_type_catalog": SimpleKeyCatalogItem,
             "manual_action_type_catalog": SimpleKeyCatalogItem,
             "m4_reason_code_catalog": ReasonCodeItem,
-            "daily_run_status_catalog": SimpleKeyCatalogItem,
             "slot_type_catalog": SimpleKeyCatalogItem,
             "context_pack_purpose_catalog": SimpleKeyCatalogItem,
             "search_demand_source_type_catalog": SimpleKeyCatalogItem,
             "platform_surface_catalog": SimpleKeyCatalogItem,
-            "idea_decision_status_catalog": SimpleKeyCatalogItem,
             "admission_decision_catalog": SimpleKeyCatalogItem,
             "m5_reason_code_catalog": ReasonCodeItem,
             "production_run_status_catalog": SimpleKeyCatalogItem,
@@ -499,19 +527,8 @@ class ConfigRegistryService:
             "llm_router_lane_catalog": LLMRouterLaneCatalogItem,
             "llm_model_profile_catalog": LLMModelProfileCatalogItem,
             "llm_route_status_catalog": SimpleKeyCatalogItem,
-            "derivative_type_catalog": SimpleKeyCatalogItem,
-            "short_candidate_state_catalog": SimpleKeyCatalogItem,
-            "short_crop_strategy_catalog": SimpleKeyCatalogItem,
-            "short_visual_source_catalog": SimpleKeyCatalogItem,
-            "originality_check_result_catalog": SimpleKeyCatalogItem,
-            "reusable_artifact_type_catalog": SimpleKeyCatalogItem,
-            "reusable_artifact_state_catalog": SimpleKeyCatalogItem,
-            "release_plan_state_catalog": SimpleKeyCatalogItem,
-            "upload_card_state_catalog": SimpleKeyCatalogItem,
-            "human_upload_task_state_catalog": SimpleKeyCatalogItem,
-            "music_policy_catalog": SimpleKeyCatalogItem,
-            "cta_type_catalog": SimpleKeyCatalogItem,
             "m10_1_reason_code_catalog": ReasonCodeItem,
+            "human_upload_task_state_catalog": SimpleKeyCatalogItem,
             "media_provider_type_catalog": SimpleKeyCatalogItem,
             "media_provider_recommendation_catalog": SimpleKeyCatalogItem,
             "media_job_type_catalog": SimpleKeyCatalogItem,
@@ -530,7 +547,6 @@ class ConfigRegistryService:
             "media_budget_state_catalog": SimpleKeyCatalogItem,
             "media_budget_enforcement_catalog": SimpleKeyCatalogItem,
             "long_form_render_package_state_catalog": SimpleKeyCatalogItem,
-            "short_render_package_state_catalog": SimpleKeyCatalogItem,
             "ai_hero_asset_state_catalog": SimpleKeyCatalogItem,
             "thumbnail_variant_state_catalog": SimpleKeyCatalogItem,
             "final_media_type_catalog": SimpleKeyCatalogItem,
@@ -610,7 +626,9 @@ class ConfigRegistryService:
                 raise ValidationFailureError(
                     "Gemini Image price catalog must contain exactly one row per supported size/aspect"
                 )
-            default_rows = [item for item in document.items if item.get("is_default_route") is True]
+            default_rows = [
+                item for item in document.items if item.get("is_default_route") is True
+            ]
             if len(default_rows) != 1 or (
                 default_rows[0].get("size"),
                 default_rows[0].get("aspect_ratio"),
@@ -619,7 +637,9 @@ class ConfigRegistryService:
                     "Gemini Image price catalog default route must be exactly 2K 16:9"
                 )
 
-    def _validate_media_provider_catalog_item(self, catalog_key: str, parsed: BaseModel) -> None:
+    def _validate_media_provider_catalog_item(
+        self, catalog_key: str, parsed: BaseModel
+    ) -> None:
         if catalog_key == "provider_registry_catalog":
             if getattr(parsed, "provider_key", None) != "google_gemini_image":
                 return
@@ -628,23 +648,49 @@ class ConfigRegistryService:
             cost = getattr(parsed, "cost_model_blob", {})
             metadata = getattr(parsed, "metadata", {})
             if getattr(parsed, "provider_type", None) != "IMAGE":
-                raise ValidationFailureError("google_gemini_image registry type must be IMAGE")
-            if capability.get("vendor") != "google" or capability.get("capability") != "AI_IMAGE_GENERATION":
-                raise ValidationFailureError("google_gemini_image registry vendor/capability is invalid")
+                raise ValidationFailureError(
+                    "google_gemini_image registry type must be IMAGE"
+                )
+            if (
+                capability.get("vendor") != "google"
+                or capability.get("capability") != "AI_IMAGE_GENERATION"
+            ):
+                raise ValidationFailureError(
+                    "google_gemini_image registry vendor/capability is invalid"
+                )
             if capability.get("transport") != "GEMINI_API_NATIVE":
-                raise ValidationFailureError("google_gemini_image transport must be GEMINI_API_NATIVE")
+                raise ValidationFailureError(
+                    "google_gemini_image transport must be GEMINI_API_NATIVE"
+                )
             if capability.get("supported_sizes") != list(GEMINI_IMAGE_SUPPORTED_SIZES):
-                raise ValidationFailureError("google_gemini_image registry sizes are invalid")
-            if capability.get("supported_aspect_ratios") != list(GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS):
-                raise ValidationFailureError("google_gemini_image registry aspect ratios are invalid")
+                raise ValidationFailureError(
+                    "google_gemini_image registry sizes are invalid"
+                )
+            if capability.get("supported_aspect_ratios") != list(
+                GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS
+            ):
+                raise ValidationFailureError(
+                    "google_gemini_image registry aspect ratios are invalid"
+                )
             if policy.get("production_enabled_when_configured") is not False:
-                raise ValidationFailureError("google_gemini_image production execution must default false")
+                raise ValidationFailureError(
+                    "google_gemini_image production execution must default false"
+                )
             if policy.get("distinct_from_google_veo") is not True:
-                raise ValidationFailureError("google_gemini_image must remain distinct from google_veo")
-            if cost.get("catalog_ref") != "config://google_gemini_image_model_price_catalog/2026-07-17":
-                raise ValidationFailureError("google_gemini_image registry price catalog ref is invalid")
+                raise ValidationFailureError(
+                    "google_gemini_image must remain distinct from google_veo"
+                )
+            if (
+                cost.get("catalog_ref")
+                != "config://google_gemini_image_model_price_catalog/2026-07-17"
+            ):
+                raise ValidationFailureError(
+                    "google_gemini_image registry price catalog ref is invalid"
+                )
             if metadata.get("shared_credential_env_key") != "GEMINI_API_KEY":
-                raise ValidationFailureError("google_gemini_image must reuse GEMINI_API_KEY")
+                raise ValidationFailureError(
+                    "google_gemini_image must reuse GEMINI_API_KEY"
+                )
             return
         if catalog_key == "google_gemini_image_model_price_catalog":
             policy_by_size = {
@@ -655,46 +701,84 @@ class ConfigRegistryService:
             size = getattr(parsed, "size", None)
             aspect_ratio = getattr(parsed, "aspect_ratio", None)
             if getattr(parsed, "provider_key", None) != "google_gemini_image":
-                raise ValidationFailureError("Gemini Image price row provider key is invalid")
+                raise ValidationFailureError(
+                    "Gemini Image price row provider key is invalid"
+                )
             if getattr(parsed, "model_id", None) not in GEMINI_IMAGE_APPROVED_MODEL_IDS:
-                raise ValidationFailureError("Gemini Image price row model is not approved")
+                raise ValidationFailureError(
+                    "Gemini Image price row model is not approved"
+                )
             if getattr(parsed, "status", None) != "GA_OR_STABLE":
-                raise ValidationFailureError("Gemini Image model status must be GA_OR_STABLE")
+                raise ValidationFailureError(
+                    "Gemini Image model status must be GA_OR_STABLE"
+                )
             if getattr(parsed, "capability", None) != "TEXT_AND_IMAGE_TO_IMAGE_STILL":
-                raise ValidationFailureError("Gemini Image price row capability is invalid")
+                raise ValidationFailureError(
+                    "Gemini Image price row capability is invalid"
+                )
             if size not in GEMINI_IMAGE_SUPPORTED_SIZES:
                 raise ValidationFailureError("Gemini Image price row size is invalid")
             if aspect_ratio not in GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS:
-                raise ValidationFailureError("Gemini Image price row aspect ratio is invalid")
+                raise ValidationFailureError(
+                    "Gemini Image price row aspect ratio is invalid"
+                )
             if getattr(parsed, "currency", None) != "USD":
-                raise ValidationFailureError("Gemini Image price row currency must be USD")
+                raise ValidationFailureError(
+                    "Gemini Image price row currency must be USD"
+                )
             if getattr(parsed, "effective_date", None) != date(2026, 7, 17):
-                raise ValidationFailureError("Gemini Image price row effective date is invalid")
+                raise ValidationFailureError(
+                    "Gemini Image price row effective date is invalid"
+                )
             if getattr(parsed, "policy_state", None) != policy_by_size[size]:
                 raise ValidationFailureError("Gemini Image size policy is invalid")
             if getattr(parsed, "actual_billed_amount", None) is not None:
-                raise ValidationFailureError("Gemini Image actual billed amount must remain null")
+                raise ValidationFailureError(
+                    "Gemini Image actual billed amount must remain null"
+                )
             return
         if catalog_key == "google_veo_model_price_catalog":
-            if getattr(parsed, "model_id", None) not in VEO_APPROVED_MODEL_IDS or not getattr(parsed, "approved", False):
-                raise ValidationFailureError("Veo price catalog contains an unapproved model")
-            if getattr(parsed, "currency", None) != "USD" or getattr(parsed, "transport", None) != "GEMINI_API_NATIVE":
-                raise ValidationFailureError("Veo price catalog currency/transport is invalid")
+            if getattr(
+                parsed, "model_id", None
+            ) not in VEO_APPROVED_MODEL_IDS or not getattr(parsed, "approved", False):
+                raise ValidationFailureError(
+                    "Veo price catalog contains an unapproved model"
+                )
+            if (
+                getattr(parsed, "currency", None) != "USD"
+                or getattr(parsed, "transport", None) != "GEMINI_API_NATIVE"
+            ):
+                raise ValidationFailureError(
+                    "Veo price catalog currency/transport is invalid"
+                )
             if getattr(parsed, "duration_seconds", None) != [8]:
                 raise ValidationFailureError("Veo price catalog duration must be [8]")
-            if not set(getattr(parsed, "aspect_ratios", [])) <= {"16:9", "9:16"}:
-                raise ValidationFailureError("Veo price catalog aspect ratio is invalid")
+            if not set(getattr(parsed, "aspect_ratios", [])) <= {"16:9"}:
+                raise ValidationFailureError(
+                    "Veo price catalog aspect ratio is invalid"
+                )
             if not getattr(parsed, "resolutions", None):
-                raise ValidationFailureError("Veo price catalog resolution rows are required")
+                raise ValidationFailureError(
+                    "Veo price catalog resolution rows are required"
+                )
             return
         if catalog_key == "media_provider_role_profile_catalog":
             provider_key = getattr(parsed, "provider_key", None)
             if provider_key == "google_veo":
                 assumption = getattr(parsed, "monthly_budget_assumption", {})
-                if assumption.get("allowed_duration_seconds") != list(VEO_ALLOWED_DURATION_SECONDS):
-                    raise ValidationFailureError("google_veo allowed duration must be exactly [8]")
-                if assumption.get("default_duration_seconds") != VEO_DEFAULT_DURATION_SECONDS:
-                    raise ValidationFailureError("google_veo default duration must be 8")
+                if assumption.get("allowed_duration_seconds") != list(
+                    VEO_ALLOWED_DURATION_SECONDS
+                ):
+                    raise ValidationFailureError(
+                        "google_veo allowed duration must be exactly [8]"
+                    )
+                if (
+                    assumption.get("default_duration_seconds")
+                    != VEO_DEFAULT_DURATION_SECONDS
+                ):
+                    raise ValidationFailureError(
+                        "google_veo default duration must be 8"
+                    )
                 if assumption.get("max_duration_seconds") != VEO_MAX_DURATION_SECONDS:
                     raise ValidationFailureError("google_veo max duration must be 8")
                 if assumption.get("model_id") not in VEO_APPROVED_MODEL_IDS:
@@ -703,9 +787,17 @@ class ConfigRegistryService:
         if catalog_key == "media_provider_capability_matrix_catalog":
             provider_key = getattr(parsed, "provider_key", None)
             job_type = getattr(parsed, "job_type", None)
-            if provider_key == "google_veo" and job_type in {"AI_HERO_GENERATION", "AI_METAPHOR_GENERATION"}:
-                if getattr(parsed, "max_duration_seconds", None) != VEO_MAX_DURATION_SECONDS:
-                    raise ValidationFailureError("google_veo capability max duration must be 8")
+            if provider_key == "google_veo" and job_type in {
+                "AI_HERO_GENERATION",
+                "AI_METAPHOR_GENERATION",
+            }:
+                if (
+                    getattr(parsed, "max_duration_seconds", None)
+                    != VEO_MAX_DURATION_SECONDS
+                ):
+                    raise ValidationFailureError(
+                        "google_veo capability max duration must be 8"
+                    )
 
     def _seed_metric_definitions(self, content: dict[str, Any]) -> None:
         from app.db.models import MetricDefinitionVersion
@@ -763,8 +855,12 @@ class ConfigRegistryService:
                 )
                 self.session.add(existing)
             else:
-                if existing.taxonomy_blob != blob or existing.status != item.get("status", "ACTIVE"):
-                    raise ConfigVersionConflictError(f"diagnostic taxonomy version conflict: {item['key']} {version}")
+                if existing.taxonomy_blob != blob or existing.status != item.get(
+                    "status", "ACTIVE"
+                ):
+                    raise ConfigVersionConflictError(
+                        f"diagnostic taxonomy version conflict: {item['key']} {version}"
+                    )
         self.session.flush()
 
     def _discover(self, paths: Iterable[str | Path]) -> list[Path]:

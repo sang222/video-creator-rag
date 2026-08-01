@@ -29,7 +29,7 @@ VEO_DEFAULT_OUTPUT_COUNT = 1
 GEMINI_IMAGE_DEFAULT_MODEL_ID = "gemini-3.1-flash-image"
 GEMINI_IMAGE_APPROVED_MODEL_IDS = (GEMINI_IMAGE_DEFAULT_MODEL_ID,)
 GEMINI_IMAGE_SUPPORTED_SIZES = ("1K", "2K", "4K")
-GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS = ("16:9", "9:16", "1:1")
+GEMINI_IMAGE_SUPPORTED_ASPECT_RATIOS = ("16:9", "1:1")
 GEMINI_IMAGE_DEFAULT_SIZE = "2K"
 GEMINI_IMAGE_DEFAULT_ASPECT_RATIO = "16:9"
 GEMINI_IMAGE_MAX_OUTPUTS = 1
@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_allowed_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
-        validation_alias=AliasChoices("VCOS_CORS_ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS"),
+        validation_alias=AliasChoices(
+            "VCOS_CORS_ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS"
+        ),
     )
     ollama_base_url: str = Field(
         default=OLLAMA_LOCAL_BASE_URL,
@@ -55,7 +57,9 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = Field(
         default=30,
         ge=1,
-        validation_alias=AliasChoices("VCOS_OLLAMA_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT_SECONDS"),
+        validation_alias=AliasChoices(
+            "VCOS_OLLAMA_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT_SECONDS"
+        ),
     )
     llm_provider: str = Field(
         default="ollama",
@@ -63,43 +67,64 @@ class Settings(BaseSettings):
     )
     llm_real_execution_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_LLM_REAL_EXECUTION_ENABLED", "LLM_REAL_EXECUTION_ENABLED"),
+        validation_alias=AliasChoices(
+            "VCOS_LLM_REAL_EXECUTION_ENABLED", "LLM_REAL_EXECUTION_ENABLED"
+        ),
     )
     llm_router_real_smoke: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_LLM_ROUTER_REAL_SMOKE", "LLM_ROUTER_REAL_SMOKE"),
+        validation_alias=AliasChoices(
+            "VCOS_LLM_ROUTER_REAL_SMOKE", "LLM_ROUTER_REAL_SMOKE"
+        ),
     )
     production_prompt_activation_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION", "ENABLE_PRODUCTION_PROMPT_ACTIVATION"),
+        validation_alias=AliasChoices(
+            "VCOS_ENABLE_PRODUCTION_PROMPT_ACTIVATION",
+            "ENABLE_PRODUCTION_PROMPT_ACTIVATION",
+        ),
     )
     real_llm_package_run_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_ENABLE_REAL_LLM_PACKAGE_RUN", "ENABLE_REAL_LLM_PACKAGE_RUN"),
+        validation_alias=AliasChoices(
+            "VCOS_ENABLE_REAL_LLM_PACKAGE_RUN", "ENABLE_REAL_LLM_PACKAGE_RUN"
+        ),
     )
     real_ollama_agent_run_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN", "ENABLE_REAL_OLLAMA_AGENT_RUN"),
+        validation_alias=AliasChoices(
+            "VCOS_ENABLE_REAL_OLLAMA_AGENT_RUN", "ENABLE_REAL_OLLAMA_AGENT_RUN"
+        ),
     )
     media_provider_calls_disabled: bool = Field(
         default=True,
-        validation_alias=AliasChoices("VCOS_DISABLE_MEDIA_PROVIDER_CALLS", "DISABLE_MEDIA_PROVIDER_CALLS"),
+        validation_alias=AliasChoices(
+            "VCOS_DISABLE_MEDIA_PROVIDER_CALLS", "DISABLE_MEDIA_PROVIDER_CALLS"
+        ),
     )
     upload_and_publish_disabled: bool = Field(
         default=True,
-        validation_alias=AliasChoices("VCOS_DISABLE_UPLOAD_AND_PUBLISH", "DISABLE_UPLOAD_AND_PUBLISH"),
+        validation_alias=AliasChoices(
+            "VCOS_DISABLE_UPLOAD_AND_PUBLISH", "DISABLE_UPLOAD_AND_PUBLISH"
+        ),
     )
     old_provider_smoke_disabled: bool = Field(
         default=True,
-        validation_alias=AliasChoices("VCOS_DISABLE_OLD_PROVIDER_SMOKE", "DISABLE_OLD_PROVIDER_SMOKE"),
+        validation_alias=AliasChoices(
+            "VCOS_DISABLE_OLD_PROVIDER_SMOKE", "DISABLE_OLD_PROVIDER_SMOKE"
+        ),
     )
     native_render_workspace_root: str = Field(
         default="var/tmp/native_renderer",
-        validation_alias=AliasChoices("VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "NATIVE_RENDER_WORKSPACE_ROOT"),
+        validation_alias=AliasChoices(
+            "VCOS_NATIVE_RENDER_WORKSPACE_ROOT", "NATIVE_RENDER_WORKSPACE_ROOT"
+        ),
     )
     local_project_workspace_root: str = Field(
         default="var/tmp/vcos-project-workspaces",
-        validation_alias=AliasChoices("VCOS_LOCAL_PROJECT_WORKSPACE_ROOT", "LOCAL_PROJECT_WORKSPACE_ROOT"),
+        validation_alias=AliasChoices(
+            "VCOS_LOCAL_PROJECT_WORKSPACE_ROOT", "LOCAL_PROJECT_WORKSPACE_ROOT"
+        ),
     )
     native_ffmpeg_local_smoke_enabled: bool = Field(
         default=False,
@@ -111,11 +136,16 @@ class Settings(BaseSettings):
     )
     controlled_memory_retrieval_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("CONTROLLED_MEMORY_RETRIEVAL_ENABLED", "VCOS_CONTROLLED_MEMORY_RETRIEVAL_ENABLED"),
+        validation_alias=AliasChoices(
+            "CONTROLLED_MEMORY_RETRIEVAL_ENABLED",
+            "VCOS_CONTROLLED_MEMORY_RETRIEVAL_ENABLED",
+        ),
     )
     vector_retrieval_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VECTOR_RETRIEVAL_ENABLED", "VCOS_VECTOR_RETRIEVAL_ENABLED"),
+        validation_alias=AliasChoices(
+            "VECTOR_RETRIEVAL_ENABLED", "VCOS_VECTOR_RETRIEVAL_ENABLED"
+        ),
     )
     vector_provider: str | None = Field(
         default="json",
@@ -123,7 +153,9 @@ class Settings(BaseSettings):
     )
     embedding_execution_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("EMBEDDING_EXECUTION_ENABLED", "VCOS_EMBEDDING_EXECUTION_ENABLED"),
+        validation_alias=AliasChoices(
+            "EMBEDDING_EXECUTION_ENABLED", "VCOS_EMBEDDING_EXECUTION_ENABLED"
+        ),
     )
     elevenlabs_api_key: SecretStr | None = Field(
         default=None,
@@ -131,11 +163,15 @@ class Settings(BaseSettings):
     )
     elevenlabs_voice_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("ELEVENLABS_VOICE_ID", "VCOS_ELEVENLABS_VOICE_ID"),
+        validation_alias=AliasChoices(
+            "ELEVENLABS_VOICE_ID", "VCOS_ELEVENLABS_VOICE_ID"
+        ),
     )
     elevenlabs_model_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("ELEVENLABS_MODEL_ID", "VCOS_ELEVENLABS_MODEL_ID"),
+        validation_alias=AliasChoices(
+            "ELEVENLABS_MODEL_ID", "VCOS_ELEVENLABS_MODEL_ID"
+        ),
     )
     voice_provider: str | None = Field(
         default=None,
@@ -147,19 +183,27 @@ class Settings(BaseSettings):
     )
     elevenlabs_monthly_cap_usd: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_ELEVENLABS_MONTHLY_CAP_USD", "ELEVENLABS_MONTHLY_CAP_USD"),
+        validation_alias=AliasChoices(
+            "VCOS_ELEVENLABS_MONTHLY_CAP_USD", "ELEVENLABS_MONTHLY_CAP_USD"
+        ),
     )
     elevenlabs_monthly_credit_cap: int | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP", "ELEVENLABS_MONTHLY_CREDIT_CAP"),
+        validation_alias=AliasChoices(
+            "VCOS_ELEVENLABS_MONTHLY_CREDIT_CAP", "ELEVENLABS_MONTHLY_CREDIT_CAP"
+        ),
     )
     elevenlabs_budget_basis: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_ELEVENLABS_BUDGET_BASIS", "ELEVENLABS_BUDGET_BASIS"),
+        validation_alias=AliasChoices(
+            "VCOS_ELEVENLABS_BUDGET_BASIS", "ELEVENLABS_BUDGET_BASIS"
+        ),
     )
     elevenlabs_real_account_smoke: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_ELEVENLABS_REAL_ACCOUNT_SMOKE", "ELEVENLABS_REAL_ACCOUNT_SMOKE"),
+        validation_alias=AliasChoices(
+            "VCOS_ELEVENLABS_REAL_ACCOUNT_SMOKE", "ELEVENLABS_REAL_ACCOUNT_SMOKE"
+        ),
     )
     pexels_api_key: SecretStr | None = Field(
         default=None,
@@ -167,23 +211,34 @@ class Settings(BaseSettings):
     )
     free_visual_fallback_provider: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("FREE_VISUAL_FALLBACK_PROVIDER", "VCOS_FREE_VISUAL_FALLBACK_PROVIDER"),
+        validation_alias=AliasChoices(
+            "FREE_VISUAL_FALLBACK_PROVIDER", "VCOS_FREE_VISUAL_FALLBACK_PROVIDER"
+        ),
     )
     pexels_attribution_required: bool = Field(
         default=True,
-        validation_alias=AliasChoices("PEXELS_ATTRIBUTION_REQUIRED", "VCOS_PEXELS_ATTRIBUTION_REQUIRED"),
+        validation_alias=AliasChoices(
+            "PEXELS_ATTRIBUTION_REQUIRED", "VCOS_PEXELS_ATTRIBUTION_REQUIRED"
+        ),
     )
     pexels_max_clips_per_long: int = Field(
         default=3,
-        validation_alias=AliasChoices("PEXELS_MAX_CLIPS_PER_LONG", "VCOS_PEXELS_MAX_CLIPS_PER_LONG"),
+        validation_alias=AliasChoices(
+            "PEXELS_MAX_CLIPS_PER_LONG", "VCOS_PEXELS_MAX_CLIPS_PER_LONG"
+        ),
     )
     pexels_max_runtime_pct_per_long: int = Field(
         default=20,
-        validation_alias=AliasChoices("PEXELS_MAX_RUNTIME_PCT_PER_LONG", "VCOS_PEXELS_MAX_RUNTIME_PCT_PER_LONG"),
+        validation_alias=AliasChoices(
+            "PEXELS_MAX_RUNTIME_PCT_PER_LONG", "VCOS_PEXELS_MAX_RUNTIME_PCT_PER_LONG"
+        ),
     )
     pexels_max_same_asset_reuse_per_30_days: int = Field(
         default=2,
-        validation_alias=AliasChoices("PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS", "VCOS_PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS"),
+        validation_alias=AliasChoices(
+            "PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS",
+            "VCOS_PEXELS_MAX_SAME_ASSET_REUSE_PER_30_DAYS",
+        ),
     )
     pixabay_api_key: SecretStr | None = Field(
         default=None,
@@ -191,103 +246,155 @@ class Settings(BaseSettings):
     )
     youtube_public_monitor_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("YOUTUBE_PUBLIC_MONITOR_ENABLED", "VCOS_YOUTUBE_PUBLIC_MONITOR_ENABLED"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_PUBLIC_MONITOR_ENABLED", "VCOS_YOUTUBE_PUBLIC_MONITOR_ENABLED"
+        ),
     )
     youtube_data_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("YOUTUBE_DATA_API_KEY", "VCOS_YOUTUBE_DATA_API_KEY"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_DATA_API_KEY", "VCOS_YOUTUBE_DATA_API_KEY"
+        ),
     )
     youtube_owner_analytics_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("YOUTUBE_OWNER_ANALYTICS_ENABLED", "VCOS_YOUTUBE_OWNER_ANALYTICS_ENABLED"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_OWNER_ANALYTICS_ENABLED", "VCOS_YOUTUBE_OWNER_ANALYTICS_ENABLED"
+        ),
     )
     youtube_oauth_client_secrets_file: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("YOUTUBE_OAUTH_CLIENT_SECRETS_FILE", "VCOS_YOUTUBE_OAUTH_CLIENT_SECRETS_FILE"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_OAUTH_CLIENT_SECRETS_FILE",
+            "VCOS_YOUTUBE_OAUTH_CLIENT_SECRETS_FILE",
+        ),
     )
     youtube_oauth_client_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("YOUTUBE_OAUTH_CLIENT_ID", "VCOS_YOUTUBE_OAUTH_CLIENT_ID"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_OAUTH_CLIENT_ID", "VCOS_YOUTUBE_OAUTH_CLIENT_ID"
+        ),
     )
     youtube_oauth_client_secret: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("YOUTUBE_OAUTH_CLIENT_SECRET", "VCOS_YOUTUBE_OAUTH_CLIENT_SECRET"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_OAUTH_CLIENT_SECRET", "VCOS_YOUTUBE_OAUTH_CLIENT_SECRET"
+        ),
     )
     youtube_oauth_redirect_uri: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("YOUTUBE_OAUTH_REDIRECT_URI", "VCOS_YOUTUBE_OAUTH_REDIRECT_URI"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_OAUTH_REDIRECT_URI", "VCOS_YOUTUBE_OAUTH_REDIRECT_URI"
+        ),
     )
     youtube_oauth_scopes: str = Field(
         default="https://www.googleapis.com/auth/youtube.readonly,https://www.googleapis.com/auth/yt-analytics.readonly",
-        validation_alias=AliasChoices("YOUTUBE_OAUTH_SCOPES", "VCOS_YOUTUBE_OAUTH_SCOPES"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_OAUTH_SCOPES", "VCOS_YOUTUBE_OAUTH_SCOPES"
+        ),
     )
     youtube_test_video_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("YOUTUBE_TEST_VIDEO_ID", "VCOS_YOUTUBE_TEST_VIDEO_ID"),
+        validation_alias=AliasChoices(
+            "YOUTUBE_TEST_VIDEO_ID", "VCOS_YOUTUBE_TEST_VIDEO_ID"
+        ),
     )
     youtube_real_public_smoke: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_YOUTUBE_REAL_PUBLIC_SMOKE", "YOUTUBE_REAL_PUBLIC_SMOKE"),
+        validation_alias=AliasChoices(
+            "VCOS_YOUTUBE_REAL_PUBLIC_SMOKE", "YOUTUBE_REAL_PUBLIC_SMOKE"
+        ),
     )
     youtube_real_owner_smoke: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_YOUTUBE_REAL_OWNER_SMOKE", "YOUTUBE_REAL_OWNER_SMOKE"),
+        validation_alias=AliasChoices(
+            "VCOS_YOUTUBE_REAL_OWNER_SMOKE", "YOUTUBE_REAL_OWNER_SMOKE"
+        ),
     )
     google_drive_offload_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_OFFLOAD_ENABLED", "VCOS_GOOGLE_DRIVE_OFFLOAD_ENABLED"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_OFFLOAD_ENABLED", "VCOS_GOOGLE_DRIVE_OFFLOAD_ENABLED"
+        ),
     )
     google_drive_archive_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_ARCHIVE_ENABLED", "VCOS_GOOGLE_DRIVE_ARCHIVE_ENABLED"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_ARCHIVE_ENABLED", "VCOS_GOOGLE_DRIVE_ARCHIVE_ENABLED"
+        ),
     )
     google_drive_oauth_client_secrets_file: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE",
+            "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_SECRETS_FILE",
+        ),
     )
     google_drive_oauth_client_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_CLIENT_ID", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_ID"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_OAUTH_CLIENT_ID", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_ID"
+        ),
     )
     google_drive_oauth_client_secret: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", "VCOS_GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"
+        ),
     )
     google_drive_oauth_redirect_uri: str | None = Field(
         default="http://localhost:8000/auth/google-drive/callback",
-        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_REDIRECT_URI", "VCOS_GOOGLE_DRIVE_OAUTH_REDIRECT_URI"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_OAUTH_REDIRECT_URI", "VCOS_GOOGLE_DRIVE_OAUTH_REDIRECT_URI"
+        ),
     )
     google_drive_oauth_scopes: str = Field(
         default="https://www.googleapis.com/auth/drive.file",
-        validation_alias=AliasChoices("GOOGLE_DRIVE_OAUTH_SCOPES", "VCOS_GOOGLE_DRIVE_OAUTH_SCOPES"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_OAUTH_SCOPES", "VCOS_GOOGLE_DRIVE_OAUTH_SCOPES"
+        ),
     )
     google_drive_root_folder_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_ROOT_FOLDER_ID", "VCOS_GOOGLE_DRIVE_ROOT_FOLDER_ID"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_ROOT_FOLDER_ID", "VCOS_GOOGLE_DRIVE_ROOT_FOLDER_ID"
+        ),
     )
     google_drive_upload_mode: str = Field(
         default="resumable",
-        validation_alias=AliasChoices("GOOGLE_DRIVE_UPLOAD_MODE", "VCOS_GOOGLE_DRIVE_UPLOAD_MODE"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_UPLOAD_MODE", "VCOS_GOOGLE_DRIVE_UPLOAD_MODE"
+        ),
     )
     delete_local_after_drive_upload: bool = Field(
         default=True,
-        validation_alias=AliasChoices("VCOS_DELETE_LOCAL_AFTER_DRIVE_UPLOAD", "DELETE_LOCAL_AFTER_DRIVE_UPLOAD"),
+        validation_alias=AliasChoices(
+            "VCOS_DELETE_LOCAL_AFTER_DRIVE_UPLOAD", "DELETE_LOCAL_AFTER_DRIVE_UPLOAD"
+        ),
     )
     local_media_max_age_hours: int = Field(
         default=24,
-        validation_alias=AliasChoices("VCOS_LOCAL_MEDIA_MAX_AGE_HOURS", "LOCAL_MEDIA_MAX_AGE_HOURS"),
+        validation_alias=AliasChoices(
+            "VCOS_LOCAL_MEDIA_MAX_AGE_HOURS", "LOCAL_MEDIA_MAX_AGE_HOURS"
+        ),
     )
     local_media_max_storage_gb: int = Field(
         default=20,
-        validation_alias=AliasChoices("VCOS_LOCAL_MEDIA_MAX_STORAGE_GB", "LOCAL_MEDIA_MAX_STORAGE_GB"),
+        validation_alias=AliasChoices(
+            "VCOS_LOCAL_MEDIA_MAX_STORAGE_GB", "LOCAL_MEDIA_MAX_STORAGE_GB"
+        ),
     )
     drive_real_upload_smoke: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_DRIVE_REAL_UPLOAD_SMOKE", "DRIVE_REAL_UPLOAD_SMOKE"),
+        validation_alias=AliasChoices(
+            "VCOS_DRIVE_REAL_UPLOAD_SMOKE", "DRIVE_REAL_UPLOAD_SMOKE"
+        ),
     )
     dashboard_auth_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VCOS_DASHBOARD_AUTH_ENABLED", "DASHBOARD_AUTH_ENABLED"),
+        validation_alias=AliasChoices(
+            "VCOS_DASHBOARD_AUTH_ENABLED", "DASHBOARD_AUTH_ENABLED"
+        ),
     )
     auth_mode: str = Field(
         default="local_password",
@@ -295,19 +402,27 @@ class Settings(BaseSettings):
     )
     bootstrap_admin_email: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_BOOTSTRAP_ADMIN_EMAIL", "BOOTSTRAP_ADMIN_EMAIL"),
+        validation_alias=AliasChoices(
+            "VCOS_BOOTSTRAP_ADMIN_EMAIL", "BOOTSTRAP_ADMIN_EMAIL"
+        ),
     )
     bootstrap_admin_password: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_BOOTSTRAP_ADMIN_PASSWORD", "BOOTSTRAP_ADMIN_PASSWORD"),
+        validation_alias=AliasChoices(
+            "VCOS_BOOTSTRAP_ADMIN_PASSWORD", "BOOTSTRAP_ADMIN_PASSWORD"
+        ),
     )
     bootstrap_admin_role: str = Field(
         default="OWNER_ADMIN",
-        validation_alias=AliasChoices("VCOS_BOOTSTRAP_ADMIN_ROLE", "BOOTSTRAP_ADMIN_ROLE"),
+        validation_alias=AliasChoices(
+            "VCOS_BOOTSTRAP_ADMIN_ROLE", "BOOTSTRAP_ADMIN_ROLE"
+        ),
     )
     auth_session_ttl_hours: int = Field(
         default=24,
-        validation_alias=AliasChoices("VCOS_AUTH_SESSION_TTL_HOURS", "AUTH_SESSION_TTL_HOURS"),
+        validation_alias=AliasChoices(
+            "VCOS_AUTH_SESSION_TTL_HOURS", "AUTH_SESSION_TTL_HOURS"
+        ),
     )
     ai_video_hero_provider: str = Field(
         default="google_veo",
@@ -375,7 +490,9 @@ class Settings(BaseSettings):
     )
     provider_real_execution_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("PROVIDER_REAL_EXECUTION_ENABLED", "VCOS_PROVIDER_REAL_EXECUTION_ENABLED"),
+        validation_alias=AliasChoices(
+            "PROVIDER_REAL_EXECUTION_ENABLED", "VCOS_PROVIDER_REAL_EXECUTION_ENABLED"
+        ),
     )
     provider_production_execution_enabled: bool = Field(
         default=False,
@@ -391,7 +508,10 @@ class Settings(BaseSettings):
     )
     elevenlabs_real_generation_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("ELEVENLABS_REAL_GENERATION_ENABLED", "VCOS_ELEVENLABS_REAL_GENERATION_ENABLED"),
+        validation_alias=AliasChoices(
+            "ELEVENLABS_REAL_GENERATION_ENABLED",
+            "VCOS_ELEVENLABS_REAL_GENERATION_ENABLED",
+        ),
     )
     elevenlabs_forced_alignment_permission_confirmed: bool | None = Field(
         default=None,
@@ -414,15 +534,23 @@ class Settings(BaseSettings):
     )
     pexels_real_search_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("PEXELS_REAL_SEARCH_ENABLED", "VCOS_PEXELS_REAL_SEARCH_ENABLED"),
+        validation_alias=AliasChoices(
+            "PEXELS_REAL_SEARCH_ENABLED", "VCOS_PEXELS_REAL_SEARCH_ENABLED"
+        ),
     )
     google_drive_real_archive_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED", "VCOS_GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED"),
+        validation_alias=AliasChoices(
+            "GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED",
+            "VCOS_GOOGLE_DRIVE_REAL_ARCHIVE_ENABLED",
+        ),
     )
     provider_real_readiness_probe_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("PROVIDER_REAL_READINESS_PROBE_ENABLED", "VCOS_PROVIDER_REAL_READINESS_PROBE_ENABLED"),
+        validation_alias=AliasChoices(
+            "PROVIDER_REAL_READINESS_PROBE_ENABLED",
+            "VCOS_PROVIDER_REAL_READINESS_PROBE_ENABLED",
+        ),
     )
     budget_mode: str | None = Field(
         default=None,
@@ -430,11 +558,15 @@ class Settings(BaseSettings):
     )
     monthly_ai_budget_usd: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_MONTHLY_AI_BUDGET_USD", "MONTHLY_AI_BUDGET_USD"),
+        validation_alias=AliasChoices(
+            "VCOS_MONTHLY_AI_BUDGET_USD", "MONTHLY_AI_BUDGET_USD"
+        ),
     )
     llm_monthly_budget_usd: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_LLM_MONTHLY_BUDGET_USD", "LLM_MONTHLY_BUDGET_USD"),
+        validation_alias=AliasChoices(
+            "VCOS_LLM_MONTHLY_BUDGET_USD", "LLM_MONTHLY_BUDGET_USD"
+        ),
     )
     llm_budget_note: str | None = Field(
         default=None,
@@ -442,15 +574,22 @@ class Settings(BaseSettings):
     )
     stock_monthly_budget_usd: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_STOCK_MONTHLY_BUDGET_USD", "STOCK_MONTHLY_BUDGET_USD"),
+        validation_alias=AliasChoices(
+            "VCOS_STOCK_MONTHLY_BUDGET_USD", "STOCK_MONTHLY_BUDGET_USD"
+        ),
     )
     music_sfx_monthly_budget_usd: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_MUSIC_SFX_MONTHLY_BUDGET_USD", "MUSIC_SFX_MONTHLY_BUDGET_USD"),
+        validation_alias=AliasChoices(
+            "VCOS_MUSIC_SFX_MONTHLY_BUDGET_USD", "MUSIC_SFX_MONTHLY_BUDGET_USD"
+        ),
     )
     extra_ai_image_monthly_budget_usd: Decimal | None = Field(
         default=None,
-        validation_alias=AliasChoices("VCOS_EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD", "EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD"),
+        validation_alias=AliasChoices(
+            "VCOS_EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD",
+            "EXTRA_AI_IMAGE_MONTHLY_BUDGET_USD",
+        ),
     )
 
     model_config = SettingsConfigDict(
@@ -462,7 +601,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_allowed_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+        return [
+            origin.strip()
+            for origin in self.cors_allowed_origins.split(",")
+            if origin.strip()
+        ]
 
     @field_validator("database_url")
     @classmethod
@@ -552,14 +695,18 @@ class Settings(BaseSettings):
     @classmethod
     def veo_model_id_must_be_approved(cls, value: str) -> str:
         if value not in VEO_APPROVED_MODEL_IDS or value in VEO_FORBIDDEN_MODEL_IDS:
-            raise ValueError("VEO_MODEL_ID must be present in the approved Veo 3.1 model catalog")
+            raise ValueError(
+                "VEO_MODEL_ID must be present in the approved Veo 3.1 model catalog"
+            )
         return value
 
     @field_validator("gemini_image_model_id")
     @classmethod
     def gemini_image_model_id_must_be_approved(cls, value: str) -> str:
         if value not in GEMINI_IMAGE_APPROVED_MODEL_IDS:
-            raise ValueError("GEMINI_IMAGE_MODEL_ID must be present in the approved image model catalog")
+            raise ValueError(
+                "GEMINI_IMAGE_MODEL_ID must be present in the approved image model catalog"
+            )
         return value
 
     @field_validator("gemini_image_default_size")

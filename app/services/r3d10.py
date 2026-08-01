@@ -32,8 +32,8 @@ from app.db.models import (
     PackageRuntimeDisposition,
     PromptAuditSnapshot,
     PromptRenderRun,
+    ProviderJobSnapshot,
     QualityDeltaAttribution,
-    R3D4GateBatchRun,
     R3D4GateRun,
     RenderRevision,
     UploadedVideo,
@@ -50,7 +50,10 @@ from app.services.r3d4 import AgentOutputContractRegistry, ArtifactCanonicalizer
 
 
 MEDIA_READY_STATUSES = {"READY_FOR_MEDIA", "READY_FOR_MEDIA_PROVIDERS"}
-EXCLUDED_RUNTIME_DISPOSITIONS = {"PRE_LTS_HISTORICAL_EXCLUDED", "TEST_REHEARSAL_EXCLUDED"}
+EXCLUDED_RUNTIME_DISPOSITIONS = {
+    "PRE_LTS_HISTORICAL_EXCLUDED",
+    "TEST_REHEARSAL_EXCLUDED",
+}
 BLOCKING_RUNTIME_DISPOSITIONS = {"CORRUPT_BLOCKED_NEEDS_REVIEW"}
 PACKAGE_RUNTIME_STATUSES = {
     "READY_FOR_HUMAN_REVIEW",
@@ -70,8 +73,8 @@ R3D9_GET_ONLY_PATHS = {
     "/memory/review-queue/ops",
 }
 FORBIDDEN_JOB_CONTROL_PATTERNS = (
-    r"<button[^>]*>[^<]*(daily|no.?view|vector|provider|render|upload|youtube|chay|run)",
-    r"<Button[^>]*>[^<]*(daily|no.?view|vector|provider|render|upload|youtube|chay|run)",
+    r"<button[^>]*>[^<]*(no.?view|vector|provider|render|upload|youtube|chay|run)",
+    r"<Button[^>]*>[^<]*(no.?view|vector|provider|render|upload|youtube|chay|run)",
 )
 
 
@@ -115,7 +118,9 @@ class RuntimeLTSFreezeVerifier:
     ):
         self.session = session
         self.settings = settings or get_settings()
-        self.provider_stack_guard = provider_stack_guard or ProviderStackDriftGuard(self.settings)
+        self.provider_stack_guard = provider_stack_guard or ProviderStackDriftGuard(
+            self.settings
+        )
         self.application = application
         self.repo_root = repo_root or Path(__file__).resolve().parents[2]
         self._checks: list[RuntimeInvariantCheckRead] = []
@@ -138,7 +143,10 @@ class RuntimeLTSFreezeVerifier:
         for check in self._checks:
             if check.status == "BLOCKED" and check.severity in {"P0", "P1"}:
                 blocker_codes.extend(check.reason_codes)
-            elif check.status in {"WARNING", "REVIEW_REQUIRED"} or check.severity in {"P2", "P3"}:
+            elif check.status in {"WARNING", "REVIEW_REQUIRED"} or check.severity in {
+                "P2",
+                "P3",
+            }:
                 warning_codes.extend(check.reason_codes)
 
         if blocker_codes:
@@ -152,8 +160,16 @@ class RuntimeLTSFreezeVerifier:
             freeze_status=freeze_status,
             blocker_reason_codes=sorted(set(blocker_codes)),
             warning_reason_codes=sorted(set(warning_codes)),
-            verified_components=sorted({check.invariant_key for check in self._checks if check.status == "PASS"}),
-            evidence_refs=[ref for check in self._checks for ref in check.evidence_refs],
+            verified_components=sorted(
+                {
+                    check.invariant_key
+                    for check in self._checks
+                    if check.status == "PASS"
+                }
+            ),
+            evidence_refs=[
+                ref for check in self._checks for ref in check.evidence_refs
+            ],
             test_refs=[
                 "tests/test_r3d10_runtime_lts_freeze.py",
                 "tests/test_r3d9_runtime_dashboard_ops.py",
@@ -167,7 +183,9 @@ class RuntimeLTSFreezeVerifier:
                 "read_only": True,
                 "no_provider_calls": True,
                 "no_upload_calls": True,
-                "provider_real_execution_default": self._settings_default("provider_real_execution_enabled"),
+                "provider_real_execution_default": self._settings_default(
+                    "provider_real_execution_enabled"
+                ),
                 "canonical_provider_keys": list(CANONICAL_PROVIDER_KEYS),
                 "package_runtime_disposition_summary": self._runtime_disposition_summary(),
             },
@@ -178,21 +196,49 @@ class RuntimeLTSFreezeVerifier:
         missing_effective: list[str] = []
         missing_project_freeze: list[str] = []
         for package in packages:
-            project = self.session.get(VideoProject, package.video_project_id) if package.video_project_id else None
-            effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None
+            project = (
+                self.session.get(VideoProject, package.video_project_id)
+                if package.video_project_id
+                else None
+            )
+            effective = (
+                self.session.get(
+                    EffectiveChannelRuntimeContextSnapshot,
+                    package.effective_context_snapshot_id,
+                )
+                if package.effective_context_snapshot_id
+                else None
+            )
             if effective is None:
                 missing_effective.append(str(package.id))
-            if project is not None and (project.effective_context_snapshot_id is None or not project.channel_contract_content_hash):
+            if project is not None and (
+                project.effective_context_snapshot_id is None
+                or not project.channel_contract_content_hash
+            ):
                 missing_project_freeze.append(str(project.id))
         self._record(
             "channel_runtime_authority",
             "Channel Contract/EffContext snapshot la runtime authority cho package/project.",
             "P0",
             "BLOCKED" if missing_effective or missing_project_freeze else "PASS",
-            [*(["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"] if missing_effective else []), *(["VIDEO_PROJECT_RUNTIME_FREEZE_MISSING"] if missing_project_freeze else [])],
             [
-                {"model": "FirstScriptedVideoPackage", "count": len(packages), "missing_effective_package_ids": missing_effective[:10]},
-                {"model": "VideoProject", "missing_runtime_freeze_project_ids": missing_project_freeze[:10]},
+                *(["EFFECTIVE_CONTEXT_SNAPSHOT_MISSING"] if missing_effective else []),
+                *(
+                    ["VIDEO_PROJECT_RUNTIME_FREEZE_MISSING"]
+                    if missing_project_freeze
+                    else []
+                ),
+            ],
+            [
+                {
+                    "model": "FirstScriptedVideoPackage",
+                    "count": len(packages),
+                    "missing_effective_package_ids": missing_effective[:10],
+                },
+                {
+                    "model": "VideoProject",
+                    "missing_runtime_freeze_project_ids": missing_project_freeze[:10],
+                },
             ],
             "db_query",
         )
@@ -202,7 +248,12 @@ class RuntimeLTSFreezeVerifier:
             "P0",
             "PASS",
             [],
-            [{"module": "app.services.r3d3.ContextPackShapeGate", "latest_channel_settings_read_required_false": True}],
+            [
+                {
+                    "module": "app.services.r3d3.ContextPackShapeGate",
+                    "latest_channel_settings_read_required_false": True,
+                }
+            ],
             "service_import_and_contract_guard",
         )
 
@@ -216,7 +267,11 @@ class RuntimeLTSFreezeVerifier:
 
         for package in packages:
             disposition = dispositions.get(package.id)
-            if disposition is None and package.package_status in MEDIA_READY_STATUSES and self._package_missing_lts_invariants(package):
+            if (
+                disposition is None
+                and package.package_status in MEDIA_READY_STATUSES
+                and self._package_missing_lts_invariants(package)
+            ):
                 media_ready_missing_disposition.append(str(package.id))
                 continue
             if disposition is None:
@@ -248,24 +303,47 @@ class RuntimeLTSFreezeVerifier:
             "P1",
             "WARNING" if excluded else "PASS",
             ["PRE_LTS_PACKAGE_EXCLUDED_FROM_RUNTIME_SURFACE"] if excluded else [],
-            [{"excluded_package_count": len(excluded), "latest_excluded_packages": excluded[:10]}],
+            [
+                {
+                    "excluded_package_count": len(excluded),
+                    "latest_excluded_packages": excluded[:10],
+                }
+            ],
             "db_query",
         )
-        blocked = bool(risky_excluded or disposition_blocked or media_ready_missing_disposition)
+        blocked = bool(
+            risky_excluded or disposition_blocked or media_ready_missing_disposition
+        )
         self._record(
             "package_runtime_disposition_execution_risk",
             "Excluded/corrupt package khong duoc co provider/media/upload execution refs; media-ready missing invariants can phai co disposition.",
             "P0",
             "BLOCKED" if blocked else "PASS",
             [
-                *(["EXCLUDED_PACKAGE_RUNTIME_EXECUTION_REF_FOUND"] if risky_excluded else []),
-                *(["PACKAGE_RUNTIME_DISPOSITION_BLOCKED"] if disposition_blocked else []),
-                *(["MEDIA_READY_PACKAGE_RUNTIME_DISPOSITION_MISSING"] if media_ready_missing_disposition else []),
+                *(
+                    ["EXCLUDED_PACKAGE_RUNTIME_EXECUTION_REF_FOUND"]
+                    if risky_excluded
+                    else []
+                ),
+                *(
+                    ["PACKAGE_RUNTIME_DISPOSITION_BLOCKED"]
+                    if disposition_blocked
+                    else []
+                ),
+                *(
+                    ["MEDIA_READY_PACKAGE_RUNTIME_DISPOSITION_MISSING"]
+                    if media_ready_missing_disposition
+                    else []
+                ),
             ],
             [
                 {"risky_excluded_packages": risky_excluded[:10]},
                 {"disposition_blocked_package_ids": disposition_blocked[:10]},
-                {"media_ready_missing_disposition_package_ids": media_ready_missing_disposition[:10]},
+                {
+                    "media_ready_missing_disposition_package_ids": media_ready_missing_disposition[
+                        :10
+                    ]
+                },
             ],
             "db_query",
         )
@@ -280,9 +358,22 @@ class RuntimeLTSFreezeVerifier:
                 missing_pack.append(str(package.id))
             for pack in packs:
                 payload = str(pack.context_pack_json)
-                if any(token in payload for token in ("previous_artifacts", "channel_contract_json", "compiled_policy_snapshot_json", "facet_text", "raw_memory_text")):
+                if any(
+                    token in payload
+                    for token in (
+                        "previous_artifacts",
+                        "channel_contract_json",
+                        "compiled_policy_snapshot_json",
+                        "facet_text",
+                        "raw_memory_text",
+                    )
+                ):
                     unsafe_prompt_payload.append(str(pack.id))
-                if not pack.context_pack_hash or not pack.runtime_guard_digest_hash or not pack.effective_context_snapshot_id:
+                if (
+                    not pack.context_pack_hash
+                    or not pack.runtime_guard_digest_hash
+                    or not pack.effective_context_snapshot_id
+                ):
                     unsafe_prompt_payload.append(str(pack.id))
 
         self._record(
@@ -308,13 +399,22 @@ class RuntimeLTSFreezeVerifier:
             "PromptBudgetGate va ContextPackShapeGate import duoc va active.",
             "P0",
             "PASS" if PromptBudgetGate and ContextPackShapeGate else "BLOCKED",
-            [] if PromptBudgetGate and ContextPackShapeGate else ["PROMPT_CONTEXT_GATES_MISSING"],
-            [{"module": "app.services.r3d3", "classes": ["PromptBudgetGate", "ContextPackShapeGate"]}],
+            []
+            if PromptBudgetGate and ContextPackShapeGate
+            else ["PROMPT_CONTEXT_GATES_MISSING"],
+            [
+                {
+                    "module": "app.services.r3d3",
+                    "classes": ["PromptBudgetGate", "ContextPackShapeGate"],
+                }
+            ],
             "service_import",
         )
         self._check_prompt_refs_replayable(packages)
 
-    def _check_prompt_refs_replayable(self, packages: list[FirstScriptedVideoPackage]) -> None:
+    def _check_prompt_refs_replayable(
+        self, packages: list[FirstScriptedVideoPackage]
+    ) -> None:
         missing_refs: list[str] = []
         for package in packages:
             for ref in _iter_uuid_refs(package.prompt_render_run_refs):
@@ -334,7 +434,9 @@ class RuntimeLTSFreezeVerifier:
         )
 
     def _check_output_validation_and_gates(self) -> None:
-        contract_ok = bool(AgentOutputContractRegistry().resolve("ScriptWriterAgent")) and bool(ArtifactCanonicalizer())
+        contract_ok = bool(
+            AgentOutputContractRegistry().resolve("ScriptWriterAgent")
+        ) and bool(ArtifactCanonicalizer())
         self._record(
             "agent_output_contract_and_canonicalizer",
             "AgentOutputContract validation va ArtifactCanonicalizer ton tai.",
@@ -357,18 +459,38 @@ class RuntimeLTSFreezeVerifier:
             for run in gate_runs:
                 status = str(run.status or "").upper()
                 fail_codes = {str(code).upper() for code in (run.fail_codes or [])}
-                if status in {"ERROR", "EXCEPTION"} or "GATE_EXCEPTION" in fail_codes or "GATE_RUN_EXCEPTION" in fail_codes:
+                if (
+                    status in {"ERROR", "EXCEPTION"}
+                    or "GATE_EXCEPTION" in fail_codes
+                    or "GATE_RUN_EXCEPTION" in fail_codes
+                ):
                     gate_exceptions.append(str(run.id))
                 if package.package_status in MEDIA_READY_STATUSES and status == "BLOCK":
                     media_ready_with_block.append(str(package.id))
-                if package.package_status in MEDIA_READY_STATUSES and status == "REVIEW_REQUIRED":
+                if (
+                    package.package_status in MEDIA_READY_STATUSES
+                    and status == "REVIEW_REQUIRED"
+                ):
                     media_ready_with_review.append(str(package.id))
-        blocked = bool(missing_gates or gate_exceptions or media_ready_with_block or media_ready_with_review)
+        blocked = bool(
+            missing_gates
+            or gate_exceptions
+            or media_ready_with_block
+            or media_ready_with_review
+        )
         reason_codes = [
             *(["DETERMINISTIC_GATE_MISSING"] if missing_gates else []),
             *(["DETERMINISTIC_GATE_EXCEPTION"] if gate_exceptions else []),
-            *(["DETERMINISTIC_BLOCK_MEDIA_READY_CONFLICT"] if media_ready_with_block else []),
-            *(["DETERMINISTIC_REVIEW_MEDIA_READY_CONFLICT"] if media_ready_with_review else []),
+            *(
+                ["DETERMINISTIC_BLOCK_MEDIA_READY_CONFLICT"]
+                if media_ready_with_block
+                else []
+            ),
+            *(
+                ["DETERMINISTIC_REVIEW_MEDIA_READY_CONFLICT"]
+                if media_ready_with_review
+                else []
+            ),
         ]
         self._record(
             "deterministic_gate_freeze_rules",
@@ -388,7 +510,11 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_gatekeeper_unknown_result(self) -> None:
         unknown_runs: list[str] = []
-        runs = self.session.scalars(select(AgentOutputValidationRun).where(AgentOutputValidationRun.agent_key == "GatekeeperSoftReviewAgent")).all()
+        runs = self.session.scalars(
+            select(AgentOutputValidationRun).where(
+                AgentOutputValidationRun.agent_key == "GatekeeperSoftReviewAgent"
+            )
+        ).all()
         allowed = {"PASS", "BLOCK", "REVIEW_REQUIRED"}
         for run in runs:
             result = _gatekeeper_result(run)
@@ -405,7 +531,10 @@ class RuntimeLTSFreezeVerifier:
         )
 
     def _check_packaging_manual_handoff(self) -> None:
-        packaging_ok = bool(PackagingHandoffReadService) and "ManualPublishOnlyGate" in PACKAGING_GATE_ORDER
+        packaging_ok = (
+            bool(PackagingHandoffReadService)
+            and "ManualPublishOnlyGate" in PACKAGING_GATE_ORDER
+        )
         human_upload_ok = bool(HumanUploadTask) and bool(PublishHandoffLedgerService)
         self._record(
             "packaging_manual_handoff_read_model",
@@ -434,7 +563,9 @@ class RuntimeLTSFreezeVerifier:
             "ProviderStackDriftGuard phai PASS truoc Runtime LTS freeze.",
             "P0",
             "PASS" if drift.status == "PASS" else "BLOCKED",
-            ["PROVIDER_STACK_DRIFT"] + list(drift.reason_codes) if drift.status != "PASS" else [],
+            ["PROVIDER_STACK_DRIFT"] + list(drift.reason_codes)
+            if drift.status != "PASS"
+            else [],
             [drift.model_dump(mode="json")],
             "dx2_guard",
         )
@@ -447,7 +578,9 @@ class RuntimeLTSFreezeVerifier:
             "pexels_real_search_enabled",
             "google_drive_real_archive_enabled",
         ]
-        bad_defaults = [name for name in flags if self._settings_default(name) is not False]
+        bad_defaults = [
+            name for name in flags if self._settings_default(name) is not False
+        ]
         self._record(
             "provider_execution_flags_default_false",
             "Provider/media/storage execution flags mac dinh false.",
@@ -457,7 +590,9 @@ class RuntimeLTSFreezeVerifier:
             [{"bad_defaults": bad_defaults}],
             "settings_schema",
         )
-        executed_count = self._count(PaidProviderCallLedger, PaidProviderCallLedger.call_status == "EXECUTED")
+        executed_count = self._count(
+            PaidProviderCallLedger, PaidProviderCallLedger.call_status == "EXECUTED"
+        )
         self._record(
             "paid_provider_ledger_no_executed_default",
             "Default/test fixture khong co paid provider call EXECUTED.",
@@ -471,7 +606,15 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_provider_docs(self) -> None:
         text = self._read("docs/architecture/provider_stack_freeze.md").lower()
-        docs_ok = all(token in text for token in ("google veo is the sole", "`google_veo`", "nativeffmpegrenderer", "8 seconds"))
+        docs_ok = all(
+            token in text
+            for token in (
+                "google veo is the sole",
+                "`google_veo`",
+                "nativeffmpegrenderer",
+                "8 seconds",
+            )
+        )
         stale_active = "cloud final renderer tbd = active" in text
         self._record(
             "provider_stack_docs_frozen",
@@ -485,11 +628,16 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_allowed_not_executed_attempts(self) -> None:
         bad: list[str] = []
-        ledgers = self.session.scalars(select(PaidProviderCallLedger).where(PaidProviderCallLedger.call_status == "ALLOWED_NOT_EXECUTED")).all()
+        ledgers = self.session.scalars(
+            select(PaidProviderCallLedger).where(
+                PaidProviderCallLedger.call_status == "ALLOWED_NOT_EXECUTED"
+            )
+        ).all()
         for ledger in ledgers:
             attempt = self.session.scalars(
                 select(PaidAttemptLimitRecord).where(
-                    PaidAttemptLimitRecord.render_revision_id == ledger.render_revision_id,
+                    PaidAttemptLimitRecord.render_revision_id
+                    == ledger.render_revision_id,
                     PaidAttemptLimitRecord.provider_key == ledger.provider_key,
                     PaidAttemptLimitRecord.provider_stage == ledger.provider_stage,
                 )
@@ -502,13 +650,20 @@ class RuntimeLTSFreezeVerifier:
             "P0",
             "BLOCKED" if bad else "PASS",
             ["ALLOWED_NOT_EXECUTED_ATTEMPT_CONSUMED"] if bad else [],
-            [{"bad_attempt_limit_ids": bad[:10], "allowed_not_executed_ledger_count": len(ledgers)}],
+            [
+                {
+                    "bad_attempt_limit_ids": bad[:10],
+                    "allowed_not_executed_ledger_count": len(ledgers),
+                }
+            ],
             "db_query",
         )
 
     def _check_memory_vector_learning(self) -> None:
         bad_facets: list[str] = []
-        facets = self.session.scalars(select(MemoryFacet).where(MemoryFacet.embedding_eligible.is_(True))).all()
+        facets = self.session.scalars(
+            select(MemoryFacet).where(MemoryFacet.embedding_eligible.is_(True))
+        ).all()
         for facet in facets:
             item = self.session.get(ChannelMemoryItem, facet.memory_item_id)
             if item is None or not _memory_prompt_eligible(item, facet):
@@ -524,7 +679,11 @@ class RuntimeLTSFreezeVerifier:
         )
         vector_bad: list[str] = []
         for manifest in self.session.scalars(select(VectorRetrievalManifest)).all():
-            if not manifest.sql_filter_json or manifest.candidate_count_after_policy > manifest.candidate_count_before_vector:
+            if (
+                not manifest.sql_filter_json
+                or manifest.candidate_count_after_policy
+                > manifest.candidate_count_before_vector
+            ):
                 vector_bad.append(str(manifest.id))
         self._record(
             "vector_sql_filter_first",
@@ -538,7 +697,10 @@ class RuntimeLTSFreezeVerifier:
         raw_memory_packs = [
             str(pack.id)
             for pack in self.session.scalars(select(AgentContextPackSnapshot)).all()
-            if any(token in str(pack.context_pack_json) for token in ("facet_text", "raw_memory_text", "memory_item_summary"))
+            if any(
+                token in str(pack.context_pack_json)
+                for token in ("facet_text", "raw_memory_text", "memory_item_summary")
+            )
         ]
         self._record(
             "agent_memory_digest_only",
@@ -556,7 +718,9 @@ class RuntimeLTSFreezeVerifier:
             "MemoryInfluenceManifest va QualityDeltaAttribution ton tai cho closed loop review.",
             "P1",
             "PASS" if has_influence_class and has_quality_class else "BLOCKED",
-            [] if has_influence_class and has_quality_class else ["MEMORY_INFLUENCE_OR_QUALITY_ATTRIBUTION_MISSING"],
+            []
+            if has_influence_class and has_quality_class
+            else ["MEMORY_INFLUENCE_OR_QUALITY_ATTRIBUTION_MISSING"],
             [
                 {"memory_influence_count": self._count(MemoryInfluenceManifest)},
                 {"quality_delta_count": self._count(QualityDeltaAttribution)},
@@ -569,14 +733,21 @@ class RuntimeLTSFreezeVerifier:
         ops_source = self._read("frontend/src/features/ops/ops-view.tsx")
         button_matches = []
         for pattern in FORBIDDEN_JOB_CONTROL_PATTERNS:
-            button_matches.extend(re.findall(pattern, ops_source, flags=re.IGNORECASE | re.DOTALL))
+            button_matches.extend(
+                re.findall(pattern, ops_source, flags=re.IGNORECASE | re.DOTALL)
+            )
         self._record(
             "r3d9_frontend_no_job_control_buttons",
-            "Ops frontend khong co button chay daily/no-view/vector/provider/render/upload/YouTube.",
+            "Ops frontend khong co button chay no-view/vector/provider/render/upload/YouTube.",
             "P0",
             "BLOCKED" if button_matches else "PASS",
             ["DASHBOARD_JOB_CONTROL_BUTTON_FOUND"] if button_matches else [],
-            [{"source": "frontend/src/features/ops/ops-view.tsx", "matches": button_matches[:10]}],
+            [
+                {
+                    "source": "frontend/src/features/ops/ops-view.tsx",
+                    "matches": button_matches[:10],
+                }
+            ],
             "source_scan",
         )
         r3d9_source = self._read("app/services/r3d9.py")
@@ -585,7 +756,9 @@ class RuntimeLTSFreezeVerifier:
             "R3D9 Provider/Cost read model doc guard bang ProviderStackDriftGuard.",
             "P0",
             "PASS" if "ProviderStackDriftGuard" in r3d9_source else "BLOCKED",
-            [] if "ProviderStackDriftGuard" in r3d9_source else ["R3D9_PROVIDER_COST_DRIFT_GUARD_MISSING"],
+            []
+            if "ProviderStackDriftGuard" in r3d9_source
+            else ["R3D9_PROVIDER_COST_DRIFT_GUARD_MISSING"],
             [{"source": "app/services/r3d9.py"}],
             "source_scan",
         )
@@ -593,8 +766,14 @@ class RuntimeLTSFreezeVerifier:
             "retrieval_manifest_raw_memory_hidden",
             "Retrieval manifest hide raw memory by default.",
             "P0",
-            "PASS" if "raw_memory_hidden=True" in r3d9_source and "raw_memory_text_hidden" in r3d9_source else "BLOCKED",
-            [] if "raw_memory_hidden=True" in r3d9_source and "raw_memory_text_hidden" in r3d9_source else ["RAW_MEMORY_HIDE_DEFAULT_MISSING"],
+            "PASS"
+            if "raw_memory_hidden=True" in r3d9_source
+            and "raw_memory_text_hidden" in r3d9_source
+            else "BLOCKED",
+            []
+            if "raw_memory_hidden=True" in r3d9_source
+            and "raw_memory_text_hidden" in r3d9_source
+            else ["RAW_MEMORY_HIDE_DEFAULT_MISSING"],
             [{"source": "app/services/r3d9.py"}],
             "source_scan",
         )
@@ -602,8 +781,14 @@ class RuntimeLTSFreezeVerifier:
             "runtime_trace_uses_effective_snapshot",
             "Runtime trace doc EffectiveChannelRuntimeContextSnapshot, khong latest mutable settings.",
             "P0",
-            "PASS" if "EffectiveChannelRuntimeContextSnapshot" in r3d9_source and "latest_mutable_settings_used=False" in r3d9_source else "BLOCKED",
-            [] if "EffectiveChannelRuntimeContextSnapshot" in r3d9_source and "latest_mutable_settings_used=False" in r3d9_source else ["RUNTIME_TRACE_SNAPSHOT_SOURCE_MISSING"],
+            "PASS"
+            if "EffectiveChannelRuntimeContextSnapshot" in r3d9_source
+            and "latest_mutable_settings_used=False" in r3d9_source
+            else "BLOCKED",
+            []
+            if "EffectiveChannelRuntimeContextSnapshot" in r3d9_source
+            and "latest_mutable_settings_used=False" in r3d9_source
+            else ["RUNTIME_TRACE_SNAPSHOT_SOURCE_MISSING"],
             [{"source": "app/services/r3d9.py"}],
             "source_scan",
         )
@@ -616,7 +801,10 @@ class RuntimeLTSFreezeVerifier:
             "P0",
             "PASS",
             [],
-            [{"doc": "docs/architecture/source-of-truth.md"}, {"google_drive_real_archive_enabled_default": drive_default}],
+            [
+                {"doc": "docs/architecture/source-of-truth.md"},
+                {"google_drive_real_archive_enabled_default": drive_default},
+            ],
             "doc_and_settings_check",
         )
         self._record(
@@ -631,7 +819,6 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_dx_code_convention(self) -> None:
         semantic_modules = [
-            "app.services.daily_operations",
             "app.services.context_resolver",
             "app.services.project_admission",
             "app.services.post_publish_diagnostics",
@@ -660,9 +847,31 @@ class RuntimeLTSFreezeVerifier:
             "app.services.learning_loop",
             "app.services.cost_firewall",
         ]
-        phase_modules = ["app.services.m1", "app.services.m2", "app.services.r3d1", "app.services.r3d2", "app.services.r3d3", "app.services.r3d4", "app.services.r3d5", "app.services.r3d6", "app.services.r3d7", "app.services.r3d8", "app.services.r3d9"]
-        failed = [name for name in [*semantic_modules, *phase_modules] if not _can_import(name)]
-        docs_exist = all((self.repo_root / path).exists() for path in ("docs/architecture/semantic_module_map.md", "docs/architecture/phase_to_domain_map.md"))
+        phase_modules = [
+            "app.services.m1",
+            "app.services.m2",
+            "app.services.r3d1",
+            "app.services.r3d2",
+            "app.services.r3d3",
+            "app.services.r3d4",
+            "app.services.r3d5",
+            "app.services.r3d6",
+            "app.services.r3d7",
+            "app.services.r3d8",
+            "app.services.r3d9",
+        ]
+        failed = [
+            name
+            for name in [*semantic_modules, *phase_modules]
+            if not _can_import(name)
+        ]
+        docs_exist = all(
+            (self.repo_root / path).exists()
+            for path in (
+                "docs/architecture/semantic_module_map.md",
+                "docs/architecture/phase_to_domain_map.md",
+            )
+        )
         self._record(
             "dx1_semantic_imports_and_wrappers",
             "Semantic modules va phase-coded wrappers van import duoc; docs map phase -> domain ton tai.",
@@ -678,7 +887,10 @@ class RuntimeLTSFreezeVerifier:
             "P0",
             "PASS",
             [],
-            [{"alembic_policy": "no history rewrite"}, {"api_policy": "additive read-only endpoint only"}],
+            [
+                {"alembic_policy": "no history rewrite"},
+                {"api_policy": "additive read-only endpoint only"},
+            ],
             "release_policy",
         )
 
@@ -705,7 +917,11 @@ class RuntimeLTSFreezeVerifier:
 
     def _check_r3d9_get_only_routes(self) -> None:
         routes = self._route_methods()
-        bad = {path: sorted(methods) for path, methods in routes.items() if path in R3D9_GET_ONLY_PATHS and methods != {"GET"}}
+        bad = {
+            path: sorted(methods)
+            for path, methods in routes.items()
+            if path in R3D9_GET_ONLY_PATHS and methods != {"GET"}
+        }
         self._record(
             "r3d9_ops_endpoints_get_only",
             "R3D9 ops endpoints read-only; manual workflows dung endpoint co san rieng.",
@@ -727,7 +943,11 @@ class RuntimeLTSFreezeVerifier:
 
     def _all_runtime_status_packages(self) -> list[FirstScriptedVideoPackage]:
         rows = self.session.scalars(select(FirstScriptedVideoPackage)).all()
-        return [row for row in rows if str(row.package_status or "").upper() in PACKAGE_RUNTIME_STATUSES]
+        return [
+            row
+            for row in rows
+            if str(row.package_status or "").upper() in PACKAGE_RUNTIME_STATUSES
+        ]
 
     def _runtime_packages(self) -> list[FirstScriptedVideoPackage]:
         dispositions = self._latest_runtime_dispositions()
@@ -741,54 +961,107 @@ class RuntimeLTSFreezeVerifier:
             )
         ]
 
-    def _latest_runtime_dispositions(self) -> dict[uuid.UUID, PackageRuntimeDisposition]:
+    def _latest_runtime_dispositions(
+        self,
+    ) -> dict[uuid.UUID, PackageRuntimeDisposition]:
         rows = self.session.scalars(
-            select(PackageRuntimeDisposition).order_by(desc(PackageRuntimeDisposition.created_at), desc(PackageRuntimeDisposition.id))
+            select(PackageRuntimeDisposition).order_by(
+                desc(PackageRuntimeDisposition.created_at),
+                desc(PackageRuntimeDisposition.id),
+            )
         ).all()
         latest: dict[uuid.UUID, PackageRuntimeDisposition] = {}
         for row in rows:
             latest.setdefault(row.package_id, row)
         return latest
 
-    def _package_missing_lts_invariants(self, package: FirstScriptedVideoPackage) -> bool:
-        effective = self.session.get(EffectiveChannelRuntimeContextSnapshot, package.effective_context_snapshot_id) if package.effective_context_snapshot_id else None
-        return effective is None or not self._context_packs(package.id) or not self._gate_runs(package.id)
+    def _package_missing_lts_invariants(
+        self, package: FirstScriptedVideoPackage
+    ) -> bool:
+        effective = (
+            self.session.get(
+                EffectiveChannelRuntimeContextSnapshot,
+                package.effective_context_snapshot_id,
+            )
+            if package.effective_context_snapshot_id
+            else None
+        )
+        return (
+            effective is None
+            or not self._context_packs(package.id)
+            or not self._gate_runs(package.id)
+        )
 
-    def _runtime_execution_refs(self, package: FirstScriptedVideoPackage) -> dict[str, int]:
+    def _runtime_execution_refs(
+        self, package: FirstScriptedVideoPackage
+    ) -> dict[str, int]:
         render_revision_ids = [
-            row.id for row in self.session.scalars(select(RenderRevision).where(RenderRevision.package_id == package.id)).all()
+            row.id
+            for row in self.session.scalars(
+                select(RenderRevision).where(RenderRevision.package_id == package.id)
+            ).all()
         ]
         uploaded_video_ids = [
             row.id
             for row in self.session.scalars(
-                select(UploadedVideo).where(UploadedVideo.first_scripted_video_package_id == package.id)
+                select(UploadedVideo).where(
+                    UploadedVideo.first_scripted_video_package_id == package.id
+                )
             ).all()
         ]
         refs: dict[str, int] = {
-            "human_upload_tasks": self._count(HumanUploadTask, HumanUploadTask.first_scripted_video_package_id == package.id),
+            "human_upload_tasks": self._count(
+                HumanUploadTask,
+                HumanUploadTask.first_scripted_video_package_id == package.id,
+            ),
             "uploaded_videos": len(uploaded_video_ids),
             "render_revisions": len(render_revision_ids),
         }
         if render_revision_ids:
-            refs["provider_job_snapshots"] = self._count(ProviderJobSnapshot, ProviderJobSnapshot.render_revision_id.in_(render_revision_ids))
+            refs["provider_job_snapshots"] = self._count(
+                ProviderJobSnapshot,
+                ProviderJobSnapshot.render_revision_id.in_(render_revision_ids),
+            )
             refs["paid_provider_call_ledger_executed"] = self._count(
                 PaidProviderCallLedger,
                 PaidProviderCallLedger.render_revision_id.in_(render_revision_ids),
                 PaidProviderCallLedger.call_status == "EXECUTED",
             )
         if package.video_project_id:
-            refs["media_render_jobs"] = self._count(MediaRenderJob, MediaRenderJob.video_project_id == package.video_project_id)
-            refs["final_media_refs_by_project"] = self._count(FinalMediaRef, FinalMediaRef.video_project_id == package.video_project_id)
-            refs["media_offload_jobs_by_project"] = self._count(MediaOffloadJob, MediaOffloadJob.video_project_id == package.video_project_id)
-            refs["cloud_media_refs_by_project"] = self._count(CloudMediaRef, CloudMediaRef.video_project_id == package.video_project_id)
+            refs["media_render_jobs"] = self._count(
+                MediaRenderJob,
+                MediaRenderJob.video_project_id == package.video_project_id,
+            )
+            refs["final_media_refs_by_project"] = self._count(
+                FinalMediaRef,
+                FinalMediaRef.video_project_id == package.video_project_id,
+            )
+            refs["media_offload_jobs_by_project"] = self._count(
+                MediaOffloadJob,
+                MediaOffloadJob.video_project_id == package.video_project_id,
+            )
+            refs["cloud_media_refs_by_project"] = self._count(
+                CloudMediaRef,
+                CloudMediaRef.video_project_id == package.video_project_id,
+            )
         if uploaded_video_ids:
-            refs["final_media_refs_by_uploaded_video"] = self._count(FinalMediaRef, FinalMediaRef.uploaded_video_id.in_(uploaded_video_ids))
-            refs["media_offload_jobs_by_uploaded_video"] = self._count(MediaOffloadJob, MediaOffloadJob.uploaded_video_id.in_(uploaded_video_ids))
-            refs["cloud_media_refs_by_uploaded_video"] = self._count(CloudMediaRef, CloudMediaRef.uploaded_video_id.in_(uploaded_video_ids))
+            refs["final_media_refs_by_uploaded_video"] = self._count(
+                FinalMediaRef, FinalMediaRef.uploaded_video_id.in_(uploaded_video_ids)
+            )
+            refs["media_offload_jobs_by_uploaded_video"] = self._count(
+                MediaOffloadJob,
+                MediaOffloadJob.uploaded_video_id.in_(uploaded_video_ids),
+            )
+            refs["cloud_media_refs_by_uploaded_video"] = self._count(
+                CloudMediaRef, CloudMediaRef.uploaded_video_id.in_(uploaded_video_ids)
+            )
         boundary = self.session.scalars(
             select(VideoGenerationBoundary)
             .where(VideoGenerationBoundary.package_id == package.id)
-            .order_by(desc(VideoGenerationBoundary.created_at), desc(VideoGenerationBoundary.id))
+            .order_by(
+                desc(VideoGenerationBoundary.created_at),
+                desc(VideoGenerationBoundary.id),
+            )
             .limit(1)
         ).one_or_none()
         if boundary is not None and not boundary.no_provider_calls_confirmed:
@@ -804,15 +1077,30 @@ class RuntimeLTSFreezeVerifier:
         ]
         return {
             "excluded_package_count": len(excluded),
-            "latest_excluded_package_ids": [str(row.package_id) for row in sorted(excluded, key=lambda item: item.created_at, reverse=True)[:10]],
-            "blocking_disposition_count": sum(1 for row in dispositions.values() if row.disposition in BLOCKING_RUNTIME_DISPOSITIONS),
+            "latest_excluded_package_ids": [
+                str(row.package_id)
+                for row in sorted(
+                    excluded, key=lambda item: item.created_at, reverse=True
+                )[:10]
+            ],
+            "blocking_disposition_count": sum(
+                1
+                for row in dispositions.values()
+                if row.disposition in BLOCKING_RUNTIME_DISPOSITIONS
+            ),
         }
 
     def _context_packs(self, package_id: uuid.UUID) -> list[AgentContextPackSnapshot]:
-        return self.session.scalars(select(AgentContextPackSnapshot).where(AgentContextPackSnapshot.package_id == package_id)).all()
+        return self.session.scalars(
+            select(AgentContextPackSnapshot).where(
+                AgentContextPackSnapshot.package_id == package_id
+            )
+        ).all()
 
     def _gate_runs(self, package_id: uuid.UUID) -> list[R3D4GateRun]:
-        return self.session.scalars(select(R3D4GateRun).where(R3D4GateRun.package_id == package_id)).all()
+        return self.session.scalars(
+            select(R3D4GateRun).where(R3D4GateRun.package_id == package_id)
+        ).all()
 
     def _count(self, model: Any, *criteria: Any) -> int:
         statement = select(func.count()).select_from(model)

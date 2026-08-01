@@ -20,12 +20,12 @@ Hard rule:
 * Prompt Registry decides what the agent is allowed to think/do/output.
 * Channel Contract decides what channel boundary the agent must obey.
 
-Daily idea rule:
+Editorial research rule:
 
-* `DailyIdeaAgent` is a registered Prompt Registry agent on the `cheap_structured` router lane.
+* `EditorialIdeaResearchAgent` is a registered Prompt Registry agent on the `cheap_structured` router lane.
 * It receives an allowlisted NICH1 context pack containing the full bounded semantic digest, editorial-slot digest, runtime guards, evidence digest, and common-skill digest.
-* It proposes `channel_fit_score` and evidence; deterministic NICH1 policy derives the final fit state from the compiled threshold and gate evidence.
-* Missing or invalid NICH1 authority blocks before a daily proposal can become project admission.
+* It proposes bounded evidence; deterministic NICH1 policy derives the final fit state from compiled policy and gate evidence.
+* Missing or invalid NICH1 authority blocks before a candidate can become project admission.
 
 ## Channel Init / Channel Contract Truth
 
@@ -206,10 +206,6 @@ format_policy:
 * long_form.target_duration_minutes_min
 * long_form.target_duration_minutes_max
 * long_form.structure
-* shorts.enabled
-* shorts.target_duration_seconds_min
-* shorts.target_duration_seconds_max
-* shorts.hard_max_seconds
 * captions.required
 * chapters.required_for_long_form
 
@@ -327,9 +323,6 @@ M12.1 must cover these agents:
 * EvidenceBundleSummarizer
 * PostPublishSummaryAgent
 * EngineeringArchitectAgent
-* ShortCandidateExtractor
-* ShortCandidateRanker
-* DerivativeOriginalityReviewer
 * RecoveryProposalReviewer
 * LocalizationSubtitleAgent
 * LocalizedMetadataAgent
@@ -337,7 +330,6 @@ M12.1 must cover these agents:
 * ProviderReadinessSummaryAgent
 * MediaQCExplanationAgent
 * RightsDisclosureReviewer
-* UploadCardCopyAgent
 
 ## Output Contract
 

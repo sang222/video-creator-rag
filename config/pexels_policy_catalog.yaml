@@ -1,5 +1,5 @@
 catalog_key: pexels_policy_catalog
-catalog_version: "1.0.0"
+catalog_version: "2.0.0"
 schema_version: "1.0.0"
 status: active
 items:
@@ -8,7 +8,7 @@ items:
     provider_type: FREE_VISUAL_FALLBACK_PROVIDER
     allowed:
       - background_visual
-      - short_broll
+      - brief_broll
       - thumbnail_background
       - mood_support
     blocked:

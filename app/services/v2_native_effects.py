@@ -79,7 +79,6 @@ _CREATIVE_GATES = (
     "TimelineCoverageGate",
     "NonBlackOutputGate",
     "FinalDurationConsistencyGate",
-    "DailyShortDurationCapabilityGate",
     "AudioStrategyTruthfulnessGate",
     "StreamIntegrityGate",
 )
@@ -371,6 +370,11 @@ class V2LocalNativeProductionAdapter:
         context: WorkflowStageContext,
         operation: V2AuthorizedAdapterOperation,
     ) -> None:
+        if (
+            context.run.production_lane != "LONG_FORM"
+            or context.run.planning_source_type != "LONG_FORM_PLAN"
+        ):
+            raise ValidationFailureError("V2_LOCAL_NATIVE_LONG_FORM_ONLY")
         if (
             operation.adapter_key != V2_LOCAL_ADAPTER_KEY
             or operation.paid_provider_call
@@ -1007,13 +1011,6 @@ class V2LocalNativeProductionAdapter:
         )
         if measured_render_duration_ms <= 0:
             raise RuntimeError("V2_NATIVE_RENDER_DURATION_MISSING")
-        if (
-            run.production_lane == "DAILY_SHORT"
-            and measured_render_duration_ms > 59_000
-        ):
-            raise ValidationFailureError(
-                "V2_DAILY_SHORT_RENDER_EXCEEDS_59_SECOND_CAPABILITY"
-            )
         output_path = Path(receipt.output_path).resolve()
         output_checksum = _sha256_file(output_path)
         if output_checksum != receipt.output_checksum:
@@ -1155,10 +1152,6 @@ class V2LocalNativeProductionAdapter:
                 - int(timeline["duration_ms"])
             )
             <= 250,
-            "DailyShortDurationCapabilityGate": (
-                run.production_lane != "DAILY_SHORT"
-                or round(float(native_qc.checks.get("duration") or 0) * 1000) <= 59_000
-            ),
             "AudioStrategyTruthfulnessGate": (
                 render_journal.get("audio_strategy") == audio_strategy
                 and render_journal.get("narration_present") is narration_present
@@ -1735,11 +1728,7 @@ class V2LocalNativeProductionAdapter:
                     company_id=project.company_id,
                     channel_workspace_id=project.channel_workspace_id,
                     video_project_id=project.id,
-                    media_type=(
-                        "LONG_FORM_FINAL"
-                        if run.production_lane == "LONG_FORM"
-                        else "SHORT_FINAL"
-                    ),
+                    media_type="LONG_FORM_FINAL",
                     storage_provider="VCOS_LOCAL_ARCHIVE",
                     drive_file_id=f"local-{checksum}",
                     drive_folder_id=str(project.id),
@@ -1913,21 +1902,11 @@ class V2LocalNativeProductionAdapter:
                     ),
                     production_package_hash=run.production_package_hash,
                     duration_contract=package.duration_contract,
-                    media_type=(
-                        "LONG_FORM_FINAL"
-                        if run.production_lane == "LONG_FORM"
-                        else "SHORT_FINAL"
-                    ),
+                    media_type="LONG_FORM_FINAL",
                     file_ref=object_ref,
                     duration_seconds=Decimal(duration_ms) / Decimal(1000),
-                    aspect_ratio=(
-                        "16:9" if run.production_lane == "LONG_FORM" else "9:16"
-                    ),
-                    resolution=(
-                        "1920x1080"
-                        if run.production_lane == "LONG_FORM"
-                        else "1080x1920"
-                    ),
+                    aspect_ratio="16:9",
+                    resolution="1920x1080",
                     provider_key=V2_LOCAL_ADAPTER_KEY,
                     provider_type="LOCAL_RENDERER_CAPABILITY",
                     checksum_sha256=checksum,
@@ -1997,6 +1976,10 @@ def _production_inputs(
         or run.production_package_artifact_version_id is None
         or run.production_package_hash is None
         or project.schema_version != "v2"
+        or run.production_lane != "LONG_FORM"
+        or run.planning_source_type != "LONG_FORM_PLAN"
+        or project.production_lane != "LONG_FORM"
+        or project.planning_source_type != "LONG_FORM_PLAN"
     ):
         raise ValidationFailureError("V2_NATIVE_PACKAGE_INPUT_REQUIRED")
     package = ProductionPackageService(session).validate_for_readiness(
@@ -2054,10 +2037,6 @@ def _build_timeline(
         <= package.duration_contract.maximum_duration_ms
     ):
         raise ValidationFailureError("V2_NATIVE_TIMELINE_DURATION_INVALID")
-    if run.production_lane == "DAILY_SHORT" and duration_ms > 59_000:
-        raise ValidationFailureError(
-            "V2_DAILY_SHORT_TIMELINE_EXCEEDS_59_SECOND_CAPABILITY"
-        )
     weights = [max(1, len(fragment.split())) for fragment in fragments]
     total_weight = sum(weights)
     scenes: list[dict[str, Any]] = []
@@ -2137,7 +2116,6 @@ def _build_render_plan(
     timeline_hash: str,
     plan_ref: str,
 ) -> dict[str, Any]:
-    long_form = package.production_lane.value == "LONG_FORM"
     return {
         "schema_version": "vcos.native-render-plan.v2",
         "plan_ref": plan_ref,
@@ -2153,8 +2131,8 @@ def _build_render_plan(
         "visual_plan_artifact_version_id": str(visual.id),
         "visual_plan_content_hash": visual.content_hash,
         "canvas": {
-            "width": 1920 if long_form else 1080,
-            "height": 1080 if long_form else 1920,
+            "width": 1920,
+            "height": 1080,
             "fps": 30,
         },
         "audio_strategy": timeline["audio_strategy"],
@@ -2179,8 +2157,6 @@ def _build_manifest(
     timeline_hash: str,
     created_at: Any,
 ) -> CompiledNativeRenderManifest:
-    long_form = timeline["production_lane"] == "LONG_FORM"
-    width, height = (1920, 1080) if long_form else (1080, 1920)
     body = {
         "source_plan_ref": plan_ref,
         "source_plan_hash": plan_hash,
@@ -2198,8 +2174,8 @@ def _build_manifest(
             }
         ),
         "normalized_canvas": {
-            "width": width,
-            "height": height,
+            "width": 1920,
+            "height": 1080,
             "fps": 30,
         },
         "normalized_audio": {
@@ -2227,8 +2203,8 @@ def _build_manifest(
         "caption_schedule": {"cues": []},
         "output_specs": [
             {
-                "width": width,
-                "height": height,
+                "width": 1920,
+                "height": 1080,
                 "fps": 30,
                 "pix_fmt": "yuv420p",
                 "color": "bt709",

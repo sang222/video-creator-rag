@@ -66,10 +66,10 @@ DEFAULT_OUTPUT_CONTRACTS: dict[str, AgentOutputContract] = {
         "PACKAGE_CRITICAL",
         ("decision",),
     ),
-    "DailyIdeaAgent": AgentOutputContract(
-        "DailyIdeaAgent",
-        "daily_idea_proposal",
-        "daily_idea",
+    "EditorialIdeaResearchAgent": AgentOutputContract(
+        "EditorialIdeaResearchAgent",
+        "editorial_idea_candidate",
+        "editorial_idea_research",
         R3D4_SCHEMA_VERSION,
         "PACKAGE_CRITICAL",
         (
@@ -82,14 +82,65 @@ DEFAULT_OUTPUT_CONTRACTS: dict[str, AgentOutputContract] = {
             "channel_fit_evidence",
         ),
     ),
-    "TopicIdeaScoringAgent": AgentOutputContract("TopicIdeaScoringAgent", "topic_scores", "topic_scoring", R3D4_SCHEMA_VERSION, "REVIEWABLE"),
-    "ResearchPackSummarizer": AgentOutputContract("ResearchPackSummarizer", "research_notes", "research_summary", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
-    "ScriptPlanningAgent": AgentOutputContract("ScriptPlanningAgent", "script_outline", "script_plan", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
-    "ScriptWriterAgent": AgentOutputContract("ScriptWriterAgent", "narration_script", "script", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL", ("sentences",)),
-    "ScriptRewriteAgent": AgentOutputContract("ScriptRewriteAgent", "narration_script", "script_rewrite", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL", ("sentences",)),
-    "PublishingMetadataAgent": AgentOutputContract("PublishingMetadataAgent", "metadata_package", "metadata", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
-    "VisualPlanningAgent": AgentOutputContract("VisualPlanningAgent", "visual_plan", "visual_plan", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL", ("scenes",)),
-    "ThumbnailBriefAgent": AgentOutputContract("ThumbnailBriefAgent", "thumbnail_brief", "thumbnail_brief", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
+    "TopicIdeaScoringAgent": AgentOutputContract(
+        "TopicIdeaScoringAgent",
+        "topic_scores",
+        "topic_scoring",
+        R3D4_SCHEMA_VERSION,
+        "REVIEWABLE",
+    ),
+    "ResearchPackSummarizer": AgentOutputContract(
+        "ResearchPackSummarizer",
+        "research_notes",
+        "research_summary",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+    ),
+    "ScriptPlanningAgent": AgentOutputContract(
+        "ScriptPlanningAgent",
+        "script_outline",
+        "script_plan",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+    ),
+    "ScriptWriterAgent": AgentOutputContract(
+        "ScriptWriterAgent",
+        "narration_script",
+        "script",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+        ("sentences",),
+    ),
+    "ScriptRewriteAgent": AgentOutputContract(
+        "ScriptRewriteAgent",
+        "narration_script",
+        "script_rewrite",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+        ("sentences",),
+    ),
+    "PublishingMetadataAgent": AgentOutputContract(
+        "PublishingMetadataAgent",
+        "metadata_package",
+        "metadata",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+    ),
+    "VisualPlanningAgent": AgentOutputContract(
+        "VisualPlanningAgent",
+        "visual_plan",
+        "visual_plan",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+        ("scenes",),
+    ),
+    "ThumbnailBriefAgent": AgentOutputContract(
+        "ThumbnailBriefAgent",
+        "thumbnail_brief",
+        "thumbnail_brief",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+    ),
     "RightsDisclosureReviewer": AgentOutputContract(
         "RightsDisclosureReviewer",
         "rights_disclosure_review",
@@ -98,10 +149,28 @@ DEFAULT_OUTPUT_CONTRACTS: dict[str, AgentOutputContract] = {
         "PACKAGE_CRITICAL",
         ("result", "source_manifest_status", "ai_disclosure_needed", "rights_risk"),
     ),
-    "GatekeeperSoftReviewAgent": AgentOutputContract("GatekeeperSoftReviewAgent", "gatekeeper_review", "soft_gatekeeper_review", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
-    "UploadCardCopyAgent": AgentOutputContract("UploadCardCopyAgent", "upload_card_copy", "upload_copy", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL"),
-    "ProviderReadinessSummaryAgent": AgentOutputContract("ProviderReadinessSummaryAgent", "provider_readiness_summary", "provider_readiness_summary", R3D4_SCHEMA_VERSION, "REVIEWABLE"),
-    "MediaQCExplanationAgent": AgentOutputContract("MediaQCExplanationAgent", "media_qc_explanation", "media_qc_explanation", R3D4_SCHEMA_VERSION, "PACKAGE_CRITICAL", ("status",)),
+    "GatekeeperSoftReviewAgent": AgentOutputContract(
+        "GatekeeperSoftReviewAgent",
+        "gatekeeper_review",
+        "soft_gatekeeper_review",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+    ),
+    "ProviderReadinessSummaryAgent": AgentOutputContract(
+        "ProviderReadinessSummaryAgent",
+        "provider_readiness_summary",
+        "provider_readiness_summary",
+        R3D4_SCHEMA_VERSION,
+        "REVIEWABLE",
+    ),
+    "MediaQCExplanationAgent": AgentOutputContract(
+        "MediaQCExplanationAgent",
+        "media_qc_explanation",
+        "media_qc_explanation",
+        R3D4_SCHEMA_VERSION,
+        "PACKAGE_CRITICAL",
+        ("status",),
+    ),
 }
 
 
@@ -132,7 +201,10 @@ class StrictRepairService:
             return StrictRepairResult(
                 repaired_output=None,
                 repair_attempted=True,
-                repair_result={"status": "FAILED", "reason_codes": ["STRICT_REPAIR_JSON_OBJECT_REQUIRED"]},
+                repair_result={
+                    "status": "FAILED",
+                    "reason_codes": ["STRICT_REPAIR_JSON_OBJECT_REQUIRED"],
+                },
             )
         repaired = dict(raw_output)
         changed = False
@@ -187,24 +259,55 @@ class ArtifactCanonicalizer:
     ) -> CanonicalArtifactResult:
         raw_hash = stable_hash({"raw_output": raw_output})
         output = parsed_output if isinstance(parsed_output, dict) else {}
-        artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        artifact = (
+            output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        )
         artifact = dict(artifact)
-        artifact, artifact_repair_reason_codes = _repair_required_artifact_aliases(contract, artifact)
+        artifact, artifact_repair_reason_codes = _repair_required_artifact_aliases(
+            contract, artifact
+        )
         output_hash = stable_hash({"agent_key": contract.agent_key, "output": output})
-        base_artifact_hash = stable_hash({"artifact_type": contract.artifact_type, "artifact": artifact})
-        evidence_refs = [item for item in _list(output.get("evidence_refs")) if isinstance(item, dict)]
+        base_artifact_hash = stable_hash(
+            {"artifact_type": contract.artifact_type, "artifact": artifact}
+        )
+        evidence_refs = [
+            item
+            for item in _list(output.get("evidence_refs"))
+            if isinstance(item, dict)
+        ]
         applied_context_refs = _dict(output.get("applied_context_refs"))
         if not applied_context_refs:
-            applied_context_refs = _dict(_dict(output.get("technical_appendix")).get("applied_context_refs"))
+            applied_context_refs = _dict(
+                _dict(output.get("technical_appendix")).get("applied_context_refs")
+            )
         if not applied_context_refs:
-            applied_context_refs = {key: value for key, value in runtime_context_refs.items() if value not in (None, "", [])}
+            applied_context_refs = {
+                key: value
+                for key, value in runtime_context_refs.items()
+                if value not in (None, "", [])
+            }
 
-        missing_context = [field for field in contract.required_context_refs if not applied_context_refs.get(field)]
-        missing_artifact = [field for field in contract.required_artifact_fields if not _field_present(artifact, field)]
+        missing_context = [
+            field
+            for field in contract.required_context_refs
+            if not applied_context_refs.get(field)
+        ]
+        missing_artifact = [
+            field
+            for field in contract.required_artifact_fields
+            if not _field_present(artifact, field)
+        ]
         invalid_fields: list[str] = []
         if output.get("agent_key") not in (None, contract.agent_key):
             invalid_fields.append("agent_key")
-        if output.get("status") not in {None, "OK", "REVIEW_REQUIRED", "BLOCK", "REFUSAL", "ERROR"}:
+        if output.get("status") not in {
+            None,
+            "OK",
+            "REVIEW_REQUIRED",
+            "BLOCK",
+            "REFUSAL",
+            "ERROR",
+        }:
             invalid_fields.append("status")
 
         reason_codes: list[str] = []
@@ -215,7 +318,10 @@ class ArtifactCanonicalizer:
         if invalid_fields:
             reason_codes.append("AGENT_OUTPUT_INVALID_FIELDS")
         validation_reason_codes = sorted(
-            set((reason_codes or ["AGENT_OUTPUT_CANONICALIZED"]) + artifact_repair_reason_codes)
+            set(
+                (reason_codes or ["AGENT_OUTPUT_CANONICALIZED"])
+                + artifact_repair_reason_codes
+            )
         )
 
         if missing_context and contract.criticality == "PACKAGE_CRITICAL":
@@ -226,7 +332,9 @@ class ArtifactCanonicalizer:
             validation_state = "REVIEW_REQUIRED"
         else:
             status = "OK"
-            validation_state = "CANONICALIZED" if "applied_context_refs" not in output else "VALID"
+            validation_state = (
+                "CANONICALIZED" if "applied_context_refs" not in output else "VALID"
+            )
 
         canonical = {
             **artifact,
@@ -242,14 +350,23 @@ class ArtifactCanonicalizer:
             "output_hash": output_hash,
             "artifact_hash": base_artifact_hash,
             "validation_state": validation_state,
-            "reason_codes": sorted(set(reason_codes + artifact_repair_reason_codes + _strings(artifact.get("reason_codes")))),
+            "reason_codes": sorted(
+                set(
+                    reason_codes
+                    + artifact_repair_reason_codes
+                    + _strings(artifact.get("reason_codes"))
+                )
+            ),
         }
         return CanonicalArtifactResult(
             canonical_artifact=canonical,
             envelope_validation=AgentOutputEnvelopeValidation(
                 status=status,
                 validation_state=validation_state,
-                missing_fields=[*(f"applied_context_refs.{field}" for field in missing_context), *missing_artifact],
+                missing_fields=[
+                    *(f"applied_context_refs.{field}" for field in missing_context),
+                    *missing_artifact,
+                ],
                 invalid_fields=invalid_fields,
                 reason_codes=validation_reason_codes,
             ),
@@ -266,11 +383,15 @@ def _repair_required_artifact_aliases(
     contract: AgentOutputContract,
     artifact: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
-    if contract.agent_key == "MediaQCExplanationAgent" and not _field_present(artifact, "status"):
+    if contract.agent_key == "MediaQCExplanationAgent" and not _field_present(
+        artifact, "status"
+    ):
         for alias_key in ("artifact_status", "artifact.status"):
             alias_value = artifact.get(alias_key)
             if isinstance(alias_value, str) and alias_value.strip():
-                return {**artifact, "status": alias_value}, ["MEDIA_QC_ARTIFACT_STATUS_ALIAS_REPAIRED"]
+                return {**artifact, "status": alias_value}, [
+                    "MEDIA_QC_ARTIFACT_STATUS_ALIAS_REPAIRED"
+                ]
     return artifact, []
 
 
@@ -395,11 +516,16 @@ class AgentOutputValidationService:
             agent_key=agent_key,
             artifact_ref=artifact_ref,
             violation_type="AGENT_OUTPUT_CONTRACT",
-            severity=SEVERITY_CRITICAL if validation.status == "BLOCK" else SEVERITY_HIGH,
+            severity=SEVERITY_CRITICAL
+            if validation.status == "BLOCK"
+            else SEVERITY_HIGH,
             missing_fields=validation.missing_fields,
             invalid_fields=validation.invalid_fields,
             repair_attempted=False,
-            repair_result={"status": "NOT_ATTEMPTED", "reason": "R3D4 validation does not rewrite business meaning."},
+            repair_result={
+                "status": "NOT_ATTEMPTED",
+                "reason": "R3D4 validation does not rewrite business meaning.",
+            },
         )
         self.session.add(ledger)
         self.session.flush()
@@ -456,7 +582,9 @@ class GateBatchResult:
 
     def to_report(self) -> dict[str, Any]:
         return {
-            "gate_batch_run_id": str(self.gate_batch_run_id) if self.gate_batch_run_id else None,
+            "gate_batch_run_id": str(self.gate_batch_run_id)
+            if self.gate_batch_run_id
+            else None,
             "status": self.status,
             "hard_block_count": self.hard_block_count,
             "review_required_count": self.review_required_count,
@@ -468,13 +596,27 @@ class GateBatchResult:
 class ScriptDurationGate:
     gate_key = "script_duration_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         script = _dict(artifacts.get("narration_script"))
-        sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
-        missing_timing = [str(item.get("sentence_id") or index + 1) for index, item in enumerate(sentences) if item.get("approx_seconds") is None]
+        sentences = [
+            item for item in _list(script.get("sentences")) if isinstance(item, dict)
+        ]
+        missing_timing = [
+            str(item.get("sentence_id") or index + 1)
+            for index, item in enumerate(sentences)
+            if item.get("approx_seconds") is None
+        ]
         actual = sum(_float(item.get("approx_seconds")) for item in sentences)
         policy = _duration_policy(effective_context, artifacts=artifacts)
-        target = _float(policy.get("target_duration_seconds") or policy.get("target_seconds"))
+        target = _float(
+            policy.get("target_duration_seconds") or policy.get("target_seconds")
+        )
         allowed_range = _dict(policy.get("allowed_duration_range_seconds"))
         min_seconds = _float(
             allowed_range.get("min")
@@ -489,16 +631,31 @@ class ScriptDurationGate:
             or policy.get("target_duration_seconds_max")
             or (target * 1.1 if target else 0)
         )
-        declared = _first_number(script.get("total_approx_seconds"), script.get("declared_total_seconds"), _dict(script.get("summary")).get("total_approx_seconds"))
+        declared = _first_number(
+            script.get("total_approx_seconds"),
+            script.get("declared_total_seconds"),
+            _dict(script.get("summary")).get("total_approx_seconds"),
+        )
         self_check = _dict(script.get("duration_self_check"))
-        self_check_total = _first_number(self_check.get("actual_total_seconds"), self_check.get("total_approx_seconds"))
-        word_count = _word_count(" ".join(str(item.get("text") or "") for item in sentences))
+        self_check_total = _first_number(
+            self_check.get("actual_total_seconds"),
+            self_check.get("total_approx_seconds"),
+        )
+        word_count = _word_count(
+            " ".join(str(item.get("text") or "") for item in sentences)
+        )
         wpm = _float(policy.get("words_per_minute_assumption"))
         words_target = _float(policy.get("narration_words_target"))
         min_words = int(words_target * 0.9) if words_target else 0
         sentence_approx_total = actual
-        word_estimated_seconds = round((word_count / wpm) * 60, 3) if wpm and word_count else None
-        actual = word_estimated_seconds if word_estimated_seconds is not None else sentence_approx_total
+        word_estimated_seconds = (
+            round((word_count / wpm) * 60, 3) if wpm and word_count else None
+        )
+        actual = (
+            word_estimated_seconds
+            if word_estimated_seconds is not None
+            else sentence_approx_total
+        )
         coverage_ratio = round(actual / target, 4) if target else None
         fail_codes: list[str] = []
         measurements = {
@@ -514,7 +671,8 @@ class ScriptDurationGate:
             "min_seconds": min_seconds,
             "max_seconds": max_seconds,
             "narration_word_count": word_count,
-            "words_per_minute_assumption": wpm or policy.get("words_per_minute_assumption"),
+            "words_per_minute_assumption": wpm
+            or policy.get("words_per_minute_assumption"),
             "narration_words_target": policy.get("narration_words_target"),
             "minimum_word_count": min_words,
             "target_format": policy.get("target_format"),
@@ -528,18 +686,42 @@ class ScriptDurationGate:
             fail_codes.append("SCRIPT_DURATION_BELOW_MINIMUM")
         if max_seconds and actual > max_seconds:
             fail_codes.append("SCRIPT_DURATION_ABOVE_MAXIMUM")
-        if self_check_total is not None and abs(self_check_total - actual) > max(10, actual * 0.1):
+        if self_check_total is not None and abs(self_check_total - actual) > max(
+            10, actual * 0.1
+        ):
             fail_codes.append("SCRIPT_DURATION_SELF_CHECK_MISMATCH")
         if min_words and word_count < min_words:
             fail_codes.append("SCRIPT_WORD_BUDGET_BELOW_MINIMUM")
         if declared is not None and abs(declared - actual) > max(10, actual * 0.1):
             fail_codes.append("SCRIPT_DECLARED_DURATION_MISMATCH")
-        metadata_duration = _first_number(_dict(artifacts.get("metadata_package")).get("duration_seconds"))
-        if metadata_duration is not None and abs(metadata_duration - actual) > max(10, actual * 0.1):
+        metadata_duration = _first_number(
+            _dict(artifacts.get("metadata_package")).get("duration_seconds")
+        )
+        if metadata_duration is not None and abs(metadata_duration - actual) > max(
+            10, actual * 0.1
+        ):
             fail_codes.append("METADATA_DURATION_MISMATCH")
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, fail_codes, ["narration_script"], ["category.default_format_policy_json"], "Sửa timing script theo duration policy.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script"], ["category.default_format_policy_json"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                fail_codes,
+                ["narration_script"],
+                ["category.default_format_policy_json"],
+                "Sửa timing script theo duration policy.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["narration_script"],
+            ["category.default_format_policy_json"],
+            None,
+        )
 
 
 class HookSpecGate:
@@ -557,20 +739,35 @@ class HookSpecGate:
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
         hook = _hook_spec(artifacts)
-        missing = [field for field in self.REQUIRED_FIELDS if hook.get(field) in (None, "", [])]
+        missing = [
+            field for field in self.REQUIRED_FIELDS if hook.get(field) in (None, "", [])
+        ]
         fail_codes: list[str] = [f"HOOK_{field.upper()}_MISSING" for field in missing]
         text = _text_blob(hook)
-        fake_claim_terms = ["fake demo", "product demo", "actual result", "real result", "generated video is ready", "final video"]
+        fake_claim_terms = [
+            "fake demo",
+            "product demo",
+            "actual result",
+            "real result",
+            "generated video is ready",
+            "final video",
+        ]
         fake_claims = [term for term in fake_claim_terms if term in text.lower()]
         if fake_claims:
             fail_codes.append("HOOK_FAKE_RESULT_OR_ASSET_CLAIM")
         clickbait_risk = str(hook.get("clickbait_risk") or "").upper()
         if clickbait_risk == "HIGH":
             fail_codes.append("HOOK_CLICKBAIT_RISK_HIGH")
-        status = GATE_REVIEW if fail_codes == ["HOOK_CLICKBAIT_RISK_HIGH"] else (GATE_BLOCK if fail_codes else GATE_PASS)
+        status = (
+            GATE_REVIEW
+            if fail_codes == ["HOOK_CLICKBAIT_RISK_HIGH"]
+            else (GATE_BLOCK if fail_codes else GATE_PASS)
+        )
         severity = SEVERITY_HIGH if status != GATE_PASS else SEVERITY_INFO
         measurements = {
-            "hook_fields_present": sorted(field for field in self.REQUIRED_FIELDS if field not in missing),
+            "hook_fields_present": sorted(
+                field for field in self.REQUIRED_FIELDS if field not in missing
+            ),
             "missing_hook_fields": missing,
             "clickbait_risk": clickbait_risk or None,
             "fake_claim_terms": fake_claims,
@@ -583,7 +780,9 @@ class HookSpecGate:
             sorted(set(fail_codes)),
             ["hook_spec", "narration_script", "script_outline"],
             ["script_contract.hook_spec", "safety_forbidden_claims_context"],
-            "Bổ sung HookSpec 3 giây đầu trước visual/provider plan." if fail_codes else None,
+            "Bổ sung HookSpec 3 giây đầu trước visual/provider plan."
+            if fail_codes
+            else None,
         )
 
 
@@ -591,9 +790,22 @@ class SRTTimingGate:
     gate_key = "srt_timing_gate"
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
         if not srt:
-            return _gate_result(self.gate_key, GATE_SKIPPED, SEVERITY_INFO, {"srt_present": False}, [], [], ["subtitle_lifecycle"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_SKIPPED,
+                SEVERITY_INFO,
+                {"srt_present": False},
+                [],
+                [],
+                ["subtitle_lifecycle"],
+                None,
+            )
         content = str(srt.get("srt") or srt.get("content") or "")
         lifecycle = str(srt.get("lifecycle_state") or "DRAFT_SCRIPT_TIMING")
         fail_codes: list[str] = []
@@ -601,20 +813,41 @@ class SRTTimingGate:
         fail_codes.extend(cue_measurements["fail_codes"])
         duration_model = _dict(artifacts.get("duration_model"))
         allowed_range = _dict(duration_model.get("allowed_duration_range_seconds"))
-        min_seconds = _first_number(allowed_range.get("min"), duration_model.get("min_seconds"))
-        max_seconds = _first_number(allowed_range.get("max"), duration_model.get("max_seconds"))
-        narration_total = _script_estimated_total_seconds(_dict(artifacts.get("narration_script")), duration_model)
-        if cue_measurements["total_seconds"] and narration_total and abs(cue_measurements["total_seconds"] - narration_total) > max(2, narration_total * 0.01):
+        min_seconds = _first_number(
+            allowed_range.get("min"), duration_model.get("min_seconds")
+        )
+        max_seconds = _first_number(
+            allowed_range.get("max"), duration_model.get("max_seconds")
+        )
+        narration_total = _script_estimated_total_seconds(
+            _dict(artifacts.get("narration_script")), duration_model
+        )
+        if (
+            cue_measurements["total_seconds"]
+            and narration_total
+            and abs(cue_measurements["total_seconds"] - narration_total)
+            > max(2, narration_total * 0.01)
+        ):
             fail_codes.append("PRECHECK_BLOCKED_SRT_DURATION_MISMATCH")
-        if min_seconds and cue_measurements["total_seconds"] and cue_measurements["total_seconds"] < min_seconds:
+        if (
+            min_seconds
+            and cue_measurements["total_seconds"]
+            and cue_measurements["total_seconds"] < min_seconds
+        ):
             fail_codes.append("PRECHECK_BLOCKED_SRT_DURATION_BELOW_RANGE")
-        if max_seconds and cue_measurements["total_seconds"] and cue_measurements["total_seconds"] > max_seconds:
+        if (
+            max_seconds
+            and cue_measurements["total_seconds"]
+            and cue_measurements["total_seconds"] > max_seconds
+        ):
             fail_codes.append("PRECHECK_BLOCKED_SRT_DURATION_ABOVE_RANGE")
         if cue_measurements["large_gap_count"]:
             fail_codes.append("PRECHECK_BLOCKED_SRT_GAP_TOO_LARGE")
         if lifecycle == "DRAFT_SCRIPT_TIMING" and srt.get("final") is True:
             fail_codes.append("DRAFT_SRT_MARKED_FINAL")
-        if lifecycle == "FINAL_APPROVED" and not (srt.get("voice_alignment_evidence_ref") and srt.get("human_approved_at")):
+        if lifecycle == "FINAL_APPROVED" and not (
+            srt.get("voice_alignment_evidence_ref") and srt.get("human_approved_at")
+        ):
             fail_codes.append("FINAL_SRT_REQUIRES_VOICE_ALIGNMENT_AND_HUMAN_APPROVAL")
         measurements = {
             "lifecycle_state": lifecycle,
@@ -627,17 +860,48 @@ class SRTTimingGate:
             "large_gap_count": cue_measurements["large_gap_count"],
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, fail_codes, ["srt"], ["subtitle_lifecycle"], "Sửa SRT timing/lifecycle trước khi final.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_LOW, measurements, [], ["srt"], ["subtitle_lifecycle"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_HIGH,
+                measurements,
+                fail_codes,
+                ["srt"],
+                ["subtitle_lifecycle"],
+                "Sửa SRT timing/lifecycle trước khi final.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_LOW,
+            measurements,
+            [],
+            ["srt"],
+            ["subtitle_lifecycle"],
+            None,
+        )
 
 
 class SRTFormatGate:
     gate_key = "srt_format_gate"
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
         if not srt:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, {"srt_present": False}, ["PRECHECK_BLOCKED_SRT_MISSING"], ["srt"], ["subtitle_lifecycle"], "Tạo SRT artifact trước provider boundary.")
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                {"srt_present": False},
+                ["PRECHECK_BLOCKED_SRT_MISSING"],
+                ["srt"],
+                ["subtitle_lifecycle"],
+                "Tạo SRT artifact trước provider boundary.",
+            )
         content = str(srt.get("srt") or srt.get("content") or "")
         parsed = _parse_srt(content)
         fail_codes = list(parsed["fail_codes"])
@@ -653,13 +917,33 @@ class SRTFormatGate:
             fail_codes.append("PRECHECK_BLOCKED_SRT_UTF8_INVALID")
         measurements = {
             "cue_count": parsed["cue_count"],
-            "starts_at_zero": bool(parsed["cues"] and parsed["cues"][0]["start_seconds"] == 0),
+            "starts_at_zero": bool(
+                parsed["cues"] and parsed["cues"][0]["start_seconds"] == 0
+            ),
             "artifact_type": srt.get("artifact_type"),
             "local_path": srt.get("local_path"),
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["srt"], ["subtitle_lifecycle"], "Sửa format SRT deterministic.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["srt"], ["subtitle_lifecycle"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                sorted(set(fail_codes)),
+                ["srt"],
+                ["subtitle_lifecycle"],
+                "Sửa format SRT deterministic.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["srt"],
+            ["subtitle_lifecycle"],
+            None,
+        )
 
 
 class CaptionCoverageGate:
@@ -667,16 +951,37 @@ class CaptionCoverageGate:
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
         script = _dict(artifacts.get("narration_script"))
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
-        sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
-        sentence_ids = [str(item.get("sentence_id") or item.get("id") or index + 1) for index, item in enumerate(sentences)]
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
+        sentences = [
+            item for item in _list(script.get("sentences")) if isinstance(item, dict)
+        ]
+        sentence_ids = [
+            str(item.get("sentence_id") or item.get("id") or index + 1)
+            for index, item in enumerate(sentences)
+        ]
         cues = [item for item in _list(srt.get("cues")) if isinstance(item, dict)]
-        covered_ids = sorted({str(ref) for cue in cues for ref in _strings(cue.get("sentence_ids") or cue.get("sentence_id"))})
+        covered_ids = sorted(
+            {
+                str(ref)
+                for cue in cues
+                for ref in _strings(cue.get("sentence_ids") or cue.get("sentence_id"))
+            }
+        )
         missing = sorted(set(sentence_ids) - set(covered_ids))
-        script_tokens = _normalized_tokens(" ".join(str(item.get("text") or "") for item in sentences))
+        script_tokens = _normalized_tokens(
+            " ".join(str(item.get("text") or "") for item in sentences)
+        )
         srt_text = str(srt.get("srt") or srt.get("content") or "")
         srt_tokens = _normalized_tokens(_srt_text_only(srt_text))
-        coverage_percent = round((len(set(sentence_ids) - set(missing)) / len(sentence_ids)) * 100, 3) if sentence_ids else 0.0
+        coverage_percent = (
+            round((len(set(sentence_ids) - set(missing)) / len(sentence_ids)) * 100, 3)
+            if sentence_ids
+            else 0.0
+        )
         fail_codes: list[str] = []
         if missing:
             fail_codes.append("PRECHECK_BLOCKED_SRT_SENTENCE_COVERAGE_INCOMPLETE")
@@ -691,15 +996,37 @@ class CaptionCoverageGate:
             "missing_sentence_ids": missing[:20],
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["narration_script", "srt"], ["script_contract", "subtitle_lifecycle"], "Đồng bộ coverage script -> SRT.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script", "srt"], ["script_contract", "subtitle_lifecycle"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                sorted(set(fail_codes)),
+                ["narration_script", "srt"],
+                ["script_contract", "subtitle_lifecycle"],
+                "Đồng bộ coverage script -> SRT.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["narration_script", "srt"],
+            ["script_contract", "subtitle_lifecycle"],
+            None,
+        )
 
 
 class CaptionReadabilityGate:
     gate_key = "caption_readability_gate"
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
         parsed = _parse_srt(str(srt.get("srt") or srt.get("content") or ""))
         too_long_lines: list[dict[str, Any]] = []
         too_dense: list[int] = []
@@ -714,7 +1041,9 @@ class CaptionReadabilityGate:
                 too_many_lines.append(cue["index"])
             for line in lines:
                 if len(line) > 42:
-                    too_long_lines.append({"index": cue["index"], "line_length": len(line)})
+                    too_long_lines.append(
+                        {"index": cue["index"], "line_length": len(line)}
+                    )
             if duration > 0 and _word_count(cue["text"]) / duration > 3.8:
                 too_dense.append(cue["index"])
         fail_codes: list[str] = []
@@ -733,8 +1062,26 @@ class CaptionReadabilityGate:
             "too_dense_caption_indexes": too_dense[:20],
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, sorted(set(fail_codes)), ["srt"], ["subtitle_readability"], "Sửa readability của caption.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["srt"], ["subtitle_readability"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_HIGH,
+                measurements,
+                sorted(set(fail_codes)),
+                ["srt"],
+                ["subtitle_readability"],
+                "Sửa readability của caption.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["srt"],
+            ["subtitle_readability"],
+            None,
+        )
 
 
 class ScriptToSRTConsistencyGate:
@@ -742,8 +1089,16 @@ class ScriptToSRTConsistencyGate:
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
         script = _dict(artifacts.get("narration_script"))
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
-        script_text = " ".join(str(item.get("text") or "") for item in _list(script.get("sentences")) if isinstance(item, dict))
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
+        script_text = " ".join(
+            str(item.get("text") or "")
+            for item in _list(script.get("sentences"))
+            if isinstance(item, dict)
+        )
         srt_text = _srt_text_only(str(srt.get("srt") or srt.get("content") or ""))
         script_tokens = _normalized_tokens(script_text)
         srt_tokens = _normalized_tokens(srt_text)
@@ -756,26 +1111,84 @@ class ScriptToSRTConsistencyGate:
             "token_delta": len(srt_tokens) - len(script_tokens),
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["narration_script", "srt"], ["script_contract.hook_spec"], "SRT phải derive từ script, không thêm claims.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script", "srt"], ["script_contract.hook_spec"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                sorted(set(fail_codes)),
+                ["narration_script", "srt"],
+                ["script_contract.hook_spec"],
+                "SRT phải derive từ script, không thêm claims.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["narration_script", "srt"],
+            ["script_contract.hook_spec"],
+            None,
+        )
 
 
 class HookCaptionGate:
     gate_key = "hook_caption_gate"
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
         hook = _hook_spec(artifacts)
         script = _dict(artifacts.get("narration_script"))
         parsed = _parse_srt(str(srt.get("srt") or srt.get("content") or ""))
-        first_window = " ".join(cue["text"] for cue in parsed["cues"] if cue["start_seconds"] < 3.0)
-        hook_words = {token for token in _normalized_tokens(str(hook.get("first_3_seconds_script") or hook.get("promise_made") or "")) if len(token) > 3}
+        first_window = " ".join(
+            cue["text"] for cue in parsed["cues"] if cue["start_seconds"] < 3.0
+        )
+        hook_words = {
+            token
+            for token in _normalized_tokens(
+                str(
+                    hook.get("first_3_seconds_script") or hook.get("promise_made") or ""
+                )
+            )
+            if len(token) > 3
+        }
         caption_words = set(_normalized_tokens(first_window))
         overlap = sorted(hook_words & caption_words)
-        first_sentence = str(_dict(_first([item for item in _list(script.get("sentences")) if isinstance(item, dict)])).get("text") or "")
-        derived_from_opening = bool(first_window and _normalized_tokens(first_window) == _normalized_tokens(first_sentence)[: len(_normalized_tokens(first_window))])
-        overpromise_terms = ["actual result", "real result", "final video", "uploaded", "published", "guaranteed"]
-        overpromise_matches = [term for term in overpromise_terms if term in first_window.lower()]
+        first_sentence = str(
+            _dict(
+                _first(
+                    [
+                        item
+                        for item in _list(script.get("sentences"))
+                        if isinstance(item, dict)
+                    ]
+                )
+            ).get("text")
+            or ""
+        )
+        derived_from_opening = bool(
+            first_window
+            and _normalized_tokens(first_window)
+            == _normalized_tokens(first_sentence)[
+                : len(_normalized_tokens(first_window))
+            ]
+        )
+        overpromise_terms = [
+            "actual result",
+            "real result",
+            "final video",
+            "uploaded",
+            "published",
+            "guaranteed",
+        ]
+        overpromise_matches = [
+            term for term in overpromise_terms if term in first_window.lower()
+        ]
         fail_codes: list[str] = []
         if not first_window.strip():
             fail_codes.append("PRECHECK_BLOCKED_SRT_HOOK_CAPTION_MISSING")
@@ -790,8 +1203,26 @@ class HookCaptionGate:
             "overpromise_matches": overpromise_matches,
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, sorted(set(fail_codes)), ["hook_spec", "srt"], ["script_contract.hook_spec"], "Caption 3 giây đầu phải hỗ trợ hook promise.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["hook_spec", "srt"], ["script_contract.hook_spec"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_HIGH,
+                measurements,
+                sorted(set(fail_codes)),
+                ["hook_spec", "srt"],
+                ["script_contract.hook_spec"],
+                "Caption 3 giây đầu phải hỗ trợ hook promise.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["hook_spec", "srt"],
+            ["script_contract.hook_spec"],
+            None,
+        )
 
 
 class VisualSRTTimelineGate:
@@ -799,13 +1230,37 @@ class VisualSRTTimelineGate:
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
         visual = _dict(artifacts.get("visual_plan"))
-        srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package") or artifacts.get("caption_track"))
-        scenes = [item for item in _list(visual.get("scenes")) if isinstance(item, dict)]
+        srt = _dict(
+            artifacts.get("srt")
+            or artifacts.get("subtitle_package")
+            or artifacts.get("caption_track")
+        )
+        scenes = [
+            item for item in _list(visual.get("scenes")) if isinstance(item, dict)
+        ]
         cues = [item for item in _list(srt.get("cues")) if isinstance(item, dict)]
         if not visual:
-            return _gate_result(self.gate_key, GATE_SKIPPED, SEVERITY_INFO, {"visual_plan_present": False}, [], [], ["visual_plan"], None)
-        srt_end = _first_number(srt.get("srt_total_seconds"), srt.get("estimated_total_seconds")) or 0.0
-        cue_sentence_ids = {str(ref) for cue in cues for ref in _strings(cue.get("sentence_ids") or cue.get("sentence_id"))}
+            return _gate_result(
+                self.gate_key,
+                GATE_SKIPPED,
+                SEVERITY_INFO,
+                {"visual_plan_present": False},
+                [],
+                [],
+                ["visual_plan"],
+                None,
+            )
+        srt_end = (
+            _first_number(
+                srt.get("srt_total_seconds"), srt.get("estimated_total_seconds")
+            )
+            or 0.0
+        )
+        cue_sentence_ids = {
+            str(ref)
+            for cue in cues
+            for ref in _strings(cue.get("sentence_ids") or cue.get("sentence_id"))
+        }
         covered_sentence_ids: set[str] = set()
         timed_scene_total = 0.0
         invalid_scene_ids: list[str] = []
@@ -823,8 +1278,12 @@ class VisualSRTTimelineGate:
                 or scene.get("sentence_id")
             )
             covered_sentence_ids.update(refs)
-            start = _first_number(scene.get("start_seconds"), scene.get("start_time"), scene.get("start"))
-            end = _first_number(scene.get("end_seconds"), scene.get("end_time"), scene.get("end"))
+            start = _first_number(
+                scene.get("start_seconds"), scene.get("start_time"), scene.get("start")
+            )
+            end = _first_number(
+                scene.get("end_seconds"), scene.get("end_time"), scene.get("end")
+            )
             duration = _first_number(scene.get("duration_seconds"))
             if start is not None or end is not None or duration is not None:
                 scene_count_with_timing += 1
@@ -832,7 +1291,13 @@ class VisualSRTTimelineGate:
                     start = end - duration
                 if end is None and start is not None and duration is not None:
                     end = start + duration
-                if start is None or end is None or start < 0 or end <= start or (srt_end and end > srt_end + 1.0):
+                if (
+                    start is None
+                    or end is None
+                    or start < 0
+                    or end <= start
+                    or (srt_end and end > srt_end + 1.0)
+                ):
                     invalid_scene_ids.append(str(scene.get("scene_id") or index))
                 elif duration is not None:
                     timed_scene_total += duration
@@ -844,9 +1309,18 @@ class VisualSRTTimelineGate:
             fail_codes.append("VISUAL_COVERAGE_INCOMPLETE")
         if invalid_scene_ids:
             fail_codes.append("VISUAL_SCENE_DURATION_INVALID")
-        if scene_count_with_timing and srt_end and abs(timed_scene_total - srt_end) > max(15, srt_end * 0.15):
+        if (
+            scene_count_with_timing
+            and srt_end
+            and abs(timed_scene_total - srt_end) > max(15, srt_end * 0.15)
+        ):
             fail_codes.append("VISUAL_TIMELINE_MISMATCH")
-        if scene_count_with_timing and scenes and cues and len(scenes) >= len(cues) * 0.95:
+        if (
+            scene_count_with_timing
+            and scenes
+            and cues
+            and len(scenes) >= len(cues) * 0.95
+        ):
             fail_codes.append("VISUAL_SCENE_DURATION_INVALID")
         measurements = {
             "scene_count": len(scenes),
@@ -856,22 +1330,56 @@ class VisualSRTTimelineGate:
             "scene_count_with_timing": scene_count_with_timing,
             "missing_caption_sentence_ids": missing_caption_sentence_ids[:20],
             "invalid_scene_ids": invalid_scene_ids[:20],
-            "timing_mode": "explicit" if scene_count_with_timing else "sentence_id_derived",
+            "timing_mode": "explicit"
+            if scene_count_with_timing
+            else "sentence_id_derived",
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["visual_plan", "srt"], ["visual_plan.scenes", "subtitle_lifecycle"], "Sửa visual/SRT timeline coverage.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["visual_plan", "srt"], ["visual_plan.scenes", "subtitle_lifecycle"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                sorted(set(fail_codes)),
+                ["visual_plan", "srt"],
+                ["visual_plan.scenes", "subtitle_lifecycle"],
+                "Sửa visual/SRT timeline coverage.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["visual_plan", "srt"],
+            ["visual_plan.scenes", "subtitle_lifecycle"],
+            None,
+        )
 
 
 class VisualCoverageGate:
     gate_key = "visual_coverage_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         script = _dict(artifacts.get("narration_script"))
         visual = _dict(artifacts.get("visual_plan"))
-        sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
-        sentence_ids = {str(item.get("sentence_id")) for item in sentences if item.get("sentence_id")}
-        scenes = [item for item in _list(visual.get("scenes")) if isinstance(item, dict)]
+        sentences = [
+            item for item in _list(script.get("sentences")) if isinstance(item, dict)
+        ]
+        sentence_ids = {
+            str(item.get("sentence_id"))
+            for item in sentences
+            if item.get("sentence_id")
+        }
+        scenes = [
+            item for item in _list(visual.get("scenes")) if isinstance(item, dict)
+        ]
         covered: set[str] = set()
         unknown: set[str] = set()
         source_types: set[str] = set()
@@ -898,10 +1406,18 @@ class VisualCoverageGate:
             source = scene.get("intended_visual_source") or scene.get("source_type")
             if source:
                 source_types.add(str(source))
-        allowed_sources = set(_strings(_dict(effective_context.visual_style_context_json).get("allowed_visual_sources")))
+        allowed_sources = set(
+            _strings(
+                _dict(effective_context.visual_style_context_json).get(
+                    "allowed_visual_sources"
+                )
+            )
+        )
         if not allowed_sources:
             allowed_sources = {"DIAGRAM", "CARD", "SCREENSHOT", "EXISTING_ASSET"}
-        disallowed = sorted(source for source in source_types if source not in allowed_sources)
+        disallowed = sorted(
+            source for source in source_types if source not in allowed_sources
+        )
         missing = sorted(sentence_ids - covered)
         fail_codes: list[str] = []
         if missing:
@@ -911,7 +1427,11 @@ class VisualCoverageGate:
         if disallowed:
             fail_codes.append("VISUAL_SOURCE_DISALLOWED_BY_CONTRACT")
         script_total = _script_total_seconds(script)
-        if scene_duration and script_total and abs(scene_duration - script_total) > max(15, script_total * 0.3):
+        if (
+            scene_duration
+            and script_total
+            and abs(scene_duration - script_total) > max(15, script_total * 0.3)
+        ):
             fail_codes.append("VISUAL_DURATION_LARGE_MISMATCH")
         measurements = {
             "sentence_count": len(sentence_ids),
@@ -924,8 +1444,26 @@ class VisualCoverageGate:
             "scene_duration_seconds": scene_duration,
         }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, fail_codes, ["visual_plan", "narration_script"], ["visual_style_context.allowed_visual_sources"], "Sửa visual plan coverage/source policy.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["visual_plan", "narration_script"], ["visual_style_context.allowed_visual_sources"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                fail_codes,
+                ["visual_plan", "narration_script"],
+                ["visual_style_context.allowed_visual_sources"],
+                "Sửa visual plan coverage/source policy.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["visual_plan", "narration_script"],
+            ["visual_style_context.allowed_visual_sources"],
+            None,
+        )
 
 
 class ArtifactConsistencyGate:
@@ -937,71 +1475,200 @@ class ArtifactConsistencyGate:
         duration_model = _dict(artifacts.get("duration_model"))
         fail_codes: list[str] = []
         script_total = _script_estimated_total_seconds(script, duration_model)
-        metadata_duration = _first_number(metadata.get("duration_seconds"), metadata.get("total_approx_seconds"))
-        if script_total and metadata_duration is not None and abs(script_total - metadata_duration) > max(10, script_total * 0.1):
+        metadata_duration = _first_number(
+            metadata.get("duration_seconds"), metadata.get("total_approx_seconds")
+        )
+        if (
+            script_total
+            and metadata_duration is not None
+            and abs(script_total - metadata_duration) > max(10, script_total * 0.1)
+        ):
             fail_codes.append("SCRIPT_METADATA_DURATION_MISMATCH")
         srt = _dict(artifacts.get("srt") or artifacts.get("subtitle_package"))
         if srt:
-            srt_total = _parse_srt(str(srt.get("srt") or srt.get("content") or ""))["total_seconds"]
-            if script_total and srt_total and abs(script_total - srt_total) > max(2, script_total * 0.05):
+            srt_total = _parse_srt(str(srt.get("srt") or srt.get("content") or ""))[
+                "total_seconds"
+            ]
+            if (
+                script_total
+                and srt_total
+                and abs(script_total - srt_total) > max(2, script_total * 0.05)
+            ):
                 fail_codes.append("SCRIPT_SRT_DURATION_MISMATCH")
-        upload = _dict(artifacts.get("upload_card_copy"))
         rights = _dict(artifacts.get("rights_disclosure_review"))
-        if rights.get("ai_disclosure_needed") is True and upload and not _text_contains_any(upload, ["disclosure", "ai-assisted", "ai assisted", "AI"]):
+        if (
+            rights.get("ai_disclosure_needed") is True
+            and metadata
+            and not _text_contains_any(
+                metadata, ["disclosure", "ai-assisted", "ai assisted", "AI"]
+            )
+        ):
             fail_codes.append("UPLOAD_COPY_DISCLOSURE_MISMATCH")
-        measurements = {"script_total_seconds": script_total, "metadata_duration_seconds": metadata_duration}
+        measurements = {
+            "script_total_seconds": script_total,
+            "metadata_duration_seconds": metadata_duration,
+        }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_HIGH, measurements, fail_codes, ["narration_script", "metadata_package"], ["metadata_seo_policy_context", "source_rights_disclosure_context"], "Đồng bộ duration/disclosure giữa artifacts.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["narration_script", "metadata_package"], ["metadata_seo_policy_context"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_HIGH,
+                measurements,
+                fail_codes,
+                ["narration_script", "metadata_package"],
+                ["metadata_seo_policy_context", "source_rights_disclosure_context"],
+                "Đồng bộ duration/disclosure giữa artifacts.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["narration_script", "metadata_package"],
+            ["metadata_seo_policy_context"],
+            None,
+        )
 
 
 class DisclosureConsistencyGate:
     gate_key = "disclosure_consistency_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         metadata = _dict(artifacts.get("metadata_package"))
-        upload = _dict(artifacts.get("upload_card_copy"))
         rights = _dict(artifacts.get("rights_disclosure_review"))
-        combined = " ".join(str(value) for value in [metadata.get("description"), upload.get("description"), upload.get("title")] if value)
+        combined = " ".join(
+            str(value)
+            for value in [metadata.get("description"), metadata.get("title")]
+            if value
+        )
         fail_codes: list[str] = []
-        if "ai-generated video is included" in combined.lower() or "media already generated" in combined.lower():
+        if (
+            "ai-generated video is included" in combined.lower()
+            or "media already generated" in combined.lower()
+        ):
             fail_codes.append("AI_MEDIA_DISCLOSURE_FALSE_PRESENT_TENSE")
-        required_blocks = _strings(_dict(effective_context.source_rights_disclosure_context_json).get("required_disclosure_blocks"))
-        if required_blocks and not (metadata.get("disclosure_notes") or upload.get("disclosure_refs") or rights.get("disclosure_notes")):
+        required_blocks = _strings(
+            _dict(effective_context.source_rights_disclosure_context_json).get(
+                "required_disclosure_blocks"
+            )
+        )
+        if required_blocks and not (
+            metadata.get("disclosure_notes")
+            or metadata.get("disclosure_refs")
+            or rights.get("disclosure_notes")
+        ):
             fail_codes.append("REQUIRED_DISCLOSURE_BLOCK_MISSING")
-        if rights.get("ai_disclosure_needed") is True and "future" not in combined.lower() and "planned" not in combined.lower() and not metadata.get("disclosure_notes"):
+        if (
+            rights.get("ai_disclosure_needed") is True
+            and "future" not in combined.lower()
+            and "planned" not in combined.lower()
+            and not metadata.get("disclosure_notes")
+        ):
             fail_codes.append("AI_DISCLOSURE_CONDITIONAL_WORDING_MISSING")
-        measurements = {"required_disclosure_blocks": required_blocks, "ai_disclosure_needed": rights.get("ai_disclosure_needed")}
+        measurements = {
+            "required_disclosure_blocks": required_blocks,
+            "ai_disclosure_needed": rights.get("ai_disclosure_needed"),
+        }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_REVIEW, SEVERITY_HIGH, measurements, fail_codes, ["metadata_package", "upload_card_copy", "rights_disclosure_review"], ["source_rights_disclosure_context"], "Sửa disclosure wording cho đúng trạng thái media.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["metadata_package", "upload_card_copy", "rights_disclosure_review"], ["source_rights_disclosure_context"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_REVIEW,
+                SEVERITY_HIGH,
+                measurements,
+                fail_codes,
+                ["metadata_package", "rights_disclosure_review"],
+                ["source_rights_disclosure_context"],
+                "Sửa disclosure wording cho đúng trạng thái media.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["metadata_package", "rights_disclosure_review"],
+            ["source_rights_disclosure_context"],
+            None,
+        )
 
 
 class UploadCopyTruthfulnessGate:
     gate_key = "upload_copy_truthfulness_gate"
 
     def run(self, *, artifacts: dict[str, Any], **_: Any) -> GateResult:
-        upload = _dict(artifacts.get("upload_card_copy"))
         metadata = _dict(artifacts.get("metadata_package"))
-        text = " ".join(str(value) for value in [upload.get("title"), upload.get("description"), metadata.get("description"), upload.get("cta")] if value).lower()
+        text = " ".join(
+            str(value)
+            for value in [
+                metadata.get("title"),
+                metadata.get("description"),
+                metadata.get("cta"),
+            ]
+            if value
+        ).lower()
         fail_codes: list[str] = []
-        unsupported = ["free checklist", "download checklist", "product demo", "free demo", "limited time"]
-        if any(item in text for item in unsupported) and not (artifacts.get("asset_manifest") or artifacts.get("funnel_manifest")):
+        unsupported = [
+            "free checklist",
+            "download checklist",
+            "product demo",
+            "free demo",
+            "limited time",
+        ]
+        if any(item in text for item in unsupported) and not (
+            artifacts.get("asset_manifest") or artifacts.get("funnel_manifest")
+        ):
             fail_codes.append("UNSUPPORTED_CTA_OR_FREEBIE_CLAIM")
-        if "uploaded" in text and not upload.get("not_uploaded"):
+        if "uploaded" in text and not metadata.get("not_uploaded"):
             fail_codes.append("UPLOAD_COPY_IMPLIES_AUTOMATED_UPLOAD")
-        measurements = {"unsupported_claim_scan": [item for item in unsupported if item in text]}
+        measurements = {
+            "unsupported_claim_scan": [item for item in unsupported if item in text]
+        }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, fail_codes, ["upload_card_copy"], ["monetization_cta_context"], "Gỡ CTA/freebie/demo không có manifest thật.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["upload_card_copy"], ["monetization_cta_context"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                fail_codes,
+                ["metadata_package"],
+                ["monetization_cta_context"],
+                "Gỡ CTA/freebie/demo không có manifest thật.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["metadata_package"],
+            ["monetization_cta_context"],
+            None,
+        )
 
 
 class ProviderBoundaryGate:
     gate_key = "provider_boundary_gate"
 
-    def run(self, *, artifacts: dict[str, Any], provider_readiness_state: dict[str, Any] | None = None, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        provider_readiness_state: dict[str, Any] | None = None,
+        **_: Any,
+    ) -> GateResult:
         fail_codes: list[str] = []
-        attempts = [item for item in _list(artifacts.get("provider_attempts")) if isinstance(item, dict)]
+        attempts = [
+            item
+            for item in _list(artifacts.get("provider_attempts"))
+            if isinstance(item, dict)
+        ]
         forbidden_media = {
             "ELEVENLABS",
             "GOOGLE_VEO",
@@ -1010,12 +1677,20 @@ class ProviderBoundaryGate:
             "GOOGLE_DRIVE",
             "YOUTUBE",
         }
-        forbidden_attempts = [item for item in attempts if str(item.get("provider_key") or "").upper() in forbidden_media]
+        forbidden_attempts = [
+            item
+            for item in attempts
+            if str(item.get("provider_key") or "").upper() in forbidden_media
+        ]
         if forbidden_attempts:
             fail_codes.append("FORBIDDEN_PROVIDER_OR_UPLOAD_ATTEMPT")
-        if artifacts.get("mock_fallback_used") or _dict(artifacts.get("risk_limitations_summary")).get("mock_fallback_used"):
+        if artifacts.get("mock_fallback_used") or _dict(
+            artifacts.get("risk_limitations_summary")
+        ).get("mock_fallback_used"):
             fail_codes.append("MOCK_FALLBACK_USED")
-        if artifacts.get("dry_run_success_used") or _dict(artifacts.get("risk_limitations_summary")).get("dry_run_success_used"):
+        if artifacts.get("dry_run_success_used") or _dict(
+            artifacts.get("risk_limitations_summary")
+        ).get("dry_run_success_used"):
             fail_codes.append("DRY_RUN_SUCCESS_USED")
         provider_state = _provider_readiness_map(provider_readiness_state or {})
         missing_required = [
@@ -1024,22 +1699,61 @@ class ProviderBoundaryGate:
             if provider_state.get(key, {}).get("status") not in {"CONFIGURED", "PASS"}
         ]
         if missing_required:
-            fail_codes.extend(f"{key.upper()}_NOT_CONFIGURED" for key in missing_required)
-        measurements = {"forbidden_attempt_count": len(forbidden_attempts), "missing_required_providers": missing_required}
+            fail_codes.extend(
+                f"{key.upper()}_NOT_CONFIGURED" for key in missing_required
+            )
+        measurements = {
+            "forbidden_attempt_count": len(forbidden_attempts),
+            "missing_required_providers": missing_required,
+        }
         if fail_codes:
-            return _gate_result(self.gate_key, GATE_BLOCK, SEVERITY_CRITICAL, measurements, sorted(set(fail_codes)), ["provider_readiness_summary"], ["cost_provider_policy_context", "media_policy"], "Dừng ở provider boundary; không gọi media/upload.")
-        return _gate_result(self.gate_key, GATE_PASS, SEVERITY_INFO, measurements, [], ["provider_readiness_summary"], ["cost_provider_policy_context", "media_policy"], None)
+            return _gate_result(
+                self.gate_key,
+                GATE_BLOCK,
+                SEVERITY_CRITICAL,
+                measurements,
+                sorted(set(fail_codes)),
+                ["provider_readiness_summary"],
+                ["cost_provider_policy_context", "media_policy"],
+                "Dừng ở provider boundary; không gọi media/upload.",
+            )
+        return _gate_result(
+            self.gate_key,
+            GATE_PASS,
+            SEVERITY_INFO,
+            measurements,
+            [],
+            ["provider_readiness_summary"],
+            ["cost_provider_policy_context", "media_policy"],
+            None,
+        )
 
 
 class ScriptStyleComplianceGate:
     gate_key = "script_style_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         script = _dict(artifacts.get("narration_script"))
         language = script.get("language") or script.get("content_language")
-        expected = _dict(effective_context.market_locale_context_json).get("content_language")
-        forbidden = _strings(_dict(effective_context.brand_voice_persona_context_json).get("forbidden_style"))
-        text = " ".join(str(item.get("text") or "") for item in _list(script.get("sentences")) if isinstance(item, dict)).lower()
+        expected = _dict(effective_context.market_locale_context_json).get(
+            "content_language"
+        )
+        forbidden = _strings(
+            _dict(effective_context.brand_voice_persona_context_json).get(
+                "forbidden_style"
+            )
+        )
+        text = " ".join(
+            str(item.get("text") or "")
+            for item in _list(script.get("sentences"))
+            if isinstance(item, dict)
+        ).lower()
         matched_terms = [term for term in forbidden if term and term.lower() in text]
         fail_codes: list[str] = []
         if language and expected and str(language).lower() != str(expected).lower():
@@ -1051,7 +1765,11 @@ class ScriptStyleComplianceGate:
             self.gate_key,
             status,
             SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
-            {"expected_language": expected, "observed_language": language, "forbidden_style_terms_found": matched_terms},
+            {
+                "expected_language": expected,
+                "observed_language": language,
+                "forbidden_style_terms_found": matched_terms,
+            },
             fail_codes,
             ["narration_script"],
             ["market_locale_context.content_language", "brand_voice_persona_context"],
@@ -1062,24 +1780,55 @@ class ScriptStyleComplianceGate:
 class VoiceProfileComplianceGate:
     gate_key = "voice_profile_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         voice = _dict(effective_context.voice_audio_context_json)
-        voice_artifact = _dict(artifacts.get("voice_profile") or artifacts.get("voice_timeline"))
+        voice_artifact = _dict(
+            artifacts.get("voice_profile") or artifacts.get("voice_timeline")
+        )
         fail_codes: list[str] = []
-        if voice_artifact and voice.get("voice_profile_id") and voice_artifact.get("voice_profile_id") != voice.get("voice_profile_id"):
+        if (
+            voice_artifact
+            and voice.get("voice_profile_id")
+            and voice_artifact.get("voice_profile_id") != voice.get("voice_profile_id")
+        ):
             fail_codes.append("VOICE_PROFILE_MISMATCH")
         character = _dict(effective_context.character_identity_context_json)
-        if character.get("character_policy_mode") == "REQUIRED_CHARACTER" and not voice.get("voice_profile_id"):
+        if character.get(
+            "character_policy_mode"
+        ) == "REQUIRED_CHARACTER" and not voice.get("voice_profile_id"):
             fail_codes.append("VOICE_PROFILE_REQUIRED_MISSING")
         status = GATE_BLOCK if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_HIGH if fail_codes else SEVERITY_INFO, {"voice_profile_id": voice.get("voice_profile_id")}, fail_codes, ["voice_profile"], ["voice_audio_context"], "Sửa voice profile binding." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
+            {"voice_profile_id": voice.get("voice_profile_id")},
+            fail_codes,
+            ["voice_profile"],
+            ["voice_audio_context"],
+            "Sửa voice profile binding." if fail_codes else None,
+        )
 
 
 class VisualStyleComplianceGate:
     gate_key = "visual_style_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
-        base = VisualCoverageGate().run(artifacts=artifacts, effective_context=effective_context)
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
+        base = VisualCoverageGate().run(
+            artifacts=artifacts, effective_context=effective_context
+        )
         return GateResult(
             gate_key=self.gate_key,
             status=base.status,
@@ -1090,7 +1839,9 @@ class VisualStyleComplianceGate:
             checked_artifact_refs=base.checked_artifact_refs,
             checked_contract_paths=base.checked_contract_paths,
             repair_hint=base.repair_hint,
-            human_readable_summary=_summary_for(status=base.status, fail_codes=base.fail_codes, gate_key=self.gate_key),
+            human_readable_summary=_summary_for(
+                status=base.status, fail_codes=base.fail_codes, gate_key=self.gate_key
+            ),
             evidence_refs=base.evidence_refs,
         )
 
@@ -1098,50 +1849,128 @@ class VisualStyleComplianceGate:
 class ThumbnailStyleComplianceGate:
     gate_key = "thumbnail_style_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         thumb = _dict(artifacts.get("thumbnail_brief"))
-        expected_language = _dict(effective_context.thumbnail_style_context_json).get("text_overlay_language")
+        expected_language = _dict(effective_context.thumbnail_style_context_json).get(
+            "text_overlay_language"
+        )
         observed = thumb.get("text_overlay_language") or thumb.get("language")
-        text = str(thumb.get("text_overlay") or _dict(_first(_list(thumb.get("variants")))).get("text") or "")
+        text = str(
+            thumb.get("text_overlay")
+            or _dict(_first(_list(thumb.get("variants")))).get("text")
+            or ""
+        )
         fail_codes: list[str] = []
-        if observed and expected_language and str(observed).lower() != str(expected_language).lower():
+        if (
+            observed
+            and expected_language
+            and str(observed).lower() != str(expected_language).lower()
+        ):
             fail_codes.append("THUMBNAIL_LANGUAGE_MISMATCH")
         if len(text) > 80:
             fail_codes.append("THUMBNAIL_TEXT_MOBILE_READABILITY_RISK")
         status = GATE_REVIEW if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_MEDIUM if fail_codes else SEVERITY_INFO, {"expected_language": expected_language, "observed_language": observed, "text_length": len(text)}, fail_codes, ["thumbnail_brief"], ["thumbnail_style_context"], "Sửa thumbnail language/readability." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_MEDIUM if fail_codes else SEVERITY_INFO,
+            {
+                "expected_language": expected_language,
+                "observed_language": observed,
+                "text_length": len(text),
+            },
+            fail_codes,
+            ["thumbnail_brief"],
+            ["thumbnail_style_context"],
+            "Sửa thumbnail language/readability." if fail_codes else None,
+        )
 
 
 class MetadataLocaleComplianceGate:
     gate_key = "metadata_locale_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         metadata = _dict(artifacts.get("metadata_package"))
-        expected = _dict(effective_context.market_locale_context_json).get("content_language")
+        expected = _dict(effective_context.market_locale_context_json).get(
+            "content_language"
+        )
         observed = metadata.get("language") or metadata.get("content_language")
-        fail_codes = ["METADATA_LANGUAGE_CONTRACT_MISMATCH"] if observed and expected and str(observed).lower() != str(expected).lower() else []
+        fail_codes = (
+            ["METADATA_LANGUAGE_CONTRACT_MISMATCH"]
+            if observed and expected and str(observed).lower() != str(expected).lower()
+            else []
+        )
         status = GATE_REVIEW if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_HIGH if fail_codes else SEVERITY_INFO, {"expected_language": expected, "observed_language": observed}, fail_codes, ["metadata_package"], ["market_locale_context.content_language", "metadata_seo_policy_context"], "Sửa metadata locale." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
+            {"expected_language": expected, "observed_language": observed},
+            fail_codes,
+            ["metadata_package"],
+            ["market_locale_context.content_language", "metadata_seo_policy_context"],
+            "Sửa metadata locale." if fail_codes else None,
+        )
 
 
 class PublishTimingComplianceGate:
     gate_key = "publish_timing_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
-        handoff = _dict(artifacts.get("upload_card_copy") or artifacts.get("publish_handoff"))
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
+        handoff = _dict(
+            artifacts.get("metadata_package") or artifacts.get("publish_handoff")
+        )
         timing = _dict(effective_context.publish_timing_context_json)
         fail_codes: list[str] = []
-        if handoff.get("auto_publish") is True or handoff.get("scheduled_by_agent") is True:
+        if (
+            handoff.get("auto_publish") is True
+            or handoff.get("scheduled_by_agent") is True
+        ):
             fail_codes.append("AUTO_PUBLISH_OR_AGENT_SCHEDULE_FORBIDDEN")
         status = GATE_BLOCK if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_CRITICAL if fail_codes else SEVERITY_INFO, {"manual_publish_only": timing.get("manual_publish_only")}, fail_codes, ["upload_card_copy"], ["publish_timing_context"], "Chỉ manual publish handoff." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_CRITICAL if fail_codes else SEVERITY_INFO,
+            {"manual_publish_only": timing.get("manual_publish_only")},
+            fail_codes,
+            ["metadata_package"],
+            ["publish_timing_context"],
+            "Chỉ manual publish handoff." if fail_codes else None,
+        )
 
 
 class RightsDisclosureComplianceGate:
     gate_key = "rights_disclosure_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **kwargs: Any) -> GateResult:
-        base = DisclosureConsistencyGate().run(artifacts=artifacts, effective_context=effective_context, **kwargs)
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **kwargs: Any,
+    ) -> GateResult:
+        base = DisclosureConsistencyGate().run(
+            artifacts=artifacts, effective_context=effective_context, **kwargs
+        )
         return GateResult(
             gate_key=self.gate_key,
             status=base.status,
@@ -1152,7 +1981,9 @@ class RightsDisclosureComplianceGate:
             checked_artifact_refs=base.checked_artifact_refs,
             checked_contract_paths=base.checked_contract_paths,
             repair_hint=base.repair_hint,
-            human_readable_summary=_summary_for(status=base.status, fail_codes=base.fail_codes, gate_key=self.gate_key),
+            human_readable_summary=_summary_for(
+                status=base.status, fail_codes=base.fail_codes, gate_key=self.gate_key
+            ),
             evidence_refs=base.evidence_refs,
         )
 
@@ -1160,22 +1991,59 @@ class RightsDisclosureComplianceGate:
 class MonetizationCTAComplianceGate:
     gate_key = "monetization_cta_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         cta = _dict(effective_context.monetization_cta_context_json)
-        upload = _dict(artifacts.get("upload_card_copy"))
-        text = " ".join(str(value) for value in [upload.get("title"), upload.get("description"), upload.get("cta")] if value).lower()
+        metadata = _dict(artifacts.get("metadata_package"))
+        text = " ".join(
+            str(value)
+            for value in [
+                metadata.get("title"),
+                metadata.get("description"),
+                metadata.get("cta"),
+            ]
+            if value
+        ).lower()
         forbidden = [item.lower() for item in _strings(cta.get("forbidden_cta_types"))]
-        fail_codes = ["CTA_FORBIDDEN_BY_CONTRACT"] if any(item and item in text for item in forbidden) else []
-        if cta.get("unsupported_asset_offer_forbidden") and any(item in text for item in ["free checklist", "demo", "download"]) and not artifacts.get("asset_manifest"):
+        fail_codes = (
+            ["CTA_FORBIDDEN_BY_CONTRACT"]
+            if any(item and item in text for item in forbidden)
+            else []
+        )
+        if (
+            cta.get("unsupported_asset_offer_forbidden")
+            and any(item in text for item in ["free checklist", "demo", "download"])
+            and not artifacts.get("asset_manifest")
+        ):
             fail_codes.append("UNSUPPORTED_ASSET_OFFER_FORBIDDEN")
         status = GATE_BLOCK if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_HIGH if fail_codes else SEVERITY_INFO, {"forbidden_cta_types": forbidden}, sorted(set(fail_codes)), ["upload_card_copy"], ["monetization_cta_context"], "Sửa CTA theo monetization contract." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
+            {"forbidden_cta_types": forbidden},
+            sorted(set(fail_codes)),
+            ["metadata_package"],
+            ["monetization_cta_context"],
+            "Sửa CTA theo monetization contract." if fail_codes else None,
+        )
 
 
 class CharacterRuntimeComplianceGate:
     gate_key = "character_runtime_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         character = _dict(effective_context.character_identity_context_json)
         mode = character.get("character_policy_mode")
         refs = _artifact_character_refs(artifacts)
@@ -1185,7 +2053,16 @@ class CharacterRuntimeComplianceGate:
         if mode == "REQUIRED_CHARACTER" and not character.get("character_profile_id"):
             fail_codes.append("REQUIRED_CHARACTER_BINDING_MISSING")
         status = GATE_BLOCK if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_CRITICAL if fail_codes else SEVERITY_INFO, {"character_policy_mode": mode, "artifact_character_refs": refs}, fail_codes, ["narration_script", "visual_plan", "thumbnail_brief"], ["character_identity_context"], "Sửa character binding/refs theo frozen context." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_CRITICAL if fail_codes else SEVERITY_INFO,
+            {"character_policy_mode": mode, "artifact_character_refs": refs},
+            fail_codes,
+            ["narration_script", "visual_plan", "thumbnail_brief"],
+            ["character_identity_context"],
+            "Sửa character binding/refs theo frozen context." if fail_codes else None,
+        )
 
 
 class CharacterBindingGate(CharacterRuntimeComplianceGate):
@@ -1203,7 +2080,13 @@ class VoiceProfileReadinessGate(VoiceProfileComplianceGate):
 class CharacterConsistencyGate:
     gate_key = "character_consistency_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         character = _dict(effective_context.character_identity_context_json)
         allowed = {
             value
@@ -1220,7 +2103,18 @@ class CharacterConsistencyGate:
         if refs and not refs <= allowed:
             fail_codes.append("CHARACTER_REFS_DO_NOT_MATCH_FROZEN_CONTEXT")
         status = GATE_BLOCK if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_CRITICAL if fail_codes else SEVERITY_INFO, {"allowed_refs": sorted(allowed), "artifact_refs": sorted(refs)}, fail_codes, ["visual_plan", "thumbnail_brief"], ["character_identity_context"], "Dùng character refs từ EffectiveChannelRuntimeContextSnapshot." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_CRITICAL if fail_codes else SEVERITY_INFO,
+            {"allowed_refs": sorted(allowed), "artifact_refs": sorted(refs)},
+            fail_codes,
+            ["visual_plan", "thumbnail_brief"],
+            ["character_identity_context"],
+            "Dùng character refs từ EffectiveChannelRuntimeContextSnapshot."
+            if fail_codes
+            else None,
+        )
 
 
 class ProviderCharacterInputGate(CharacterConsistencyGate):
@@ -1230,34 +2124,86 @@ class ProviderCharacterInputGate(CharacterConsistencyGate):
 class MarketRuntimeComplianceGate:
     gate_key = "market_runtime_compliance_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
-        expected = _dict(effective_context.market_locale_context_json).get("content_language")
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
+        expected = _dict(effective_context.market_locale_context_json).get(
+            "content_language"
+        )
         observed_values = [
             _dict(artifacts.get("narration_script")).get("language"),
             _dict(artifacts.get("metadata_package")).get("language"),
             _dict(artifacts.get("thumbnail_brief")).get("language"),
         ]
-        mismatches = [value for value in observed_values if value and expected and str(value).lower() != str(expected).lower()]
+        mismatches = [
+            value
+            for value in observed_values
+            if value and expected and str(value).lower() != str(expected).lower()
+        ]
         fail_codes = ["MARKET_LOCALE_LANGUAGE_MISMATCH"] if mismatches else []
         status = GATE_REVIEW if fail_codes else GATE_PASS
-        return _gate_result(self.gate_key, status, SEVERITY_HIGH if fail_codes else SEVERITY_INFO, {"expected_language": expected, "observed_mismatches": mismatches}, fail_codes, ["narration_script", "metadata_package", "thumbnail_brief"], ["market_locale_context"], "Sửa artifact language theo market/locale." if fail_codes else None)
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
+            {"expected_language": expected, "observed_mismatches": mismatches},
+            fail_codes,
+            ["narration_script", "metadata_package", "thumbnail_brief"],
+            ["market_locale_context"],
+            "Sửa artifact language theo market/locale." if fail_codes else None,
+        )
 
 
 class ChannelRuntimeContractGate:
     gate_key = "channel_runtime_contract_gate"
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **kwargs: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **kwargs: Any,
+    ) -> GateResult:
         sub_results = [
-            ScriptStyleComplianceGate().run(artifacts=artifacts, effective_context=effective_context, **kwargs),
-            MetadataLocaleComplianceGate().run(artifacts=artifacts, effective_context=effective_context, **kwargs),
-            CharacterRuntimeComplianceGate().run(artifacts=artifacts, effective_context=effective_context, **kwargs),
-            MonetizationCTAComplianceGate().run(artifacts=artifacts, effective_context=effective_context, **kwargs),
+            ScriptStyleComplianceGate().run(
+                artifacts=artifacts, effective_context=effective_context, **kwargs
+            ),
+            MetadataLocaleComplianceGate().run(
+                artifacts=artifacts, effective_context=effective_context, **kwargs
+            ),
+            CharacterRuntimeComplianceGate().run(
+                artifacts=artifacts, effective_context=effective_context, **kwargs
+            ),
+            MonetizationCTAComplianceGate().run(
+                artifacts=artifacts, effective_context=effective_context, **kwargs
+            ),
         ]
         fail_codes: list[str] = []
         for result in sub_results:
             fail_codes.extend(result.fail_codes)
-        status = GATE_BLOCK if any(result.status == GATE_BLOCK for result in sub_results) else (GATE_REVIEW if any(result.status == GATE_REVIEW for result in sub_results) else GATE_PASS)
-        return _gate_result(self.gate_key, status, SEVERITY_HIGH if fail_codes else SEVERITY_INFO, {"sub_gate_statuses": {item.gate_key: item.status for item in sub_results}}, sorted(set(fail_codes)), ["package_artifacts"], ["effective_channel_runtime_context_snapshot"], "Sửa artifact theo frozen runtime contract." if fail_codes else None)
+        status = (
+            GATE_BLOCK
+            if any(result.status == GATE_BLOCK for result in sub_results)
+            else (
+                GATE_REVIEW
+                if any(result.status == GATE_REVIEW for result in sub_results)
+                else GATE_PASS
+            )
+        )
+        return _gate_result(
+            self.gate_key,
+            status,
+            SEVERITY_HIGH if fail_codes else SEVERITY_INFO,
+            {"sub_gate_statuses": {item.gate_key: item.status for item in sub_results}},
+            sorted(set(fail_codes)),
+            ["package_artifacts"],
+            ["effective_channel_runtime_context_snapshot"],
+            "Sửa artifact theo frozen runtime contract." if fail_codes else None,
+        )
 
 
 class GateResultReducer:
@@ -1272,26 +2218,55 @@ class GateResultReducer:
 
 
 class PackageStatusReducer:
-    def resolve(self, *, current_status: str, deterministic_batch: GateBatchResult | None, gatekeeper_result: str | None = None) -> dict[str, Any]:
+    def resolve(
+        self,
+        *,
+        current_status: str,
+        deterministic_batch: GateBatchResult | None,
+        gatekeeper_result: str | None = None,
+    ) -> dict[str, Any]:
         if deterministic_batch and deterministic_batch.status == GATE_BLOCK:
             provider_only = deterministic_batch.fail_codes and all(
-                code.endswith("_NOT_CONFIGURED") or code in {"PROVIDER_READINESS_MISSING"}
+                code.endswith("_NOT_CONFIGURED")
+                or code in {"PROVIDER_READINESS_MISSING"}
                 for code in deterministic_batch.fail_codes
             )
             return {
-                "package_status": "WAITING_PROVIDER_CONFIG" if provider_only else "BLOCKED",
+                "package_status": "WAITING_PROVIDER_CONFIG"
+                if provider_only
+                else "BLOCKED",
                 "reason_codes": deterministic_batch.fail_codes,
                 "source": "deterministic_gates",
             }
         if deterministic_batch and deterministic_batch.status == GATE_REVIEW:
-            return {"package_status": "REVIEW_REQUIRED", "reason_codes": deterministic_batch.fail_codes, "source": "deterministic_gates"}
+            return {
+                "package_status": "REVIEW_REQUIRED",
+                "reason_codes": deterministic_batch.fail_codes,
+                "source": "deterministic_gates",
+            }
         if gatekeeper_result in {None, "", "UNKNOWN", "AMBIGUOUS"}:
-            return {"package_status": "REVIEW_REQUIRED", "reason_codes": ["GATEKEEPER_RESULT_UNKNOWN"], "source": "gatekeeper_soft_review"}
+            return {
+                "package_status": "REVIEW_REQUIRED",
+                "reason_codes": ["GATEKEEPER_RESULT_UNKNOWN"],
+                "source": "gatekeeper_soft_review",
+            }
         if gatekeeper_result == "BLOCK":
-            return {"package_status": "BLOCKED", "reason_codes": ["GATEKEEPER_BLOCK"], "source": "gatekeeper_soft_review"}
+            return {
+                "package_status": "BLOCKED",
+                "reason_codes": ["GATEKEEPER_BLOCK"],
+                "source": "gatekeeper_soft_review",
+            }
         if gatekeeper_result == "REVIEW_REQUIRED":
-            return {"package_status": "REVIEW_REQUIRED", "reason_codes": ["GATEKEEPER_REVIEW_REQUIRED"], "source": "gatekeeper_soft_review"}
-        return {"package_status": current_status, "reason_codes": [], "source": "package_state"}
+            return {
+                "package_status": "REVIEW_REQUIRED",
+                "reason_codes": ["GATEKEEPER_REVIEW_REQUIRED"],
+                "source": "gatekeeper_soft_review",
+            }
+        return {
+            "package_status": current_status,
+            "reason_codes": [],
+            "source": "package_state",
+        }
 
 
 class NicheAlignmentEvidenceGate:
@@ -1304,7 +2279,13 @@ class NicheAlignmentEvidenceGate:
     def __init__(self, gate_key: str):
         self.gate_key = gate_key
 
-    def run(self, *, artifacts: dict[str, Any], effective_context: EffectiveChannelRuntimeContextSnapshot, **_: Any) -> GateResult:
+    def run(
+        self,
+        *,
+        artifacts: dict[str, Any],
+        effective_context: EffectiveChannelRuntimeContextSnapshot,
+        **_: Any,
+    ) -> GateResult:
         category = _dict(effective_context.category_runtime_context_json)
         strict = isinstance(category.get("niche_contract_digest"), dict) or isinstance(
             category.get("niche_contract_digest_ref"), dict
@@ -1367,7 +2348,11 @@ class NicheAlignmentEvidenceGate:
         return _gate_result(
             self.gate_key,
             status,
-            SEVERITY_CRITICAL if status == GATE_BLOCK else SEVERITY_MEDIUM if status == GATE_REVIEW else SEVERITY_INFO,
+            SEVERITY_CRITICAL
+            if status == GATE_BLOCK
+            else SEVERITY_MEDIUM
+            if status == GATE_REVIEW
+            else SEVERITY_INFO,
             {
                 "content_hash": typed_result.content_hash,
                 "niche_contract_digest_hash": typed_result.niche_contract_digest_hash,
@@ -1379,7 +2364,9 @@ class NicheAlignmentEvidenceGate:
             fail_codes,
             [self.gate_key],
             ["category_runtime_context_json.niche_contract_digest_ref"],
-            None if status == GATE_PASS else "Repair the semantic niche mismatch and create a new version.",
+            None
+            if status == GATE_PASS
+            else "Repair the semantic niche mismatch and create a new version.",
         )
 
     def _validate_typed_result(
@@ -1418,8 +2405,7 @@ class NicheAlignmentEvidenceGate:
         ):
             failures.append("NICHE_GATE_DIGEST_BINDING_MISMATCH")
         if (
-            typed.checked_policy_snapshot_ref
-            != digest.compiled_policy_snapshot_ref
+            typed.checked_policy_snapshot_ref != digest.compiled_policy_snapshot_ref
             or typed.checked_policy_snapshot_hash
             != digest.compiled_policy_snapshot_hash
         ):
@@ -1510,21 +2496,58 @@ class R3D4GateService:
         "voice_profile_readiness_gate": VoiceProfileReadinessGate(),
         "character_consistency_gate": CharacterConsistencyGate(),
         "provider_character_input_gate": ProviderCharacterInputGate(),
-        "topic_niche_alignment_gate": NicheAlignmentEvidenceGate("topic_niche_alignment_gate"),
-        "script_niche_alignment_gate": NicheAlignmentEvidenceGate("script_niche_alignment_gate"),
-        "visual_niche_alignment_gate": NicheAlignmentEvidenceGate("visual_niche_alignment_gate"),
-        "thumbnail_niche_alignment_gate": NicheAlignmentEvidenceGate("thumbnail_niche_alignment_gate"),
-        "metadata_niche_alignment_gate": NicheAlignmentEvidenceGate("metadata_niche_alignment_gate"),
+        "topic_niche_alignment_gate": NicheAlignmentEvidenceGate(
+            "topic_niche_alignment_gate"
+        ),
+        "script_niche_alignment_gate": NicheAlignmentEvidenceGate(
+            "script_niche_alignment_gate"
+        ),
+        "visual_niche_alignment_gate": NicheAlignmentEvidenceGate(
+            "visual_niche_alignment_gate"
+        ),
+        "thumbnail_niche_alignment_gate": NicheAlignmentEvidenceGate(
+            "thumbnail_niche_alignment_gate"
+        ),
+        "metadata_niche_alignment_gate": NicheAlignmentEvidenceGate(
+            "metadata_niche_alignment_gate"
+        ),
     }
     GATES_AFTER_AGENT = {
         "TopicIdeaScoringAgent": ["topic_niche_alignment_gate"],
-        "ScriptWriterAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate", "script_niche_alignment_gate"],
-        "ScriptRewriteAgent": ["script_duration_gate", "hook_3s_gate", "script_style_compliance_gate", "script_niche_alignment_gate"],
-        "VisualPlanningAgent": ["visual_coverage_gate", "visual_style_compliance_gate", "character_runtime_compliance_gate", "visual_niche_alignment_gate"],
-        "ThumbnailBriefAgent": ["thumbnail_style_compliance_gate", "character_consistency_gate", "thumbnail_niche_alignment_gate"],
-        "PublishingMetadataAgent": ["metadata_locale_compliance_gate", "metadata_niche_alignment_gate"],
-        "RightsDisclosureReviewer": ["rights_disclosure_compliance_gate", "disclosure_consistency_gate"],
-        "UploadCardCopyAgent": ["upload_copy_truthfulness_gate", "monetization_cta_compliance_gate", "publish_timing_compliance_gate"],
+        "ScriptWriterAgent": [
+            "script_duration_gate",
+            "hook_3s_gate",
+            "script_style_compliance_gate",
+            "script_niche_alignment_gate",
+        ],
+        "ScriptRewriteAgent": [
+            "script_duration_gate",
+            "hook_3s_gate",
+            "script_style_compliance_gate",
+            "script_niche_alignment_gate",
+        ],
+        "VisualPlanningAgent": [
+            "visual_coverage_gate",
+            "visual_style_compliance_gate",
+            "character_runtime_compliance_gate",
+            "visual_niche_alignment_gate",
+        ],
+        "ThumbnailBriefAgent": [
+            "thumbnail_style_compliance_gate",
+            "character_consistency_gate",
+            "thumbnail_niche_alignment_gate",
+        ],
+        "PublishingMetadataAgent": [
+            "metadata_locale_compliance_gate",
+            "metadata_niche_alignment_gate",
+            "upload_copy_truthfulness_gate",
+            "monetization_cta_compliance_gate",
+            "publish_timing_compliance_gate",
+        ],
+        "RightsDisclosureReviewer": [
+            "rights_disclosure_compliance_gate",
+            "disclosure_consistency_gate",
+        ],
     }
 
     def __init__(self, session: Session, *, reducer: GateResultReducer | None = None):
@@ -1581,7 +2604,9 @@ class R3D4GateService:
             "metadata_niche_alignment_gate",
         ]
         if include_provider_boundary:
-            gate_keys.extend(["provider_boundary_gate", "provider_character_input_gate"])
+            gate_keys.extend(
+                ["provider_boundary_gate", "provider_character_input_gate"]
+            )
         return self.run_batch(
             package_id=package_id,
             video_project_id=video_project_id,
@@ -1607,7 +2632,18 @@ class R3D4GateService:
         for gate_key in gate_keys:
             gate = self.GATES_BY_KEY.get(gate_key)
             if gate is None:
-                results.append(_gate_result(gate_key, GATE_BLOCK, SEVERITY_CRITICAL, {}, ["REQUIRED_GATE_MISSING"], [], [], "Required gate is not registered."))
+                results.append(
+                    _gate_result(
+                        gate_key,
+                        GATE_BLOCK,
+                        SEVERITY_CRITICAL,
+                        {},
+                        ["REQUIRED_GATE_MISSING"],
+                        [],
+                        [],
+                        "Required gate is not registered.",
+                    )
+                )
                 continue
             try:
                 results.append(
@@ -1618,7 +2654,18 @@ class R3D4GateService:
                     )
                 )
             except Exception as exc:  # pragma: no cover - defensive audit path
-                results.append(_gate_result(gate_key, GATE_BLOCK, SEVERITY_CRITICAL, {"exception": str(exc)}, ["GATE_EXCEPTION"], [], [], "Gate exception blocks package."))
+                results.append(
+                    _gate_result(
+                        gate_key,
+                        GATE_BLOCK,
+                        SEVERITY_CRITICAL,
+                        {"exception": str(exc)},
+                        ["GATE_EXCEPTION"],
+                        [],
+                        [],
+                        "Gate exception blocks package.",
+                    )
+                )
         status, hard_blocks, reviews = self.reducer.reduce(results)
         batch = R3D4GateBatchRun(
             package_id=package_id,
@@ -1630,7 +2677,11 @@ class R3D4GateService:
             hard_block_count=hard_blocks,
             review_required_count=reviews,
             gate_results_json=[result.to_dict() for result in results],
-            reducer_decision_json={"status": status, "hard_block_count": hard_blocks, "review_required_count": reviews},
+            reducer_decision_json={
+                "status": status,
+                "hard_block_count": hard_blocks,
+                "review_required_count": reviews,
+            },
         )
         self.session.add(batch)
         self.session.flush()
@@ -1668,15 +2719,25 @@ class R3D4GateService:
         )
 
 
-def compact_gate_report(existing: dict[str, Any] | None, batch: GateBatchResult) -> dict[str, Any]:
+def compact_gate_report(
+    existing: dict[str, Any] | None, batch: GateBatchResult
+) -> dict[str, Any]:
     previous_batches = list(_dict(existing).get("gate_batch_run_refs") or [])
-    previous_batches.append(str(batch.gate_batch_run_id) if batch.gate_batch_run_id else None)
-    fail_codes = sorted(set([*_strings(_dict(existing).get("fail_codes")), *batch.fail_codes]))
+    previous_batches.append(
+        str(batch.gate_batch_run_id) if batch.gate_batch_run_id else None
+    )
+    fail_codes = sorted(
+        set([*_strings(_dict(existing).get("fail_codes")), *batch.fail_codes])
+    )
     return {
-        "status": batch.status if batch.status != GATE_PASS else _dict(existing).get("status", GATE_PASS),
+        "status": batch.status
+        if batch.status != GATE_PASS
+        else _dict(existing).get("status", GATE_PASS),
         "gate_batch_run_refs": [item for item in previous_batches if item],
-        "hard_block_count": int(_dict(existing).get("hard_block_count") or 0) + batch.hard_block_count,
-        "review_required_count": int(_dict(existing).get("review_required_count") or 0) + batch.review_required_count,
+        "hard_block_count": int(_dict(existing).get("hard_block_count") or 0)
+        + batch.hard_block_count,
+        "review_required_count": int(_dict(existing).get("review_required_count") or 0)
+        + batch.review_required_count,
         "fail_codes": fail_codes,
         "latest_gate_results": [
             {
@@ -1707,11 +2768,15 @@ def _gate_result(
         severity=severity,
         measurements_json=measurements,
         fail_codes=sorted(set(fail_codes)),
-        blocking_refs=[{"artifact_key": key} for key in artifact_keys] if status in {GATE_BLOCK, GATE_REVIEW} else [],
+        blocking_refs=[{"artifact_key": key} for key in artifact_keys]
+        if status in {GATE_BLOCK, GATE_REVIEW}
+        else [],
         checked_artifact_refs=[{"artifact_key": key} for key in artifact_keys],
         checked_contract_paths=contract_paths,
         repair_hint=repair_hint,
-        human_readable_summary=_summary_for(status=status, fail_codes=fail_codes, gate_key=gate_key),
+        human_readable_summary=_summary_for(
+            status=status, fail_codes=fail_codes, gate_key=gate_key
+        ),
     )
 
 
@@ -1748,19 +2813,35 @@ def _field_present(value: dict[str, Any], field: str) -> bool:
     return True
 
 
-def _duration_policy(effective_context: EffectiveChannelRuntimeContextSnapshot, *, artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
+def _duration_policy(
+    effective_context: EffectiveChannelRuntimeContextSnapshot,
+    *,
+    artifacts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     frozen = _dict(_dict(artifacts or {}).get("duration_model"))
     if frozen:
         return frozen
-    policy = _dict(_dict(effective_context.category_runtime_context_json).get("default_format_policy"))
+    policy = _dict(
+        _dict(effective_context.category_runtime_context_json).get(
+            "default_format_policy"
+        )
+    )
     long_form = _dict(policy.get("long_form"))
     if long_form:
         minutes = _dict(long_form.get("target_duration_minutes"))
         min_minutes = _first_number(minutes.get("min"))
         max_minutes = _first_number(minutes.get("max"))
-        min_seconds = _first_number(long_form.get("min_seconds"), min_minutes * 60 if min_minutes is not None else None)
-        max_seconds = _first_number(long_form.get("max_seconds"), max_minutes * 60 if max_minutes is not None else None)
-        target = _first_number(long_form.get("target_duration_seconds"), long_form.get("target_seconds"))
+        min_seconds = _first_number(
+            long_form.get("min_seconds"),
+            min_minutes * 60 if min_minutes is not None else None,
+        )
+        max_seconds = _first_number(
+            long_form.get("max_seconds"),
+            max_minutes * 60 if max_minutes is not None else None,
+        )
+        target = _first_number(
+            long_form.get("target_duration_seconds"), long_form.get("target_seconds")
+        )
         if target is None and min_seconds is not None and max_seconds is not None:
             target = (min_seconds + max_seconds) / 2
         return {
@@ -1796,14 +2877,24 @@ def _first(value: list[Any]) -> Any:
 
 
 def _script_total_seconds(script: dict[str, Any]) -> float:
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
     return sum(_float(item.get("approx_seconds")) for item in sentences)
 
 
-def _script_estimated_total_seconds(script: dict[str, Any], duration_model: dict[str, Any] | None = None) -> float:
-    sentences = [item for item in _list(script.get("sentences")) if isinstance(item, dict)]
-    word_count = _word_count(" ".join(str(item.get("text") or "") for item in sentences))
-    wpm = _first_number(_dict(duration_model).get("words_per_minute_assumption")) or 140.0
+def _script_estimated_total_seconds(
+    script: dict[str, Any], duration_model: dict[str, Any] | None = None
+) -> float:
+    sentences = [
+        item for item in _list(script.get("sentences")) if isinstance(item, dict)
+    ]
+    word_count = _word_count(
+        " ".join(str(item.get("text") or "") for item in sentences)
+    )
+    wpm = (
+        _first_number(_dict(duration_model).get("words_per_minute_assumption")) or 140.0
+    )
     if word_count and wpm:
         return round((word_count / wpm) * 60, 3)
     return _script_total_seconds(script)
@@ -1816,7 +2907,9 @@ def _word_count(value: str) -> int:
 def _hook_spec(artifacts: dict[str, Any]) -> dict[str, Any]:
     script = _dict(artifacts.get("narration_script"))
     plan = _dict(artifacts.get("script_outline"))
-    hook = _dict(artifacts.get("hook_spec") or script.get("hook_spec") or plan.get("hook_spec"))
+    hook = _dict(
+        artifacts.get("hook_spec") or script.get("hook_spec") or plan.get("hook_spec")
+    )
     return dict(hook)
 
 
@@ -1834,7 +2927,11 @@ def _text_blob(value: Any) -> str:
 
 def _parse_srt(content: str) -> dict[str, Any]:
     fail_codes: list[str] = []
-    blocks = [block.strip() for block in re.split(r"\n\s*\n", content.strip()) if block.strip()]
+    blocks = [
+        block.strip()
+        for block in re.split(r"\n\s*\n", content.strip())
+        if block.strip()
+    ]
     previous_end = 0.0
     total_seconds = 0.0
     expected_number = 1
@@ -1853,7 +2950,9 @@ def _parse_srt(content: str) -> dict[str, Any]:
         if number != expected_number:
             fail_codes.append("SRT_NUMBERING_NOT_SEQUENTIAL")
         expected_number += 1
-        match = re.match(r"^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})$", lines[1])
+        match = re.match(
+            r"^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})$", lines[1]
+        )
         if not match:
             fail_codes.append("SRT_TIMESTAMP_FORMAT_INVALID")
             continue
@@ -1913,16 +3012,29 @@ def _text_contains_any(value: dict[str, Any], needles: list[str]) -> bool:
 
 def _artifact_character_refs(artifacts: dict[str, Any]) -> list[str]:
     refs: list[str] = []
-    for artifact_key in ("narration_script", "visual_plan", "thumbnail_brief", "voice_profile", "voice_timeline"):
+    for artifact_key in (
+        "narration_script",
+        "visual_plan",
+        "thumbnail_brief",
+        "voice_profile",
+        "voice_timeline",
+    ):
         artifact = _dict(artifacts.get(artifact_key))
         refs.extend(_strings(artifact.get("character_refs")))
         refs.extend(_strings(artifact.get("character_profile_id")))
         refs.extend(_strings(artifact.get("character_version_id")))
-        refs.extend(_strings(artifact.get("character_branch_id") or artifact.get("character_image_branch_id")))
+        refs.extend(
+            _strings(
+                artifact.get("character_branch_id")
+                or artifact.get("character_image_branch_id")
+            )
+        )
     return sorted(set(refs))
 
 
-def _provider_readiness_map(provider_readiness_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _provider_readiness_map(
+    provider_readiness_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
     mapped: dict[str, dict[str, Any]] = {}
     for summary in _list(provider_readiness_state.get("provider_summaries")):
         if not isinstance(summary, dict) or not summary.get("provider_key"):
@@ -1931,24 +3043,51 @@ def _provider_readiness_map(provider_readiness_state: dict[str, Any]) -> dict[st
         readiness_state = str(summary.get("readiness_state") or "UNKNOWN")
         missing_env = _list(summary.get("missing_env_keys"))
         reason_codes = _strings(summary.get("reason_codes"))
-        status = "PASS" if readiness_state == "PASS" else ("NEEDS_CREDENTIAL" if missing_env or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes) else "NOT_CONFIGURED")
-        mapped[key] = {"status": status, "readiness_state": readiness_state, "reason_codes": reason_codes}
-    m2_snapshot = _dict(provider_readiness_state.get("m2_provider_wiring")) or _dict(_dict(provider_readiness_state.get("technical_appendix")).get("m2_provider_wiring"))
+        status = (
+            "PASS"
+            if readiness_state == "PASS"
+            else (
+                "NEEDS_CREDENTIAL"
+                if missing_env
+                or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes)
+                else "NOT_CONFIGURED"
+            )
+        )
+        mapped[key] = {
+            "status": status,
+            "readiness_state": readiness_state,
+            "reason_codes": reason_codes,
+        }
+    m2_snapshot = _dict(provider_readiness_state.get("m2_provider_wiring")) or _dict(
+        _dict(provider_readiness_state.get("technical_appendix")).get(
+            "m2_provider_wiring"
+        )
+    )
     for item in _list(m2_snapshot.get("providers")):
         if not isinstance(item, dict) or not item.get("provider_key"):
             continue
         key = str(item["provider_key"]).lower()
         readiness_state = str(item.get("readiness_state") or "UNKNOWN")
         reason_codes = _strings(item.get("blocker_reason_codes"))
-        if readiness_state in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION", "CAPABILITY_READY"}:
+        if readiness_state in {
+            "READY_FOR_HUMAN_PAID_APPROVAL",
+            "READY_FOR_FUTURE_EXECUTION",
+            "CAPABILITY_READY",
+        }:
             status = "CONFIGURED"
         elif readiness_state == "DISABLED":
             status = "DISABLED"
-        elif item.get("missing_env_keys") or any("CREDENTIAL" in code or "KEY" in code for code in reason_codes):
+        elif item.get("missing_env_keys") or any(
+            "CREDENTIAL" in code or "KEY" in code for code in reason_codes
+        ):
             status = "NEEDS_CREDENTIAL"
         else:
             status = "NOT_CONFIGURED"
-        mapped[key] = {"status": status, "readiness_state": readiness_state, "reason_codes": reason_codes}
+        mapped[key] = {
+            "status": status,
+            "readiness_state": readiness_state,
+            "reason_codes": reason_codes,
+        }
         if key == "google_veo":
             mapped["google_veo"] = mapped[key]
     return mapped

@@ -4,8 +4,6 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 
-import pytest
-
 from app.contracts import ChannelProfileVersionCreate, ChannelWorkspaceCreate
 from app.contracts.profile import ChannelProfileInput
 from app.contracts.vcos_qualification import NativeQualificationRenderRequest
@@ -23,19 +21,10 @@ from app.services.vcos_qualification import NativeQualificationService
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize(
-    ("lane", "width", "height"),
-    [
-        (ProductionLane.LONG_FORM, 1920, 1080),
-        (ProductionLane.DAILY_SHORT, 1080, 1920),
-    ],
-)
 def test_real_native_ffmpeg_qualification_has_h264_aac_streams(
     tmp_path,
-    lane: ProductionLane,
-    width: int,
-    height: int,
 ) -> None:
+    lane = ProductionLane.LONG_FORM
     profile_id = uuid.uuid4()
     policy_id = uuid.uuid4()
     duration = DurationContractV2(
@@ -73,8 +62,8 @@ def test_real_native_ffmpeg_qualification_has_h264_aac_streams(
 
     assert result.output_path.is_file()
     assert result.output_path.stat().st_size > 0
-    assert result.width == width
-    assert result.height == height
+    assert result.width == 1920
+    assert result.height == 1080
     assert result.has_video_stream is True
     assert result.has_audio_stream is True
     assert result.video_codec == "h264"

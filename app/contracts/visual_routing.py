@@ -240,7 +240,9 @@ class VeoRoutingRejectPolicy(BaseModel):
 
 class VeoRoutingBoundaryPolicy(BaseModel):
     motion_semantic_value_min: float = Field(ge=0.0, le=1.0)
-    allowed_scene_classes: list[Literal["hero", "metaphor", "transition"]] = Field(min_length=3)
+    allowed_scene_classes: list[Literal["hero", "metaphor", "transition"]] = Field(
+        min_length=3
+    )
     still_plus_native_motion_must_be_insufficient: Literal[True]
     evidence_truth_requirement_must_be_below: float = Field(ge=0.0, le=1.0)
     future_cost_class_must_allow_veo: Literal[True]
@@ -274,13 +276,22 @@ class VisualSourceRoutingThresholdPolicy(BaseModel):
         prohibited = self.pexels_prohibited_if
         if supporting.filmability_score_min > eligible.filmability_score_min:
             raise ValueError("VSR1_PEXELS_FILMABILITY_THRESHOLDS_INVALID")
-        if supporting.stock_searchability_score_min > eligible.stock_searchability_score_min:
+        if (
+            supporting.stock_searchability_score_min
+            > eligible.stock_searchability_score_min
+        ):
             raise ValueError("VSR1_PEXELS_SEARCHABILITY_THRESHOLDS_INVALID")
         if prohibited.exact_text_dependency_min <= eligible.exact_text_dependency_max:
             raise ValueError("VSR1_PEXELS_EXACT_TEXT_THRESHOLDS_INVALID")
-        if prohibited.exact_number_dependency_min <= eligible.exact_number_dependency_max:
+        if (
+            prohibited.exact_number_dependency_min
+            <= eligible.exact_number_dependency_max
+        ):
             raise ValueError("VSR1_PEXELS_EXACT_NUMBER_THRESHOLDS_INVALID")
-        if prohibited.evidence_truth_requirement_min <= eligible.evidence_truth_requirement_max:
+        if (
+            prohibited.evidence_truth_requirement_min
+            <= eligible.evidence_truth_requirement_max
+        ):
             raise ValueError("VSR1_PEXELS_EVIDENCE_THRESHOLDS_INVALID")
         return self
 
@@ -313,7 +324,12 @@ class VisualSourceRoutingPolicyCatalogItem(BaseModel):
             raise ValueError("VSR1_POLICY_ROUTE_TAXONOMY_INCOMPLETE")
         if set(self.fallback_classes) != set(SourceFallbackClass):
             raise ValueError("VSR1_POLICY_FALLBACK_TAXONOMY_INCOMPLETE")
-        if _duplicates([(item.from_route, item.to_route, item.scope) for item in self.forbidden_fallback_pairs]):
+        if _duplicates(
+            [
+                (item.from_route, item.to_route, item.scope)
+                for item in self.forbidden_fallback_pairs
+            ]
+        ):
             raise ValueError("VSR1_POLICY_DUPLICATE_FORBIDDEN_FALLBACK")
         fixture_profiles = {item.niche_visual_source_profile for item in self.fixtures}
         if NicheVisualSourceProfile.STOCK_ASSISTED not in fixture_profiles:
@@ -322,7 +338,7 @@ class VisualSourceRoutingPolicyCatalogItem(BaseModel):
 
 
 MinimumOutputResolution = Literal["1080p", "1440p", "2160p"]
-TargetAspectRatio = Literal["16:9", "9:16", "1:1"]
+TargetAspectRatio = Literal["16:9"]
 EstimatedCostClass = Literal["NONE", "FREE", "LOW", "MEDIUM", "HIGH", "UNKNOWN"]
 
 
@@ -332,8 +348,12 @@ _AI_IMAGE_ROUTES = frozenset(
         VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY,
     }
 )
-_PEXELS_ROUTES = frozenset({VisualSourceRoute.PEXELS_VIDEO, VisualSourceRoute.PEXELS_PHOTO})
-_VEO_ROUTES = frozenset({VisualSourceRoute.VEO_TEXT_TO_VIDEO, VisualSourceRoute.VEO_IMAGE_TO_VIDEO})
+_PEXELS_ROUTES = frozenset(
+    {VisualSourceRoute.PEXELS_VIDEO, VisualSourceRoute.PEXELS_PHOTO}
+)
+_VEO_ROUTES = frozenset(
+    {VisualSourceRoute.VEO_TEXT_TO_VIDEO, VisualSourceRoute.VEO_IMAGE_TO_VIDEO}
+)
 _PROVIDER_ROUTES = _PEXELS_ROUTES | _AI_IMAGE_ROUTES | _VEO_ROUTES
 _NATIVE_ROUTES = frozenset(
     {
@@ -401,7 +421,9 @@ class SceneVisualRealizationRequirements(SceneVisualIntent):
         }
         missing = [name for name, value in text_fields.items() if not value.strip()]
         if missing:
-            raise ValueError(f"VSR1_ROUTING_CRITICAL_TEXT_MISSING:{','.join(sorted(missing))}")
+            raise ValueError(
+                f"VSR1_ROUTING_CRITICAL_TEXT_MISSING:{','.join(sorted(missing))}"
+            )
         if len(set(self.segment_ids)) != len(self.segment_ids):
             raise ValueError("VSR1_DUPLICATE_SEGMENT_ID")
         if self.target_aspect_ratio != self.aspect_ratio:
@@ -468,12 +490,19 @@ class AIImageEligibilityAssessment(_ReasonBearingAssessment):
             raise ValueError("VSR1_AI_IMAGE_ASSESSMENT_ROUTE_INVALID")
         if self.result == AIImageEligibilityResult.AI_IMAGE_PROHIBITED and routes:
             raise ValueError("VSR1_AI_IMAGE_PROHIBITED_WITH_ROUTE")
-        if self.result in {
-            AIImageEligibilityResult.AI_IMAGE_ALLOWED,
-            AIImageEligibilityResult.AI_IMAGE_WITH_NATIVE_OVERLAY_REQUIRED,
-        } and not routes:
+        if (
+            self.result
+            in {
+                AIImageEligibilityResult.AI_IMAGE_ALLOWED,
+                AIImageEligibilityResult.AI_IMAGE_WITH_NATIVE_OVERLAY_REQUIRED,
+            }
+            and not routes
+        ):
             raise ValueError("VSR1_AI_IMAGE_PLANNING_ROUTE_REQUIRED")
-        if self.result == AIImageEligibilityResult.AI_IMAGE_WITH_NATIVE_OVERLAY_REQUIRED:
+        if (
+            self.result
+            == AIImageEligibilityResult.AI_IMAGE_WITH_NATIVE_OVERLAY_REQUIRED
+        ):
             if (
                 routes != {VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY}
                 or not self.native_overlay_required
@@ -484,10 +513,14 @@ class AIImageEligibilityAssessment(_ReasonBearingAssessment):
         if self.result == AIImageEligibilityResult.AI_IMAGE_ALLOWED:
             if routes != {VisualSourceRoute.AI_GENERATED_IMAGE}:
                 raise ValueError("VSR1_AI_IMAGE_ALLOWED_ROUTE_INVALID")
-        if self.result in {
-            AIImageEligibilityResult.AI_IMAGE_LOW_CONFIDENCE,
-            AIImageEligibilityResult.AI_IMAGE_PROHIBITED,
-        } and routes:
+        if (
+            self.result
+            in {
+                AIImageEligibilityResult.AI_IMAGE_LOW_CONFIDENCE,
+                AIImageEligibilityResult.AI_IMAGE_PROHIBITED,
+            }
+            and routes
+        ):
             raise ValueError("VSR1_AI_IMAGE_NON_ELIGIBLE_WITH_ROUTE")
         return self
 
@@ -515,7 +548,8 @@ class EvidenceTruthAssessment(_ReasonBearingAssessment):
                 not self.evidence_truth_required
                 or not self.authorized_asset_required
                 or not self.authorized_asset_available
-                or self.selected_route != VisualSourceRoute.AUTHORIZED_UI_OR_PRODUCT_ASSET
+                or self.selected_route
+                != VisualSourceRoute.AUTHORIZED_UI_OR_PRODUCT_ASSET
             ):
                 raise ValueError("VSR1_AUTHORIZED_SOURCE_RESULT_INCONSISTENT")
         if self.result == EvidenceTruthResult.BLOCKED:
@@ -527,7 +561,11 @@ class EvidenceTruthAssessment(_ReasonBearingAssessment):
             ):
                 raise ValueError("VSR1_EVIDENCE_BLOCK_ROUTE_REQUIRED")
         if self.result == EvidenceTruthResult.NOT_REQUIRED:
-            if self.evidence_truth_required or self.authorized_asset_required or self.selected_route is not None:
+            if (
+                self.evidence_truth_required
+                or self.authorized_asset_required
+                or self.selected_route is not None
+            ):
                 raise ValueError("VSR1_EVIDENCE_NOT_REQUIRED_INCONSISTENT")
         if self.result == EvidenceTruthResult.AUTHORIZED_SOURCE_REQUIRED:
             if (
@@ -537,7 +575,9 @@ class EvidenceTruthAssessment(_ReasonBearingAssessment):
                 or self.selected_route is not None
             ):
                 raise ValueError("VSR1_AUTHORIZED_SOURCE_REQUIRED_INCONSISTENT")
-        if self.evidence_truth_required and self.selected_route in (_PEXELS_ROUTES | _AI_IMAGE_ROUTES | _VEO_ROUTES):
+        if self.evidence_truth_required and self.selected_route in (
+            _PEXELS_ROUTES | _AI_IMAGE_ROUTES | _VEO_ROUTES
+        ):
             raise ValueError("VSR1_GENERATED_OR_STOCK_EVIDENCE_PROHIBITED")
         return self
 
@@ -587,7 +627,11 @@ class ArchiveReuseAssessment(_ReasonBearingAssessment):
         if self.result == ArchiveReuseResult.ELIGIBLE:
             if not self.matched_asset_ref or not all(gates):
                 raise ValueError("VSR1_ARCHIVE_REUSE_ELIGIBILITY_INCONSISTENT")
-        if self.result == ArchiveReuseResult.INELIGIBLE and all(gates) and self.matched_asset_ref:
+        if (
+            self.result == ArchiveReuseResult.INELIGIBLE
+            and all(gates)
+            and self.matched_asset_ref
+        ):
             raise ValueError("VSR1_ARCHIVE_REUSE_INELIGIBILITY_INCONSISTENT")
         return self
 
@@ -603,7 +647,9 @@ class ExactTextNativeOverlayContract(BaseModel):
     forbidden_generated_logo: Literal[True]
     forbidden_generated_fake_ui: Literal[True]
     native_overlay_required: bool
-    authoritative_content_kinds: list[AuthoritativeOverlayContentKind] = Field(default_factory=list)
+    authoritative_content_kinds: list[AuthoritativeOverlayContentKind] = Field(
+        default_factory=list
+    )
     authoritative_content_refs: list[str] = Field(min_length=1)
     content_hash: str = Field(min_length=1)
 
@@ -617,7 +663,9 @@ class ExactTextNativeOverlayContract(BaseModel):
             not ref.strip() for ref in self.authoritative_content_refs
         ):
             raise ValueError("VSR1_AUTHORITATIVE_CONTENT_REF_INVALID")
-        if (self.exact_text_required or self.exact_number_required) and not self.native_overlay_required:
+        if (
+            self.exact_text_required or self.exact_number_required
+        ) and not self.native_overlay_required:
             raise ValueError("VSR1_EXACT_CONTENT_REQUIRES_NATIVE_OVERLAY")
         if self.exact_text_required and not self.authoritative_content_kinds:
             raise ValueError("VSR1_EXACT_TEXT_CONTENT_KIND_REQUIRED")
@@ -626,9 +674,14 @@ class ExactTextNativeOverlayContract(BaseModel):
             AuthoritativeOverlayContentKind.PERCENTAGE,
             AuthoritativeOverlayContentKind.DATA_VALUE,
         }
-        if self.exact_number_required and not (set(self.authoritative_content_kinds) & number_kinds):
+        if self.exact_number_required and not (
+            set(self.authoritative_content_kinds) & number_kinds
+        ):
             raise ValueError("VSR1_EXACT_NUMBER_CONTENT_KIND_REQUIRED")
-        if self.preferred_source_route == VisualSourceRoute.AI_GENERATED_IMAGE and self.native_overlay_required:
+        if (
+            self.preferred_source_route == VisualSourceRoute.AI_GENERATED_IMAGE
+            and self.native_overlay_required
+        ):
             raise ValueError("VSR1_AI_IMAGE_NATIVE_OVERLAY_ROUTE_REQUIRED")
         return self
 
@@ -670,7 +723,9 @@ class VisualSourceDecision(SceneSourceDecisionContract):
     def validate_vsr1_decision(self) -> "VisualSourceDecision":
         allowed = set(self.allowed_fallback_routes)
         forbidden = set(self.forbidden_fallback_routes)
-        if _duplicates(self.allowed_fallback_routes) or _duplicates(self.forbidden_fallback_routes):
+        if _duplicates(self.allowed_fallback_routes) or _duplicates(
+            self.forbidden_fallback_routes
+        ):
             raise ValueError("VSR1_DUPLICATE_FALLBACK_ROUTE")
         if allowed & forbidden:
             raise ValueError("VSR1_ALLOWED_FORBIDDEN_FALLBACK_OVERLAP")
@@ -704,10 +759,14 @@ class VisualSourceDecision(SceneSourceDecisionContract):
         if self.fallback_class == SourceFallbackClass.NO_FALLBACK and allowed:
             raise ValueError("VSR1_NO_FALLBACK_CLASS_HAS_ALLOWED_ROUTE")
         if self.fallback_class == SourceFallbackClass.PEXELS_ONLY:
-            if self.preferred_source_route not in _PEXELS_ROUTES or allowed & (_AI_IMAGE_ROUTES | _VEO_ROUTES):
+            if self.preferred_source_route not in _PEXELS_ROUTES or allowed & (
+                _AI_IMAGE_ROUTES | _VEO_ROUTES
+            ):
                 raise ValueError("VSR1_PEXELS_ONLY_FALLBACK_INVALID")
         if self.fallback_class == SourceFallbackClass.PEXELS_PRIMARY_WITH_AI_ALLOWED:
-            if self.preferred_source_route not in _PEXELS_ROUTES or not (allowed & _AI_IMAGE_ROUTES):
+            if self.preferred_source_route not in _PEXELS_ROUTES or not (
+                allowed & _AI_IMAGE_ROUTES
+            ):
                 raise ValueError("VSR1_PEXELS_AI_PREAPPROVAL_FALLBACK_INVALID")
         if self.fallback_class == SourceFallbackClass.AI_IMAGE_PRIMARY:
             if self.preferred_source_route not in _AI_IMAGE_ROUTES:
@@ -715,7 +774,10 @@ class VisualSourceDecision(SceneSourceDecisionContract):
             if allowed - _NATIVE_ROUTES:
                 raise ValueError("VSR1_AI_IMAGE_FALLBACK_MUST_BE_NATIVE")
         if self.fallback_class == SourceFallbackClass.NATIVE_ONLY:
-            if self.preferred_source_route not in _NATIVE_ROUTES or allowed & _PROVIDER_ROUTES:
+            if (
+                self.preferred_source_route not in _NATIVE_ROUTES
+                or allowed & _PROVIDER_ROUTES
+            ):
                 raise ValueError("VSR1_NATIVE_ONLY_FALLBACK_INVALID")
         if self.fallback_class == SourceFallbackClass.AUTHORIZED_ASSET_ONLY:
             authorized_routes = {
@@ -723,11 +785,17 @@ class VisualSourceDecision(SceneSourceDecisionContract):
                 VisualSourceRoute.HUMAN_SUPPLIED_ASSET,
                 VisualSourceRoute.UNRESOLVED_BLOCK,
             }
-            if self.preferred_source_route not in authorized_routes or allowed - authorized_routes:
+            if (
+                self.preferred_source_route not in authorized_routes
+                or allowed - authorized_routes
+            ):
                 raise ValueError("VSR1_AUTHORIZED_ASSET_ONLY_FALLBACK_INVALID")
 
         if self.preferred_source_route in _PEXELS_ROUTES and allowed & _AI_IMAGE_ROUTES:
-            if self.fallback_class != SourceFallbackClass.PEXELS_PRIMARY_WITH_AI_ALLOWED:
+            if (
+                self.fallback_class
+                != SourceFallbackClass.PEXELS_PRIMARY_WITH_AI_ALLOWED
+            ):
                 raise ValueError("VSR1_AUTO_PEXELS_TO_AI_FAILOVER_PROHIBITED")
         if self.preferred_source_route in _AI_IMAGE_ROUTES:
             if "IMAGE_PROVIDER_ROUTE_NOT_YET_ACTIVE" not in self.routing_reason_codes:
@@ -742,10 +810,19 @@ class VisualSourceDecision(SceneSourceDecisionContract):
             expected_legacy_projection = ("API_NATIVE_PROVIDER", "AI_PLACEHOLDER")
         elif self.preferred_source_route in _NATIVE_ROUTES:
             expected_legacy_projection = ("LOCAL_RENDERER", "DIAGRAM_PLACEHOLDER")
-        elif self.preferred_source_route == VisualSourceRoute.AUTHORIZED_UI_OR_PRODUCT_ASSET:
-            expected_legacy_projection = ("APPROVED_ASSET_POOL", "SCREENSHOT_PLACEHOLDER")
+        elif (
+            self.preferred_source_route
+            == VisualSourceRoute.AUTHORIZED_UI_OR_PRODUCT_ASSET
+        ):
+            expected_legacy_projection = (
+                "APPROVED_ASSET_POOL",
+                "SCREENSHOT_PLACEHOLDER",
+            )
         elif self.preferred_source_route == VisualSourceRoute.HUMAN_SUPPLIED_ASSET:
-            expected_legacy_projection = ("MANUAL_ASSET_LIBRARY", "MANUAL_PREMIUM_PLACEHOLDER")
+            expected_legacy_projection = (
+                "MANUAL_ASSET_LIBRARY",
+                "MANUAL_PREMIUM_PLACEHOLDER",
+            )
         else:
             expected_legacy_projection = ("APPROVED_ASSET_POOL", "APPROVED_ASSET_POOL")
         if (self.source_class, self.preferred_source) != expected_legacy_projection:

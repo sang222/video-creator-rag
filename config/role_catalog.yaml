@@ -1,5 +1,5 @@
 catalog_key: role_catalog
-catalog_version: "1.5.0"
+catalog_version: "2.0.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -87,7 +87,7 @@ items:
       - ops.manage
   - key: channel_manager
     name: Channel Manager
-    description: Manages channel workspace, daily runs, lifecycle review, and recovery.
+    description: Manages channel workspace, editorial research, lifecycle review, and recovery.
     permissions:
       - dashboard:read
       - channel:lifecycle:decide

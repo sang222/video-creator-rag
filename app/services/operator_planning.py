@@ -5,13 +5,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.operator_planning import (
-    DailyShortPlanningLaunchRequest,
     LongFormPlanningLaunchRequest,
     OperatorPlanningCatalogRead,
     OperatorPlanningLaunchRead,
@@ -21,14 +19,7 @@ from app.contracts.operator_planning import (
     OperatorPlanningStartRequest,
     PlanningSourceKind,
 )
-from app.contracts.m5 import (
-    ChannelDailyRunCreate,
-    ChannelStatePackSnapshotCreate,
-    ContextPackSnapshotCreate,
-    DailyIdeaDecisionCreate,
-    IdeaMarketPreflightCreate,
-    RetrievalPlanSnapshotCreate,
-)
+from app.contracts.m5 import IdeaMarketPreflightCreate
 from app.contracts.geo_market import DestinationBinding
 from app.contracts.production_workflow import ProductionWorkflowProjectStart
 from app.contracts.vcos_v2 import (
@@ -37,7 +28,6 @@ from app.contracts.vcos_v2 import (
     LongFormPlanningRequest,
     PlanningSourceType,
     ProductionLane,
-    ProjectAdmissionV2Request,
 )
 from app.core.actor import ActorContext, ActorType
 from app.core.errors import ForbiddenError, NotFoundError, ValidationFailureError
@@ -49,8 +39,6 @@ from app.db.models.channel import (
 )
 from app.db.models.foundation import Company, UserRole
 from app.db.models.m5 import (
-    ChannelDailyRun,
-    DailyIdeaDecision,
     EditorialCalendarSlot,
     IdeaMarketPreflight,
     ProjectAdmissionDecision,
@@ -62,19 +50,11 @@ from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.workflow import VideoProject
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.production_workflow import ProductionWorkflowCoordinator
-from app.services.m5 import (
-    DEFAULT_DAILY_CONTEXT_SOURCES,
-    ChannelAuthorityService,
-    ChannelDailyRunService,
-    ChannelStatePackService,
-    IdeaMarketPreflightService,
-    ResourceResolverService,
-)
+from app.services.m5 import IdeaMarketPreflightService
 from app.services.r3d1 import (
     CategoryScopeResolver,
     ChannelRuntimeAuthorityService,
     CharacterBindingResolver,
-    ProjectScopeAdmissionGuard,
 )
 from app.services.rbac import RBACService
 from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
@@ -86,13 +66,10 @@ from app.services.v2_support_authority import (
 )
 from app.services.vcos_v2 import (
     LongFormPlanningService,
-    ProjectAdmissionV2Service,
 )
 
 
 _SOURCE_LIMIT = 200
-_ELIGIBLE_DAILY_STATES = {"PROPOSED", "ADMITTED"}
-_NEW_DAILY_RUN_STATES = {"PENDING", "RUNNING", "COMPLETED"}
 _NEW_SLOT_STATES = {"OPEN", "ASSIGNED"}
 _EXISTING_SLOT_STATES = {*_NEW_SLOT_STATES, "ADMITTED"}
 
@@ -138,10 +115,9 @@ class _PlanningBlocked(ValidationFailureError):
 class OperatorPlanningService:
     """Resolve trusted v2 authority and start the durable workflow atomically.
 
-    A frozen Daily slot may be materialized into its typed daily run and idea.
     Missing preflights are created only from persisted evidence. The service
-    then creates or reuses admission, project, Effective Context, and the
-    canonical trusted support-authority envelope before workflow start.
+    then creates or reuses long-form admission, project, Effective Context,
+    and the canonical trusted support-authority envelope before workflow start.
     """
 
     def __init__(
@@ -149,11 +125,9 @@ class OperatorPlanningService:
         session: Session,
         *,
         support_producer: TrustedV2SupportProducer | None = None,
-        daily_llm_workflow: Any | None = None,
     ):
         self.session = session
         self.support_producer = support_producer
-        self.daily_llm_workflow = daily_llm_workflow
 
     def catalog(
         self,
@@ -165,27 +139,6 @@ class OperatorPlanningService:
             permission="production.read",
         )
 
-        daily_statement = (
-            select(DailyIdeaDecision)
-            .where(
-                DailyIdeaDecision.schema_version == "v2",
-                DailyIdeaDecision.production_lane == ProductionLane.DAILY_SHORT,
-            )
-            .order_by(DailyIdeaDecision.created_at.desc(), DailyIdeaDecision.id)
-            .limit(_SOURCE_LIMIT)
-        )
-        daily_slot_statement = (
-            select(EditorialCalendarSlot)
-            .where(
-                EditorialCalendarSlot.schema_version == "v2",
-                EditorialCalendarSlot.production_lane == ProductionLane.DAILY_SHORT,
-            )
-            .order_by(
-                EditorialCalendarSlot.slot_date.desc(),
-                EditorialCalendarSlot.id,
-            )
-            .limit(_SOURCE_LIMIT)
-        )
         long_statement = (
             select(EditorialCalendarSlot)
             .where(
@@ -208,37 +161,16 @@ class OperatorPlanningService:
                         "automatic_publish": False,
                     },
                 )
-            daily_statement = daily_statement.where(
-                DailyIdeaDecision.company_id.in_(accessible_company_ids)
-            )
-            daily_slot_statement = daily_slot_statement.where(
-                EditorialCalendarSlot.company_id.in_(accessible_company_ids)
-            )
             long_statement = long_statement.where(
                 EditorialCalendarSlot.company_id.in_(accessible_company_ids)
             )
 
-        daily_ideas = list(self.session.scalars(daily_statement).all())
-        represented_daily_slot_ids = {
-            run.editorial_calendar_slot_id
-            for idea in daily_ideas
-            if (run := self.session.get(ChannelDailyRun, idea.channel_daily_run_id))
-            is not None
-            and run.editorial_calendar_slot_id is not None
-        }
-        daily_options = [self._daily_option(idea) for idea in daily_ideas]
-        daily_options.extend(
-            self._daily_slot_option(slot)
-            for slot in self.session.scalars(daily_slot_statement).all()
-            if slot.id not in represented_daily_slot_ids
-        )
         long_options = [
             self._long_option(slot)
             for slot in self.session.scalars(long_statement).all()
         ]
         return OperatorPlanningCatalogRead(
             generated_at=utc_now(),
-            daily_short_options=daily_options,
             long_form_options=long_options,
             technical_appendix={
                 "accessible_company_count": (
@@ -294,37 +226,6 @@ class OperatorPlanningService:
             reused_admission=prepared.reused_admission,
         )
 
-    def launch_daily_short(
-        self,
-        *,
-        data: DailyShortPlanningLaunchRequest,
-        actor: ActorContext,
-    ) -> OperatorPlanningLaunchRead:
-        idempotency_key = self._command_idempotency_key(
-            provided=data.idempotency_key,
-            source_type=PlanningSourceType.DAILY_IDEA,
-            source_id=data.daily_idea_decision_id,
-        )
-        prepared = self._prepare_source(
-            source_type=PlanningSourceType.DAILY_IDEA,
-            source_id=data.daily_idea_decision_id,
-            max_budget_usd=data.max_budget_usd,
-            actor=actor,
-        )
-        return self._start_admitted_project(
-            lane=ProductionLane.DAILY_SHORT,
-            title=prepared.authority.source_title,
-            admission=prepared.admission,
-            authority=prepared.authority,
-            effective=prepared.effective_context,
-            support=prepared.support_authority,
-            actor=actor,
-            company_id=prepared.authority.workspace.company_id,
-            max_attempts=data.max_attempts,
-            idempotency_key=idempotency_key,
-            reused_admission=prepared.reused_admission,
-        )
-
     def launch_long_form(
         self,
         *,
@@ -370,89 +271,38 @@ class OperatorPlanningService:
             else source_type
         )
         requested_source_id = source_id
-        if requested_source_type == "DAILY_SLOT":
-            slot = self.session.scalar(
-                select(EditorialCalendarSlot)
-                .where(EditorialCalendarSlot.id == source_id)
-                .with_for_update()
-            )
-            if slot is None:
-                raise NotFoundError("frozen v2 Daily Short slot not found")
-            self._require_company_permission(
-                actor=actor,
-                permission="production.start",
-                company_id=slot.company_id,
-            )
-            idea = self._materialize_daily_source(
-                slot=slot,
-                actor=actor,
-            )
-            source_type = PlanningSourceType.DAILY_IDEA
-            source_id = idea.id
-        elif requested_source_type == PlanningSourceType.DAILY_IDEA.value:
-            source_type = PlanningSourceType.DAILY_IDEA
-            idea = self.session.scalar(
-                select(DailyIdeaDecision)
-                .where(DailyIdeaDecision.id == source_id)
-                .with_for_update()
-            )
-            if idea is None:
-                raise NotFoundError("frozen v2 Daily Short source not found")
-            self._require_company_permission(
-                actor=actor,
-                permission="production.start",
-                company_id=idea.company_id,
-            )
-        elif requested_source_type == PlanningSourceType.LONG_FORM_PLAN.value:
-            source_type = PlanningSourceType.LONG_FORM_PLAN
-        else:
+        if requested_source_type != PlanningSourceType.LONG_FORM_PLAN.value:
             raise ValidationFailureError("PLANNING_SOURCE_TYPE_UNSUPPORTED")
-
-        if source_type == PlanningSourceType.DAILY_IDEA:
-            self._active_authority(
-                company_id=idea.company_id,
-                channel_workspace_id=idea.channel_workspace_id,
-                policy_snapshot_id=idea.policy_snapshot_id,
-                lane=ProductionLane.DAILY_SHORT,
-            )
-            self._ensure_daily_preflight(idea)
-            authority = self._resolve_daily(idea)
-            admission, reused = self._admit_daily(
-                idea=idea,
-                authority=authority,
-                actor=actor,
-            )
-            lane = ProductionLane.DAILY_SHORT
-        else:
-            slot = self.session.scalar(
-                select(EditorialCalendarSlot)
-                .where(EditorialCalendarSlot.id == source_id)
-                .with_for_update()
-            )
-            if slot is None:
-                raise NotFoundError("frozen v2 Long-form slot not found")
-            self._require_company_permission(
-                actor=actor,
-                permission="production.start",
-                company_id=slot.company_id,
-            )
-            self._active_authority(
-                company_id=slot.company_id,
-                channel_workspace_id=slot.channel_workspace_id,
-                policy_snapshot_id=slot.policy_snapshot_id,
-                lane=ProductionLane.LONG_FORM,
-            )
-            self._ensure_long_preflight(slot)
-            authority = self._resolve_long(
-                slot,
-                requested_preflight_id=None,
-            )
-            admission, reused = self._admit_long(
-                slot=slot,
-                authority=authority,
-                actor=actor,
-            )
-            lane = ProductionLane.LONG_FORM
+        source_type = PlanningSourceType.LONG_FORM_PLAN
+        slot = self.session.scalar(
+            select(EditorialCalendarSlot)
+            .where(EditorialCalendarSlot.id == source_id)
+            .with_for_update()
+        )
+        if slot is None:
+            raise NotFoundError("frozen v2 Long-form slot not found")
+        self._require_company_permission(
+            actor=actor,
+            permission="production.start",
+            company_id=slot.company_id,
+        )
+        self._active_authority(
+            company_id=slot.company_id,
+            channel_workspace_id=slot.channel_workspace_id,
+            policy_snapshot_id=slot.policy_snapshot_id,
+            lane=ProductionLane.LONG_FORM,
+        )
+        self._ensure_long_preflight(slot)
+        authority = self._resolve_long(
+            slot,
+            requested_preflight_id=None,
+        )
+        admission, reused = self._admit_long(
+            slot=slot,
+            authority=authority,
+            actor=actor,
+        )
+        lane = ProductionLane.LONG_FORM
 
         if admission.decision != "ADMIT" or admission.admitted_video_project_id is None:
             raise ValidationFailureError(
@@ -501,195 +351,6 @@ class OperatorPlanningService:
             reused_admission=reused,
         )
 
-    def _materialize_daily_source(
-        self,
-        *,
-        slot: EditorialCalendarSlot,
-        actor: ActorContext,
-    ) -> DailyIdeaDecision:
-        existing = self.session.scalars(
-            select(DailyIdeaDecision)
-            .join(
-                ChannelDailyRun,
-                ChannelDailyRun.id == DailyIdeaDecision.channel_daily_run_id,
-            )
-            .where(
-                ChannelDailyRun.editorial_calendar_slot_id == slot.id,
-                DailyIdeaDecision.company_id == slot.company_id,
-                DailyIdeaDecision.channel_workspace_id == slot.channel_workspace_id,
-                DailyIdeaDecision.policy_snapshot_id == slot.policy_snapshot_id,
-                DailyIdeaDecision.schema_version == "v2",
-                DailyIdeaDecision.production_lane == ProductionLane.DAILY_SHORT,
-                DailyIdeaDecision.decision_status.in_(_ELIGIBLE_DAILY_STATES),
-            )
-            .order_by(
-                DailyIdeaDecision.created_at.asc(),
-                DailyIdeaDecision.id,
-            )
-            .with_for_update()
-        ).first()
-        existing_admission = (
-            self._existing_admission(
-                source_type=PlanningSourceType.DAILY_IDEA,
-                source_id=existing.id,
-            )
-            if existing is not None
-            else None
-        )
-        self._require_slot(
-            slot=slot,
-            company_id=slot.company_id,
-            channel_workspace_id=slot.channel_workspace_id,
-            policy_snapshot_id=slot.policy_snapshot_id,
-            lane=ProductionLane.DAILY_SHORT,
-            existing=existing_admission,
-        )
-        if existing is not None:
-            return existing
-
-        daily_run = ChannelDailyRunService(self.session).create_run(
-            data=ChannelDailyRunCreate(
-                company_id=slot.company_id,
-                channel_workspace_id=slot.channel_workspace_id,
-                policy_snapshot_id=slot.policy_snapshot_id,
-                editorial_calendar_slot_id=slot.id,
-                run_date=slot.slot_date,
-                status="PENDING",
-                run_mode="REAL",
-                trigger_type="MANUAL",
-                metadata={
-                    "authority_source": "operator_planning_daily_slot",
-                    "schema_version": "v2",
-                },
-            ),
-            correlation_id="operator-planning-daily-run-create",
-        )
-        daily_run.status = "RUNNING"
-        daily_run.started_at = utc_now()
-        resolver = ResourceResolverService(self.session)
-        plan = resolver.create_retrieval_plan(
-            data=RetrievalPlanSnapshotCreate(
-                purpose="DAILY_IDEA",
-                company_id=slot.company_id,
-                channel_workspace_id=slot.channel_workspace_id,
-                policy_snapshot_id=slot.policy_snapshot_id,
-                editorial_calendar_slot_id=slot.id,
-                allowed_sources=DEFAULT_DAILY_CONTEXT_SOURCES,
-                source_order=DEFAULT_DAILY_CONTEXT_SOURCES,
-                created_by_user_id=actor.actor_id,
-            ),
-            correlation_id="operator-planning-daily-retrieval-plan",
-        )
-        context = resolver.build_context_pack(
-            data=ContextPackSnapshotCreate(
-                retrieval_plan_snapshot_id=plan.id,
-                freshness_state="UNKNOWN",
-                confidence_level="UNKNOWN",
-                created_by_user_id=actor.actor_id,
-            ),
-            correlation_id="operator-planning-daily-context-pack",
-        )
-        state = ChannelStatePackService(self.session).build_snapshot(
-            data=ChannelStatePackSnapshotCreate(
-                channel_daily_run_id=daily_run.id,
-                company_id=slot.company_id,
-                channel_workspace_id=slot.channel_workspace_id,
-                policy_snapshot_id=slot.policy_snapshot_id,
-                context_pack_snapshot_id=context.id,
-            ),
-            correlation_id="operator-planning-daily-state-pack",
-        )
-        idea = ChannelAuthorityService(
-            self.session,
-            llm_workflow=self.daily_llm_workflow,
-        ).create_decision(
-            data=DailyIdeaDecisionCreate(
-                channel_daily_run_id=daily_run.id,
-                context_pack_snapshot_id=context.id,
-                channel_state_pack_snapshot_id=state.id,
-                schema_version="v2",
-                production_lane=ProductionLane.DAILY_SHORT,
-                assignment_input_ref={
-                    "editorial_calendar_slot_id": str(slot.id),
-                    "policy_snapshot_id": str(slot.policy_snapshot_id),
-                    "production_lane": "DAILY_SHORT",
-                    "assignment_mode": slot.assignment_mode,
-                    "preferred_series_plan_id": (
-                        str(slot.preferred_series_plan_id)
-                        if slot.preferred_series_plan_id is not None
-                        else None
-                    ),
-                    "preferred_series_run_id": (
-                        str(slot.preferred_series_run_id)
-                        if slot.preferred_series_run_id is not None
-                        else None
-                    ),
-                },
-                provider_key="llm_router",
-                estimated_cost=Decimal("0"),
-            ),
-            correlation_id="operator-planning-daily-authority",
-        )
-        daily_run.context_pack_snapshot_id = context.id
-        daily_run.channel_state_pack_snapshot_id = state.id
-        daily_run.daily_idea_decision_id = idea.id
-        daily_run.status = "COMPLETED"
-        daily_run.completed_at = utc_now()
-        daily_run.reason_codes = [
-            "DAILY_RUN_COMPLETED",
-            *list(idea.reason_codes or []),
-        ]
-        self.session.flush()
-        return idea
-
-    def _ensure_daily_preflight(
-        self,
-        idea: DailyIdeaDecision,
-    ) -> IdeaMarketPreflight:
-        daily_run = self.session.get(ChannelDailyRun, idea.channel_daily_run_id)
-        if daily_run is None or daily_run.editorial_calendar_slot_id is None:
-            raise ValidationFailureError("DAILY_RUN_SOURCE_MISMATCH")
-        existing = self.session.scalars(
-            select(IdeaMarketPreflight)
-            .where(
-                IdeaMarketPreflight.company_id == idea.company_id,
-                IdeaMarketPreflight.channel_workspace_id == idea.channel_workspace_id,
-                IdeaMarketPreflight.editorial_calendar_slot_id
-                == daily_run.editorial_calendar_slot_id,
-                IdeaMarketPreflight.channel_daily_run_id == daily_run.id,
-                IdeaMarketPreflight.daily_idea_decision_id == idea.id,
-                IdeaMarketPreflight.policy_fit_state == "PASS",
-                IdeaMarketPreflight.decision == "PASS",
-            )
-            .order_by(
-                IdeaMarketPreflight.created_at.desc(),
-                IdeaMarketPreflight.id,
-            )
-        ).first()
-        if existing is not None:
-            return existing
-        evidence_ids = self._persisted_search_evidence_ids(
-            company_id=idea.company_id,
-            channel_workspace_id=idea.channel_workspace_id,
-        )
-        return IdeaMarketPreflightService(self.session).create_preflight(
-            data=IdeaMarketPreflightCreate(
-                company_id=idea.company_id,
-                channel_workspace_id=idea.channel_workspace_id,
-                editorial_calendar_slot_id=(daily_run.editorial_calendar_slot_id),
-                channel_daily_run_id=daily_run.id,
-                daily_idea_decision_id=idea.id,
-                # The source is already bound to the channel's active compiled
-                # policy; this is server-derived authority, never caller input.
-                policy_fit_state="PASS",
-                evidence_blob={
-                    "search_demand_evidence_ids": [str(item) for item in evidence_ids],
-                    "authority_source": ("PERSISTED_OPERATOR_PLANNING_DAILY_SOURCE"),
-                },
-            ),
-            correlation_id="operator-planning-daily-preflight",
-        )
-
     def _ensure_long_preflight(
         self,
         slot: EditorialCalendarSlot,
@@ -700,8 +361,6 @@ class OperatorPlanningService:
                 IdeaMarketPreflight.company_id == slot.company_id,
                 IdeaMarketPreflight.channel_workspace_id == slot.channel_workspace_id,
                 IdeaMarketPreflight.editorial_calendar_slot_id == slot.id,
-                IdeaMarketPreflight.channel_daily_run_id.is_(None),
-                IdeaMarketPreflight.daily_idea_decision_id.is_(None),
                 IdeaMarketPreflight.policy_fit_state == "PASS",
                 IdeaMarketPreflight.decision == "PASS",
             )
@@ -752,50 +411,6 @@ class OperatorPlanningService:
                 .limit(20)
             ).all()
         )
-
-    def _admit_daily(
-        self,
-        *,
-        idea: DailyIdeaDecision,
-        authority: _ResolvedAuthority,
-        actor: ActorContext,
-    ) -> tuple[ProjectAdmissionDecision, bool]:
-        admission = authority.existing_admission
-        if admission is not None:
-            return admission, True
-        daily_run = self.session.get(ChannelDailyRun, idea.channel_daily_run_id)
-        assert daily_run is not None
-        admission = ProjectAdmissionV2Service(self.session).create_decision(
-            data=ProjectAdmissionV2Request(
-                planning_source_type=PlanningSourceType.DAILY_IDEA,
-                company_id=idea.company_id,
-                channel_workspace_id=idea.channel_workspace_id,
-                channel_profile_version_id=authority.profile.id,
-                policy_snapshot_id=authority.policy.id,
-                editorial_calendar_slot_id=authority.slot.id,
-                channel_daily_run_id=daily_run.id,
-                daily_idea_decision_id=idea.id,
-                idea_market_preflight_id=authority.preflight.id,
-                production_lane=ProductionLane.DAILY_SHORT,
-                assignment_mode=AssignmentMode(authority.slot.assignment_mode),
-                preferred_series_plan_id=(authority.slot.preferred_series_plan_id),
-                preferred_series_run_id=(authority.slot.preferred_series_run_id),
-                title=authority.source_title,
-                description=authority.source_description,
-                category_id=authority.category_id,
-                character_binding_id=authority.character_binding_id,
-                duration_contract=authority.duration,
-                niche_gate_passed=True,
-                market_gate_passed=True,
-                timely_niche_opportunity=self._slot_flag(
-                    authority.slot, "timely_niche_opportunity"
-                ),
-                bridge_or_special=self._slot_flag(authority.slot, "bridge_or_special"),
-                evidence_refs=list(idea.evidence_refs or []),
-                created_by_user_id=actor.actor_id,
-            )
-        )
-        return admission, False
 
     def _admit_long(
         self,
@@ -890,13 +505,8 @@ class OperatorPlanningService:
         source_id: uuid.UUID,
         preflight_id: uuid.UUID,
     ) -> None:
-        source_kind = (
-            "FROZEN_DAILY_IDEA"
-            if source_type == PlanningSourceType.DAILY_IDEA
-            else "FROZEN_EDITORIAL_SLOT"
-        )
         source_ref_matches = any(
-            ref.source_kind == source_kind and ref.id == source_id
+            ref.source_kind == "FROZEN_EDITORIAL_SLOT" and ref.id == source_id
             for ref in result.exact_source_refs
         )
         preflight_ref_matches = any(
@@ -927,58 +537,6 @@ class OperatorPlanningService:
         if provided:
             return provided
         return f"operator-planning:{source_type.value}:{source_id}"
-
-    def _daily_option(self, idea: DailyIdeaDecision) -> OperatorPlanningOptionRead:
-        workspace = self.session.get(ChannelWorkspace, idea.channel_workspace_id)
-        run = self.session.get(ChannelDailyRun, idea.channel_daily_run_id)
-        slot = (
-            self.session.get(EditorialCalendarSlot, run.editorial_calendar_slot_id)
-            if run is not None and run.editorial_calendar_slot_id is not None
-            else None
-        )
-        try:
-            authority = self._resolve_daily(idea)
-            return self._ready_option(
-                source_id=idea.id,
-                source_type="DAILY_IDEA",
-                lane=ProductionLane.DAILY_SHORT,
-                title=authority.source_title,
-                workspace=authority.workspace,
-                slot=authority.slot,
-                duration=authority.duration,
-                admission=authority.existing_admission,
-                preflight=authority.preflight,
-                destination_binding_ref=(authority.destination_binding_ref),
-                destination_binding_hash=(authority.destination_binding_hash),
-            )
-        except _PlanningBlocked as exc:
-            if exc.code == "DAILY_PREFLIGHT_NOT_PASS" and slot is not None:
-                return self._slot_preparation_option(
-                    slot=slot,
-                    source_type="DAILY_IDEA",
-                    source_id=idea.id,
-                    lane=ProductionLane.DAILY_SHORT,
-                )
-            return self._blocked_option(
-                source_id=idea.id,
-                source_type="DAILY_IDEA",
-                lane=ProductionLane.DAILY_SHORT,
-                title=idea.proposed_title,
-                workspace=workspace,
-                slot=slot,
-                code=exc.code,
-                guidance=exc.guidance,
-            )
-
-    def _daily_slot_option(
-        self,
-        slot: EditorialCalendarSlot,
-    ) -> OperatorPlanningOptionRead:
-        return self._slot_preparation_option(
-            slot=slot,
-            source_type="DAILY_SLOT",
-            lane=ProductionLane.DAILY_SHORT,
-        )
 
     def _long_option(self, slot: EditorialCalendarSlot) -> OperatorPlanningOptionRead:
         workspace = self.session.get(ChannelWorkspace, slot.channel_workspace_id)
@@ -1082,14 +640,7 @@ class OperatorPlanningService:
                 source_id=option_source_id,
                 source_type=source_type,
                 lane=lane,
-                title=(
-                    slot.production_goal
-                    or (
-                        "Daily Short"
-                        if lane == ProductionLane.DAILY_SHORT
-                        else "Video dài"
-                    )
-                ),
+                title=slot.production_goal or "Video dài",
                 workspace=authority.workspace,
                 slot=slot,
                 duration=authority.duration,
@@ -1103,117 +654,12 @@ class OperatorPlanningService:
                 source_id=option_source_id,
                 source_type=source_type,
                 lane=lane,
-                title=slot.production_goal
-                or (
-                    "Daily Short" if lane == ProductionLane.DAILY_SHORT else "Video dài"
-                ),
+                title=slot.production_goal or "Video dài",
                 workspace=workspace,
                 slot=slot,
                 code=exc.code,
                 guidance=exc.guidance,
             )
-
-    def _resolve_daily(self, idea: DailyIdeaDecision) -> _ResolvedAuthority:
-        if (
-            idea.schema_version != "v2"
-            or idea.production_lane != ProductionLane.DAILY_SHORT
-            or idea.decision_status not in _ELIGIBLE_DAILY_STATES
-        ):
-            self._block(
-                "DAILY_IDEA_NOT_FROZEN_ELIGIBLE",
-                "Ý tưởng chưa phải proposal/frozen v2 Daily Short đủ điều kiện.",
-            )
-        daily_run = self.session.get(ChannelDailyRun, idea.channel_daily_run_id)
-        if (
-            daily_run is None
-            or daily_run.company_id != idea.company_id
-            or daily_run.channel_workspace_id != idea.channel_workspace_id
-            or daily_run.policy_snapshot_id != idea.policy_snapshot_id
-            or daily_run.daily_idea_decision_id not in {None, idea.id}
-            or daily_run.editorial_calendar_slot_id is None
-        ):
-            self._block(
-                "DAILY_RUN_SOURCE_MISMATCH",
-                "Daily run không còn khớp chính xác với ý tưởng đã đóng băng.",
-            )
-        existing = self._existing_admission(
-            source_type=PlanningSourceType.DAILY_IDEA,
-            source_id=idea.id,
-        )
-        if existing is None and daily_run.status not in _NEW_DAILY_RUN_STATES:
-            self._block(
-                "DAILY_RUN_NOT_ELIGIBLE",
-                "Daily run đã bị chặn, hủy hoặc thất bại; cần tạo nguồn kế hoạch mới.",
-            )
-        slot = self.session.get(
-            EditorialCalendarSlot, daily_run.editorial_calendar_slot_id
-        )
-        self._require_slot(
-            slot=slot,
-            company_id=idea.company_id,
-            channel_workspace_id=idea.channel_workspace_id,
-            policy_snapshot_id=idea.policy_snapshot_id,
-            lane=ProductionLane.DAILY_SHORT,
-            existing=existing,
-        )
-        assert slot is not None
-        frozen_slot_id = self._frozen_daily_slot_id(idea)
-        if frozen_slot_id != slot.id:
-            self._block(
-                "DAILY_IDEA_FROZEN_SLOT_MISMATCH",
-                "Ý tưởng không còn trỏ đúng lịch nội dung đã đóng băng.",
-            )
-        authority = self._active_authority(
-            company_id=idea.company_id,
-            channel_workspace_id=idea.channel_workspace_id,
-            policy_snapshot_id=idea.policy_snapshot_id,
-            lane=ProductionLane.DAILY_SHORT,
-        )
-        preflight = self._daily_preflight(
-            idea=idea,
-            daily_run=daily_run,
-            slot=slot,
-            existing=existing,
-        )
-        if slot.category_id is None:
-            self._block(
-                "CATEGORY_SCOPE_MISSING",
-                "Lịch nội dung chưa khóa danh mục nội dung; hãy bổ sung trước khi chạy.",
-            )
-        scope = ProjectScopeAdmissionGuard(self.session).evaluate_for_daily_run(
-            daily_run,
-            explicit_category_id=slot.category_id,
-        )
-        if not scope.ok or scope.category_id is None:
-            self._block(
-                "DAILY_RUNTIME_SCOPE_BLOCKED",
-                self._scope_guidance(scope.reason_codes),
-            )
-        self._require_series_assignment(slot, authority.profile, authority.policy)
-        destination_binding_ref, destination_binding_hash = (
-            self._verified_destination_authority(authority.workspace)
-        )
-        resolved = _ResolvedAuthority(
-            workspace=authority.workspace,
-            profile=authority.profile,
-            policy=authority.policy,
-            slot=slot,
-            preflight=preflight,
-            duration=authority.duration,
-            category_id=scope.category_id,
-            character_binding_id=scope.character_binding_id,
-            existing_admission=existing,
-            source_title=idea.proposed_title,
-            source_description=idea.proposed_angle,
-            destination_binding_ref=destination_binding_ref,
-            destination_binding_hash=destination_binding_hash,
-        )
-        self._require_existing_authority(
-            authority=resolved,
-            lane=ProductionLane.DAILY_SHORT,
-            source_id=idea.id,
-        )
-        return resolved
 
     def _resolve_long(
         self,
@@ -1372,50 +818,6 @@ class OperatorPlanningService:
             duration=duration,
         )
 
-    def _daily_preflight(
-        self,
-        *,
-        idea: DailyIdeaDecision,
-        daily_run: ChannelDailyRun,
-        slot: EditorialCalendarSlot,
-        existing: ProjectAdmissionDecision | None,
-    ) -> IdeaMarketPreflight:
-        preferred_id = (
-            existing.idea_market_preflight_id if existing is not None else None
-        )
-        statement = select(IdeaMarketPreflight).where(
-            IdeaMarketPreflight.company_id == idea.company_id,
-            IdeaMarketPreflight.channel_workspace_id == idea.channel_workspace_id,
-            IdeaMarketPreflight.editorial_calendar_slot_id == slot.id,
-            IdeaMarketPreflight.channel_daily_run_id == daily_run.id,
-            IdeaMarketPreflight.daily_idea_decision_id == idea.id,
-        )
-        preflight = (
-            self.session.get(IdeaMarketPreflight, preferred_id)
-            if preferred_id is not None
-            else self.session.scalars(
-                statement.order_by(
-                    IdeaMarketPreflight.created_at.desc(),
-                    IdeaMarketPreflight.id,
-                )
-            ).first()
-        )
-        if (
-            preflight is None
-            or preflight.company_id != idea.company_id
-            or preflight.channel_workspace_id != idea.channel_workspace_id
-            or preflight.editorial_calendar_slot_id != slot.id
-            or preflight.channel_daily_run_id != daily_run.id
-            or preflight.daily_idea_decision_id != idea.id
-            or preflight.policy_fit_state != "PASS"
-            or preflight.decision != "PASS"
-        ):
-            self._block(
-                "DAILY_PREFLIGHT_NOT_PASS",
-                "Ý tưởng chưa có preflight PASS khớp chính xác với Daily run và lịch.",
-            )
-        return preflight
-
     def _long_preflight(
         self,
         *,
@@ -1436,8 +838,6 @@ class OperatorPlanningService:
                     IdeaMarketPreflight.channel_workspace_id
                     == slot.channel_workspace_id,
                     IdeaMarketPreflight.editorial_calendar_slot_id == slot.id,
-                    IdeaMarketPreflight.channel_daily_run_id.is_(None),
-                    IdeaMarketPreflight.daily_idea_decision_id.is_(None),
                     IdeaMarketPreflight.policy_fit_state == "PASS",
                     IdeaMarketPreflight.decision == "PASS",
                 )
@@ -1451,8 +851,6 @@ class OperatorPlanningService:
             or preflight.company_id != slot.company_id
             or preflight.channel_workspace_id != slot.channel_workspace_id
             or preflight.editorial_calendar_slot_id != slot.id
-            or preflight.channel_daily_run_id is not None
-            or preflight.daily_idea_decision_id is not None
             or preflight.policy_fit_state != "PASS"
             or preflight.decision != "PASS"
         ):
@@ -1657,11 +1055,7 @@ class OperatorPlanningService:
         admission = authority.existing_admission
         if admission is None:
             return
-        source_matches = (
-            admission.daily_idea_decision_id == source_id
-            if lane == ProductionLane.DAILY_SHORT
-            else admission.editorial_calendar_slot_id == source_id
-        )
+        source_matches = admission.editorial_calendar_slot_id == source_id
         project = self._existing_project(admission)
         effective = (
             self.session.get(
@@ -1748,22 +1142,12 @@ class OperatorPlanningService:
         self._require_existing_authority(
             authority=exact,
             lane=lane,
-            source_id=(
-                admission.daily_idea_decision_id
-                if lane == ProductionLane.DAILY_SHORT
-                else admission.editorial_calendar_slot_id
-            )
-            or uuid.UUID(int=0),
+            source_id=admission.editorial_calendar_slot_id or uuid.UUID(int=0),
         )
         self._verify_support_authority(
             result=support,
             source_type=PlanningSourceType(admission.planning_source_type),
-            source_id=(
-                admission.daily_idea_decision_id
-                if lane == ProductionLane.DAILY_SHORT
-                else admission.editorial_calendar_slot_id
-            )
-            or uuid.UUID(int=0),
+            source_id=admission.editorial_calendar_slot_id or uuid.UUID(int=0),
             preflight_id=authority.preflight.id,
         )
         existing_workflow = self.session.scalars(
@@ -1803,11 +1187,7 @@ class OperatorPlanningService:
             ),
             technical_appendix={
                 "planning_source_type": admission.planning_source_type,
-                "planning_source_id": (
-                    admission.daily_idea_decision_id
-                    if lane == ProductionLane.DAILY_SHORT
-                    else admission.editorial_calendar_slot_id
-                ),
+                "planning_source_id": admission.editorial_calendar_slot_id,
                 "profile_version_id": authority.profile.id,
                 "policy_snapshot_id": authority.policy.id,
                 "duration_contract_hash": (authority.duration.duration_contract_hash),
@@ -1950,17 +1330,14 @@ class OperatorPlanningService:
         source_type: PlanningSourceType,
         source_id: uuid.UUID,
     ) -> ProjectAdmissionDecision | None:
-        source_filter = (
-            ProjectAdmissionDecision.daily_idea_decision_id == source_id
-            if source_type == PlanningSourceType.DAILY_IDEA
-            else ProjectAdmissionDecision.editorial_calendar_slot_id == source_id
-        )
+        if source_type != PlanningSourceType.LONG_FORM_PLAN:
+            raise ValidationFailureError("PLANNING_SOURCE_TYPE_UNSUPPORTED")
         return self.session.scalars(
             select(ProjectAdmissionDecision)
             .where(
                 ProjectAdmissionDecision.schema_version == "v2",
                 ProjectAdmissionDecision.planning_source_type == source_type,
-                source_filter,
+                ProjectAdmissionDecision.editorial_calendar_slot_id == source_id,
             )
             .order_by(ProjectAdmissionDecision.created_at.asc())
         ).first()
@@ -1971,23 +1348,6 @@ class OperatorPlanningService:
         if admission is None or admission.admitted_video_project_id is None:
             return None
         return self.session.get(VideoProject, admission.admitted_video_project_id)
-
-    @staticmethod
-    def _frozen_daily_slot_id(
-        idea: DailyIdeaDecision,
-    ) -> uuid.UUID | None:
-        payload = (
-            idea.assignment_input_ref
-            if isinstance(idea.assignment_input_ref, dict)
-            else {}
-        )
-        raw = payload.get("editorial_calendar_slot_id", payload.get("slot_id"))
-        if raw in (None, ""):
-            return None
-        try:
-            return uuid.UUID(str(raw))
-        except (TypeError, ValueError, AttributeError):
-            return None
 
     @staticmethod
     def _slot_character_binding_id(
@@ -2022,12 +1382,7 @@ class OperatorPlanningService:
     def _slot_label(slot: EditorialCalendarSlot | None) -> str:
         if slot is None:
             return "Chưa xác định lịch"
-        lane_label = (
-            "Short hằng ngày"
-            if slot.production_lane == ProductionLane.DAILY_SHORT
-            else "Video dài"
-        )
-        return f"{lane_label} · {slot.slot_date.strftime('%d/%m/%Y')}"
+        return f"Video dài · {slot.slot_date.strftime('%d/%m/%Y')}"
 
     @staticmethod
     def _assignment_label(value: str | None) -> str:

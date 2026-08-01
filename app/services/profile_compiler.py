@@ -51,17 +51,18 @@ from app.db.models import (
 )
 from app.services.config_registry import LoadedCatalog, canonical_json, content_hash
 from app.services.config_registry import ConfigRegistryService
-from app.services.channel_contract import build_channel_contract, reject_legacy_provider_budget_fields
+from app.services.channel_contract import (
+    build_channel_contract,
+    reject_legacy_provider_budget_fields,
+)
 from app.services.creative_quality_policy import CreativeQualityPolicyCatalog
 
 
 CH1_FLEX_V2_MASTER_APPROVAL_REF = (
-    "operator-approval://ch1-flex-v2/"
-    "small-team-ai/master-prompt-2026-07-19"
+    "operator-approval://ch1-flex-v2/small-team-ai/master-prompt-2026-07-19"
 )
 CH1_MARKET_V3_MASTER_APPROVAL_REF = (
-    "operator-approval://ch1-market-v3/"
-    "small-team-ai/master-prompt-2026-07-19"
+    "operator-approval://ch1-market-v3/small-team-ai/master-prompt-2026-07-19"
 )
 
 
@@ -80,7 +81,9 @@ class ChannelProfileCompiler:
         self.session = session
         self.config_dir = Path(config_dir)
 
-    def profile_input_from_template(self, template_key: str) -> tuple[ChannelProfileInput, LoadedM1Catalogs]:
+    def profile_input_from_template(
+        self, template_key: str
+    ) -> tuple[ChannelProfileInput, LoadedM1Catalogs]:
         catalogs = self.load_catalogs(template_key)
         template = catalogs.template
         profile_input = ChannelProfileInput(
@@ -137,7 +140,9 @@ class ChannelProfileCompiler:
             policy.channel_key != "small-team-ai"
             or approval_ref != CH1_FLEX_V2_MASTER_APPROVAL_REF
         ):
-            raise ValidationFailureError("CH1-FLEX v2 requires its exact scoped operator approval")
+            raise ValidationFailureError(
+                "CH1-FLEX v2 requires its exact scoped operator approval"
+            )
         binding = self._qualified_visual_source_binding()
         raw = deepcopy(policy.model_dump(mode="json"))
         raw["policy_version"] = f"{policy.channel_key}.channel-policy.v2"
@@ -234,7 +239,9 @@ class ChannelProfileCompiler:
         }
         for key, expected in expected_market.items():
             if getattr(target_market_profile, key) != expected:
-                raise ValidationFailureError(f"CH1_MARKET_V3_PROFILE_VALUE_MISMATCH:{key}")
+                raise ValidationFailureError(
+                    f"CH1_MARKET_V3_PROFILE_VALUE_MISMATCH:{key}"
+                )
         expected_mismatches = {
             "TRANSLATED_SOUNDING_ENGLISH",
             "NON_US_CURRENCY_WITHOUT_USD_EQUIVALENT",
@@ -243,17 +250,23 @@ class ChannelProfileCompiler:
             "WRONG_METADATA_LOCALE",
             "WRONG_THUMBNAIL_LOCALE",
         }
-        if set(target_market_profile.prohibited_market_mismatches) != expected_mismatches:
+        if (
+            set(target_market_profile.prohibited_market_mismatches)
+            != expected_mismatches
+        ):
             raise ValidationFailureError("CH1_MARKET_V3_PROHIBITED_MISMATCHES_INVALID")
         if (
             target_market_digest.profile_hash != target_market_profile.content_hash
-            or target_market_digest.primary_market != target_market_profile.primary_market
+            or target_market_digest.primary_market
+            != target_market_profile.primary_market
             or destination_binding.channel_id != target_market_profile.channel_id
             or destination_binding.channel_key != target_market_profile.channel_key
-            or destination_binding.target_market_profile_hash != target_market_profile.content_hash
+            or destination_binding.target_market_profile_hash
+            != target_market_profile.content_hash
             or destination_binding.platform != "YOUTUBE"
             or destination_binding.manual_publish_required is not True
-            or destination_binding.destination_status not in {"VERIFIED", "PENDING_PLATFORM_ID"}
+            or destination_binding.destination_status
+            not in {"VERIFIED", "PENDING_PLATFORM_ID"}
         ):
             raise ValidationFailureError("CH1_MARKET_V3_BINDING_SCOPE_MISMATCH")
 
@@ -311,7 +324,9 @@ class ChannelProfileCompiler:
         profile_version = self.session.get(ChannelProfileVersion, profile_version_id)
         if profile_version is None:
             raise KeyError(f"profile version not found: {profile_version_id}")
-        profile_input = ChannelProfileInput.model_validate(profile_version.profile_input)
+        profile_input = ChannelProfileInput.model_validate(
+            profile_version.profile_input
+        )
         reject_legacy_provider_budget_fields(profile_input.model_dump(mode="json"))
         catalogs = self.load_catalogs(profile_input.template_key)
         run = ChannelProfileCompileRun(
@@ -326,7 +341,9 @@ class ChannelProfileCompiler:
         self.session.add(run)
         self.session.flush()
         try:
-            channel = self.session.get(ChannelWorkspace, profile_version.channel_workspace_id)
+            channel = self.session.get(
+                ChannelWorkspace, profile_version.channel_workspace_id
+            )
             payload, output_hash = self.compile_from_input(
                 profile_input=profile_input,
                 template=catalogs.template,
@@ -335,14 +352,21 @@ class ChannelProfileCompiler:
                 channel=channel,
                 profile_input_hash_override=profile_version.profile_input_hash,
             )
-            if profile_version.status == "active" and channel is not None and channel.active_policy_snapshot_id:
+            if (
+                profile_version.status == "active"
+                and channel is not None
+                and channel.active_policy_snapshot_id
+            ):
                 active_snapshot = self.session.get(
                     CompiledChannelPolicySnapshot,
                     channel.active_policy_snapshot_id,
                 )
                 if (
                     active_snapshot is not None
-                    and (active_snapshot.compiled_payload or {}).get("channel_scoped_policy") is not None
+                    and (active_snapshot.compiled_payload or {}).get(
+                        "channel_scoped_policy"
+                    )
+                    is not None
                     and active_snapshot.content_hash != output_hash
                 ):
                     raise ValidationFailureError(
@@ -397,18 +421,31 @@ class ChannelProfileCompiler:
         if not capability_matrix.policy_snapshot_available:
             raise ValidationFailureError("policy snapshot capability is unavailable")
         if profile_input.template_key not in compiler_policy.allowed_template_keys:
-            raise ValidationFailureError(f"unsupported template: {profile_input.template_key}")
+            raise ValidationFailureError(
+                f"unsupported template: {profile_input.template_key}"
+            )
         if profile_input.template_key != template.template_key:
-            raise ValidationFailureError("profile input template does not match loaded template")
-        if profile_input.audience_segment not in compiler_policy.allowed_audience_segments:
-            raise ValidationFailureError(f"unsupported audience segment: {profile_input.audience_segment}")
+            raise ValidationFailureError(
+                "profile input template does not match loaded template"
+            )
+        if (
+            profile_input.audience_segment
+            not in compiler_policy.allowed_audience_segments
+        ):
+            raise ValidationFailureError(
+                f"unsupported audience segment: {profile_input.audience_segment}"
+            )
         if profile_input.risk_tolerance not in compiler_policy.allowed_risk_tolerance:
-            raise ValidationFailureError(f"unsupported risk tolerance: {profile_input.risk_tolerance}")
+            raise ValidationFailureError(
+                f"unsupported risk tolerance: {profile_input.risk_tolerance}"
+            )
         legacy_payload = {
             "channel_constitution": {
                 "promise": f"Practical, evidence-aware {profile_input.display_name} content.",
                 "audience": profile_input.audience_segment,
-                "boundaries": [profile_input.policies.get("safety", "avoid unsupported claims")],
+                "boundaries": [
+                    profile_input.policies.get("safety", "avoid unsupported claims")
+                ],
             },
             "operating_blueprint": {
                 "target_market": profile_input.target_market,
@@ -420,8 +457,9 @@ class ChannelProfileCompiler:
             "series_plan": profile_input.series_plan,
             "editorial_calendar_defaults": {
                 "planning_unit": "weekly",
-                "long_form_minutes": profile_input.format_strategy.get("long_form_minutes"),
-                "shorts_role": profile_input.format_strategy.get("shorts_role"),
+                "long_form_minutes": profile_input.format_strategy.get(
+                    "long_form_minutes"
+                ),
             },
             "initial_content_runway": profile_input.initial_content_runway,
             "default_playbook": {
@@ -457,12 +495,17 @@ class ChannelProfileCompiler:
             },
             "capability_status": self._capability_status(capability_matrix),
         }
-        channel_contract = build_channel_contract(profile_input=profile_input.model_dump(mode="json"), channel=channel)
-        creative_quality_policies = self._creative_quality_policies(channel_key=channel.key if channel else None)
+        channel_contract = build_channel_contract(
+            profile_input=profile_input.model_dump(mode="json"), channel=channel
+        )
+        creative_quality_policies = self._creative_quality_policies(
+            channel_key=channel.key if channel else None
+        )
         channel_policy_payload = self._channel_scoped_policy_payload(
             channel=channel,
             policy_override=profile_input.channel_policy,
-            profile_input_hash=profile_input_hash_override or content_hash(profile_input.model_dump(mode="json")),
+            profile_input_hash=profile_input_hash_override
+            or content_hash(profile_input.model_dump(mode="json")),
             creative_quality_policies=creative_quality_policies,
         )
         compiled_policy_snapshot_json = {
@@ -511,8 +554,7 @@ class ChannelProfileCompiler:
                     **payload["gate_policy"],
                     "channel_fit_threshold": float(threshold),
                     "channel_fit_threshold_authority": {
-                        "ref": provider_ref["ref"]
-                        + "#pexels.semantic_fit_threshold",
+                        "ref": provider_ref["ref"] + "#pexels.semantic_fit_threshold",
                         "version": provider_ref["version"],
                         "content_hash": provider_ref["content_hash"],
                         "derivation": "REUSE_APPROVED_SEMANTIC_FIT_THRESHOLD",
@@ -531,11 +573,14 @@ class ChannelProfileCompiler:
             payload["activation_required"] = bool(
                 payload["activation_required"]
                 or channel_policy_payload["capability_evaluation"]["status"] != "PASS"
-                or channel_policy_payload["channel_scoped_policy"]["policy_status"] != "APPROVED"
+                or channel_policy_payload["channel_scoped_policy"]["policy_status"]
+                != "APPROVED"
             )
         missing = sorted(set(compiler_policy.required_output_sections) - set(payload))
         if missing:
-            raise ValidationFailureError(f"compiled payload missing sections: {missing}")
+            raise ValidationFailureError(
+                f"compiled payload missing sections: {missing}"
+            )
         parsed = CompiledChannelPolicyPayload.model_validate(payload)
         parsed_payload = parsed.model_dump(mode="json")
         return parsed_payload, content_hash(parsed_payload)
@@ -561,7 +606,11 @@ class ChannelProfileCompiler:
                 self.config_dir / "channel_scoped_policy_catalog.yaml"
             )
             selected = next(
-                (item for item in loaded.content["items"] if item.get("channel_key") == channel.key),
+                (
+                    item
+                    for item in loaded.content["items"]
+                    if item.get("channel_key") == channel.key
+                ),
                 None,
             )
             if selected is None:
@@ -575,7 +624,9 @@ class ChannelProfileCompiler:
             profile_input_hash=profile_input_hash,
             channel_policy_catalog_ref=catalog_ref,
             channel_policy_catalog_hash=catalog_hash,
-            format_contract_evidence=self._format_contract_evidence(channel=channel, policy=policy),
+            format_contract_evidence=self._format_contract_evidence(
+                channel=channel, policy=policy
+            ),
         )
 
     def compile_channel_policy_blocks(
@@ -598,9 +649,15 @@ class ChannelProfileCompiler:
                 "policy_version": policy.creative_quality_binding.policy_version,
                 "catalog_hash": "0" * 64,
             }
-        if creative_quality_policies.get("policy_ref") != policy.creative_quality_binding.policy_ref:
+        if (
+            creative_quality_policies.get("policy_ref")
+            != policy.creative_quality_binding.policy_ref
+        ):
             blockers.append("CREATIVE_QUALITY_POLICY_REF_MISMATCH")
-        if creative_quality_policies.get("policy_version") != policy.creative_quality_binding.policy_version:
+        if (
+            creative_quality_policies.get("policy_version")
+            != policy.creative_quality_binding.policy_version
+        ):
             blockers.append("CREATIVE_QUALITY_POLICY_VERSION_MISMATCH")
         creative_hash = str(creative_quality_policies.get("catalog_hash") or "")
         if len(creative_hash) != 64:
@@ -609,7 +666,10 @@ class ChannelProfileCompiler:
 
         if format_contract_evidence is None:
             blockers.append("FORMAT_IDENTITY_CONTRACT_MISSING")
-        elif format_contract_evidence.get("content_hash") != policy.format_identity_contract.content_hash:
+        elif (
+            format_contract_evidence.get("content_hash")
+            != policy.format_identity_contract.content_hash
+        ):
             blockers.append("FORMAT_IDENTITY_CONTRACT_HASH_MISMATCH")
         elif format_contract_evidence.get("status") != "APPROVED":
             blockers.append("FORMAT_IDENTITY_CONTRACT_NOT_APPROVED")
@@ -619,8 +679,12 @@ class ChannelProfileCompiler:
         publish_dump = policy.publish_policy.model_dump(mode="json")
         caption_hash = content_hash(
             {
-                "caption_style_policy": creative_quality_policies.get("caption_style_policy"),
-                "caption_sync_policy": creative_quality_policies.get("caption_sync_policy"),
+                "caption_style_policy": creative_quality_policies.get(
+                    "caption_style_policy"
+                ),
+                "caption_sync_policy": creative_quality_policies.get(
+                    "caption_sync_policy"
+                ),
             }
         )
         native_core = {
@@ -643,8 +707,14 @@ class ChannelProfileCompiler:
             status="BLOCKED" if blockers else "PASS",
             required=policy.capability_requirements.required,
             available=[
-                item for item in policy.capability_requirements.required
-                if item not in ({"format_identity_contract", "creative_quality_policy"} if blockers else set())
+                item
+                for item in policy.capability_requirements.required
+                if item
+                not in (
+                    {"format_identity_contract", "creative_quality_policy"}
+                    if blockers
+                    else set()
+                )
             ],
             blockers=sorted(set(blockers)),
         )
@@ -704,7 +774,9 @@ class ChannelProfileCompiler:
                 visual_binding.visual_source_routing_catalog if visual_binding else None
             ),
             gemini_image_provider_registry=(
-                visual_binding.gemini_image_provider_registry if visual_binding else None
+                visual_binding.gemini_image_provider_registry
+                if visual_binding
+                else None
             ),
             gemini_image_model_catalog=(
                 visual_binding.gemini_image_model_catalog if visual_binding else None
@@ -838,7 +910,8 @@ class ChannelProfileCompiler:
                     {
                         "decision": "DESTINATION_BINDING",
                         "result": destination.destination_status,
-                        "publish_execution_allowed": destination.destination_status == "VERIFIED",
+                        "publish_execution_allowed": destination.destination_status
+                        == "VERIFIED",
                     },
                     {
                         "decision": "MARKET_PACKAGE_FREEZE_POLICY",
@@ -894,7 +967,9 @@ class ChannelProfileCompiler:
             "expected_ref": policy.format_identity_contract.ref,
         }
 
-    def _creative_quality_policies(self, *, channel_key: str | None) -> dict[str, Any] | None:
+    def _creative_quality_policies(
+        self, *, channel_key: str | None
+    ) -> dict[str, Any] | None:
         """Compile immutable channel-scoped creative policy without service constants."""
         if not channel_key:
             return None
@@ -902,7 +977,11 @@ class ChannelProfileCompiler:
             self.config_dir / "creative_quality_policy_catalog.yaml"
         )
         selected = next(
-            (item for item in loaded.content["items"] if item.get("channel_key") == channel_key),
+            (
+                item
+                for item in loaded.content["items"]
+                if item.get("channel_key") == channel_key
+            ),
             None,
         )
         if selected is None:
@@ -975,16 +1054,16 @@ class ChannelProfileCompiler:
             provider_row.get("status") != "ACTIVE"
             or provider_row.get("capability_blob", {}).get("capability")
             != "AI_IMAGE_GENERATION"
-            or provider_row.get("policy_fit_blob", {}).get(
-                "provider_fallback_allowed"
-            )
+            or provider_row.get("policy_fit_blob", {}).get("provider_fallback_allowed")
             is not False
             or provider_row.get("policy_fit_blob", {}).get(
                 "production_enabled_when_configured"
             )
             is not False
         ):
-            raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_PROVIDER_POLICY_INVALID")
+            raise ValidationFailureError(
+                "CH1_FLEX_V2_GEMINI_IMAGE_PROVIDER_POLICY_INVALID"
+            )
 
         default_image_rows = [
             item
@@ -1040,8 +1119,7 @@ class ChannelProfileCompiler:
         canary_receipt_hash = str(drive.get("drive", {}).get("receipt_hash") or "")
         if (
             len(canary_receipt_hash) != 64
-            or canary.get("drive", {}).get("drive_receipt_hash")
-            != canary_receipt_hash
+            or canary.get("drive", {}).get("drive_receipt_hash") != canary_receipt_hash
         ):
             raise ValidationFailureError("CH1_FLEX_V2_DRIVE_RECEIPT_BINDING_INVALID")
 
@@ -1118,9 +1196,15 @@ class ChannelProfileCompiler:
 
     def load_catalogs(self, template_key: str) -> LoadedM1Catalogs:
         registry = ConfigRegistryService(self.session)
-        template_catalog = registry.validate_catalog(self.config_dir / "niche_profile_templates.yaml")
-        capability_catalog = registry.validate_catalog(self.config_dir / "capability_matrix.yaml")
-        compiler_policy_catalog = registry.validate_catalog(self.config_dir / "profile_compiler_policy.yaml")
+        template_catalog = registry.validate_catalog(
+            self.config_dir / "niche_profile_templates.yaml"
+        )
+        capability_catalog = registry.validate_catalog(
+            self.config_dir / "capability_matrix.yaml"
+        )
+        compiler_policy_catalog = registry.validate_catalog(
+            self.config_dir / "profile_compiler_policy.yaml"
+        )
         template_item = self._find_item(template_catalog, "template_key", template_key)
         if template_item is None:
             raise ValidationFailureError(f"unsupported template: {template_key}")
@@ -1128,9 +1212,13 @@ class ChannelProfileCompiler:
             template_catalog=template_catalog,
             template=NicheProfileTemplate.model_validate(template_item),
             capability_catalog=capability_catalog,
-            capability_matrix=CapabilityMatrix.model_validate(capability_catalog.content["items"][0]),
+            capability_matrix=CapabilityMatrix.model_validate(
+                capability_catalog.content["items"][0]
+            ),
             compiler_policy_catalog=compiler_policy_catalog,
-            compiler_policy=ProfileCompilerPolicy.model_validate(compiler_policy_catalog.content["items"][0]),
+            compiler_policy=ProfileCompilerPolicy.model_validate(
+                compiler_policy_catalog.content["items"][0]
+            ),
         )
 
     def _get_or_create_snapshot(
@@ -1144,7 +1232,8 @@ class ChannelProfileCompiler:
     ) -> CompiledChannelPolicySnapshot:
         existing = self.session.scalars(
             select(CompiledChannelPolicySnapshot).where(
-                CompiledChannelPolicySnapshot.channel_profile_version_id == profile_version.id,
+                CompiledChannelPolicySnapshot.channel_profile_version_id
+                == profile_version.id,
                 CompiledChannelPolicySnapshot.compiler_version
                 == catalogs.compiler_policy.compiler_version,
                 CompiledChannelPolicySnapshot.capability_matrix_version
@@ -1159,7 +1248,8 @@ class ChannelProfileCompiler:
         next_version = (
             self.session.scalar(
                 select(func.max(CompiledChannelPolicySnapshot.snapshot_version)).where(
-                    CompiledChannelPolicySnapshot.channel_workspace_id == profile_version.channel_workspace_id
+                    CompiledChannelPolicySnapshot.channel_workspace_id
+                    == profile_version.channel_workspace_id
                 )
             )
             or 0
@@ -1182,13 +1272,27 @@ class ChannelProfileCompiler:
 
     def _capability_status(self, capability_matrix: CapabilityMatrix) -> dict[str, Any]:
         return {
-            "profile_compiler": "available" if capability_matrix.profile_compiler_available else "not_available_yet",
-            "policy_snapshot": "available" if capability_matrix.policy_snapshot_available else "not_available_yet",
-            "artifact_workflow": "available" if capability_matrix.artifact_workflow_available else "restricted_until_milestone",
-            "media_pipeline": "available" if capability_matrix.media_pipeline_available else "restricted_until_milestone",
-            "publish_pipeline": "available" if capability_matrix.publish_pipeline_available else "restricted_until_milestone",
-            "analytics": "available" if capability_matrix.analytics_available else "restricted_until_milestone",
-            "no_view_diagnostic": "available" if capability_matrix.no_view_diagnostic_available else "restricted_until_milestone",
+            "profile_compiler": "available"
+            if capability_matrix.profile_compiler_available
+            else "not_available_yet",
+            "policy_snapshot": "available"
+            if capability_matrix.policy_snapshot_available
+            else "not_available_yet",
+            "artifact_workflow": "available"
+            if capability_matrix.artifact_workflow_available
+            else "restricted_until_milestone",
+            "media_pipeline": "available"
+            if capability_matrix.media_pipeline_available
+            else "restricted_until_milestone",
+            "publish_pipeline": "available"
+            if capability_matrix.publish_pipeline_available
+            else "restricted_until_milestone",
+            "analytics": "available"
+            if capability_matrix.analytics_available
+            else "restricted_until_milestone",
+            "no_view_diagnostic": "available"
+            if capability_matrix.no_view_diagnostic_available
+            else "restricted_until_milestone",
             "envato_manual_asset_pilot_documented": capability_matrix.envato_manual_asset_pilot_documented,
             "ffmpeg_renderer_planned": capability_matrix.ffmpeg_renderer_planned,
         }
@@ -1201,10 +1305,14 @@ class ChannelProfileCompiler:
             "capability_matrix_hash": catalogs.capability_catalog.content_hash,
             "compiler_policy_version": catalogs.compiler_policy_catalog.catalog_version,
             "compiler_policy_hash": catalogs.compiler_policy_catalog.content_hash,
-            "canonical_json": canonical_json({"policy": catalogs.compiler_policy.model_dump(mode="json")}),
+            "canonical_json": canonical_json(
+                {"policy": catalogs.compiler_policy.model_dump(mode="json")}
+            ),
         }
 
-    def _find_item(self, catalog: LoadedCatalog, key: str, value: str) -> dict[str, Any] | None:
+    def _find_item(
+        self, catalog: LoadedCatalog, key: str, value: str
+    ) -> dict[str, Any] | None:
         for item in catalog.content["items"]:
             if item.get(key) == value:
                 return item

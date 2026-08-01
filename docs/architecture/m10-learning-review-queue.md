@@ -67,7 +67,8 @@ M11 approval and promotion are required before any draft can become reusable gui
 
 ## M10.1 Follow-On
 
-M10.1 now owns guarded real Ollama LLMRouter and derivative/reuse/shorts/cross-platform funnel backend contracts. See `docs/architecture/m10-1-llm-router-derivative-funnel.md`.
+M10.1 owns the guarded LLMRouter used by the active long-form agent workflows.
+See `docs/architecture/m10-1-llm-router.md`.
 
 M10.2 owns Media Provider Role Matrix and provider routing.
 

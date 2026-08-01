@@ -1,75 +1,56 @@
 from __future__ import annotations
 
 import json
+import runpy
 import secrets
 import subprocess
-import uuid
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from app.contracts.d2p1 import DailyToPackageRequest
-from app.contracts.workflow import ApprovalDecisionCreate
 from app.core.time import utc_now
 from app.db.models import (
     FinalMediaRef,
     OperatorAuthSession,
     OperatorUser,
     ProviderAttempt,
-    ReviewTask,
 )
 from app.main import create_app
-from app.services.d2p1 import DailyToPackageOrchestrator
-from app.services.workflow import ApprovalService
 from app.services.m11_1 import AUTH_COOKIE_NAME, hash_session_token
-from tests.test_d2p1_daily_to_package_bridge import (
-    _OfflinePackageService,
-    _approve_research,
-    _d2p_scope,
-)
+from app.services.production_package import ProductionReadinessService
+
+
+ROOT = Path(__file__).resolve().parents[1]
+_PHASE3 = runpy.run_path(str(ROOT / "tests/test_phase3_production_package_v2.py"))
+_phase3_scope = _PHASE3["_scope"]
+_phase3_create_package = _PHASE3["_create_package"]
 
 
 def _promote_package(db_session):
-    scope = _d2p_scope(db_session)
-    orchestrator = DailyToPackageOrchestrator(
+    scope = _phase3_scope(
         db_session,
-        package_service=_OfflinePackageService(db_session),
+        minimum_ms=1_500,
+        target_ms=2_000,
+        maximum_ms=3_500,
     )
-    request = DailyToPackageRequest(
-        daily_idea_decision_id=scope.decision.id,
+    package = _phase3_create_package(db_session, scope)
+    readiness = ProductionReadinessService(db_session).evaluate(
+        package_artifact_version_id=package.artifact_version_id,
         created_by_user_id=scope.operator.id,
     )
-    assert orchestrator.run(request).current_state == "AWAITING_RESEARCH"
-    _approve_research(db_session, scope)
-    pending = orchestrator.run(request)
-    assert pending.current_state == "PACKAGE_READY_FOR_HUMAN_REVIEW"
-    reviewed_version_id = uuid.UUID(pending.receipt["artifact_version_id"])
-    review = db_session.scalars(
-        select(ReviewTask).where(
-            ReviewTask.target_artifact_version_id == reviewed_version_id,
-            ReviewTask.review_type == "final_human",
-        )
-    ).one()
-    review.status = "completed"
-    ApprovalService(db_session).create_approval_decision(
-        data=ApprovalDecisionCreate(
-            target_type="artifact_version",
-            target_id=reviewed_version_id,
-            target_artifact_version_id=reviewed_version_id,
-            decision="approved",
-            decided_by_user_id=scope.admin.id,
-            rationale="LPRO1 exact package handoff fixture review PASS.",
-            evidence_basis={"review_task_id": str(review.id)},
-        )
+    assert readiness.status == "READY_FOR_PRODUCTION"
+    return scope, SimpleNamespace(
+        project={"id": scope.project.id},
+        package={"id": package.artifact_version_id},
     )
-    promoted = orchestrator.run(request)
-    assert promoted.current_state == "READY_FOR_LONG_PRODUCTION"
-    return scope, promoted
 
 
-def test_application_trigger_runs_real_local_fixture_to_reviewable_mp4_and_resumes(db_session) -> None:
+def test_application_trigger_runs_real_local_fixture_to_reviewable_mp4_and_resumes(
+    db_session,
+) -> None:
     scope, promoted = _promote_package(db_session)
     project_id = promoted.project["id"]
     package_id = promoted.package["id"]
@@ -97,7 +78,10 @@ def test_application_trigger_runs_real_local_fixture_to_reviewable_mp4_and_resum
         client.cookies.set(AUTH_COOKIE_NAME, token)
         gated = client.post(
             f"/video-projects/{project_id}/long-production/run",
-            json={"package_id": package_id, "execution_mode": "REAL_APPROVED_PRODUCTION"},
+            json={
+                "package_id": package_id,
+                "execution_mode": "REAL_APPROVED_PRODUCTION",
+            },
         )
         assert gated.status_code != 200
         assert "LPRO1_MR1_EXECUTION_ENVELOPE_REQUIRED" in gated.text
@@ -119,9 +103,11 @@ def test_application_trigger_runs_real_local_fixture_to_reviewable_mp4_and_resum
             "READY_FOR_HUMAN_REVIEW",
         ]
 
-        candidate = json.loads(Path(body["review_media_candidate_ref"]).read_text(encoding="utf-8"))
+        candidate = json.loads(
+            Path(body["review_media_candidate_ref"]).read_text(encoding="utf-8")
+        )
         output = Path(candidate["output_file_ref"])
-        assert output.is_file() and output.stat().st_size > 1_000_000
+        assert output.is_file() and output.stat().st_size > 10_000
         assert candidate["production_eligible"] is False
         assert candidate["not_publishable"] is True
         assert candidate["human_review_status"] == "PENDING"
@@ -167,13 +153,22 @@ def test_application_trigger_runs_real_local_fixture_to_reviewable_mp4_and_resum
         "h264",
         "yuv420p",
     )
-    assert (audio["codec_name"], int(audio["sample_rate"]), audio["channels"]) == ("aac", 48000, 2)
-    technical = json.loads(Path(body["technical_media_qc_ref"]).read_text(encoding="utf-8"))
-    creative = json.loads(Path(body["creative_media_qc_ref"]).read_text(encoding="utf-8"))
+    assert (audio["codec_name"], int(audio["sample_rate"]), audio["channels"]) == (
+        "aac",
+        48000,
+        2,
+    )
+    technical = json.loads(
+        Path(body["technical_media_qc_ref"]).read_text(encoding="utf-8")
+    )
+    creative = json.loads(
+        Path(body["creative_media_qc_ref"]).read_text(encoding="utf-8")
+    )
     strict = json.loads(
-        (Path(body["review_media_candidate_ref"]).parent / "strict-long-form-render-package.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            Path(body["review_media_candidate_ref"]).parent
+            / "strict-long-form-render-package.json"
+        ).read_text(encoding="utf-8")
     )
     assert technical["result"] == "PASS"
     assert creative["result"] == "REVIEW_REQUIRED"

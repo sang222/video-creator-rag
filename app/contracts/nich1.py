@@ -130,8 +130,12 @@ class NicheReasonCode(StrEnum):
     VISUAL_SOURCE_PROFILE_MISMATCH = "VISUAL_SOURCE_PROFILE_MISMATCH"
     SMALL_TEAM_AI_STOCK_ASSISTED_REQUIRED = "SMALL_TEAM_AI_STOCK_ASSISTED_REQUIRED"
     VISUAL_SCENE_DECISION_MISSING = "VISUAL_SCENE_DECISION_MISSING"
-    MECHANISM_MEANING_REPLACED_BY_GENERIC_STOCK = "MECHANISM_MEANING_REPLACED_BY_GENERIC_STOCK"
-    AI_IMAGE_EDITORIAL_JUSTIFICATION_MISSING = "AI_IMAGE_EDITORIAL_JUSTIFICATION_MISSING"
+    MECHANISM_MEANING_REPLACED_BY_GENERIC_STOCK = (
+        "MECHANISM_MEANING_REPLACED_BY_GENERIC_STOCK"
+    )
+    AI_IMAGE_EDITORIAL_JUSTIFICATION_MISSING = (
+        "AI_IMAGE_EDITORIAL_JUSTIFICATION_MISSING"
+    )
     AUTHORIZED_ASSET_REQUIRED_FOR_EVIDENCE = "AUTHORIZED_ASSET_REQUIRED_FOR_EVIDENCE"
 
     # Thumbnail/metadata policy.
@@ -231,7 +235,10 @@ class NicheContractDigest(_HashBoundModel):
     editorial_slot_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     content_pillar_id: str | None = Field(default=None, max_length=500)
     content_pillar_key: str = Field(min_length=1, max_length=500)
-    series_key: str = Field(min_length=1, max_length=500)
+    # An editorial candidate can be explicitly standalone.  Series assignment
+    # is resolved later by ProjectAdmissionService, so research/preflight must
+    # not fabricate a series binding for an OPEN_MIX or standalone slot.
+    series_key: str | None = Field(default=None, max_length=500)
     production_goal: str = Field(min_length=1, max_length=2000)
 
     voice_tone_summary: str = Field(min_length=1, max_length=2000)
@@ -253,7 +260,9 @@ class NicheContractDigest(_HashBoundModel):
         for field_name in list_fields:
             values = getattr(self, field_name)
             normalized = [value.strip().casefold() for value in values]
-            if any(not value for value in normalized) or len(normalized) != len(set(normalized)):
+            if any(not value for value in normalized) or len(normalized) != len(
+                set(normalized)
+            ):
                 raise ValueError(f"NICH1_DUPLICATE_OR_EMPTY_LIST_VALUE:{field_name}")
         pillars = {value.strip().casefold() for value in self.content_pillars}
         if self.content_pillar_key.strip().casefold() not in pillars:
@@ -290,7 +299,7 @@ class EditorialSlotBinding(_HashBoundModel):
     category_id: uuid.UUID
     content_pillar_id: str | None = Field(default=None, max_length=500)
     content_pillar_key: str = Field(min_length=1, max_length=500)
-    series_key: str = Field(min_length=1, max_length=500)
+    series_key: str | None = Field(default=None, max_length=500)
     production_goal: str = Field(min_length=1, max_length=2000)
 
 
@@ -416,8 +425,8 @@ class TopicNicheAlignmentInput(_NicheGateInput):
 
 
 class ScriptNicheAlignmentInput(_NicheGateInput):
-    daily_idea_ref: str = Field(min_length=1, max_length=1000)
-    daily_idea_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    editorial_idea_candidate_ref: str = Field(min_length=1, max_length=1000)
+    editorial_idea_candidate_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     topic_gate_ref: str = Field(min_length=1, max_length=1000)
     topic_gate_result: NicheGateResult
     approved_topic: str = Field(min_length=1, max_length=2000)
@@ -427,7 +436,9 @@ class ScriptNicheAlignmentInput(_NicheGateInput):
     declared_sub_niche: str = Field(min_length=1, max_length=500)
     declared_category_id: uuid.UUID
     declared_content_pillar_key: str = Field(min_length=1, max_length=500)
-    addressed_audience_pain_points: list[str] = Field(default_factory=list, max_length=64)
+    addressed_audience_pain_points: list[str] = Field(
+        default_factory=list, max_length=64
+    )
     addressed_audience_desired_outcomes: list[str] = Field(
         default_factory=list, max_length=64
     )
@@ -452,7 +463,9 @@ class ThumbnailNicheAlignmentInput(_NicheGateInput):
     visual_language: str = Field(min_length=1, max_length=2000)
     text_claims: list[str] = Field(default_factory=list, max_length=64)
     number_claims: list[str] = Field(default_factory=list, max_length=64)
-    claim_evidence_refs: list[NicheEvidenceRef] = Field(default_factory=list, max_length=64)
+    claim_evidence_refs: list[NicheEvidenceRef] = Field(
+        default_factory=list, max_length=64
+    )
     misleading_product_or_ui_representation: bool = False
 
 
@@ -464,12 +477,14 @@ class MetadataNicheAlignmentInput(_NicheGateInput):
     tags: list[str] = Field(default_factory=list, max_length=128)
     chapters: list[str] = Field(default_factory=list, max_length=128)
     summary_copy: str | None = Field(default=None, max_length=10_000)
-    upload_card_copy: str | None = Field(default=None, max_length=10_000)
+    manual_publishing_copy: str | None = Field(default=None, max_length=10_000)
     cta: str | None = Field(default=None, max_length=4000)
     declared_category_id: uuid.UUID
     declared_content_pillar_key: str = Field(min_length=1, max_length=500)
     claim_scope: list[str] = Field(default_factory=list, max_length=64)
-    claim_evidence_refs: list[NicheEvidenceRef] = Field(default_factory=list, max_length=64)
+    claim_evidence_refs: list[NicheEvidenceRef] = Field(
+        default_factory=list, max_length=64
+    )
     adjacent_niche_conflict: bool = False
 
 
@@ -521,7 +536,7 @@ class NicheAlignmentDossier(_HashBoundModel):
     category_ref: str = Field(min_length=1, max_length=1000)
     content_pillar_id: str | None = Field(default=None, max_length=500)
     content_pillar_key: str = Field(min_length=1, max_length=500)
-    series_key: str = Field(min_length=1, max_length=500)
+    series_key: str | None = Field(default=None, max_length=500)
 
     topic_result: NicheGateResult | None = None
     script_result: NicheGateResult | None = None

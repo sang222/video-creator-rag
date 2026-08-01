@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from copy import deepcopy
 from datetime import date
-from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -44,24 +43,19 @@ from app.services.r3d3 import (
     build_script_contract_digest,
 )
 from app.db.models import (
-    ChannelDailyRun,
     ChannelProfileVersion,
     ChannelWorkspace,
     CompiledChannelPolicySnapshot,
     ContentCategory,
-    ContextPackSnapshot,
-    DailyIdeaDecision,
     EditorialCalendarSlot,
     RetrievalPlanSnapshot,
 )
-from app.contracts.m5 import ContextPackSnapshotCreate, IdeaMarketPreflightCreate
+from app.contracts.m5 import ContextPackSnapshotCreate
 from app.core.errors import ValidationFailureError
 from app.services.m5 import (
-    LLMWorkflowService,
     ResourceResolverService,
-    _evaluate_nich1_preflight,
     _hash_payload,
-    _validate_nich1_daily_context_authority,
+    _validate_nich1_editorial_context_authority,
 )
 from app.services.m12_2 import (
     FULL_REHEARSAL_AGENT_CHAIN,
@@ -185,9 +179,7 @@ def _authority() -> SimpleNamespace:
         allowed_topics_json=["workflow audit", "support automation"],
         forbidden_topics_json=["enterprise ERP migration"],
         default_format_policy_json={"format": "explainer"},
-        default_visual_style_json={
-            "niche_visual_source_profile": "STOCK_ASSISTED"
-        },
+        default_visual_style_json={"niche_visual_source_profile": "STOCK_ASSISTED"},
         status="ACTIVE",
         content_hash=nich1_stable_hash(category_payload),
     )
@@ -242,26 +234,6 @@ def _semantic(gate) -> list[NicheCriterionEvidence]:
     ]
 
 
-def _daily_criterion_evidence(score: float = 0.92) -> dict:
-    criteria = (
-        "NICHE_RELEVANCE",
-        "AUDIENCE_FIT",
-        "POSITIONING_FIT",
-        "BRAND_PROMISE_FIT",
-        "ALLOWED_TOPIC_COMPLIANCE",
-        "SERIES_FIT",
-        "PRODUCTION_GOAL_FIT",
-    )
-    return {
-        "criterion_scores": {criterion: score for criterion in criteria},
-        "criterion_rationales": {
-            criterion: f"Offline frozen-context evidence for {criterion}."
-            for criterion in criteria
-        },
-        "reason_codes": ["OFFLINE_TYPED_SEMANTIC_EVIDENCE"],
-    }
-
-
 def _bindings(scope: SimpleNamespace):
     result = EditorialSlotValidator().validate(
         channel=scope.channel,
@@ -281,7 +253,7 @@ def _bindings(scope: SimpleNamespace):
 def _base_input(scope: SimpleNamespace, digest, subject: str) -> dict:
     return {
         "niche_contract_digest": digest,
-        "niche_contract_digest_ref": "context-pack://daily-pack#niche_contract_digest",
+        "niche_contract_digest_ref": "context-pack://editorial-pack#niche_contract_digest",
         "niche_contract_digest_hash": digest.content_hash,
         "active_policy_snapshot_ref": digest.compiled_policy_snapshot_ref,
         "active_policy_snapshot_hash": digest.compiled_policy_snapshot_hash,
@@ -295,7 +267,7 @@ def _positive_gate_results(scope: SimpleNamespace, digest):
     slot_binding, category_binding = _bindings(scope)
     topic_gate = TopicNicheAlignmentGate()
     topic_input = TopicNicheAlignmentInput(
-        **_base_input(scope, digest, "daily-idea"),
+        **_base_input(scope, digest, "editorial-candidate"),
         channel_id=scope.channel.id,
         slot_binding=slot_binding,
         category_binding=category_binding,
@@ -309,8 +281,8 @@ def _positive_gate_results(scope: SimpleNamespace, digest):
     script_gate = ScriptNicheAlignmentGate()
     script_input = ScriptNicheAlignmentInput(
         **_base_input(scope, digest, "script"),
-        daily_idea_ref=topic_result.subject_ref,
-        daily_idea_hash=topic_input.subject_hash,
+        editorial_idea_candidate_ref=topic_result.subject_ref,
+        editorial_idea_candidate_hash=topic_input.subject_hash,
         topic_gate_ref=f"niche-gate://topic/{topic_result.content_hash}",
         topic_gate_result=topic_result,
         approved_topic=topic_input.topic,
@@ -423,7 +395,9 @@ def test_digest_is_authoritative_bounded_deterministic_and_hash_bound() -> None:
         type(first).model_validate(tampered)
 
 
-def test_strict_daily_context_recompiles_authority_and_rejects_self_hashed_forgery() -> None:
+def test_strict_editorial_context_recompiles_authority_and_rejects_self_hashed_forgery() -> (
+    None
+):
     scope = _authority()
     digest = _digest(scope)
     digest_ref = {
@@ -441,7 +415,7 @@ def test_strict_daily_context_recompiles_authority_and_rejects_self_hashed_forge
             "direct_provider_sdk_allowed": False,
         },
         "agent_context_pack": {
-            "agent_key": "DailyIdeaAgent",
+            "agent_key": "TopicIdeaScoringAgent",
             "digests": {
                 "niche_contract_digest": digest.model_dump(mode="json"),
             },
@@ -485,7 +459,7 @@ def test_strict_daily_context_recompiles_authority_and_rejects_self_hashed_forge
 
     valid_pack = _pack(pack_content, policy_refs)
     assert (
-        _validate_nich1_daily_context_authority(
+        _validate_nich1_editorial_context_authority(
             _Session(),
             context_pack=valid_pack,
             snapshot=scope.snapshot,
@@ -503,22 +477,24 @@ def test_strict_daily_context_recompiles_authority_and_rejects_self_hashed_forge
         **digest_ref,
         "content_hash": forged.content_hash,
     }
-    forged_content["agent_context_pack"]["digests"][
-        "niche_contract_digest"
-    ] = forged.model_dump(mode="json")
+    forged_content["agent_context_pack"]["digests"]["niche_contract_digest"] = (
+        forged.model_dump(mode="json")
+    )
     forged_refs = [{**policy_refs[0], "content_hash": forged.content_hash}]
     with pytest.raises(
         ValidationFailureError,
-        match="NICH1_DAILY_CONTEXT_DIGEST_BINDING_MISMATCH",
+        match="NICH1_EDITORIAL_CONTEXT_DIGEST_BINDING_MISMATCH",
     ):
-        _validate_nich1_daily_context_authority(
+        _validate_nich1_editorial_context_authority(
             _Session(),
             context_pack=_pack(forged_content, forged_refs),
             snapshot=scope.snapshot,
         )
 
 
-def test_digest_rejects_stale_authority_and_slot_validator_preserves_legacy_read() -> None:
+def test_digest_rejects_stale_authority_and_slot_validator_preserves_legacy_read() -> (
+    None
+):
     scope = _authority()
     scope.channel.active_policy_snapshot_id = uuid.uuid4()
     with pytest.raises(NicheContractCompilationError) as exc:
@@ -553,7 +529,9 @@ def test_digest_rejects_stale_authority_and_slot_validator_preserves_legacy_read
     assert NicheReasonCode.LEGACY_SLOT_STRICT_BINDING_REQUIRED in readable.reason_codes
 
 
-def test_all_five_registered_gates_pass_and_production_dossier_is_consolidated() -> None:
+def test_all_five_registered_gates_pass_and_production_dossier_is_consolidated() -> (
+    None
+):
     scope = _authority()
     digest = _digest(scope)
     results = _positive_gate_results(scope, digest)
@@ -640,7 +618,7 @@ def test_m12_derives_typed_script_gate_and_r3d4_rejects_tampered_pass() -> None:
         "niche_gate_results": {
             NicheGateKey.TOPIC.value: positive.topic.model_dump(mode="json")
         },
-        "approved_daily_idea": {"topic": positive.topic_input.topic},
+        "approved_editorial_candidate": {"topic": positive.topic_input.topic},
         "narration_script": {
             "sentences": [
                 {
@@ -667,7 +645,9 @@ def test_m12_derives_typed_script_gate_and_r3d4_rejects_tampered_pass() -> None:
     )
     assert result is not None and result.verdict == NicheGateVerdict.PASS
     adapter = NicheAlignmentEvidenceGate(NicheGateKey.SCRIPT.value)
-    assert adapter.run(artifacts=artifacts, effective_context=effective).status == "PASS"
+    assert (
+        adapter.run(artifacts=artifacts, effective_context=effective).status == "PASS"
+    )
 
     tampered = result.model_dump(mode="json")
     tampered["checked_policy_snapshot_hash"] = "f" * 64
@@ -716,7 +696,9 @@ def test_missing_stale_forbidden_and_adjacent_topic_inputs_block() -> None:
     assert NicheReasonCode.ADJACENT_NICHE_CONFLICT in adjacent.reason_codes
 
 
-def test_channel_fit_is_policy_derived_and_caller_pass_cannot_override_low_score() -> None:
+def test_channel_fit_is_policy_derived_and_caller_pass_cannot_override_low_score() -> (
+    None
+):
     scope = _authority()
     digest = _digest(scope)
     topic = _positive_gate_results(scope, digest).topic
@@ -810,9 +792,13 @@ def test_negative_downstream_drift_and_missing_package_gate_evidence_block() -> 
     assert NicheReasonCode.MANDATORY_NICHE_GATE_EVIDENCE_MISSING in dossier.reason_codes
 
 
-def test_daily_idea_context_contract_is_bounded_without_effective_project_context() -> None:
+def test_editorial_idea_context_contract_is_bounded_without_effective_project_context() -> (
+    None
+):
     contract = AgentContextContractRegistry().resolve(
-        "DailyIdeaAgent", task_type="daily_idea", lane="cheap_structured"
+        "EditorialIdeaResearchAgent",
+        task_type="editorial_idea_research",
+        lane="cheap_structured",
     )
     sections = {
         name: {"digest_type": name, "content": "bounded"}
@@ -828,7 +814,9 @@ def test_daily_idea_context_contract_is_bounded_without_effective_project_contex
     assert contract.required_context_sections[0] == "niche_contract_digest"
 
 
-def test_m5_context_builder_exposes_semantic_digest_and_budgeted_agent_pack_offline() -> None:
+def test_m5_context_builder_exposes_semantic_digest_and_budgeted_agent_pack_offline() -> (
+    None
+):
     scope = _authority()
     scope.profile.version = 2
     scope.channel.name = "Small Team AI"
@@ -846,7 +834,7 @@ def test_m5_context_builder_exposes_semantic_digest_and_budgeted_agent_pack_offl
     scope.snapshot.compiler_version = "nich1-offline"
     scope.snapshot.content_hash = nich1_stable_hash(scope.snapshot.compiled_payload)
     scope.slot.slot_date = date(2026, 7, 19)
-    scope.slot.slot_type = "DAILY"
+    scope.slot.slot_type = "RESEARCH"
     scope.slot.target_platforms = ["YOUTUBE"]
     scope.slot.format_hint = "explainer"
     scope.slot.risk_level = "LOW"
@@ -866,7 +854,7 @@ def test_m5_context_builder_exposes_semantic_digest_and_budgeted_agent_pack_offl
 
     plan = SimpleNamespace(
         id=uuid.uuid4(),
-        purpose="DAILY_IDEA",
+        purpose="EDITORIAL_RESEARCH",
         company_id=scope.channel.company_id,
         channel_workspace_id=scope.channel.id,
         channel_profile_version_id=scope.profile.id,
@@ -914,13 +902,13 @@ def test_strict_context_builder_rejects_caller_authority_overrides() -> None:
     scope.snapshot.compiler_version = "nich1-offline"
     scope.snapshot.content_hash = nich1_stable_hash(scope.snapshot.compiled_payload)
     scope.slot.slot_date = date(2026, 7, 19)
-    scope.slot.slot_type = "DAILY"
+    scope.slot.slot_type = "RESEARCH"
     scope.slot.target_platforms = ["YOUTUBE"]
     scope.slot.risk_level = "LOW"
     plan_id = uuid.uuid4()
     plan = SimpleNamespace(
         id=plan_id,
-        purpose="DAILY_IDEA",
+        purpose="EDITORIAL_RESEARCH",
         company_id=scope.channel.company_id,
         channel_workspace_id=scope.channel.id,
         channel_profile_version_id=scope.profile.id,
@@ -974,491 +962,6 @@ def test_strict_context_builder_rejects_caller_authority_overrides() -> None:
                 ],
             )
         )
-
-
-def test_m5_preflight_derives_channel_fit_and_ignores_caller_pass_offline() -> None:
-    scope = _authority()
-    scope.profile.version = 2
-    scope.snapshot.compiled_payload["channel_scoped_policy"].update(
-        {
-            "policy_version": "small-team-ai.channel-policy.v2",
-            "visual_source_policy_binding": {
-                "schema_version": "ch1-flex.visual-source-policy-binding.v2",
-                "niche_visual_source_profile": "STOCK_ASSISTED",
-            },
-        }
-    )
-    scope.snapshot.content_hash = nich1_stable_hash(scope.snapshot.compiled_payload)
-    digest = _digest(scope)
-    run_id = uuid.uuid4()
-    decision_id = uuid.uuid4()
-    pack_id = uuid.uuid4()
-    daily_run = SimpleNamespace(
-        id=run_id,
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        policy_snapshot_id=scope.snapshot.id,
-        editorial_calendar_slot_id=scope.slot.id,
-    )
-    digest_ref = digest.as_ref().model_dump(mode="json")
-    pack_content = {
-        "niche_contract_digest": digest.model_dump(mode="json"),
-        "niche_contract_digest_ref": digest_ref,
-        "runtime_guard_digest": {
-            "compiled_policy_snapshot_id": str(scope.snapshot.id),
-            "compiled_policy_snapshot_hash": scope.snapshot.content_hash,
-            "provider_calls_allowed": False,
-            "direct_provider_sdk_allowed": False,
-        },
-        "agent_context_pack": {
-            "agent_key": "DailyIdeaAgent",
-            "digests": {
-                "niche_contract_digest": digest.model_dump(mode="json"),
-            },
-        },
-    }
-    pack_payload = {
-        "input_refs": [],
-        "policy_refs": [
-            {
-                "type": "niche_contract_digest_authority",
-                "compiled_policy_snapshot_id": str(scope.snapshot.id),
-                "content_hash": digest.content_hash,
-            }
-        ],
-        "evidence_refs": [],
-        "metric_refs": [],
-        "memory_refs": [],
-        "pack_content": pack_content,
-    }
-    pack = SimpleNamespace(
-        id=pack_id,
-        policy_snapshot_id=scope.snapshot.id,
-        channel_workspace_id=scope.channel.id,
-        channel_profile_version_id=scope.profile.id,
-        editorial_calendar_slot_id=scope.slot.id,
-        pack_hash=_hash_payload(pack_payload),
-        **pack_payload,
-    )
-    idea = SimpleNamespace(
-        id=decision_id,
-        channel_daily_run_id=run_id,
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        policy_snapshot_id=scope.snapshot.id,
-        context_pack_snapshot_id=pack_id,
-        proposed_title="How small teams audit an AI support workflow",
-        proposed_angle="A bounded checklist for repetitive support work",
-        proposed_pillar=scope.slot.content_pillar,
-        proposed_series_key=scope.slot.series_key,
-        rationale={
-            "audience_problem": "A small support team needs an auditable workflow handoff.",
-            "channel_fit_score": 0.92,
-            "channel_fit_evidence": _daily_criterion_evidence(),
-        },
-        evidence_refs=[],
-    )
-
-    class _Session:
-        def __init__(self):
-            self.rows = {
-                (ChannelDailyRun, run_id): daily_run,
-                (CompiledChannelPolicySnapshot, scope.snapshot.id): scope.snapshot,
-                (DailyIdeaDecision, decision_id): idea,
-                (ContextPackSnapshot, pack_id): pack,
-                (EditorialCalendarSlot, scope.slot.id): scope.slot,
-                (ContentCategory, scope.category.id): scope.category,
-                (ChannelWorkspace, scope.channel.id): scope.channel,
-                (ChannelProfileVersion, scope.profile.id): scope.profile,
-            }
-
-        def get(self, model, identifier):
-            return self.rows.get((model, identifier))
-
-    request = IdeaMarketPreflightCreate(
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        channel_daily_run_id=run_id,
-        daily_idea_decision_id=decision_id,
-        demand_score=50,
-        channel_fit_score=0.01,
-        policy_fit_state="PASS",
-        evidence_blob={"search_led": False},
-    )
-    passed = _evaluate_nich1_preflight(_Session(), data=request, evidence_refs=[])
-    assert passed is not None
-    assert passed["decision"] == "PASS"
-    assert passed["channel_fit_score"] == 0.92
-    assert passed["channel_fit_threshold"] == 0.8
-    assert passed["policy_fit_state"] == "PASS"
-    assert passed["topic_gate"]["verdict"] == "PASS"
-
-    complete_evidence = idea.rationale["channel_fit_evidence"]
-    idea.rationale["channel_fit_evidence"] = {"reason_codes": ["UNBOUND_HIGH_SCORE"]}
-    missing_semantic = _evaluate_nich1_preflight(
-        _Session(), data=request, evidence_refs=[]
-    )
-    assert missing_semantic is not None
-    assert missing_semantic["decision"] == "BLOCK"
-    assert missing_semantic["topic_gate"]["verdict"] == "BLOCK"
-
-    idea.rationale["channel_fit_evidence"] = complete_evidence
-    idea.proposed_title = "Consumer crypto trading signals for retail speculators"
-    adjacent = _evaluate_nich1_preflight(_Session(), data=request, evidence_refs=[])
-    assert adjacent is not None
-    assert adjacent["decision"] == "BLOCK"
-    assert adjacent["topic_gate"]["verdict"] == "BLOCK"
-
-    idea.proposed_title = "A small team gardening workflow checklist"
-    idea.proposed_angle = "A seasonal planting checklist for a tiny office garden"
-    one_generic_anchor = _evaluate_nich1_preflight(
-        _Session(), data=request, evidence_refs=[]
-    )
-    assert one_generic_anchor is not None
-    assert one_generic_anchor["decision"] == "BLOCK"
-    assert one_generic_anchor["topic_gate"]["verdict"] == "BLOCK"
-
-    idea.proposed_title = "How small teams audit an AI support workflow"
-    idea.proposed_angle = "A bounded checklist for repetitive support work"
-    idea.rationale["channel_fit_score"] = 0.2
-    blocked = _evaluate_nich1_preflight(_Session(), data=request, evidence_refs=[])
-    assert blocked is not None
-    assert blocked["decision"] == "BLOCK"
-    assert blocked["policy_fit_state"] == "BLOCK"
-
-
-def test_daily_llm_uses_prompt_registry_and_router_without_direct_provider() -> None:
-    scope = _authority()
-    llm_run_id = uuid.uuid4()
-    prompt_render_run_id = uuid.uuid4()
-    prompt_audit_snapshot_id = uuid.uuid4()
-    routed_calls: list[dict] = []
-    rendered_requests: list[object] = []
-    validated_requests: list[object] = []
-    daily_run = SimpleNamespace(
-        id=uuid.uuid4(),
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        policy_snapshot_id=scope.snapshot.id,
-    )
-    context_pack = SimpleNamespace(
-        id=uuid.uuid4(),
-        pack_hash="c" * 64,
-        pack_content={
-            "editorial_slot": {
-                "id": str(scope.slot.id),
-                "production_goal": scope.slot.production_goal,
-            },
-            "agent_context_pack": {
-                "agent_key": "DailyIdeaAgent",
-                "digests": {"niche_contract_digest": _digest(scope).model_dump(mode="json")},
-            },
-        },
-        evidence_refs=[{"type": "offline_fixture", "id": "daily-router"}],
-        input_refs=[{"type": "editorial_calendar_slot", "id": str(scope.slot.id)}],
-    )
-    llm_run = SimpleNamespace(id=llm_run_id, status="COMPLETED")
-
-    class _Session:
-        def get(self, model, identifier):
-            if model is CompiledChannelPolicySnapshot and identifier == scope.snapshot.id:
-                return scope.snapshot
-            if identifier == llm_run_id:
-                return llm_run
-            return None
-
-    envelope = {
-        "contract_version": "m12.1.0",
-        "agent_key": "DailyIdeaAgent",
-        "status": "OK",
-        "confidence_label": "HIGH",
-        "evidence_refs": context_pack.evidence_refs,
-        "limitations": [],
-        "next_action": "Run deterministic niche gates.",
-        "operator_summary_vi": "Ý tưởng hằng ngày đã được tạo từ context đóng băng.",
-        "technical_appendix": {},
-        "artifact": {
-            "proposed_title": "Audit one small-team support workflow",
-            "proposed_angle": "Show the bounded mechanism and human handoff",
-            "proposed_format": "long-form documentary/explainer",
-            "proposed_pillar": scope.slot.content_pillar,
-            "proposed_series_key": scope.slot.series_key,
-            "audience_problem": "Repeated support work lacks an auditable handoff.",
-            "search_intent_hypothesis": {"query": "small team AI workflow audit"},
-            "rationale": {"digest_bound": True},
-            "channel_fit_score": 0.91,
-            "channel_fit_evidence": _daily_criterion_evidence(score=0.91),
-        },
-    }
-
-    class _Registry:
-        def render_prompt(self, request):
-            rendered_requests.append(request)
-            return SimpleNamespace(
-                status="OK",
-                router_lane="cheap_structured",
-                rendered_messages=[
-                    SimpleNamespace(
-                        model_dump=lambda: {"role": "user", "content": "bounded daily idea"}
-                    )
-                ],
-                prompt_render_run_id=prompt_render_run_id,
-                prompt_audit_snapshot_id=prompt_audit_snapshot_id,
-                reason_codes=[],
-            )
-
-        def validate_output(self, request):
-            validated_requests.append(request)
-            return SimpleNamespace(
-                status="OK",
-                parsed_output=envelope,
-                validation_result={"schema": "PASS"},
-                reason_codes=[],
-            )
-
-    class _Router:
-        def route(self, **kwargs):
-            routed_calls.append(kwargs)
-            return SimpleNamespace(
-                status="SUCCESS",
-                structured_output=envelope,
-                content=None,
-                llm_run_snapshot_id=llm_run_id,
-                provider_attempt_id=None,
-                reason_codes=["OFFLINE_ROUTER_FIXTURE"],
-            )
-
-    result = LLMWorkflowService(
-        _Session(), llm_router=_Router(), prompt_registry=_Registry()
-    ).run_authority(
-        daily_run=daily_run,
-        context_pack=context_pack,
-        provider_key="llm_router",
-        quota_account_id=None,
-        budget_policy_key=None,
-        estimated_cost=Decimal("0"),
-        correlation_id="nich1-daily-router-offline",
-    )
-
-    assert result.terminal_status == "COMPLETED"
-    assert Decimal(str(result.proposal["channel_fit_score"])) == Decimal("0.91")
-    assert len(rendered_requests) == len(validated_requests) == len(routed_calls) == 1
-    assert rendered_requests[0].agent_key == "DailyIdeaAgent"
-    assert routed_calls[0]["lane_name"] == "cheap_structured"
-    assert routed_calls[0]["requested_task_type"] == "daily_idea"
-    assert routed_calls[0]["response_format"] == "json"
-    assert result.provider_attempt is None
-    assert result.budget_gate_result["decision"] == "PASS"
-    assert result.budget_gate_result["source"] == "compiled_channel_policy_snapshot"
-
-
-def test_daily_llm_cannot_bypass_frozen_cost_cap_with_optional_budget_policy() -> None:
-    scope = _authority()
-    daily_run = SimpleNamespace(
-        id=uuid.uuid4(),
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        policy_snapshot_id=scope.snapshot.id,
-    )
-    context_pack = SimpleNamespace(
-        id=uuid.uuid4(),
-        pack_hash="c" * 64,
-        pack_content={
-            "editorial_slot": {
-                "id": str(scope.slot.id),
-                "production_goal": scope.slot.production_goal,
-            }
-        },
-        evidence_refs=[],
-        input_refs=[{"type": "editorial_calendar_slot", "id": str(scope.slot.id)}],
-    )
-
-    class _Session:
-        def get(self, model, identifier):
-            if model is CompiledChannelPolicySnapshot and identifier == scope.snapshot.id:
-                return scope.snapshot
-            return None
-
-    workflow = LLMWorkflowService(_Session())
-    workflow._blocked_run = lambda **kwargs: SimpleNamespace(  # type: ignore[method-assign]
-        terminal_status="BLOCKED",
-        reason_codes=kwargs["reason_codes"],
-        budget_gate_result=kwargs.get("budget_gate_result") or {},
-    )
-    result = workflow.run_authority(
-        daily_run=daily_run,
-        context_pack=context_pack,
-        provider_key="llm_router",
-        quota_account_id=None,
-        budget_policy_key="otherwise-permissive-runtime-policy",
-        estimated_cost=Decimal("1.01"),
-        correlation_id="nich1-frozen-cost-cap",
-    )
-
-    assert result.terminal_status == "BLOCKED"
-    assert "ESTIMATED_COST_EXCEEDS_FROZEN_CAP" in result.reason_codes
-    assert result.budget_gate_result["source"] == "compiled_channel_policy_snapshot"
-    assert result.budget_gate_result["decision"] == "BLOCK"
-
-
-@pytest.mark.parametrize(
-    ("agent_status", "validation_status", "expected_terminal"),
-    [
-        ("REVIEW_REQUIRED", "OK", "BLOCKED"),
-        ("BLOCK", "BLOCK", "BLOCKED"),
-    ],
-)
-def test_daily_llm_propagates_non_ok_agent_envelope(
-    agent_status: str,
-    validation_status: str,
-    expected_terminal: str,
-) -> None:
-    scope = _authority()
-    llm_run_id = uuid.uuid4()
-    daily_run = SimpleNamespace(
-        id=uuid.uuid4(),
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        policy_snapshot_id=scope.snapshot.id,
-    )
-    context_pack = SimpleNamespace(
-        id=uuid.uuid4(),
-        pack_hash="c" * 64,
-        pack_content={
-            "editorial_slot": {
-                "id": str(scope.slot.id),
-                "production_goal": scope.slot.production_goal,
-            }
-        },
-        evidence_refs=[],
-        input_refs=[],
-    )
-
-    class _Session:
-        def get(self, model, identifier):
-            if model is CompiledChannelPolicySnapshot and identifier == scope.snapshot.id:
-                return scope.snapshot
-            if identifier == llm_run_id:
-                return SimpleNamespace(id=llm_run_id, status="COMPLETED")
-            return None
-
-    class _Registry:
-        def render_prompt(self, request):
-            return SimpleNamespace(
-                status="OK",
-                router_lane="cheap_structured",
-                rendered_messages=[],
-                prompt_render_run_id=uuid.uuid4(),
-                prompt_audit_snapshot_id=uuid.uuid4(),
-                reason_codes=[],
-            )
-
-        def validate_output(self, request):
-            return SimpleNamespace(
-                status=validation_status,
-                reason_codes=["AGENT_DECLARED_NON_OK"],
-                parsed_output={"status": agent_status},
-            )
-
-    class _Router:
-        def route(self, **kwargs):
-            return SimpleNamespace(
-                status="SUCCESS",
-                structured_output={"status": agent_status},
-                content=None,
-                llm_run_snapshot_id=llm_run_id,
-                provider_attempt_id=None,
-                reason_codes=[],
-            )
-
-    result = LLMWorkflowService(
-        _Session(),
-        llm_router=_Router(),
-        prompt_registry=_Registry(),
-    ).run_authority(
-        daily_run=daily_run,
-        context_pack=context_pack,
-        provider_key="llm_router",
-        quota_account_id=None,
-        budget_policy_key=None,
-        estimated_cost=Decimal("0"),
-        correlation_id="nich1-agent-non-ok",
-    )
-
-    assert result.terminal_status == expected_terminal
-    assert result.proposal is None
-    assert "AGENT_DECLARED_NON_OK" in result.reason_codes
-
-
-def test_daily_llm_success_without_persisted_run_snapshot_fails_closed() -> None:
-    scope = _authority()
-    daily_run = SimpleNamespace(
-        id=uuid.uuid4(),
-        company_id=scope.channel.company_id,
-        channel_workspace_id=scope.channel.id,
-        policy_snapshot_id=scope.snapshot.id,
-    )
-    context_pack = SimpleNamespace(
-        id=uuid.uuid4(),
-        pack_hash="c" * 64,
-        pack_content={
-            "editorial_slot": {
-                "id": str(scope.slot.id),
-                "production_goal": scope.slot.production_goal,
-            }
-        },
-        evidence_refs=[],
-        input_refs=[],
-    )
-
-    class _Session:
-        def get(self, model, identifier):
-            if model is CompiledChannelPolicySnapshot and identifier == scope.snapshot.id:
-                return scope.snapshot
-            return None
-
-    class _Registry:
-        def render_prompt(self, request):
-            return SimpleNamespace(
-                status="OK",
-                router_lane="cheap_structured",
-                rendered_messages=[],
-                prompt_render_run_id=uuid.uuid4(),
-                prompt_audit_snapshot_id=uuid.uuid4(),
-                reason_codes=[],
-            )
-
-        def validate_output(self, request):
-            raise AssertionError("validation must not run without an LLMRunSnapshot")
-
-    class _Router:
-        def route(self, **kwargs):
-            return SimpleNamespace(
-                status="SUCCESS",
-                structured_output={"status": "OK"},
-                content=None,
-                llm_run_snapshot_id=None,
-                provider_attempt_id=None,
-                reason_codes=["OFFLINE_BROKEN_ROUTER_FIXTURE"],
-            )
-
-    result = LLMWorkflowService(
-        _Session(),
-        llm_router=_Router(),
-        prompt_registry=_Registry(),
-    ).run_authority(
-        daily_run=daily_run,
-        context_pack=context_pack,
-        provider_key="llm_router",
-        quota_account_id=None,
-        budget_policy_key=None,
-        estimated_cost=Decimal("0"),
-        correlation_id="nich1-missing-llm-run",
-    )
-
-    assert result.terminal_status == "FAILED"
-    assert result.proposal is None
-    assert "LLM_RUN_SNAPSHOT_REQUIRED" in result.reason_codes
 
 
 def test_script_contract_digest_projects_bounded_niche_fields_and_ref_hash() -> None:

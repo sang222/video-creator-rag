@@ -56,6 +56,7 @@ class NativeQualificationService:
     ) -> NativeQualificationRenderResult:
         """Verify the request against profile/policy duration authority before render."""
 
+        _require_long_form(request.production_lane)
         resolved = ChannelDurationContractResolver(session).resolve(
             profile_version_id=request.channel_profile_version_id,
             policy_snapshot_id=request.duration_contract.source_policy_snapshot_id,
@@ -71,6 +72,7 @@ class NativeQualificationService:
         self,
         request: NativeQualificationRenderRequest,
     ) -> NativeQualificationRenderResult:
+        _require_long_form(request.production_lane)
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
         if not ffmpeg or not ffprobe:
@@ -264,6 +266,7 @@ class NativeQualificationService:
         It is replay-safe under a project row lock.
         """
 
+        _require_long_form(request.production_lane)
         self._validate_render_archive_binding(
             request=request,
             render=render,
@@ -280,6 +283,7 @@ class NativeQualificationService:
             or project.company_id != request.company_id
             or project.channel_workspace_id != request.channel_workspace_id
             or project.production_lane != request.production_lane.value
+            or project.planning_source_type != "LONG_FORM_PLAN"
             or project.channel_profile_version_id != request.channel_profile_version_id
         ):
             raise RuntimeError("NATIVE_QUALIFICATION_PROJECT_SCOPE_MISMATCH")
@@ -338,18 +342,10 @@ class NativeQualificationService:
                     request.production_package_artifact_version_id
                 ),
                 production_package_hash=request.production_package_hash,
-                media_type=(
-                    "LONG_FORM_FINAL"
-                    if request.production_lane == ProductionLane.LONG_FORM
-                    else "SHORT_FINAL"
-                ),
+                media_type="LONG_FORM_FINAL",
                 file_ref=file_ref,
                 duration_seconds=Decimal(str(render.duration_seconds)),
-                aspect_ratio=(
-                    "16:9"
-                    if request.production_lane == ProductionLane.LONG_FORM
-                    else "9:16"
-                ),
+                aspect_ratio="16:9",
                 resolution=f"{render.width}x{render.height}",
                 provider_key="native_ffmpeg",
                 provider_type=LOCAL_RENDERER_CAPABILITY,
@@ -439,11 +435,7 @@ class NativeQualificationService:
             video_project_id=request.video_project_id,
             uploaded_video_id=None,
             render_package_id=None,
-            media_type=(
-                "LONG_FORM_FINAL"
-                if request.production_lane == ProductionLane.LONG_FORM
-                else "SHORT_FINAL"
-            ),
+            media_type="LONG_FORM_FINAL",
             upload_result=upload,
             verification=verification,
             local_source_path_hash=render.output_checksum,
@@ -552,14 +544,13 @@ class NativeQualificationService:
 
 
 def _output_geometry(lane: ProductionLane) -> tuple[int, int, str]:
-    if lane == ProductionLane.LONG_FORM:
-        return 1920, 1080, "YT_LONG_1080P30_SDR_H264_VT"
-    if lane in {
-        ProductionLane.DAILY_SHORT,
-        ProductionLane.LONG_DERIVED_SHORT,
-    }:
-        return 1080, 1920, "YT_SHORT_1080X1920_30_SDR_H264_VT"
-    raise ValueError(f"UNSUPPORTED_PRODUCTION_LANE:{lane}")
+    _require_long_form(lane)
+    return 1920, 1080, "YT_LONG_1080P30_SDR_H264_VT"
+
+
+def _require_long_form(lane: ProductionLane) -> None:
+    if lane != ProductionLane.LONG_FORM:
+        raise ValueError("NATIVE_QUALIFICATION_LONG_FORM_ONLY")
 
 
 def _sha256_file(path: Path) -> str:

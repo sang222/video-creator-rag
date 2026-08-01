@@ -2,19 +2,54 @@ import math
 import uuid
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
-AnalyticsPlatform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
-AnalyticsSyncMode = Literal["MANUAL_IMPORT", "CSV_IMPORT", "REAL_DISABLED", "YOUTUBE_PUBLIC_MONITOR", "YOUTUBE_OWNER_ANALYTICS"]
-AnalyticsSyncState = Literal["PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
-AnalyticsObservationWindow = Literal["T_PLUS_1H", "T_PLUS_6H", "T_PLUS_24H", "T_PLUS_48H", "T_PLUS_7D", "CUSTOM", "UNKNOWN"]
-MetricGroup = Literal["REACH", "ENGAGEMENT", "RETENTION", "TRAFFIC", "AUDIENCE", "REVENUE_DISABLED", "OTHER"]
-MetricUnit = Literal["COUNT", "PERCENT", "SECONDS", "MINUTES", "RATIO", "CURRENCY", "UNKNOWN"]
+AnalyticsPlatform = Literal["YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
+AnalyticsSyncMode = Literal[
+    "MANUAL_IMPORT",
+    "CSV_IMPORT",
+    "REAL_DISABLED",
+    "YOUTUBE_PUBLIC_MONITOR",
+    "YOUTUBE_OWNER_ANALYTICS",
+]
+AnalyticsSyncState = Literal[
+    "PENDING", "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"
+]
+AnalyticsObservationWindow = Literal[
+    "T_PLUS_1H",
+    "T_PLUS_6H",
+    "T_PLUS_24H",
+    "T_PLUS_48H",
+    "T_PLUS_7D",
+    "CUSTOM",
+    "UNKNOWN",
+]
+MetricGroup = Literal[
+    "REACH",
+    "ENGAGEMENT",
+    "RETENTION",
+    "TRAFFIC",
+    "AUDIENCE",
+    "REVENUE_DISABLED",
+    "OTHER",
+]
+MetricUnit = Literal[
+    "COUNT", "PERCENT", "SECONDS", "MINUTES", "RATIO", "CURRENCY", "UNKNOWN"
+]
 MetricDefinitionStatus = Literal["ACTIVE", "DISABLED", "DEPRECATED"]
 MetricFreshnessState = Literal["FRESH", "STALE", "UNKNOWN", "NOT_AVAILABLE"]
 MetricConfidenceLevel = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
-UploadedVideoAnalyticsMonitoringState = Literal["READY_FOR_ANALYTICS", "SYNCED", "PARTIAL_DATA", "NO_DATA_YET", "STALE", "BLOCKED"]
+UploadedVideoAnalyticsMonitoringState = Literal[
+    "READY_FOR_ANALYTICS", "SYNCED", "PARTIAL_DATA", "NO_DATA_YET", "STALE", "BLOCKED"
+]
 MetricAvailabilityState = Literal["AVAILABLE", "UNKNOWN", "NOT_AVAILABLE"]
 
 
@@ -138,7 +173,9 @@ class TrafficSourceItem(BaseModel):
         if value is None:
             return None
         if isinstance(value, bool) or not math.isfinite(float(value)) or value < 0:
-            raise ValueError("traffic source numeric values must be finite and non-negative")
+            raise ValueError(
+                "traffic source numeric values must be finite and non-negative"
+            )
         return value
 
     @field_validator("percentage")
@@ -172,7 +209,9 @@ class RetentionCurvePoint(BaseModel):
         if value is None:
             return None
         if not math.isfinite(value) or value < 0:
-            raise ValueError("viewers_remaining_estimate must be finite and non-negative")
+            raise ValueError(
+                "viewers_remaining_estimate must be finite and non-negative"
+            )
         return value
 
 
@@ -196,12 +235,18 @@ class AnalyticsProviderOutputContract(BaseModel):
 
     @field_validator("metrics", "engagement")
     @classmethod
-    def validate_numeric_blob(cls, value: dict[str, Any] | None) -> dict[str, float] | None:
+    def validate_numeric_blob(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, float] | None:
         return _validate_metric_blob(value)
 
     @model_validator(mode="after")
     def validate_observed_range(self) -> "AnalyticsProviderOutputContract":
-        if self.observed_from and self.observed_to and self.observed_from > self.observed_to:
+        if (
+            self.observed_from
+            and self.observed_to
+            and self.observed_from > self.observed_to
+        ):
             raise ValueError("observed_from must be before observed_to")
         return self
 
@@ -228,7 +273,9 @@ class ManualAnalyticsImportContract(BaseModel):
 
     @field_validator("metrics", "engagement")
     @classmethod
-    def validate_manual_numeric_blob(cls, value: dict[str, Any] | None) -> dict[str, float] | None:
+    def validate_manual_numeric_blob(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, float] | None:
         return _validate_metric_blob(value)
 
     @field_validator("duration_seconds")
@@ -240,16 +287,28 @@ class ManualAnalyticsImportContract(BaseModel):
 
     @model_validator(mode="after")
     def validate_manual_import(self) -> "ManualAnalyticsImportContract":
-        if self.observed_from and self.observed_to and self.observed_from > self.observed_to:
+        if (
+            self.observed_from
+            and self.observed_to
+            and self.observed_from > self.observed_to
+        ):
             raise ValueError("observed_from must be before observed_to")
         if self.strict_metric_keys:
-            unknown = sorted(key for key in self.metrics if key not in KNOWN_ANALYTICS_METRICS)
+            unknown = sorted(
+                key for key in self.metrics if key not in KNOWN_ANALYTICS_METRICS
+            )
             if unknown:
                 raise ValueError(f"unknown metric keys: {', '.join(unknown)}")
         if self.duration_seconds is not None and self.retention_curve:
-            out_of_range = [point.time_seconds for point in self.retention_curve if point.time_seconds > self.duration_seconds]
+            out_of_range = [
+                point.time_seconds
+                for point in self.retention_curve
+                if point.time_seconds > self.duration_seconds
+            ]
             if out_of_range:
-                raise ValueError("retention time_seconds must be within duration_seconds")
+                raise ValueError(
+                    "retention time_seconds must be within duration_seconds"
+                )
         return self
 
 

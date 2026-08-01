@@ -184,11 +184,11 @@ class ProductionWorkflowRun(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "production_lane in ('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT')",
+            "production_lane = 'LONG_FORM'",
             name="production_workflow_runs_lane",
         ),
         CheckConstraint(
-            "planning_source_type in ('DAILY_IDEA','LONG_FORM_PLAN','DERIVED_SHORT')",
+            "planning_source_type = 'LONG_FORM_PLAN'",
             name="production_workflow_runs_planning_source",
         ),
         CheckConstraint(

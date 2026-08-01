@@ -1,5 +1,5 @@
 catalog_key: niche_profile_templates
-catalog_version: "1.0.0"
+catalog_version: "2.0.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -21,22 +21,11 @@ items:
         maximum_duration_ms: 720000
         duration_contract_version: channel-duration-contract.v2
       duration_contracts:
-        DAILY_SHORT:
-          minimum_duration_ms: 15000
-          target_duration_ms: 45000
-          maximum_duration_ms: 60000
-          duration_contract_version: channel-duration-contract.v2
         LONG_FORM:
           minimum_duration_ms: 360000
           target_duration_ms: 540000
           maximum_duration_ms: 720000
           duration_contract_version: channel-duration-contract.v2
-        LONG_DERIVED_SHORT:
-          minimum_duration_ms: 15000
-          target_duration_ms: 45000
-          maximum_duration_ms: 60000
-          duration_contract_version: channel-duration-contract.v2
-      shorts_role: tofu
       cadence_bias: practical walkthroughs and concise explainers
     risk_tolerance: low_to_medium
     media_style:
@@ -54,7 +43,6 @@ items:
       cite_when: claim is non-obvious
     platform_strategy:
       primary: youtube_long_form
-      secondary: youtube_shorts
     human_review_strictness: moderate
     default_content_pillars:
       - AI automation workflows
@@ -70,9 +58,50 @@ items:
     default_runway:
       - title: AI automation stack for solo SaaS operators
         format: long_form
-      - title: Three workflow diagrams that reduce support load
-        format: shorts
     default_policies:
       review: human_review_for_non_obvious_claims
       safety: avoid unsupported revenue or performance guarantees
       sourcing: cite software/business claims when non-obvious
+      channel_contract:
+        channel_identity:
+          niche: Practical AI for small professional teams
+          positioning: Evidence-aware AI operations for lean teams
+          brand_promise: Turn repeated work into bounded, auditable workflows
+        target_audience:
+          primary_persona: small-team operators
+          audience_level: professional_dense
+          pain_points:
+            - repetitive support work
+            - unclear automation risk
+          desired_outcome: Adopt auditable workflows without unsupported claims
+        market_locale:
+          primary_market: US
+          audience_locale: en-US
+          content_language: en
+          operator_language: vi
+          timezone: America/New_York
+          currency: USD
+          measurement_units: US_WITH_METRIC_WHEN_RELEVANT
+          date_format: MMM D, YYYY
+        editorial_strategy:
+          allowed_topics:
+            - AI workflow
+            - small-team operations
+            - SaaS automation
+          forbidden_topics:
+            - medical guarantees
+            - crypto trading
+        voice_style:
+          narration_tone: professional calm documentary explainer
+          pacing: measured
+          allowed_style:
+            - evidence-aware
+          forbidden_style:
+            - hype
+        platform_strategy:
+          primary_platform: YouTube
+          publish_mode: human_handoff_only
+          auto_publish_allowed: false
+          studio_scraping_allowed: false
+        media_policy:
+          niche_visual_source_profile: STOCK_ASSISTED

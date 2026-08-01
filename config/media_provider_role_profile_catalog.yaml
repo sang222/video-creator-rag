@@ -1,5 +1,5 @@
 catalog_key: media_provider_role_profile_catalog
-catalog_version: "1.0.2"
+catalog_version: "2.0.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -30,7 +30,7 @@ items:
   - provider_key: elevenlabs
     provider_name: ElevenLabs
     provider_type: API_NATIVE_TTS
-    role_description: "Voice generation only: long narration, short narration, segments, and usage metadata."
+    role_description: "Voice generation only: long-form narration, segments, and usage metadata."
     recommendation: CORE_QUALITY_LAYER
     is_enabled: true
     is_real_provider: true
@@ -56,7 +56,7 @@ items:
   - provider_key: google_veo
     provider_name: Google Veo API
     provider_type: AI_VIDEO_HERO_PROVIDER
-    role_description: Google Veo API provider for opening hooks, key metaphors, and short AI hero clips only.
+    role_description: Google Veo API provider for opening hooks and key metaphors in long-form productions.
     recommendation: CORE_QUALITY_LAYER
     is_enabled: true
     is_real_provider: true
@@ -78,9 +78,7 @@ items:
         opening_hook: google_veo
         key_metaphor: google_veo
         thumbnail_background: human_approved_still_or_template_composition
-        shorts_default: reuse_or_crop_long_form_hero
         workflow_data_diagram: native_ffmpeg_renderer
-        per_short_ai_hero_default: false
     notes: Sole external AI hero provider. Execution and PA1R smoke are disabled by default; no external provider fallback.
   - provider_key: native_ffmpeg_renderer
     provider_name: NativeFFmpegRenderer
@@ -133,7 +131,7 @@ items:
   - provider_key: paid_stock_provider_deferred
     provider_name: Paid stock providers
     provider_type: API_NATIVE_STOCK_PROVIDER
-    role_description: Paid stock API providers deferred from daily backbone.
+    role_description: Paid stock API providers deferred from the production backbone.
     recommendation: DEFERRED
     is_enabled: false
     is_real_provider: true
@@ -157,12 +155,11 @@ items:
   - provider_key: envato_manual_library
     provider_name: Envato/manual stock library
     provider_type: DEFERRED_MANUAL_LIBRARY
-    role_description: Manual library, not daily automated production backbone.
+    role_description: Manual library outside the automated production backbone.
     recommendation: DEFERRED
     is_enabled: false
     is_real_provider: false
     supports_real_execution: false
     monthly_budget_assumption:
       mode: QUALITY_FIRST_250
-      daily_backbone: false
     notes: Manual library only; no automated Envato integration in M10.4.

@@ -110,12 +110,6 @@ class FinalReviewCandidate(Base):
     )
     episode_number: Mapped[int | None] = mapped_column(Integer)
     standalone_reason_code: Mapped[str | None] = mapped_column(String(160))
-    parent_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("video_projects.id")
-    )
-    parent_final_media_ref_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("final_media_refs.id")
-    )
     publish_metadata_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict
     )
@@ -139,7 +133,7 @@ class FinalReviewCandidate(Base):
             name="ck_final_review_candidates_archive_verified",
         ),
         CheckConstraint(
-            "production_lane in ('DAILY_SHORT','LONG_FORM','LONG_DERIVED_SHORT')",
+            "production_lane = 'LONG_FORM'",
             name="ck_final_review_candidates_production_lane",
         ),
         CheckConstraint(
@@ -158,12 +152,6 @@ class FinalReviewCandidate(Base):
             "and episode_number is null "
             "and standalone_reason_code is not null)",
             name="ck_final_review_candidates_assignment",
-        ),
-        CheckConstraint(
-            "(production_lane <> 'LONG_DERIVED_SHORT') or "
-            "(parent_video_project_id is not null "
-            "and parent_final_media_ref_id is not null)",
-            name="ck_final_review_candidates_parent_lineage",
         ),
         CheckConstraint(
             "production_package_hash ~ '^[0-9a-f]{64}$' "

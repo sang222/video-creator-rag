@@ -23,9 +23,8 @@ import type {
   ManualPublish,
   ManualPublishConfirmationInput,
   OpsQueue,
-  OperatorPlanningCatalog,
-  OperatorPlanningLaunch,
-  OperatorPlanningPrepare,
+  CadenceEvaluation,
+  LaunchCadenceDashboard,
   PackagingApplyApprovedChangesResult,
   PackagingPatchApplyRun,
   PackagingPatchApprovalDecision,
@@ -126,7 +125,7 @@ export const queryKeys = {
     "production-cockpit",
     projectId ?? "next"
   ],
-  operatorPlanning: ["operator-planning"]
+  launchCadence: (channelId: string) => ["launch-cadence", channelId]
 } as const;
 
 export function getCurrentUser() {
@@ -156,99 +155,37 @@ export function getProductionCockpit(projectId?: string) {
   );
 }
 
-export function getOperatorPlanningCatalog() {
-  return request<OperatorPlanningCatalog>("/operator-planning/catalog");
+export function getLaunchCadenceDashboard(channelId: string) {
+  return request<LaunchCadenceDashboard>(
+    `/channels/${channelId}/launch-cadence`
+  );
 }
 
-export function prepareOperatorPlanningSource(input: {
-  sourceType: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
-  sourceId: string;
-  maxBudgetUsd?: number;
-}) {
-  return request<OperatorPlanningPrepare>("/operator-planning/prepare", {
+export function pauseLaunchCadence(channelId: string) {
+  return request<LaunchCadenceDashboard>(
+    `/channels/${channelId}/launch-cadence/pause`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason_code: "OPERATOR_PAUSE" })
+    }
+  );
+}
+
+export function resumeLaunchCadence(channelId: string) {
+  return request<LaunchCadenceDashboard>(
+    `/channels/${channelId}/launch-cadence/resume`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason_code: "OPERATOR_RESUME" })
+    }
+  );
+}
+
+export function evaluateCadence(channelId: string) {
+  return request<CadenceEvaluation>("/cadence/evaluate", {
     method: "POST",
-    body: JSON.stringify({
-      source_type: input.sourceType,
-      source_id: input.sourceId,
-      max_budget_usd: input.maxBudgetUsd ?? 0
-    })
+    body: JSON.stringify({ channel_workspace_id: channelId })
   });
-}
-
-export function prepareAndLaunchOperatorPlanningSource(input: {
-  sourceType: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN";
-  sourceId: string;
-  maxBudgetUsd?: number;
-}) {
-  return request<OperatorPlanningLaunch>("/operator-planning/launch", {
-    method: "POST",
-    body: JSON.stringify({
-      source_type: input.sourceType,
-      source_id: input.sourceId,
-      max_budget_usd: input.maxBudgetUsd ?? 0,
-      idempotency_key: operatorPlanningIdempotencyKey(
-        input.sourceType,
-        input.sourceId
-      )
-    })
-  });
-}
-
-function operatorPlanningIdempotencyKey(
-  sourceType: "DAILY_SLOT" | "DAILY_IDEA" | "LONG_FORM_PLAN",
-  sourceId: string
-) {
-  return `operator-planning:${sourceType}:${sourceId}`;
-}
-
-export function launchDailyShortPlanning(
-  dailyIdeaDecisionId: string,
-  maxBudgetUsd = 0
-) {
-  return request<OperatorPlanningLaunch>(
-    "/operator-planning/daily-short/launch",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        daily_idea_decision_id: dailyIdeaDecisionId,
-        max_budget_usd: maxBudgetUsd,
-        idempotency_key: operatorPlanningIdempotencyKey(
-          "DAILY_IDEA",
-          dailyIdeaDecisionId
-        )
-      })
-    }
-  );
-}
-
-export function launchLongFormPlanning(input: {
-  editorialCalendarSlotId: string;
-  maxBudgetUsd?: number;
-}) {
-  return request<OperatorPlanningLaunch>(
-    "/operator-planning/long-form/launch",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        editorial_calendar_slot_id: input.editorialCalendarSlotId,
-        max_budget_usd: input.maxBudgetUsd ?? 0,
-        idempotency_key: operatorPlanningIdempotencyKey(
-          "LONG_FORM_PLAN",
-          input.editorialCalendarSlotId
-        )
-      })
-    }
-  );
-}
-
-export function startProjectProduction(projectId: string, companyId: string) {
-  return request<Record<string, unknown>>(
-    `/video-projects/${projectId}/production-workflow/start?company_id=${encodeURIComponent(companyId)}`,
-    {
-      method: "POST",
-      body: JSON.stringify({})
-    }
-  );
 }
 
 export function resumeProductionWorkflow(workflowRunId: string, companyId: string) {
@@ -891,13 +828,7 @@ export type ChannelInitInput = {
   long_form_enabled: boolean;
   long_form_min_minutes: number;
   long_form_max_minutes: number;
-  shorts_enabled: boolean;
-  shorts_min_seconds: number;
-  shorts_max_seconds: number;
-  shorts_hard_max_seconds: number;
-  captions_required: boolean;
   chapters_required_for_long_form: boolean;
-  derivative_shorts_per_long_form: number;
   narration_tone: string;
   pacing: string;
   allowed_style: string;
@@ -921,13 +852,6 @@ export async function initChannel(input: ChannelInitInput) {
       target_duration_minutes: { min: input.long_form_min_minutes, max: input.long_form_max_minutes },
       structure: ["hook", "problem", "mechanism", "result", "takeaway"],
       chapters_required: input.chapters_required_for_long_form
-    },
-    shorts: {
-      enabled: input.shorts_enabled,
-      target_duration_seconds: { min: input.shorts_min_seconds, max: input.shorts_max_seconds },
-      hard_max_seconds: input.shorts_hard_max_seconds,
-      captions_required: input.captions_required,
-      shorts_per_long_form: input.derivative_shorts_per_long_form
     }
   };
   const channelContract = {
@@ -1084,7 +1008,7 @@ export async function initChannel(input: ChannelInitInput) {
         platform_strategy: channelContract.platform_strategy,
         human_review_strictness: "strict",
         content_pillars: contentPillars.length ? contentPillars : [input.niche],
-        series_plan: [{ key: "operator_series", name: input.niche, format: "long_form_and_shorts" }],
+        series_plan: [{ key: "operator_series", name: input.niche, format: "long_form" }],
         initial_content_runway: [{ title: input.niche, format: "long_form" }],
         policies: {
           review: "human_review_for_non_obvious_claims",
@@ -1111,7 +1035,7 @@ export function activateChannel(channelId: string, snapshotId?: string) {
 export function postLifecycleDecision(channelId: string, action: string, reason?: string) {
   return request<Record<string, unknown>>(`/channels/${channelId}/lifecycle-decision`, {
     method: "POST",
-    body: JSON.stringify({ action, reason: reason ?? `Operator activated channel via CTA`, actor_role: "OWNER_ADMIN" })
+    body: JSON.stringify({ action, reason: reason ?? "Operator activated channel via CTA" })
   });
 }
 

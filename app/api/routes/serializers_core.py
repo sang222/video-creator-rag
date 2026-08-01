@@ -2,6 +2,7 @@ from app.api.routes.imports import (
     Any,
 )
 
+
 def _company(company: Any) -> dict[str, Any]:
     return {
         "id": company.id,
@@ -38,7 +39,9 @@ def _channel(channel: Any) -> dict[str, Any]:
     }
 
 
-def _channel_init_draft(draft: Any, latest_contract_draft: Any | None) -> dict[str, Any]:
+def _channel_init_draft(
+    draft: Any, latest_contract_draft: Any | None
+) -> dict[str, Any]:
     return {
         "id": draft.id,
         "company_id": draft.company_id,
@@ -58,7 +61,9 @@ def _channel_init_draft(draft: Any, latest_contract_draft: Any | None) -> dict[s
         "channel_id": draft.channel_id,
         "channel_profile_version_id": draft.channel_profile_version_id,
         "compiled_policy_snapshot_id": draft.compiled_policy_snapshot_id,
-        "latest_contract_draft": _channel_contract_draft(latest_contract_draft) if latest_contract_draft else None,
+        "latest_contract_draft": _channel_contract_draft(latest_contract_draft)
+        if latest_contract_draft
+        else None,
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
     }
@@ -136,20 +141,41 @@ def _snapshot(snapshot: Any) -> dict[str, Any]:
 
 def _snapshot_with_contract_state(snapshot: Any) -> dict[str, Any]:
     payload = snapshot.compiled_payload if snapshot is not None else {}
-    contract = payload.get("channel_contract_json") if isinstance(payload, dict) and isinstance(payload.get("channel_contract_json"), dict) else {}
-    status_value = contract.get("contract_status") or payload.get("contract_status") if isinstance(payload, dict) else "MISSING"
-    missing_fields = contract.get("missing_fields") or payload.get("missing_fields") if isinstance(payload, dict) else []
-    contradiction_reasons = contract.get("contradiction_reasons") or payload.get("contradiction_reasons") if isinstance(payload, dict) else []
+    contract = (
+        payload.get("channel_contract_json")
+        if isinstance(payload, dict)
+        and isinstance(payload.get("channel_contract_json"), dict)
+        else {}
+    )
+    status_value = (
+        contract.get("contract_status") or payload.get("contract_status")
+        if isinstance(payload, dict)
+        else "MISSING"
+    )
+    missing_fields = (
+        contract.get("missing_fields") or payload.get("missing_fields")
+        if isinstance(payload, dict)
+        else []
+    )
+    contradiction_reasons = (
+        contract.get("contradiction_reasons") or payload.get("contradiction_reasons")
+        if isinstance(payload, dict)
+        else []
+    )
     return {
         **_snapshot(snapshot),
         "channel_contract_json": contract or None,
-        "compiled_policy_snapshot_json": payload.get("compiled_policy_snapshot_json") if isinstance(payload, dict) else None,
+        "compiled_policy_snapshot_json": payload.get("compiled_policy_snapshot_json")
+        if isinstance(payload, dict)
+        else None,
         "contract_status": status_value or "MISSING",
         "missing_fields": missing_fields or [],
         "contradiction_reasons": contradiction_reasons or [],
         "next_action": contract.get("next_action")
         or (
-            "Kích hoạt kênh." if status_value == "COMPLETE" else "Bổ sung hồ sơ kênh và compile lại policy snapshot."
+            "Kích hoạt kênh."
+            if status_value == "COMPLETE"
+            else "Bổ sung hồ sơ kênh và compile lại policy snapshot."
         ),
     }
 
@@ -179,6 +205,7 @@ def _video_project(project: Any) -> dict[str, Any]:
         "updated_at": project.updated_at,
     }
 
+
 def _artifact(artifact: Any) -> dict[str, Any]:
     return {
         "id": artifact.id,
@@ -190,6 +217,7 @@ def _artifact(artifact: Any) -> dict[str, Any]:
         "created_at": artifact.created_at,
         "updated_at": artifact.updated_at,
     }
+
 
 def _artifact_version(version: Any) -> dict[str, Any]:
     return {
@@ -212,6 +240,7 @@ def _artifact_version(version: Any) -> dict[str, Any]:
         "created_at": version.created_at,
     }
 
+
 def _review_task(review_task: Any) -> dict[str, Any]:
     return {
         "id": review_task.id,
@@ -233,6 +262,7 @@ def _review_task(review_task: Any) -> dict[str, Any]:
         "updated_at": review_task.updated_at,
     }
 
+
 def _review_finding(finding: Any) -> dict[str, Any]:
     return {
         "id": finding.id,
@@ -244,6 +274,7 @@ def _review_finding(finding: Any) -> dict[str, Any]:
         "created_by_user_id": finding.created_by_user_id,
         "created_at": finding.created_at,
     }
+
 
 def _revision_request(revision: Any) -> dict[str, Any]:
     return {
@@ -257,6 +288,7 @@ def _revision_request(revision: Any) -> dict[str, Any]:
         "created_at": revision.created_at,
         "resolved_at": revision.resolved_at,
     }
+
 
 def _approval_decision(decision: Any) -> dict[str, Any]:
     return {
@@ -276,6 +308,7 @@ def _approval_decision(decision: Any) -> dict[str, Any]:
         "human_decision_note": decision.human_decision_note,
         "created_at": decision.created_at,
     }
+
 
 def _gate_run(gate_run: Any) -> dict[str, Any]:
     return {
@@ -303,6 +336,7 @@ def _gate_run(gate_run: Any) -> dict[str, Any]:
         "created_at": gate_run.created_at,
     }
 
+
 def _policy_catalog(catalog: Any) -> dict[str, Any]:
     return {
         "id": catalog.id,
@@ -314,6 +348,7 @@ def _policy_catalog(catalog: Any) -> dict[str, Any]:
         "created_at": catalog.created_at,
         "updated_at": catalog.updated_at,
     }
+
 
 def _policy_version(version: Any) -> dict[str, Any]:
     return {
@@ -331,6 +366,7 @@ def _policy_version(version: Any) -> dict[str, Any]:
         "superseded_at": version.superseded_at,
     }
 
+
 def _policy_source_ref(ref: Any) -> dict[str, Any]:
     return {
         "id": ref.id,
@@ -344,6 +380,7 @@ def _policy_source_ref(ref: Any) -> dict[str, Any]:
         "notes": ref.notes,
         "created_at": ref.created_at,
     }
+
 
 def _policy_change_record(record: Any) -> dict[str, Any]:
     return {
@@ -366,6 +403,7 @@ def _policy_change_record(record: Any) -> dict[str, Any]:
         "updated_at": record.updated_at,
     }
 
+
 def _policy_revalidation_batch(batch: Any) -> dict[str, Any]:
     return {
         "id": batch.id,
@@ -379,6 +417,7 @@ def _policy_revalidation_batch(batch: Any) -> dict[str, Any]:
         "created_by_user_id": batch.created_by_user_id,
         "created_at": batch.created_at,
     }
+
 
 def _provider_registry_entry(entry: Any) -> dict[str, Any]:
     return {
@@ -397,6 +436,7 @@ def _provider_registry_entry(entry: Any) -> dict[str, Any]:
         "updated_at": entry.updated_at,
     }
 
+
 def _credential_reference(reference: Any) -> dict[str, Any]:
     return {
         "id": reference.id,
@@ -413,6 +453,7 @@ def _credential_reference(reference: Any) -> dict[str, Any]:
         "updated_at": reference.updated_at,
     }
 
+
 def _credential_health(snapshot: Any) -> dict[str, Any]:
     return {
         "id": snapshot.id,
@@ -425,6 +466,7 @@ def _credential_health(snapshot: Any) -> dict[str, Any]:
         "metadata": snapshot.metadata_,
         "created_at": snapshot.created_at,
     }
+
 
 def _quota_account(account: Any) -> dict[str, Any]:
     return {
@@ -444,6 +486,7 @@ def _quota_account(account: Any) -> dict[str, Any]:
         "updated_at": account.updated_at,
     }
 
+
 def _quota_event(event: Any) -> dict[str, Any]:
     return {
         "id": event.id,
@@ -458,6 +501,7 @@ def _quota_event(event: Any) -> dict[str, Any]:
         "metadata": event.metadata_,
         "created_at": event.created_at,
     }
+
 
 def _cost_event(event: Any) -> dict[str, Any]:
     return {
@@ -475,6 +519,7 @@ def _cost_event(event: Any) -> dict[str, Any]:
         "created_at": event.created_at,
     }
 
+
 def _budget_policy(policy: Any) -> dict[str, Any]:
     return {
         "id": policy.id,
@@ -486,6 +531,7 @@ def _budget_policy(policy: Any) -> dict[str, Any]:
         "created_at": policy.created_at,
         "updated_at": policy.updated_at,
     }
+
 
 def _provider_health(snapshot: Any) -> dict[str, Any]:
     return {
@@ -503,6 +549,7 @@ def _provider_health(snapshot: Any) -> dict[str, Any]:
         "created_at": snapshot.created_at,
     }
 
+
 def _component_health(snapshot: Any) -> dict[str, Any]:
     return {
         "id": snapshot.id,
@@ -515,6 +562,7 @@ def _component_health(snapshot: Any) -> dict[str, Any]:
         "metadata": snapshot.metadata_,
         "created_at": snapshot.created_at,
     }
+
 
 def _system_health(snapshot: Any) -> dict[str, Any]:
     return {
@@ -530,6 +578,7 @@ def _system_health(snapshot: Any) -> dict[str, Any]:
         "created_at": snapshot.created_at,
     }
 
+
 def _retry_policy(policy: Any) -> dict[str, Any]:
     return {
         "id": policy.id,
@@ -541,6 +590,7 @@ def _retry_policy(policy: Any) -> dict[str, Any]:
         "created_at": policy.created_at,
         "updated_at": policy.updated_at,
     }
+
 
 def _provider_attempt(attempt: Any) -> dict[str, Any]:
     return {
@@ -561,6 +611,7 @@ def _provider_attempt(attempt: Any) -> dict[str, Any]:
         "metadata": attempt.metadata_,
     }
 
+
 def _dead_letter_job(job: Any) -> dict[str, Any]:
     return {
         "id": job.id,
@@ -580,6 +631,7 @@ def _dead_letter_job(job: Any) -> dict[str, Any]:
         "updated_at": job.updated_at,
     }
 
+
 def _ops_incident(incident: Any) -> dict[str, Any]:
     return {
         "id": incident.id,
@@ -598,6 +650,7 @@ def _ops_incident(incident: Any) -> dict[str, Any]:
         "updated_at": incident.updated_at,
     }
 
+
 def _manual_action(action: Any) -> dict[str, Any]:
     return {
         "id": action.id,
@@ -613,6 +666,7 @@ def _manual_action(action: Any) -> dict[str, Any]:
         "created_at": action.created_at,
         "updated_at": action.updated_at,
     }
+
 
 def _editorial_slot(slot: Any) -> dict[str, Any]:
     return {
@@ -642,28 +696,6 @@ def _editorial_slot(slot: Any) -> dict[str, Any]:
         "updated_at": slot.updated_at,
     }
 
-def _channel_daily_run(daily_run: Any) -> dict[str, Any]:
-    return {
-        "id": daily_run.id,
-        "company_id": daily_run.company_id,
-        "channel_workspace_id": daily_run.channel_workspace_id,
-        "policy_snapshot_id": daily_run.policy_snapshot_id,
-        "editorial_calendar_slot_id": daily_run.editorial_calendar_slot_id,
-        "run_date": daily_run.run_date,
-        "status": daily_run.status,
-        "run_mode": daily_run.run_mode,
-        "trigger_type": daily_run.trigger_type,
-        "started_at": daily_run.started_at,
-        "completed_at": daily_run.completed_at,
-        "context_pack_snapshot_id": daily_run.context_pack_snapshot_id,
-        "channel_state_pack_snapshot_id": daily_run.channel_state_pack_snapshot_id,
-        "daily_idea_decision_id": daily_run.daily_idea_decision_id,
-        "project_admission_decision_id": daily_run.project_admission_decision_id,
-        "reason_codes": daily_run.reason_codes,
-        "metadata": daily_run.metadata_,
-        "created_at": daily_run.created_at,
-        "updated_at": daily_run.updated_at,
-    }
 
 def _retrieval_plan(plan: Any) -> dict[str, Any]:
     return {
@@ -684,6 +716,7 @@ def _retrieval_plan(plan: Any) -> dict[str, Any]:
         "created_by_user_id": plan.created_by_user_id,
         "created_at": plan.created_at,
     }
+
 
 def _context_pack(pack: Any) -> dict[str, Any]:
     return {
@@ -709,10 +742,11 @@ def _context_pack(pack: Any) -> dict[str, Any]:
         "created_at": pack.created_at,
     }
 
+
 def _channel_state_pack(snapshot: Any) -> dict[str, Any]:
     return {
         "id": snapshot.id,
-        "channel_daily_run_id": snapshot.channel_daily_run_id,
+        "editorial_research_run_id": snapshot.editorial_research_run_id,
         "company_id": snapshot.company_id,
         "channel_workspace_id": snapshot.channel_workspace_id,
         "policy_snapshot_id": snapshot.policy_snapshot_id,
@@ -729,6 +763,7 @@ def _channel_state_pack(snapshot: Any) -> dict[str, Any]:
         "state_hash": snapshot.state_hash,
         "created_at": snapshot.created_at,
     }
+
 
 def _search_demand_evidence(evidence: Any) -> dict[str, Any]:
     return {
@@ -752,57 +787,30 @@ def _search_demand_evidence(evidence: Any) -> dict[str, Any]:
         "created_at": evidence.created_at,
     }
 
-def _daily_idea_decision(decision: Any) -> dict[str, Any]:
-    return {
-        "id": decision.id,
-        "channel_daily_run_id": decision.channel_daily_run_id,
-        "company_id": decision.company_id,
-        "channel_workspace_id": decision.channel_workspace_id,
-        "policy_snapshot_id": decision.policy_snapshot_id,
-        "context_pack_snapshot_id": decision.context_pack_snapshot_id,
-        "channel_state_pack_snapshot_id": decision.channel_state_pack_snapshot_id,
-        "llm_run_snapshot_id": decision.llm_run_snapshot_id,
-        "schema_version": decision.schema_version,
-        "production_lane": decision.production_lane,
-        "proposed_content_mode": decision.proposed_content_mode,
-        "assignment_input_ref": decision.assignment_input_ref,
-        "decision_status": decision.decision_status,
-        "proposed_title": decision.proposed_title,
-        "proposed_angle": decision.proposed_angle,
-        "proposed_format": decision.proposed_format,
-        "proposed_pillar": decision.proposed_pillar,
-        "proposed_series_key": decision.proposed_series_key,
-        "rationale": decision.rationale,
-        "evidence_refs": decision.evidence_refs,
-        "reason_codes": decision.reason_codes,
-        "confidence_level": decision.confidence_level,
-        "created_at": decision.created_at,
-    }
 
 def _idea_market_preflight(preflight: Any) -> dict[str, Any]:
-    market = preflight.evidence_blob or {}
     return {
         "id": preflight.id,
         "company_id": preflight.company_id,
         "channel_workspace_id": preflight.channel_workspace_id,
         "editorial_calendar_slot_id": preflight.editorial_calendar_slot_id,
-        "channel_daily_run_id": preflight.channel_daily_run_id,
-        "daily_idea_decision_id": preflight.daily_idea_decision_id,
+        "editorial_research_run_id": preflight.editorial_research_run_id,
+        "editorial_idea_candidate_id": preflight.editorial_idea_candidate_id,
         "search_intent_map_id": preflight.search_intent_map_id,
         "audience_target_pack_id": preflight.audience_target_pack_id,
         "demand_score": preflight.demand_score,
         "channel_fit_score": preflight.channel_fit_score,
         "policy_fit_state": preflight.policy_fit_state,
-        "niche_contract_digest_ref": market.get("niche_contract_digest_ref"),
-        "niche_contract_digest_hash": market.get("niche_contract_digest_hash"),
-        "target_market_digest_ref": market.get("target_market_digest_ref"),
-        "target_market_digest_hash": market.get("target_market_digest_hash"),
-        "editorial_slot_ref": market.get("editorial_slot_ref"),
-        "content_category_ref": market.get("content_category_ref"),
-        "target_market": market.get("target_market"),
-        "market_scope": market.get("market_scope", []),
-        "market_fit_score": market.get("market_fit_score"),
-        "market_fit_threshold": market.get("market_fit_threshold"),
+        "niche_contract_digest_ref": preflight.niche_contract_digest_ref,
+        "niche_contract_digest_hash": preflight.niche_contract_digest_hash,
+        "target_market_digest_ref": preflight.target_market_digest_ref,
+        "target_market_digest_hash": preflight.target_market_digest_hash,
+        "editorial_slot_ref": preflight.editorial_slot_ref,
+        "content_category_ref": preflight.content_category_ref,
+        "target_market": preflight.target_market,
+        "market_scope": preflight.market_scope,
+        "market_fit_score": preflight.market_fit_score,
+        "market_fit_threshold": preflight.market_fit_threshold,
         "confidence_state": preflight.confidence_state,
         "evidence_blob": preflight.evidence_blob,
         "reason_codes": preflight.reason_codes,
@@ -810,12 +818,13 @@ def _idea_market_preflight(preflight: Any) -> dict[str, Any]:
         "created_at": preflight.created_at,
     }
 
+
 def _project_admission_decision(decision: Any) -> dict[str, Any]:
     return {
         "id": decision.id,
         "schema_version": decision.schema_version,
-        "channel_daily_run_id": decision.channel_daily_run_id,
-        "daily_idea_decision_id": decision.daily_idea_decision_id,
+        "editorial_research_run_id": decision.editorial_research_run_id,
+        "editorial_idea_candidate_id": decision.editorial_idea_candidate_id,
         "editorial_calendar_slot_id": decision.editorial_calendar_slot_id,
         "company_id": decision.company_id,
         "channel_workspace_id": decision.channel_workspace_id,
@@ -837,10 +846,6 @@ def _project_admission_decision(decision: Any) -> dict[str, Any]:
         "episode_number": decision.episode_number,
         "episode_role": decision.episode_role,
         "standalone_reason_code": decision.standalone_reason_code,
-        "parent_video_project_id": decision.parent_video_project_id,
-        "parent_final_media_ref_id": decision.parent_final_media_ref_id,
-        "canonical_timeline_ref": decision.canonical_timeline_ref,
-        "canonical_timeline_hash": decision.canonical_timeline_hash,
         "resolver_version": decision.resolver_version,
         "resolver_input_hash": decision.resolver_input_hash,
         "decision_hash": decision.decision_hash,
@@ -855,6 +860,7 @@ def _project_admission_decision(decision: Any) -> dict[str, Any]:
         "created_artifact_refs": decision.created_artifact_refs,
         "created_at": decision.created_at,
     }
+
 
 def _production_run(run: Any) -> dict[str, Any]:
     return {
@@ -885,10 +891,13 @@ def _production_run(run: Any) -> dict[str, Any]:
         "updated_at": run.updated_at,
     }
 
+
 def _render_job(job: Any) -> dict[str, Any]:
     return {
         "id": str(job.id),
-        "production_artifact_run_id": str(job.production_artifact_run_id) if job.production_artifact_run_id else None,
+        "production_artifact_run_id": str(job.production_artifact_run_id)
+        if job.production_artifact_run_id
+        else None,
         "video_project_id": str(job.video_project_id),
         "render_spec_snapshot_id": str(job.render_spec_snapshot_id),
         "render_variant_id": job.render_variant_id,
@@ -899,10 +908,13 @@ def _render_job(job: Any) -> dict[str, Any]:
         "reason_codes": job.reason_codes,
     }
 
+
 def _render_package(package: Any) -> dict[str, Any]:
     return {
         "id": str(package.id),
-        "production_artifact_run_id": str(package.production_artifact_run_id) if package.production_artifact_run_id else None,
+        "production_artifact_run_id": str(package.production_artifact_run_id)
+        if package.production_artifact_run_id
+        else None,
         "video_project_id": str(package.video_project_id),
         "media_render_job_id": str(package.media_render_job_id),
         "render_spec_snapshot_id": str(package.render_spec_snapshot_id),
@@ -911,16 +923,23 @@ def _render_package(package: Any) -> dict[str, Any]:
         "manifest_ref": package.manifest_ref,
         "file_manifest": package.file_manifest,
         "checksum_manifest": package.checksum_manifest,
-        "duration_seconds": str(package.duration_seconds) if package.duration_seconds is not None else None,
+        "duration_seconds": str(package.duration_seconds)
+        if package.duration_seconds is not None
+        else None,
         "package_state": package.package_state,
     }
+
 
 def _media_qc_report(report: Any) -> dict[str, Any]:
     return {
         "id": str(report.id),
-        "production_artifact_run_id": str(report.production_artifact_run_id) if report.production_artifact_run_id else None,
+        "production_artifact_run_id": str(report.production_artifact_run_id)
+        if report.production_artifact_run_id
+        else None,
         "video_project_id": str(report.video_project_id),
-        "render_package_snapshot_id": str(report.render_package_snapshot_id) if report.render_package_snapshot_id else None,
+        "render_package_snapshot_id": str(report.render_package_snapshot_id)
+        if report.render_package_snapshot_id
+        else None,
         "render_spec_snapshot_id": str(report.render_spec_snapshot_id),
         "qc_state": report.qc_state,
         "reason_codes": report.reason_codes,
@@ -929,17 +948,25 @@ def _media_qc_report(report: Any) -> dict[str, Any]:
         "manifest_check": report.manifest_check,
     }
 
+
 def _accessibility_qc_report(report: Any) -> dict[str, Any]:
     return {
         "id": str(report.id),
-        "production_artifact_run_id": str(report.production_artifact_run_id) if report.production_artifact_run_id else None,
+        "production_artifact_run_id": str(report.production_artifact_run_id)
+        if report.production_artifact_run_id
+        else None,
         "video_project_id": str(report.video_project_id),
-        "caption_track_snapshot_id": str(report.caption_track_snapshot_id) if report.caption_track_snapshot_id else None,
-        "render_package_snapshot_id": str(report.render_package_snapshot_id) if report.render_package_snapshot_id else None,
+        "caption_track_snapshot_id": str(report.caption_track_snapshot_id)
+        if report.caption_track_snapshot_id
+        else None,
+        "render_package_snapshot_id": str(report.render_package_snapshot_id)
+        if report.render_package_snapshot_id
+        else None,
         "qc_state": report.qc_state,
         "reason_codes": report.reason_codes,
         "caption_presence_check": report.caption_presence_check,
         "caption_readability_check": report.caption_readability_check,
     }
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

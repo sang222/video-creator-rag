@@ -90,7 +90,11 @@ VALID_POLICY_TRANSITIONS = {
     "IMPACT_CLASSIFIED": {"CATALOG_PATCHED", "MONITOR_ONLY", "REJECTED"},
     "CATALOG_PATCHED": {"GATES_UPDATED", "READY_TO_ACTIVATE", "REJECTED"},
     "GATES_UPDATED": {"REVALIDATION_RUNNING", "READY_TO_ACTIVATE", "REJECTED"},
-    "REVALIDATION_RUNNING": {"READY_TO_ACTIVATE", "OPERATOR_REVIEW_REQUIRED", "REJECTED"},
+    "REVALIDATION_RUNNING": {
+        "READY_TO_ACTIVATE",
+        "OPERATOR_REVIEW_REQUIRED",
+        "REJECTED",
+    },
     "OPERATOR_REVIEW_REQUIRED": {"READY_TO_ACTIVATE", "REJECTED", "MONITOR_ONLY"},
     "READY_TO_ACTIVATE": {"ACTIVE", "REJECTED"},
     "ACTIVE": {"SUPERSEDED", "ROLLED_BACK"},
@@ -131,10 +135,14 @@ class GateDefinitionService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_definition(self, *, data: GateDefinitionVersionCreate) -> GateDefinitionVersion:
+    def create_definition(
+        self, *, data: GateDefinitionVersionCreate
+    ) -> GateDefinitionVersion:
         existing = self.get_definition(data.gate_key, data.version)
         if existing is not None:
-            raise ConflictError(f"gate definition exists: {data.gate_key} {data.version}")
+            raise ConflictError(
+                f"gate definition exists: {data.gate_key} {data.version}"
+            )
         if data.created_by_user_id is not None:
             _require_user(self.session, data.created_by_user_id, "created_by_user_id")
         definition = GateDefinitionVersion(**data.model_dump())
@@ -183,7 +191,9 @@ class GateDefinitionService:
         self.session.flush()
         return records
 
-    def activate_definition(self, gate_definition_version_id: uuid.UUID) -> GateDefinitionVersion:
+    def activate_definition(
+        self, gate_definition_version_id: uuid.UUID
+    ) -> GateDefinitionVersion:
         definition = self._require_definition_id(gate_definition_version_id)
         if definition.status == "active":
             return definition
@@ -208,15 +218,21 @@ class GateDefinitionService:
         )
         return definition
 
-    def deprecate_definition(self, gate_definition_version_id: uuid.UUID) -> GateDefinitionVersion:
+    def deprecate_definition(
+        self, gate_definition_version_id: uuid.UUID
+    ) -> GateDefinitionVersion:
         definition = self._require_definition_id(gate_definition_version_id)
         if definition.status == "active":
-            raise ValidationFailureError("active gate definition must be superseded by activating a new version")
+            raise ValidationFailureError(
+                "active gate definition must be superseded by activating a new version"
+            )
         definition.status = "deprecated"
         self.session.flush()
         return definition
 
-    def get_definition(self, gate_key: str, version: str) -> GateDefinitionVersion | None:
+    def get_definition(
+        self, gate_key: str, version: str
+    ) -> GateDefinitionVersion | None:
         return self.session.scalars(
             select(GateDefinitionVersion).where(
                 GateDefinitionVersion.gate_key == gate_key,
@@ -224,7 +240,9 @@ class GateDefinitionService:
             )
         ).one_or_none()
 
-    def get_active_gate_version(self, gate_key: str, *, required: bool = True) -> GateDefinitionVersion | None:
+    def get_active_gate_version(
+        self, gate_key: str, *, required: bool = True
+    ) -> GateDefinitionVersion | None:
         record = self.session.scalars(
             select(GateDefinitionVersion).where(
                 GateDefinitionVersion.gate_key == gate_key,
@@ -235,31 +253,46 @@ class GateDefinitionService:
             raise NotFoundError(f"active gate definition not found: {gate_key}")
         return record
 
-    def _require_definition_id(self, gate_definition_version_id: uuid.UUID) -> GateDefinitionVersion:
+    def _require_definition_id(
+        self, gate_definition_version_id: uuid.UUID
+    ) -> GateDefinitionVersion:
         definition = self.session.get(GateDefinitionVersion, gate_definition_version_id)
         if definition is None:
-            raise NotFoundError(f"gate definition not found: {gate_definition_version_id}")
+            raise NotFoundError(
+                f"gate definition not found: {gate_definition_version_id}"
+            )
         return definition
 
     def _load_catalog_definitions(self) -> list[GateDefinitionVersionCreate]:
         try:
-            loaded = ConfigRegistryService(self.session).validate_catalog(GATE_DEFINITION_CATALOG)
+            loaded = ConfigRegistryService(self.session).validate_catalog(
+                GATE_DEFINITION_CATALOG
+            )
         except FileNotFoundError:
             return _builtin_definition_contracts()
-        return [GateDefinitionVersionCreate.model_validate(item) for item in loaded.content["items"]]
+        return [
+            GateDefinitionVersionCreate.model_validate(item)
+            for item in loaded.content["items"]
+        ]
 
 
 class GateRunnerService:
     def __init__(self, session: Session):
         self.session = session
 
-    def run_gate(self, *, data: GateRunCreate, correlation_id: str = "m3-gate-run") -> GateRun:
+    def run_gate(
+        self, *, data: GateRunCreate, correlation_id: str = "m3-gate-run"
+    ) -> GateRun:
         definition = self._resolve_definition(data)
         context = self._build_target_context(data.target_type, data.target_id)
         input_hash = content_hash(context.input_snapshot)
-        evaluation = _evaluate_gate(definition.gate_key, context.input_snapshot, self.session)
+        evaluation = _evaluate_gate(
+            definition.gate_key, context.input_snapshot, self.session
+        )
         gate_run_id = uuid.uuid4()
-        review_link = GateReviewIntegrationService(self.session).create_or_link_review_task(
+        review_link = GateReviewIntegrationService(
+            self.session
+        ).create_or_link_review_task(
             gate_run_id=gate_run_id,
             definition=definition,
             context=context,
@@ -277,7 +310,9 @@ class GateRunnerService:
             target_type=data.target_type,
             target_id=data.target_id,
             video_project_id=context.project.id,
-            artifact_version_id=context.artifact_version.id if context.artifact_version else None,
+            artifact_version_id=context.artifact_version.id
+            if context.artifact_version
+            else None,
             review_task_id=context.review_task.id if context.review_task else None,
             policy_snapshot_id=context.project.policy_snapshot_id,
             input_snapshot=context.input_snapshot,
@@ -290,7 +325,9 @@ class GateRunnerService:
             confidence_level=evaluation.confidence_level,
             confidence_reason_codes=evaluation.confidence_reason_codes,
             decision_basis=evaluation.decision_basis,
-            created_review_task_id=review_link.review_task.id if review_link.review_task else None,
+            created_review_task_id=review_link.review_task.id
+            if review_link.review_task
+            else None,
             created_by_user_id=data.created_by_user_id,
         )
         self.session.add(gate_run)
@@ -340,26 +377,43 @@ class GateRunnerService:
     def list_project_gate_runs(self, project_id: uuid.UUID) -> list[GateRun]:
         return list(
             self.session.scalars(
-                select(GateRun).where(GateRun.video_project_id == project_id).order_by(GateRun.created_at.asc())
+                select(GateRun)
+                .where(GateRun.video_project_id == project_id)
+                .order_by(GateRun.created_at.asc())
             ).all()
         )
 
     def _resolve_definition(self, data: GateRunCreate) -> GateDefinitionVersion:
         if data.gate_definition_version_id is not None:
-            definition = self.session.get(GateDefinitionVersion, data.gate_definition_version_id)
+            definition = self.session.get(
+                GateDefinitionVersion, data.gate_definition_version_id
+            )
             if definition is None:
-                raise NotFoundError(f"gate definition not found: {data.gate_definition_version_id}")
+                raise NotFoundError(
+                    f"gate definition not found: {data.gate_definition_version_id}"
+                )
             if definition.gate_key != data.gate_key:
-                raise ValidationFailureError("gate key does not match gate definition version")
+                raise ValidationFailureError(
+                    "gate key does not match gate definition version"
+                )
             return definition
-        return GateDefinitionService(self.session).get_active_gate_version(data.gate_key)
+        return GateDefinitionService(self.session).get_active_gate_version(
+            data.gate_key
+        )
 
-    def _build_target_context(self, target_type: str, target_id: uuid.UUID) -> GateTargetContext:
+    def _build_target_context(
+        self, target_type: str, target_id: uuid.UUID
+    ) -> GateTargetContext:
         if target_type == "video_project":
             project = self.session.get(VideoProject, target_id)
             if project is None:
                 raise NotFoundError(f"project not found: {target_id}")
-            return GateTargetContext(project=project, artifact_version=None, review_task=None, input_snapshot=_snapshot_for_project(project))
+            return GateTargetContext(
+                project=project,
+                artifact_version=None,
+                review_task=None,
+                input_snapshot=_snapshot_for_project(project),
+            )
         if target_type == "artifact_version":
             version = self.session.get(ArtifactVersion, target_id)
             if version is None:
@@ -374,7 +428,9 @@ class GateRunnerService:
                 project=project,
                 artifact_version=version,
                 review_task=None,
-                input_snapshot=_snapshot_for_artifact_version(project, artifact, version),
+                input_snapshot=_snapshot_for_artifact_version(
+                    project, artifact, version
+                ),
             )
         if target_type == "review_task":
             review = self.session.get(ReviewTask, target_id)
@@ -383,7 +439,11 @@ class GateRunnerService:
             project = self.session.get(VideoProject, review.video_project_id)
             if project is None:
                 raise NotFoundError(f"project not found: {review.video_project_id}")
-            version = self.session.get(ArtifactVersion, review.target_artifact_version_id) if review.target_artifact_version_id else None
+            version = (
+                self.session.get(ArtifactVersion, review.target_artifact_version_id)
+                if review.target_artifact_version_id
+                else None
+            )
             return GateTargetContext(
                 project=project,
                 artifact_version=version,
@@ -413,8 +473,12 @@ class GateReviewIntegrationService:
         gate_config = definition.definition or {}
         if result != "REVIEW_REQUIRED" or not gate_config.get("review_required", True):
             return ReviewLinkResult(review_task=None, created=False)
-        review_type = gate_config.get("review_type") or REVIEW_TYPE_BY_GATE.get(definition.gate_key, "policy_review")
-        review_target_type, review_target_id, target_version_id = _review_target(target_type, target_id, context)
+        review_type = gate_config.get("review_type") or REVIEW_TYPE_BY_GATE.get(
+            definition.gate_key, "policy_review"
+        )
+        review_target_type, review_target_id, target_version_id = _review_target(
+            target_type, target_id, context
+        )
         existing = self.session.scalars(
             select(ReviewTask).where(
                 ReviewTask.video_project_id == context.project.id,
@@ -456,7 +520,9 @@ class WorkflowReadinessService:
             raise NotFoundError(f"project not found: {project_id}")
         runs = list(
             self.session.scalars(
-                select(GateRun).where(GateRun.video_project_id == project_id).order_by(GateRun.created_at.desc())
+                select(GateRun)
+                .where(GateRun.video_project_id == project_id)
+                .order_by(GateRun.created_at.desc())
             ).all()
         )
         latest: dict[tuple[str, str, uuid.UUID], GateRun] = {}
@@ -465,26 +531,49 @@ class WorkflowReadinessService:
             if key not in latest:
                 latest[key] = run
         latest_runs = list(latest.values())
-        blockers = [_readiness_item(run) for run in latest_runs if run.result == "BLOCK"]
-        review_required = [_readiness_item(run) for run in latest_runs if run.result == "REVIEW_REQUIRED"]
+        blockers = [
+            _readiness_item(run) for run in latest_runs if run.result == "BLOCK"
+        ]
+        review_required = [
+            _readiness_item(run)
+            for run in latest_runs
+            if run.result == "REVIEW_REQUIRED"
+        ]
         return {
             "project_id": str(project.id),
             "policy_snapshot_id": str(project.policy_snapshot_id),
-            "status": "BLOCKED" if blockers else "REVIEW_REQUIRED" if review_required else "READY" if latest_runs else "UNKNOWN",
+            "status": "BLOCKED"
+            if blockers
+            else "REVIEW_REQUIRED"
+            if review_required
+            else "READY"
+            if latest_runs
+            else "UNKNOWN",
             "counts": {
                 "PASS": sum(1 for run in latest_runs if run.result == "PASS"),
                 "REVIEW_REQUIRED": len(review_required),
                 "BLOCK": len(blockers),
                 "SKIPPED": sum(1 for run in latest_runs if run.result == "SKIPPED"),
-                "NOT_APPLICABLE": sum(1 for run in latest_runs if run.result == "NOT_APPLICABLE"),
+                "NOT_APPLICABLE": sum(
+                    1 for run in latest_runs if run.result == "NOT_APPLICABLE"
+                ),
             },
             "blockers": blockers,
             "review_required": review_required,
             "next_actions": [
-                {"type": "resolve_blocker", "gate_run_id": item["gate_run_id"], "reason_codes": item["reason_codes"]}
+                {
+                    "type": "resolve_blocker",
+                    "gate_run_id": item["gate_run_id"],
+                    "reason_codes": item["reason_codes"],
+                }
                 for item in blockers
-            ] + [
-                {"type": "complete_review", "gate_run_id": item["gate_run_id"], "review_task_id": item["review_task_id"]}
+            ]
+            + [
+                {
+                    "type": "complete_review",
+                    "gate_run_id": item["gate_run_id"],
+                    "review_task_id": item["review_task_id"],
+                }
                 for item in review_required
             ],
         }
@@ -494,9 +583,13 @@ class PolicyCatalogService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_catalog(self, *, data: PlatformPolicyCatalogCreate) -> PlatformPolicyCatalog:
+    def create_catalog(
+        self, *, data: PlatformPolicyCatalogCreate
+    ) -> PlatformPolicyCatalog:
         existing = self.session.scalars(
-            select(PlatformPolicyCatalog).where(PlatformPolicyCatalog.catalog_key == data.catalog_key)
+            select(PlatformPolicyCatalog).where(
+                PlatformPolicyCatalog.catalog_key == data.catalog_key
+            )
         ).one_or_none()
         if existing is not None:
             raise ConflictError(f"policy catalog exists: {data.catalog_key}")
@@ -513,11 +606,17 @@ class PolicyCatalogService:
             target_id=catalog.id,
             company_id=None,
             correlation_id="m3-policy-catalog-created",
-            payload={"catalog_key": catalog.catalog_key, "platform": catalog.platform, "policy_domain": catalog.policy_domain},
+            payload={
+                "catalog_key": catalog.catalog_key,
+                "platform": catalog.platform,
+                "policy_domain": catalog.policy_domain,
+            },
         )
         return catalog
 
-    def create_version(self, *, data: PlatformPolicyVersionCreate) -> PlatformPolicyVersion:
+    def create_version(
+        self, *, data: PlatformPolicyVersionCreate
+    ) -> PlatformPolicyVersion:
         catalog = self.session.get(PlatformPolicyCatalog, data.catalog_id)
         if catalog is None:
             raise NotFoundError(f"policy catalog not found: {data.catalog_id}")
@@ -530,7 +629,9 @@ class PolicyCatalogService:
             )
         ).one_or_none()
         if existing is not None:
-            raise ConflictError(f"policy version exists: {catalog.catalog_key} {data.version}")
+            raise ConflictError(
+                f"policy version exists: {catalog.catalog_key} {data.version}"
+            )
         version = PlatformPolicyVersion(**data.model_dump())
         self.session.add(version)
         self.session.flush()
@@ -583,14 +684,24 @@ class PolicyCatalogService:
     def attach_source_ref(self, *, data: PolicySourceRefCreate) -> PolicySourceRef:
         return _create_policy_source_ref(self.session, data=data)
 
-    def get_active_policy_version(self, *, catalog_key: str | None = None, platform: str | None = None, policy_domain: str | None = None) -> PlatformPolicyVersion | None:
+    def get_active_policy_version(
+        self,
+        *,
+        catalog_key: str | None = None,
+        platform: str | None = None,
+        policy_domain: str | None = None,
+    ) -> PlatformPolicyVersion | None:
         statement: Select[tuple[PlatformPolicyCatalog]] = select(PlatformPolicyCatalog)
         if catalog_key is not None:
-            statement = statement.where(PlatformPolicyCatalog.catalog_key == catalog_key)
+            statement = statement.where(
+                PlatformPolicyCatalog.catalog_key == catalog_key
+            )
         if platform is not None:
             statement = statement.where(PlatformPolicyCatalog.platform == platform)
         if policy_domain is not None:
-            statement = statement.where(PlatformPolicyCatalog.policy_domain == policy_domain)
+            statement = statement.where(
+                PlatformPolicyCatalog.policy_domain == policy_domain
+            )
         catalog = self.session.scalars(statement).first()
         if catalog is None or catalog.current_version_id is None:
             return None
@@ -601,11 +712,15 @@ class PolicyChangeService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_change_record(self, *, data: PolicyChangeRecordCreate) -> PolicyChangeRecord:
+    def create_change_record(
+        self, *, data: PolicyChangeRecordCreate
+    ) -> PolicyChangeRecord:
         if data.created_by_user_id is not None:
             _require_user(self.session, data.created_by_user_id, "created_by_user_id")
         existing = self.session.scalars(
-            select(PolicyChangeRecord).where(PolicyChangeRecord.change_key == data.change_key)
+            select(PolicyChangeRecord).where(
+                PolicyChangeRecord.change_key == data.change_key
+            )
         ).one_or_none()
         if existing is not None:
             raise ConflictError(f"policy change exists: {data.change_key}")
@@ -629,7 +744,9 @@ class PolicyChangeService:
     def add_source_ref(self, *, data: PolicySourceRefCreate) -> PolicySourceRef:
         return _create_policy_source_ref(self.session, data=data)
 
-    def record_diff_summary(self, policy_change_record_id: uuid.UUID, diff_summary: dict[str, Any]) -> PolicyChangeRecord:
+    def record_diff_summary(
+        self, policy_change_record_id: uuid.UUID, diff_summary: dict[str, Any]
+    ) -> PolicyChangeRecord:
         record = self._require_record(policy_change_record_id)
         record.diff_summary = diff_summary
         self.session.flush()
@@ -655,13 +772,17 @@ class PolicyChangeService:
         self.session.flush()
         return record
 
-    def transition_state(self, policy_change_record_id: uuid.UUID, new_state: str) -> PolicyChangeRecord:
+    def transition_state(
+        self, policy_change_record_id: uuid.UUID, new_state: str
+    ) -> PolicyChangeRecord:
         record = self._require_record(policy_change_record_id)
         if new_state == record.state:
             return record
         allowed = VALID_POLICY_TRANSITIONS.get(record.state, set())
         if new_state not in allowed:
-            raise ValidationFailureError(f"invalid policy change transition: {record.state} -> {new_state}")
+            raise ValidationFailureError(
+                f"invalid policy change transition: {record.state} -> {new_state}"
+            )
         old_state = record.state
         record.state = new_state
         self.session.flush()
@@ -682,7 +803,9 @@ class PolicyChangeService:
     def _require_record(self, policy_change_record_id: uuid.UUID) -> PolicyChangeRecord:
         record = self.session.get(PolicyChangeRecord, policy_change_record_id)
         if record is None:
-            raise NotFoundError(f"policy change record not found: {policy_change_record_id}")
+            raise NotFoundError(
+                f"policy change record not found: {policy_change_record_id}"
+            )
         return record
 
 
@@ -690,7 +813,9 @@ class PolicyRevalidationService:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_batch(self, *, data: PolicyRevalidationBatchCreate) -> PolicyRevalidationBatch:
+    def create_batch(
+        self, *, data: PolicyRevalidationBatchCreate
+    ) -> PolicyRevalidationBatch:
         if data.created_by_user_id is not None:
             _require_user(self.session, data.created_by_user_id, "created_by_user_id")
         batch = PolicyRevalidationBatch(
@@ -717,23 +842,40 @@ class PolicyRevalidationService:
         )
         return batch
 
-    def run_batch(self, policy_revalidation_batch_id: uuid.UUID) -> PolicyRevalidationBatch:
+    def run_batch(
+        self, policy_revalidation_batch_id: uuid.UUID
+    ) -> PolicyRevalidationBatch:
         batch = self.session.get(PolicyRevalidationBatch, policy_revalidation_batch_id)
         if batch is None:
-            raise NotFoundError(f"policy revalidation batch not found: {policy_revalidation_batch_id}")
+            raise NotFoundError(
+                f"policy revalidation batch not found: {policy_revalidation_batch_id}"
+            )
         if batch.status not in {"PENDING", "FAILED"}:
-            raise ValidationFailureError(f"cannot run batch with status: {batch.status}")
+            raise ValidationFailureError(
+                f"cannot run batch with status: {batch.status}"
+            )
         targets = batch.scope.get("targets", [])
         if not isinstance(targets, list) or not targets:
             raise ValidationFailureError("revalidation scope requires targets list")
         batch.status = "RUNNING"
         batch.started_at = utc_now()
         self.session.flush()
-        counts = {"total": 0, "created": 0, "PASS": 0, "REVIEW_REQUIRED": 0, "BLOCK": 0, "SKIPPED": 0, "NOT_APPLICABLE": 0, "failed": 0}
+        counts = {
+            "total": 0,
+            "created": 0,
+            "PASS": 0,
+            "REVIEW_REQUIRED": 0,
+            "BLOCK": 0,
+            "SKIPPED": 0,
+            "NOT_APPLICABLE": 0,
+            "failed": 0,
+        }
         try:
             for target in targets:
                 if not isinstance(target, dict):
-                    raise ValidationFailureError("each revalidation target must be an object")
+                    raise ValidationFailureError(
+                        "each revalidation target must be an object"
+                    )
                 gate_keys = _target_gate_keys(target, batch, self.session)
                 for gate_key in gate_keys:
                     counts["total"] += 1
@@ -799,7 +941,9 @@ def _builtin_definition_contracts() -> list[GateDefinitionVersionCreate]:
     ]
 
 
-def _evaluate_gate(gate_key: str, snapshot: dict[str, Any], session: Session) -> GateEvaluation:
+def _evaluate_gate(
+    gate_key: str, snapshot: dict[str, Any], session: Session
+) -> GateEvaluation:
     mapping = {
         "ai_use_disclosure_gate": _ai_use_disclosure_gate,
         "ai_provenance_gate": _ai_provenance_gate,
@@ -830,7 +974,12 @@ def _evaluate_gate(gate_key: str, snapshot: dict[str, Any], session: Session) ->
     }
     handler = mapping.get(gate_key)
     if handler is None:
-        return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, basis={"reason": "unknown_gate"})
+        return _gate_result(
+            "SKIPPED",
+            ["GATE_INPUT_INSUFFICIENT"],
+            snapshot,
+            basis={"reason": "unknown_gate"},
+        )
     return handler(snapshot)
 
 
@@ -893,18 +1042,10 @@ def _production_assignment_integrity_gate(
         and not content.get("episode_role")
         and bool(content.get("standalone_reason_code"))
     )
-    derivative_valid = (
-        content.get("production_lane") != "LONG_DERIVED_SHORT"
-        or (
-            content_mode == "STANDALONE"
-            and _exact_ref(content.get("parent_derivative_lineage"))
-        )
-    )
     exact_authority = (
         _sha256(content.get("project_admission_decision_hash"))
         and evidence.get("assignment_integrity_pass") is True
         and (series_valid or standalone_valid)
-        and derivative_valid
     )
     if "POLICY" in exceptions or not exact_authority:
         return _production_block(snapshot, "POLICY_EXCEPTION_BLOCKED")
@@ -940,11 +1081,10 @@ def _production_duration_contract_gate(
         )
     except (TypeError, ValueError):
         return _production_block(snapshot, "DURATION_CONTRACT_INVALID")
-    if (
-        str(contract.source_profile_version_id)
-        != str(content.get("channel_profile_version_id"))
-        or str(contract.source_policy_snapshot_id)
-        != str(content.get("compiled_policy_snapshot_id"))
+    if str(contract.source_profile_version_id) != str(
+        content.get("channel_profile_version_id")
+    ) or str(contract.source_policy_snapshot_id) != str(
+        content.get("compiled_policy_snapshot_id")
     ):
         return _production_block(snapshot, "DURATION_CONTRACT_HASH_MISMATCH")
     if not (
@@ -1191,11 +1331,10 @@ def _production_package_integrity_gate(
         content.get("destination_binding_ref"),
     ]
     exact_hash = content_hash(content) == artifact_version.get("content_hash")
-    scope_matches = (
-        str(content.get("video_project_id"))
-        == str((snapshot.get("project") or {}).get("id"))
-        and str(content.get("compiled_policy_snapshot_id"))
-        == str((snapshot.get("project") or {}).get("policy_snapshot_id"))
+    scope_matches = str(content.get("video_project_id")) == str(
+        (snapshot.get("project") or {}).get("id")
+    ) and str(content.get("compiled_policy_snapshot_id")) == str(
+        (snapshot.get("project") or {}).get("policy_snapshot_id")
     )
     if (
         "SECURITY" in exceptions
@@ -1241,8 +1380,7 @@ def _production_package_gate_input(
     if (
         not isinstance(content, dict)
         or content.get("schema_version") != "production.package.v2"
-        or content.get("authority_classification")
-        != "CANONICAL_V2_AUTHORITY"
+        or content.get("authority_classification") != "CANONICAL_V2_AUTHORITY"
     ):
         return {}, {}, "PRODUCTION_PACKAGE_V2_REQUIRED"
     evidence = content.get("readiness_evidence")
@@ -1300,23 +1438,38 @@ def _exact_ref(value: Any) -> bool:
 
 def _exact_ref_list(value: Any) -> bool:
     return bool(
-        isinstance(value, list)
-        and value
-        and all(_exact_ref(item) for item in value)
+        isinstance(value, list) and value and all(_exact_ref(item) for item in value)
     )
 
 
 def _sha256(value: Any) -> bool:
     text = str(value or "")
-    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
+    return len(text) == 64 and all(
+        character in "0123456789abcdef" for character in text
+    )
 
 
 def _ai_use_disclosure_gate(snapshot: dict[str, Any]) -> GateEvaluation:
     if not _has_ai_flag(snapshot):
-        return _gate_result("NOT_APPLICABLE", ["AI_DISCLOSURE_NOT_REQUIRED"], snapshot, freshness="NOT_REQUIRED", confidence="HIGH")
-    evidence = _evidence_refs(snapshot, keywords=["ai_disclosure", "disclosure", "aigc"])
+        return _gate_result(
+            "NOT_APPLICABLE",
+            ["AI_DISCLOSURE_NOT_REQUIRED"],
+            snapshot,
+            freshness="NOT_REQUIRED",
+            confidence="HIGH",
+        )
+    evidence = _evidence_refs(
+        snapshot, keywords=["ai_disclosure", "disclosure", "aigc"]
+    )
     if _has_disclosure(snapshot, "ai") or evidence:
-        return _gate_result("PASS", ["AI_DISCLOSURE_REQUIRED"], snapshot, evidence=evidence, freshness="FRESH", confidence="HIGH")
+        return _gate_result(
+            "PASS",
+            ["AI_DISCLOSURE_REQUIRED"],
+            snapshot,
+            evidence=evidence,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
     return _gate_result(
         "REVIEW_REQUIRED",
         ["AI_DISCLOSURE_REQUIRED", "AI_DISCLOSURE_MISSING"],
@@ -1327,102 +1480,335 @@ def _ai_use_disclosure_gate(snapshot: dict[str, Any]) -> GateEvaluation:
 
 
 def _ai_provenance_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if _text_contains(snapshot, ["content_credentials", "c2pa_present", "c2pa_metadata_present"]):
-        return _gate_result("PASS", ["CONTENT_CREDENTIALS_DETECTED", "C2PA_METADATA_PRESENT"], snapshot, freshness="FRESH", confidence="HIGH")
+    if _text_contains(
+        snapshot, ["content_credentials", "c2pa_present", "c2pa_metadata_present"]
+    ):
+        return _gate_result(
+            "PASS",
+            ["CONTENT_CREDENTIALS_DETECTED", "C2PA_METADATA_PRESENT"],
+            snapshot,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
     if _has_ai_flag(snapshot):
-        return _gate_result("REVIEW_REQUIRED", ["PROVENANCE_MISSING", "C2PA_METADATA_ABSENT"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
-    return _gate_result("NOT_APPLICABLE", ["AI_DISCLOSURE_NOT_REQUIRED"], snapshot, freshness="NOT_REQUIRED", confidence="HIGH")
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["PROVENANCE_MISSING", "C2PA_METADATA_ABSENT"],
+            snapshot,
+            confidence="MEDIUM",
+            confidence_reasons=["EVIDENCE_REQUIRED"],
+        )
+    return _gate_result(
+        "NOT_APPLICABLE",
+        ["AI_DISCLOSURE_NOT_REQUIRED"],
+        snapshot,
+        freshness="NOT_REQUIRED",
+        confidence="HIGH",
+    )
 
 
 def _rights_copyright_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    evidence = _evidence_refs(snapshot, keywords=["rights", "license", "permission", "source"])
-    if _text_contains(snapshot, ["rights_basis", "license_id", "permission_ref", "public_domain"]) or evidence:
-        return _gate_result("PASS", ["EVIDENCE_REQUIRED"], snapshot, evidence=evidence, freshness="FRESH", confidence="HIGH")
-    return _gate_result("REVIEW_REQUIRED", ["RIGHTS_BASIS_MISSING"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
+    evidence = _evidence_refs(
+        snapshot, keywords=["rights", "license", "permission", "source"]
+    )
+    if (
+        _text_contains(
+            snapshot, ["rights_basis", "license_id", "permission_ref", "public_domain"]
+        )
+        or evidence
+    ):
+        return _gate_result(
+            "PASS",
+            ["EVIDENCE_REQUIRED"],
+            snapshot,
+            evidence=evidence,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "REVIEW_REQUIRED",
+        ["RIGHTS_BASIS_MISSING"],
+        snapshot,
+        confidence="MEDIUM",
+        confidence_reasons=["EVIDENCE_REQUIRED"],
+    )
 
 
 def _affiliate_disclosure_gate(snapshot: dict[str, Any]) -> GateEvaluation:
     if not _text_contains(snapshot, ["affiliate", "affiliate_link", "commission"]):
-        return _gate_result("NOT_APPLICABLE", ["GATE_INPUT_INSUFFICIENT"], snapshot, freshness="NOT_REQUIRED", confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+        return _gate_result(
+            "NOT_APPLICABLE",
+            ["GATE_INPUT_INSUFFICIENT"],
+            snapshot,
+            freshness="NOT_REQUIRED",
+            confidence="LOW",
+            confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+        )
     if _has_disclosure(snapshot, "affiliate"):
-        return _gate_result("PASS", ["AFFILIATE_DISCLOSURE_REQUIRED"], snapshot, freshness="FRESH", confidence="HIGH")
-    return _gate_result("REVIEW_REQUIRED", ["AFFILIATE_DISCLOSURE_REQUIRED", "AFFILIATE_DISCLOSURE_MISSING"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
+        return _gate_result(
+            "PASS",
+            ["AFFILIATE_DISCLOSURE_REQUIRED"],
+            snapshot,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "REVIEW_REQUIRED",
+        ["AFFILIATE_DISCLOSURE_REQUIRED", "AFFILIATE_DISCLOSURE_MISSING"],
+        snapshot,
+        confidence="MEDIUM",
+        confidence_reasons=["EVIDENCE_REQUIRED"],
+    )
 
 
 def _commercial_disclosure_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if not _text_contains(snapshot, ["sponsor", "paid_promotion", "commercial", "brand_deal"]):
-        return _gate_result("NOT_APPLICABLE", ["GATE_INPUT_INSUFFICIENT"], snapshot, freshness="NOT_REQUIRED", confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+    if not _text_contains(
+        snapshot, ["sponsor", "paid_promotion", "commercial", "brand_deal"]
+    ):
+        return _gate_result(
+            "NOT_APPLICABLE",
+            ["GATE_INPUT_INSUFFICIENT"],
+            snapshot,
+            freshness="NOT_REQUIRED",
+            confidence="LOW",
+            confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+        )
     if _has_disclosure(snapshot, "commercial") or _has_disclosure(snapshot, "paid"):
-        return _gate_result("PASS", ["COMMERCIAL_DISCLOSURE_REQUIRED"], snapshot, freshness="FRESH", confidence="HIGH")
-    return _gate_result("REVIEW_REQUIRED", ["COMMERCIAL_DISCLOSURE_REQUIRED", "COMMERCIAL_DISCLOSURE_MISSING"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
+        return _gate_result(
+            "PASS",
+            ["COMMERCIAL_DISCLOSURE_REQUIRED"],
+            snapshot,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "REVIEW_REQUIRED",
+        ["COMMERCIAL_DISCLOSURE_REQUIRED", "COMMERCIAL_DISCLOSURE_MISSING"],
+        snapshot,
+        confidence="MEDIUM",
+        confidence_reasons=["EVIDENCE_REQUIRED"],
+    )
 
 
 def _platform_originality_gate(snapshot: dict[str, Any]) -> GateEvaluation:
     if _text_contains(snapshot, ["reused_content", "transformation_insufficient"]):
-        return _gate_result("REVIEW_REQUIRED", ["REUSED_CONTENT_TRANSFORMATION_INSUFFICIENT"], snapshot, confidence="MEDIUM")
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["REUSED_CONTENT_TRANSFORMATION_INSUFFICIENT"],
+            snapshot,
+            confidence="MEDIUM",
+        )
     if _text_contains(snapshot, ["human_value_weak", "low_originality"]):
-        return _gate_result("REVIEW_REQUIRED", ["HUMAN_VALUE_CONTRIBUTION_WEAK"], snapshot, confidence="MEDIUM")
-    return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["HUMAN_VALUE_CONTRIBUTION_WEAK"],
+            snapshot,
+            confidence="MEDIUM",
+        )
+    return _gate_result(
+        "SKIPPED",
+        ["GATE_INPUT_INSUFFICIENT"],
+        snapshot,
+        confidence="LOW",
+        confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+    )
 
 
 def _repetitive_template_risk_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if _text_contains(snapshot, ["repetitive_template", "template_saturation", "stock_visual_overuse"]):
-        return _gate_result("REVIEW_REQUIRED", ["REPETITIVE_TEMPLATE_RISK", "TEMPLATE_SATURATION_RISK"], snapshot, confidence="MEDIUM")
-    return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+    if _text_contains(
+        snapshot, ["repetitive_template", "template_saturation", "stock_visual_overuse"]
+    ):
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["REPETITIVE_TEMPLATE_RISK", "TEMPLATE_SATURATION_RISK"],
+            snapshot,
+            confidence="MEDIUM",
+        )
+    return _gate_result(
+        "SKIPPED",
+        ["GATE_INPUT_INSUFFICIENT"],
+        snapshot,
+        confidence="LOW",
+        confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+    )
 
 
 def _brand_conflict_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if _text_contains(snapshot, ["restricted_entity", "entity_restricted", "brand_conflict"]):
-        return _gate_result("REVIEW_REQUIRED", ["ENTITY_RESTRICTED"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
-    return _gate_result("NOT_APPLICABLE", ["GATE_INPUT_INSUFFICIENT"], snapshot, freshness="NOT_REQUIRED", confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+    if _text_contains(
+        snapshot, ["restricted_entity", "entity_restricted", "brand_conflict"]
+    ):
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["ENTITY_RESTRICTED"],
+            snapshot,
+            confidence="MEDIUM",
+            confidence_reasons=["EVIDENCE_REQUIRED"],
+        )
+    return _gate_result(
+        "NOT_APPLICABLE",
+        ["GATE_INPUT_INSUFFICIENT"],
+        snapshot,
+        freshness="NOT_REQUIRED",
+        confidence="LOW",
+        confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+    )
 
 
 def _commercial_conflict_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if _text_contains(snapshot, ["affiliate_conflict", "sponsor_conflict", "commercial_conflict"]):
-        return _gate_result("REVIEW_REQUIRED", ["SPONSOR_CONFLICT_WITH_CONTENT"], snapshot, confidence="MEDIUM")
-    return _gate_result("NOT_APPLICABLE", ["GATE_INPUT_INSUFFICIENT"], snapshot, freshness="NOT_REQUIRED", confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+    if _text_contains(
+        snapshot, ["affiliate_conflict", "sponsor_conflict", "commercial_conflict"]
+    ):
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["SPONSOR_CONFLICT_WITH_CONTENT"],
+            snapshot,
+            confidence="MEDIUM",
+        )
+    return _gate_result(
+        "NOT_APPLICABLE",
+        ["GATE_INPUT_INSUFFICIENT"],
+        snapshot,
+        freshness="NOT_REQUIRED",
+        confidence="LOW",
+        confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+    )
 
 
 def _disclosure_placement_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if _text_contains(snapshot, ["disclosure_required"]) and not _text_contains(snapshot, ["clear_and_conspicuous", "placement_ok", "above_fold"]):
-        return _gate_result("REVIEW_REQUIRED", ["DISCLOSURE_PLACEMENT_INSUFFICIENT", "DISCLOSURE_NOT_CLEAR_AND_CONSPICUOUS"], snapshot, confidence="MEDIUM")
-    return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+    if _text_contains(snapshot, ["disclosure_required"]) and not _text_contains(
+        snapshot, ["clear_and_conspicuous", "placement_ok", "above_fold"]
+    ):
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            [
+                "DISCLOSURE_PLACEMENT_INSUFFICIENT",
+                "DISCLOSURE_NOT_CLEAR_AND_CONSPICUOUS",
+            ],
+            snapshot,
+            confidence="MEDIUM",
+        )
+    return _gate_result(
+        "SKIPPED",
+        ["GATE_INPUT_INSUFFICIENT"],
+        snapshot,
+        confidence="LOW",
+        confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+    )
 
 
 def _search_demand_gate(snapshot: dict[str, Any]) -> GateEvaluation:
     if not _text_contains(snapshot, ["search_led", "keyword", "search_demand"]):
-        return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+        return _gate_result(
+            "SKIPPED",
+            ["GATE_INPUT_INSUFFICIENT"],
+            snapshot,
+            confidence="LOW",
+            confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+        )
     metrics = _metric_refs(snapshot, keywords=["search_volume", "demand", "keyword"])
     if metrics or _text_contains(snapshot, ["search_volume", "demand_evidence"]):
-        return _gate_result("PASS", ["EVIDENCE_REQUIRED"], snapshot, metrics=metrics, freshness="FRESH", confidence="HIGH")
-    return _gate_result("REVIEW_REQUIRED", ["SEARCH_DEMAND_EVIDENCE_MISSING", "SEARCH_VOLUME_UNKNOWN"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
+        return _gate_result(
+            "PASS",
+            ["EVIDENCE_REQUIRED"],
+            snapshot,
+            metrics=metrics,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "REVIEW_REQUIRED",
+        ["SEARCH_DEMAND_EVIDENCE_MISSING", "SEARCH_VOLUME_UNKNOWN"],
+        snapshot,
+        confidence="MEDIUM",
+        confidence_reasons=["EVIDENCE_REQUIRED"],
+    )
 
 
 def _distribution_readiness_gate(snapshot: dict[str, Any]) -> GateEvaluation:
     packaging = snapshot.get("artifact_version", {}).get("packaging_metadata", {})
     audience = snapshot.get("project", {}).get("audience_delivery_summary", {})
-    if _text_contains(packaging, ["metadata_ready", "distribution_ready"]) or (
-        isinstance(packaging, dict) and bool(packaging.get("title")) and bool(packaging.get("description"))
-    ) or _text_contains(audience, ["metadata_ready", "distribution_ready"]):
-        return _gate_result("PASS", ["EVIDENCE_REQUIRED"], snapshot, freshness="FRESH", confidence="HIGH")
-    return _gate_result("REVIEW_REQUIRED", ["DISTRIBUTION_READINESS_MISSING", "METADATA_READINESS_MISSING"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
+    if (
+        _text_contains(packaging, ["metadata_ready", "distribution_ready"])
+        or (
+            isinstance(packaging, dict)
+            and bool(packaging.get("title"))
+            and bool(packaging.get("description"))
+        )
+        or _text_contains(audience, ["metadata_ready", "distribution_ready"])
+    ):
+        return _gate_result(
+            "PASS",
+            ["EVIDENCE_REQUIRED"],
+            snapshot,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "REVIEW_REQUIRED",
+        ["DISTRIBUTION_READINESS_MISSING", "METADATA_READINESS_MISSING"],
+        snapshot,
+        confidence="MEDIUM",
+        confidence_reasons=["EVIDENCE_REQUIRED"],
+    )
 
 
 def _packaging_expectation_gate(snapshot: dict[str, Any]) -> GateEvaluation:
     packaging = snapshot.get("artifact_version", {}).get("packaging_metadata", {})
     if _text_contains(snapshot, ["promise_mismatch", "packaging_mismatch"]):
-        return _gate_result("REVIEW_REQUIRED", ["PACKAGING_PROMISE_MISMATCH"], snapshot, confidence="MEDIUM")
-    if isinstance(packaging, dict) and (packaging.get("title") or packaging.get("hook") or packaging.get("description")):
-        return _gate_result("PASS", ["EVIDENCE_REQUIRED"], snapshot, freshness="FRESH", confidence="HIGH")
-    return _gate_result("SKIPPED", ["GATE_INPUT_INSUFFICIENT"], snapshot, confidence="LOW", confidence_reasons=["GATE_INPUT_INSUFFICIENT"])
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["PACKAGING_PROMISE_MISMATCH"],
+            snapshot,
+            confidence="MEDIUM",
+        )
+    if isinstance(packaging, dict) and (
+        packaging.get("title") or packaging.get("hook") or packaging.get("description")
+    ):
+        return _gate_result(
+            "PASS",
+            ["EVIDENCE_REQUIRED"],
+            snapshot,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "SKIPPED",
+        ["GATE_INPUT_INSUFFICIENT"],
+        snapshot,
+        confidence="LOW",
+        confidence_reasons=["GATE_INPUT_INSUFFICIENT"],
+    )
 
 
 def _privacy_retention_gate(snapshot: dict[str, Any]) -> GateEvaluation:
-    if not _text_contains(snapshot, ["raw_comment", "pii", "community_data", "memory_promotion"]):
-        return _gate_result("NOT_APPLICABLE", ["PRIVACY_PII_REMOVED"], snapshot, freshness="NOT_REQUIRED", confidence="HIGH")
-    if _text_contains(snapshot, ["pii_removed", "scrubbed", "retention_policy", "raw_comment_storage_blocked"]):
-        return _gate_result("PASS", ["PRIVACY_PII_REMOVED"], snapshot, freshness="FRESH", confidence="HIGH")
-    return _gate_result("REVIEW_REQUIRED", ["RAW_COMMENT_STORAGE_BLOCKED", "CONTEXT_SCOPE_MISSING"], snapshot, confidence="MEDIUM", confidence_reasons=["EVIDENCE_REQUIRED"])
+    if not _text_contains(
+        snapshot, ["raw_comment", "pii", "community_data", "memory_promotion"]
+    ):
+        return _gate_result(
+            "NOT_APPLICABLE",
+            ["PRIVACY_PII_REMOVED"],
+            snapshot,
+            freshness="NOT_REQUIRED",
+            confidence="HIGH",
+        )
+    if _text_contains(
+        snapshot,
+        ["pii_removed", "scrubbed", "retention_policy", "raw_comment_storage_blocked"],
+    ):
+        return _gate_result(
+            "PASS",
+            ["PRIVACY_PII_REMOVED"],
+            snapshot,
+            freshness="FRESH",
+            confidence="HIGH",
+        )
+    return _gate_result(
+        "REVIEW_REQUIRED",
+        ["RAW_COMMENT_STORAGE_BLOCKED", "CONTEXT_SCOPE_MISSING"],
+        snapshot,
+        confidence="MEDIUM",
+        confidence_reasons=["EVIDENCE_REQUIRED"],
+    )
 
 
 def _publish_risk_gate(snapshot: dict[str, Any], session: Session) -> GateEvaluation:
@@ -1437,10 +1823,29 @@ def _publish_risk_gate(snapshot: dict[str, Any], session: Session) -> GateEvalua
         ).all()
     )
     if any(run.result == "BLOCK" for run in runs):
-        return _gate_result("BLOCK", ["MANUAL_REVIEW_REQUIRED"], snapshot, confidence="HIGH", basis={"source_gate_run_count": len(runs)})
+        return _gate_result(
+            "BLOCK",
+            ["MANUAL_REVIEW_REQUIRED"],
+            snapshot,
+            confidence="HIGH",
+            basis={"source_gate_run_count": len(runs)},
+        )
     if any(run.result == "REVIEW_REQUIRED" for run in runs):
-        return _gate_result("REVIEW_REQUIRED", ["MANUAL_REVIEW_REQUIRED"], snapshot, confidence="HIGH", basis={"source_gate_run_count": len(runs)})
-    return _gate_result("PASS", ["SYSTEM_OK"], snapshot, freshness="FRESH", confidence="HIGH", basis={"source_gate_run_count": len(runs)})
+        return _gate_result(
+            "REVIEW_REQUIRED",
+            ["MANUAL_REVIEW_REQUIRED"],
+            snapshot,
+            confidence="HIGH",
+            basis={"source_gate_run_count": len(runs)},
+        )
+    return _gate_result(
+        "PASS",
+        ["SYSTEM_OK"],
+        snapshot,
+        freshness="FRESH",
+        confidence="HIGH",
+        basis={"source_gate_run_count": len(runs)},
+    )
 
 
 def _gate_result(
@@ -1474,11 +1879,19 @@ def _snapshot_for_project(project: VideoProject) -> dict[str, Any]:
     }
 
 
-def _snapshot_for_artifact_version(project: VideoProject, artifact: Artifact, version: ArtifactVersion) -> dict[str, Any]:
+def _snapshot_for_artifact_version(
+    project: VideoProject, artifact: Artifact, version: ArtifactVersion
+) -> dict[str, Any]:
     return {
         "target": {"target_type": "artifact_version", "target_id": str(version.id)},
         "project": _project_payload(project),
-        "artifact": {"id": str(artifact.id), "artifact_type": artifact.artifact_type, "current_version_id": str(artifact.current_version_id) if artifact.current_version_id else None},
+        "artifact": {
+            "id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "current_version_id": str(artifact.current_version_id)
+            if artifact.current_version_id
+            else None,
+        },
         "artifact_version": {
             "id": str(version.id),
             "artifact_id": str(version.artifact_id),
@@ -1498,14 +1911,18 @@ def _snapshot_for_artifact_version(project: VideoProject, artifact: Artifact, ve
     }
 
 
-def _snapshot_for_review_task(project: VideoProject, review: ReviewTask, version: ArtifactVersion | None) -> dict[str, Any]:
+def _snapshot_for_review_task(
+    project: VideoProject, review: ReviewTask, version: ArtifactVersion | None
+) -> dict[str, Any]:
     snapshot = _snapshot_for_project(project)
     snapshot["target"] = {"target_type": "review_task", "target_id": str(review.id)}
     snapshot["review_task"] = {
         "id": str(review.id),
         "target_type": review.target_type,
         "target_id": str(review.target_id),
-        "target_artifact_version_id": str(review.target_artifact_version_id) if review.target_artifact_version_id else None,
+        "target_artifact_version_id": str(review.target_artifact_version_id)
+        if review.target_artifact_version_id
+        else None,
         "review_type": review.review_type,
         "status": review.status,
         "review_reason_codes": review.review_reason_codes,
@@ -1547,11 +1964,19 @@ def _project_payload(project: VideoProject) -> dict[str, Any]:
     }
 
 
-def _review_target(target_type: str, target_id: uuid.UUID, context: GateTargetContext) -> tuple[str, uuid.UUID, uuid.UUID | None]:
+def _review_target(
+    target_type: str, target_id: uuid.UUID, context: GateTargetContext
+) -> tuple[str, uuid.UUID, uuid.UUID | None]:
     if target_type == "artifact_version":
         return "artifact_version", target_id, target_id
     if target_type == "review_task":
-        return "review_task", target_id, context.review_task.target_artifact_version_id if context.review_task else None
+        return (
+            "review_task",
+            target_id,
+            context.review_task.target_artifact_version_id
+            if context.review_task
+            else None,
+        )
     return "video_project", context.project.id, None
 
 
@@ -1563,12 +1988,16 @@ def _readiness_item(run: GateRun) -> dict[str, Any]:
         "target_id": str(run.target_id),
         "result": run.result,
         "reason_codes": run.reason_codes,
-        "review_task_id": str(run.created_review_task_id) if run.created_review_task_id else None,
+        "review_task_id": str(run.created_review_task_id)
+        if run.created_review_task_id
+        else None,
         "created_at": run.created_at.isoformat(),
     }
 
 
-def _target_gate_keys(target: dict[str, Any], batch: PolicyRevalidationBatch, session: Session) -> list[str]:
+def _target_gate_keys(
+    target: dict[str, Any], batch: PolicyRevalidationBatch, session: Session
+) -> list[str]:
     if "gate_key" in target:
         return [str(target["gate_key"])]
     if "gate_keys" in target:
@@ -1576,20 +2005,38 @@ def _target_gate_keys(target: dict[str, Any], batch: PolicyRevalidationBatch, se
     if batch.scope.get("gate_keys"):
         return [str(item) for item in batch.scope["gate_keys"]]
     if batch.gate_definition_version_id is not None:
-        definition = session.get(GateDefinitionVersion, batch.gate_definition_version_id)
+        definition = session.get(
+            GateDefinitionVersion, batch.gate_definition_version_id
+        )
         if definition is None:
-            raise NotFoundError(f"gate definition not found: {batch.gate_definition_version_id}")
+            raise NotFoundError(
+                f"gate definition not found: {batch.gate_definition_version_id}"
+            )
         return [definition.gate_key]
-    raise ValidationFailureError("revalidation target requires gate_key, gate_keys, or batch gate_definition_version_id")
+    raise ValidationFailureError(
+        "revalidation target requires gate_key, gate_keys, or batch gate_definition_version_id"
+    )
 
 
-def _create_policy_source_ref(session: Session, *, data: PolicySourceRefCreate) -> PolicySourceRef:
+def _create_policy_source_ref(
+    session: Session, *, data: PolicySourceRefCreate
+) -> PolicySourceRef:
     if data.policy_version_id is None and data.policy_change_record_id is None:
-        raise ValidationFailureError("policy source ref requires policy_version_id or policy_change_record_id")
-    if data.policy_version_id is not None and session.get(PlatformPolicyVersion, data.policy_version_id) is None:
+        raise ValidationFailureError(
+            "policy source ref requires policy_version_id or policy_change_record_id"
+        )
+    if (
+        data.policy_version_id is not None
+        and session.get(PlatformPolicyVersion, data.policy_version_id) is None
+    ):
         raise NotFoundError(f"policy version not found: {data.policy_version_id}")
-    if data.policy_change_record_id is not None and session.get(PolicyChangeRecord, data.policy_change_record_id) is None:
-        raise NotFoundError(f"policy change record not found: {data.policy_change_record_id}")
+    if (
+        data.policy_change_record_id is not None
+        and session.get(PolicyChangeRecord, data.policy_change_record_id) is None
+    ):
+        raise NotFoundError(
+            f"policy change record not found: {data.policy_change_record_id}"
+        )
     source_ref = PolicySourceRef(**data.model_dump())
     session.add(source_ref)
     session.flush()
@@ -1603,50 +2050,88 @@ def _create_policy_source_ref(session: Session, *, data: PolicySourceRefCreate) 
         target_id=source_ref.id,
         company_id=None,
         correlation_id="m3-policy-source-ref-created",
-        payload={"source_type": source_ref.source_type, "reliability": source_ref.reliability},
+        payload={
+            "source_type": source_ref.source_type,
+            "reliability": source_ref.reliability,
+        },
     )
     return source_ref
 
 
 def _has_ai_flag(value: Any) -> bool:
-    return _text_contains(value, ["ai_used", "synthetic_voice", "voice_clone", "realistic_ai", "aigc", "generated_by_ai", "synthetic_media"])
+    return _text_contains(
+        value,
+        [
+            "ai_used",
+            "synthetic_voice",
+            "voice_clone",
+            "realistic_ai",
+            "aigc",
+            "generated_by_ai",
+            "synthetic_media",
+        ],
+    )
 
 
 def _has_disclosure(value: Any, keyword: str) -> bool:
-    return _text_contains(value, [f"{keyword}_disclosure", f"{keyword}_disclosed", "disclosure_present", "disclosure_evidence"])
+    return _text_contains(
+        value,
+        [
+            f"{keyword}_disclosure",
+            f"{keyword}_disclosed",
+            "disclosure_present",
+            "disclosure_evidence",
+        ],
+    )
 
 
 def _text_contains(value: Any, needles: list[str]) -> bool:
     normalized_needles = [needle.lower() for needle in needles]
     for key, item in _walk_items(value):
         key_text = str(key).lower()
-        value_text = str(item).lower() if isinstance(item, (str, bool, int, float)) else ""
-        if any(needle in key_text or needle in value_text for needle in normalized_needles):
+        value_text = (
+            str(item).lower() if isinstance(item, (str, bool, int, float)) else ""
+        )
+        if any(
+            needle in key_text or needle in value_text for needle in normalized_needles
+        ):
             if item is False or item == "false":
                 continue
             return True
     return False
 
 
-def _evidence_refs(snapshot: dict[str, Any], keywords: list[str] | None = None) -> list[dict[str, Any]]:
+def _evidence_refs(
+    snapshot: dict[str, Any], keywords: list[str] | None = None
+) -> list[dict[str, Any]]:
     refs: list[dict[str, Any]] = []
     for key, item in _walk_items(snapshot):
         if key == "evidence_refs" and isinstance(item, list):
             refs.extend(ref for ref in item if isinstance(ref, dict))
     if keywords:
         lowered = [keyword.lower() for keyword in keywords]
-        return [ref for ref in refs if any(keyword in str(ref).lower() for keyword in lowered)]
+        return [
+            ref
+            for ref in refs
+            if any(keyword in str(ref).lower() for keyword in lowered)
+        ]
     return refs
 
 
-def _metric_refs(snapshot: dict[str, Any], keywords: list[str] | None = None) -> list[dict[str, Any]]:
+def _metric_refs(
+    snapshot: dict[str, Any], keywords: list[str] | None = None
+) -> list[dict[str, Any]]:
     refs: list[dict[str, Any]] = []
     for key, item in _walk_items(snapshot):
         if key in {"metric_refs", "metrics"} and isinstance(item, list):
             refs.extend(ref for ref in item if isinstance(ref, dict))
     if keywords:
         lowered = [keyword.lower() for keyword in keywords]
-        return [ref for ref in refs if any(keyword in str(ref).lower() for keyword in lowered)]
+        return [
+            ref
+            for ref in refs
+            if any(keyword in str(ref).lower() for keyword in lowered)
+        ]
     return refs
 
 
@@ -1667,20 +2152,55 @@ def _walk_items(value: Any) -> list[tuple[str, Any]]:
 
 def _reason_refs_for_gate(gate_key: str) -> list[str]:
     refs = {
-        "ai_use_disclosure_gate": ["AI_DISCLOSURE_REQUIRED", "AI_DISCLOSURE_MISSING", "AI_DISCLOSURE_NOT_REQUIRED"],
-        "ai_provenance_gate": ["PROVENANCE_MISSING", "CONTENT_CREDENTIALS_DETECTED", "C2PA_METADATA_ABSENT"],
+        "ai_use_disclosure_gate": [
+            "AI_DISCLOSURE_REQUIRED",
+            "AI_DISCLOSURE_MISSING",
+            "AI_DISCLOSURE_NOT_REQUIRED",
+        ],
+        "ai_provenance_gate": [
+            "PROVENANCE_MISSING",
+            "CONTENT_CREDENTIALS_DETECTED",
+            "C2PA_METADATA_ABSENT",
+        ],
         "rights_copyright_gate": ["RIGHTS_BASIS_MISSING", "RIGHTS_EVIDENCE_WEAK"],
-        "affiliate_disclosure_gate": ["AFFILIATE_DISCLOSURE_REQUIRED", "AFFILIATE_DISCLOSURE_MISSING"],
-        "commercial_disclosure_gate": ["COMMERCIAL_DISCLOSURE_REQUIRED", "COMMERCIAL_DISCLOSURE_MISSING"],
-        "platform_originality_gate": ["REUSED_CONTENT_TRANSFORMATION_INSUFFICIENT", "HUMAN_VALUE_CONTRIBUTION_WEAK"],
-        "repetitive_template_risk_gate": ["REPETITIVE_TEMPLATE_RISK", "TEMPLATE_SATURATION_RISK"],
+        "affiliate_disclosure_gate": [
+            "AFFILIATE_DISCLOSURE_REQUIRED",
+            "AFFILIATE_DISCLOSURE_MISSING",
+        ],
+        "commercial_disclosure_gate": [
+            "COMMERCIAL_DISCLOSURE_REQUIRED",
+            "COMMERCIAL_DISCLOSURE_MISSING",
+        ],
+        "platform_originality_gate": [
+            "REUSED_CONTENT_TRANSFORMATION_INSUFFICIENT",
+            "HUMAN_VALUE_CONTRIBUTION_WEAK",
+        ],
+        "repetitive_template_risk_gate": [
+            "REPETITIVE_TEMPLATE_RISK",
+            "TEMPLATE_SATURATION_RISK",
+        ],
         "brand_conflict_gate": ["ENTITY_RESTRICTED"],
-        "commercial_conflict_gate": ["AFFILIATE_CONFLICT_WITH_CLAIM", "SPONSOR_CONFLICT_WITH_CONTENT"],
-        "disclosure_placement_gate": ["DISCLOSURE_PLACEMENT_INSUFFICIENT", "DISCLOSURE_NOT_CLEAR_AND_CONSPICUOUS"],
-        "search_demand_gate": ["SEARCH_DEMAND_EVIDENCE_MISSING", "SEARCH_VOLUME_UNKNOWN"],
-        "distribution_readiness_gate": ["DISTRIBUTION_READINESS_MISSING", "METADATA_READINESS_MISSING"],
+        "commercial_conflict_gate": [
+            "AFFILIATE_CONFLICT_WITH_CLAIM",
+            "SPONSOR_CONFLICT_WITH_CONTENT",
+        ],
+        "disclosure_placement_gate": [
+            "DISCLOSURE_PLACEMENT_INSUFFICIENT",
+            "DISCLOSURE_NOT_CLEAR_AND_CONSPICUOUS",
+        ],
+        "search_demand_gate": [
+            "SEARCH_DEMAND_EVIDENCE_MISSING",
+            "SEARCH_VOLUME_UNKNOWN",
+        ],
+        "distribution_readiness_gate": [
+            "DISTRIBUTION_READINESS_MISSING",
+            "METADATA_READINESS_MISSING",
+        ],
         "packaging_expectation_gate": ["PACKAGING_PROMISE_MISMATCH"],
-        "privacy_retention_gate": ["RAW_COMMENT_STORAGE_BLOCKED", "CONTEXT_SCOPE_MISSING"],
+        "privacy_retention_gate": [
+            "RAW_COMMENT_STORAGE_BLOCKED",
+            "CONTEXT_SCOPE_MISSING",
+        ],
         "publish_risk_gate": ["MANUAL_REVIEW_REQUIRED", "SYSTEM_OK"],
         "production_research_evidence_gate": [
             "PRODUCTION_RESEARCH_EVIDENCE_PASS",

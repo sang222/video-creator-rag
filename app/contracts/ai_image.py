@@ -14,7 +14,7 @@ from app.contracts.visual_routing import VisualSourceRoute
 
 
 AIImageSize = Literal["1K", "2K", "4K"]
-AIImageAspectRatio = Literal["16:9", "9:16", "1:1"]
+AIImageAspectRatio = Literal["16:9", "1:1"]
 ImageGateVerdict = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
 
 
@@ -161,12 +161,20 @@ class AIImageRequest(BaseModel):
             and not self.reference_assets
         ):
             raise ValueError("AI_IMAGE_AUTHORIZED_IDENTITY_REFERENCE_REQUIRED")
-        if (self.exact_text_required or self.exact_number_required) and not self.native_overlay_required:
+        if (
+            self.exact_text_required or self.exact_number_required
+        ) and not self.native_overlay_required:
             raise ValueError("AI_IMAGE_EXACT_CONTENT_REQUIRES_NATIVE_OVERLAY")
-        if self.visual_source_route == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY:
+        if (
+            self.visual_source_route
+            == VisualSourceRoute.AI_GENERATED_IMAGE_WITH_NATIVE_OVERLAY
+        ):
             if not self.native_overlay_required:
                 raise ValueError("AI_IMAGE_OVERLAY_ROUTE_REQUIRES_NATIVE_OVERLAY")
-        if self.visual_source_route == VisualSourceRoute.AI_GENERATED_IMAGE and self.native_overlay_required:
+        if (
+            self.visual_source_route == VisualSourceRoute.AI_GENERATED_IMAGE
+            and self.native_overlay_required
+        ):
             raise ValueError("AI_IMAGE_NATIVE_OVERLAY_REQUIRES_OVERLAY_ROUTE")
         if self.native_overlay_required:
             if not self.native_overlay_plan_ref or not self.native_overlay_plan_hash:
@@ -177,7 +185,10 @@ class AIImageRequest(BaseModel):
             raise ValueError("AI_IMAGE_DUPLICATE_SOURCE_SEGMENT")
         expected_refs = [asset.asset_ref for asset in self.reference_assets]
         expected_hashes = [asset.asset_hash for asset in self.reference_assets]
-        if self.reference_asset_refs != expected_refs or self.reference_asset_hashes != expected_hashes:
+        if (
+            self.reference_asset_refs != expected_refs
+            or self.reference_asset_hashes != expected_hashes
+        ):
             raise ValueError("AI_IMAGE_REFERENCE_BINDING_MISMATCH")
         if len(self.reference_asset_refs) != len(set(self.reference_asset_refs)):
             raise ValueError("AI_IMAGE_DUPLICATE_REFERENCE_ASSET")
@@ -274,13 +285,18 @@ class ImageNormalizationManifest(BaseModel):
     def validate_effective_resolution(self) -> "ImageNormalizationManifest":
         minimums = {
             "16:9": (1920, 1080),
-            "9:16": (1080, 1920),
             "1:1": (1080, 1080),
         }
         min_width, min_height = minimums[self.target_aspect_ratio]
-        if self.effective_width_after_crop < min_width or self.effective_height_after_crop < min_height:
+        if (
+            self.effective_width_after_crop < min_width
+            or self.effective_height_after_crop < min_height
+        ):
             raise ValueError("AI_IMAGE_EFFECTIVE_RESOLUTION_BELOW_1080P")
-        if self.target_width > self.effective_width_after_crop or self.target_height > self.effective_height_after_crop:
+        if (
+            self.target_width > self.effective_width_after_crop
+            or self.target_height > self.effective_height_after_crop
+        ):
             raise ValueError("AI_IMAGE_SILENT_UPSCALE_FORBIDDEN")
         if self.checksum != self.source_checksum:
             raise ValueError("AI_IMAGE_NORMALIZATION_CHECKSUM_BINDING_MISMATCH")
@@ -383,7 +399,16 @@ class NativeOverlayImageBinding(BaseModel):
     native_overlay_plan_ref: str = Field(min_length=1)
     native_overlay_plan_hash: str = Field(min_length=1)
     authoritative_content_kinds: list[
-        Literal["HEADLINE", "NUMBER", "LABEL", "CITATION", "CTA", "TOOL_NAME", "PRODUCT_NAME", "WORKFLOW_NODE"]
+        Literal[
+            "HEADLINE",
+            "NUMBER",
+            "LABEL",
+            "CITATION",
+            "CTA",
+            "TOOL_NAME",
+            "PRODUCT_NAME",
+            "WORKFLOW_NODE",
+        ]
     ] = Field(min_length=1)
     image_model_owns_final_text: Literal[False] = False
     production_eligible: Literal[False] = False
@@ -393,7 +418,9 @@ class NativeOverlayImageBinding(BaseModel):
 
     @model_validator(mode="after")
     def validate_binding(self) -> "NativeOverlayImageBinding":
-        if len(self.authoritative_content_kinds) != len(set(self.authoritative_content_kinds)):
+        if len(self.authoritative_content_kinds) != len(
+            set(self.authoritative_content_kinds)
+        ):
             raise ValueError("AI_IMAGE_DUPLICATE_AUTHORITATIVE_CONTENT_KIND")
         expected = ai_image_stable_hash(
             self.model_dump(mode="json", exclude={"content_hash"})
@@ -433,9 +460,14 @@ class AIImageProvenanceManifest(BaseModel):
 
     @model_validator(mode="after")
     def validate_provenance(self) -> "AIImageProvenanceManifest":
-        if self.output_reference.startswith(("http://", "https://", "data:")) or "?" in self.output_reference:
+        if (
+            self.output_reference.startswith(("http://", "https://", "data:"))
+            or "?" in self.output_reference
+        ):
             raise ValueError("AI_IMAGE_RAW_OUTPUT_REFERENCE_FORBIDDEN")
-        if self.reference_asset_refs and len(self.reference_asset_refs) != len(self.reference_asset_hashes):
+        if self.reference_asset_refs and len(self.reference_asset_refs) != len(
+            self.reference_asset_hashes
+        ):
             raise ValueError("AI_IMAGE_PROVENANCE_REFERENCE_BINDING_MISMATCH")
         expected = ai_image_stable_hash(
             self.model_dump(mode="json", exclude={"manifest_hash"})

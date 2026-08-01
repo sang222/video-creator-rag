@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -78,48 +78,15 @@ class ProductionWorkflowStart(BaseModel):
 
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
-    production_lane: ProductionLane
-    planning_source_type: PlanningSourceType
+    production_lane: Literal[ProductionLane.LONG_FORM]
+    planning_source_type: Literal[PlanningSourceType.LONG_FORM_PLAN]
     planning_source_id: uuid.UUID
     planning_source_hash: str = Field(pattern=SHA256_PATTERN)
     video_project_id: uuid.UUID | None = None
-    parent_video_project_id: uuid.UUID | None = None
-    parent_final_media_ref_id: uuid.UUID | None = None
-    canonical_media_timeline_ref: str | None = None
-    canonical_media_timeline_hash: str | None = Field(
-        default=None, pattern=SHA256_PATTERN
-    )
     max_attempts: int = Field(default=5, ge=1, le=20)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
     model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def validate_lane_source(self) -> Self:
-        expected = {
-            PlanningSourceType.DAILY_IDEA: ProductionLane.DAILY_SHORT,
-            PlanningSourceType.LONG_FORM_PLAN: ProductionLane.LONG_FORM,
-            PlanningSourceType.DERIVED_SHORT: ProductionLane.LONG_DERIVED_SHORT,
-        }[self.planning_source_type]
-        if self.production_lane != expected:
-            raise ValueError("production lane does not match planning source")
-        derivative_values = (
-            self.parent_video_project_id,
-            self.canonical_media_timeline_ref,
-            self.canonical_media_timeline_hash,
-        )
-        if self.production_lane == ProductionLane.LONG_DERIVED_SHORT:
-            if any(value is None for value in derivative_values):
-                raise ValueError(
-                    "LONG_DERIVED_SHORT requires exact parent and timeline"
-                )
-        elif any(value is not None for value in derivative_values) or (
-            self.parent_final_media_ref_id is not None
-        ):
-            raise ValueError(
-                "parent/timeline bindings are valid only for LONG_DERIVED_SHORT"
-            )
-        return self
 
 
 class ProductionWorkflowProjectStart(BaseModel):
@@ -294,7 +261,7 @@ class WorkflowStageResult(BaseModel):
 
 class WorkflowStageEventPayload(BaseModel):
     workflow_run_id: uuid.UUID
-    production_lane: ProductionLane
+    production_lane: Literal[ProductionLane.LONG_FORM]
     stage: ProductionWorkflowStage
     handler_key: str = Field(min_length=1, max_length=160)
     input_hash: str = Field(pattern=SHA256_PATTERN)
@@ -331,8 +298,8 @@ class ProductionWorkflowRead(BaseModel):
     channel_workspace_id: uuid.UUID
     video_project_id: uuid.UUID | None
     uploaded_video_id: uuid.UUID | None
-    production_lane: ProductionLane
-    planning_source_type: PlanningSourceType
+    production_lane: Literal[ProductionLane.LONG_FORM]
+    planning_source_type: Literal[PlanningSourceType.LONG_FORM_PLAN]
     planning_source_id: uuid.UUID
     planning_source_hash: str
     workflow_key: str

@@ -25,7 +25,7 @@ def _contract(**overrides):
             "positioning": "Giải thích thực dụng, không hype",
             "brand_promise": "Giúp operator hiểu workflow và giới hạn bằng chứng.",
             "primary_platform": "YouTube",
-            "secondary_platforms": ["Shorts"],
+            "secondary_platforms": [],
         },
         "target_audience": {
             "primary_persona": "Founder/operator bán kỹ thuật",
@@ -44,7 +44,12 @@ def _contract(**overrides):
             "currency": "VND",
             "measurement_units": "metric",
             "date_format": "DD/MM/YYYY",
-            "cultural_style": {"tone": "calm", "formality": "neutral", "humor": "light", "cta_style": "soft"},
+            "cultural_style": {
+                "tone": "calm",
+                "formality": "neutral",
+                "humor": "light",
+                "cta_style": "soft",
+            },
             "market_examples_preference": "prefer",
             "regulatory_sensitivity": {
                 "finance_claim_sensitivity": "high",
@@ -67,25 +72,26 @@ def _contract(**overrides):
                 "structure": ["hook", "problem", "mechanism", "result", "takeaway"],
                 "chapters_required": True,
             },
-            "shorts": {
-                "enabled": True,
-                "target_duration_seconds": {"min": 30, "max": 45},
-                "hard_max_seconds": 59,
-                "captions_required": True,
-                "shorts_per_long_form": 2,
-            },
         },
         "voice_style": {
             "narration_tone": "practical_explainer",
             "pacing": "clear_short_sentences",
             "allowed_style": ["calm", "specific"],
-            "forbidden_style": ["hype", "fearmongering", "aggressive_sales", "fake_urgency"],
+            "forbidden_style": [
+                "hype",
+                "fearmongering",
+                "aggressive_sales",
+                "fake_urgency",
+            ],
         },
         "platform_strategy": {
             "primary_platform": "YouTube",
             "youtube_is_learning_authority": True,
-            "secondary_platforms": ["Shorts"],
-            "disabled_authorities": ["tiktok_analytics_learning", "facebook_analytics_learning"],
+            "secondary_platforms": [],
+            "disabled_authorities": [
+                "tiktok_analytics_learning",
+                "facebook_analytics_learning",
+            ],
             "publish_mode": "human_handoff_only",
             "auto_publish_allowed": False,
             "studio_scraping_allowed": False,
@@ -98,7 +104,11 @@ def _contract(**overrides):
             "ai_hero_default_duration_seconds": 8,
             "ai_hero_audio": False,
             "ai_hero_allowed_use": ["hero_shot", "hard_to_find_visual"],
-            "ai_hero_forbidden_use": ["data_diagram", "workflow_chart", "factual_evidence_visualization"],
+            "ai_hero_forbidden_use": [
+                "data_diagram",
+                "workflow_chart",
+                "factual_evidence_visualization",
+            ],
             "renderer": "NativeFFmpegRenderer",
             "storage_archive": "Google Drive",
             "drive_offload_enabled": True,
@@ -153,7 +163,9 @@ def _deep_update(base, overrides):
 
 
 def _scope(db_session, contract=None):
-    company = CompanyService(db_session).create_company(name=f"M12.2P {uuid.uuid4().hex[:8]}")
+    company = CompanyService(db_session).create_company(
+        name=f"M12.2P {uuid.uuid4().hex[:8]}"
+    )
     channel = ChannelWorkspaceService(db_session).create_channel(
         company_id=company.id,
         data=ChannelWorkspaceCreate(
@@ -165,7 +177,10 @@ def _scope(db_session, contract=None):
             target_market="VN",
             default_timezone="Asia/Ho_Chi_Minh",
             target_regions=["VN"],
-            metadata={"operator_language": "vi", "m12_2p_channel_contract": contract or _contract()},
+            metadata={
+                "operator_language": "vi",
+                "m12_2p_channel_contract": contract or _contract(),
+            },
         ),
     )
     compiler = ChannelProfileCompiler(db_session)
@@ -174,19 +189,28 @@ def _scope(db_session, contract=None):
     profile_input = profile_input.model_copy(
         update={
             "display_name": contract_payload["channel_identity"]["channel_name"],
-            "target_market": contract_payload["market_locale"].get("primary_market") or "",
+            "target_market": contract_payload["market_locale"].get("primary_market")
+            or "",
             "format_strategy": contract_payload["format_policy"],
             "voice_style": contract_payload["voice_style"],
             "platform_strategy": contract_payload["platform_strategy"],
-            "content_pillars": contract_payload["editorial_strategy"]["content_pillars"],
-            "policies": {"review": "human_review", "safety": "avoid unsupported claims", "channel_contract": contract_payload},
+            "content_pillars": contract_payload["editorial_strategy"][
+                "content_pillars"
+            ],
+            "policies": {
+                "review": "human_review",
+                "safety": "avoid unsupported claims",
+                "channel_contract": contract_payload,
+            },
         }
     )
     profile = ChannelProfileService(db_session).create_profile_version(
         channel_id=channel.id,
         data=ChannelProfileVersionCreate(profile_input=profile_input),
     )
-    compiled = compiler.compile(profile_version_id=profile.id, correlation_id="m12-2p-test")
+    compiled = compiler.compile(
+        profile_version_id=profile.id, correlation_id="m12-2p-test"
+    )
     snapshot = db_session.get(CompiledChannelPolicySnapshot, compiled.snapshot_id)
     return company, channel, profile, compiled, snapshot
 
@@ -198,14 +222,21 @@ def test_m12_2p_complete_contract_compiles_snapshot_and_activates(db_session) ->
 
     assert profile.version == 1
     assert contract["contract_status"] == "COMPLETE"
-    assert snapshot.compiled_payload["compiled_policy_snapshot_json"]["channel_contract_status"] == "COMPLETE"
+    assert (
+        snapshot.compiled_payload["compiled_policy_snapshot_json"][
+            "channel_contract_status"
+        ]
+        == "COMPLETE"
+    )
     assert snapshot.compiled_payload["contract_status"] == "COMPLETE"
     assert contract["market_locale"]["primary_market"] == "VN"
     assert contract["platform_strategy"]["publish_mode"] == "human_handoff_only"
     assert contract["media_policy"]["renderer"] == "NativeFFmpegRenderer"
     assert contract["learning_policy"]["authority"] == "youtube_analytics_only"
 
-    activated = ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
+    activated = ChannelProfileService(db_session).activate_snapshot(
+        snapshot_id=snapshot.id
+    )
     db_session.refresh(channel)
     assert activated.status == "active"
     assert channel.active_policy_snapshot_id == snapshot.id
@@ -214,9 +245,21 @@ def test_m12_2p_complete_contract_compiles_snapshot_and_activates(db_session) ->
 @pytest.mark.parametrize(
     ("override", "missing_field", "unexpected_default"),
     [
-        ({"market_locale": {"primary_market": None}}, "market_locale.primary_market", "US"),
-        ({"market_locale": {"content_language": None}}, "market_locale.content_language", "en"),
-        ({"target_audience": {"primary_persona": None}}, "target_audience.primary_persona", None),
+        (
+            {"market_locale": {"primary_market": None}},
+            "market_locale.primary_market",
+            "US",
+        ),
+        (
+            {"market_locale": {"content_language": None}},
+            "market_locale.content_language",
+            "en",
+        ),
+        (
+            {"target_audience": {"primary_persona": None}},
+            "target_audience.primary_persona",
+            None,
+        ),
     ],
 )
 def test_m12_2p_missing_required_contract_fields_are_partial_without_defaults(
@@ -270,7 +313,9 @@ def test_m12_2p_contradictory_auto_publish_blocks_activation(db_session) -> None
     contract = snapshot.compiled_payload["channel_contract_json"]
 
     assert contract["contract_status"] == "CONTRADICTORY"
-    assert any("auto_publish_allowed" in reason for reason in contract["contradiction_reasons"])
+    assert any(
+        "auto_publish_allowed" in reason for reason in contract["contradiction_reasons"]
+    )
     with pytest.raises(ValidationFailureError):
         ChannelProfileService(db_session).activate_snapshot(snapshot_id=snapshot.id)
 
@@ -279,19 +324,38 @@ def test_m12_2p_contract_hash_changes_when_market_locale_changes(db_session) -> 
     _, _, _, first, first_snapshot = _scope(db_session, _contract())
     _, _, _, second, second_snapshot = _scope(
         db_session,
-        _contract(market_locale={"primary_market": "US", "audience_locale": "en-US", "content_language": "en", "currency": "USD", "timezone": "America/New_York"}),
+        _contract(
+            market_locale={
+                "primary_market": "US",
+                "audience_locale": "en-US",
+                "content_language": "en",
+                "currency": "USD",
+                "timezone": "America/New_York",
+            }
+        ),
     )
 
     assert first.content_hash == first_snapshot.content_hash
     assert second.content_hash == second_snapshot.content_hash
     assert first.content_hash != second.content_hash
-    assert second_snapshot.compiled_payload["channel_contract_json"]["market_locale"]["primary_market"] == "US"
+    assert (
+        second_snapshot.compiled_payload["channel_contract_json"]["market_locale"][
+            "primary_market"
+        ]
+        == "US"
+    )
 
 
 def test_m12_2p_existing_video_project_snapshot_is_not_mutated(db_session) -> None:
     company, channel, _, _, first_snapshot = _scope(db_session, _contract())
-    activated = ChannelProfileService(db_session).activate_snapshot(snapshot_id=first_snapshot.id)
-    user = User(email=f"m12-2p-{uuid.uuid4().hex[:8]}@example.com", display_name="M12.2P", status="active")
+    activated = ChannelProfileService(db_session).activate_snapshot(
+        snapshot_id=first_snapshot.id
+    )
+    user = User(
+        email=f"m12-2p-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="M12.2P",
+        status="active",
+    )
     db_session.add(user)
     db_session.flush()
     project = VideoProject(
@@ -308,7 +372,15 @@ def test_m12_2p_existing_video_project_snapshot_is_not_mutated(db_session) -> No
 
     compiler = ChannelProfileCompiler(db_session)
     profile_input, _ = compiler.profile_input_from_template("saas_digital_leverage")
-    new_contract = _contract(market_locale={"primary_market": "US", "audience_locale": "en-US", "content_language": "en", "currency": "USD", "timezone": "America/New_York"})
+    new_contract = _contract(
+        market_locale={
+            "primary_market": "US",
+            "audience_locale": "en-US",
+            "content_language": "en",
+            "currency": "USD",
+            "timezone": "America/New_York",
+        }
+    )
     profile_input = profile_input.model_copy(
         update={
             "display_name": "New market",
@@ -324,7 +396,9 @@ def test_m12_2p_existing_video_project_snapshot_is_not_mutated(db_session) -> No
         channel_id=channel.id,
         data=ChannelProfileVersionCreate(profile_input=profile_input),
     )
-    second = compiler.compile(profile_version_id=profile.id, correlation_id="m12-2p-new-snapshot")
+    second = compiler.compile(
+        profile_version_id=profile.id, correlation_id="m12-2p-new-snapshot"
+    )
     ChannelProfileService(db_session).activate_snapshot(snapshot_id=second.snapshot_id)
 
     db_session.refresh(first_snapshot)

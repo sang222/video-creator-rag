@@ -54,10 +54,14 @@ STRATEGIC_FIELD_PATHS = {
     "editorial_strategy.content_pillars",
     "editorial_strategy.claim_style",
     "format_policy.long_form.enabled",
-    "format_policy.shorts.enabled",
     "learning_policy.min_evidence_required",
 }
-HUMAN_TRUTH_SOURCE_TYPES = {"ADMIN_INPUT", "HUMAN_CONFIRMED", "GLOBAL_LOCKED_POLICY", "PROVIDER_POLICY"}
+HUMAN_TRUTH_SOURCE_TYPES = {
+    "ADMIN_INPUT",
+    "HUMAN_CONFIRMED",
+    "GLOBAL_LOCKED_POLICY",
+    "PROVIDER_POLICY",
+}
 
 
 class ChannelInitDraftService:
@@ -68,7 +72,11 @@ class ChannelInitDraftService:
         if self.session.get(Company, data.company_id) is None:
             raise NotFoundError(f"company not found: {data.company_id}")
         reject_legacy_provider_budget_fields(data.model_dump(mode="json"))
-        workflow_status = WORKFLOW_RESEARCH_PENDING if data.source_usage_attestation else WORKFLOW_BLOCKED
+        workflow_status = (
+            WORKFLOW_RESEARCH_PENDING
+            if data.source_usage_attestation
+            else WORKFLOW_BLOCKED
+        )
         draft = ChannelInitDraft(
             company_id=data.company_id,
             channel_name=data.channel_name,
@@ -103,7 +111,9 @@ class ChannelInitDraftService:
 
 
 class ChannelResearchEvidenceCollector:
-    def collect(self, draft: ChannelInitDraft, *, enable_optional_web_snippets: bool = False) -> list[dict[str, Any]]:
+    def collect(
+        self, draft: ChannelInitDraft, *, enable_optional_web_snippets: bool = False
+    ) -> list[dict[str, Any]]:
         now = utc_now().isoformat()
         evidence: list[dict[str, Any]] = []
         if draft.operator_note_purpose:
@@ -182,7 +192,9 @@ class ChannelResearchEvidenceCollector:
 
 
 class ChannelContractDraftBuilder:
-    def build(self, draft: ChannelInitDraft, evidence_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    def build(
+        self, draft: ChannelInitDraft, evidence_refs: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         text_blob = " ".join(
             [
                 draft.channel_name,
@@ -193,8 +205,14 @@ class ChannelContractDraftBuilder:
             ]
         )
         hints = draft.initial_topic_pillar_hints
-        has_ai_workflow_signal = _contains_any(text_blob, ["ai workflow", "automation", "dashboard", "small team"])
-        topic_summary = " / ".join(hints) if hints else _bounded_summary(draft.operator_note_purpose)
+        has_ai_workflow_signal = _contains_any(
+            text_blob, ["ai workflow", "automation", "dashboard", "small team"]
+        )
+        topic_summary = (
+            " / ".join(hints)
+            if hints
+            else _bounded_summary(draft.operator_note_purpose)
+        )
         niche = (
             f"Practical {topic_summary} for small teams"
             if has_ai_workflow_signal and topic_summary
@@ -212,12 +230,18 @@ class ChannelContractDraftBuilder:
                 "positioning": _positioning_suggestion(draft, niche),
                 "brand_promise": _brand_promise_suggestion(draft),
                 "primary_platform": "YouTube",
-                "secondary_platforms": ["Shorts"],
-                "series_plan": [{"key": "operator_series", "name": niche if niche != "UNKNOWN" else draft.channel_name}],
+                "series_plan": [
+                    {
+                        "key": "operator_series",
+                        "name": niche if niche != "UNKNOWN" else draft.channel_name,
+                    }
+                ],
             },
             "target_audience": {
                 "primary_persona": _audience_suggestion(text_blob),
-                "audience_level": "semi_technical" if has_ai_workflow_signal else "UNKNOWN",
+                "audience_level": "semi_technical"
+                if has_ai_workflow_signal
+                else "UNKNOWN",
                 "pain_points": _pain_points_suggestion(text_blob),
                 "desired_outcome": _desired_outcome_suggestion(draft),
                 "audience_notes": "Research suggestion only; requires operator confirmation.",
@@ -232,19 +256,33 @@ class ChannelContractDraftBuilder:
                 "currency": "UNKNOWN",
                 "measurement_units": "metric",
                 "date_format": "DD/MM/YYYY",
-                "cultural_style": {"tone": "clear", "formality": "professional", "humor": "light", "cta_style": "practical"},
+                "cultural_style": {
+                    "tone": "clear",
+                    "formality": "professional",
+                    "humor": "light",
+                    "cta_style": "practical",
+                },
                 "market_examples_preference": "prefer",
                 "regulatory_sensitivity": {
                     "finance_claim_sensitivity": "high",
                     "health_claim_sensitivity": "high",
                     "disclosure_standard": "clear_ai_and_source_disclosure",
                 },
-                "market_locale_context_status": "UNKNOWN" if primary_market == "UNKNOWN" else "PARTIAL",
+                "market_locale_context_status": "UNKNOWN"
+                if primary_market == "UNKNOWN"
+                else "PARTIAL",
             },
             "editorial_strategy": {
                 "content_pillars": hints if hints else ["UNKNOWN"],
-                "allowed_angles": ["practical explainer", "operator workflow walkthrough"],
-                "forbidden_angles": ["guaranteed ROI", "fake urgency", "provider bypass"],
+                "allowed_angles": [
+                    "practical explainer",
+                    "operator workflow walkthrough",
+                ],
+                "forbidden_angles": [
+                    "guaranteed ROI",
+                    "fake urgency",
+                    "provider bypass",
+                ],
                 "claim_style": ["practical", "evidence_bounded", "no_exaggerated_roi"],
                 "allowed_topics": hints if hints else [],
                 "forbidden_topics": ["fake engagement", "platform evasion"],
@@ -253,28 +291,34 @@ class ChannelContractDraftBuilder:
                 "long_form": {
                     "enabled": True,
                     "target_duration_minutes": {"min": 8, "max": 15},
-                    "structure": ["hook", "problem", "mechanism", "workflow", "takeaway"],
+                    "structure": [
+                        "hook",
+                        "problem",
+                        "mechanism",
+                        "workflow",
+                        "takeaway",
+                    ],
                     "chapters_required": True,
-                },
-                "shorts": {
-                    "enabled": True,
-                    "target_duration_seconds": {"min": 30, "max": 45},
-                    "hard_max_seconds": 59,
-                    "captions_required": True,
-                    "shorts_per_long_form": 2,
                 },
             },
             "voice_style": {
                 "narration_tone": "practical_explainer",
                 "pacing": "clear_short_sentences",
                 "allowed_style": ["calm", "specific", "implementation-first"],
-                "forbidden_style": ["hype", "fearmongering", "aggressive_sales", "fake_urgency"],
+                "forbidden_style": [
+                    "hype",
+                    "fearmongering",
+                    "aggressive_sales",
+                    "fake_urgency",
+                ],
             },
             "platform_strategy": {
                 "primary_platform": "YouTube",
                 "youtube_is_learning_authority": True,
-                "secondary_platforms": ["Shorts"],
-                "disabled_authorities": ["tiktok_analytics_learning", "facebook_analytics_learning"],
+                "disabled_authorities": [
+                    "tiktok_analytics_learning",
+                    "facebook_analytics_learning",
+                ],
                 "publish_mode": "human_handoff_only",
                 "auto_publish_allowed": False,
                 "studio_scraping_allowed": False,
@@ -297,10 +341,18 @@ class ChannelContractDraftBuilder:
             },
             "forbidden_behavior": sorted(FORBIDDEN_BEHAVIOR_CODES),
         }
-        field_map = self._build_field_map(contract=contract, draft=draft, evidence_refs=evidence_refs)
-        status, missing_fields, contradiction_reasons = evaluate_contract(contract, field_map)
-        _apply_status(contract, field_map, status, missing_fields, contradiction_reasons)
-        confidence_summary = {path: meta["confidence_label"] for path, meta in field_map.items()}
+        field_map = self._build_field_map(
+            contract=contract, draft=draft, evidence_refs=evidence_refs
+        )
+        status, missing_fields, contradiction_reasons = evaluate_contract(
+            contract, field_map
+        )
+        _apply_status(
+            contract, field_map, status, missing_fields, contradiction_reasons
+        )
+        confidence_summary = {
+            path: meta["confidence_label"] for path, meta in field_map.items()
+        }
         return {
             "contract": contract,
             "field_map": field_map,
@@ -318,8 +370,16 @@ class ChannelContractDraftBuilder:
         evidence_refs: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
         evidence_ids = [item["ref_id"] for item in evidence_refs]
-        note_refs = [item["ref_id"] for item in evidence_refs if item["source_type"] == "ADMIN_NOTE"]
-        public_refs = [item["ref_id"] for item in evidence_refs if item["source_type"] in {"YOUTUBE_API", "PUBLIC_WEB", "SOCIAL_PROFILE"}]
+        note_refs = [
+            item["ref_id"]
+            for item in evidence_refs
+            if item["source_type"] == "ADMIN_NOTE"
+        ]
+        public_refs = [
+            item["ref_id"]
+            for item in evidence_refs
+            if item["source_type"] in {"YOUTUBE_API", "PUBLIC_WEB", "SOCIAL_PROFILE"}
+        ]
         field_map: dict[str, dict[str, Any]] = {}
         for path, value in leaf_values(contract).items():
             if path in {
@@ -327,13 +387,32 @@ class ChannelContractDraftBuilder:
                 "channel_identity.channel_name",
                 "market_locale.operator_language",
             }:
-                field_map[path] = _meta(value, "ADMIN_INPUT", "HIGH", [], review_required=False)
-            elif path == "market_locale.primary_market" and draft.intended_primary_market:
-                field_map[path] = _meta(value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True)
-            elif path == "market_locale.content_language" and draft.intended_content_language:
-                field_map[path] = _meta(value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True)
+                field_map[path] = _meta(
+                    value, "ADMIN_INPUT", "HIGH", [], review_required=False
+                )
+            elif (
+                path == "market_locale.primary_market" and draft.intended_primary_market
+            ):
+                field_map[path] = _meta(
+                    value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True
+                )
+            elif (
+                path == "market_locale.content_language"
+                and draft.intended_content_language
+            ):
+                field_map[path] = _meta(
+                    value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True
+                )
             elif path.startswith("media_policy."):
-                field_map[path] = _meta(value, "PROVIDER_POLICY", "HIGH", [], review_required=False, editable=False, locked_reason="Global provider policy")
+                field_map[path] = _meta(
+                    value,
+                    "PROVIDER_POLICY",
+                    "HIGH",
+                    [],
+                    review_required=False,
+                    editable=False,
+                    locked_reason="Global provider policy",
+                )
             elif path.startswith("rights_policy.") or path in {
                 "platform_strategy.publish_mode",
                 "platform_strategy.auto_publish_allowed",
@@ -345,17 +424,49 @@ class ChannelContractDraftBuilder:
                 "learning_policy.weak_evidence_action",
                 "forbidden_behavior",
             }:
-                field_map[path] = _meta(value, "GLOBAL_LOCKED_POLICY", "HIGH", [], review_required=False, editable=False, locked_reason="Global safety policy")
-            elif path in {"channel_identity.niche", "editorial_strategy.content_pillars", "editorial_strategy.allowed_topics"} and draft.initial_topic_pillar_hints:
-                field_map[path] = _meta(value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True)
-            elif path in {"channel_identity.positioning", "channel_identity.brand_promise"} and draft.operator_note_purpose:
-                field_map[path] = _meta(value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True)
+                field_map[path] = _meta(
+                    value,
+                    "GLOBAL_LOCKED_POLICY",
+                    "HIGH",
+                    [],
+                    review_required=False,
+                    editable=False,
+                    locked_reason="Global safety policy",
+                )
+            elif (
+                path
+                in {
+                    "channel_identity.niche",
+                    "editorial_strategy.content_pillars",
+                    "editorial_strategy.allowed_topics",
+                }
+                and draft.initial_topic_pillar_hints
+            ):
+                field_map[path] = _meta(
+                    value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True
+                )
+            elif (
+                path
+                in {"channel_identity.positioning", "channel_identity.brand_promise"}
+                and draft.operator_note_purpose
+            ):
+                field_map[path] = _meta(
+                    value, "ADMIN_HINT", "MEDIUM", note_refs, review_required=True
+                )
             elif _is_unknown(value):
-                field_map[path] = _meta(value, "UNKNOWN", "LOW", [], review_required=True)
+                field_map[path] = _meta(
+                    value, "UNKNOWN", "LOW", [], review_required=True
+                )
             else:
                 refs = public_refs or note_refs or evidence_ids
                 confidence = "MEDIUM" if refs else "LOW"
-                field_map[path] = _meta(value, "RESEARCH_INFERENCE", confidence, refs, review_required=path in STRATEGIC_FIELD_PATHS)
+                field_map[path] = _meta(
+                    value,
+                    "RESEARCH_INFERENCE",
+                    confidence,
+                    refs,
+                    review_required=path in STRATEGIC_FIELD_PATHS,
+                )
         return field_map
 
 
@@ -365,17 +476,28 @@ class ChannelSetupResearchAgentService:
         self.collector = ChannelResearchEvidenceCollector()
         self.builder = ChannelContractDraftBuilder()
 
-    def run(self, draft_id: uuid.UUID, *, enable_optional_web_snippets: bool = False) -> ChannelContractDraft:
+    def run(
+        self, draft_id: uuid.UUID, *, enable_optional_web_snippets: bool = False
+    ) -> ChannelContractDraft:
         draft = ChannelInitDraftService(self.session).get(draft_id)
         if not draft.source_usage_attestation:
             draft.workflow_status = WORKFLOW_BLOCKED
             self.session.flush()
-            raise ValidationFailureError("source usage attestation is required before research")
-        if draft.public_presence_mode == "EXISTING_PUBLIC_CHANNEL" and not _has_public_anchor(draft):
+            raise ValidationFailureError(
+                "source usage attestation is required before research"
+            )
+        if (
+            draft.public_presence_mode == "EXISTING_PUBLIC_CHANNEL"
+            and not _has_public_anchor(draft)
+        ):
             draft.workflow_status = WORKFLOW_BLOCKED
             self.session.flush()
-            raise ValidationFailureError("existing public channel requires at least one public source anchor")
-        evidence_refs = self.collector.collect(draft, enable_optional_web_snippets=enable_optional_web_snippets)
+            raise ValidationFailureError(
+                "existing public channel requires at least one public source anchor"
+            )
+        evidence_refs = self.collector.collect(
+            draft, enable_optional_web_snippets=enable_optional_web_snippets
+        )
         result = self.builder.build(draft, evidence_refs)
         contract_draft = ChannelContractDraft(
             init_draft_id=draft.id,
@@ -405,11 +527,17 @@ class ChannelContractReviewService:
     def __init__(self, session: Session):
         self.session = session
 
-    def apply_review(self, draft_id: uuid.UUID, data: ChannelContractReviewRequest) -> ChannelContractDraft:
+    def apply_review(
+        self, draft_id: uuid.UUID, data: ChannelContractReviewRequest
+    ) -> ChannelContractDraft:
         init_draft = ChannelInitDraftService(self.session).get(draft_id)
-        contract_draft = ChannelInitDraftService(self.session).latest_contract_draft(draft_id)
+        contract_draft = ChannelInitDraftService(self.session).latest_contract_draft(
+            draft_id
+        )
         if contract_draft is None:
-            raise NotFoundError(f"channel contract draft not found for init draft: {draft_id}")
+            raise NotFoundError(
+                f"channel contract draft not found for init draft: {draft_id}"
+            )
         contract = deepcopy(contract_draft.suggested_channel_contract)
         field_map = deepcopy(contract_draft.field_source_map_json)
         log = list(contract_draft.review_decision_log_json or [])
@@ -418,9 +546,16 @@ class ChannelContractReviewService:
             path = decision.field_path
             action = decision.action
             previous_value = _get_path(contract, path)
-            previous_meta = field_map.get(path, _meta(previous_value, "UNKNOWN", "LOW", [], review_required=True))
-            if not previous_meta.get("editable_by_human", True) and action != "add_note":
-                raise ValidationFailureError(f"field is locked and cannot be reviewed: {path}")
+            previous_meta = field_map.get(
+                path, _meta(previous_value, "UNKNOWN", "LOW", [], review_required=True)
+            )
+            if (
+                not previous_meta.get("editable_by_human", True)
+                and action != "add_note"
+            ):
+                raise ValidationFailureError(
+                    f"field is locked and cannot be reviewed: {path}"
+                )
             if action == "confirm":
                 new_value = previous_value
                 field_map[path] = {
@@ -444,7 +579,9 @@ class ChannelContractReviewService:
             elif action in {"reject", "mark_unknown"}:
                 new_value = "UNKNOWN"
                 _set_path(contract, path, new_value)
-                field_map[path] = _meta(new_value, "UNKNOWN", "LOW", [], review_required=True, editable=True)
+                field_map[path] = _meta(
+                    new_value, "UNKNOWN", "LOW", [], review_required=True, editable=True
+                )
             elif action == "add_note":
                 new_value = previous_value
             else:
@@ -456,23 +593,37 @@ class ChannelContractReviewService:
                     "previous_value": previous_value,
                     "new_value": new_value,
                     "previous_source_type": previous_meta.get("source_type"),
-                    "new_source_type": field_map.get(path, previous_meta).get("source_type"),
-                    "reviewer_user_id": str(decision.reviewer_user_id) if decision.reviewer_user_id else None,
+                    "new_source_type": field_map.get(path, previous_meta).get(
+                        "source_type"
+                    ),
+                    "reviewer_user_id": str(decision.reviewer_user_id)
+                    if decision.reviewer_user_id
+                    else None,
                     "timestamp": now,
                     "reason_note": decision.note,
                     "human_notes": data.human_notes,
                 }
             )
         ensure_field_source_coverage(contract, field_map)
-        status, missing_fields, contradiction_reasons = evaluate_contract(contract, field_map)
-        _apply_status(contract, field_map, status, missing_fields, contradiction_reasons)
+        status, missing_fields, contradiction_reasons = evaluate_contract(
+            contract, field_map
+        )
+        _apply_status(
+            contract, field_map, status, missing_fields, contradiction_reasons
+        )
         contract_draft.suggested_channel_contract = contract
         contract_draft.field_source_map_json = field_map
-        contract_draft.confidence_summary = {path: meta["confidence_label"] for path, meta in field_map.items()}
+        contract_draft.confidence_summary = {
+            path: meta["confidence_label"] for path, meta in field_map.items()
+        }
         contract_draft.missing_fields = missing_fields
         contract_draft.human_questions = _human_questions(missing_fields)
         contract_draft.contract_status = status
-        contract_draft.workflow_status = WORKFLOW_READY_TO_COMPILE if status == CONTRACT_COMPLETE else WORKFLOW_NEEDS_HUMAN_REVIEW
+        contract_draft.workflow_status = (
+            WORKFLOW_READY_TO_COMPILE
+            if status == CONTRACT_COMPLETE
+            else WORKFLOW_NEEDS_HUMAN_REVIEW
+        )
         contract_draft.review_decision_log_json = log
         init_draft.workflow_status = contract_draft.workflow_status
         init_draft.contract_status = status
@@ -484,28 +635,44 @@ class ChannelContractCompiler:
     def __init__(self, session: Session):
         self.session = session
 
-    def compile(self, draft_id: uuid.UUID, *, correlation_id: str | None = None) -> dict[str, Any]:
+    def compile(
+        self, draft_id: uuid.UUID, *, correlation_id: str | None = None
+    ) -> dict[str, Any]:
         init_draft = ChannelInitDraftService(self.session).get(draft_id)
-        contract_draft = ChannelInitDraftService(self.session).latest_contract_draft(draft_id)
+        contract_draft = ChannelInitDraftService(self.session).latest_contract_draft(
+            draft_id
+        )
         if contract_draft is None:
-            raise NotFoundError(f"channel contract draft not found for init draft: {draft_id}")
+            raise NotFoundError(
+                f"channel contract draft not found for init draft: {draft_id}"
+            )
         contract = deepcopy(contract_draft.suggested_channel_contract)
         field_map = deepcopy(contract_draft.field_source_map_json)
         self._force_locked_policies(contract, field_map)
         ensure_field_source_coverage(contract, field_map)
         reject_legacy_provider_budget_fields(contract)
-        status, missing_fields, contradiction_reasons = evaluate_contract(contract, field_map)
-        _apply_status(contract, field_map, status, missing_fields, contradiction_reasons)
+        status, missing_fields, contradiction_reasons = evaluate_contract(
+            contract, field_map
+        )
+        _apply_status(
+            contract, field_map, status, missing_fields, contradiction_reasons
+        )
         channel = self._get_or_create_channel(init_draft, contract, field_map)
         profile = self._create_profile_version(channel, contract, field_map)
         payload = self._compiled_payload(contract=contract, field_map=field_map)
         output_hash = content_hash(payload)
-        snapshot = self._create_snapshot(channel=channel, profile=profile, payload=payload, output_hash=output_hash)
+        snapshot = self._create_snapshot(
+            channel=channel, profile=profile, payload=payload, output_hash=output_hash
+        )
         contract_draft.suggested_channel_contract = contract
         contract_draft.field_source_map_json = field_map
         contract_draft.missing_fields = missing_fields
         contract_draft.contract_status = status
-        contract_draft.workflow_status = WORKFLOW_COMPILED_COMPLETE if status == CONTRACT_COMPLETE else WORKFLOW_COMPILED_PARTIAL
+        contract_draft.workflow_status = (
+            WORKFLOW_COMPILED_COMPLETE
+            if status == CONTRACT_COMPLETE
+            else WORKFLOW_COMPILED_PARTIAL
+        )
         init_draft.channel_id = channel.id
         init_draft.channel_profile_version_id = profile.id
         init_draft.compiled_policy_snapshot_id = snapshot.id
@@ -526,7 +693,9 @@ class ChannelContractCompiler:
             "field_source_map_json": field_map,
         }
 
-    def _force_locked_policies(self, contract: dict[str, Any], field_map: dict[str, dict[str, Any]]) -> None:
+    def _force_locked_policies(
+        self, contract: dict[str, Any], field_map: dict[str, dict[str, Any]]
+    ) -> None:
         locked_values = {
             "platform_strategy.publish_mode": "human_handoff_only",
             "platform_strategy.auto_publish_allowed": False,
@@ -538,11 +707,25 @@ class ChannelContractCompiler:
             "learning_policy.weak_evidence_action": "summarize_limitations_only",
             "forbidden_behavior": sorted(FORBIDDEN_BEHAVIOR_CODES),
         }
-        locked_values.update({f"media_policy.{key}": value for key, value in _locked_media_policy().items()})
-        locked_values.update({f"rights_policy.{key}": value for key, value in _locked_rights_policy().items()})
+        locked_values.update(
+            {
+                f"media_policy.{key}": value
+                for key, value in _locked_media_policy().items()
+            }
+        )
+        locked_values.update(
+            {
+                f"rights_policy.{key}": value
+                for key, value in _locked_rights_policy().items()
+            }
+        )
         for path, value in locked_values.items():
             _set_path(contract, path, value)
-            source_type = "PROVIDER_POLICY" if path.startswith("media_policy.") else "GLOBAL_LOCKED_POLICY"
+            source_type = (
+                "PROVIDER_POLICY"
+                if path.startswith("media_policy.")
+                else "GLOBAL_LOCKED_POLICY"
+            )
             field_map[path] = _meta(
                 value,
                 source_type,
@@ -550,7 +733,9 @@ class ChannelContractCompiler:
                 [],
                 review_required=False,
                 editable=False,
-                locked_reason="Global provider policy" if source_type == "PROVIDER_POLICY" else "Global safety policy",
+                locked_reason="Global provider policy"
+                if source_type == "PROVIDER_POLICY"
+                else "Global safety policy",
             )
 
     def _get_or_create_channel(
@@ -564,7 +749,9 @@ class ChannelContractCompiler:
             if channel is None:
                 raise NotFoundError(f"channel not found: {init_draft.channel_id}")
             return channel
-        key = _unique_channel_key(self.session, init_draft.company_id, init_draft.channel_name, init_draft.id)
+        key = _unique_channel_key(
+            self.session, init_draft.company_id, init_draft.channel_name, init_draft.id
+        )
         market = contract.get("market_locale", {})
         channel = ChannelWorkspaceService(self.session).create_channel(
             company_id=init_draft.company_id,
@@ -640,19 +827,37 @@ class ChannelContractCompiler:
         self.session.flush()
         return snapshot
 
-    def _compiled_payload(self, *, contract: dict[str, Any], field_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        pillars = _string_list(contract.get("editorial_strategy", {}).get("content_pillars")) or ["UNKNOWN"]
-        series_plan = _list_of_dicts(contract.get("channel_identity", {}).get("series_plan")) or [
-            {"key": "operator_series", "name": contract.get("channel_identity", {}).get("channel_name", "Channel")}
+    def _compiled_payload(
+        self, *, contract: dict[str, Any], field_map: dict[str, dict[str, Any]]
+    ) -> dict[str, Any]:
+        pillars = _string_list(
+            contract.get("editorial_strategy", {}).get("content_pillars")
+        ) or ["UNKNOWN"]
+        series_plan = _list_of_dicts(
+            contract.get("channel_identity", {}).get("series_plan")
+        ) or [
+            {
+                "key": "operator_series",
+                "name": contract.get("channel_identity", {}).get(
+                    "channel_name", "Channel"
+                ),
+            }
         ]
         legacy_payload = {
             "channel_constitution": {
-                "promise": contract.get("channel_identity", {}).get("brand_promise") or "Research-assisted channel contract.",
-                "audience": contract.get("target_audience", {}).get("primary_persona") or "UNKNOWN",
-                "boundaries": ["human review required", "no auto publish/upload/reupload"],
+                "promise": contract.get("channel_identity", {}).get("brand_promise")
+                or "Research-assisted channel contract.",
+                "audience": contract.get("target_audience", {}).get("primary_persona")
+                or "UNKNOWN",
+                "boundaries": [
+                    "human review required",
+                    "no auto publish/upload/reupload",
+                ],
             },
             "operating_blueprint": {
-                "target_market": contract.get("market_locale", {}).get("primary_market"),
+                "target_market": contract.get("market_locale", {}).get(
+                    "primary_market"
+                ),
                 "platform_strategy": contract.get("platform_strategy", {}),
                 "human_review_strictness": "strict",
                 "risk_tolerance": "low_to_medium",
@@ -661,7 +866,10 @@ class ChannelContractCompiler:
             "series_plan": series_plan,
             "editorial_calendar_defaults": {"planning_unit": "weekly"},
             "initial_content_runway": [{"title": pillars[0], "format": "long_form"}],
-            "default_playbook": {"format_strategy": contract.get("format_policy", {}), "media_style": {"source": "research_assisted"}},
+            "default_playbook": {
+                "format_strategy": contract.get("format_policy", {}),
+                "media_style": {"source": "research_assisted"},
+            },
             "render_policy": {
                 "capcut_prototype_viewer_only": True,
                 "production_renderer_planned": "NativeFFmpegRenderer",
@@ -669,14 +877,34 @@ class ChannelContractCompiler:
                 "ai_video_mode": "manual_external",
                 "visual_plan_required": True,
             },
-            "gate_policy": {"claim_review": "human_review_for_non_obvious_claims", "safety": "avoid unsupported claims"},
+            "gate_policy": {
+                "claim_review": "human_review_for_non_obvious_claims",
+                "safety": "avoid unsupported claims",
+            },
             "voice_policy": contract.get("voice_style", {}),
-            "evidence_policy": {"claims": contract.get("learning_policy", {}).get("min_evidence_required")},
+            "evidence_policy": {
+                "claims": contract.get("learning_policy", {}).get(
+                    "min_evidence_required"
+                )
+            },
             "monetization_policy": {"primary": "UNKNOWN", "channels": []},
-            "kpi_profile": {"primary": "qualified attention", "secondary": ["watch_time", "returning_viewers"]},
-            "editorial_promise": contract.get("channel_identity", {}).get("brand_promise") or "Evidence-bounded practical guidance.",
-            "distinctiveness_profile": {"angle": contract.get("channel_identity", {}).get("positioning") or "UNKNOWN", "visual_bias": []},
-            "format_bible": {"long_form": contract.get("format_policy", {}).get("long_form", {}), "voice": contract.get("voice_style", {})},
+            "kpi_profile": {
+                "primary": "qualified attention",
+                "secondary": ["watch_time", "returning_viewers"],
+            },
+            "editorial_promise": contract.get("channel_identity", {}).get(
+                "brand_promise"
+            )
+            or "Evidence-bounded practical guidance.",
+            "distinctiveness_profile": {
+                "angle": contract.get("channel_identity", {}).get("positioning")
+                or "UNKNOWN",
+                "visual_bias": [],
+            },
+            "format_bible": {
+                "long_form": contract.get("format_policy", {}).get("long_form", {}),
+                "voice": contract.get("voice_style", {}),
+            },
             "capability_status": {
                 "profile_compiler": "research_assisted_minimal",
                 "policy_snapshot": "available",
@@ -713,7 +941,9 @@ class ChannelContractCompiler:
         }
 
 
-def evaluate_contract(contract: dict[str, Any], field_map: dict[str, dict[str, Any]]) -> tuple[str, list[str], list[str]]:
+def evaluate_contract(
+    contract: dict[str, Any], field_map: dict[str, dict[str, Any]]
+) -> tuple[str, list[str], list[str]]:
     ensure_field_source_coverage(contract, field_map)
     missing: set[str] = set()
     contradictions: list[str] = []
@@ -744,16 +974,24 @@ def evaluate_contract(contract: dict[str, Any], field_map: dict[str, dict[str, A
     if platform.get("studio_scraping_allowed") is not False:
         contradictions.append("platform_strategy.studio_scraping_allowed must be false")
     if platform.get("dashboard_scraping_allowed") not in {False, None}:
-        contradictions.append("platform_strategy.dashboard_scraping_allowed must be false")
+        contradictions.append(
+            "platform_strategy.dashboard_scraping_allowed must be false"
+        )
     if platform.get("publish_mode") != "human_handoff_only":
-        contradictions.append("platform_strategy.publish_mode must be human_handoff_only")
+        contradictions.append(
+            "platform_strategy.publish_mode must be human_handoff_only"
+        )
     if learning.get("auto_promote_learning") is not False:
         contradictions.append("learning_policy.auto_promote_learning must be false")
     if learning.get("config_mutation_by_agent_allowed") is not False:
-        contradictions.append("learning_policy.config_mutation_by_agent_allowed must be false")
+        contradictions.append(
+            "learning_policy.config_mutation_by_agent_allowed must be false"
+        )
     missing_forbidden = sorted(set(FORBIDDEN_BEHAVIOR_CODES) - forbidden)
     if missing_forbidden:
-        contradictions.append(f"forbidden_behavior missing locked rules: {missing_forbidden}")
+        contradictions.append(
+            f"forbidden_behavior missing locked rules: {missing_forbidden}"
+        )
     if contradictions:
         return CONTRACT_CONTRADICTORY, sorted(missing), contradictions
     if missing:
@@ -761,7 +999,9 @@ def evaluate_contract(contract: dict[str, Any], field_map: dict[str, dict[str, A
     return CONTRACT_COMPLETE, [], []
 
 
-def ensure_field_source_coverage(contract: dict[str, Any], field_map: dict[str, dict[str, Any]]) -> None:
+def ensure_field_source_coverage(
+    contract: dict[str, Any], field_map: dict[str, dict[str, Any]]
+) -> None:
     for path, value in leaf_values(contract).items():
         if path not in field_map:
             field_map[path] = _meta(value, "UNKNOWN", "LOW", [], review_required=True)
@@ -789,8 +1029,17 @@ def _apply_status(
     contract["contract_status"] = status
     contract["missing_fields"] = missing_fields
     contract["contradiction_reasons"] = contradiction_reasons
-    contract["next_action"] = "Kích hoạt kênh." if status == CONTRACT_COMPLETE else "Người vận hành cần xác nhận hoặc sửa các field còn thiếu."
-    for path in ["contract_status", "missing_fields", "contradiction_reasons", "next_action"]:
+    contract["next_action"] = (
+        "Kích hoạt kênh."
+        if status == CONTRACT_COMPLETE
+        else "Người vận hành cần xác nhận hoặc sửa các field còn thiếu."
+    )
+    for path in [
+        "contract_status",
+        "missing_fields",
+        "contradiction_reasons",
+        "next_action",
+    ]:
         field_map[path] = _meta(
             contract[path],
             "COMPILER_DERIVED",
@@ -803,7 +1052,9 @@ def _apply_status(
     ensure_field_source_coverage(contract, field_map)
 
 
-def _profile_input_from_contract(contract: dict[str, Any], field_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _profile_input_from_contract(
+    contract: dict[str, Any], field_map: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     identity = contract.get("channel_identity", {})
     market = contract.get("market_locale", {})
     audience = contract.get("target_audience", {})
@@ -813,18 +1064,28 @@ def _profile_input_from_contract(contract: dict[str, Any], field_map: dict[str, 
         template_key="research_assisted_minimal_contract",
         template_version="m12.2p3",
         display_name=identity.get("channel_name") or "Channel",
-        target_market=market.get("primary_market") if not _is_unknown(market.get("primary_market")) else "",
-        audience_segment=audience.get("primary_persona") if not _is_unknown(audience.get("primary_persona")) else "UNKNOWN",
+        target_market=market.get("primary_market")
+        if not _is_unknown(market.get("primary_market"))
+        else "",
+        audience_segment=audience.get("primary_persona")
+        if not _is_unknown(audience.get("primary_persona"))
+        else "UNKNOWN",
         monetization_model={"primary": "UNKNOWN", "channels": []},
         format_strategy=contract.get("format_policy", {}),
         risk_tolerance="low_to_medium",
-        media_style={"visual_bias": [], "external_assets": "approved/licensed/audio-library-safe only"},
+        media_style={
+            "visual_bias": [],
+            "external_assets": "approved/licensed/audio-library-safe only",
+        },
         voice_style=contract.get("voice_style", {}),
-        evidence_requirement={"claims": contract.get("learning_policy", {}).get("min_evidence_required")},
+        evidence_requirement={
+            "claims": contract.get("learning_policy", {}).get("min_evidence_required")
+        },
         platform_strategy=contract.get("platform_strategy", {}),
         human_review_strictness="strict",
         content_pillars=pillars,
-        series_plan=_list_of_dicts(identity.get("series_plan")) or [{"key": "operator_series", "name": pillars[0]}],
+        series_plan=_list_of_dicts(identity.get("series_plan"))
+        or [{"key": "operator_series", "name": pillars[0]}],
         initial_content_runway=[{"title": pillars[0], "format": "long_form"}],
         policies={
             "channel_contract": contract,
@@ -854,7 +1115,9 @@ def _channel_workspace_create(
         key=key,
         name=name,
         status="draft",
-        primary_language=content_language if not _is_unknown(content_language) else "und",
+        primary_language=content_language
+        if not _is_unknown(content_language)
+        else "und",
         primary_region=primary_market if not _is_unknown(primary_market) else None,
         primary_timezone=timezone if not _is_unknown(timezone) else "UTC",
         target_market=primary_market if not _is_unknown(primary_market) else None,
@@ -892,7 +1155,9 @@ def _meta(
 
 
 def _has_public_anchor(draft: ChannelInitDraft) -> bool:
-    return bool(draft.youtube_url_or_handle or draft.website_url or draft.social_profile_links)
+    return bool(
+        draft.youtube_url_or_handle or draft.website_url or draft.social_profile_links
+    )
 
 
 def _minimal_input_json(draft: ChannelInitDraft) -> dict[str, Any]:
@@ -926,7 +1191,17 @@ def _source_urls(draft: ChannelInitDraft) -> list[dict[str, Any]]:
 def _content_language_suggestion(draft: ChannelInitDraft, text_blob: str) -> str:
     if draft.intended_content_language:
         return draft.intended_content_language
-    if _contains_any(text_blob, [" small ", " team ", " workflow", "automation", "dashboard", "https://smallteamai.com"]):
+    if _contains_any(
+        text_blob,
+        [
+            " small ",
+            " team ",
+            " workflow",
+            "automation",
+            "dashboard",
+            "https://smallteamai.com",
+        ],
+    ):
         return "en"
     return "UNKNOWN"
 
@@ -953,7 +1228,9 @@ def _brand_promise_suggestion(draft: ChannelInitDraft) -> str:
 
 
 def _audience_suggestion(text_blob: str) -> str:
-    if _contains_any(text_blob, ["small team", "đội ngũ nhỏ", "founder", "operator", "dashboard"]):
+    if _contains_any(
+        text_blob, ["small team", "đội ngũ nhỏ", "founder", "operator", "dashboard"]
+    ):
         return "Small business owners, team leads, operators, and builders"
     return "UNKNOWN"
 
@@ -1015,7 +1292,11 @@ def _locked_media_policy() -> dict[str, Any]:
         "ai_hero_default_duration_seconds": 8,
         "ai_hero_audio": False,
         "ai_hero_allowed_use": ["hero_shot", "hard_to_find_visual"],
-        "ai_hero_forbidden_use": ["data_diagram", "workflow_chart", "factual_evidence_visualization"],
+        "ai_hero_forbidden_use": [
+            "data_diagram",
+            "workflow_chart",
+            "factual_evidence_visualization",
+        ],
         "renderer": "NativeFFmpegRenderer",
         "storage_archive": "Google Drive",
         "drive_offload_enabled": True,
@@ -1033,7 +1314,9 @@ def _locked_rights_policy() -> dict[str, Any]:
     }
 
 
-def _unique_channel_key(session: Session, company_id: uuid.UUID, channel_name: str, draft_id: uuid.UUID) -> str:
+def _unique_channel_key(
+    session: Session, company_id: uuid.UUID, channel_name: str, draft_id: uuid.UUID
+) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", channel_name.lower()).strip("-") or "channel"
     candidate = base[:64]
     existing = session.scalars(
@@ -1066,7 +1349,13 @@ def _set_path(payload: dict[str, Any], path: str, value: Any) -> None:
 
 
 def _is_unknown(value: Any) -> bool:
-    return value is None or value == "" or value == [] or value == {} or str(value).upper() in {"UNKNOWN", "NEEDS_HUMAN_CONFIRMATION"}
+    return (
+        value is None
+        or value == ""
+        or value == []
+        or value == {}
+        or str(value).upper() in {"UNKNOWN", "NEEDS_HUMAN_CONFIRMATION"}
+    )
 
 
 def _contains_any(value: str, needles: list[str]) -> bool:

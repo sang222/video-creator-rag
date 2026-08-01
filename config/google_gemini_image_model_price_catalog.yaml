@@ -1,5 +1,5 @@
 catalog_key: google_gemini_image_model_price_catalog
-catalog_version: "2026-07-17"
+catalog_version: "2026-07-30"
 schema_version: catalog.v1
 status: active
 items:
@@ -10,20 +10,6 @@ items:
     capability: TEXT_AND_IMAGE_TO_IMAGE_STILL
     size: 1K
     aspect_ratio: "16:9"
-    estimated_unit_cost_usd: "0.067"
-    currency: USD
-    effective_date: "2026-07-17"
-    source_note: Official Google Gemini API pricing evidence captured in visual research; planning estimate only and not billed truth.
-    policy_state: BLOCK
-    is_default_route: false
-    actual_billed_amount: null
-  - key: gemini_3_1_flash_image_1k_9_16
-    provider_key: google_gemini_image
-    model_id: gemini-3.1-flash-image
-    status: GA_OR_STABLE
-    capability: TEXT_AND_IMAGE_TO_IMAGE_STILL
-    size: 1K
-    aspect_ratio: "9:16"
     estimated_unit_cost_usd: "0.067"
     currency: USD
     effective_date: "2026-07-17"
@@ -59,20 +45,6 @@ items:
     policy_state: ALLOWED
     is_default_route: true
     actual_billed_amount: null
-  - key: gemini_3_1_flash_image_2k_9_16
-    provider_key: google_gemini_image
-    model_id: gemini-3.1-flash-image
-    status: GA_OR_STABLE
-    capability: TEXT_AND_IMAGE_TO_IMAGE_STILL
-    size: 2K
-    aspect_ratio: "9:16"
-    estimated_unit_cost_usd: "0.101"
-    currency: USD
-    effective_date: "2026-07-17"
-    source_note: Official Google Gemini API pricing evidence captured in visual research; planning estimate only and not billed truth.
-    policy_state: ALLOWED
-    is_default_route: false
-    actual_billed_amount: null
   - key: gemini_3_1_flash_image_2k_1_1
     provider_key: google_gemini_image
     model_id: gemini-3.1-flash-image
@@ -94,20 +66,6 @@ items:
     capability: TEXT_AND_IMAGE_TO_IMAGE_STILL
     size: 4K
     aspect_ratio: "16:9"
-    estimated_unit_cost_usd: "0.151"
-    currency: USD
-    effective_date: "2026-07-17"
-    source_note: Official Google Gemini API pricing evidence captured in visual research; planning estimate only and not billed truth.
-    policy_state: REVIEW_REQUIRED
-    is_default_route: false
-    actual_billed_amount: null
-  - key: gemini_3_1_flash_image_4k_9_16
-    provider_key: google_gemini_image
-    model_id: gemini-3.1-flash-image
-    status: GA_OR_STABLE
-    capability: TEXT_AND_IMAGE_TO_IMAGE_STILL
-    size: 4K
-    aspect_ratio: "9:16"
     estimated_unit_cost_usd: "0.151"
     currency: USD
     effective_date: "2026-07-17"

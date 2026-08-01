@@ -42,12 +42,22 @@ VALID_AUDIENCE_LOCALES = {"en-US", "en-GB", "ja-JP", "ko-KR", "vi-VN", "other"}
 def reject_legacy_provider_budget_fields(payload: Any) -> None:
     matches = sorted(_find_keys(payload, LEGACY_PROVIDER_BUDGET_KEYS))
     if matches:
-        raise ValidationFailureError(f"provider budget fields are not channel init inputs: {matches}")
+        raise ValidationFailureError(
+            f"provider budget fields are not channel init inputs: {matches}"
+        )
 
 
-def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None = None) -> dict[str, Any]:
-    policies = profile_input.get("policies") if isinstance(profile_input.get("policies"), dict) else {}
-    metadata = (getattr(channel, "metadata_", None) or {}) if channel is not None else {}
+def build_channel_contract(
+    *, profile_input: dict[str, Any], channel: Any | None = None
+) -> dict[str, Any]:
+    policies = (
+        profile_input.get("policies")
+        if isinstance(profile_input.get("policies"), dict)
+        else {}
+    )
+    metadata = (
+        (getattr(channel, "metadata_", None) or {}) if channel is not None else {}
+    )
     explicit = _first_dict(
         policies.get("channel_contract"),
         policies.get("channel_contract_json"),
@@ -69,8 +79,16 @@ def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None
     budget_source = _dict(source.get("budget_policy"))
     learning_source = _dict(source.get("learning_policy"))
 
-    legacy_market = _legacy_market(profile_input.get("target_market")) if not explicit_mode else None
-    legacy_locale = _legacy_locale(profile_input=profile_input, channel=channel) if not explicit_mode else None
+    legacy_market = (
+        _legacy_market(profile_input.get("target_market"))
+        if not explicit_mode
+        else None
+    )
+    legacy_locale = (
+        _legacy_locale(profile_input=profile_input, channel=channel)
+        if not explicit_mode
+        else None
+    )
     explicit_primary_market = _clean(market_source.get("primary_market"))
     secondary_markets = _string_list(market_source.get("secondary_markets"))
     if not secondary_markets and not explicit_mode and channel is not None:
@@ -79,19 +97,28 @@ def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None
     contract = {
         "channel_identity": {
             "company_id": channel_identity_source.get("company_id"),
-            "channel_key": channel_identity_source.get("channel_key") or (getattr(channel, "key", None) if channel is not None else None),
-            "channel_name": channel_identity_source.get("channel_name") or profile_input.get("display_name") or (getattr(channel, "name", None) if channel is not None else None),
-            "template_key": channel_identity_source.get("template_key") or profile_input.get("template_key"),
-            "channel_type": channel_identity_source.get("channel_type") or "YOUTUBE_CHANNEL",
-            "niche": channel_identity_source.get("niche") or profile_input.get("template_key"),
-            "positioning": channel_identity_source.get("positioning") or profile_input.get("audience_segment"),
+            "channel_key": channel_identity_source.get("channel_key")
+            or (getattr(channel, "key", None) if channel is not None else None),
+            "channel_name": channel_identity_source.get("channel_name")
+            or profile_input.get("display_name")
+            or (getattr(channel, "name", None) if channel is not None else None),
+            "template_key": channel_identity_source.get("template_key")
+            or profile_input.get("template_key"),
+            "channel_type": channel_identity_source.get("channel_type")
+            or "YOUTUBE_CHANNEL",
+            "niche": channel_identity_source.get("niche")
+            or profile_input.get("template_key"),
+            "positioning": channel_identity_source.get("positioning")
+            or profile_input.get("audience_segment"),
             "brand_promise": channel_identity_source.get("brand_promise"),
-            "primary_platform": channel_identity_source.get("primary_platform") or "YouTube",
-            "secondary_platforms": _string_list(channel_identity_source.get("secondary_platforms")),
-            "series_plan": channel_identity_source.get("series_plan") or profile_input.get("series_plan", []),
+            "primary_platform": channel_identity_source.get("primary_platform")
+            or "YouTube",
+            "series_plan": channel_identity_source.get("series_plan")
+            or profile_input.get("series_plan", []),
         },
         "target_audience": {
-            "primary_persona": target_audience_source.get("primary_persona") or (profile_input.get("audience_segment") if not explicit_mode else None),
+            "primary_persona": target_audience_source.get("primary_persona")
+            or (profile_input.get("audience_segment") if not explicit_mode else None),
             "audience_level": target_audience_source.get("audience_level"),
             "pain_points": _string_list(target_audience_source.get("pain_points")),
             "desired_outcome": target_audience_source.get("desired_outcome"),
@@ -101,79 +128,169 @@ def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None
             "primary_market": explicit_primary_market or legacy_market,
             "secondary_markets": secondary_markets,
             "audience_locale": market_source.get("audience_locale") or legacy_locale,
-            "content_language": market_source.get("content_language") or (_clean(profile_input.get("target_language")) if not explicit_mode else None) or (getattr(channel, "primary_language", None) if channel is not None and not explicit_mode else None),
-            "operator_language": market_source.get("operator_language") or ("vi" if not explicit_mode else None),
-            "timezone": market_source.get("timezone") or ((getattr(channel, "primary_timezone", None) or getattr(channel, "default_timezone", None)) if channel is not None and not explicit_mode else None),
+            "content_language": market_source.get("content_language")
+            or (
+                _clean(profile_input.get("target_language"))
+                if not explicit_mode
+                else None
+            )
+            or (
+                getattr(channel, "primary_language", None)
+                if channel is not None and not explicit_mode
+                else None
+            ),
+            "operator_language": market_source.get("operator_language")
+            or ("vi" if not explicit_mode else None),
+            "timezone": market_source.get("timezone")
+            or (
+                (
+                    getattr(channel, "primary_timezone", None)
+                    or getattr(channel, "default_timezone", None)
+                )
+                if channel is not None and not explicit_mode
+                else None
+            ),
             "currency": market_source.get("currency"),
             "measurement_units": market_source.get("measurement_units"),
             "date_format": market_source.get("date_format"),
             "cultural_style": _dict(market_source.get("cultural_style")),
-            "market_examples_preference": market_source.get("market_examples_preference"),
-            "regulatory_sensitivity": _dict(market_source.get("regulatory_sensitivity")),
+            "market_examples_preference": market_source.get(
+                "market_examples_preference"
+            ),
+            "regulatory_sensitivity": _dict(
+                market_source.get("regulatory_sensitivity")
+            ),
         },
         "editorial_strategy": {
-            "content_pillars": _string_list(editorial_source.get("content_pillars") or profile_input.get("content_pillars", [])),
+            "content_pillars": _string_list(
+                editorial_source.get("content_pillars")
+                or profile_input.get("content_pillars", [])
+            ),
             "allowed_angles": _string_list(editorial_source.get("allowed_angles")),
             "forbidden_angles": _string_list(editorial_source.get("forbidden_angles")),
-            "claim_style": _string_list(editorial_source.get("claim_style") or ["measured", "evidence_backed"]),
+            "claim_style": _string_list(
+                editorial_source.get("claim_style") or ["measured", "evidence_backed"]
+            ),
             "allowed_topics": _string_list(editorial_source.get("allowed_topics")),
             "forbidden_topics": _string_list(editorial_source.get("forbidden_topics")),
         },
-        "format_policy": _format_policy(format_source or profile_input.get("format_strategy") or {}),
+        "format_policy": _format_policy(
+            format_source or profile_input.get("format_strategy") or {}
+        ),
         "voice_style": {
-            "narration_tone": voice_source.get("narration_tone") or _legacy_voice_tone(profile_input.get("voice_style")) if not explicit_mode else voice_source.get("narration_tone"),
-            "pacing": voice_source.get("pacing") or _dict(profile_input.get("voice_style")).get("pacing"),
+            "narration_tone": voice_source.get("narration_tone")
+            or _legacy_voice_tone(profile_input.get("voice_style"))
+            if not explicit_mode
+            else voice_source.get("narration_tone"),
+            "pacing": voice_source.get("pacing")
+            or _dict(profile_input.get("voice_style")).get("pacing"),
             "allowed_style": _string_list(voice_source.get("allowed_style")),
-            "forbidden_style": _string_list(voice_source.get("forbidden_style") or ["hype", "fearmongering", "aggressive_sales", "fake_urgency"]),
+            "forbidden_style": _string_list(
+                voice_source.get("forbidden_style")
+                or ["hype", "fearmongering", "aggressive_sales", "fake_urgency"]
+            ),
         },
         "platform_strategy": {
             "primary_platform": platform_source.get("primary_platform") or "YouTube",
-            "youtube_is_learning_authority": platform_source.get("youtube_is_learning_authority", True),
-            "secondary_platforms": _string_list(platform_source.get("secondary_platforms")),
-            "disabled_authorities": _string_list(platform_source.get("disabled_authorities") or ["tiktok_analytics_learning", "facebook_analytics_learning"]),
+            "youtube_is_learning_authority": platform_source.get(
+                "youtube_is_learning_authority", True
+            ),
+            "disabled_authorities": _string_list(
+                platform_source.get("disabled_authorities")
+                or ["tiktok_analytics_learning", "facebook_analytics_learning"]
+            ),
             "publish_mode": platform_source.get("publish_mode", "human_handoff_only"),
             "auto_publish_allowed": platform_source.get("auto_publish_allowed", False),
-            "studio_scraping_allowed": platform_source.get("studio_scraping_allowed", False),
+            "studio_scraping_allowed": platform_source.get(
+                "studio_scraping_allowed", False
+            ),
         },
         "media_policy": {
             "voice_provider": media_source.get("voice_provider") or "ElevenLabs",
-            "ai_hero_provider": media_source.get("ai_hero_provider") or "Google Veo API",
-            "ai_hero_model_id": media_source.get("ai_hero_model_id") or "veo-3.1-fast-generate-preview",
-            "ai_hero_allowed_durations_seconds": _int_list(media_source.get("ai_hero_allowed_durations_seconds") or [8]),
-            "ai_hero_default_duration_seconds": media_source.get("ai_hero_default_duration_seconds", 8),
+            "ai_hero_provider": media_source.get("ai_hero_provider")
+            or "Google Veo API",
+            "ai_hero_model_id": media_source.get("ai_hero_model_id")
+            or "veo-3.1-fast-generate-preview",
+            "ai_hero_allowed_durations_seconds": _int_list(
+                media_source.get("ai_hero_allowed_durations_seconds") or [8]
+            ),
+            "ai_hero_default_duration_seconds": media_source.get(
+                "ai_hero_default_duration_seconds", 8
+            ),
             "ai_hero_audio": media_source.get("ai_hero_audio", False),
-            "ai_hero_allowed_use": _string_list(media_source.get("ai_hero_allowed_use") or ["hero_shot", "hard_to_find_visual"]),
-            "ai_hero_forbidden_use": _string_list(media_source.get("ai_hero_forbidden_use") or ["data_diagram", "workflow_chart", "factual_evidence_visualization"]),
+            "ai_hero_allowed_use": _string_list(
+                media_source.get("ai_hero_allowed_use")
+                or ["hero_shot", "hard_to_find_visual"]
+            ),
+            "ai_hero_forbidden_use": _string_list(
+                media_source.get("ai_hero_forbidden_use")
+                or ["data_diagram", "workflow_chart", "factual_evidence_visualization"]
+            ),
             "renderer": media_source.get("renderer") or "NativeFFmpegRenderer",
             "storage_archive": media_source.get("storage_archive") or "Google Drive",
             "drive_offload_enabled": media_source.get("drive_offload_enabled", True),
         },
         "rights_policy": {
-            "source_manifest_required": rights_source.get("source_manifest_required", True),
-            "rights_evidence_required": rights_source.get("rights_evidence_required", True),
-            "ai_disclosure_required_when_ai_media_used": rights_source.get("ai_disclosure_required_when_ai_media_used", True),
-            "synthetic_media_warning_when_applicable": rights_source.get("synthetic_media_warning_when_applicable", True),
-            "music_policy": rights_source.get("music_policy") or "approved_licensed_audio_library_safe_only",
-            "reused_content_sensitivity": rights_source.get("reused_content_sensitivity") or "medium",
+            "source_manifest_required": rights_source.get(
+                "source_manifest_required", True
+            ),
+            "rights_evidence_required": rights_source.get(
+                "rights_evidence_required", True
+            ),
+            "ai_disclosure_required_when_ai_media_used": rights_source.get(
+                "ai_disclosure_required_when_ai_media_used", True
+            ),
+            "synthetic_media_warning_when_applicable": rights_source.get(
+                "synthetic_media_warning_when_applicable", True
+            ),
+            "music_policy": rights_source.get("music_policy")
+            or "approved_licensed_audio_library_safe_only",
+            "reused_content_sensitivity": rights_source.get(
+                "reused_content_sensitivity"
+            )
+            or "medium",
         },
         "budget_policy": {
             "cost_sensitivity": budget_source.get("cost_sensitivity") or "medium",
-            "avoid_unnecessary_ai_hero": budget_source.get("avoid_unnecessary_ai_hero", True),
-            "prefer_reuse_safe_assets": budget_source.get("prefer_reuse_safe_assets", True),
-            "exact_cost_claim_requires_provider_snapshot": budget_source.get("exact_cost_claim_requires_provider_snapshot", True),
+            "avoid_unnecessary_ai_hero": budget_source.get(
+                "avoid_unnecessary_ai_hero", True
+            ),
+            "prefer_reuse_safe_assets": budget_source.get(
+                "prefer_reuse_safe_assets", True
+            ),
+            "exact_cost_claim_requires_provider_snapshot": budget_source.get(
+                "exact_cost_claim_requires_provider_snapshot", True
+            ),
         },
         "learning_policy": {
             "authority": learning_source.get("authority") or "youtube_analytics_only",
-            "min_evidence_required": learning_source.get("min_evidence_required") or _dict(profile_input.get("evidence_requirement")),
-            "auto_promote_learning": learning_source.get("auto_promote_learning", False),
-            "config_mutation_by_agent_allowed": learning_source.get("config_mutation_by_agent_allowed", False),
-            "weak_evidence_action": learning_source.get("weak_evidence_action") or "summarize_limitations_only",
+            "min_evidence_required": learning_source.get("min_evidence_required")
+            or _dict(profile_input.get("evidence_requirement")),
+            "auto_promote_learning": learning_source.get(
+                "auto_promote_learning", False
+            ),
+            "config_mutation_by_agent_allowed": learning_source.get(
+                "config_mutation_by_agent_allowed", False
+            ),
+            "weak_evidence_action": learning_source.get("weak_evidence_action")
+            or "summarize_limitations_only",
         },
-        "forbidden_behavior": sorted(set([*_string_list(source.get("forbidden_behavior")), *FORBIDDEN_BEHAVIOR_CODES])),
+        "forbidden_behavior": sorted(
+            set(
+                [
+                    *_string_list(source.get("forbidden_behavior")),
+                    *FORBIDDEN_BEHAVIOR_CODES,
+                ]
+            )
+        ),
     }
     missing_fields = _missing_fields(contract)
     contradiction_reasons = _contradiction_reasons(contract)
-    market_status = "KNOWN" if not any(field.startswith("market_locale.") for field in missing_fields) else "PARTIAL"
+    market_status = (
+        "KNOWN"
+        if not any(field.startswith("market_locale.") for field in missing_fields)
+        else "PARTIAL"
+    )
     contract["market_locale"]["market_locale_context_status"] = market_status
     if contradiction_reasons:
         status = CONTRACT_CONTRADICTORY
@@ -188,42 +305,67 @@ def build_channel_contract(*, profile_input: dict[str, Any], channel: Any | None
     return contract
 
 
-def contract_status_from_snapshot_payload(payload: dict[str, Any] | None) -> tuple[str, list[str], list[str]]:
+def contract_status_from_snapshot_payload(
+    payload: dict[str, Any] | None,
+) -> tuple[str, list[str], list[str]]:
     if not isinstance(payload, dict):
         return CONTRACT_MISSING, ["channel_contract_json"], []
-    contract = payload.get("channel_contract_json") if isinstance(payload.get("channel_contract_json"), dict) else {}
-    status = str(contract.get("contract_status") or payload.get("contract_status") or CONTRACT_MISSING)
-    missing = _string_list(contract.get("missing_fields") or payload.get("missing_fields"))
-    contradictions = _string_list(contract.get("contradiction_reasons") or payload.get("contradiction_reasons"))
+    contract = (
+        payload.get("channel_contract_json")
+        if isinstance(payload.get("channel_contract_json"), dict)
+        else {}
+    )
+    status = str(
+        contract.get("contract_status")
+        or payload.get("contract_status")
+        or CONTRACT_MISSING
+    )
+    missing = _string_list(
+        contract.get("missing_fields") or payload.get("missing_fields")
+    )
+    contradictions = _string_list(
+        contract.get("contradiction_reasons") or payload.get("contradiction_reasons")
+    )
     return status, missing, contradictions
 
 
 def ensure_snapshot_contract_activatable(payload: dict[str, Any] | None) -> None:
     status, missing, contradictions = contract_status_from_snapshot_payload(payload)
     if status != CONTRACT_COMPLETE:
-        details = {"contract_status": status, "missing_fields": missing, "contradiction_reasons": contradictions}
-        raise ValidationFailureError(f"channel contract is not COMPLETE; activation blocked: {details}")
+        details = {
+            "contract_status": status,
+            "missing_fields": missing,
+            "contradiction_reasons": contradictions,
+        }
+        raise ValidationFailureError(
+            f"channel contract is not COMPLETE; activation blocked: {details}"
+        )
 
 
 def _format_policy(source: dict[str, Any]) -> dict[str, Any]:
-    long_form = source.get("long_form") if isinstance(source.get("long_form"), dict) else {}
-    shorts = source.get("shorts") if isinstance(source.get("shorts"), dict) else {}
+    long_form = (
+        source.get("long_form") if isinstance(source.get("long_form"), dict) else {}
+    )
     long_minutes = source.get("long_form_minutes")
     if long_minutes and not long_form:
-        long_form = {"enabled": True, "target_duration_minutes": {"min": 6, "max": 12}, "structure": ["hook", "problem", "mechanism", "result", "takeaway"]}
+        long_form = {
+            "enabled": True,
+            "target_duration_minutes": {"min": 6, "max": 12},
+            "structure": ["hook", "problem", "mechanism", "result", "takeaway"],
+        }
     return {
         "long_form": {
             "enabled": long_form.get("enabled", True),
-            "target_duration_minutes": _dict(long_form.get("target_duration_minutes")) or {"min": long_form.get("min_minutes"), "max": long_form.get("max_minutes")},
-            "structure": _string_list(long_form.get("structure") or ["hook", "problem", "mechanism", "result", "takeaway"]),
+            "target_duration_minutes": _dict(long_form.get("target_duration_minutes"))
+            or {
+                "min": long_form.get("min_minutes"),
+                "max": long_form.get("max_minutes"),
+            },
+            "structure": _string_list(
+                long_form.get("structure")
+                or ["hook", "problem", "mechanism", "result", "takeaway"]
+            ),
             "chapters_required": long_form.get("chapters_required", True),
-        },
-        "shorts": {
-            "enabled": shorts.get("enabled", True),
-            "target_duration_seconds": _dict(shorts.get("target_duration_seconds")) or {"min": shorts.get("min_seconds"), "max": shorts.get("max_seconds")},
-            "hard_max_seconds": shorts.get("hard_max_seconds", 59),
-            "captions_required": shorts.get("captions_required", True),
-            "shorts_per_long_form": shorts.get("shorts_per_long_form", source.get("shorts_per_long_form", 0)),
         },
     }
 
@@ -231,17 +373,31 @@ def _format_policy(source: dict[str, Any]) -> dict[str, Any]:
 def _missing_fields(contract: dict[str, Any]) -> list[str]:
     missing: list[str] = []
     checks = {
-        "channel_identity.channel_name": contract["channel_identity"].get("channel_name"),
+        "channel_identity.channel_name": contract["channel_identity"].get(
+            "channel_name"
+        ),
         "channel_identity.niche": contract["channel_identity"].get("niche"),
-        "target_audience.primary_persona": contract["target_audience"].get("primary_persona"),
+        "target_audience.primary_persona": contract["target_audience"].get(
+            "primary_persona"
+        ),
         "market_locale.primary_market": contract["market_locale"].get("primary_market"),
-        "market_locale.audience_locale": contract["market_locale"].get("audience_locale"),
-        "market_locale.content_language": contract["market_locale"].get("content_language"),
-        "market_locale.operator_language": contract["market_locale"].get("operator_language"),
+        "market_locale.audience_locale": contract["market_locale"].get(
+            "audience_locale"
+        ),
+        "market_locale.content_language": contract["market_locale"].get(
+            "content_language"
+        ),
+        "market_locale.operator_language": contract["market_locale"].get(
+            "operator_language"
+        ),
         "market_locale.timezone": contract["market_locale"].get("timezone"),
-        "editorial_strategy.content_pillars": contract["editorial_strategy"].get("content_pillars"),
+        "editorial_strategy.content_pillars": contract["editorial_strategy"].get(
+            "content_pillars"
+        ),
         "voice_style.narration_tone": contract["voice_style"].get("narration_tone"),
-        "platform_strategy.primary_platform": contract["platform_strategy"].get("primary_platform"),
+        "platform_strategy.primary_platform": contract["platform_strategy"].get(
+            "primary_platform"
+        ),
         "media_policy.voice_provider": contract["media_policy"].get("voice_provider"),
         "media_policy.renderer": contract["media_policy"].get("renderer"),
         "learning_policy.authority": contract["learning_policy"].get("authority"),
@@ -261,8 +417,8 @@ def _missing_fields(contract: dict[str, Any]) -> list[str]:
     if contract["rights_policy"].get("source_manifest_required") is not True:
         missing.append("rights_policy.source_manifest_required")
     fmt = contract["format_policy"]
-    if not (_dict(fmt.get("long_form")).get("enabled") or _dict(fmt.get("shorts")).get("enabled")):
-        missing.append("format_policy.long_form_or_shorts")
+    if _dict(fmt.get("long_form")).get("enabled") is not True:
+        missing.append("format_policy.long_form")
     return sorted(set(missing))
 
 
@@ -283,10 +439,17 @@ def _contradiction_reasons(contract: dict[str, Any]) -> list[str]:
         reasons.append("learning_policy.config_mutation_by_agent_allowed must be false")
     if media.get("ai_hero_audio") is True:
         reasons.append("media_policy.ai_hero_audio must be false")
-    overlap = set(_string_list(media.get("ai_hero_allowed_use"))) & set(_string_list(media.get("ai_hero_forbidden_use")))
+    overlap = set(_string_list(media.get("ai_hero_allowed_use"))) & set(
+        _string_list(media.get("ai_hero_forbidden_use"))
+    )
     if overlap:
-        reasons.append(f"media_policy.ai_hero_allowed_use conflicts with forbidden use: {sorted(overlap)}")
-    missing_forbidden = sorted(set(FORBIDDEN_BEHAVIOR_CODES) - set(_string_list(contract.get("forbidden_behavior"))))
+        reasons.append(
+            f"media_policy.ai_hero_allowed_use conflicts with forbidden use: {sorted(overlap)}"
+        )
+    missing_forbidden = sorted(
+        set(FORBIDDEN_BEHAVIOR_CODES)
+        - set(_string_list(contract.get("forbidden_behavior")))
+    )
     if missing_forbidden:
         reasons.append(f"forbidden_behavior missing locked rules: {missing_forbidden}")
     return reasons
@@ -301,8 +464,15 @@ def _legacy_market(value: Any) -> str | None:
 
 
 def _legacy_locale(*, profile_input: dict[str, Any], channel: Any | None) -> str | None:
-    language = str((getattr(channel, "primary_language", None) if channel is not None else None) or "").lower()
-    region = str((getattr(channel, "primary_region", None) if channel is not None else None) or _legacy_market(profile_input.get("target_market")) or "").upper()
+    language = str(
+        (getattr(channel, "primary_language", None) if channel is not None else None)
+        or ""
+    ).lower()
+    region = str(
+        (getattr(channel, "primary_region", None) if channel is not None else None)
+        or _legacy_market(profile_input.get("target_market"))
+        or ""
+    ).upper()
     if language.startswith("vi"):
         return "vi-VN"
     if language.startswith("ja"):

@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from app.cli.main import app as cli_app
-from app.contracts.m5 import ChannelDailyRunCreate, DailyRunMode
 from app.contracts.m6 import ProductionArtifactRunCreate, ProductionRunMode
 from app.contracts.m8 import AnalyticsSyncMode, AnalyticsSyncRunCreate
 from app.core.time import utc_now
@@ -36,14 +35,18 @@ def test_cli_help_excludes_mock_runtime_commands_and_flags() -> None:
     runner = CliRunner()
 
     provider_help = runner.invoke(cli_app, ["provider", "--help"]).output
-    daily_help = runner.invoke(cli_app, ["daily", "execute", "--help"]).output
-    production_help = runner.invoke(cli_app, ["production", "run-create", "--help"]).output
-    analytics_help = runner.invoke(cli_app, ["analytics", "sync-create", "--help"]).output
+    root_help = runner.invoke(cli_app, ["--help"]).output
+    production_help = runner.invoke(
+        cli_app, ["production", "run-create", "--help"]
+    ).output
+    analytics_help = runner.invoke(
+        cli_app, ["analytics", "sync-create", "--help"]
+    ).output
     media_help = runner.invoke(cli_app, ["media", "--help"]).output
 
     assert "seed-mocks" not in provider_help
     assert "attempt-mock" not in provider_help
-    assert "--mock-mode" not in daily_help
+    assert "daily" not in root_help.lower()
     assert "MOCK" not in production_help
     assert "MOCK" not in analytics_help
     assert "render-local-smoke" not in media_help
@@ -57,13 +60,16 @@ def test_runtime_catalogs_contain_no_mock_provider_entries() -> None:
         assert "local_fixture" not in raw, path
 
 
-def test_daily_runtime_modes_match_schema_and_default_real() -> None:
-    assert set(get_args(DailyRunMode)) == {"MOCK", "REAL_DISABLED", "REAL"}
-    assert ChannelDailyRunCreate.model_fields["run_mode"].default == "REAL"
+def test_active_runtime_modes_exclude_mock() -> None:
     assert "MOCK" not in get_args(ProductionRunMode)
-    assert ProductionArtifactRunCreate.model_fields["run_mode"].default == "REAL_DISABLED"
+    assert (
+        ProductionArtifactRunCreate.model_fields["run_mode"].default == "REAL_DISABLED"
+    )
     assert "MOCK" not in get_args(AnalyticsSyncMode)
-    assert AnalyticsSyncRunCreate.model_fields["sync_mode"].default == "YOUTUBE_OWNER_ANALYTICS"
+    assert (
+        AnalyticsSyncRunCreate.model_fields["sync_mode"].default
+        == "YOUTUBE_OWNER_ANALYTICS"
+    )
 
 
 def test_readiness_excludes_mock_providers(db_session) -> None:
@@ -88,7 +94,11 @@ def test_no_production_module_imports_runtime_mock_provider() -> None:
         if path.as_posix().endswith("app/providers/mock.py"):
             continue
         text = path.read_text(encoding="utf-8")
-        if "app.providers.mock" in text or "MockLLMProvider" in text or "MockAnalyticsProvider" in text:
+        if (
+            "app.providers.mock" in text
+            or "MockLLMProvider" in text
+            or "MockAnalyticsProvider" in text
+        ):
             offenders.append(path.relative_to(ROOT).as_posix())
 
     assert offenders == []

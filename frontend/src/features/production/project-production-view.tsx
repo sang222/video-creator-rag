@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 import { ActionHintCard, EmptyStateCard, PageHeader } from "@/components/cockpit";
 import { LoadingState } from "@/components/states";
-import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import {
   cancelProductionWorkflow,
@@ -16,7 +15,6 @@ import {
   queryKeys,
   resumeProductionWorkflow,
   startManualUpload,
-  startProjectProduction,
   submitManualPublishConfirmation,
   verifyManualPublishConfirmation
 } from "@/lib/api";
@@ -26,7 +24,7 @@ import { ManualPublishSurface } from "./manual-publish-surface";
 import { ProductionCockpitCard } from "./production-cockpit-card";
 import { ProductionProgressSurface } from "./production-progress";
 
-type ProgressAction = "start" | "resume" | "cancel";
+type ProgressAction = "resume" | "cancel";
 type FinalDecision = "UPLOAD" | "DO_NOT_UPLOAD";
 type PublishAction = "start" | "confirm" | "correct" | "verify";
 
@@ -58,7 +56,6 @@ export function ProjectProductionView({ projectId }: { projectId: string }) {
     }) => {
       const companyId = technicalString(query.data?.technical_appendix.company_id);
       if (!companyId) throw new Error("COMPANY_SCOPE_REQUIRED");
-      if (action === "start") return startProjectProduction(projectId, companyId);
       if (!workflowRunId) throw new Error("WORKFLOW_RUN_REQUIRED");
       if (action === "resume") {
         return resumeProductionWorkflow(workflowRunId, companyId);
@@ -69,9 +66,7 @@ export function ProjectProductionView({ projectId }: { projectId: string }) {
       setNotice(
         variables.action === "cancel"
           ? "Đã gửi yêu cầu dừng an toàn."
-          : variables.action === "resume"
-            ? "Đã tiếp tục từ checkpoint bền vững."
-            : "Đã bắt đầu luồng sản xuất."
+          : "Đã tiếp tục từ checkpoint bền vững."
       );
       await refresh();
     },
@@ -213,23 +208,11 @@ export function ProjectProductionView({ projectId }: { projectId: string }) {
         />
       ) : nextVideo ? (
         <Panel className="border-primary/35">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold">Sẵn sàng bắt đầu sản xuất</h2>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                VCOS sẽ dùng admission, assignment và duration contract v2 đã chốt. Không
-                cần duyệt từng gate trước render.
-              </p>
-            </div>
-            <Button
-              disabled={progressMutation.isPending}
-              onClick={() => progressMutation.mutate({ action: "start" })}
-              variant="primary"
-            >
-              <Play size={16} aria-hidden="true" />
-              {progressMutation.isPending ? "Đang bắt đầu..." : "Bắt đầu sản xuất"}
-            </Button>
-          </div>
+          <h2 className="text-lg font-semibold">Đang chờ cadence</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Cadence evaluator quyết định thời điểm bắt đầu sản xuất từ policy,
+            buffer và publish slot. Người vận hành không khởi chạy workflow trực tiếp.
+          </p>
         </Panel>
       ) : null}
 

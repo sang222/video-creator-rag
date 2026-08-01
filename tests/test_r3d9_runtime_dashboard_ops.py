@@ -18,6 +18,7 @@ from app.db.models import (
     FailureTraceReport,
     FinalMediaRef,
     FirstScriptedVideoPackage,
+    HumanUploadTask,
     HumanPaidRenderApproval,
     LearningCandidate,
     LearningEvidenceBundle,
@@ -80,8 +81,14 @@ def _artifacts() -> dict:
         },
         "narration_script": {
             "sentences": [
-                {"sentence_id": "S1", "text": "VCOS prepares copy for a human operator."},
-                {"sentence_id": "S2", "text": "VCOS stops before provider calls and upload."},
+                {
+                    "sentence_id": "S1",
+                    "text": "VCOS prepares copy for a human operator.",
+                },
+                {
+                    "sentence_id": "S2",
+                    "text": "VCOS stops before provider calls and upload.",
+                },
             ]
         },
         "metadata_package": {
@@ -98,11 +105,6 @@ def _artifacts() -> dict:
             "main_subject": "VCOS dashboard",
             "composition": "Clear card",
             "mobile_readability_notes": "Short text.",
-        },
-        "upload_card_copy": {
-            "title": "VCOS manual publish handoff",
-            "description": "Copy into YouTube manually after final human review. VCOS does not upload or publish.",
-            "checklist_items": ["Copy title", "Copy description", "Upload subtitles"],
         },
     }
 
@@ -137,16 +139,23 @@ def _fixture(db_session, qualification_factory):
     )
     project = db_session.get(VideoProject, project_read.id)
     assert project is not None
-    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(project.id)
+    effective = EffectiveChannelRuntimeContextCompiler(db_session).ensure_for_project(
+        project.id
+    )
     effective.publish_timing_context_json = {
         "channel_timezone": "Asia/Ho_Chi_Minh",
         "manual_publish_only": True,
-        "configured_publish_window": {"windows": [{"day": "MONDAY", "start": "09:00", "end": "11:00"}]},
+        "configured_publish_window": {
+            "windows": [{"day": "MONDAY", "start": "09:00", "end": "11:00"}]
+        },
         "source_contract_paths": ["publish_timing"],
     }
     effective.voice_audio_context_json = {"voice_profile_id": None, "language": "vi"}
     effective.thumbnail_style_context_json = {"style": "high contrast"}
-    effective.cost_provider_policy_context_json = {"provider_real_execution_enabled": False, "budget_cap": "manual-only"}
+    effective.cost_provider_policy_context_json = {
+        "provider_real_execution_enabled": False,
+        "budget_cap": "manual-only",
+    }
     db_session.flush()
 
     package = FirstScriptedVideoPackage(
@@ -182,7 +191,26 @@ def _fixture(db_session, qualification_factory):
     db_session.add(final_media)
     db_session.flush()
 
-    task = PublishHandoffLedgerService(db_session).create_upload_task_from_package(package.id)
+    # Historical v1 ledger input for read-model coverage only; active task
+    # creation is owned by the final-media decision workflow.
+    task = HumanUploadTask(
+        company_id=scope.company.id,
+        channel_workspace_id=scope.channel.id,
+        video_project_id=project.id,
+        first_scripted_video_package_id=package.id,
+        destination="YOUTUBE",
+        target_platform="YOUTUBE",
+        task_state="READY_FOR_HUMAN_UPLOAD",
+        publish_metadata_ref=f"fixture://publish-metadata/{package.id}",
+        title_snapshot="VCOS manual publish handoff",
+        description_snapshot=package.artifacts["metadata_package"]["description"],
+        thumbnail_ref=package.artifacts["thumbnail_brief"],
+        subtitle_refs=package.artifacts["metadata_package"]["subtitle_refs"],
+        required_assets=[{"type": "LONG_FORM_FINAL"}],
+        checklist=[{"code": "MANUAL_UPLOAD_ONLY", "required": True}],
+    )
+    db_session.add(task)
+    db_session.flush()
     backfill = PublishHandoffLedgerService(db_session).backfill_uploaded_video(
         task_id=task.id,
         data=BackfillUploadedVideoRequest(
@@ -394,7 +422,11 @@ def _fixture(db_session, qualification_factory):
     )
     db_session.add(facet)
     db_session.flush()
-    memory_queue = MemoryReviewQueueItem(memory_item_id=memory.id, queue_status="PENDING", reason_codes_json=["MEMORY_REVIEW_REQUIRED"])
+    memory_queue = MemoryReviewQueueItem(
+        memory_item_id=memory.id,
+        queue_status="PENDING",
+        reason_codes_json=["MEMORY_REVIEW_REQUIRED"],
+    )
     db_session.add(memory_queue)
 
     retrieval = VectorRetrievalManifest(
@@ -410,8 +442,21 @@ def _fixture(db_session, qualification_factory):
         sql_filter_json={"approval_status": "APPROVED"},
         candidate_count_before_vector=1,
         candidate_count_after_policy=0,
-        selected_memory_facet_refs_json=[{"memory_item_id": str(memory.id), "memory_facet_id": str(facet.id), "facet_text": facet.facet_text}],
-        blocked_refs_json=[{"memory_item_id": str(memory.id), "memory_facet_id": str(facet.id), "reason_codes": ["MEMORY_NOT_APPROVED"], "facet_text": facet.facet_text}],
+        selected_memory_facet_refs_json=[
+            {
+                "memory_item_id": str(memory.id),
+                "memory_facet_id": str(facet.id),
+                "facet_text": facet.facet_text,
+            }
+        ],
+        blocked_refs_json=[
+            {
+                "memory_item_id": str(memory.id),
+                "memory_facet_id": str(facet.id),
+                "reason_codes": ["MEMORY_NOT_APPROVED"],
+                "facet_text": facet.facet_text,
+            }
+        ],
         rejected_refs_json=[],
         retrieval_hash="retrieval-hash",
         digest_hash="digest-hash",
@@ -430,7 +475,13 @@ def _fixture(db_session, qualification_factory):
         prompt_context_hash="prompt-context-hash",
         applied_as_json={"context_pack_section": "memory_digest"},
         ignored_memory_refs_json=[],
-        blocked_memory_refs_json=[{"memory_item_id": str(memory.id), "reason_codes": ["MEMORY_NOT_APPROVED"], "facet_text": facet.facet_text}],
+        blocked_memory_refs_json=[
+            {
+                "memory_item_id": str(memory.id),
+                "reason_codes": ["MEMORY_NOT_APPROVED"],
+                "facet_text": facet.facet_text,
+            }
+        ],
         scope_status="BLOCK",
     )
     db_session.add(influence)
@@ -462,7 +513,11 @@ def _fixture(db_session, qualification_factory):
         source_artifact_refs_json=[{"package_id": str(package.id)}],
         gate_batch_refs_json=[{"gate_batch_run_id": str(batch.id), "status": "BLOCK"}],
         render_plan_hash="render-plan-hash",
-        provider_plan_json={"provider_stages": [{"provider_key": "google_veo", "provider_stage": "AI_HERO_VIDEO"}]},
+        provider_plan_json={
+            "provider_stages": [
+                {"provider_key": "google_veo", "provider_stage": "AI_HERO_VIDEO"}
+            ]
+        },
         created_by="r3d9-test",
     )
     db_session.add(revision)
@@ -528,7 +583,9 @@ def _fixture(db_session, qualification_factory):
     }
 
 
-def test_r3d9_runtime_dashboard_read_models_and_safe_boundaries(db_session, qualification_factory) -> None:
+def test_r3d9_runtime_dashboard_read_models_and_safe_boundaries(
+    db_session, qualification_factory
+) -> None:
     fx = _fixture(db_session, qualification_factory)
 
     command = RuntimeDashboardService(db_session).command_center()
@@ -542,20 +599,31 @@ def test_r3d9_runtime_dashboard_read_models_and_safe_boundaries(db_session, qual
     assert command.memory_approvals_needing_review
     assert command.provider_cost_blockers
     assert command.gate_failures
-    assert all(card.next_action.next_action_code for card in command.packages_waiting_review + command.provider_cost_blockers)
+    assert all(
+        card.next_action.next_action_code
+        for card in command.packages_waiting_review + command.provider_cost_blockers
+    )
 
     trace = ChannelRuntimeTraceService(db_session).for_project(fx["project"].id)
     fx["scope"].channel.primary_timezone = "Pacific/Honolulu"
     db_session.flush()
-    trace_after_mutation = ChannelRuntimeTraceService(db_session).for_project(fx["project"].id)
+    trace_after_mutation = ChannelRuntimeTraceService(db_session).for_project(
+        fx["project"].id
+    )
     assert trace.effective_context_snapshot_id == fx["effective"].id
     assert trace.channel_contract_hash == fx["effective"].channel_contract_hash
     assert trace.latest_mutable_settings_used is False
-    assert trace_after_mutation.publish_timing_policy["channel_timezone"] == "Asia/Ho_Chi_Minh"
+    assert (
+        trace_after_mutation.publish_timing_policy["channel_timezone"]
+        == "Asia/Ho_Chi_Minh"
+    )
 
     package = PackageOpsSummaryService(db_session).build(fx["package"].id)
     assert package.manual_publish_handoff["manual_only_warning_vi"]
-    assert package.title_description_subtitles_disclosure["title"] == "VCOS manual publish handoff"
+    assert (
+        package.title_description_subtitles_disclosure["title"]
+        == "VCOS manual publish handoff"
+    )
     assert package.r3d4_deterministic_gate_results[0]["gate_key"] == "TitlePromiseGate"
     assert package.prompt_budget_summary[0]["budget_report"]["prompt_budget"] == 1234
 
@@ -586,11 +654,16 @@ def test_r3d9_runtime_dashboard_read_models_and_safe_boundaries(db_session, qual
 
     provider = ProviderCostOpsService(db_session).build(fx["package"].id)
     assert provider.will_execute is False
-    assert provider.cost_estimates[0]["estimate_status"] == "ESTIMATE_PENDING_PROVIDER_CONFIG"
+    assert (
+        provider.cost_estimates[0]["estimate_status"]
+        == "ESTIMATE_PENDING_PROVIDER_CONFIG"
+    )
     assert "VEO_PROVIDER_NOT_CONFIGURED" in provider.next_action.blocking_reason_codes
 
 
-def test_r3d9_api_routes_are_get_only_and_do_not_add_job_controls(db_session, qualification_factory) -> None:
+def test_r3d9_api_routes_are_get_only_and_do_not_add_job_controls(
+    db_session, qualification_factory
+) -> None:
     fx = _fixture(db_session, qualification_factory)
     db_session.commit()
     client = TestClient(create_app())
@@ -613,15 +686,27 @@ def test_r3d9_api_routes_are_get_only_and_do_not_add_job_controls(db_session, qu
         response = client.get(path)
         assert response.status_code == 200, response.text
 
-    r3d9_paths = {route.path: route.methods for route in create_app().routes if route.path in {
-        "/ops/command-center",
-        "/ops/next-actions",
-        "/diagnostics/queue",
-        "/recovery/queue",
-        "/learning/queue",
-        "/memory/review-queue/ops",
-    }}
+    r3d9_paths = {
+        route.path: route.methods
+        for route in create_app().routes
+        if route.path
+        in {
+            "/ops/command-center",
+            "/ops/next-actions",
+            "/diagnostics/queue",
+            "/recovery/queue",
+            "/learning/queue",
+            "/memory/review-queue/ops",
+        }
+    }
     assert all(methods == {"GET"} for methods in r3d9_paths.values())
     source = Path("app/services/r3d9.py").read_text(encoding="utf-8").lower()
-    forbidden = ["execute_real_provider_flow", "googledriveuploadservice", "youtubeupload", "scrape", "studio", "run_pending_cleanup"]
+    forbidden = [
+        "execute_real_provider_flow",
+        "googledriveuploadservice",
+        "youtubeupload",
+        "scrape",
+        "studio",
+        "run_pending_cleanup",
+    ]
     assert [token for token in forbidden if token in source] == []

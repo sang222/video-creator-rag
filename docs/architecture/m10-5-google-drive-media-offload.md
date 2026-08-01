@@ -33,7 +33,6 @@ VCOS/
     channel_<id>/
       project_<id>/
         long_form/
-        shorts/
         thumbnails/
         captions/
         ai_hero/

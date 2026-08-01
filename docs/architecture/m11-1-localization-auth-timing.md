@@ -1,6 +1,9 @@
 # M11.1 Localization / Auth / Publish Timing
 
-M11.1 mở rộng Operator Dashboard thành cockpit tiếng Việt có login local/dev, gói phụ đề/metadata theo ngôn ngữ, readiness gate localization, và khung giờ publish theo timezone kênh.
+M11.1 mở rộng Operator Dashboard thành cockpit tiếng Việt có login local/dev,
+gói phụ đề/metadata theo ngôn ngữ và readiness gate localization. Khung giờ
+publish hiện được đọc từ `FirstChannelLaunchPolicyVersion` đã duyệt; bảng timing
+M11.1 cũ chỉ là lịch sử và không còn là authority ghi.
 
 ## Scope
 
@@ -11,8 +14,10 @@ M11.1 mở rộng Operator Dashboard thành cockpit tiếng Việt có login loc
 - `localized_subtitle_packages` dùng CloudMediaRef/Google Drive CTA cho SRT/VTT khi có file.
 - `localized_metadata_packages` lưu title/description/tags theo ngôn ngữ, bắt buộc human review trước khi dùng.
 - Localization readiness gate trả PASS/REVIEW_REQUIRED/BLOCK/NOT_REQUIRED với summary tiếng Việt.
-- Channel publish timing policy lưu IANA timezone và khung giờ publish đã cấu hình.
-- Publish timing suggestion chuyển local target timezone sang UTC và giờ operator.
+- Approved FirstChannelLaunchPolicyVersion lưu IANA timezone, weekday, local
+  time, minimum interval, version và canonical hash.
+- Publish timing suggestion chuyển local target timezone sang UTC và giờ
+  operator, đồng thời lưu lineage chính xác `LP:<policy-id>`.
 - Publish handoff/uploaded video dashboard hiển thị subtitle/metadata/timing state.
 
 ## Non-Scope

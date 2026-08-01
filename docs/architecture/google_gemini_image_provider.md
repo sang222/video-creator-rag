@@ -61,8 +61,8 @@ safe regions and `NativeOverlayPlan`; the image model never owns final text.
 The single price source is
 `config/google_gemini_image_model_price_catalog.yaml`, version
 `2026-07-17`. It contains the approved
-`gemini-3.1-flash-image` matrix for 1K, 2K and 4K across 16:9, 9:16 and 1:1.
-The default route is 2K/16:9. Estimates are planning evidence; actual billed
+`gemini-3.1-flash-image` matrix for 1K, 2K and 4K in the active 16:9 long-form
+format. The default route is 2K/16:9. Estimates are planning evidence; actual billed
 amount remains null because IMG1 makes no provider call.
 
 Generic R3D8 cost, human approval, idempotency, paid-attempt and call-ledger

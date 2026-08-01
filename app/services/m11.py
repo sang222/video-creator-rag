@@ -31,7 +31,6 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationFailureErro
 from app.core.time import utc_now
 from app.db.models import (
     ApprovedPlaybookEntry,
-    ChannelDailyRun,
     ChannelLifecycleDecision,
     ChannelProfileVersion,
     ChannelWorkspace,
@@ -65,6 +64,7 @@ from app.db.models import (
     VideoProject,
     YouTubeMonitoringCredential,
 )
+from app.db.models.m5 import EditorialResearchRun
 from app.services.policy_snapshot import PolicySnapshotService
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
@@ -91,8 +91,14 @@ class M11DashboardService:
     def __init__(self, session: Session):
         self.session = session
 
-    def command_center(self, *, company_id: uuid.UUID | None = None) -> CommandCenterRead:
-        ready_to_publish = self._count(PublishHandoffPackage, PublishHandoffPackage.package_state == "READY_FOR_OPERATOR", company_id=company_id)
+    def command_center(
+        self, *, company_id: uuid.UUID | None = None
+    ) -> CommandCenterRead:
+        ready_to_publish = self._count(
+            PublishHandoffPackage,
+            PublishHandoffPackage.package_state == "READY_FOR_OPERATOR",
+            company_id=company_id,
+        )
         need_manual_upload = self._count(
             HumanUploadTask,
             HumanUploadTask.task_state == "READY_FOR_HUMAN_UPLOAD",
@@ -100,56 +106,192 @@ class M11DashboardService:
         )
         waiting_backfill = self._count(
             HumanUploadTask,
-            HumanUploadTask.task_state.in_(["HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"]),
+            HumanUploadTask.task_state.in_(
+                ["HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"]
+            ),
             company_id=company_id,
         )
         learning_count = self._count(
             LearningReviewQueueItem,
-            LearningReviewQueueItem.queue_state.in_(["READY_FOR_HUMAN_REVIEW", "NEEDS_MORE_EVIDENCE", "BLOCKED"]),
+            LearningReviewQueueItem.queue_state.in_(
+                ["READY_FOR_HUMAN_REVIEW", "NEEDS_MORE_EVIDENCE", "BLOCKED"]
+            ),
             company_id=company_id,
         )
-        recovery_count = self._count(RecoveryProposal, RecoveryProposal.proposal_state == "PROPOSED")
+        recovery_count = self._count(
+            RecoveryProposal, RecoveryProposal.proposal_state == "PROPOSED"
+        )
         manual_action_count = self._count(ManualAction, ManualAction.state == "OPEN")
-        incident_count = self._count(OpsIncident, OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"]))
+        incident_count = self._count(
+            OpsIncident, OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"])
+        )
         stale_metrics_count = self._count(
             UploadedVideoMetricsSummary,
             UploadedVideoMetricsSummary.freshness_state.in_(["STALE", "UNKNOWN"]),
             company_id=company_id,
         )
-        channels_at_risk = self._count_channels_with_health(["LOW_VIEW", "NO_VIEW", "WATCHLIST", "NEEDS_HUMAN_REVIEW"])
+        channels_at_risk = self._count_channels_with_health(
+            ["LOW_VIEW", "NO_VIEW", "WATCHLIST", "NEEDS_HUMAN_REVIEW"]
+        )
         drive_auth_needed = self._drive_auth_needed()
         youtube_auth_needed = self._youtube_auth_needed()
         cards = [
-            _action_card("critical_queue", "Việc cần xử lý", learning_count + recovery_count + manual_action_count + incident_count, "HIGH", "Mở hàng chờ duyệt, phục hồi và ops.", "/queues"),
-            _action_card("due_today", "Việc ops đang mở", manual_action_count, "NORMAL", "Mở hàng chờ thao tác thủ công.", "/queues/ops"),
-            _action_card("blocked_human", "Đang chờ người vận hành", ready_to_publish + learning_count, "HIGH", "Duyệt bài học hoặc hoàn tất gói publish.", "/queues"),
-            _action_card("manual_upload_needed", "Cần upload thủ công", need_manual_upload, "HIGH", "Mở gói upload, upload thủ công trên YouTube rồi nhập lại video_id.", "/channels"),
-            _action_card("waiting_video_id_backfill", "Chờ nhập video_id", waiting_backfill, "HIGH", "Nhập URL hoặc video_id sau khi upload thủ công.", "/channels"),
-            _action_card("blocked_policy", "Bị chặn bởi policy/rights", self._count_blocked_gates(), "HIGH", "Mở hàng chờ kiểm tra bằng chứng và quyền.", "/queues"),
-            _action_card("blocked_provider", "Nhà cung cấp/quota cần xem", incident_count, "HIGH", "Kiểm tra trạng thái nhà cung cấp và ops.", "/ops"),
-            _action_card("needs_youtube_auth", "Cần kết nối YouTube", 1 if youtube_auth_needed else 0, "NORMAL", "Kết nối lại owner analytics khi cần.", "/ops"),
-            _action_card("needs_drive_auth", "Cần kết nối Google Drive", 1 if drive_auth_needed else 0, "NORMAL", "Kết nối Google Drive media offload.", "/media"),
-            _action_card("channels_at_risk", "Kênh cần theo dõi", channels_at_risk, "HIGH", "Mở lifecycle và diagnostic của kênh.", "/channels"),
-            _action_card("learning_review", "Bài học chờ duyệt", learning_count, "NORMAL", "Xem bằng chứng trước khi đưa vào playbook.", "/learning"),
+            _action_card(
+                "critical_queue",
+                "Việc cần xử lý",
+                learning_count + recovery_count + manual_action_count + incident_count,
+                "HIGH",
+                "Mở hàng chờ duyệt, phục hồi và ops.",
+                "/queues",
+            ),
+            _action_card(
+                "due_today",
+                "Việc ops đang mở",
+                manual_action_count,
+                "NORMAL",
+                "Mở hàng chờ thao tác thủ công.",
+                "/queues/ops",
+            ),
+            _action_card(
+                "blocked_human",
+                "Đang chờ người vận hành",
+                ready_to_publish + learning_count,
+                "HIGH",
+                "Duyệt bài học hoặc hoàn tất gói publish.",
+                "/queues",
+            ),
+            _action_card(
+                "manual_upload_needed",
+                "Cần upload thủ công",
+                need_manual_upload,
+                "HIGH",
+                "Mở gói upload, upload thủ công trên YouTube rồi nhập lại video_id.",
+                "/channels",
+            ),
+            _action_card(
+                "waiting_video_id_backfill",
+                "Chờ nhập video_id",
+                waiting_backfill,
+                "HIGH",
+                "Nhập URL hoặc video_id sau khi upload thủ công.",
+                "/channels",
+            ),
+            _action_card(
+                "blocked_policy",
+                "Bị chặn bởi policy/rights",
+                self._count_blocked_gates(),
+                "HIGH",
+                "Mở hàng chờ kiểm tra bằng chứng và quyền.",
+                "/queues",
+            ),
+            _action_card(
+                "blocked_provider",
+                "Nhà cung cấp/quota cần xem",
+                incident_count,
+                "HIGH",
+                "Kiểm tra trạng thái nhà cung cấp và ops.",
+                "/ops",
+            ),
+            _action_card(
+                "needs_youtube_auth",
+                "Cần kết nối YouTube",
+                1 if youtube_auth_needed else 0,
+                "NORMAL",
+                "Kết nối lại owner analytics khi cần.",
+                "/ops",
+            ),
+            _action_card(
+                "needs_drive_auth",
+                "Cần kết nối Google Drive",
+                1 if drive_auth_needed else 0,
+                "NORMAL",
+                "Kết nối Google Drive media offload.",
+                "/media",
+            ),
+            _action_card(
+                "channels_at_risk",
+                "Kênh cần theo dõi",
+                channels_at_risk,
+                "HIGH",
+                "Mở lifecycle và diagnostic của kênh.",
+                "/channels",
+            ),
+            _action_card(
+                "learning_review",
+                "Bài học chờ duyệt",
+                learning_count,
+                "NORMAL",
+                "Xem bằng chứng trước khi đưa vào playbook.",
+                "/learning",
+            ),
         ]
         required_actions = [
-            {"type": "PUBLISH_HANDOFF", "count": ready_to_publish, "next_action": "Upload thủ công trên YouTube, rồi paste back video_id/url."},
-            {"type": "HUMAN_UPLOAD_TASK", "count": need_manual_upload, "next_action": "Upload thủ công; VCOS chỉ ghi nhận và xác minh."},
-            {"type": "UPLOAD_BACKFILL", "count": waiting_backfill, "next_action": "Nhập URL hoặc video_id YouTube vào VCOS."},
-            {"type": "LEARNING_REVIEW", "count": learning_count, "next_action": "Duyệt evidence bundle; không tự mutate profile/config."},
-            {"type": "RECOVERY_REVIEW", "count": recovery_count, "next_action": "Duyệt/chờ/từ chối đề xuất phục hồi. Không re-upload spam."},
-            {"type": "ANALYTICS_FRESHNESS", "count": stale_metrics_count, "next_action": "Sync/import analytics trước khi kết luận."},
+            {
+                "type": "PUBLISH_HANDOFF",
+                "count": ready_to_publish,
+                "next_action": "Upload thủ công trên YouTube, rồi paste back video_id/url.",
+            },
+            {
+                "type": "HUMAN_UPLOAD_TASK",
+                "count": need_manual_upload,
+                "next_action": "Upload thủ công; VCOS chỉ ghi nhận và xác minh.",
+            },
+            {
+                "type": "UPLOAD_BACKFILL",
+                "count": waiting_backfill,
+                "next_action": "Nhập URL hoặc video_id YouTube vào VCOS.",
+            },
+            {
+                "type": "LEARNING_REVIEW",
+                "count": learning_count,
+                "next_action": "Duyệt evidence bundle; không tự mutate profile/config.",
+            },
+            {
+                "type": "RECOVERY_REVIEW",
+                "count": recovery_count,
+                "next_action": "Duyệt/chờ/từ chối đề xuất phục hồi. Không re-upload spam.",
+            },
+            {
+                "type": "ANALYTICS_FRESHNESS",
+                "count": stale_metrics_count,
+                "next_action": "Sync/import analytics trước khi kết luận.",
+            },
         ]
         return CommandCenterRead(
             generated_at=utc_now(),
             company_id=company_id,
             cards=cards,
             metrics=[
-                DashboardMetricCard(key="ready_to_publish", label="Gói publish sẵn sàng", value=ready_to_publish, state="ACTION_REQUIRED"),
-                DashboardMetricCard(key="need_manual_upload", label="Cần upload thủ công", value=need_manual_upload, state="ACTION_REQUIRED"),
-                DashboardMetricCard(key="waiting_backfill", label="Chờ nhập video_id", value=waiting_backfill, state="ACTION_REQUIRED"),
-                DashboardMetricCard(key="stale_metrics", label="Metric YouTube cũ/chưa có", value=stale_metrics_count, state="CHECK_FRESHNESS"),
-                DashboardMetricCard(key="ops_incidents", label="Sự cố ops/nhà cung cấp", value=incident_count, state="WATCH"),
+                DashboardMetricCard(
+                    key="ready_to_publish",
+                    label="Gói publish sẵn sàng",
+                    value=ready_to_publish,
+                    state="ACTION_REQUIRED",
+                ),
+                DashboardMetricCard(
+                    key="need_manual_upload",
+                    label="Cần upload thủ công",
+                    value=need_manual_upload,
+                    state="ACTION_REQUIRED",
+                ),
+                DashboardMetricCard(
+                    key="waiting_backfill",
+                    label="Chờ nhập video_id",
+                    value=waiting_backfill,
+                    state="ACTION_REQUIRED",
+                ),
+                DashboardMetricCard(
+                    key="stale_metrics",
+                    label="Metric YouTube cũ/chưa có",
+                    value=stale_metrics_count,
+                    state="CHECK_FRESHNESS",
+                ),
+                DashboardMetricCard(
+                    key="ops_incidents",
+                    label="Sự cố ops/nhà cung cấp",
+                    value=incident_count,
+                    state="WATCH",
+                ),
             ],
             required_actions=required_actions,
             safety_warnings=_safety_warnings(),
@@ -185,11 +327,21 @@ class M11DashboardService:
                 )
             else:
                 current.count += 1
-                current.allowed_actions = sorted(set([*current.allowed_actions, *item.allowed_actions]))
-        return DashboardQueuesRead(generated_at=utc_now(), summaries=list(summaries_by_type.values()), items=items)
+                current.allowed_actions = sorted(
+                    set([*current.allowed_actions, *item.allowed_actions])
+                )
+        return DashboardQueuesRead(
+            generated_at=utc_now(),
+            summaries=list(summaries_by_type.values()),
+            items=items,
+        )
 
-    def list_channels(self, *, company_id: uuid.UUID | None = None) -> list[dict[str, Any]]:
-        statement = select(ChannelWorkspace).order_by(ChannelWorkspace.created_at.desc(), ChannelWorkspace.id.desc())
+    def list_channels(
+        self, *, company_id: uuid.UUID | None = None
+    ) -> list[dict[str, Any]]:
+        statement = select(ChannelWorkspace).order_by(
+            ChannelWorkspace.created_at.desc(), ChannelWorkspace.id.desc()
+        )
         if company_id is not None:
             statement = statement.where(ChannelWorkspace.company_id == company_id)
         channels = []
@@ -211,17 +363,19 @@ class M11DashboardService:
         health_status = _metadata_health(channel)
         if latest is not None:
             health_status = latest.health_status
-        daily_allowed = lifecycle_state == "ACTIVE"
+        research_allowed = lifecycle_state == "ACTIVE"
         next_action = _channel_next_action(lifecycle_state, health_status)
         return ChannelLifecycleRead(
             channel_id=channel.id,
             lifecycle_state=lifecycle_state,
             health_status=health_status,
-            daily_generation_allowed=daily_allowed,
+            editorial_research_allowed=research_allowed,
             next_action=next_action,
-            main_blocker=None if daily_allowed else next_action,
+            main_blocker=None if research_allowed else next_action,
             allowed_actions=_allowed_lifecycle_actions(lifecycle_state),
-            last_decision=_channel_lifecycle_decision_dict(latest) if latest is not None else None,
+            last_decision=_channel_lifecycle_decision_dict(latest)
+            if latest is not None
+            else None,
         )
 
     def workspace(self, channel_id: uuid.UUID) -> ChannelWorkspaceDashboardRead:
@@ -238,20 +392,31 @@ class M11DashboardService:
                 .limit(25)
             ).all()
         ]
-        daily_runs = [
-            _daily_run_card(run)
+        research_runs = [
+            _editorial_research_run_card(run)
             for run in self.session.scalars(
-                select(ChannelDailyRun)
-                .where(ChannelDailyRun.channel_workspace_id == channel_id)
-                .order_by(ChannelDailyRun.created_at.desc())
+                select(EditorialResearchRun)
+                .where(EditorialResearchRun.channel_workspace_id == channel_id)
+                .order_by(EditorialResearchRun.created_at.desc())
                 .limit(20)
             ).all()
         ]
-        approvals = [item for item in self._learning_queue_items(channel_id=channel_id)[:10]]
-        uploaded_videos = [item.model_dump(mode="json") for item in self.list_uploaded_videos(channel_id=channel_id)[:10]]
+        approvals = [
+            item for item in self._learning_queue_items(channel_id=channel_id)[:10]
+        ]
+        uploaded_videos = [
+            item.model_dump(mode="json")
+            for item in self.list_uploaded_videos(channel_id=channel_id)[:10]
+        ]
         upload_counts = self._upload_counts(channel_id)
-        media_count = self._count(CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id)
-        failed_media_count = self._count(CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id, CloudMediaRef.upload_status == "FAILED")
+        media_count = self._count(
+            CloudMediaRef, CloudMediaRef.channel_workspace_id == channel_id
+        )
+        failed_media_count = self._count(
+            CloudMediaRef,
+            CloudMediaRef.channel_workspace_id == channel_id,
+            CloudMediaRef.upload_status == "FAILED",
+        )
         contract_review = self._contract_review(channel_id)
         return ChannelWorkspaceDashboardRead(
             channel=_channel_dict(channel),
@@ -261,31 +426,56 @@ class M11DashboardService:
                 "next_action": lifecycle.next_action,
                 "main_blocker": lifecycle.main_blocker,
                 "analytics_freshness": self._channel_analytics_freshness(channel_id),
-                "production_state": _state_from_count(len(projects), "NO_PROJECTS", "PROJECTS_ACTIVE"),
-                "publish_state": _state_from_count(self._count(PublishHandoffPackage, PublishHandoffPackage.channel_workspace_id == channel_id), "NO_HANDOFFS", "HANDOFFS_AVAILABLE"),
+                "production_state": _state_from_count(
+                    len(projects), "NO_PROJECTS", "PROJECTS_ACTIVE"
+                ),
+                "publish_state": _state_from_count(
+                    self._count(
+                        PublishHandoffPackage,
+                        PublishHandoffPackage.channel_workspace_id == channel_id,
+                    ),
+                    "NO_HANDOFFS",
+                    "HANDOFFS_AVAILABLE",
+                ),
                 "upload_counts": upload_counts,
                 "contract_review": contract_review,
                 "contract_status": contract_review["contract_status"],
-                "learning_state": _state_from_count(len(approvals), "NO_LEARNING_REVIEW", "LEARNING_REVIEW_READY"),
-                "storage_state": "FAILED" if failed_media_count else _state_from_count(media_count, "NO_CLOUD_MEDIA", "GOOGLE_DRIVE_READY"),
+                "learning_state": _state_from_count(
+                    len(approvals), "NO_LEARNING_REVIEW", "LEARNING_REVIEW_READY"
+                ),
+                "storage_state": "FAILED"
+                if failed_media_count
+                else _state_from_count(
+                    media_count, "NO_CLOUD_MEDIA", "GOOGLE_DRIVE_READY"
+                ),
             },
             lifecycle=lifecycle,
             projects=projects,
-            daily_runs=daily_runs,
+            editorial_research_runs=research_runs,
             approvals=approvals,
             uploaded_videos=uploaded_videos,
             publish_ledger={
                 **upload_counts,
                 "operator_summary_vi": "Upload là thao tác thủ công. VCOS chỉ ghi nhận URL/video_id và xác minh YouTube nếu đã kết nối.",
             },
-            media_storage={"provider": "Google Drive", "cloud_media_count": media_count, "failed_count": failed_media_count, "cta_only": True},
+            media_storage={
+                "provider": "Google Drive",
+                "cloud_media_count": media_count,
+                "failed_count": failed_media_count,
+                "cta_only": True,
+            },
             provider_health=self.provider_ops().integrations,
-            technical_appendix={"no_latest_profile_lookup_for_projects": True, "contract_review": contract_review},
+            technical_appendix={
+                "no_latest_profile_lookup_for_projects": True,
+                "contract_review": contract_review,
+            },
         )
 
     def _contract_review(self, channel_id: uuid.UUID) -> dict[str, Any]:
         snapshots = PolicySnapshotService(self.session).list_snapshots(channel_id)
-        active = PolicySnapshotService(self.session).get_active_snapshot_for_channel(channel_id)
+        active = PolicySnapshotService(self.session).get_active_snapshot_for_channel(
+            channel_id
+        )
         snapshot = active or (snapshots[0] if snapshots else None)
         if snapshot is None:
             return {
@@ -296,10 +486,24 @@ class M11DashboardService:
                 "missing_fields": ["compiled_policy_snapshot"],
                 "next_action": "Tạo hồ sơ kênh và compile policy snapshot.",
             }
-        payload = snapshot.compiled_payload if isinstance(snapshot.compiled_payload, dict) else {}
-        contract = payload.get("channel_contract_json") if isinstance(payload.get("channel_contract_json"), dict) else {}
-        contract_status = str(contract.get("contract_status") or payload.get("contract_status") or "MISSING")
-        missing_fields = contract.get("missing_fields") or payload.get("missing_fields") or []
+        payload = (
+            snapshot.compiled_payload
+            if isinstance(snapshot.compiled_payload, dict)
+            else {}
+        )
+        contract = (
+            payload.get("channel_contract_json")
+            if isinstance(payload.get("channel_contract_json"), dict)
+            else {}
+        )
+        contract_status = str(
+            contract.get("contract_status")
+            or payload.get("contract_status")
+            or "MISSING"
+        )
+        missing_fields = (
+            contract.get("missing_fields") or payload.get("missing_fields") or []
+        )
         labels = {
             "COMPLETE": "Đủ điều kiện kích hoạt",
             "PARTIAL": "Cần bổ sung hồ sơ",
@@ -307,20 +511,46 @@ class M11DashboardService:
             "STALE": "Cần review policy snapshot",
             "MISSING": "Cần bổ sung hồ sơ",
         }
-        profile_version = self.session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
-        scoped_policy = payload.get("channel_scoped_policy") if isinstance(payload.get("channel_scoped_policy"), dict) else {}
-        target_market_profile = scoped_policy.get("target_market_profile") if isinstance(scoped_policy.get("target_market_profile"), dict) else {}
-        destination_policy = scoped_policy.get("destination_binding_policy") if isinstance(scoped_policy.get("destination_binding_policy"), dict) else {}
-        destination = destination_policy.get("destination") if isinstance(destination_policy.get("destination"), dict) else {}
-        visual_binding = scoped_policy.get("visual_source_policy_binding") if isinstance(scoped_policy.get("visual_source_policy_binding"), dict) else {}
+        profile_version = self.session.get(
+            ChannelProfileVersion, snapshot.channel_profile_version_id
+        )
+        scoped_policy = (
+            payload.get("channel_scoped_policy")
+            if isinstance(payload.get("channel_scoped_policy"), dict)
+            else {}
+        )
+        target_market_profile = (
+            scoped_policy.get("target_market_profile")
+            if isinstance(scoped_policy.get("target_market_profile"), dict)
+            else {}
+        )
+        destination_policy = (
+            scoped_policy.get("destination_binding_policy")
+            if isinstance(scoped_policy.get("destination_binding_policy"), dict)
+            else {}
+        )
+        destination = (
+            destination_policy.get("destination")
+            if isinstance(destination_policy.get("destination"), dict)
+            else {}
+        )
+        visual_binding = (
+            scoped_policy.get("visual_source_policy_binding")
+            if isinstance(scoped_policy.get("visual_source_policy_binding"), dict)
+            else {}
+        )
         return {
             "contract_status": contract_status,
             "label": labels.get(contract_status, "Cần review policy snapshot"),
             "latest_snapshot_id": str(snapshot.id),
             "active_snapshot_id": str(active.id) if active is not None else None,
             "snapshot_version": snapshot.snapshot_version,
-            "channel_profile_version": profile_version.version if profile_version else None,
-            "target_market_profile_version": target_market_profile.get("profile_version"),
+            "channel_profile_version": profile_version.version
+            if profile_version
+            else None,
+            "target_market_profile_version": target_market_profile.get(
+                "profile_version"
+            ),
             "target_market": target_market_profile.get("primary_market"),
             "primary_locale": target_market_profile.get("primary_locale"),
             "narration_locale": target_market_profile.get("narration_locale"),
@@ -328,11 +558,20 @@ class M11DashboardService:
             "currency": target_market_profile.get("currency"),
             "visual_profile": visual_binding.get("niche_visual_source_profile"),
             "destination_status": destination.get("destination_status"),
-            "market_policy_state": "ACTIVE" if target_market_profile and active is not None else "NOT_ACTIVE",
+            "market_policy_state": "ACTIVE"
+            if target_market_profile and active is not None
+            else "NOT_ACTIVE",
             "missing_fields": missing_fields,
-            "contradiction_reasons": contract.get("contradiction_reasons") or payload.get("contradiction_reasons") or [],
+            "contradiction_reasons": contract.get("contradiction_reasons")
+            or payload.get("contradiction_reasons")
+            or [],
             "market_locale": contract.get("market_locale") or {},
-            "next_action": contract.get("next_action") or ("Kích hoạt kênh." if contract_status == "COMPLETE" else "Bổ sung hồ sơ kênh và compile lại policy snapshot."),
+            "next_action": contract.get("next_action")
+            or (
+                "Kích hoạt kênh."
+                if contract_status == "COMPLETE"
+                else "Bổ sung hồ sơ kênh và compile lại policy snapshot."
+            ),
         }
 
     def list_uploaded_videos(
@@ -341,9 +580,13 @@ class M11DashboardService:
         channel_id: uuid.UUID | None = None,
         company_id: uuid.UUID | None = None,
     ) -> list[UploadedVideoListItem]:
-        statement = select(UploadedVideo).order_by(UploadedVideo.published_at.desc(), UploadedVideo.id.desc())
+        statement = select(UploadedVideo).order_by(
+            UploadedVideo.published_at.desc(), UploadedVideo.id.desc()
+        )
         if channel_id is not None:
-            statement = statement.where(UploadedVideo.channel_workspace_id == channel_id)
+            statement = statement.where(
+                UploadedVideo.channel_workspace_id == channel_id
+            )
         if company_id is not None:
             statement = statement.where(UploadedVideo.company_id == company_id)
         items = []
@@ -352,7 +595,12 @@ class M11DashboardService:
             public = self._latest_public_snapshot(uploaded.id)
             owner = self._latest_owner_snapshot(uploaded.id)
             metrics = _metrics_from_summary(summary, public, owner)
-            title = str(uploaded.actual_title or uploaded.actual_metadata.get("actual_title") or uploaded.operator_summary.get("title") or uploaded.platform_video_id)
+            title = str(
+                uploaded.actual_title
+                or uploaded.actual_metadata.get("actual_title")
+                or uploaded.operator_summary.get("title")
+                or uploaded.platform_video_id
+            )
             items.append(
                 UploadedVideoListItem(
                     id=uploaded.id,
@@ -368,8 +616,12 @@ class M11DashboardService:
                     analytics_sync_status=uploaded.analytics_sync_status,
                     published_at=uploaded.published_at,
                     metrics=metrics,
-                    freshness=summary.freshness_state if summary is not None else uploaded.analytics_sync_status,
-                    owner_analytics_status="CONNECTED" if owner is not None else uploaded.analytics_sync_status,
+                    freshness=summary.freshness_state
+                    if summary is not None
+                    else uploaded.analytics_sync_status,
+                    owner_analytics_status="CONNECTED"
+                    if owner is not None
+                    else uploaded.analytics_sync_status,
                     latest_diagnostic=self._latest_failure_status(uploaded.id),
                     next_action=summary.next_action
                     if summary is not None
@@ -379,7 +631,9 @@ class M11DashboardService:
             )
         return items
 
-    def uploaded_video_dashboard(self, uploaded_video_id: uuid.UUID) -> UploadedVideoDashboardRead:
+    def uploaded_video_dashboard(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoDashboardRead:
         uploaded = self.session.get(UploadedVideo, uploaded_video_id)
         if uploaded is None:
             raise NotFoundError(f"uploaded video not found: {uploaded_video_id}")
@@ -392,14 +646,32 @@ class M11DashboardService:
             publish_check={
                 **_publish_check(public),
                 **self._publish_timing_check(uploaded),
-                "localization_packages": self._localization_packages(uploaded.video_project_id),
+                "localization_packages": self._localization_packages(
+                    uploaded.video_project_id
+                ),
             },
-            diagnostics=[_failure_report_card(report) for report in self._failure_reports(uploaded.id)],
-            recovery_proposals=[_recovery_card(proposal) for proposal in self._recovery_proposals(uploaded.id)],
-            learning_candidates=[_learning_candidate_card(candidate) for candidate in self._learning_candidates(uploaded.id)],
-            media=[_cloud_media_card(ref) for ref in self._cloud_refs_for_uploaded(uploaded.id)],
+            diagnostics=[
+                _failure_report_card(report)
+                for report in self._failure_reports(uploaded.id)
+            ],
+            recovery_proposals=[
+                _recovery_card(proposal)
+                for proposal in self._recovery_proposals(uploaded.id)
+            ],
+            learning_candidates=[
+                _learning_candidate_card(candidate)
+                for candidate in self._learning_candidates(uploaded.id)
+            ],
+            media=[
+                _cloud_media_card(ref)
+                for ref in self._cloud_refs_for_uploaded(uploaded.id)
+            ],
             safety_warnings=_safety_warnings(),
-            technical_appendix={"uploaded_video_id": str(uploaded.id), "youtube_public_authority": "WEAK", "youtube_owner_authority": "STRONG"},
+            technical_appendix={
+                "uploaded_video_id": str(uploaded.id),
+                "youtube_public_authority": "WEAK",
+                "youtube_owner_authority": "STRONG",
+            },
         )
 
     def provider_ops(self) -> ProviderOpsDashboardRead:
@@ -409,9 +681,15 @@ class M11DashboardService:
                 "provider_name": provider.provider_name,
                 "provider_type": provider.provider_type,
                 "status": provider.status,
-                "next_action": "Kiểm tra capability/budget của nhà cung cấp." if provider.status != "ACTIVE" else None,
+                "next_action": "Kiểm tra capability/budget của nhà cung cấp."
+                if provider.status != "ACTIVE"
+                else None,
             }
-            for provider in self.session.scalars(select(ProviderRegistryEntry).order_by(ProviderRegistryEntry.provider_key.asc()).limit(100)).all()
+            for provider in self.session.scalars(
+                select(ProviderRegistryEntry)
+                .order_by(ProviderRegistryEntry.provider_key.asc())
+                .limit(100)
+            ).all()
         ]
         credentials = [
             {
@@ -420,30 +698,62 @@ class M11DashboardService:
                 "status": credential.status,
                 "secret_values_exposed": False,
             }
-            for credential in self.session.scalars(select(CredentialReference).order_by(CredentialReference.created_at.desc()).limit(100)).all()
+            for credential in self.session.scalars(
+                select(CredentialReference)
+                .order_by(CredentialReference.created_at.desc())
+                .limit(100)
+            ).all()
         ]
         quotas = [
             {
                 "provider_key": quota.provider_key,
                 "unit": quota.unit,
-                "quota_limit": str(quota.quota_limit) if quota.quota_limit is not None else None,
+                "quota_limit": str(quota.quota_limit)
+                if quota.quota_limit is not None
+                else None,
                 "quota_used": str(quota.quota_used),
                 "quota_reserved": str(quota.quota_reserved),
                 "status": quota.status,
             }
-            for quota in self.session.scalars(select(QuotaAccount).order_by(QuotaAccount.created_at.desc()).limit(50)).all()
+            for quota in self.session.scalars(
+                select(QuotaAccount).order_by(QuotaAccount.created_at.desc()).limit(50)
+            ).all()
         ]
         costs = [
-            {"provider_key": cost.provider_key, "amount": str(cost.amount), "currency": cost.currency, "cost_type": cost.cost_type, "created_at": cost.created_at}
-            for cost in self.session.scalars(select(CostEvent).order_by(CostEvent.created_at.desc()).limit(50)).all()
+            {
+                "provider_key": cost.provider_key,
+                "amount": str(cost.amount),
+                "currency": cost.currency,
+                "cost_type": cost.cost_type,
+                "created_at": cost.created_at,
+            }
+            for cost in self.session.scalars(
+                select(CostEvent).order_by(CostEvent.created_at.desc()).limit(50)
+            ).all()
         ]
         incidents = [
-            {"id": incident.id, "incident_type": incident.incident_type, "severity": incident.severity, "state": incident.state, "next_action": incident.next_action}
-            for incident in self.session.scalars(select(OpsIncident).order_by(OpsIncident.created_at.desc()).limit(50)).all()
+            {
+                "id": incident.id,
+                "incident_type": incident.incident_type,
+                "severity": incident.severity,
+                "state": incident.state,
+                "next_action": incident.next_action,
+            }
+            for incident in self.session.scalars(
+                select(OpsIncident).order_by(OpsIncident.created_at.desc()).limit(50)
+            ).all()
         ]
         manual_actions = [
-            {"id": action.id, "action_type": action.action_type, "priority": action.priority, "state": action.state, "next_action": action.next_action}
-            for action in self.session.scalars(select(ManualAction).order_by(ManualAction.created_at.desc()).limit(50)).all()
+            {
+                "id": action.id,
+                "action_type": action.action_type,
+                "priority": action.priority,
+                "state": action.state,
+                "next_action": action.next_action,
+            }
+            for action in self.session.scalars(
+                select(ManualAction).order_by(ManualAction.created_at.desc()).limit(50)
+            ).all()
         ]
         return ProviderOpsDashboardRead(
             generated_at=utc_now(),
@@ -454,16 +764,38 @@ class M11DashboardService:
             incidents=incidents,
             manual_actions=manual_actions,
             integrations={
-                "ollama_router": {"state": _state_from_count(self._count_provider_key_like("ollama"), "DISABLED", "CONFIGURED")},
-                "google_veo": {"state": _state_from_count(self._count_provider_key_like("google_veo"), "CONFIGURED_BY_CATALOG", "CONFIGURED")},
+                "ollama_router": {
+                    "state": _state_from_count(
+                        self._count_provider_key_like("ollama"),
+                        "DISABLED",
+                        "CONFIGURED",
+                    )
+                },
+                "google_veo": {
+                    "state": _state_from_count(
+                        self._count_provider_key_like("google_veo"),
+                        "CONFIGURED_BY_CATALOG",
+                        "CONFIGURED",
+                    )
+                },
                 "native_ffmpeg_renderer": {"state": "LOCAL_CAPABILITY"},
-                "google_drive": {"state": "CONNECTED" if not self._drive_auth_needed() else "NEEDS_AUTH"},
-                "youtube_analytics": {"state": "CONNECTED" if not self._youtube_auth_needed() else "NEEDS_AUTH"},
+                "google_drive": {
+                    "state": "CONNECTED"
+                    if not self._drive_auth_needed()
+                    else "NEEDS_AUTH"
+                },
+                "youtube_analytics": {
+                    "state": "CONNECTED"
+                    if not self._youtube_auth_needed()
+                    else "NEEDS_AUTH"
+                },
             },
             safety_warnings=_safety_warnings(),
         )
 
-    def _count(self, model: Any, *conditions: Any, company_id: uuid.UUID | None = None) -> int:
+    def _count(
+        self, model: Any, *conditions: Any, company_id: uuid.UUID | None = None
+    ) -> int:
         statement = select(func.count()).select_from(model)
         for condition in conditions:
             statement = statement.where(condition)
@@ -481,19 +813,27 @@ class M11DashboardService:
         waiting_backfill = self._count(
             HumanUploadTask,
             HumanUploadTask.channel_workspace_id == channel_id,
-            HumanUploadTask.task_state.in_(["HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"]),
+            HumanUploadTask.task_state.in_(
+                ["HUMAN_UPLOAD_IN_PROGRESS", "UPLOADED_WAITING_BACKFILL"]
+            ),
             HumanUploadTask.actual_uploaded_video_id.is_(None),
         )
-        uploaded = self._count(UploadedVideo, UploadedVideo.channel_workspace_id == channel_id)
+        uploaded = self._count(
+            UploadedVideo, UploadedVideo.channel_workspace_id == channel_id
+        )
         waiting_verification = self._count(
             UploadedVideo,
             UploadedVideo.channel_workspace_id == channel_id,
-            UploadedVideo.verification_status.in_(["NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "VERIFICATION_FAILED"]),
+            UploadedVideo.verification_status.in_(
+                ["NOT_VERIFIED", "VERIFICATION_UNAVAILABLE", "VERIFICATION_FAILED"]
+            ),
         )
         verified = self._count(
             UploadedVideo,
             UploadedVideo.channel_workspace_id == channel_id,
-            UploadedVideo.verification_status.in_(["VERIFIED_PUBLIC", "VERIFIED_OWNER"]),
+            UploadedVideo.verification_status.in_(
+                ["VERIFIED_PUBLIC", "VERIFIED_OWNER"]
+            ),
         )
         return {
             "need_upload_count": need_upload,
@@ -503,22 +843,43 @@ class M11DashboardService:
             "verified_count": verified,
         }
 
-    def _latest_lifecycle_decision(self, channel_id: uuid.UUID) -> ChannelLifecycleDecision | None:
+    def _latest_lifecycle_decision(
+        self, channel_id: uuid.UUID
+    ) -> ChannelLifecycleDecision | None:
         return self.session.scalars(
             select(ChannelLifecycleDecision)
             .where(ChannelLifecycleDecision.channel_workspace_id == channel_id)
-            .order_by(ChannelLifecycleDecision.created_at.desc(), ChannelLifecycleDecision.id.desc())
+            .order_by(
+                ChannelLifecycleDecision.created_at.desc(),
+                ChannelLifecycleDecision.id.desc(),
+            )
             .limit(1)
         ).one_or_none()
 
-    def _learning_queue_items(self, *, channel_id: uuid.UUID | None = None) -> list[ApprovalQueueItem]:
-        statement = select(LearningReviewQueueItem).order_by(LearningReviewQueueItem.created_at.desc()).limit(100)
+    def _learning_queue_items(
+        self, *, channel_id: uuid.UUID | None = None
+    ) -> list[ApprovalQueueItem]:
+        statement = (
+            select(LearningReviewQueueItem)
+            .order_by(LearningReviewQueueItem.created_at.desc())
+            .limit(100)
+        )
         if channel_id is not None:
-            statement = statement.where(LearningReviewQueueItem.channel_workspace_id == channel_id)
+            statement = statement.where(
+                LearningReviewQueueItem.channel_workspace_id == channel_id
+            )
         items = []
         for item in self.session.scalars(statement).all():
-            channel = self.session.get(ChannelWorkspace, item.channel_workspace_id) if item.channel_workspace_id else None
-            project = self.session.get(VideoProject, item.video_project_id) if item.video_project_id else None
+            channel = (
+                self.session.get(ChannelWorkspace, item.channel_workspace_id)
+                if item.channel_workspace_id
+                else None
+            )
+            project = (
+                self.session.get(VideoProject, item.video_project_id)
+                if item.video_project_id
+                else None
+            )
             items.append(
                 ApprovalQueueItem(
                     queue_item_id=item.id,
@@ -570,11 +931,17 @@ class M11DashboardService:
                     confidence_label="HUMAN_REQUIRED",
                     freshness_label="CURRENT",
                     evidence_summary="Media phải mở qua Google Drive CTA; không dùng đường dẫn local.",
-                    next_action=handoff.next_action or "Mở file trên Google Drive, upload thủ công, rồi nhập lại thông tin publish thực tế.",
+                    next_action=handoff.next_action
+                    or "Mở file trên Google Drive, upload thủ công, rồi nhập lại thông tin publish thực tế.",
                     allowed_actions=["OPEN_DRIVE", "CONFIRM_MANUAL_PUBLISH"],
                     source_refs=handoff.cloud_media_refs,
-                    audit_refs=[{"type": "publish_handoff_package", "id": str(handoff.id)}],
-                    technical_appendix={"no_youtube_upload_api": True, "no_backend_download_proxy": True},
+                    audit_refs=[
+                        {"type": "publish_handoff_package", "id": str(handoff.id)}
+                    ],
+                    technical_appendix={
+                        "no_youtube_upload_api": True,
+                        "no_backend_download_proxy": True,
+                    },
                 )
             )
         return items
@@ -583,18 +950,32 @@ class M11DashboardService:
         statement = (
             select(PackagingReviewQueueItem)
             .where(PackagingReviewQueueItem.status != "CLOSED")
-            .order_by(PackagingReviewQueueItem.created_at.desc(), PackagingReviewQueueItem.id.desc())
+            .order_by(
+                PackagingReviewQueueItem.created_at.desc(),
+                PackagingReviewQueueItem.id.desc(),
+            )
             .limit(100)
         )
         items: list[ApprovalQueueItem] = []
         for queue_item in self.session.scalars(statement).all():
             package = self.session.get(FirstScriptedVideoPackage, queue_item.package_id)
-            channel = self.session.get(ChannelWorkspace, package.channel_id) if package else None
-            project = self.session.get(VideoProject, queue_item.video_project_id) if queue_item.video_project_id else None
+            channel = (
+                self.session.get(ChannelWorkspace, package.channel_id)
+                if package
+                else None
+            )
+            project = (
+                self.session.get(VideoProject, queue_item.video_project_id)
+                if queue_item.video_project_id
+                else None
+            )
             patch = self.session.scalars(
                 select(PackagingProposedPatch)
                 .where(PackagingProposedPatch.queue_item_id == queue_item.id)
-                .order_by(PackagingProposedPatch.created_at.desc(), PackagingProposedPatch.id.desc())
+                .order_by(
+                    PackagingProposedPatch.created_at.desc(),
+                    PackagingProposedPatch.id.desc(),
+                )
                 .limit(1)
             ).one_or_none()
             actions = ["OPEN_PACKAGE_REVIEW"]
@@ -660,18 +1041,37 @@ class M11DashboardService:
                 risk_level=proposal.risk_level,
                 confidence_label="EVIDENCE_BOUND",
                 freshness_label="SEE_DIAGNOSTIC",
-                evidence_summary=", ".join(proposal.recommended_actions) or "Chưa có mô tả thao tác.",
+                evidence_summary=", ".join(proposal.recommended_actions)
+                or "Chưa có mô tả thao tác.",
                 next_action="Duyệt, từ chối, chờ thêm dữ liệu, yêu cầu review, hoặc đánh dấu không an toàn.",
-                allowed_actions=["ACCEPT", "REJECT", "WAIT", "REQUEST_REVIEW", "MARK_UNSAFE"],
+                allowed_actions=[
+                    "ACCEPT",
+                    "REJECT",
+                    "WAIT",
+                    "REQUEST_REVIEW",
+                    "MARK_UNSAFE",
+                ],
                 source_refs=proposal.evidence_refs,
                 audit_refs=[{"type": "recovery_proposal", "id": str(proposal.id)}],
-                technical_appendix={"forbidden_recovery": ["fake traffic", "bot engagement", "platform evasion", "reupload spam"]},
+                technical_appendix={
+                    "forbidden_recovery": [
+                        "fake traffic",
+                        "bot engagement",
+                        "platform evasion",
+                        "reupload spam",
+                    ]
+                },
             )
             for proposal in self.session.scalars(statement).all()
         ]
 
     def _ops_queue_items(self) -> list[ApprovalQueueItem]:
-        statement = select(ManualAction).where(ManualAction.state == "OPEN").order_by(ManualAction.created_at.desc()).limit(100)
+        statement = (
+            select(ManualAction)
+            .where(ManualAction.state == "OPEN")
+            .order_by(ManualAction.created_at.desc())
+            .limit(100)
+        )
         return [
             ApprovalQueueItem(
                 queue_item_id=action.id,
@@ -692,21 +1092,37 @@ class M11DashboardService:
             for action in self.session.scalars(statement).all()
         ]
 
-    def _latest_metrics_summary(self, uploaded_video_id: uuid.UUID) -> UploadedVideoMetricsSummary | None:
-        return self.session.scalars(select(UploadedVideoMetricsSummary).where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded_video_id).limit(1)).one_or_none()
+    def _latest_metrics_summary(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoMetricsSummary | None:
+        return self.session.scalars(
+            select(UploadedVideoMetricsSummary)
+            .where(UploadedVideoMetricsSummary.uploaded_video_id == uploaded_video_id)
+            .limit(1)
+        ).one_or_none()
 
-    def _latest_public_snapshot(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubePublicMonitorSnapshot | None:
+    def _latest_public_snapshot(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubePublicMonitorSnapshot | None:
         return self.session.scalars(
             select(UploadedVideoYouTubePublicMonitorSnapshot)
-            .where(UploadedVideoYouTubePublicMonitorSnapshot.uploaded_video_id == uploaded_video_id)
+            .where(
+                UploadedVideoYouTubePublicMonitorSnapshot.uploaded_video_id
+                == uploaded_video_id
+            )
             .order_by(UploadedVideoYouTubePublicMonitorSnapshot.last_synced_at.desc())
             .limit(1)
         ).one_or_none()
 
-    def _latest_owner_snapshot(self, uploaded_video_id: uuid.UUID) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot | None:
+    def _latest_owner_snapshot(
+        self, uploaded_video_id: uuid.UUID
+    ) -> UploadedVideoYouTubeOwnerAnalyticsSnapshot | None:
         return self.session.scalars(
             select(UploadedVideoYouTubeOwnerAnalyticsSnapshot)
-            .where(UploadedVideoYouTubeOwnerAnalyticsSnapshot.uploaded_video_id == uploaded_video_id)
+            .where(
+                UploadedVideoYouTubeOwnerAnalyticsSnapshot.uploaded_video_id
+                == uploaded_video_id
+            )
             .order_by(UploadedVideoYouTubeOwnerAnalyticsSnapshot.last_synced_at.desc())
             .limit(1)
         ).one_or_none()
@@ -720,7 +1136,9 @@ class M11DashboardService:
         ).one_or_none()
         return report.primary_status if report is not None else None
 
-    def _failure_reports(self, uploaded_video_id: uuid.UUID) -> list[FailureTraceReport]:
+    def _failure_reports(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[FailureTraceReport]:
         return list(
             self.session.scalars(
                 select(FailureTraceReport)
@@ -730,7 +1148,9 @@ class M11DashboardService:
             ).all()
         )
 
-    def _recovery_proposals(self, uploaded_video_id: uuid.UUID) -> list[RecoveryProposal]:
+    def _recovery_proposals(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[RecoveryProposal]:
         return list(
             self.session.scalars(
                 select(RecoveryProposal)
@@ -740,7 +1160,9 @@ class M11DashboardService:
             ).all()
         )
 
-    def _learning_candidates(self, uploaded_video_id: uuid.UUID) -> list[LearningCandidate]:
+    def _learning_candidates(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[LearningCandidate]:
         return list(
             self.session.scalars(
                 select(LearningCandidate)
@@ -750,7 +1172,9 @@ class M11DashboardService:
             ).all()
         )
 
-    def _cloud_refs_for_uploaded(self, uploaded_video_id: uuid.UUID) -> list[CloudMediaRef]:
+    def _cloud_refs_for_uploaded(
+        self, uploaded_video_id: uuid.UUID
+    ) -> list[CloudMediaRef]:
         return list(
             self.session.scalars(
                 select(CloudMediaRef)
@@ -770,7 +1194,10 @@ class M11DashboardService:
             }
         suggestion = self.session.scalars(
             select(PublishTimingSuggestion)
-            .where(PublishTimingSuggestion.publish_handoff_package_id == uploaded.publish_handoff_package_id)
+            .where(
+                PublishTimingSuggestion.publish_handoff_package_id
+                == uploaded.publish_handoff_package_id
+            )
             .order_by(PublishTimingSuggestion.created_at.desc())
             .limit(1)
         ).one_or_none()
@@ -781,17 +1208,28 @@ class M11DashboardService:
                 "published_inside_configured_window": "UNKNOWN",
                 "publish_timing_summary": "Chưa có khung giờ publish đã cấu hình cho video này.",
             }
-        inside_window = abs((uploaded.published_at - suggestion.suggested_publish_at_utc).total_seconds()) <= 7200
+        inside_window = (
+            abs(
+                (
+                    uploaded.published_at - suggestion.suggested_publish_at_utc
+                ).total_seconds()
+            )
+            <= 7200
+        )
         return {
             "actual_published_at": uploaded.published_at,
             "configured_publish_window": suggestion.suggested_publish_at_local,
             "channel_timezone": suggestion.target_timezone,
             "operator_local_time": suggestion.operator_local_time,
-            "published_inside_configured_window": "INSIDE" if inside_window else "OUTSIDE",
+            "published_inside_configured_window": "INSIDE"
+            if inside_window
+            else "OUTSIDE",
             "publish_timing_summary": "Khung giờ publish đã cấu hình; human vẫn quyết định giờ publish thực tế.",
         }
 
-    def _localization_packages(self, video_project_id: uuid.UUID | None) -> dict[str, Any]:
+    def _localization_packages(
+        self, video_project_id: uuid.UUID | None
+    ) -> dict[str, Any]:
         if video_project_id is None:
             return {
                 "subtitle_languages": [],
@@ -800,16 +1238,24 @@ class M11DashboardService:
                 "metadata_review_status": {},
             }
         subtitles = self.session.scalars(
-            select(LocalizedSubtitlePackage).where(LocalizedSubtitlePackage.video_project_id == video_project_id)
+            select(LocalizedSubtitlePackage).where(
+                LocalizedSubtitlePackage.video_project_id == video_project_id
+            )
         ).all()
         metadata = self.session.scalars(
-            select(LocalizedMetadataPackage).where(LocalizedMetadataPackage.video_project_id == video_project_id)
+            select(LocalizedMetadataPackage).where(
+                LocalizedMetadataPackage.video_project_id == video_project_id
+            )
         ).all()
         return {
             "subtitle_languages": [item.target_language for item in subtitles],
             "metadata_languages": [item.language for item in metadata],
-            "subtitle_review_status": {item.target_language: item.human_review_status for item in subtitles},
-            "metadata_review_status": {item.language: item.human_review_status for item in metadata},
+            "subtitle_review_status": {
+                item.target_language: item.human_review_status for item in subtitles
+            },
+            "metadata_review_status": {
+                item.language: item.human_review_status for item in metadata
+            },
         }
 
     def _channel_analytics_freshness(self, channel_id: uuid.UUID) -> str:
@@ -828,7 +1274,9 @@ class M11DashboardService:
 
     def _drive_auth_needed(self) -> bool:
         connected = self.session.scalar(
-            select(func.count()).select_from(GoogleDriveMediaCredential).where(GoogleDriveMediaCredential.connection_state == "CONNECTED")
+            select(func.count())
+            .select_from(GoogleDriveMediaCredential)
+            .where(GoogleDriveMediaCredential.connection_state == "CONNECTED")
         )
         return int(connected or 0) == 0
 
@@ -836,12 +1284,17 @@ class M11DashboardService:
         owner_connected = self.session.scalar(
             select(func.count())
             .select_from(YouTubeMonitoringCredential)
-            .where(YouTubeMonitoringCredential.provider_key == "YOUTUBE_ANALYTICS_API", YouTubeMonitoringCredential.connection_state == "CONNECTED")
+            .where(
+                YouTubeMonitoringCredential.provider_key == "YOUTUBE_ANALYTICS_API",
+                YouTubeMonitoringCredential.connection_state == "CONNECTED",
+            )
         )
         return int(owner_connected or 0) == 0
 
     def _count_blocked_gates(self) -> int:
-        return self._count(RecoveryProposal, RecoveryProposal.risk_level.in_(["HIGH", "BLOCKED"]))
+        return self._count(
+            RecoveryProposal, RecoveryProposal.risk_level.in_(["HIGH", "BLOCKED"])
+        )
 
     def _count_channels_with_health(self, states: list[str]) -> int:
         channels = self.session.scalars(select(ChannelWorkspace)).all()
@@ -850,10 +1303,13 @@ class M11DashboardService:
     def _count_provider_key_like(self, fragment: str) -> int:
         return int(
             self.session.scalar(
-                select(func.count()).select_from(ProviderRegistryEntry).where(ProviderRegistryEntry.provider_key.ilike(f"%{fragment}%"))
+                select(func.count())
+                .select_from(ProviderRegistryEntry)
+                .where(ProviderRegistryEntry.provider_key.ilike(f"%{fragment}%"))
             )
             or 0
         )
+
 
 class M11ChannelLifecycleService:
     def __init__(self, session: Session):
@@ -892,7 +1348,7 @@ class M11ChannelLifecycleService:
             decided_by_user_id=data.decided_by_user_id,
             decision_metadata={
                 **data.metadata,
-                "daily_generation_allowed": new_state == "ACTIVE",
+                "editorial_research_allowed": new_state == "ACTIVE",
                 "no_auto_deactivation": True,
             },
         )
@@ -907,7 +1363,11 @@ class M11ChannelLifecycleService:
             actor_id=data.decided_by_user_id,
             correlation_id=correlation_id,
             reason_code="M11_HUMAN_LIFECYCLE_DECISION",
-            payload={"action": data.action, "previous_lifecycle_state": previous, "lifecycle_state": new_state},
+            payload={
+                "action": data.action,
+                "previous_lifecycle_state": previous,
+                "lifecycle_state": new_state,
+            },
         )
         _event(
             self.session,
@@ -916,7 +1376,11 @@ class M11ChannelLifecycleService:
             aggregate_id=channel.id,
             company_id=channel.company_id,
             correlation_id=correlation_id,
-            payload={"decision_id": str(decision.id), "action": data.action, "lifecycle_state": new_state},
+            payload={
+                "decision_id": str(decision.id),
+                "action": data.action,
+                "lifecycle_state": new_state,
+            },
         )
         return decision
 
@@ -943,10 +1407,19 @@ class M11LearningReviewService:
             .limit(1)
         ).one_or_none()
         if queue is not None and data.action not in queue.approval_actions_allowed:
-            raise ValidationFailureError(f"action is not allowed for this queue item: {data.action}")
-        if data.action == "APPROVE" and candidate.candidate_state != "READY_FOR_HUMAN_REVIEW":
+            raise ValidationFailureError(
+                f"action is not allowed for this queue item: {data.action}"
+            )
+        if (
+            data.action == "APPROVE"
+            and candidate.candidate_state != "READY_FOR_HUMAN_REVIEW"
+        ):
             raise ValidationFailureError("learning candidate is not ready for approval")
-        bundle = self.session.get(LearningEvidenceBundle, candidate.evidence_bundle_id) if candidate.evidence_bundle_id else None
+        bundle = (
+            self.session.get(LearningEvidenceBundle, candidate.evidence_bundle_id)
+            if candidate.evidence_bundle_id
+            else None
+        )
         draft = self.session.scalars(
             select(PlaybookCandidateDraft)
             .where(PlaybookCandidateDraft.learning_candidate_id == candidate.id)
@@ -970,7 +1443,7 @@ class M11LearningReviewService:
             technical_appendix={
                 "no_channel_profile_mutation": True,
                 "no_config_upgrade_suggestion": True,
-                "no_daily_workflow_change": True,
+                "no_editorial_workflow_change": True,
             },
         )
         self.session.add(decision)
@@ -1009,7 +1482,9 @@ class M11LearningReviewService:
             payload={
                 "action": data.action,
                 "decision_id": str(decision.id),
-                "approved_playbook_entry_id": str(approved_entry.id) if approved_entry else None,
+                "approved_playbook_entry_id": str(approved_entry.id)
+                if approved_entry
+                else None,
                 "no_channel_profile_mutation": True,
             },
         )
@@ -1020,7 +1495,13 @@ class M11LearningReviewService:
             aggregate_id=candidate.id,
             company_id=candidate.company_id,
             correlation_id=correlation_id,
-            payload={"decision_id": str(decision.id), "action": data.action, "approved_playbook_entry_id": str(approved_entry.id) if approved_entry else None},
+            payload={
+                "decision_id": str(decision.id),
+                "action": data.action,
+                "approved_playbook_entry_id": str(approved_entry.id)
+                if approved_entry
+                else None,
+            },
         )
         return decision
 
@@ -1034,7 +1515,9 @@ class M11LearningReviewService:
         approved_by_user_id: uuid.UUID | None,
     ) -> ApprovedPlaybookEntry:
         if draft is None:
-            raise ValidationFailureError("approved learning requires a playbook candidate draft")
+            raise ValidationFailureError(
+                "approved learning requires a playbook candidate draft"
+            )
         entry = ApprovedPlaybookEntry(
             learning_candidate_id=candidate.id,
             learning_review_decision_id=decision.id,
@@ -1045,7 +1528,8 @@ class M11LearningReviewService:
             scope=candidate.recommended_scope,
             category=draft.playbook_category,
             playbook_text=draft.draft_text,
-            evidence_refs=draft.evidence_refs or _learning_evidence_refs(candidate, bundle),
+            evidence_refs=draft.evidence_refs
+            or _learning_evidence_refs(candidate, bundle),
             limitations=candidate.limitations,
             counter_evidence=candidate.counter_evidence,
             policy_rights_summary=bundle.policy_rights_summary if bundle else {},
@@ -1070,15 +1554,39 @@ class M11LearningReviewService:
         return entry
 
 
-def _action_card(key: str, title: str, count: int, severity: str, next_action: str, route: str) -> DashboardActionCard:
-    return DashboardActionCard(key=key, title=title, count=count, severity=severity, next_action=next_action, route=route)
+def _action_card(
+    key: str, title: str, count: int, severity: str, next_action: str, route: str
+) -> DashboardActionCard:
+    return DashboardActionCard(
+        key=key,
+        title=title,
+        count=count,
+        severity=severity,
+        next_action=next_action,
+        route=route,
+    )
 
 
 def _safety_warnings() -> list[DashboardWarning]:
     return [
-        DashboardWarning(key="no_auto_publish", label="Không tự publish", severity="HARD_RULE", text="Bảng điều hành không upload/publish/reupload tự động."),
-        DashboardWarning(key="no_fake_traffic", label="Không fake traffic", severity="HARD_RULE", text="Không bot engagement, fake views, IP/VPS tricks, hoặc platform evasion."),
-        DashboardWarning(key="drive_cta_only", label="Chỉ dùng CTA Google Drive", severity="HARD_RULE", text="Media chỉ mở qua nút Google Drive đã xác minh; không tạo link tải hoặc preview trung gian."),
+        DashboardWarning(
+            key="no_auto_publish",
+            label="Không tự publish",
+            severity="HARD_RULE",
+            text="Bảng điều hành không upload/publish/reupload tự động.",
+        ),
+        DashboardWarning(
+            key="no_fake_traffic",
+            label="Không fake traffic",
+            severity="HARD_RULE",
+            text="Không bot engagement, fake views, IP/VPS tricks, hoặc platform evasion.",
+        ),
+        DashboardWarning(
+            key="drive_cta_only",
+            label="Chỉ dùng CTA Google Drive",
+            severity="HARD_RULE",
+            text="Media chỉ mở qua nút Google Drive đã xác minh; không tạo link tải hoặc preview trung gian.",
+        ),
     ]
 
 
@@ -1117,20 +1625,27 @@ def _channel_dict(channel: ChannelWorkspace) -> dict[str, Any]:
     }
 
 
-def _channel_summary(channel: ChannelWorkspace, lifecycle: ChannelLifecycleRead) -> dict[str, Any]:
+def _channel_summary(
+    channel: ChannelWorkspace, lifecycle: ChannelLifecycleRead
+) -> dict[str, Any]:
     return {
         **_channel_dict(channel),
         "lifecycle_state": lifecycle.lifecycle_state,
         "health_status": lifecycle.health_status,
         "next_action": lifecycle.next_action,
-        "daily_generation_allowed": lifecycle.daily_generation_allowed,
+        "editorial_research_allowed": lifecycle.editorial_research_allowed,
     }
 
 
 def _channel_ref(channel: ChannelWorkspace | None) -> dict[str, Any] | None:
     if channel is None:
         return None
-    return {"id": str(channel.id), "key": channel.key, "name": channel.name, "status": channel.status}
+    return {
+        "id": str(channel.id),
+        "key": channel.key,
+        "name": channel.name,
+        "status": channel.status,
+    }
 
 
 def _project_ref(project: VideoProject | None) -> dict[str, Any] | None:
@@ -1150,17 +1665,19 @@ def _project_card(project: VideoProject) -> dict[str, Any]:
     }
 
 
-def _daily_run_card(run: ChannelDailyRun) -> dict[str, Any]:
+def _editorial_research_run_card(run: EditorialResearchRun) -> dict[str, Any]:
     metadata = run.metadata_ if isinstance(run.metadata_, dict) else {}
     return {
         "id": run.id,
         "run_date": run.run_date,
         "run_state": run.status,
-        "admission_state": metadata.get("admission_state") or (
-            "ADMITTED" if run.project_admission_decision_id else "PENDING"
-        ),
-        "next_action": metadata.get("next_action") or (
-            "Xem kết quả daily run." if run.status == "COMPLETED" else "Tiếp tục daily run theo gate hiện tại."
+        "admission_state": metadata.get("admission_state")
+        or ("ADMITTED" if run.project_admission_decision_id else "PENDING"),
+        "next_action": metadata.get("next_action")
+        or (
+            "Xem kết quả nghiên cứu biên tập."
+            if run.status == "COMPLETED"
+            else "Tiếp tục nghiên cứu biên tập theo gate hiện tại."
         ),
         "policy_snapshot_id": run.policy_snapshot_id,
     }
@@ -1185,7 +1702,9 @@ def _lifecycle_from_channel(channel: ChannelWorkspace) -> str:
 
 
 def _metadata_health(channel: ChannelWorkspace) -> str:
-    value = (channel.metadata_ or {}).get("m11_health_status") or (channel.metadata_ or {}).get("health_status")
+    value = (channel.metadata_ or {}).get("m11_health_status") or (
+        channel.metadata_ or {}
+    ).get("health_status")
     return str(value or "NEW")
 
 
@@ -1194,12 +1713,16 @@ def _channel_next_action(lifecycle_state: str, health_status: str) -> str:
         return "Cần review policy snapshot trước khi activate channel."
     if lifecycle_state == "READY":
         return "Channel này đã sẵn sàng sản xuất video."
-    if lifecycle_state == "ACTIVE" and health_status in {"LOW_VIEW", "NO_VIEW", "WATCHLIST"}:
+    if lifecycle_state == "ACTIVE" and health_status in {
+        "LOW_VIEW",
+        "NO_VIEW",
+        "WATCHLIST",
+    }:
         return "Tiếp tục quan sát hoặc mở diagnostic; lifecycle không tự đổi."
     if lifecycle_state == "ACTIVE":
-        return "Tiếp tục daily generation và theo dõi bằng chứng."
+        return "Tiếp tục nghiên cứu biên tập và theo dõi bằng chứng."
     if lifecycle_state == "PAUSED":
-        return "Channel đang PAUSED nên daily job sẽ không tạo video mới."
+        return "Channel đang PAUSED nên lịch nghiên cứu biên tập sẽ không tạo ứng viên mới."
     if lifecycle_state == "DEACTIVATED":
         return "Channel đã DEACTIVATED nên VCOS không generate idea/project mới."
     return "Channel đã archive là read-only trừ khi được kích hoạt lại."
@@ -1207,7 +1730,14 @@ def _channel_next_action(lifecycle_state: str, health_status: str) -> str:
 
 def _allowed_lifecycle_actions(lifecycle_state: str) -> list[str]:
     if lifecycle_state == "ACTIVE":
-        return ["KEEP_ACTIVE", "PAUSE_DAILY_GENERATION", "CONTINUE_OBSERVING", "ADD_MANUAL_NOTE", "DEACTIVATE_CHANNEL", "ARCHIVE_CHANNEL"]
+        return [
+            "KEEP_ACTIVE",
+            "PAUSE_EDITORIAL_RESEARCH",
+            "CONTINUE_OBSERVING",
+            "ADD_MANUAL_NOTE",
+            "DEACTIVATE_CHANNEL",
+            "ARCHIVE_CHANNEL",
+        ]
     if lifecycle_state in {"PAUSED", "DEACTIVATED", "ARCHIVED"}:
         return ["REACTIVATE_CHANNEL", "ADD_MANUAL_NOTE", "ARCHIVE_CHANNEL"]
     return ["KEEP_ACTIVE", "ADD_MANUAL_NOTE", "REACTIVATE_CHANNEL"]
@@ -1216,7 +1746,7 @@ def _allowed_lifecycle_actions(lifecycle_state: str) -> list[str]:
 def _state_for_lifecycle_action(action: str, previous: str) -> str:
     if action in {"KEEP_ACTIVE", "CONTINUE_OBSERVING"}:
         return "ACTIVE" if previous in {"READY", "ACTIVE"} else previous
-    if action == "PAUSE_DAILY_GENERATION":
+    if action == "PAUSE_EDITORIAL_RESEARCH":
         return "PAUSED"
     if action == "DEACTIVATE_CHANNEL":
         return "DEACTIVATED"
@@ -1227,7 +1757,9 @@ def _state_for_lifecycle_action(action: str, previous: str) -> str:
     return previous
 
 
-def _channel_lifecycle_decision_dict(decision: ChannelLifecycleDecision | None) -> dict[str, Any] | None:
+def _channel_lifecycle_decision_dict(
+    decision: ChannelLifecycleDecision | None,
+) -> dict[str, Any] | None:
     if decision is None:
         return None
     return {
@@ -1247,7 +1779,9 @@ def _metrics_from_summary(
 ) -> dict[str, Any]:
     metrics = dict(summary.metrics_summary if summary is not None else {})
     if public is not None:
-        metrics.update({"views": public.views, "likes": public.likes, "comments": public.comments})
+        metrics.update(
+            {"views": public.views, "likes": public.likes, "comments": public.comments}
+        )
     if owner is not None:
         metrics.update(
             {
@@ -1280,7 +1814,9 @@ def _uploaded_video_dict(uploaded: UploadedVideo) -> dict[str, Any]:
     }
 
 
-def _public_stats_card(snapshot: UploadedVideoYouTubePublicMonitorSnapshot | None) -> dict[str, Any]:
+def _public_stats_card(
+    snapshot: UploadedVideoYouTubePublicMonitorSnapshot | None,
+) -> dict[str, Any]:
     if snapshot is None:
         return {
             "source": "YouTube Data API",
@@ -1304,7 +1840,9 @@ def _public_stats_card(snapshot: UploadedVideoYouTubePublicMonitorSnapshot | Non
     }
 
 
-def _owner_analytics_card(snapshot: UploadedVideoYouTubeOwnerAnalyticsSnapshot | None) -> dict[str, Any]:
+def _owner_analytics_card(
+    snapshot: UploadedVideoYouTubeOwnerAnalyticsSnapshot | None,
+) -> dict[str, Any]:
     if snapshot is None:
         return {
             "connection": "UNKNOWN",
@@ -1333,13 +1871,32 @@ def _owner_analytics_card(snapshot: UploadedVideoYouTubeOwnerAnalyticsSnapshot |
     }
 
 
-def _publish_check(snapshot: UploadedVideoYouTubePublicMonitorSnapshot | None) -> dict[str, str]:
+def _publish_check(
+    snapshot: UploadedVideoYouTubePublicMonitorSnapshot | None,
+) -> dict[str, str]:
     if snapshot is None:
-        return {"title_match": "UNKNOWN", "duration_match": "UNKNOWN", "captions": "UNKNOWN", "visibility": "UNKNOWN"}
+        return {
+            "title_match": "UNKNOWN",
+            "duration_match": "UNKNOWN",
+            "captions": "UNKNOWN",
+            "visibility": "UNKNOWN",
+        }
     return {
-        "title_match": "OK" if snapshot.title_matches_confirmed_metadata else "CHANGED" if snapshot.title_matches_confirmed_metadata is False else "UNKNOWN",
-        "duration_match": "OK" if snapshot.duration_matches_render_package else "REVIEW" if snapshot.duration_matches_render_package is False else "UNKNOWN",
-        "captions": "AVAILABLE" if snapshot.caption_status == "true" else "UNKNOWN" if snapshot.caption_status is None else "NOT_AVAILABLE",
+        "title_match": "OK"
+        if snapshot.title_matches_confirmed_metadata
+        else "CHANGED"
+        if snapshot.title_matches_confirmed_metadata is False
+        else "UNKNOWN",
+        "duration_match": "OK"
+        if snapshot.duration_matches_render_package
+        else "REVIEW"
+        if snapshot.duration_matches_render_package is False
+        else "UNKNOWN",
+        "captions": "AVAILABLE"
+        if snapshot.caption_status == "true"
+        else "UNKNOWN"
+        if snapshot.caption_status is None
+        else "NOT_AVAILABLE",
         "visibility": str(snapshot.privacy_status or "UNKNOWN").upper(),
     }
 
@@ -1396,19 +1953,31 @@ def _cloud_media_card(ref: CloudMediaRef) -> dict[str, Any]:
         "uploaded_at": ref.uploaded_at,
         "cleanup_status": ref.local_cleanup_status,
         "verification_status": ref.verification_status,
-        "friendly_error": None if ref.upload_status == "VERIFIED" else "Không mở được file trên Google Drive. Cần kiểm tra quyền hoặc re-upload.",
-        "technical_appendix": {"no_local_path": True, "no_backend_download": True, "no_preview_proxy": True},
+        "friendly_error": None
+        if ref.upload_status == "VERIFIED"
+        else "Không mở được file trên Google Drive. Cần kiểm tra quyền hoặc re-upload.",
+        "technical_appendix": {
+            "no_local_path": True,
+            "no_backend_download": True,
+            "no_preview_proxy": True,
+        },
     }
 
 
 def _learning_decision_reason_codes(action: str) -> list[str]:
-    codes = [f"M11_LEARNING_{action}", "NO_CHANNEL_PROFILE_MUTATION", "NO_CONFIG_UPGRADE_SUGGESTION"]
+    codes = [
+        f"M11_LEARNING_{action}",
+        "NO_CHANNEL_PROFILE_MUTATION",
+        "NO_CONFIG_UPGRADE_SUGGESTION",
+    ]
     if action == "APPROVE":
         codes.append("APPROVED_PLAYBOOK_ENTRY_CREATED")
     return codes
 
 
-def _learning_evidence_refs(candidate: LearningCandidate, bundle: LearningEvidenceBundle | None) -> list[dict[str, Any]]:
+def _learning_evidence_refs(
+    candidate: LearningCandidate, bundle: LearningEvidenceBundle | None
+) -> list[dict[str, Any]]:
     refs = list(candidate.source_refs or [])
     if bundle is not None:
         refs.append({"type": "learning_evidence_bundle", "id": str(bundle.id)})
@@ -1501,7 +2070,9 @@ def _event(
     )
 
 
-def channel_lifecycle_decision_read(decision: ChannelLifecycleDecision) -> ChannelLifecycleDecisionRead:
+def channel_lifecycle_decision_read(
+    decision: ChannelLifecycleDecision,
+) -> ChannelLifecycleDecisionRead:
     return ChannelLifecycleDecisionRead(
         id=decision.id,
         channel_workspace_id=decision.channel_workspace_id,
@@ -1518,7 +2089,9 @@ def channel_lifecycle_decision_read(decision: ChannelLifecycleDecision) -> Chann
     )
 
 
-def approved_playbook_entry_read(entry: ApprovedPlaybookEntry) -> ApprovedPlaybookEntryRead:
+def approved_playbook_entry_read(
+    entry: ApprovedPlaybookEntry,
+) -> ApprovedPlaybookEntryRead:
     return ApprovedPlaybookEntryRead(
         id=entry.id,
         learning_candidate_id=entry.learning_candidate_id,
@@ -1541,8 +2114,14 @@ def approved_playbook_entry_read(entry: ApprovedPlaybookEntry) -> ApprovedPlaybo
     )
 
 
-def learning_review_decision_read(session: Session, decision: LearningReviewDecision) -> LearningReviewDecisionRead:
-    entry = session.get(ApprovedPlaybookEntry, decision.approved_playbook_entry_id) if decision.approved_playbook_entry_id else None
+def learning_review_decision_read(
+    session: Session, decision: LearningReviewDecision
+) -> LearningReviewDecisionRead:
+    entry = (
+        session.get(ApprovedPlaybookEntry, decision.approved_playbook_entry_id)
+        if decision.approved_playbook_entry_id
+        else None
+    )
     return LearningReviewDecisionRead(
         id=decision.id,
         learning_candidate_id=decision.learning_candidate_id,
@@ -1561,5 +2140,7 @@ def learning_review_decision_read(session: Session, decision: LearningReviewDeci
         evidence_refs=decision.evidence_refs,
         technical_appendix=decision.technical_appendix,
         created_at=decision.created_at,
-        approved_playbook_entry=approved_playbook_entry_read(entry) if entry is not None else None,
+        approved_playbook_entry=approved_playbook_entry_read(entry)
+        if entry is not None
+        else None,
     )

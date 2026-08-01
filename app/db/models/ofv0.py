@@ -14,12 +14,20 @@ class FormatIdentityContract(Base):
     __tablename__ = "format_identity_contracts"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False)
-    channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_profile_versions.id"))
-    effective_context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("effective_channel_runtime_context_snapshots.id"))
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
+    )
+    channel_profile_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_profile_versions.id")
+    )
+    effective_context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("effective_channel_runtime_context_snapshots.id")
+    )
     contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="DRAFT")
-    character_policy_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="NO_CHARACTER")
+    character_policy_mode: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="NO_CHARACTER"
+    )
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_by: Mapped[str] = mapped_column(Text, nullable=False)
@@ -40,12 +48,26 @@ class EpisodeOriginalityManifest(Base):
     __tablename__ = "episode_originality_manifests"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id"), nullable=False)
-    video_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"))
-    channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False)
-    format_identity_contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("format_identity_contracts.id"), nullable=False)
-    format_identity_contract_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    approval_status: Mapped[str] = mapped_column(String(40), nullable=False, default="PENDING_HUMAN_REVIEW")
+    package_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_scripted_video_packages.id"),
+        nullable=False,
+    )
+    video_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id")
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
+    )
+    format_identity_contract_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("format_identity_contracts.id"), nullable=False
+    )
+    format_identity_contract_hash: Mapped[str] = mapped_column(
+        String(128), nullable=False
+    )
+    approval_status: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="PENDING_HUMAN_REVIEW"
+    )
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     manifest_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = utc_created_at()
@@ -53,7 +75,9 @@ class EpisodeOriginalityManifest(Base):
     __table_args__ = (
         UniqueConstraint("package_id"),
         Index("ix_episode_originality_manifests_channel", "channel_id"),
-        Index("ix_episode_originality_manifests_contract", "format_identity_contract_id"),
+        Index(
+            "ix_episode_originality_manifests_contract", "format_identity_contract_id"
+        ),
         Index("ix_episode_originality_manifests_approval", "approval_status"),
         Index("ix_episode_originality_manifests_created_at", "created_at"),
     )
@@ -63,7 +87,11 @@ class ClaimEvidenceLedger(Base):
     __tablename__ = "claim_evidence_ledgers"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id"), nullable=False)
+    package_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_scripted_video_packages.id"),
+        nullable=False,
+    )
     claim_id: Mapped[str] = mapped_column(String(160), nullable=False)
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -80,8 +108,14 @@ class SyntheticMediaDisclosureReceipt(Base):
     __tablename__ = "synthetic_media_disclosure_receipts"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id"), nullable=False)
-    receipt_status: Mapped[str] = mapped_column(String(60), nullable=False, default="PRE_RENDER_PLANNED")
+    package_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_scripted_video_packages.id"),
+        nullable=False,
+    )
+    receipt_status: Mapped[str] = mapped_column(
+        String(60), nullable=False, default="PRE_RENDER_PLANNED"
+    )
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = utc_created_at()
@@ -97,10 +131,13 @@ class PlatformNativePackagePlan(Base):
     __tablename__ = "platform_native_package_plans"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    source_package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id"), nullable=False)
+    source_package_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_scripted_video_packages.id"),
+        nullable=False,
+    )
     target_surface: Mapped[str] = mapped_column(String(40), nullable=False)
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    derivative_manifest_ref: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -114,7 +151,11 @@ class OriginalityGateRun(Base):
     __tablename__ = "originality_gate_runs"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("first_scripted_video_packages.id"), nullable=False)
+    package_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("first_scripted_video_packages.id"),
+        nullable=False,
+    )
     gate_key: Mapped[str] = mapped_column(String(120), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False)
     result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

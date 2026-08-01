@@ -4,8 +4,18 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
-ProductionRunMode = Literal["REAL", "REAL_DISABLED", "NOT_CONFIGURED", "HUMAN_REVIEW_ONLY", "BLOCKED"]
-ProductionRunStatus = Literal["PENDING", "RUNNING", "COMPLETED", "REVIEW_REQUIRED", "BLOCKED", "FAILED", "CANCELLED"]
+ProductionRunMode = Literal[
+    "REAL", "REAL_DISABLED", "NOT_CONFIGURED", "HUMAN_REVIEW_ONLY", "BLOCKED"
+]
+ProductionRunStatus = Literal[
+    "PENDING",
+    "RUNNING",
+    "COMPLETED",
+    "REVIEW_REQUIRED",
+    "BLOCKED",
+    "FAILED",
+    "CANCELLED",
+]
 TimingSource = Literal["ESTIMATED", "LOCAL_AUDIO_ANALYSIS"]
 ConfidenceLevel = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 CaptionFormat = Literal["SRT", "VTT", "JSON"]
@@ -39,9 +49,15 @@ ProviderSourceClass = Literal[
     "PREMIUM_FALLBACK_PROVIDER",
     "APPROVED_ASSET_POOL",
 ]
-RequiredMediaType = Literal["IMAGE", "VIDEO", "AUDIO", "DIAGRAM", "SCREENSHOT", "GENERATED_PLACEHOLDER"]
-LicenseRequirement = Literal["COMMERCIAL_SAFE", "INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "UNKNOWN"]
-RequirementStatus = Literal["SATISFIED", "FALLBACK_USED", "WAITING_FOR_ASSET", "BLOCKED", "NOT_REQUIRED"]
+RequiredMediaType = Literal[
+    "IMAGE", "VIDEO", "AUDIO", "DIAGRAM", "SCREENSHOT", "GENERATED_PLACEHOLDER"
+]
+LicenseRequirement = Literal[
+    "COMMERCIAL_SAFE", "INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "UNKNOWN"
+]
+RequirementStatus = Literal[
+    "SATISFIED", "FALLBACK_USED", "WAITING_FOR_ASSET", "BLOCKED", "NOT_REQUIRED"
+]
 VisualSourceRouteValue = Literal[
     "ARCHIVED_ASSET_REUSE",
     "PEXELS_VIDEO",
@@ -71,18 +87,35 @@ EvidenceTruthClassificationValue = Literal[
     "AUTHORIZED_SOURCE_AVAILABLE",
     "BLOCKED",
 ]
-AssetCandidateSourceType = Literal["MANUAL_PLACEHOLDER", "MANUAL_ENVATO_PLACEHOLDER", "EXTERNAL_DISABLED"]
-LicenseState = Literal["INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "LICENSE_VERIFIED", "UNKNOWN"]
-Platform = Literal["YOUTUBE", "YOUTUBE_SHORTS", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
-Surface = Literal["LONG_FORM", "SHORT_FORM", "REELS", "FEED", "STORY", "GENERIC"]
-AspectRatio = Literal["16:9", "9:16", "1:1", "4:5", "4:3", "CUSTOM"]
-CropStrategy = Literal["CENTER_CROP", "FIT_WITH_BLUR", "SMART_CROP_PLACEHOLDER", "LETTERBOX", "PILLARBOX", "CUSTOM"]
-VariantStatus = Literal["PLANNED", "READY", "BLOCKED", "RENDERED", "QC_PASSED", "QC_REVIEW_REQUIRED"]
+AssetCandidateSourceType = Literal[
+    "MANUAL_PLACEHOLDER", "MANUAL_ENVATO_PLACEHOLDER", "EXTERNAL_DISABLED"
+]
+LicenseState = Literal[
+    "INTERNAL_TEST_ONLY", "LICENSE_REQUIRED", "LICENSE_VERIFIED", "UNKNOWN"
+]
+Platform = Literal["YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GENERIC"]
+Surface = Literal["LONG_FORM", "FEED", "GENERIC"]
+AspectRatio = Literal["16:9", "1:1", "4:5", "4:3", "CUSTOM"]
+CropStrategy = Literal[
+    "CENTER_CROP",
+    "FIT_WITH_BLUR",
+    "SMART_CROP_PLACEHOLDER",
+    "LETTERBOX",
+    "PILLARBOX",
+    "CUSTOM",
+]
+VariantStatus = Literal[
+    "PLANNED", "READY", "BLOCKED", "RENDERED", "QC_PASSED", "QC_REVIEW_REQUIRED"
+]
 RenderIntent = Literal["LOCAL_SMOKE", "DRAFT_PREVIEW", "PRODUCTION_DISABLED"]
 RenderSpecValidationState = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
 RendererKey = Literal["REAL_DISABLED"]
-MediaRenderJobStatus = Literal["PENDING", "RUNNING", "COMPLETED", "REVIEW_REQUIRED", "BLOCKED", "FAILED"]
-RenderPackageState = Literal["CREATED", "QC_PASSED", "QC_REVIEW_REQUIRED", "QC_BLOCKED", "FAILED"]
+MediaRenderJobStatus = Literal[
+    "PENDING", "RUNNING", "COMPLETED", "REVIEW_REQUIRED", "BLOCKED", "FAILED"
+]
+RenderPackageState = Literal[
+    "CREATED", "QC_PASSED", "QC_REVIEW_REQUIRED", "QC_BLOCKED", "FAILED"
+]
 QCState = Literal["PASS", "REVIEW_REQUIRED", "BLOCK", "FAILED"]
 PronunciationStatus = Literal["ACTIVE", "DISABLED", "NEEDS_REVIEW"]
 
@@ -113,7 +146,9 @@ class NarrationSegmentContract(BaseModel):
     @model_validator(mode="after")
     def validate_timing(self) -> "NarrationSegmentContract":
         if self.estimated_end_time <= self.estimated_start_time:
-            raise ValueError("narration segment end_time must be greater than start_time")
+            raise ValueError(
+                "narration segment end_time must be greater than start_time"
+            )
         expected = round(self.estimated_end_time - self.estimated_start_time, 3)
         if abs(expected - self.estimated_duration_seconds) > 0.05:
             raise ValueError("narration segment duration must match start/end")
@@ -150,8 +185,13 @@ class VoiceTimelineContract(BaseModel):
     @model_validator(mode="after")
     def validate_voice_timeline(self) -> "VoiceTimelineContract":
         _validate_ordered_segments(self.segments)
-        if abs(self.total_duration_seconds - self.segments[-1].estimated_end_time) > 0.05:
-            raise ValueError("voice timeline total duration must match final segment end")
+        if (
+            abs(self.total_duration_seconds - self.segments[-1].estimated_end_time)
+            > 0.05
+        ):
+            raise ValueError(
+                "voice timeline total duration must match final segment end"
+            )
         return self
 
 
@@ -447,7 +487,6 @@ class RenderVariantSpec(BaseModel):
     def validate_ratio(self) -> "RenderVariantSpec":
         expected = {
             "16:9": 16 / 9,
-            "9:16": 9 / 16,
             "1:1": 1.0,
             "4:5": 4 / 5,
             "4:3": 4 / 3,
@@ -455,7 +494,9 @@ class RenderVariantSpec(BaseModel):
         if self.aspect_ratio in expected:
             actual = self.resolution_width / self.resolution_height
             if abs(actual - expected[self.aspect_ratio]) > 0.02:
-                raise ValueError("render variant resolution does not match aspect_ratio")
+                raise ValueError(
+                    "render variant resolution does not match aspect_ratio"
+                )
         return self
 
 
@@ -485,7 +526,9 @@ class RenderSceneSpec(BaseModel):
     def validate_scene(self) -> "RenderSceneSpec":
         if self.end_time <= self.start_time:
             raise ValueError("render scene end_time must be greater than start_time")
-        if self.visual_asset_ref is None and not any(layer.asset_ref for layer in self.layer_specs):
+        if self.visual_asset_ref is None and not any(
+            layer.asset_ref for layer in self.layer_specs
+        ):
             raise ValueError("render scene requires an asset ref or placeholder layer")
         return self
 
@@ -538,7 +581,9 @@ class RenderSpecContract(BaseModel):
     default_export_profile: ExportProfileContract
     caption_style: CaptionStyleSpec = Field(default_factory=CaptionStyleSpec)
     audio_ducking: AudioDuckingSpec = Field(default_factory=AudioDuckingSpec)
-    thumbnail_compositor: ThumbnailCompositorSpec = Field(default_factory=ThumbnailCompositorSpec)
+    thumbnail_compositor: ThumbnailCompositorSpec = Field(
+        default_factory=ThumbnailCompositorSpec
+    )
     render_intent: RenderIntent
     total_duration_seconds: float = Field(gt=0)
     render_spec_hash: str
@@ -639,7 +684,9 @@ def _validate_ordered_segments(segments: list[NarrationSegmentContract]) -> None
         expected_index += 1
 
 
-def _validate_ordered_scenes(scenes: list[SceneSpecContract], total_duration_seconds: float) -> None:
+def _validate_ordered_scenes(
+    scenes: list[SceneSpecContract], total_duration_seconds: float
+) -> None:
     seen_ids: set[str] = set()
     narration_ids: set[str] = set()
     expected_index = scenes[0].sequence_index
@@ -648,7 +695,9 @@ def _validate_ordered_scenes(scenes: list[SceneSpecContract], total_duration_sec
         if scene.scene_id in seen_ids:
             raise ValueError("scene ids must be unique")
         if scene.narration_segment_id in narration_ids:
-            raise ValueError("M6 scene compiler expects one scene per narration segment")
+            raise ValueError(
+                "M6 scene compiler expects one scene per narration segment"
+            )
         seen_ids.add(scene.scene_id)
         narration_ids.add(scene.narration_segment_id)
         if scene.sequence_index != expected_index:
@@ -663,7 +712,9 @@ def _validate_ordered_scenes(scenes: list[SceneSpecContract], total_duration_sec
         raise ValueError("scene coverage must match total duration")
 
 
-def _validate_ordered_render_scenes(scenes: list[RenderSceneSpec], total_duration_seconds: float) -> None:
+def _validate_ordered_render_scenes(
+    scenes: list[RenderSceneSpec], total_duration_seconds: float
+) -> None:
     last_end = -1.0
     for scene in scenes:
         if scene.start_time < last_end - 0.05:

@@ -129,7 +129,9 @@ class TargetMarketSemanticFields(_StrictModel):
     foreign_source_context_required: bool = True
     allowed_market_contexts: list[str] = Field(default_factory=list)
     prohibited_market_mismatches: list[str] = Field(default_factory=list)
-    initial_publish_window_hypotheses: list[dict[str, Any]] = Field(default_factory=list)
+    initial_publish_window_hypotheses: list[dict[str, Any]] = Field(
+        default_factory=list
+    )
     minimum_comparable_videos: int = Field(ge=3)
     video_geo_evaluation_window_days: int = Field(ge=1)
     channel_geo_review_window_days: int = Field(ge=1)
@@ -158,9 +160,7 @@ class TargetMarketSemanticFields(_StrictModel):
         if any(locale.lower() in {"eu", "europe"} for locale in locales):
             raise ValueError("EUROPE_IS_NOT_A_LOCALE")
         if any(
-            not isinstance(locale, str)
-            or len(locale) < 5
-            or "-" not in locale
+            not isinstance(locale, str) or len(locale) < 5 or "-" not in locale
             for locale in locales
         ):
             raise ValueError("LOCALE_INVALID")
@@ -241,7 +241,7 @@ class IdeaMarketPreflightResult(_HashBoundModel):
     schema_version: Literal["geo1.idea-market-preflight.v1"] = (
         "geo1.idea-market-preflight.v1"
     )
-    daily_idea_decision_ref: str
+    editorial_idea_candidate_ref: str
     niche_contract_digest_ref: str
     niche_contract_digest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_market_digest_ref: str
@@ -322,9 +322,7 @@ class MetadataMarketAlignmentInput(_StrictModel):
 
 
 class MarketGateResult(_HashBoundModel):
-    schema_version: Literal["geo1.market-gate-result.v1"] = (
-        "geo1.market-gate-result.v1"
-    )
+    schema_version: Literal["geo1.market-gate-result.v1"] = "geo1.market-gate-result.v1"
     gate_key: MarketGateKey
     target_market_profile_ref: str
     target_market_profile_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -432,7 +430,10 @@ class DestinationBinding(_HashBoundModel):
                 or not self.credential_ref
             ):
                 raise ValueError("DESTINATION_VERIFIED_EVIDENCE_INCOMPLETE")
-        if self.verification_state == "VERIFIED" and self.destination_status != "VERIFIED":
+        if (
+            self.verification_state == "VERIFIED"
+            and self.destination_status != "VERIFIED"
+        ):
             raise ValueError("DESTINATION_STATUS_VERIFICATION_MISMATCH")
         return self
 
