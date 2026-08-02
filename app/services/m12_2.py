@@ -4853,7 +4853,7 @@ class FirstScriptedVideoPackageService:
         reason_codes = list(item.get("blocker_reason_codes") or [])
         missing_env_keys = list(item.get("missing_env_keys") or [])
         if readiness_state in {
-            "READY_FOR_HUMAN_PAID_APPROVAL",
+            "READY_FOR_EXECUTION_AUTHORIZATION",
             "READY_FOR_FUTURE_EXECUTION",
             "CAPABILITY_READY",
         }:

@@ -48,7 +48,9 @@ def test_all_provider_execution_defaults_are_off():
 
 
 def test_unknown_provider_has_no_compatibility_path():
-    assert provider_key_rejection_reasons("retired-cloud-renderer") == ["UNKNOWN_PROVIDER_KEY"]
+    assert provider_key_rejection_reasons("retired-cloud-renderer") == [
+        "UNKNOWN_PROVIDER_KEY"
+    ]
 
 
 def _gemini_image_cost_item(**overrides):
@@ -78,9 +80,11 @@ def test_fixture_only_execution_does_not_hide_configured_route_from_cost_firewal
         gemini_image_real_generation_enabled=False,
         img1_fixture_only=True,
     )
-    provider = ProviderReadinessM2Service(settings).provider_map()["google_gemini_image"]
+    provider = ProviderReadinessM2Service(settings).provider_map()[
+        "google_gemini_image"
+    ]
 
-    assert provider.readiness_state == "READY_FOR_HUMAN_PAID_APPROVAL"
+    assert provider.readiness_state == "READY_FOR_EXECUTION_AUTHORIZATION"
     assert "GEMINI_IMAGE_EXECUTION_DISABLED" in provider.blocker_reason_codes
     assert provider.safe_config["execution_enabled"] is False
     assert provider.safe_config["fixture_only"] is True
@@ -156,9 +160,15 @@ def test_r3d8_snapshot_persists_catalog_derived_image_cost_without_new_column():
 @pytest.mark.parametrize(
     ("changes", "reason_code"),
     [
-        ({"estimated_cost": "999.00"}, "GEMINI_IMAGE_FREEFORM_ESTIMATE_MISMATCH_CATALOG"),
+        (
+            {"estimated_cost": "999.00"},
+            "GEMINI_IMAGE_FREEFORM_ESTIMATE_MISMATCH_CATALOG",
+        ),
         ({"actual_amount": "0.101"}, "GEMINI_IMAGE_ACTUAL_COST_MUST_BE_NULL"),
-        ({"price_catalog_version": "stale"}, "GEMINI_IMAGE_PRICE_CATALOG_VERSION_MISMATCH"),
+        (
+            {"price_catalog_version": "stale"},
+            "GEMINI_IMAGE_PRICE_CATALOG_VERSION_MISMATCH",
+        ),
         ({"output_count": 2}, "GEMINI_IMAGE_SINGLE_OUTPUT_SINGLE_ATTEMPT_REQUIRED"),
         ({"attempt_count": 2}, "GEMINI_IMAGE_SINGLE_OUTPUT_SINGLE_ATTEMPT_REQUIRED"),
         ({"hard_cap": "0.10"}, "GEMINI_IMAGE_COST_CAP_EXCEEDED"),

@@ -45,6 +45,13 @@ describe("friendly Vietnamese dashboard UI", () => {
     expect(screen.queryByText("READY_FOR_HUMAN_REVIEW")).not.toBeInTheDocument();
   });
 
+  it("describes V2 provider readiness as machine execution authorization", () => {
+    render(<StatusBadge value="READY_FOR_EXECUTION_AUTHORIZATION" />);
+
+    expect(screen.getByText("Sẵn sàng xác thực thực thi")).toBeInTheDocument();
+    expect(screen.queryByText("READY_FOR_EXECUTION_AUTHORIZATION")).not.toBeInTheDocument();
+  });
+
   it("uses a safe Vietnamese fallback for unmapped backend enum labels", () => {
     render(<StatusBadge value="SOME_NEW_BACKEND_ENUM" />);
 

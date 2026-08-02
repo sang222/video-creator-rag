@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import runpy
+import uuid
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +20,13 @@ from app.core.actor import authenticated_actor_context
 from app.db.models.foundation import DomainEvent
 from app.db.models.m5 import EditorialCalendarSlot, IdeaMarketPreflight
 from app.db.models.production_workflow import ProductionWorkflowRun
-from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
+from app.db.models.workflow import (
+    ApprovalDecision,
+    Artifact,
+    ArtifactVersion,
+    ReviewTask,
+    VideoProject,
+)
 from app.services.context_resolver import (
     EffectiveChannelRuntimeContextCompiler,
 )
@@ -304,6 +311,63 @@ def test_default_support_compiler_progresses_new_v2_project_to_readiness(
         )
         assert package_version is not None
         assert receipt_version is not None
+        package_content = package_version.content
+        provider_plan_version = check.get(
+            ArtifactVersion,
+            uuid.UUID(
+                package_content["provider_execution_plan_ref"]["artifact_version_id"]
+            ),
+        )
+        budget_scope_version = check.get(
+            ArtifactVersion,
+            uuid.UUID(package_content["budget_scope_ref"]["artifact_version_id"]),
+        )
+        assert provider_plan_version is not None
+        assert budget_scope_version is not None
+        provider_plan = provider_plan_version.content
+        budget_scope = budget_scope_version.content
+        assert provider_plan["execution_authorized"] is True
+        assert provider_plan["paid_provider_calls"] is False
+        assert budget_scope["budget_authorized"] is True
+        assert all(
+            operation["execution_authorized"] is True
+            and operation["paid_provider_call"] is False
+            and operation["max_cost_usd"] == "0"
+            for operation in provider_plan["adapter_operations"].values()
+        )
+        assert all(
+            authorization["authorized"] is True
+            and authorization["paid_provider_call"] is False
+            and authorization["max_cost_usd"] == "0"
+            for authorization in budget_scope["operation_authorizations"].values()
+        )
+        assert (
+            list(
+                check.scalars(
+                    select(ReviewTask).where(
+                        ReviewTask.video_project_id == scope.project.id
+                    )
+                )
+            )
+            == []
+        )
+        assert (
+            list(
+                check.scalars(
+                    select(ApprovalDecision).where(
+                        ApprovalDecision.target_artifact_version_id.in_(
+                            [
+                                package_version.id,
+                                receipt_version.id,
+                                provider_plan_version.id,
+                                budget_scope_version.id,
+                            ]
+                        )
+                    )
+                )
+            )
+            == []
+        )
         expected_envelope_ref = {
             "artifact_version_id": str(prepared.artifact_version_id),
             "content_hash": prepared.envelope_hash,

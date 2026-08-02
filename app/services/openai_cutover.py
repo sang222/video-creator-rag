@@ -193,7 +193,24 @@ class OpenAICutoverService:
         else:
             receipt = authority.receipt
         if receipt.status == "BLOCKED":
-            raise ValidationFailureError("OPENAI_CUTOVER_CREDENTIAL_NOT_CONFIGURED")
+            if (
+                authority.credential.status != "CONFIGURED"
+                or self._receipt_has_credential_rejection(receipt=receipt)
+            ):
+                raise ValidationFailureError("OPENAI_CUTOVER_CREDENTIAL_NOT_CONFIGURED")
+            # A non-authentication failure can be repaired in policy and then
+            # retried under the same frozen receipt. Existing SUCCESS artifacts
+            # remain idempotent; only the failed logical artifact runs again.
+            receipt.status = "READY"
+            _record_cutover_event(
+                self.session,
+                event_type="openai_cutover.canary_reopened_after_local_repair",
+                aggregate_type="openai_cutover_receipt",
+                aggregate_id=receipt.id,
+                actor_id=actor.actor_id,
+                payload={"credential_reference_id": str(authority.credential.id)},
+            )
+            self.session.flush()
         if not self._api_key_present():
             receipt.status = "BLOCKED"
             self.session.flush()
@@ -330,6 +347,23 @@ class OpenAICutoverService:
             )
         return receipt
 
+    def _receipt_has_credential_rejection(
+        self, *, receipt: OpenAICutoverReceipt
+    ) -> bool:
+        return (
+            self.session.scalar(
+                select(LLMRouteAttempt.id)
+                .join(
+                    OpenAICanaryArtifact,
+                    OpenAICanaryArtifact.llm_route_attempt_id == LLMRouteAttempt.id,
+                )
+                .where(OpenAICanaryArtifact.cutover_receipt_id == receipt.id)
+                .where(LLMRouteAttempt.error_code == "OPENAI_CREDENTIAL_REJECTED")
+                .limit(1)
+            )
+            is not None
+        )
+
     def authorize_rotated_credential(
         self,
         *,
@@ -378,9 +412,17 @@ class OpenAICutoverService:
             raise ValidationFailureError("OPENAI_CREDENTIAL_ROTATION_NOT_REQUIRED")
 
         credential.status = "CONFIGURED"
+        rotated_receipt = self._ensure_rotated_canary_receipt(
+            previous_receipt=receipt,
+            actor=actor,
+        )
         metadata = dict(credential.metadata_ or {})
         metadata["rotation_authorized_at"] = utc_now().isoformat()
         metadata["rotation_authorized_by_user_id"] = str(actor.actor_id)
+        # This is an opaque durable identifier, never a secret.  It gives the
+        # caller an exact receipt to run and avoids selecting a receipt by
+        # creation time after a credential rotation.
+        metadata["rotated_canary_receipt_id"] = str(rotated_receipt.id)
         credential.metadata_ = metadata
         _record_cutover_event(
             self.session,
@@ -388,10 +430,54 @@ class OpenAICutoverService:
             aggregate_type="openai_cutover_receipt",
             aggregate_id=receipt.id,
             actor_id=actor.actor_id,
-            payload={"credential_reference_id": str(credential.id)},
+            payload={
+                "credential_reference_id": str(credential.id),
+                "rotated_canary_receipt_id": str(rotated_receipt.id),
+            },
         )
         self.session.flush()
         return credential
+
+    def rotated_canary_receipt_id(
+        self,
+        *,
+        receipt_id: uuid.UUID,
+    ) -> uuid.UUID:
+        """Return the exact fresh receipt authorized from a failed receipt.
+
+        The lookup is through the immutable prior receipt's credential
+        metadata rather than an ambiguous newest-receipt query.
+        """
+
+        receipt = self.session.get(OpenAICutoverReceipt, receipt_id)
+        if receipt is None:
+            raise NotFoundError("OPENAI_CUTOVER_RECEIPT_NOT_FOUND")
+        credential = self.session.get(
+            CredentialReference, receipt.credential_reference_id
+        )
+        if credential is None:
+            raise ValidationFailureError("OPENAI_CREDENTIAL_REFERENCE_MISSING")
+        raw_receipt_id = (credential.metadata_ or {}).get(
+            "rotated_canary_receipt_id"
+        )
+        if not raw_receipt_id:
+            raise ValidationFailureError("OPENAI_ROTATED_CANARY_RECEIPT_MISSING")
+        try:
+            rotated_receipt_id = uuid.UUID(str(raw_receipt_id))
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "OPENAI_ROTATED_CANARY_RECEIPT_INVALID"
+            ) from exc
+        rotated_receipt = self.session.get(OpenAICutoverReceipt, rotated_receipt_id)
+        if rotated_receipt is None:
+            raise ValidationFailureError("OPENAI_ROTATED_CANARY_RECEIPT_MISSING")
+        expected_lane_mapping_hash = _rotated_lane_mapping_hash(receipt)
+        if (
+            rotated_receipt.credential_reference_id != credential.id
+            or rotated_receipt.lane_mapping_hash != expected_lane_mapping_hash
+        ):
+            raise ValidationFailureError("OPENAI_ROTATED_CANARY_RECEIPT_CONTRADICTORY")
+        return rotated_receipt.id
 
     def _ensure_provider(self) -> ProviderRegistryEntry:
         service = ProviderRegistryService(self.session)
@@ -569,12 +655,9 @@ class OpenAICutoverService:
             )
         ).one_or_none()
         if existing is not None:
-            desired_status = "READY" if credential.status == "CONFIGURED" else "BLOCKED"
-            if (
-                existing.status in {"READY", "BLOCKED"}
-                and existing.status != desired_status
-            ):
-                existing.status = desired_status
+            # A failed canary receipt is historical evidence.  Credential
+            # rotation must create a new receipt, never reopen or recast this
+            # one as ready/passed.
             return existing
         status = "READY" if credential.status == "CONFIGURED" else "BLOCKED"
         receipt = OpenAICutoverReceipt(
@@ -607,6 +690,65 @@ class OpenAICutoverService:
         )
         return receipt
 
+    def _ensure_rotated_canary_receipt(
+        self,
+        *,
+        previous_receipt: OpenAICutoverReceipt,
+        actor: ActorContext,
+    ) -> OpenAICutoverReceipt:
+        """Create the deterministic successor receipt for one rotation.
+
+        The schema intentionally keeps the original lane-mapping hash unique.
+        A successor's hash includes the immutable prior receipt identity, so
+        it has a fresh namespace for all 22 canary artifacts and request IDs.
+        """
+
+        lane_mapping_hash = _rotated_lane_mapping_hash(previous_receipt)
+        canonical_payload = {
+            "provider_registry_entry_id": previous_receipt.provider_registry_entry_id,
+            "pricing_snapshot_id": previous_receipt.pricing_snapshot_id,
+            "budget_policy_id": previous_receipt.budget_policy_id,
+            "credential_reference_id": previous_receipt.credential_reference_id,
+            "lane_mapping_hash": lane_mapping_hash,
+            "rotation_from_receipt_id": previous_receipt.id,
+            "rotation_from_canonical_hash": previous_receipt.canonical_hash,
+        }
+        canonical_hash = _hash(canonical_payload)
+        existing = self.session.scalars(
+            select(OpenAICutoverReceipt).where(
+                OpenAICutoverReceipt.lane_mapping_hash == lane_mapping_hash
+            )
+        ).one_or_none()
+        if existing is not None:
+            if existing.canonical_hash != canonical_hash:
+                raise ValidationFailureError("OPENAI_ROTATED_RECEIPT_CONTRADICTORY")
+            return existing
+        receipt = OpenAICutoverReceipt(
+            provider_registry_entry_id=previous_receipt.provider_registry_entry_id,
+            pricing_snapshot_id=previous_receipt.pricing_snapshot_id,
+            budget_policy_id=previous_receipt.budget_policy_id,
+            credential_reference_id=previous_receipt.credential_reference_id,
+            lane_mapping_hash=lane_mapping_hash,
+            canonical_hash=canonical_hash,
+            status="READY",
+            created_by_user_id=actor.actor_id,
+        )
+        self.session.add(receipt)
+        self.session.flush()
+        _record_cutover_event(
+            self.session,
+            event_type="openai_cutover_receipt.rotation_successor_created",
+            aggregate_type="openai_cutover_receipt",
+            aggregate_id=receipt.id,
+            actor_id=actor.actor_id,
+            payload={
+                "rotation_from_receipt_id": str(previous_receipt.id),
+                "rotation_from_canonical_hash": previous_receipt.canonical_hash,
+                "lane_mapping_hash": lane_mapping_hash,
+            },
+        )
+        return receipt
+
     def _get_or_create_canary_artifact(
         self, *, receipt: OpenAICutoverReceipt, item: dict[str, str]
     ) -> tuple[OpenAICanaryArtifact, bool]:
@@ -616,6 +758,14 @@ class OpenAICutoverService:
             .where(OpenAICanaryArtifact.artifact_key == item["artifact_key"])
         ).one_or_none()
         if existing is not None:
+            # A repaired, not-yet-successful artifact may have a changed
+            # prompt or typed visual fixture. Preserve its prior route attempt
+            # in the global route ledger while binding the retry to the exact
+            # new request identity.
+            if existing.status != "SUCCESS":
+                existing.request_hash = _canary_request_hash(
+                    receipt=receipt, item=item
+                )
             return existing, False
         model_id, reasoning_effort = _lane_model_and_reasoning(item["lane_name"])
         artifact = OpenAICanaryArtifact(
@@ -624,7 +774,7 @@ class OpenAICutoverService:
             lane_name=item["lane_name"],
             model_id=model_id,
             reasoning_effort=reasoning_effort,
-            request_hash=_hash(_canary_prompt(item["artifact_key"])),
+            request_hash=_canary_request_hash(receipt=receipt, item=item),
             is_critical=True,
             status="PENDING",
         )
@@ -810,6 +960,18 @@ def _lane_mapping_payload() -> list[dict[str, str]]:
     ]
 
 
+def _rotated_lane_mapping_hash(previous_receipt: OpenAICutoverReceipt) -> str:
+    """Derive a new immutable lane identity from a precise failed receipt."""
+
+    return _hash(
+        {
+            "lane_mapping": _lane_mapping_payload(),
+            "rotation_from_receipt_id": previous_receipt.id,
+            "rotation_from_canonical_hash": previous_receipt.canonical_hash,
+        }
+    )
+
+
 def _lane_model_and_reasoning(lane_name: str) -> tuple[str, str]:
     for lane in FINAL_LANES:
         if lane["lane_name"] == lane_name:
@@ -829,6 +991,19 @@ def _canary_prompt(artifact_key: str) -> str:
     )
 
 
+def _canary_request_hash(
+    *, receipt: OpenAICutoverReceipt, item: dict[str, str]
+) -> str:
+    return _hash(
+        {
+            "cutover_receipt_id": receipt.id,
+            "artifact_key": item["artifact_key"],
+            "prompt": _canary_prompt(item["artifact_key"]),
+            "image_inputs": _canary_image_inputs(item),
+        }
+    )
+
+
 def _canary_image_inputs(item: dict[str, str]) -> list[dict[str, str]] | None:
     """Supply a still contact-sheet probe only to the visual-review canary.
 
@@ -844,8 +1019,8 @@ def _canary_image_inputs(item: dict[str, str]) -> list[dict[str, str]] | None:
             "media_type": "image/png",
             "image_url": (
                 "data:image/png;base64,"
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
-                "/x8AAusB9Y9JZqQAAAAASUVORK5CYII="
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNg"
+                "YGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC"
             ),
         }
     ]

@@ -407,8 +407,8 @@ class ProviderEnvValidator:
         )
         if execution_disabled:
             # Configuration/readiness and execution authorization are separate
-            # concerns.  IMG1 must remain fixture-only, but an otherwise valid
-            # provider route still needs to reach the R3D8 cost/approval gates.
+            # concerns. IMG1 must remain fixture-only, but an otherwise valid
+            # provider route still needs to reach the R3D8 cost/authority gates.
             reason_codes.append("GEMINI_IMAGE_EXECUTION_DISABLED")
         if not self.settings.gemini_image_provider_route_approved:
             readiness_state = "BLOCKED_PROVIDER_NOT_CONFIGURED"
@@ -564,20 +564,20 @@ class ProviderEnvValidator:
         matrix = self.matrix[provider_key]
         if not selected_ok and readiness_state not in {"DISABLED"}:
             readiness_state = "BLOCKED_PROVIDER_NOT_CONFIGURED"
-        configured = readiness_state in {
-            "READY_FOR_HUMAN_PAID_APPROVAL",
-            "READY_FOR_FUTURE_EXECUTION",
-        }
         if (
             not missing_env_keys
             and selected_ok
             and readiness_state not in {"DISABLED", "BLOCKED_PROVIDER_NOT_CONFIGURED"}
         ):
             readiness_state = (
-                "READY_FOR_HUMAN_PAID_APPROVAL"
+                "READY_FOR_EXECUTION_AUTHORIZATION"
                 if any(cap in PAID_CAPABILITIES for cap in matrix.capabilities)
                 else "READY_FOR_FUTURE_EXECUTION"
             )
+        configured = readiness_state in {
+            "READY_FOR_EXECUTION_AUTHORIZATION",
+            "READY_FOR_FUTURE_EXECUTION",
+        }
         credential_state = _credential_state(
             readiness_state, credential_present, missing_env_keys
         )
@@ -614,7 +614,7 @@ class ProviderEnvValidator:
             capability_status="CAPABILITY_READY"
             if readiness_state
             in {
-                "READY_FOR_HUMAN_PAID_APPROVAL",
+                "READY_FOR_EXECUTION_AUTHORIZATION",
                 "READY_FOR_FUTURE_EXECUTION",
                 "DISABLED",
             }
@@ -648,7 +648,7 @@ class ProviderReadinessM2Service:
             for item in providers
             if item.readiness_state
             not in {
-                "READY_FOR_HUMAN_PAID_APPROVAL",
+                "READY_FOR_EXECUTION_AUTHORIZATION",
                 "READY_FOR_FUTURE_EXECUTION",
                 "DISABLED",
             }
@@ -703,7 +703,7 @@ class ProviderBoundaryPreflight:
         if not reason_codes and (
             provider is None
             or provider.readiness_state
-            not in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
+            not in {"READY_FOR_EXECUTION_AUTHORIZATION", "READY_FOR_FUTURE_EXECUTION"}
         ):
             reason_codes.append("BLOCKED_PROVIDER_NOT_CONFIGURED")
             if provider is not None:
@@ -804,7 +804,7 @@ class _BaseRequestBuilder:
         provider_configured = bool(
             provider
             and provider.readiness_state
-            in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
+            in {"READY_FOR_EXECUTION_AUTHORIZATION", "READY_FOR_FUTURE_EXECUTION"}
         )
         return ProviderRequestValidationResultRead(
             provider_key=self.provider_key,
@@ -1037,7 +1037,7 @@ def _readiness_from_missing(
     missing: list[str], *, all_missing_state: str, priority: list[tuple[str, str]]
 ) -> str:
     if not missing:
-        return "READY_FOR_HUMAN_PAID_APPROVAL"
+        return "READY_FOR_EXECUTION_AUTHORIZATION"
     if len(missing) == len(priority):
         return all_missing_state
     missing_set = set(missing)

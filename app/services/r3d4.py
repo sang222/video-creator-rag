@@ -3070,7 +3070,7 @@ def _provider_readiness_map(
         readiness_state = str(item.get("readiness_state") or "UNKNOWN")
         reason_codes = _strings(item.get("blocker_reason_codes"))
         if readiness_state in {
-            "READY_FOR_HUMAN_PAID_APPROVAL",
+            "READY_FOR_EXECUTION_AUTHORIZATION",
             "READY_FOR_FUTURE_EXECUTION",
             "CAPABILITY_READY",
         }:

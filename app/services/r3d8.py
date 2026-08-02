@@ -485,7 +485,7 @@ class CostEstimateService:
             execution_configured = bool(
                 provider
                 and provider.readiness_state
-                in {"READY_FOR_HUMAN_PAID_APPROVAL", "READY_FOR_FUTURE_EXECUTION"}
+                in {"READY_FOR_EXECUTION_AUTHORIZATION", "READY_FOR_FUTURE_EXECUTION"}
             )
             configured = (
                 _gemini_image_cost_route_configured(provider)
@@ -1302,7 +1302,7 @@ class PaidProviderBoundaryService:
                 "BLOCKED_PROVIDER_NOT_CONFIGURED",
             )
         if provider.readiness_state not in {
-            "READY_FOR_HUMAN_PAID_APPROVAL",
+            "READY_FOR_EXECUTION_AUTHORIZATION",
             "READY_FOR_FUTURE_EXECUTION",
         }:
             return GateCheck(
