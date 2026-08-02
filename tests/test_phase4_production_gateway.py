@@ -677,6 +677,82 @@ def test_package_bound_gateway_executes_authorized_adapter_operations(
     ]
 
 
+def test_qualification_archive_cannot_create_final_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _RecordingOperationAdapter()
+    gateway = PackageBoundV2StageGateway({"recording-native": adapter})
+    context = SimpleNamespace(
+        command_id="qualification-archive-command",
+        run=SimpleNamespace(
+            production_lane="LONG_FORM",
+            planning_source_type="LONG_FORM_PLAN",
+        ),
+        ensure_active=lambda: None,
+    )
+    monkeypatch.setattr(
+        "app.services.v2_provider_production._authorized_adapter_operation",
+        lambda _context, _stage: V2AuthorizedAdapterOperation(
+            operation_id="qualification:archive",
+            stage=ProductionWorkflowStage.ARCHIVE,
+            adapter_key="recording-native",
+            paid_provider_call=False,
+            max_cost_usd=Decimal("0"),
+            parameters={"execution_mode": "QUALIFICATION_LOCAL"},
+            execution_mode="QUALIFICATION_LOCAL",
+        ),
+    )
+
+    with pytest.raises(WorkflowStageError) as raised:
+        gateway.archive_media(context)
+    assert raised.value.error_code == "V2_QUALIFICATION_FINAL_MEDIA_FORBIDDEN"
+    assert adapter.calls == []
+
+
+def test_real_media_missing_elevenlabs_credential_blocks_without_local_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    monkeypatch.delenv("VCOS_ELEVENLABS_API_KEY", raising=False)
+    gateway = PackageBoundV2StageGateway({})
+    context = SimpleNamespace(
+        command_id="real-media-credential-check",
+        run=SimpleNamespace(
+            production_lane="LONG_FORM",
+            planning_source_type="LONG_FORM_PLAN",
+        ),
+        ensure_active=lambda: None,
+    )
+    monkeypatch.setattr(
+        "app.services.v2_provider_production._authorized_adapter_operation",
+        lambda _context, _stage: V2AuthorizedAdapterOperation(
+            operation_id="real:elevenlabs:narration",
+            stage=ProductionWorkflowStage.MEDIA,
+            adapter_key="v2-elevenlabs-narration",
+            paid_provider_call=True,
+            max_cost_usd=Decimal("1"),
+            parameters={
+                "provider_execution": {
+                    "provider": "elevenlabs",
+                    "credential_ref": "env://ELEVENLABS_API_KEY",
+                    "voice_id": "approved-voice",
+                    "model_id": "approved-model",
+                    "voice_settings": {"stability": 0.5},
+                    "attempt_limit": 1,
+                    "idempotency_key": "real:elevenlabs:narration:submit",
+                    "estimated_cost_usd": "1",
+                    "budget_reservation_ref": "mr1-budget://real-run",
+                }
+            },
+            execution_mode="REAL_LONG_FORM_PRODUCTION",
+        ),
+    )
+
+    with pytest.raises(WorkflowStageError) as raised:
+        gateway.produce_media(context)
+    assert raised.value.error_code == "V2_REAL_ELEVENLABS_BLOCKED_CREDENTIAL"
+
+
 def test_normal_worker_factory_is_in_repo_concrete_gateway() -> None:
     gateway = build_v2_provider_production_gateway()
     assert isinstance(gateway, V2ProviderProductionGateway)

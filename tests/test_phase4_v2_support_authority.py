@@ -3,6 +3,7 @@ from __future__ import annotations
 import runpy
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,6 +15,8 @@ from app.contracts.geo_market import DestinationBinding
 from app.contracts.m10_1 import LLMRouteResponse
 from app.contracts.production_package import ProductionDurationContractV2
 from app.contracts.workflow import ArtifactCreate
+from app.core.config import get_settings
+from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
 from app.core.errors import ValidationFailureError
 from app.db.models.m10_2 import MediaRenderRoutingDecision
 from app.db.models.m5 import IdeaMarketPreflight
@@ -32,6 +35,7 @@ from app.services.v2_support_authority import (
     V2SupportProductionContext,
     V2TrustedSupportDraft,
 )
+from app.services.v2_package_readiness import _support_authority, _support_payloads
 from app.services.workflow import ArtifactService
 
 
@@ -174,6 +178,8 @@ def _command(
     *,
     idempotency_key: str = "support-authority-1",
     max_budget_usd: str = "25.00",
+    execution_mode: str = "QUALIFICATION_LOCAL",
+    budget_reservation_run_id: uuid.UUID | None = None,
 ):
     assert scope.admission.editorial_calendar_slot_id is not None
     return V2SupportAuthorityPrepareCommand(
@@ -183,6 +189,8 @@ def _command(
         actor_user_id=scope.operator.id,
         idempotency_key=idempotency_key,
         max_budget_usd=max_budget_usd,
+        execution_mode=execution_mode,
+        budget_reservation_run_id=budget_reservation_run_id,
     )
 
 
@@ -439,3 +447,77 @@ def test_envelope_model_rejects_route_budget_rebinding(
     tampered["zero_cost_budget"] = budget
     with pytest.raises(ValidationError):
         V2FrozenSupportEnvelope.model_validate(tampered)
+
+
+def test_real_mode_seals_elevenlabs_and_durable_budget_authority(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real cadence authority names provider/credential refs without calling it."""
+
+    monkeypatch.setenv("VCOS_MONTHLY_AI_BUDGET_USD", "20")
+    monkeypatch.setenv("VCOS_ELEVENLABS_MONTHLY_CAP_USD", "20")
+    get_settings.cache_clear()
+    scope = _phase4_script_scope(db_session)
+    _configure_verified_destination(scope)
+    reservation_run_id = uuid.uuid4()
+    result = V2SupportAuthorityService(
+        db_session,
+        producer=_FakeTrustedProducer(),
+    ).prepare(
+        _command(
+            scope,
+            idempotency_key="real-provider-support-authority-1",
+            execution_mode="REAL_LONG_FORM_PRODUCTION",
+            budget_reservation_run_id=reservation_run_id,
+        )
+    )
+    version = db_session.get(ArtifactVersion, result.artifact_version_id)
+    assert version is not None
+    envelope = V2FrozenSupportEnvelope.model_validate(version.content)
+    assert envelope.execution_mode == "REAL_LONG_FORM_PRODUCTION"
+    assert {route.stage: route.adapter_key for route in envelope.native_routes} == {
+        "MEDIA": "v2-elevenlabs-narration",
+        "RENDER": "v2-local-native",
+        "QC": "v2-local-native",
+        "ARCHIVE": "v2-google-drive-remote",
+    }
+    assert (
+        envelope.zero_cost_budget.reservation_ref
+        == f"mr1-budget://{reservation_run_id}"
+    )
+    assert envelope.zero_cost_budget.reservation_evidence is not None
+    reservation = db_session.scalar(
+        select(MR1MonthlyBudgetReservation).where(
+            MR1MonthlyBudgetReservation.run_id == reservation_run_id
+        )
+    )
+    assert reservation is not None
+    assert reservation.status == "RESERVED"
+    context = SimpleNamespace(
+        session=db_session,
+        run=SimpleNamespace(
+            video_project_id=scope.project.id,
+            id=reservation_run_id,
+            production_lane="LONG_FORM",
+            planning_source_type="LONG_FORM_PLAN",
+        ),
+    )
+    payloads = _support_payloads(context, _support_authority(context))
+    provider_plan = payloads["provider_execution_plan"]
+    media = provider_plan["adapter_operations"]["MEDIA"]
+    archive = provider_plan["adapter_operations"]["ARCHIVE"]
+    assert provider_plan["execution_mode"] == "REAL_LONG_FORM_PRODUCTION"
+    assert provider_plan["final_tts_provider"] == "ELEVENLABS"
+    assert provider_plan["archive_provider"] == "GOOGLE_DRIVE"
+    assert media["adapter_key"] == "v2-elevenlabs-narration"
+    assert media["parameters"]["provider_execution"]["credential_ref"] == (
+        "env://ELEVENLABS_API_KEY"
+    )
+    assert media["parameters"]["provider_execution"]["attempt_limit"] == 1
+    assert media["parameters"]["provider_execution"]["budget_reservation_ref"] == (
+        envelope.zero_cost_budget.reservation_ref
+    )
+    assert archive["adapter_key"] == "v2-google-drive-remote"
+    assert archive["parameters"]["provider_execution"]["remote_object_required"] is True
+    get_settings.cache_clear()

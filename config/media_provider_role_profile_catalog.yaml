@@ -104,6 +104,18 @@ items:
       mode: QUALITY_FIRST_250
       cost_usd: 0
     notes: Storage/archive is separate from local rendering authority.
+  - provider_key: google_drive_archive
+    provider_name: Google Drive archive
+    provider_type: MEDIA_STORAGE
+    role_description: Remote final-media archive with OAuth authority, remote object identity, and checksum/readback verification.
+    recommendation: CORE
+    is_enabled: true
+    is_real_provider: true
+    supports_real_execution: true
+    monthly_budget_assumption:
+      mode: EXTERNAL_STORAGE_NO_SYNTHETIC_COST
+      cost_usd: 0
+    notes: Required only for REAL_LONG_FORM_PRODUCTION; local archive adapters cannot satisfy this role.
   - provider_key: vcos_media_qc
     provider_name: VCOS MediaQC
     provider_type: MEDIA_QC_ENGINE

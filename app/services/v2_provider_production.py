@@ -11,6 +11,7 @@ idempotency key.
 from __future__ import annotations
 
 import uuid
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -42,6 +43,15 @@ V2_PROVIDER_GATEWAY_VERSION = "vcos.v2-provider-gateway.v1"
 V2_PROVIDER_PLAN_SCHEMA = "vcos.post-readiness-provider-plan.v2"
 V2_ADAPTER_OPERATION_SCHEMA = "vcos.provider-adapter-operation.v1"
 V2_BUDGET_OPERATION_SCHEMA = "vcos.operation-budget-authority.v1"
+V2_QUALIFICATION_MODE = "QUALIFICATION_LOCAL"
+V2_REAL_PRODUCTION_MODE = "REAL_LONG_FORM_PRODUCTION"
+_V2_EXECUTION_MODES = frozenset({V2_QUALIFICATION_MODE, V2_REAL_PRODUCTION_MODE})
+_V2_REAL_ADAPTERS_BY_STAGE = {
+    ProductionWorkflowStage.MEDIA: "v2-elevenlabs-narration",
+    ProductionWorkflowStage.RENDER: "v2-local-native",
+    ProductionWorkflowStage.QC: "v2-local-native",
+    ProductionWorkflowStage.ARCHIVE: "v2-google-drive-remote",
+}
 V2_EFFECT_STAGES = frozenset(
     {
         ProductionWorkflowStage.MEDIA,
@@ -105,6 +115,7 @@ class V2AuthorizedAdapterOperation:
     paid_provider_call: bool
     max_cost_usd: Decimal
     parameters: Mapping[str, Any]
+    execution_mode: str = V2_QUALIFICATION_MODE
 
 
 @runtime_checkable
@@ -263,7 +274,12 @@ class PackageBoundV2StageGateway:
             or refs.final_media_ref_hash != context.run.render_output_checksum
         ):
             raise ValidationFailureError("V2_PROVIDER_ARCHIVE_RESULT_INCOMPLETE")
-        if operation.adapter_key == "v2-google-drive-archive":
+        if operation.execution_mode != V2_REAL_PRODUCTION_MODE:
+            raise ValidationFailureError("V2_QUALIFICATION_FINAL_MEDIA_FORBIDDEN")
+        if operation.adapter_key in {
+            "v2-google-drive-archive",
+            "v2-google-drive-remote",
+        }:
             from app.services.v2_drive_archive import (
                 require_v2_google_drive_final_media,
             )
@@ -300,6 +316,25 @@ class PackageBoundV2StageGateway:
     ) -> WorkflowStageResult:
         _require_long_form_context(context)
         operation = _authorized_adapter_operation(context, stage)
+        if (
+            operation.execution_mode == V2_QUALIFICATION_MODE
+            and stage == ProductionWorkflowStage.ARCHIVE
+        ):
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.FAIL_PERMANENT_POLICY,
+                error_code="V2_QUALIFICATION_FINAL_MEDIA_FORBIDDEN",
+                summary=(
+                    "Qualification-local authority cannot create final media "
+                    "or a final review candidate."
+                ),
+                incident_type="POLICY_BLOCK",
+                retry_eligible=False,
+            )
+        if operation.execution_mode == V2_REAL_PRODUCTION_MODE:
+            expected_adapter = _V2_REAL_ADAPTERS_BY_STAGE[stage]
+            if operation.adapter_key != expected_adapter:
+                raise ValidationFailureError("V2_REAL_PROVIDER_ADAPTER_ROUTE_MISMATCH")
+            _require_real_provider_operation(operation)
         adapter = self._adapters.get(operation.adapter_key)
         if adapter is None:
             raise WorkflowStageError(
@@ -356,7 +391,12 @@ class PackageBoundV2StageGateway:
         archive_operation = _authorized_adapter_operation(
             context, ProductionWorkflowStage.ARCHIVE
         )
-        if archive_operation.adapter_key == "v2-google-drive-archive":
+        if archive_operation.execution_mode != V2_REAL_PRODUCTION_MODE:
+            raise ValidationFailureError("V2_QUALIFICATION_FINAL_REVIEW_FORBIDDEN")
+        if archive_operation.adapter_key in {
+            "v2-google-drive-archive",
+            "v2-google-drive-remote",
+        }:
             from app.services.v2_drive_archive import (
                 require_v2_google_drive_final_media,
             )
@@ -551,6 +591,7 @@ def _provider_plan(context: WorkflowStageContext) -> dict[str, Any]:
         or plan.get("invokes_mr1") is not False
         or plan.get("automatic_publish") is not False
         or not isinstance(plan.get("paid_provider_calls"), bool)
+        or plan.get("execution_mode") not in _V2_EXECUTION_MODES
         or "stage_authorities" in plan
     ):
         raise ValidationFailureError("V2_PROVIDER_EXECUTION_PLAN_NOT_AUTHORIZED")
@@ -565,6 +606,73 @@ def _require_long_form_context(context: WorkflowStageContext) -> None:
         or context.run.planning_source_type != "LONG_FORM_PLAN"
     ):
         raise ValidationFailureError("V2_PROVIDER_LONG_FORM_ONLY")
+
+
+def _require_real_provider_operation(operation: V2AuthorizedAdapterOperation) -> None:
+    """Fail closed on the real-provider bindings before any adapter lookup.
+
+    This deliberately validates only stable references here.  Credentials are
+    never copied into an immutable package, and no local qualification adapter
+    is treated as a substitute for either external authority.
+    """
+
+    details = operation.parameters.get("provider_execution")
+    if not isinstance(details, dict):
+        raise ValidationFailureError("V2_REAL_PROVIDER_EXECUTION_DETAILS_REQUIRED")
+    attempt_limit = details.get("attempt_limit")
+    idempotency_key = details.get("idempotency_key")
+    reservation_ref = details.get("budget_reservation_ref")
+    if (
+        attempt_limit != 1
+        or not isinstance(idempotency_key, str)
+        or not idempotency_key.strip()
+        or not isinstance(reservation_ref, str)
+        or not reservation_ref.startswith("mr1-budget://")
+    ):
+        raise ValidationFailureError("V2_REAL_PROVIDER_EXECUTION_BINDING_INVALID")
+    if operation.stage == ProductionWorkflowStage.MEDIA:
+        if (
+            details.get("provider") != "elevenlabs"
+            or details.get("credential_ref") != "env://ELEVENLABS_API_KEY"
+            or not isinstance(details.get("voice_id"), str)
+            or not isinstance(details.get("model_id"), str)
+            or not isinstance(details.get("voice_settings"), dict)
+            or details.get("estimated_cost_usd") != str(operation.max_cost_usd)
+            or not operation.paid_provider_call
+            or operation.max_cost_usd <= 0
+        ):
+            raise ValidationFailureError("V2_REAL_ELEVENLABS_OPERATION_INVALID")
+        if not (
+            str(os.getenv("ELEVENLABS_API_KEY") or "").strip()
+            or str(os.getenv("VCOS_ELEVENLABS_API_KEY") or "").strip()
+        ):
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_REAL_ELEVENLABS_BLOCKED_CREDENTIAL",
+                summary=(
+                    "The package selects ElevenLabs final narration, but its "
+                    "credential is unavailable; no local narration fallback "
+                    "was attempted."
+                ),
+                incident_type="CREDENTIAL_BLOCK",
+                retry_eligible=False,
+                operator_visible_blocker=(
+                    "Cấu hình lại ElevenLabs credential cho worker rồi tạo "
+                    "một natural cadence run mới; không thay bằng local TTS."
+                ),
+            )
+    elif operation.stage == ProductionWorkflowStage.ARCHIVE:
+        if (
+            details.get("provider") != "google_drive"
+            or details.get("credential_ref") != "oauth://google-drive/channel-connected"
+            or details.get("remote_object_required") is not True
+            or details.get("checksum_readback_required") is not True
+            or operation.paid_provider_call
+            or operation.max_cost_usd != 0
+        ):
+            raise ValidationFailureError("V2_REAL_GOOGLE_DRIVE_OPERATION_INVALID")
+    elif operation.paid_provider_call or operation.max_cost_usd != 0:
+        raise ValidationFailureError("V2_REAL_LOCAL_STAGE_COST_INVALID")
 
 
 def _authorized_adapter_operation(
@@ -591,6 +699,7 @@ def _authorized_adapter_operation(
         or raw_operation.get("automatic_publish") is not False
         or str(raw_operation.get("stage")) != stage.value
         or str(raw_operation.get("production_lane")) != context.run.production_lane
+        or raw_operation.get("execution_mode") != plan.get("execution_mode")
         or not isinstance(raw_operation.get("paid_provider_call"), bool)
     ):
         raise ValidationFailureError(
@@ -643,6 +752,7 @@ def _authorized_adapter_operation(
         or budget_authorization.get("stage") != stage.value
         or budget_authorization.get("paid_provider_call")
         is not raw_operation["paid_provider_call"]
+        or budget_authorization.get("execution_mode") != plan.get("execution_mode")
     ):
         raise ValidationFailureError("V2_PROVIDER_OPERATION_BUDGET_NOT_AUTHORIZED")
     try:
@@ -664,6 +774,7 @@ def _authorized_adapter_operation(
         paid_provider_call=raw_operation["paid_provider_call"],
         max_cost_usd=max_cost,
         parameters=dict(parameters),
+        execution_mode=str(plan.get("execution_mode", V2_QUALIFICATION_MODE)),
     )
 
 

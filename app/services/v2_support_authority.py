@@ -21,10 +21,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.geo_market import DestinationBinding
 from app.contracts.m10_1 import LLMRouteResponse
 from app.contracts.production_package import ProductionDurationContractV2
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
+from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models.channel import (
     ChannelProfileVersion,
@@ -50,6 +52,7 @@ from app.services.m10_2 import (
     MediaProviderRoleService,
     ProviderCapabilityMatrixService,
 )
+from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.production_package import semantic_hash
 from app.services.workflow import ArtifactService
 
@@ -120,6 +123,24 @@ class V2SupportAuthorityPrepareCommand(_StrictFrozenModel):
         le=Decimal("250"),
         decimal_places=2,
     )
+    execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"] = (
+        "QUALIFICATION_LOCAL"
+    )
+    budget_reservation_run_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_execution_mode(self) -> Self:
+        if (
+            self.execution_mode == "REAL_LONG_FORM_PRODUCTION"
+            and self.budget_reservation_run_id is None
+        ):
+            raise ValueError("V2_REAL_PROVIDER_BUDGET_RESERVATION_RUN_REQUIRED")
+        if (
+            self.execution_mode == "QUALIFICATION_LOCAL"
+            and self.budget_reservation_run_id is not None
+        ):
+            raise ValueError("V2_QUALIFICATION_BUDGET_RESERVATION_FORBIDDEN")
+        return self
 
 
 class V2ExactAuthorityRef(_StrictFrozenModel):
@@ -454,7 +475,12 @@ class V2LocalGeneratedCardRights(_StrictFrozenModel):
 class V2NativeRouteReceipt(_StrictFrozenModel):
     stage: Literal["MEDIA", "RENDER", "QC", "ARCHIVE"]
     operation_id: str = Field(min_length=1, max_length=200)
-    adapter_key: Literal["v2-local-native", "v2-google-drive-archive"]
+    adapter_key: Literal[
+        "v2-local-native",
+        "v2-google-drive-archive",
+        "v2-elevenlabs-narration",
+        "v2-google-drive-remote",
+    ]
     provider_role_id: uuid.UUID
     provider_key: str = Field(min_length=1)
     provider_type: str = Field(min_length=1)
@@ -463,30 +489,39 @@ class V2NativeRouteReceipt(_StrictFrozenModel):
     routing_policy_hash: str = Field(pattern=_SHA256_PATTERN)
     capability_entry_id: uuid.UUID | None = None
     job_type: str | None = None
-    paid_provider_call: Literal[False] = False
-    max_cost_usd: Decimal = Field(default=Decimal("0"), ge=0, le=0)
+    paid_provider_call: bool = False
+    max_cost_usd: Decimal = Field(default=Decimal("0"), ge=0, le=250)
     route_hash: str = Field(pattern=_SHA256_PATTERN)
 
     @model_validator(mode="after")
     def validate_hash(self) -> Self:
-        if self.adapter_key != _V2_ADAPTER_BY_STAGE[self.stage]:
-            raise ValueError("V2_NATIVE_ROUTE_ADAPTER_STAGE_MISMATCH")
         expected = semantic_hash(self.model_dump(mode="json", exclude={"route_hash"}))
         if self.route_hash != expected:
-            raise ValueError("NATIVE_ROUTE_HASH_MISMATCH")
+            raise ValueError("V2_PROVIDER_ROUTE_HASH_MISMATCH")
         return self
 
 
 class V2ZeroCostBudgetAuthority(_StrictFrozenModel):
-    schema_version: Literal["vcos.zero-cost-route-budget.v1"] = (
-        "vcos.zero-cost-route-budget.v1"
-    )
-    policy_mode: Literal["LOCAL_CAPABILITY_NO_PAID_PROVIDER_LEDGER"] = (
-        "LOCAL_CAPABILITY_NO_PAID_PROVIDER_LEDGER"
+    """Frozen route budget, retaining the historical class name for reads."""
+
+    schema_version: Literal[
+        "vcos.zero-cost-route-budget.v1", "vcos.real-provider-route-budget.v1"
+    ] = "vcos.zero-cost-route-budget.v1"
+    policy_mode: Literal[
+        "LOCAL_CAPABILITY_NO_PAID_PROVIDER_LEDGER",
+        "REAL_PROVIDER_PER_VIDEO_RESERVATION",
+    ] = "LOCAL_CAPABILITY_NO_PAID_PROVIDER_LEDGER"
+    execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"] = (
+        "QUALIFICATION_LOCAL"
     )
     requested_ceiling_usd: Decimal = Field(ge=0, le=250)
-    authorized_cost_usd: Decimal = Field(default=Decimal("0"), ge=0, le=0)
-    paid_provider_calls_allowed: Literal[False] = False
+    authorized_cost_usd: Decimal = Field(default=Decimal("0"), ge=0, le=250)
+    paid_provider_calls_allowed: bool = False
+    monthly_budget_usd: Decimal | None = Field(default=None, ge=0, le=250)
+    monthly_used_usd: Decimal | None = Field(default=None, ge=0, le=250)
+    monthly_reserved_usd: Decimal | None = Field(default=None, ge=0, le=250)
+    reservation_ref: str | None = None
+    reservation_evidence: dict[str, Any] | None = None
     operation_ids: list[str] = Field(min_length=4, max_length=4)
     route_hashes: list[str] = Field(min_length=4, max_length=4)
     content_hash: str = Field(pattern=_SHA256_PATTERN)
@@ -499,7 +534,25 @@ class V2ZeroCostBudgetAuthority(_StrictFrozenModel):
             raise ValueError("BUDGET_ROUTE_BINDING_INVALID")
         expected = semantic_hash(self.model_dump(mode="json", exclude={"content_hash"}))
         if self.content_hash != expected:
-            raise ValueError("ZERO_COST_BUDGET_HASH_MISMATCH")
+            raise ValueError("V2_ROUTE_BUDGET_HASH_MISMATCH")
+        if self.execution_mode == "QUALIFICATION_LOCAL" and (
+            self.schema_version != "vcos.zero-cost-route-budget.v1"
+            or self.policy_mode != "LOCAL_CAPABILITY_NO_PAID_PROVIDER_LEDGER"
+            or self.authorized_cost_usd != 0
+            or self.paid_provider_calls_allowed
+        ):
+            raise ValueError("V2_QUALIFICATION_BUDGET_MODE_INVALID")
+        if self.execution_mode == "REAL_LONG_FORM_PRODUCTION" and (
+            self.schema_version != "vcos.real-provider-route-budget.v1"
+            or self.policy_mode != "REAL_PROVIDER_PER_VIDEO_RESERVATION"
+            or self.authorized_cost_usd <= 0
+            or not self.paid_provider_calls_allowed
+            or not self.reservation_ref
+            or not isinstance(self.reservation_evidence, dict)
+            or self.reservation_evidence.get("reservation_ref") != self.reservation_ref
+            or self.reservation_evidence.get("status") != "RESERVED"
+        ):
+            raise ValueError("V2_REAL_PROVIDER_BUDGET_MODE_INVALID")
         return self
 
 
@@ -538,6 +591,9 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     compiled_policy_ref: V2ExactAuthorityRef
     effective_context_ref: V2ExactAuthorityRef
     production_lane: Literal["LONG_FORM"]
+    execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"] = (
+        "QUALIFICATION_LOCAL"
+    )
     duration_contract: ProductionDurationContractV2
     frozen_sources: list[V2FrozenSourceRef] = Field(min_length=2)
     approved_script: V2ApprovedScriptProvenance
@@ -558,8 +614,28 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
         if (
             self.zero_cost_budget.route_hashes != route_hashes
             or self.zero_cost_budget.operation_ids != operation_ids
+            or self.zero_cost_budget.execution_mode != self.execution_mode
         ):
             raise ValueError("BUDGET_ROUTE_BINDING_INVALID")
+        expected_adapters = (
+            {
+                "MEDIA": "v2-local-native",
+                "RENDER": "v2-local-native",
+                "QC": "v2-local-native",
+                "ARCHIVE": "v2-google-drive-archive",
+            }
+            if self.execution_mode == "QUALIFICATION_LOCAL"
+            else {
+                "MEDIA": "v2-elevenlabs-narration",
+                "RENDER": "v2-local-native",
+                "QC": "v2-local-native",
+                "ARCHIVE": "v2-google-drive-remote",
+            }
+        )
+        if {
+            route.stage: route.adapter_key for route in self.native_routes
+        } != expected_adapters:
+            raise ValueError("V2_EXECUTION_ROUTE_MODE_MISMATCH")
         if (
             self.approved_script.estimated_duration_ms
             < self.duration_contract.minimum_duration_ms
@@ -627,6 +703,7 @@ class _ResolvedSupportAuthority(_StrictFrozenModel):
     forbidden_claims: list[str]
     forbidden_style_terms: list[str]
     verified_destination: V2VerifiedDestinationAuthority
+    execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"]
     idempotency_hash: str
     input_fingerprint: str
 
@@ -664,10 +741,7 @@ class V2SupportAuthorityService:
             project=project,
             input_fingerprint=resolved.input_fingerprint,
             duration=resolved.duration_contract,
-        )
-        budget = _build_zero_cost_budget(
-            routes=routes,
-            requested_ceiling_usd=command.max_budget_usd,
+            execution_mode=resolved.execution_mode,
         )
         existing = self._existing_artifact(project.id)
         if existing is not None:
@@ -676,9 +750,21 @@ class V2SupportAuthorityService:
                 expected_idempotency_hash=resolved.idempotency_hash,
                 expected_input_fingerprint=resolved.input_fingerprint,
                 expected_routes=routes,
-                expected_budget=budget,
+                expected_execution_mode=resolved.execution_mode,
+                requested_ceiling_usd=command.max_budget_usd,
+                reservation_run_id=command.budget_reservation_run_id,
             )
-
+        budget = _build_zero_cost_budget(
+            session=self.session,
+            routes=routes,
+            requested_ceiling_usd=command.max_budget_usd,
+            execution_mode=resolved.execution_mode,
+            policy_snapshot=self.session.get(
+                CompiledChannelPolicySnapshot, project.policy_snapshot_id
+            ),
+            project_id=project.id,
+            reservation_run_id=command.budget_reservation_run_id,
+        )
         production_context = V2SupportProductionContext(
             video_project_id=project.id,
             production_lane=resolved.production_lane,
@@ -711,6 +797,7 @@ class V2SupportAuthorityService:
             compiled_policy_ref=resolved.compiled_policy_ref,
             effective_context_ref=resolved.effective_context_ref,
             production_lane=resolved.production_lane,
+            execution_mode=resolved.execution_mode,
             duration_contract=resolved.duration_contract,
             frozen_sources=resolved.frozen_sources,
             approved_script=validated["script"],
@@ -903,6 +990,12 @@ class V2SupportAuthorityService:
             ],
             "verified_destination_hash": destination.content_hash,
             "requested_budget_ceiling_usd": _decimal_string(command.max_budget_usd),
+            "execution_mode": command.execution_mode,
+            "budget_reservation_run_id": (
+                str(command.budget_reservation_run_id)
+                if command.budget_reservation_run_id is not None
+                else None
+            ),
             "idempotency_hash": semantic_hash(
                 {"idempotency_key": command.idempotency_key}
             ),
@@ -922,6 +1015,7 @@ class V2SupportAuthorityService:
             forbidden_claims=forbidden_claims,
             forbidden_style_terms=forbidden_style_terms,
             verified_destination=destination,
+            execution_mode=command.execution_mode,
             idempotency_hash=idempotency_hash,
             input_fingerprint=semantic_hash(input_payload),
         )
@@ -1145,7 +1239,14 @@ class V2SupportAuthorityService:
         project: VideoProject,
         input_fingerprint: str,
         duration: ProductionDurationContractV2,
+        execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"],
     ) -> list[V2NativeRouteReceipt]:
+        if execution_mode == "REAL_LONG_FORM_PRODUCTION":
+            return self._create_real_provider_routes(
+                project=project,
+                input_fingerprint=input_fingerprint,
+                duration=duration,
+            )
         lane_routes = _JOB_TYPES_BY_LANE.get(str(project.production_lane))
         if lane_routes is None:
             raise ValidationFailureError("V2_SUPPORT_NATIVE_ROUTE_INVALID")
@@ -1227,6 +1328,147 @@ class V2SupportAuthorityService:
                         "paid_provider_call": False,
                     }
                 ),
+            )
+        )
+        return receipts
+
+    def _create_real_provider_routes(
+        self,
+        *,
+        project: VideoProject,
+        input_fingerprint: str,
+        duration: ProductionDurationContractV2,
+    ) -> list[V2NativeRouteReceipt]:
+        """Bind the real lane to its contract-selected providers only.
+
+        The local adapter remains a valid *visual composition* boundary, but
+        it is never the narration or archive authority for real long-form
+        production.  Provider credentials are deliberately represented by a
+        stable reference, not by secret material in an immutable package.
+        """
+
+        policy_snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, project.policy_snapshot_id
+        )
+        try:
+            scoped = ChannelScopedPolicy.model_validate(
+                (policy_snapshot.compiled_payload or {}).get("channel_scoped_policy")
+                if policy_snapshot is not None
+                else None
+            )
+        except ValidationError as exc:
+            raise ValidationFailureError("V2_REAL_PROVIDER_POLICY_INVALID") from exc
+        if (
+            scoped.voice_policy.provider != "elevenlabs"
+            or not scoped.provider_usage_policy.elevenlabs.enabled
+            or not scoped.provider_usage_policy.elevenlabs.final_narration_authority
+            or not scoped.provider_usage_policy.native_ffmpeg_final_render_authority
+            or not scoped.provider_usage_policy.drive_archive_required_before_cleanup
+            or not scoped.publish_policy.drive_archive_required
+        ):
+            raise ValidationFailureError("V2_REAL_PROVIDER_POLICY_NOT_AUTHORIZED")
+        lane_routes = _JOB_TYPES_BY_LANE.get(str(project.production_lane))
+        if lane_routes is None:
+            raise ValidationFailureError("V2_SUPPORT_NATIVE_ROUTE_INVALID")
+        roles = MediaProviderRoleService(self.session)
+        roles.ensure_matrix()
+        matrix = ProviderCapabilityMatrixService(self.session)
+        routing_catalog = ConfigRegistryService(self.session).validate_catalog(
+            _MEDIA_ROUTING_POLICY_CATALOG
+        )
+        routing_items = {
+            str(item.get("job_type")): item
+            for item in routing_catalog.content.get("items", [])
+            if isinstance(item, dict) and item.get("job_type")
+        }
+        route_specs = (
+            (
+                "MEDIA",
+                "elevenlabs",
+                "v2-elevenlabs-narration",
+                "LONG_VOICE_GENERATION",
+                True,
+            ),
+            (
+                "RENDER",
+                "native_ffmpeg_renderer",
+                "v2-local-native",
+                lane_routes["RENDER"],
+                False,
+            ),
+            ("QC", "vcos_media_qc", "v2-local-native", lane_routes["QC"], False),
+        )
+        receipts: list[V2NativeRouteReceipt] = []
+        for stage, provider_key, adapter_key, job_type, paid in route_specs:
+            role = roles.require_role(provider_key)
+            capability = matrix.find_entry(
+                provider_key=provider_key,
+                job_type=job_type,
+            )
+            routing_item = routing_items.get(job_type)
+            if (
+                role.is_enabled is not True
+                or role.supports_real_execution is not True
+                or capability is None
+                or capability.capability != "SUPPORTED"
+                or not isinstance(routing_item, dict)
+                or routing_item.get("provider_key") != provider_key
+                or (
+                    capability.max_duration_seconds is not None
+                    and Decimal(duration.target_duration_ms) / Decimal("1000")
+                    > capability.max_duration_seconds
+                )
+            ):
+                raise ValidationFailureError("V2_REAL_PROVIDER_ROUTE_INVALID")
+            receipts.append(
+                _route_receipt(
+                    stage=stage,
+                    project_id=project.id,
+                    input_fingerprint=input_fingerprint,
+                    role=role,
+                    capability=capability,
+                    job_type=job_type,
+                    routing_policy_ref=(
+                        "config://media_provider_routing_policy_catalog/"
+                        f"{routing_catalog.catalog_version}/{job_type}"
+                    ),
+                    routing_policy_hash=semantic_hash(routing_item),
+                    adapter_key=adapter_key,
+                    paid_provider_call=paid,
+                    max_cost_usd=(
+                        Decimal(str(scoped.budget_policy.max_estimated_cost_per_video))
+                        if paid
+                        else Decimal("0")
+                    ),
+                )
+            )
+        archive_role = roles.require_role("google_drive_archive")
+        if (
+            archive_role.is_enabled is not True
+            or archive_role.is_real_provider is not True
+            or archive_role.supports_real_execution is not True
+        ):
+            raise ValidationFailureError("V2_REAL_PROVIDER_ROUTE_INVALID")
+        receipts.append(
+            _route_receipt(
+                stage="ARCHIVE",
+                project_id=project.id,
+                input_fingerprint=input_fingerprint,
+                role=archive_role,
+                capability=None,
+                job_type=None,
+                routing_policy_ref="domain://v2-support-authority/google-drive-remote-archive",
+                routing_policy_hash=semantic_hash(
+                    {
+                        "stage": "ARCHIVE",
+                        "provider_key": archive_role.provider_key,
+                        "provider_role_id": str(archive_role.id),
+                        "remote_archive_required": True,
+                    }
+                ),
+                adapter_key="v2-google-drive-remote",
+                paid_provider_call=False,
+                max_cost_usd=Decimal("0"),
             )
         )
         return receipts
@@ -1394,7 +1636,11 @@ class V2SupportAuthorityService:
         expected_idempotency_hash: str,
         expected_input_fingerprint: str,
         expected_routes: list[V2NativeRouteReceipt],
-        expected_budget: V2ZeroCostBudgetAuthority,
+        expected_execution_mode: Literal[
+            "QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"
+        ],
+        requested_ceiling_usd: Decimal,
+        reservation_run_id: uuid.UUID | None,
     ) -> V2SupportAuthorityResult:
         version = (
             self.session.get(ArtifactVersion, artifact.current_version_id)
@@ -1434,9 +1680,27 @@ class V2SupportAuthorityService:
         if (
             envelope.idempotency_hash != expected_idempotency_hash
             or envelope.input_fingerprint != expected_input_fingerprint
+            or envelope.execution_mode != expected_execution_mode
             or [route.route_hash for route in envelope.native_routes]
             != [route.route_hash for route in expected_routes]
-            or envelope.zero_cost_budget.content_hash != expected_budget.content_hash
+            or envelope.zero_cost_budget.requested_ceiling_usd != requested_ceiling_usd
+        ):
+            raise ValidationFailureError("V2_SUPPORT_ENVELOPE_IMMUTABLE_DRIFT")
+        budget = envelope.zero_cost_budget
+        if expected_execution_mode == "REAL_LONG_FORM_PRODUCTION":
+            evidence = budget.reservation_evidence or {}
+            if (
+                reservation_run_id is None
+                or budget.reservation_ref != f"mr1-budget://{reservation_run_id}"
+                or evidence.get("run_id") != str(reservation_run_id)
+                or evidence.get("reservation_ref") != budget.reservation_ref
+                or evidence.get("status") != "RESERVED"
+            ):
+                raise ValidationFailureError("V2_SUPPORT_ENVELOPE_IMMUTABLE_DRIFT")
+        elif (
+            budget.schema_version != "vcos.zero-cost-route-budget.v1"
+            or budget.authorized_cost_usd != 0
+            or budget.reservation_ref is not None
         ):
             raise ValidationFailureError("V2_SUPPORT_ENVELOPE_IMMUTABLE_DRIFT")
         return _result(
@@ -1811,8 +2075,11 @@ def _route_receipt(
     job_type: str | None,
     routing_policy_ref: str,
     routing_policy_hash: str,
+    adapter_key: str | None = None,
+    paid_provider_call: bool = False,
+    max_cost_usd: Decimal = Decimal("0"),
 ) -> V2NativeRouteReceipt:
-    adapter_key = _V2_ADAPTER_BY_STAGE[stage]
+    adapter_key = adapter_key or _V2_ADAPTER_BY_STAGE[stage]
     payload = {
         "stage": stage,
         "operation_id": (
@@ -1827,8 +2094,8 @@ def _route_receipt(
         "routing_policy_hash": routing_policy_hash,
         "capability_entry_id": str(capability.id) if capability else None,
         "job_type": job_type,
-        "paid_provider_call": False,
-        "max_cost_usd": "0",
+        "paid_provider_call": paid_provider_call,
+        "max_cost_usd": _decimal_string(max_cost_usd),
     }
     return V2NativeRouteReceipt(
         **payload,
@@ -1838,15 +2105,100 @@ def _route_receipt(
 
 def _build_zero_cost_budget(
     *,
+    session: Session,
     routes: list[V2NativeRouteReceipt],
     requested_ceiling_usd: Decimal,
+    execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"],
+    policy_snapshot: CompiledChannelPolicySnapshot | None,
+    project_id: uuid.UUID,
+    reservation_run_id: uuid.UUID | None,
 ) -> V2ZeroCostBudgetAuthority:
+    if execution_mode == "REAL_LONG_FORM_PRODUCTION":
+        try:
+            scoped = ChannelScopedPolicy.model_validate(
+                (policy_snapshot.compiled_payload or {}).get("channel_scoped_policy")
+                if policy_snapshot is not None
+                else None
+            )
+        except ValidationError as exc:
+            raise ValidationFailureError(
+                "V2_REAL_PROVIDER_BUDGET_POLICY_INVALID"
+            ) from exc
+        per_video = Decimal(str(scoped.budget_policy.max_estimated_cost_per_video))
+        monthly = Decimal(str(scoped.budget_policy.monthly_channel_budget))
+        if (
+            requested_ceiling_usd < per_video
+            or per_video <= 0
+            or reservation_run_id is None
+        ):
+            raise ValidationFailureError("V2_REAL_PROVIDER_BUDGET_RESERVATION_BLOCKED")
+        settings = get_settings()
+        environment_cap = Decimal(str(settings.monthly_ai_budget_usd or 0))
+        elevenlabs_cap = Decimal(str(settings.elevenlabs_monthly_cap_usd or 0))
+        if environment_cap <= 0 or elevenlabs_cap <= 0:
+            raise ValidationFailureError("V2_REAL_PROVIDER_BUDGET_CAP_REQUIRED")
+        evidence = MR1MonthlyBudgetAuthority(session).reserve_run(
+            run_id=reservation_run_id,
+            project_id=project_id,
+            reservation_amount_usd=per_video,
+            environment_cap_usd=environment_cap,
+            company_cap_usd=environment_cap,
+            channel_cap_usd=monthly,
+            provider_allocations_usd={
+                "elevenlabs": per_video,
+                "google_drive": Decimal("0"),
+            },
+            provider_caps_usd={
+                "elevenlabs": elevenlabs_cap,
+                "google_drive": environment_cap,
+            },
+            provider_aliases={
+                "elevenlabs": ["elevenlabs", "forced_alignment"],
+                "google_drive": ["google_drive"],
+            },
+        )
+        if (
+            evidence.get("run_id") != str(reservation_run_id)
+            or evidence.get("project_id") != str(project_id)
+            or evidence.get("status") != "RESERVED"
+            or Decimal(str(evidence.get("reserved_amount_usd"))) != per_video
+        ):
+            raise ValidationFailureError("V2_REAL_PROVIDER_BUDGET_RESERVATION_INVALID")
+        payload = {
+            "schema_version": "vcos.real-provider-route-budget.v1",
+            "policy_mode": "REAL_PROVIDER_PER_VIDEO_RESERVATION",
+            "execution_mode": execution_mode,
+            "requested_ceiling_usd": _decimal_string(requested_ceiling_usd),
+            "authorized_cost_usd": _decimal_string(per_video),
+            "paid_provider_calls_allowed": True,
+            "monthly_budget_usd": _decimal_string(monthly),
+            "monthly_used_usd": str(
+                (evidence.get("capacity_evidence") or {})
+                .get("before_reservation", {})
+                .get("channel_occupied_usd", "0")
+            ),
+            "monthly_reserved_usd": evidence["reserved_amount_usd"],
+            "reservation_ref": evidence["reservation_ref"],
+            "reservation_evidence": evidence,
+            "operation_ids": sorted(route.operation_id for route in routes),
+            "route_hashes": sorted(route.route_hash for route in routes),
+        }
+        return V2ZeroCostBudgetAuthority(
+            **payload,
+            content_hash=semantic_hash(payload),
+        )
     payload = {
         "schema_version": "vcos.zero-cost-route-budget.v1",
         "policy_mode": "LOCAL_CAPABILITY_NO_PAID_PROVIDER_LEDGER",
+        "execution_mode": execution_mode,
         "requested_ceiling_usd": _decimal_string(requested_ceiling_usd),
         "authorized_cost_usd": "0",
         "paid_provider_calls_allowed": False,
+        "monthly_budget_usd": None,
+        "monthly_used_usd": None,
+        "monthly_reserved_usd": None,
+        "reservation_ref": None,
+        "reservation_evidence": None,
         "operation_ids": sorted(route.operation_id for route in routes),
         "route_hashes": sorted(route.route_hash for route in routes),
     }

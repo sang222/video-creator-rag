@@ -6,6 +6,7 @@ import hashlib
 import json
 import uuid
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -65,6 +66,7 @@ from app.db.models.production_publish import (
     FinalVideoDecision,
 )
 from app.db.models.production_workflow import ProductionWorkflowRun
+from app.db.models.workflow import VideoProject
 from app.db.models.r3d1 import ContentCategory
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.services.cadence_events import (
@@ -72,6 +74,10 @@ from app.services.cadence_events import (
     CADENCE_EVALUATION_EVENT_TYPE,
 )
 from app.services.company_access import require_company_permission
+from app.services.nich1 import (
+    NicheContractCompilationError,
+    NicheContractDigestCompiler,
+)
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.production_start_readiness import (
     resolve_budget_authority,
@@ -79,6 +85,11 @@ from app.services.production_start_readiness import (
 )
 from app.services.production_workflow import ProductionWorkflowCoordinator
 from app.services.r3d1 import CharacterBindingResolver
+from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
+from app.services.v2_support_authority import (
+    V2SupportAuthorityPrepareCommand,
+    V2SupportAuthorityService,
+)
 from app.services.vcos_v2 import LongFormPlanningService
 
 
@@ -133,6 +144,20 @@ def _hash(value: Any) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _cadence_support_budget_ceiling(budget_authority: dict[str, Any]) -> Decimal:
+    """Use the evaluated per-video ceiling for frozen support authority."""
+
+    try:
+        value = Decimal(str(budget_authority["max_estimated_cost_per_video"]))
+    except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationFailureError(
+            "CADENCE_SUPPORT_BUDGET_AUTHORITY_INVALID"
+        ) from exc
+    if value < 0 or value > Decimal("250"):
+        raise ValidationFailureError("CADENCE_SUPPORT_BUDGET_AUTHORITY_INVALID")
+    return value
 
 
 class FirstChannelLaunchPolicyService:
@@ -600,10 +625,18 @@ class LongFormCadenceService:
         *,
         now: Any = utc_now,
         provider_readiness_snapshot: Callable[[], Any] | None = None,
+        support_authority_preparer: Callable[
+            [uuid.UUID, uuid.UUID, uuid.UUID, Decimal], Any
+        ]
+        | None = None,
     ):
         self.session = session
         self.now = now
         self.provider_readiness_snapshot = provider_readiness_snapshot
+        # This seam is intentionally narrow and exists only for isolated
+        # tests.  The normal cadence path seals the same frozen support
+        # envelope as OperatorPlanningService before it starts a workflow.
+        self.support_authority_preparer = support_authority_preparer
 
     def ensure_slots(self, launch_run_id: uuid.UUID) -> list[LongFormPublishSlot]:
         run = self.session.scalar(
@@ -1233,6 +1266,34 @@ class LongFormCadenceService:
                 or admission.admitted_video_project_id is None
             ):
                 raise ValidationFailureError("CADENCE_ADMISSION_DID_NOT_ADMIT")
+
+        if admission.admitted_video_project_id is None:
+            raise ValidationFailureError("CADENCE_ADMISSION_PROJECT_MISSING")
+        if admission.editorial_calendar_slot_id is None:
+            raise ValidationFailureError("CADENCE_ADMISSION_SLOT_MISSING")
+
+        self._bind_niche_governance(
+            project_id=admission.admitted_video_project_id,
+            editorial_slot_id=admission.editorial_calendar_slot_id,
+        )
+
+        # A workflow may never be enqueued against an admitted project whose
+        # runtime authority has not been compiled and bound.  Previously the
+        # cadence path skipped this step (unlike OperatorPlanningService), so
+        # the first RESEARCH command could only fail with a stale/missing
+        # effective-context error after a project had already been reserved.
+        effective = EffectiveChannelRuntimeContextCompiler(
+            self.session
+        ).ensure_for_project(
+            admission.admitted_video_project_id,
+            editorial_calendar_slot_id=admission.editorial_calendar_slot_id,
+        )
+        if effective.compile_status != "PASS":
+            raise ValidationFailureError("CADENCE_EFFECTIVE_CONTEXT_NOT_PASS")
+
+        # The workflow id is the durable monthly-budget reservation key for
+        # real execution.  Its initial event is still in this transaction: if
+        # support sealing blocks, both the workflow and its event roll back.
         worker_actor = _system_worker_actor(
             "vcos-durable-worker", permissions={"production.start"}
         )
@@ -1253,12 +1314,114 @@ class LongFormCadenceService:
         workflow = self.session.get(ProductionWorkflowRun, workflow_read.id)
         if workflow is None:
             raise ValidationFailureError("CADENCE_WORKFLOW_START_MISSING")
+
+        # Seal the immutable LLM-produced support envelope before that
+        # transaction may dispatch its initial workflow command.  Cadence is
+        # the only natural production entry point, so it always requests the
+        # real-provider mode; the narrow callback remains test-only.
+        max_budget_usd = _cadence_support_budget_ceiling(budget_gate_result)
+        if self.support_authority_preparer is not None:
+            self.support_authority_preparer(
+                admission.admitted_video_project_id,
+                admission.editorial_calendar_slot_id,
+                run.updated_by_user_id,
+                max_budget_usd,
+            )
+        else:
+            V2SupportAuthorityService(self.session).prepare(
+                V2SupportAuthorityPrepareCommand(
+                    video_project_id=admission.admitted_video_project_id,
+                    source_type="LONG_FORM_PLAN",
+                    source_id=admission.editorial_calendar_slot_id,
+                    actor_user_id=run.updated_by_user_id,
+                    max_budget_usd=max_budget_usd,
+                    idempotency_key=(
+                        f"cadence-support:{policy.id}:{publish_slot.id}:{candidate.id}"
+                    ),
+                    execution_mode="REAL_LONG_FORM_PRODUCTION",
+                    budget_reservation_run_id=workflow.id,
+                )
+            )
         candidate.stage = "IN_PRODUCTION"
         publish_slot.state = "RESERVED"
         publish_slot.reserved_candidate_id = candidate.id
         publish_slot.admitted_video_project_id = admission.admitted_video_project_id
         self.session.flush()
         return admission, workflow
+
+    def _bind_niche_governance(
+        self,
+        *,
+        project_id: uuid.UUID,
+        editorial_slot_id: uuid.UUID,
+    ) -> None:
+        """Freeze the official NICH1 digest for a cadence-created PUBLISH slot.
+
+        The normal research slot's preflight digest cannot be transplanted to a
+        newly-created PUBLISH slot because the slot id, goal, and series
+        binding are part of that digest.  Compile the digest from the exact
+        project/slot authority instead, once and before effective context
+        compilation.  This is a deterministic local authority write, not a
+        caller-provided digest or a provider effect.
+        """
+
+        project = self.session.get(VideoProject, project_id)
+        slot = self.session.get(EditorialCalendarSlot, editorial_slot_id)
+        channel = (
+            self.session.get(ChannelWorkspace, project.channel_workspace_id)
+            if project is not None
+            else None
+        )
+        profile = (
+            self.session.get(ChannelProfileVersion, project.channel_profile_version_id)
+            if project is not None and project.channel_profile_version_id is not None
+            else None
+        )
+        policy = (
+            self.session.get(CompiledChannelPolicySnapshot, project.policy_snapshot_id)
+            if project is not None
+            else None
+        )
+        category = (
+            self.session.get(ContentCategory, project.category_id)
+            if project is not None and project.category_id is not None
+            else None
+        )
+        if any(
+            item is None for item in (project, slot, channel, profile, policy, category)
+        ):
+            raise ValidationFailureError("CADENCE_NICHE_AUTHORITY_MISSING")
+        assert project is not None and slot is not None
+        assert channel is not None and profile is not None and policy is not None
+        assert category is not None
+
+        summary = dict(project.audience_delivery_summary or {})
+        frozen = summary.get("niche_governance")
+        if isinstance(frozen, dict) and frozen:
+            return
+        try:
+            digest = NicheContractDigestCompiler().compile(
+                channel=channel,
+                profile_version=profile,
+                policy_snapshot=policy,
+                category=category,
+                editorial_slot=slot,
+            )
+        except NicheContractCompilationError as exc:
+            raise ValidationFailureError("CADENCE_NICHE_AUTHORITY_NOT_PASS") from exc
+        digest_ref = {
+            "type": "niche_contract_digest",
+            "ref": digest.editorial_slot_ref + "#niche_contract_digest",
+            "content_hash": digest.content_hash,
+        }
+        summary["niche_governance"] = {
+            "channel_id": str(channel.id),
+            "niche_contract_digest": digest.model_dump(mode="json"),
+            "niche_contract_digest_ref": digest_ref,
+            "topic": project.title,
+        }
+        project.audience_delivery_summary = summary
+        self.session.flush()
 
     def _resolve_category(
         self,

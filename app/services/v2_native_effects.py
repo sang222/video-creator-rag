@@ -382,6 +382,17 @@ class V2LocalNativeProductionAdapter:
             or operation.parameters.get("mode") != _STAGE_MODES[operation.stage]
         ):
             raise ValidationFailureError("V2_LOCAL_NATIVE_OPERATION_NOT_AUTHORIZED")
+        execution_mode = operation.execution_mode
+        if execution_mode not in {
+            "QUALIFICATION_LOCAL",
+            "REAL_LONG_FORM_PRODUCTION",
+        }:
+            raise ValidationFailureError("V2_LOCAL_NATIVE_EXECUTION_MODE_INVALID")
+        if execution_mode == "REAL_LONG_FORM_PRODUCTION" and operation.stage in {
+            ProductionWorkflowStage.MEDIA,
+            ProductionWorkflowStage.ARCHIVE,
+        }:
+            raise ValidationFailureError("V2_LOCAL_NATIVE_REAL_FINAL_EFFECT_FORBIDDEN")
         audio_strategy = operation.parameters.get("audio_strategy")
         if operation.stage in {
             ProductionWorkflowStage.MEDIA,

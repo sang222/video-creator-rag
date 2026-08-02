@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, runtime_checkable
 
 from sqlalchemy import select
 
+from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.production_package import (
     ExactContentRefV2,
     ProductionDurationContractV2,
@@ -827,6 +829,38 @@ def _support_envelope_integrity_error(code: str) -> WorkflowStageError:
     )
 
 
+def _decimal_text(value: Any) -> str:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationFailureError("V2_PROVIDER_COST_DECIMAL_INVALID") from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise ValidationFailureError("V2_PROVIDER_COST_DECIMAL_INVALID")
+    return format(parsed, "f")
+
+
+def _real_provider_policy(authority: _SupportAuthority) -> ChannelScopedPolicy:
+    try:
+        scoped = ChannelScopedPolicy.model_validate(
+            (authority.policy.compiled_payload or {}).get("channel_scoped_policy")
+        )
+    except Exception as exc:
+        raise ValidationFailureError("V2_REAL_PROVIDER_POLICY_INVALID") from exc
+    if (
+        scoped.media_production_profile.final_narration_authority != "elevenlabs"
+        or scoped.voice_policy.provider != "elevenlabs"
+        or not scoped.provider_usage_policy.elevenlabs.enabled
+        or not scoped.provider_usage_policy.elevenlabs.final_narration_authority
+        or scoped.provider_usage_policy.elevenlabs.initial_tts_attempts != 1
+        or not scoped.provider_usage_policy.native_ffmpeg_final_render_authority
+        or not scoped.provider_usage_policy.drive_archive_required_before_cleanup
+        or not scoped.publish_policy.drive_archive_required
+        or scoped.budget_policy.max_estimated_cost_per_video <= 0
+    ):
+        raise ValidationFailureError("V2_REAL_PROVIDER_POLICY_NOT_AUTHORIZED")
+    return scoped
+
+
 def _ensure_support_versions(
     context: WorkflowStageContext,
     authority: _SupportAuthority,
@@ -944,6 +978,8 @@ def _validate_support_version(
                 != authority.support_envelope_version.content_hash
                 or lineage.get("frozen_support_envelope_input_fingerprint")
                 != authority.support_envelope.input_fingerprint
+                or lineage.get("execution_mode")
+                != authority.support_envelope.execution_mode
             )
         )
         or not isinstance(domain, dict)
@@ -963,12 +999,35 @@ def _support_payloads(
     sections = script["sections"]
     adapter_operations: dict[str, dict[str, Any]] = {}
     operation_authorizations: dict[str, dict[str, Any]] = {}
-    stage_modes = {
-        "MEDIA": "PACKAGE_NATIVE_TIMELINE",
-        "RENDER": "NATIVE_FFMPEG_LOCAL",
-        "QC": "AUTOMATED_NATIVE_QC",
-    }
-    audio_strategy = "LOCAL_OS_TTS_SCRIPT_BOUND"
+    envelope = authority.support_envelope
+    execution_mode = (
+        envelope.execution_mode if envelope is not None else "QUALIFICATION_LOCAL"
+    )
+    real_production = execution_mode == "REAL_LONG_FORM_PRODUCTION"
+    scoped_policy = _real_provider_policy(authority) if real_production else None
+    support_envelope_hash = (
+        authority.support_envelope_version.content_hash
+        if authority.support_envelope_version is not None
+        else ""
+    )
+    if real_production and not support_envelope_hash:
+        raise ValidationFailureError("V2_REAL_PROVIDER_SUPPORT_ENVELOPE_REQUIRED")
+    stage_modes = (
+        {
+            "MEDIA": "ELEVENLABS_FINAL_NARRATION",
+            "RENDER": "NATIVE_FFMPEG_LOCAL",
+            "QC": "AUTOMATED_NATIVE_QC",
+        }
+        if real_production
+        else {
+            "MEDIA": "PACKAGE_NATIVE_TIMELINE",
+            "RENDER": "NATIVE_FFMPEG_LOCAL",
+            "QC": "AUTOMATED_NATIVE_QC",
+        }
+    )
+    audio_strategy = (
+        "ELEVENLABS_FINAL_NARRATION" if real_production else "LOCAL_OS_TTS_SCRIPT_BOUND"
+    )
     route_by_stage = (
         {route.stage: route for route in authority.support_envelope.native_routes}
         if authority.support_envelope is not None
@@ -988,15 +1047,22 @@ def _support_payloads(
         # harness, where it is explicitly supplied in the frozen envelope; do
         # not silently turn an unconfigured Drive archive into a local copy.
         mode = (
-            "GOOGLE_DRIVE_VERIFIED_ARCHIVE"
-            if stage == "ARCHIVE" and adapter_key == "v2-google-drive-archive"
+            "GOOGLE_DRIVE_REMOTE_ARCHIVE"
+            if real_production and stage == "ARCHIVE"
             else (
-                "LOCAL_VERIFIED_ARCHIVE" if stage == "ARCHIVE" else stage_modes[stage]
+                "GOOGLE_DRIVE_VERIFIED_ARCHIVE"
+                if stage == "ARCHIVE" and adapter_key == "v2-google-drive-archive"
+                else (
+                    "LOCAL_VERIFIED_ARCHIVE"
+                    if stage == "ARCHIVE"
+                    else stage_modes[stage]
+                )
             )
         )
         parameters: dict[str, Any] = {
             "mode": mode,
             "audio_strategy": audio_strategy,
+            "execution_mode": execution_mode,
         }
         if adapter_key == "v2-google-drive-archive":
             parameters["archive_resolution"] = "PERSISTED_VERIFIED_CLOUD_MEDIA"
@@ -1005,6 +1071,36 @@ def _support_payloads(
             if route is not None
             else f"v2:{authority.project.id}:{stage.lower()}"
         )
+        paid_provider_call = bool(route.paid_provider_call) if route else False
+        max_cost_usd = _decimal_text(route.max_cost_usd) if route is not None else "0"
+        if real_production and stage == "MEDIA":
+            assert scoped_policy is not None and envelope is not None
+            parameters["provider_execution"] = {
+                "provider": "elevenlabs",
+                "voice_id": scoped_policy.voice_policy.voice_id,
+                "model_id": scoped_policy.voice_policy.model_id,
+                "voice_settings": scoped_policy.voice_policy.settings.model_dump(
+                    mode="json"
+                ),
+                "credential_ref": "env://ELEVENLABS_API_KEY",
+                "attempt_limit": scoped_policy.provider_usage_policy.elevenlabs.initial_tts_attempts,
+                "idempotency_key": f"{operation_id}:elevenlabs-final-narration",
+                "estimated_cost_usd": max_cost_usd,
+                "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
+                "package_support_envelope_hash": support_envelope_hash,
+            }
+        if real_production and stage == "ARCHIVE":
+            assert envelope is not None
+            parameters["provider_execution"] = {
+                "provider": "google_drive",
+                "credential_ref": "oauth://google-drive/channel-connected",
+                "attempt_limit": 1,
+                "idempotency_key": f"{operation_id}:google-drive-archive",
+                "remote_object_required": True,
+                "checksum_readback_required": True,
+                "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
+                "package_support_envelope_hash": support_envelope_hash,
+            }
         adapter_operations[stage] = {
             "schema_version": "vcos.provider-adapter-operation.v1",
             "execution_authorized": True,
@@ -1014,10 +1110,11 @@ def _support_payloads(
             "automatic_publish": False,
             "stage": stage,
             "production_lane": authority.project.production_lane,
-            "paid_provider_call": False,
+            "execution_mode": execution_mode,
+            "paid_provider_call": paid_provider_call,
             "operation_id": operation_id,
             "adapter_key": adapter_key,
-            "max_cost_usd": "0",
+            "max_cost_usd": max_cost_usd,
             **(
                 {
                     "provider_role_id": str(route.provider_role_id),
@@ -1043,13 +1140,13 @@ def _support_payloads(
             "operation_id": operation_id,
             "adapter_key": adapter_key,
             "stage": stage,
-            "paid_provider_call": False,
-            "max_cost_usd": "0",
+            "paid_provider_call": paid_provider_call,
+            "max_cost_usd": max_cost_usd,
+            "execution_mode": execution_mode,
             **({"route_hash": route.route_hash} if route is not None else {}),
         }
     target_surface = "LONG_FORM"
     destination = authority.destination
-    envelope = authority.support_envelope
     gate_receipts = {
         str(receipt["gate_key"]): receipt
         for receipt in (envelope.gate_receipts if envelope is not None else [])
@@ -1192,14 +1289,22 @@ def _support_payloads(
             "schema_version": "vcos.post-readiness-provider-plan.v2",
             "result": "PASS",
             "execution_authorized": True,
-            "retry_authorized": True,
-            "max_attempts": 5,
+            "retry_authorized": not real_production,
+            "max_attempts": 1 if real_production else 5,
             "retry_cost_usd": "0",
             "production_lane": authority.project.production_lane,
+            "execution_mode": execution_mode,
             "fixture_only": False,
             "invokes_mr1": False,
             "automatic_publish": False,
-            "paid_provider_calls": False,
+            "paid_provider_calls": real_production,
+            "final_tts_provider": (
+                "ELEVENLABS" if real_production else "QUALIFICATION_LOCAL_OS_TTS"
+            ),
+            "archive_provider": (
+                "GOOGLE_DRIVE" if real_production else "QUALIFICATION_ONLY"
+            ),
+            "visual_provider_plan": ["NATIVE_FFMPEG"],
             "adapter_operations": adapter_operations,
             **(
                 {
@@ -1243,15 +1348,29 @@ def _support_payloads(
             "schema_version": "vcos.operation-budget-authority.v1",
             "result": "PASS",
             "budget_authorized": True,
-            "retry_authorized": True,
-            "max_attempts": 5,
+            "retry_authorized": not real_production,
+            "max_attempts": 1 if real_production else 5,
             "retry_cost_usd": "0",
-            "remaining_budget_usd": "0",
+            "remaining_budget_usd": (
+                _decimal_text(envelope.zero_cost_budget.authorized_cost_usd)
+                if envelope is not None
+                else "0"
+            ),
+            "execution_mode": execution_mode,
             "operation_authorizations": operation_authorizations,
             **(
                 {
                     "zero_cost_budget_authority": (
                         envelope.zero_cost_budget.model_dump(mode="json")
+                    ),
+                    **(
+                        {
+                            "real_provider_budget_authority": (
+                                envelope.zero_cost_budget.model_dump(mode="json")
+                            )
+                        }
+                        if real_production
+                        else {}
                     ),
                     "gate_receipt": gate_receipts["zero_cost_budget"],
                 }
@@ -1448,6 +1567,7 @@ def _lineage(
                 "frozen_support_envelope_input_fingerprint": (
                     authority.support_envelope.input_fingerprint
                 ),
+                "execution_mode": authority.support_envelope.execution_mode,
             }
         )
     return lineage

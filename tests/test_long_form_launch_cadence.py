@@ -104,6 +104,10 @@ def _ready_provider_snapshot():
     )
 
 
+def _test_support_authority_preparer(*_args) -> None:
+    """Keep cadence unit tests network-free; support sealing has its own suite."""
+
+
 def _approved_series_plan(session, scope, index: int | str):
     service = SeriesPlanService(session)
     record = service.create(
@@ -476,6 +480,7 @@ def test_buffer_below_target_starts_exactly_one_long_form_workflow(
         db_session,
         now=lambda: fixed_now,
         provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
     )
     first = service.evaluate(
         launch_run_id=run.id,
@@ -616,6 +621,7 @@ def test_open_mix_admission_filters_series_outside_launch_policy(
         db_session,
         now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
         provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
     ).evaluate(
         launch_run_id=launch_run.id,
         data=CadenceEvaluationCommand(evaluation_key="open-mix-launch-guard"),

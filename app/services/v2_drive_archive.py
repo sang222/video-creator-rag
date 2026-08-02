@@ -206,6 +206,7 @@ class V2GoogleDriveArchiveAdapter:
         if (
             operation.stage != ProductionWorkflowStage.ARCHIVE
             or operation.adapter_key != V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY
+            or operation.execution_mode != "QUALIFICATION_LOCAL"
             or operation.paid_provider_call
             or operation.max_cost_usd != Decimal("0")
             or operation.parameters.get("mode") != "GOOGLE_DRIVE_VERIFIED_ARCHIVE"
