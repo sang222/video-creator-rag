@@ -61,8 +61,15 @@ from app.services.workflow import ArtifactService
 V2_LOCAL_ADAPTER_KEY = "v2-local-native"
 V2_SILENT_AUDIO_STRATEGY = "SILENT_STEREO_TEXT_LED"
 V2_LOCAL_NARRATION_STRATEGY = "LOCAL_OS_TTS_SCRIPT_BOUND"
+V2_ELEVENLABS_NARRATION_STRATEGY = "ELEVENLABS_FINAL_NARRATION"
 V2_AUDIO_STRATEGY = V2_SILENT_AUDIO_STRATEGY
-V2_AUDIO_STRATEGIES = frozenset({V2_SILENT_AUDIO_STRATEGY, V2_LOCAL_NARRATION_STRATEGY})
+V2_AUDIO_STRATEGIES = frozenset(
+    {
+        V2_SILENT_AUDIO_STRATEGY,
+        V2_LOCAL_NARRATION_STRATEGY,
+        V2_ELEVENLABS_NARRATION_STRATEGY,
+    }
+)
 V2_TIMELINE_SCHEMA = "vcos.canonical-media-timeline.v2"
 V2_TECHNICAL_QC_SCHEMA = "vcos.technical-media-qc.v2"
 V2_CREATIVE_QC_SCHEMA = "vcos.creative-media-qc.v2"
@@ -400,10 +407,10 @@ class V2LocalNativeProductionAdapter:
         }:
             if audio_strategy not in V2_AUDIO_STRATEGIES:
                 raise ValidationFailureError("V2_LOCAL_NATIVE_AUDIO_STRATEGY_REQUIRED")
-            if (
-                context.run.production_lane == "LONG_FORM"
-                and audio_strategy != V2_LOCAL_NARRATION_STRATEGY
-            ):
+            if context.run.production_lane == "LONG_FORM" and audio_strategy not in {
+                V2_LOCAL_NARRATION_STRATEGY,
+                V2_ELEVENLABS_NARRATION_STRATEGY,
+            }:
                 raise ValidationFailureError(
                     "V2_LONG_FORM_NARRATION_CAPABILITY_REQUIRED"
                 )
@@ -413,6 +420,13 @@ class V2LocalNativeProductionAdapter:
             ):
                 raise ValidationFailureError(
                     "V2_LOCAL_NARRATION_CAPABILITY_UNAVAILABLE"
+                )
+            if audio_strategy == V2_ELEVENLABS_NARRATION_STRATEGY and (
+                execution_mode != "REAL_LONG_FORM_PRODUCTION"
+                or operation.stage != ProductionWorkflowStage.RENDER
+            ):
+                raise ValidationFailureError(
+                    "V2_ELEVENLABS_NARRATION_STRATEGY_ROUTE_INVALID"
                 )
         elif audio_strategy is not None and audio_strategy not in V2_AUDIO_STRATEGIES:
             raise ValidationFailureError("V2_LOCAL_NATIVE_AUDIO_STRATEGY_INVALID")
@@ -937,12 +951,16 @@ class V2LocalNativeProductionAdapter:
             or media_journal.get("audio_strategy") != audio_strategy
         ):
             raise ValidationFailureError("V2_NATIVE_RENDER_TIMELINE_MISMATCH")
+        narration_audio_strategy = audio_strategy in {
+            V2_LOCAL_NARRATION_STRATEGY,
+            V2_ELEVENLABS_NARRATION_STRATEGY,
+        }
         audio_path = (
             self._from_relative(_required_text(media_journal, "audio_relative_path"))
-            if audio_strategy == V2_LOCAL_NARRATION_STRATEGY
+            if narration_audio_strategy
             else None
         )
-        if audio_strategy == V2_LOCAL_NARRATION_STRATEGY and (
+        if narration_audio_strategy and (
             timeline.get("narration_present") is not True
             or media_journal.get("audio_checksum") != _sha256_file(audio_path)
         ):
@@ -1168,7 +1186,11 @@ class V2LocalNativeProductionAdapter:
                 and render_journal.get("narration_present") is narration_present
                 and (
                     (
-                        audio_strategy == V2_LOCAL_NARRATION_STRATEGY
+                        audio_strategy
+                        in {
+                            V2_LOCAL_NARRATION_STRATEGY,
+                            V2_ELEVENLABS_NARRATION_STRATEGY,
+                        }
                         and narration_present is True
                         and isinstance(timeline.get("audio_checksum"), str)
                         and timeline.get("audio_checksum")

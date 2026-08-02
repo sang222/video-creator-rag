@@ -345,12 +345,25 @@ class GoogleDriveOAuthCredentialService:
             channel_workspace_id=channel_workspace_id,
         )
 
-    def get_connected_reference(self) -> CredentialReference | None:
+    def get_connected_reference(
+        self,
+        *,
+        company_id: Any | None = None,
+        channel_workspace_id: Any | None = None,
+    ) -> CredentialReference | None:
+        statement = select(GoogleDriveMediaCredential).where(
+            GoogleDriveMediaCredential.connection_state == "CONNECTED"
+        )
+        if company_id is not None:
+            statement = statement.where(
+                GoogleDriveMediaCredential.company_id == company_id
+            )
+        if channel_workspace_id is not None:
+            statement = statement.where(
+                GoogleDriveMediaCredential.channel_workspace_id == channel_workspace_id
+            )
         credential = self.session.scalars(
-            select(GoogleDriveMediaCredential)
-            .where(GoogleDriveMediaCredential.connection_state == "CONNECTED")
-            .order_by(GoogleDriveMediaCredential.updated_at.desc())
-            .limit(1)
+            statement.order_by(GoogleDriveMediaCredential.updated_at.desc()).limit(1)
         ).one_or_none()
         if credential is None:
             return None
@@ -728,6 +741,7 @@ class GoogleDriveMediaStorageProvider:
         folder_id: str,
         upload_mode: str,
         mime_type: str | None,
+        idempotency_key: str | None = None,
     ) -> GoogleDriveUploadResult:
         size_bytes = local_path.stat().st_size
         mode = self.choose_upload_mode(
@@ -739,13 +753,55 @@ class GoogleDriveMediaStorageProvider:
                 local_path=local_path,
                 folder_id=folder_id,
                 mime_type=mime_type,
+                idempotency_key=idempotency_key,
             )
         return self._resumable_upload(
             access_token=access_token,
             local_path=local_path,
             folder_id=folder_id,
             mime_type=mime_type,
+            idempotency_key=idempotency_key,
         )
+
+    def find_file_by_idempotency_key(
+        self,
+        *,
+        access_token: str,
+        folder_id: str,
+        idempotency_key: str,
+    ) -> GoogleDriveUploadResult | None:
+        """Resolve only a file created with this exact V2 archive key."""
+
+        escaped = idempotency_key.replace("'", "\\'")
+        query = urllib.parse.urlencode(
+            {
+                "q": (
+                    f"'{folder_id}' in parents and "
+                    "appProperties has { key='vcos_idempotency_key' and "
+                    f"value='{escaped}' }} and trashed=false"
+                ),
+                "fields": (
+                    "files(id,name,size,mimeType,webViewLink,parents,md5Checksum,"
+                    "sha256Checksum)"
+                ),
+                "spaces": "drive",
+            }
+        )
+        request = urlrequest.Request(
+            f"{GOOGLE_DRIVE_FILES_URL}?{query}",
+            method="GET",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        with urlrequest.urlopen(
+            request, timeout=20, context=GOOGLE_SSL_CONTEXT
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        files = payload.get("files") if isinstance(payload.get("files"), list) else []
+        if not files:
+            return None
+        if len(files) != 1:
+            raise ValidationFailureError("Google Drive idempotency key is ambiguous")
+        return _drive_result_from_payload(files[0], upload_mode="reconciled")
 
     def get_file_metadata(
         self, *, access_token: str, drive_file_id: str
@@ -765,6 +821,22 @@ class GoogleDriveMediaStorageProvider:
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return _drive_result_from_payload(payload, upload_mode=None)
+
+    def readback_sha256(self, *, access_token: str, drive_file_id: str) -> str:
+        """Hash the exact remote bytes when Drive omits a SHA-256 field."""
+
+        request = urlrequest.Request(
+            f"{GOOGLE_DRIVE_FILES_URL}/{urllib.parse.quote(drive_file_id)}?alt=media",
+            method="GET",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        digest = hashlib.sha256()
+        with urlrequest.urlopen(
+            request, timeout=120, context=GOOGLE_SSL_CONTEXT
+        ) as response:
+            while chunk := response.read(1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def _ensure_child_folder(
         self, *, access_token: str, parent_id: str, folder_name: str
@@ -818,10 +890,13 @@ class GoogleDriveMediaStorageProvider:
         local_path: Path,
         folder_id: str,
         mime_type: str | None,
+        idempotency_key: str | None,
     ) -> GoogleDriveUploadResult:
         media_type = mime_type or "application/octet-stream"
         boundary = f"vcos-{secrets.token_hex(12)}"
         metadata = {"name": local_path.name, "parents": [folder_id]}
+        if idempotency_key:
+            metadata["appProperties"] = {"vcos_idempotency_key": idempotency_key}
         body = b"\r\n".join(
             [
                 f"--{boundary}".encode(),
@@ -864,11 +939,16 @@ class GoogleDriveMediaStorageProvider:
         local_path: Path,
         folder_id: str,
         mime_type: str | None,
+        idempotency_key: str | None,
     ) -> GoogleDriveUploadResult:
         media_type = mime_type or "application/octet-stream"
-        metadata = json.dumps({"name": local_path.name, "parents": [folder_id]}).encode(
-            "utf-8"
-        )
+        metadata_body: dict[str, Any] = {
+            "name": local_path.name,
+            "parents": [folder_id],
+        }
+        if idempotency_key:
+            metadata_body["appProperties"] = {"vcos_idempotency_key": idempotency_key}
+        metadata = json.dumps(metadata_body).encode("utf-8")
         query = urllib.parse.urlencode(
             {
                 "uploadType": "resumable",
@@ -1260,6 +1340,7 @@ class GoogleDriveUploadService:
         render_package_id: Any | None,
         source_refs: list[dict[str, Any]],
         retention_policy: dict[str, Any],
+        idempotency_key: str | None = None,
     ) -> tuple[CloudMediaRef, GoogleDriveVerificationResult]:
         if not self.config_service.offload_enabled():
             raise ValidationFailureError("Google Drive offload is disabled")
@@ -1268,7 +1349,15 @@ class GoogleDriveUploadService:
             raise ValidationFailureError(
                 "GOOGLE_DRIVE_ROOT_FOLDER_ID is required for real upload"
             )
-        reference = self.credential_service.get_connected_reference()
+        try:
+            reference = self.credential_service.get_connected_reference(
+                company_id=company_id,
+                channel_workspace_id=channel_workspace_id,
+            )
+        except TypeError:
+            # Compatibility for an injected qualification test double only;
+            # the concrete service always requires the scoped arguments.
+            reference = self.credential_service.get_connected_reference()
         if reference is None:
             raise ValidationFailureError(
                 "Google Drive OAuth credential is not connected"
@@ -1280,6 +1369,16 @@ class GoogleDriveUploadService:
             )
         local_size = local_path.stat().st_size
         local_sha256 = _sha256_file(local_path)
+        if idempotency_key is not None and (
+            not idempotency_key
+            or len(idempotency_key) > 200
+            or any(
+                character
+                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+                for character in idempotency_key
+            )
+        ):
+            raise ValidationFailureError("Google Drive idempotency key is invalid")
         archive_path = self.archive_path_builder.build(
             company_id=company_id,
             channel_workspace_id=channel_workspace_id,
@@ -1296,16 +1395,37 @@ class GoogleDriveUploadService:
         mime_type = (
             mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
         )
-        upload_result = self.provider.upload_file(
-            access_token=access_token,
-            local_path=local_path,
-            folder_id=folder_id,
-            upload_mode=self.config_service.upload_mode(),
-            mime_type=mime_type,
+        upload_result = (
+            self.provider.find_file_by_idempotency_key(
+                access_token=access_token,
+                folder_id=folder_id,
+                idempotency_key=idempotency_key,
+            )
+            if idempotency_key
+            else None
         )
+        if upload_result is None:
+            upload_kwargs = {
+                "access_token": access_token,
+                "local_path": local_path,
+                "folder_id": folder_id,
+                "upload_mode": self.config_service.upload_mode(),
+                "mime_type": mime_type,
+            }
+            if idempotency_key:
+                upload_kwargs["idempotency_key"] = idempotency_key
+            upload_result = self.provider.upload_file(**upload_kwargs)
         metadata = self.provider.get_file_metadata(
             access_token=access_token, drive_file_id=upload_result.drive_file_id
         )
+        provider_checksum = metadata.checksum_sha256 or upload_result.checksum_sha256
+        checksum_readback_performed = False
+        if not provider_checksum and idempotency_key:
+            provider_checksum = self.provider.readback_sha256(
+                access_token=access_token,
+                drive_file_id=(metadata.drive_file_id or upload_result.drive_file_id),
+            )
+            checksum_readback_performed = True
         upload_result = GoogleDriveUploadResult(
             drive_file_id=metadata.drive_file_id or upload_result.drive_file_id,
             drive_folder_id=metadata.drive_folder_id
@@ -1317,13 +1437,15 @@ class GoogleDriveUploadService:
             size_bytes=metadata.size_bytes
             if metadata.size_bytes is not None
             else upload_result.size_bytes,
-            checksum_sha256=metadata.checksum_sha256 or upload_result.checksum_sha256,
+            checksum_sha256=provider_checksum,
             upload_mode=upload_result.upload_mode,
             technical_appendix={
                 "folder_path": folder_path,
                 "folder_path_mode": archive_path.mode,
                 "upload_mode": upload_result.upload_mode,
                 "root_folder_configured": True,
+                "idempotency_key": idempotency_key,
+                "checksum_readback_performed": checksum_readback_performed,
             },
         )
         verification = self.verifier.verify(

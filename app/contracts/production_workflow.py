@@ -43,6 +43,7 @@ class ProductionWorkflowState(StrEnum):
     CANCELED = "CANCELED"
     FAILED_TERMINAL = "FAILED_TERMINAL"
     DEAD_LETTERED = "DEAD_LETTERED"
+    SUPERSEDED = "SUPERSEDED"
 
 
 class ProductionWorkflowStage(StrEnum):

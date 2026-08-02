@@ -41,16 +41,20 @@ from app.contracts.vcos_v2 import (
 )
 from app.core.actor import _system_worker_actor, authenticated_actor_context
 from app.core.errors import ValidationFailureError
+from app.core.time import utc_now
 from app.db.models import (
     HumanUploadTask,
     MediaRenderJob,
     VideoProject,
 )
+from app.db.models.foundation import DomainEvent
 from app.db.models.launch_cadence import (
     CadenceEvaluationReceipt,
     LongFormPublishSlot,
 )
 from app.db.models.production_workflow import ProductionWorkflowRun
+from app.db.models.production_workflow import WorkflowRecoveryReceipt
+from app.db.models.ops import DeadLetterJob, OpsIncident, ProviderAttempt
 from app.services.editorial_research import EditorialResearchService
 from app.services.launch_cadence import (
     FirstChannelLaunchPolicyService,
@@ -61,6 +65,10 @@ from app.services.m5 import (
     EditorialCalendarService,
     IdeaMarketPreflightService,
     SearchDemandEvidenceService,
+)
+from app.services.stale_workflow_recovery import (
+    STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
+    StaleWorkflowRecoveryService,
 )
 from app.services.r3d1 import R3D1AdminService
 from app.services.rbac import RBACService
@@ -93,7 +101,7 @@ def _ready_provider_snapshot():
         providers=[
             SimpleNamespace(
                 provider_key=provider_key,
-                readiness_state="READY_FOR_FUTURE_EXECUTION",
+                readiness_state="READY_FOR_REAL_EXECUTION",
                 blocker_reason_codes=[],
                 no_call_was_made=True,
             )
@@ -520,6 +528,161 @@ def test_buffer_below_target_starts_exactly_one_long_form_workflow(
     assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
 
 
+def _stale_zero_effect_workflow(db_session, qualification_factory):
+    scope = qualification_factory.channel_scope(
+        name="Stale workflow recovery", strict_long_form=True
+    )
+    policy, admin_actor, _ = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    launch_run = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    producer_actor = _actor(db_session, scope)
+    _greenlit_candidate(db_session, scope, producer_actor)
+    receipt = LongFormCadenceService(
+        db_session,
+        now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    ).evaluate(
+        launch_run_id=launch_run.id,
+        data=CadenceEvaluationCommand(evaluation_key="stale-zero-effect-start"),
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    workflow = db_session.get(ProductionWorkflowRun, receipt.production_workflow_run_id)
+    project = db_session.get(VideoProject, receipt.admitted_video_project_id)
+    origin_event = db_session.scalar(
+        select(DomainEvent)
+        .where(DomainEvent.workflow_run_id == workflow.id)
+        .order_by(DomainEvent.occurred_at)
+        .limit(1)
+    )
+    assert workflow is not None and project is not None and origin_event is not None
+    project.effective_context_snapshot_id = None
+    workflow.state = "DEAD_LETTERED"
+    workflow.current_stage = "RESEARCH"
+    workflow.state_reason_codes = ["STAGE_RETRY_EXHAUSTED"]
+    dead_letter = DeadLetterJob(
+        queue_name="production-workflow",
+        job_type="production.workflow.stage",
+        target_type="production_workflow_run",
+        target_id=workflow.id,
+        domain_event_id=origin_event.id,
+        workflow_run_id=workflow.id,
+        command_id=origin_event.command_id,
+        fail_count=5,
+        replay_state="REPLAYABLE",
+        retry_eligible=True,
+        reason_code="STAGE_RETRY_EXHAUSTED",
+        next_action="Historical fixture retry.",
+    )
+    incident = OpsIncident(
+        incident_type="STAGE_RETRY_EXHAUSTED",
+        severity="ERROR",
+        state="OPEN",
+        project_id=project.id,
+        workflow_run_id=workflow.id,
+        stage="RESEARCH",
+        domain_event_id=origin_event.id,
+        command_id=origin_event.command_id,
+        retry_eligible=True,
+        learning_excluded=True,
+        operator_visible_blocker="Historical research retry exhaustion.",
+        reason_codes=["STAGE_RETRY_EXHAUSTED"],
+        next_action="Do not replay until recovery is classified.",
+    )
+    db_session.add_all([dead_letter, incident])
+    db_session.flush()
+    return workflow, dead_letter, incident, origin_event
+
+
+def test_zero_effect_stale_dead_letter_auto_supersedes_once(
+    db_session, qualification_factory
+) -> None:
+    workflow, dead_letter, incident, origin_event = _stale_zero_effect_workflow(
+        db_session, qualification_factory
+    )
+
+    recovery = StaleWorkflowRecoveryService(db_session)
+    assert recovery.enqueue_due() == 1
+    event = db_session.scalar(
+        select(DomainEvent).where(
+            DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
+        )
+    )
+    assert event is not None
+    receipt = recovery.execute_event(
+        event=event,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    db_session.flush()
+
+    assert receipt.workflow_run_id == workflow.id
+    assert receipt.dead_letter_job_id == dead_letter.id
+    assert receipt.incident_id == incident.id
+    assert receipt.proof["effect_invocation_count"] == 0
+    assert receipt.proof["provider_attempt_count"] == 0
+    assert receipt.proof["budget_reservation_count"] == 0
+    assert receipt.proof["budget_settlement_count"] == 0
+    assert workflow.state == "SUPERSEDED"
+    assert dead_letter.replay_state == "DISCARDED"
+    assert dead_letter.retry_eligible is False
+    assert incident.state == "RESOLVED"
+    assert incident.resolution_evidence["workflow_recovery_receipt_id"] == str(
+        receipt.id
+    )
+    assert origin_event.id == dead_letter.domain_event_id
+    assert (
+        recovery.execute_event(
+            event=event,
+            actor=_system_worker_actor(
+                "vcos-durable-worker", permissions={"production.start"}
+            ),
+        ).id
+        == receipt.id
+    )
+    assert recovery.enqueue_due() == 0
+    assert db_session.scalar(select(func.count(WorkflowRecoveryReceipt.id))) == 1
+    assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
+
+
+def test_effectful_stale_dead_letter_is_never_auto_superseded(
+    db_session, qualification_factory
+) -> None:
+    workflow, _dead_letter, _incident, _origin_event = _stale_zero_effect_workflow(
+        db_session, qualification_factory
+    )
+    db_session.add(
+        ProviderAttempt(
+            provider_key="elevenlabs",
+            operation_key="final_narration",
+            target_type="production_workflow_run",
+            target_id=workflow.id,
+            attempt_number=1,
+            status="SUCCESS",
+            started_at=utc_now(),
+            finished_at=utc_now(),
+        )
+    )
+    db_session.flush()
+
+    assert StaleWorkflowRecoveryService(db_session).enqueue_due() == 0
+    assert workflow.state == "DEAD_LETTERED"
+    assert (
+        db_session.scalar(
+            select(func.count(WorkflowRecoveryReceipt.id)).where(
+                WorkflowRecoveryReceipt.workflow_run_id == workflow.id
+            )
+        )
+        == 0
+    )
+
+
 def test_series_run_activation_enforces_launch_allowlist_and_maximum(
     db_session, qualification_factory
 ) -> None:
@@ -690,6 +853,23 @@ def test_cadence_wait_matrix_never_forces_bad_input() -> None:
         quality_blocked=False,
     )
     assert decision == CadenceDecision.WAIT_BUDGET_BLOCKED
+
+    decision, reasons = LongFormCadenceService._decision(
+        run=run,
+        policy=policy,
+        slot=object(),
+        next_open=None,
+        projection=projection(0),
+        active_count=0,
+        candidates=[object()],
+        incidents=[],
+        budget_blocked=False,
+        rights_blocked=False,
+        quality_blocked=False,
+        provider_blocked=True,
+    )
+    assert decision == CadenceDecision.WAIT_PROVIDER_AUTHORITY
+    assert reasons == ["MANDATORY_REAL_PROVIDER_AUTHORITY_BLOCKED"]
 
     decision, _ = LongFormCadenceService._decision(
         run=run,

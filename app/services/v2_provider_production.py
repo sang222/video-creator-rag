@@ -252,6 +252,12 @@ class PackageBoundV2StageGateway:
             for adapter in self._adapters.values()
         )
 
+    @property
+    def registered_adapter_keys(self) -> frozenset[str]:
+        """Expose the concrete process registry for pre-start readiness only."""
+
+        return frozenset(self._adapters)
+
     def produce_media(self, context: WorkflowStageContext) -> WorkflowStageResult:
         return self._execute_operation(context, ProductionWorkflowStage.MEDIA)
 
@@ -514,7 +520,7 @@ def build_v2_provider_production_gateway(
     *,
     adapters: Mapping[str, V2ProductionOperationAdapter] | None = None,
 ) -> V2ProviderProductionGateway:
-    """Build the V2 gateway with local render and Drive-only archive stages."""
+    """Build the V2 gateway with concrete real-provider effect adapters."""
 
     configured_adapters = adapters
     if configured_adapters is None:
@@ -522,7 +528,13 @@ def build_v2_provider_production_gateway(
         # this module and is also usable directly with injected test storage.
         from app.services.v2_drive_archive import (
             V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY,
+            V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY,
             V2GoogleDriveArchiveAdapter,
+            V2GoogleDriveRemoteArchiveAdapter,
+        )
+        from app.services.v2_elevenlabs_narration import (
+            V2_ELEVENLABS_NARRATION_ADAPTER_KEY,
+            V2ElevenLabsNarrationAdapter,
         )
         from app.services.v2_native_effects import (
             V2_LOCAL_ADAPTER_KEY,
@@ -532,6 +544,8 @@ def build_v2_provider_production_gateway(
         configured_adapters = {
             V2_LOCAL_ADAPTER_KEY: V2LocalNativeProductionAdapter(),
             V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY: V2GoogleDriveArchiveAdapter(),
+            V2_ELEVENLABS_NARRATION_ADAPTER_KEY: V2ElevenLabsNarrationAdapter(),
+            V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY: V2GoogleDriveRemoteArchiveAdapter(),
         }
     package_bound = PackageBoundV2StageGateway(configured_adapters)
     return V2ProviderProductionGateway(
@@ -542,7 +556,7 @@ def build_v2_provider_production_gateway(
         presentation=package_bound,
         descriptor=PostReadinessProductionGatewayDescriptor(
             gateway_id="v2-provider",
-            version="1.3.0",
+            version="1.4.0",
             supported_lanes=frozenset({ProductionLane.LONG_FORM}),
             production_eligible=True,
             fixture_only=False,

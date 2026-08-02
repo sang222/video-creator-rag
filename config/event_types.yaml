@@ -114,6 +114,9 @@ items:
   - event_type: dead_letter_job.replayed
     event_version: 1
     description: Dead-letter job replayed.
+  - event_type: production.workflow.stale_recovery.requested
+    event_version: 1
+    description: System-worker request to supersede a proven zero-effect stale workflow.
   - event_type: ops_incident.created
     event_version: 1
     description: Ops incident created.

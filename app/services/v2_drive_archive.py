@@ -1,10 +1,10 @@
-"""Fail-closed V2 Google Drive archive resolution.
+"""Fail-closed V2 Google Drive archive execution and resolution.
 
-This module deliberately has no Google API client.  A separately authorized
-Drive upload must first persist a checksum-verified ``CloudMediaRef``.  The
-V2 archive stage then resolves that immutable remote artifact into the V2
-final-media and review authorities.  This keeps the workflow from treating a
-local recovery copy as an archive or silently creating an external effect.
+The qualification adapter only resolves an already verified remote object.
+The real adapter uses the existing Drive upload service behind a durable
+effect ledger and a sealed request journal, then resolves the resulting
+checksum-verified ``CloudMediaRef`` into final-media authority.  Neither path
+can treat a local recovery copy as a real archive.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import parse_qs, urlparse
 
@@ -29,12 +30,25 @@ from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.errors import ValidationFailureError
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef, GoogleDriveMediaCredential
+from app.db.models.v2_effect import V2ProductionEffectLedger
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.config_registry import content_hash
 from app.services.m10_2 import FinalMediaRefService
-from app.services.m10_5 import GOOGLE_DRIVE_SCOPE, GoogleDriveConfigService
+from app.services.m10_5 import (
+    GOOGLE_DRIVE_SCOPE,
+    GoogleDriveConfigService,
+    GoogleDriveUploadService,
+)
 from app.services.production_package import ProductionPackageService
 from app.services.production_workflow import WorkflowStageContext, WorkflowStageError
+from app.services.v2_native_effects import (
+    V2LocalNativeProductionAdapter,
+    _load_json,
+    _production_inputs,
+    _required_text,
+    _sha256_file,
+    _write_json_atomic,
+)
 from app.services.v2_provider_production import (
     V2AuthorizedAdapterOperation,
     V2ProductionAdapterDescriptor,
@@ -43,6 +57,7 @@ from app.services.workflow import ArtifactService
 
 
 V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY = "v2-google-drive-archive"
+V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY = "v2-google-drive-remote"
 V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE = "v2_drive_final_media_lineage_receipt"
 V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA = "vcos.v2-drive-final-media-lineage.v1"
 V2_DRIVE_ARCHIVE_RECEIPT_SCHEMA = "vcos.v2-drive-archive-receipt.v1"
@@ -271,6 +286,299 @@ class V2GoogleDriveArchiveAdapter:
         return result
 
 
+class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
+    """Upload one exact V2 render to channel-scoped Google Drive authority.
+
+    The inherited V2 effect ledger records ``EFFECT_STARTED`` before this
+    method runs.  This adapter additionally seals a filesystem request journal
+    before making the Drive call.  Therefore a crash after submission, but
+    before the verified ``CloudMediaRef`` transaction commits, is fail-closed
+    rather than a second upload under the same workflow command.
+    """
+
+    descriptor = V2ProductionAdapterDescriptor(
+        adapter_key=V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY,
+        supported_stages=frozenset({ProductionWorkflowStage.ARCHIVE}),
+        production_eligible=True,
+        fixture_only=False,
+        invokes_mr1=False,
+        paid_provider_calls=False,
+        automatic_publish=False,
+    )
+
+    def __init__(
+        self,
+        *,
+        readiness_gate: V2DriveArchiveReadinessGate | None = None,
+        upload_service_factory: Callable[[Session], GoogleDriveUploadService]
+        | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._readiness_gate = readiness_gate or PersistedV2DriveArchiveReadinessGate()
+        self._upload_service_factory = (
+            upload_service_factory or GoogleDriveUploadService
+        )
+
+    def _validate_operation(
+        self,
+        context: WorkflowStageContext,
+        operation: V2AuthorizedAdapterOperation,
+    ) -> None:
+        details = operation.parameters.get("provider_execution")
+        if (
+            context.run.production_lane != "LONG_FORM"
+            or context.run.planning_source_type != "LONG_FORM_PLAN"
+            or operation.stage != ProductionWorkflowStage.ARCHIVE
+            or operation.adapter_key != V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY
+            or operation.execution_mode != "REAL_LONG_FORM_PRODUCTION"
+            or operation.paid_provider_call
+            or operation.max_cost_usd != Decimal("0")
+            or operation.parameters.get("mode") != "GOOGLE_DRIVE_REMOTE_ARCHIVE"
+            or not isinstance(details, dict)
+            or details.get("provider") != "google_drive"
+            or details.get("credential_ref") != "oauth://google-drive/channel-connected"
+            or details.get("attempt_limit") != 1
+            or not isinstance(details.get("idempotency_key"), str)
+            or not details["idempotency_key"].strip()
+            or details.get("remote_object_required") is not True
+            or details.get("checksum_readback_required") is not True
+        ):
+            raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_OPERATION_INVALID")
+
+    def _archive(
+        self,
+        *,
+        ledger_id: uuid.UUID,
+        context: WorkflowStageContext,
+        operation: V2AuthorizedAdapterOperation,
+    ) -> tuple[WorkflowStageResult, dict[str, Any]]:
+        with self._session_factory() as session:
+            run, project, _package, _script, _visual = _production_inputs(
+                session, context.run.id
+            )
+            render_ledger = session.scalar(
+                select(V2ProductionEffectLedger).where(
+                    V2ProductionEffectLedger.workflow_run_id == run.id,
+                    V2ProductionEffectLedger.stage == "RENDER",
+                    V2ProductionEffectLedger.state == "VERIFIED",
+                )
+            )
+            if render_ledger is None:
+                raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_RENDER_REQUIRED")
+            render_journal = dict(render_ledger.effect_journal or {})
+        source = self._from_relative(
+            _required_text(render_journal, "output_relative_path")
+        )
+        checksum = _sha256_file(source)
+        if checksum != run.render_output_checksum:
+            raise ValidationFailureError(
+                "V2_GOOGLE_DRIVE_REMOTE_SOURCE_CHECKSUM_MISMATCH"
+            )
+        measured_duration_ms = int(
+            render_journal.get("measured_render_duration_ms") or 0
+        )
+        if measured_duration_ms <= 0:
+            raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_DURATION_REQUIRED")
+
+        self._readiness_gate.require_ready(
+            session=context.session,
+            company_id=run.company_id,
+            channel_workspace_id=run.channel_workspace_id,
+        )
+        artifact = self._resolve_existing_or_upload(
+            context=context,
+            operation=operation,
+            source=source,
+            checksum=checksum,
+            measured_duration_ms=measured_duration_ms,
+        )
+        destination = _normalized_destination_for_drive(context)
+        journal = {
+            "schema_version": "vcos.production-effect-journal.v1",
+            "command_id": context.command_id,
+            "stage": "ARCHIVE",
+            "state": "VERIFIED",
+            "effect_invocation_count": 1,
+            "provider_call_count": 1,
+            "provider": "google_drive",
+            "idempotency_key": operation.parameters["provider_execution"][
+                "idempotency_key"
+            ],
+            "source_relative_path": self._relative(source),
+            "source_checksum": checksum,
+            "measured_render_duration_ms": measured_duration_ms,
+            "cloud_media_ref_id": str(artifact.cloud_media.id),
+            "drive_file_id": artifact.cloud_media.drive_file_id,
+            "archive_receipt_hash": artifact.archive_receipt_hash,
+            "archive_object_ref": artifact.archive_object_ref,
+            "external_effect_performed": True,
+        }
+        _write_json_atomic(
+            self._effect_dir(context.command_id) / "google-drive-archive-receipt.json",
+            journal,
+        )
+        return (
+            WorkflowStageResult(
+                result_type="V2_VERIFIED_GOOGLE_DRIVE_REMOTE_ARCHIVE",
+                result_id=artifact.final_media.id,
+                result_ref=artifact.archive_object_ref,
+                result_hash=artifact.archive_receipt_hash,
+                result_payload={
+                    "archive_state": "VERIFIED",
+                    "storage_provider": "GOOGLE_DRIVE",
+                    "cloud_media_ref_id": str(artifact.cloud_media.id),
+                    "drive_file_id": artifact.cloud_media.drive_file_id,
+                    "checksum_sha256": artifact.final_media.checksum_sha256,
+                    "external_effect_performed": True,
+                    "automatic_publish": False,
+                },
+                authority_refs=WorkflowAuthorityRefs(
+                    video_project_id=run.video_project_id,
+                    archive_receipt_ref=(
+                        f"v2-drive-archive-receipt://{artifact.cloud_media.id}/"
+                        f"{artifact.archive_receipt_hash}"
+                    ),
+                    archive_receipt_hash=artifact.archive_receipt_hash,
+                    archive_object_ref=artifact.archive_object_ref,
+                    archive_verification_state="VERIFIED",
+                    final_media_ref_id=artifact.final_media.id,
+                    final_media_ref_hash=run.render_output_checksum,
+                    destination_binding_id=destination["id"],
+                    destination_binding_fingerprint=destination["content_hash"],
+                    destination_binding=destination["binding"],
+                ),
+                reason_codes=[
+                    "V2_GOOGLE_DRIVE_REMOTE_ARCHIVE_VERIFIED",
+                    "V2_GOOGLE_DRIVE_CHECKSUM_READBACK_VERIFIED",
+                ],
+            ),
+            journal,
+        )
+
+    def _resolve_existing_or_upload(
+        self,
+        *,
+        context: WorkflowStageContext,
+        operation: V2AuthorizedAdapterOperation,
+        source: Any,
+        checksum: str,
+        measured_duration_ms: int,
+    ) -> V2VerifiedDriveArchiveArtifact:
+        try:
+            return _resolve_or_create_v2_drive_archive(
+                session=context.session,
+                context=context,
+                operation=operation,
+                external_effect_performed=True,
+            )
+        except WorkflowStageError as exc:
+            if exc.error_code != "V2_DRIVE_ARCHIVE_ARTIFACT_REQUIRED":
+                raise
+
+        details = dict(operation.parameters["provider_execution"])
+        effect_dir = self._effect_dir(context.command_id)
+        request_path = effect_dir / "google-drive-archive-request-journal.json"
+        identity = {
+            "schema_version": "vcos.v2-google-drive-archive-request.v1",
+            "command_id": context.command_id,
+            "operation_id": operation.operation_id,
+            "idempotency_key": details["idempotency_key"],
+            "source_relative_path": self._relative(source),
+            "source_checksum": checksum,
+            "source_size_bytes": source.stat().st_size,
+            "measured_render_duration_ms": measured_duration_ms,
+            "attempt_limit": 1,
+        }
+        if request_path.exists():
+            prior = _load_json(request_path)
+            if any(prior.get(key) != value for key, value in identity.items()):
+                raise ValidationFailureError("V2_GOOGLE_DRIVE_REQUEST_JOURNAL_MISMATCH")
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_GOOGLE_DRIVE_OUTCOME_UNCERTAIN",
+                summary=(
+                    "A Google Drive archive request was submitted without a "
+                    "sealed checksum-verified authority; no duplicate upload "
+                    "was attempted."
+                ),
+                incident_type="PROVIDER_OUTCOME_UNCERTAIN",
+                retry_eligible=False,
+            )
+        _write_json_atomic(request_path, {**identity, "state": "SUBMITTED"})
+        try:
+            cloud, verification = self._upload_service_factory(
+                context.session
+            ).upload_verified(
+                local_path=source,
+                media_type="LONG_FORM_FINAL",
+                company_id=context.run.company_id,
+                channel_workspace_id=context.run.channel_workspace_id,
+                video_project_id=context.run.video_project_id,
+                uploaded_video_id=None,
+                render_package_id=None,
+                source_refs=[
+                    {
+                        "type": "v2_render_output",
+                        "workflow_run_id": str(context.run.id),
+                        "render_output_ref": context.run.render_output_ref,
+                        "render_output_checksum": context.run.render_output_checksum,
+                        "production_package_artifact_version_id": str(
+                            context.run.production_package_artifact_version_id
+                        ),
+                        "production_package_hash": context.run.production_package_hash,
+                    }
+                ],
+                retention_policy={
+                    "keep_local": True,
+                    "cleanup_authorized": False,
+                    "source": "v2-real-archive",
+                },
+                idempotency_key=details["idempotency_key"],
+            )
+        except Exception as exc:
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_GOOGLE_DRIVE_ARCHIVE_PROVIDER_FAILURE",
+                summary=(
+                    "Google Drive archive did not yield a sealed verified "
+                    "response; no retry or local archive fallback was attempted."
+                ),
+                incident_type="PROVIDER_OUTCOME_UNCERTAIN",
+                retry_eligible=False,
+            ) from exc
+        if (
+            verification.verification_status != "CHECKSUM_VERIFIED"
+            or verification.checksum_verified is not True
+        ):
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_GOOGLE_DRIVE_CHECKSUM_READBACK_REQUIRED",
+                summary=(
+                    "Google Drive did not provide a checksum-verified readback; "
+                    "the archive cannot become final-media authority."
+                ),
+                incident_type="ARCHIVE_VERIFICATION_BLOCK",
+                retry_eligible=False,
+            )
+        cloud.technical_appendix = {
+            **(cloud.technical_appendix or {}),
+            "measured_render_duration_ms": measured_duration_ms,
+            "v2_archive_command_id": context.command_id,
+            "v2_archive_idempotency_key": details["idempotency_key"],
+            "v2_remote_archive": True,
+        }
+        context.session.flush()
+        artifact = _resolve_or_create_v2_drive_archive(
+            session=context.session,
+            context=context,
+            operation=operation,
+            external_effect_performed=True,
+        )
+        context.session.commit()
+        return artifact
+
+
 def require_v2_google_drive_final_media(
     session: Session,
     *,
@@ -307,7 +615,8 @@ def require_v2_google_drive_final_media(
         or project_id is None
         or media.video_project_id != project_id
         or media.media_type != "LONG_FORM_FINAL"
-        or media.provider_key != V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY
+        or media.provider_key
+        not in {V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY, V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY}
         or media.provider_type != "MEDIA_STORAGE"
         or media.file_ref != archive_object_ref
         or media.checksum_sha256 != expected_checksum
@@ -356,6 +665,7 @@ def _resolve_or_create_v2_drive_archive(
     session: Session,
     context: WorkflowStageContext,
     operation: V2AuthorizedAdapterOperation,
+    external_effect_performed: bool = False,
 ) -> V2VerifiedDriveArchiveArtifact:
     run = context.run
     project = session.get(VideoProject, run.video_project_id)
@@ -440,7 +750,7 @@ def _resolve_or_create_v2_drive_archive(
         "archive_state": "VERIFIED",
         "invokes_mr1": False,
         "automatic_publish": False,
-        "external_effect_performed": False,
+        "external_effect_performed": external_effect_performed,
     }
     receipt_hash = content_hash(receipt)
     lineage_content = {
@@ -468,12 +778,15 @@ def _resolve_or_create_v2_drive_archive(
         "storage_provider": "GOOGLE_DRIVE",
         "invokes_mr1": False,
         "automatic_publish": False,
+        "external_effect_performed": external_effect_performed,
     }
     lineage = _ensure_lineage(
         session=session,
         project=project,
         command_id=context.command_id,
         content=lineage_content,
+        producer_key=operation.adapter_key,
+        external_effect_performed=external_effect_performed,
     )
     final_media = _ensure_final_media(
         session=session,
@@ -484,6 +797,7 @@ def _resolve_or_create_v2_drive_archive(
         lineage=lineage,
         archive_object_ref=archive_object_ref,
         measured_duration_ms=measured_duration_ms,
+        provider_key=operation.adapter_key,
     )
     return require_v2_google_drive_final_media(
         session,
@@ -500,6 +814,8 @@ def _ensure_lineage(
     project: VideoProject,
     command_id: str,
     content: dict[str, Any],
+    producer_key: str,
+    external_effect_performed: bool,
 ) -> ArtifactVersion:
     expected_hash = content_hash(content)
     existing = session.execute(
@@ -545,9 +861,9 @@ def _ensure_lineage(
             created_by_user_id=project.created_by_user_id,
             external_entity_refs=[],
             packaging_metadata={
-                "producer": V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY,
+                "producer": producer_key,
                 "archive_command_id": command_id,
-                "external_effect_performed": False,
+                "external_effect_performed": external_effect_performed,
             },
             media_qc_metadata={
                 "technical_qc_hash": content["technical_qc_hash"],
@@ -593,6 +909,7 @@ def _ensure_final_media(
     lineage: ArtifactVersion,
     archive_object_ref: str,
     measured_duration_ms: int,
+    provider_key: str,
 ) -> FinalMediaRef:
     existing = session.scalar(
         select(FinalMediaRef).where(
@@ -609,7 +926,7 @@ def _ensure_final_media(
             existing.file_ref != archive_object_ref
             or existing.cloud_media_ref_id != cloud.id
             or existing.lineage_artifact_version_id != lineage.id
-            or existing.provider_key != V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY
+            or existing.provider_key != provider_key
             or existing.provider_type != "MEDIA_STORAGE"
             or existing.duration_seconds != duration_seconds
         ):
@@ -630,7 +947,7 @@ def _ensure_final_media(
             duration_seconds=duration_seconds,
             aspect_ratio="16:9",
             resolution="1920x1080",
-            provider_key=V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY,
+            provider_key=provider_key,
             provider_type="MEDIA_STORAGE",
             checksum_sha256=run.render_output_checksum,
             cloud_media_ref_id=cloud.id,
@@ -781,9 +1098,11 @@ __all__ = [
     "V2DriveArchiveReadiness",
     "V2DriveArchiveReadinessGate",
     "V2GoogleDriveArchiveAdapter",
+    "V2GoogleDriveRemoteArchiveAdapter",
     "V2VerifiedDriveArchiveArtifact",
     "V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE",
     "V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA",
     "V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY",
+    "V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY",
     "require_v2_google_drive_final_media",
 ]

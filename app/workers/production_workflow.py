@@ -37,6 +37,10 @@ from app.services.production_workflow import (
     ProductionWorkflowCoordinator,
     build_default_stage_handler_registry,
 )
+from app.services.stale_workflow_recovery import (
+    STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
+    StaleWorkflowRecoveryService,
+)
 
 
 SessionFactory = Callable[[], Session]
@@ -121,6 +125,7 @@ class ProductionWorkflowWorker:
         self._next_cadence_scan_at: datetime | None = None
 
     def run_once(self) -> WorkerRunResult:
+        self._enqueue_due_stale_workflow_recoveries()
         self._enqueue_due_cadence_evaluations()
         self._enqueue_due_analytics_windows()
         claim = self._claim()
@@ -159,6 +164,11 @@ class ProductionWorkflowWorker:
                     data=CadenceEvaluationCommand(
                         evaluation_key=str(event.payload["evaluation_key"])
                     ),
+                    actor=self._actor,
+                )
+            elif event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE:
+                StaleWorkflowRecoveryService(session, now=self.now).execute_event(
+                    event=event,
                     actor=self._actor,
                 )
             elif event.event_type == ANALYTICS_WINDOW_EVENT_TYPE:
@@ -285,6 +295,20 @@ class ProductionWorkflowWorker:
                 seconds=self.cadence_scan_interval_seconds
             )
             return len(launch_runs)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _enqueue_due_stale_workflow_recoveries(self) -> int:
+        """Use the normal worker outbox for zero-effect stale recovery only."""
+
+        session = self.session_factory()
+        try:
+            count = StaleWorkflowRecoveryService(session, now=self.now).enqueue_due()
+            session.commit()
+            return count
         except Exception:
             session.rollback()
             raise

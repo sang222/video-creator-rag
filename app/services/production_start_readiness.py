@@ -7,22 +7,22 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.channel_policy import ChannelScopedPolicy
+from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
-from app.db.models.channel import CompiledChannelPolicySnapshot
+from app.db.models.channel import ChannelWorkspace, CompiledChannelPolicySnapshot
+from app.db.models.m10_5 import GoogleDriveMediaCredential
+from app.db.models.ops import CredentialReference
+from app.services.m10_5 import GOOGLE_DRIVE_SCOPE, GoogleDriveConfigService
 from app.services.config_registry import content_hash
-from app.services.m2 import ProviderReadinessM2Service
 from app.services.ops import CostService
 
 
-_READY_PROVIDER_STATES = {
-    "CAPABILITY_READY",
-    "READY_FOR_EXECUTION_AUTHORIZATION",
-    "READY_FOR_FUTURE_EXECUTION",
-}
+_READY_PROVIDER_STATES = {"READY_FOR_REAL_EXECUTION"}
 
 
 def resolve_budget_authority(
@@ -98,17 +98,33 @@ def resolve_provider_authority(
         required.append("elevenlabs")
     if scoped.provider_usage_policy.drive_archive_required_before_cleanup:
         required.append("google_drive_archive")
-    readiness_snapshot = (
-        readiness_snapshot
+    # A caller-provided snapshot exists solely for hermetic unit tests. Runtime
+    # cadence never supplies it: it recomputes the concrete v2 executor and
+    # channel-scoped credential authority below.
+    provider_map = (
+        {item.provider_key: item for item in readiness_snapshot.providers}
         if readiness_snapshot is not None
-        else ProviderReadinessM2Service().snapshot()
+        else {}
     )
-    provider_map = {item.provider_key: item for item in readiness_snapshot.providers}
     providers: list[dict[str, Any]] = []
     blocked: list[str] = []
     for provider_key in sorted(set(required)):
         item = provider_map.get(provider_key)
-        state = item.readiness_state if item is not None else "NOT_CONFIGURED"
+        runtime = (
+            None
+            if readiness_snapshot is not None
+            else _real_runtime_readiness(
+                session=session,
+                provider_key=provider_key,
+                channel_workspace_id=channel_workspace_id,
+                scoped=scoped,
+            )
+        )
+        state = (
+            item.readiness_state
+            if item is not None
+            else str((runtime or {}).get("readiness_state") or "NOT_CONFIGURED")
+        )
         ready = state in _READY_PROVIDER_STATES
         if not ready:
             blocked.append(provider_key)
@@ -120,11 +136,12 @@ def resolve_provider_authority(
                 "reason_codes": (
                     list(item.blocker_reason_codes)
                     if item is not None
-                    else ["PROVIDER_READINESS_MISSING"]
+                    else list((runtime or {}).get("reason_codes") or [])
                 ),
-                "no_call_was_made": (
-                    bool(item.no_call_was_made) if item is not None else True
-                ),
+                "requirements": (runtime or {}).get("requirements", {}),
+                "no_call_was_made": bool(item.no_call_was_made)
+                if item is not None
+                else True,
             }
         )
     return {
@@ -142,8 +159,164 @@ def resolve_provider_authority(
         ),
         "real_network_probe_enabled": bool(
             readiness_snapshot.real_network_probe_enabled
+            if readiness_snapshot is not None
+            else False
         ),
-        "no_network_calls_made": bool(readiness_snapshot.no_network_calls_made),
+        "no_network_calls_made": bool(
+            readiness_snapshot.no_network_calls_made
+            if readiness_snapshot is not None
+            else True
+        ),
+    }
+
+
+def _real_runtime_readiness(
+    *,
+    session: Session,
+    provider_key: str,
+    channel_workspace_id: uuid.UUID,
+    scoped: ChannelScopedPolicy,
+) -> dict[str, Any]:
+    """Read the real v2 pre-start authority without probing a provider."""
+
+    settings = get_settings()
+    if provider_key == "elevenlabs":
+        api_key = settings.elevenlabs_api_key
+        requirements = {
+            "real_executor_registered": _real_executor_registered(
+                "v2-elevenlabs-narration"
+            ),
+            "credential_reference_exists": bool(
+                api_key and api_key.get_secret_value().strip()
+            ),
+            "credential_state_healthy": bool(
+                api_key and api_key.get_secret_value().strip()
+            ),
+            "channel_scope_match": bool(scoped.voice_policy.voice_id)
+            and bool(scoped.voice_policy.model_id),
+            # The immutable channel policy, not an unrelated environment
+            # default, is the source of the voice/model passed to ElevenLabs.
+            "capability_model_match": bool(scoped.voice_policy.voice_id)
+            and bool(scoped.voice_policy.model_id),
+            "idempotency_supported": True,
+            "attempt_limit_defined": (
+                scoped.provider_usage_policy.elevenlabs.initial_tts_attempts == 1
+            ),
+            "real_execution_enabled": settings.provider_real_execution_enabled
+            and settings.provider_production_execution_enabled
+            and settings.elevenlabs_real_execution_enabled
+            and settings.elevenlabs_real_generation_enabled
+            and not settings.media_provider_calls_disabled,
+        }
+        return _readiness_from_requirements(
+            provider_key="elevenlabs", requirements=requirements
+        )
+    if provider_key == "google_drive_archive":
+        workspace = session.get(ChannelWorkspace, channel_workspace_id)
+        config = GoogleDriveConfigService(settings)
+        try:
+            safe_status = config.safe_status()
+        except ValidationFailureError:
+            safe_status = {}
+        credential = (
+            session.scalar(
+                select(GoogleDriveMediaCredential)
+                .where(
+                    GoogleDriveMediaCredential.company_id
+                    == (workspace.company_id if workspace is not None else None),
+                    GoogleDriveMediaCredential.channel_workspace_id
+                    == channel_workspace_id,
+                    GoogleDriveMediaCredential.connection_state == "CONNECTED",
+                )
+                .order_by(GoogleDriveMediaCredential.updated_at.desc())
+                .limit(1)
+            )
+            if workspace is not None
+            else None
+        )
+        reference = (
+            session.get(CredentialReference, credential.credential_reference_id)
+            if credential is not None
+            else None
+        )
+        requirements = {
+            "real_executor_registered": _real_executor_registered(
+                "v2-google-drive-remote"
+            ),
+            "credential_reference_exists": reference is not None,
+            "credential_state_healthy": reference is not None
+            and reference.status not in {"MISSING", "REVOKED", "DISABLED"},
+            "channel_scope_match": credential is not None
+            and credential.company_id == workspace.company_id
+            and credential.channel_workspace_id == channel_workspace_id,
+            "capability_model_match": credential is not None
+            and GOOGLE_DRIVE_SCOPE in set(credential.scopes or []),
+            "idempotency_supported": True,
+            "attempt_limit_defined": True,
+            "root_authority": credential is not None
+            and bool(config.root_folder_id())
+            and credential.root_folder_id == config.root_folder_id(),
+            "real_execution_enabled": settings.google_drive_offload_enabled
+            and settings.google_drive_archive_enabled
+            and settings.google_drive_real_archive_enabled
+            and bool(safe_status.get("config_state") == "CONFIGURED"),
+        }
+        return _readiness_from_requirements(
+            provider_key="google_drive_archive", requirements=requirements
+        )
+    return {
+        "readiness_state": "BLOCKED_CAPABILITY",
+        "reason_codes": ["REAL_PROVIDER_UNKNOWN"],
+        "requirements": {},
+    }
+
+
+def _real_executor_registered(adapter_key: str) -> bool:
+    """Inspect the real default gateway without making a provider request."""
+
+    try:
+        from app.services.v2_provider_production import (
+            PackageBoundV2StageGateway,
+            build_v2_provider_production_gateway,
+        )
+
+        gateway = build_v2_provider_production_gateway()
+        return isinstance(gateway.media, PackageBoundV2StageGateway) and (
+            adapter_key in gateway.media.registered_adapter_keys
+        )
+    except Exception:
+        return False
+
+
+def _readiness_from_requirements(
+    *, provider_key: str, requirements: dict[str, bool]
+) -> dict[str, Any]:
+    if all(requirements.values()):
+        return {
+            "readiness_state": "READY_FOR_REAL_EXECUTION",
+            "reason_codes": [],
+            "requirements": requirements,
+        }
+    if not requirements.get("real_executor_registered", False):
+        reason = "BLOCKED_EXECUTOR_UNAVAILABLE"
+    elif not requirements.get(
+        "credential_reference_exists", False
+    ) or not requirements.get("credential_state_healthy", False):
+        reason = "BLOCKED_CREDENTIAL"
+    elif not requirements.get("channel_scope_match", False):
+        reason = "BLOCKED_CHANNEL_SCOPE"
+    elif provider_key == "google_drive_archive" and not requirements.get(
+        "root_authority", False
+    ):
+        reason = "BLOCKED_ARCHIVE_AUTHORITY"
+    elif not requirements.get("capability_model_match", False):
+        reason = "BLOCKED_CAPABILITY"
+    else:
+        reason = "BLOCKED_EXECUTOR_UNAVAILABLE"
+    return {
+        "readiness_state": reason,
+        "reason_codes": [reason],
+        "requirements": requirements,
     }
 
 

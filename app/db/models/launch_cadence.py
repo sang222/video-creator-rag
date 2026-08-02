@@ -376,7 +376,8 @@ class CadenceEvaluationReceipt(Base):
             "'START_LONG_FORM_PRODUCTION','WAIT_BUFFER_FULL',"
             "'WAIT_NO_ELIGIBLE_CANDIDATE','WAIT_ACTIVE_PRODUCTION',"
             "'WAIT_OUTSIDE_PRODUCTION_HORIZON','WAIT_BUDGET_BLOCKED',"
-            "'WAIT_POLICY_OR_RIGHTS_BLOCKED','WAIT_QUALITY_BLOCKED',"
+            "'WAIT_PROVIDER_AUTHORITY','WAIT_POLICY_OR_RIGHTS_BLOCKED',"
+            "'WAIT_QUALITY_BLOCKED',"
             "'WAIT_LAUNCH_NOT_ACTIVE')",
             name="ck_cadence_receipts_decision",
         ),

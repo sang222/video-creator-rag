@@ -258,6 +258,7 @@ from app.db.models.ofv0 import (
 from app.db.models.production_workflow import (
     ProductionWorkflowRun,
     WorkflowCommandReceipt,
+    WorkflowRecoveryReceipt,
 )
 from app.db.models.production_publish import (
     FinalReviewCandidate,
@@ -473,6 +474,8 @@ __all__ = [
     "PackageRuntimeDisposition",
     "ProductionWorkflowRun",
     "WorkflowCommandReceipt",
+    "WorkflowRecoveryReceipt",
+    "LongFormAnalyticsWindow",
     "FinalReviewCandidate",
     "FinalVideoDecision",
     "SeriesEpisodePublication",

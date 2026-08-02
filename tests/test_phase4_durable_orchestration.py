@@ -1128,7 +1128,15 @@ def test_one_action_and_worker_restart_complete_trusted_fixture_flow(
                     f"{failed_event.last_error_summary if failed_event else None}:"
                     f"calls={calls}"
                 )
-    assert second_worker.run_once().status == "IDLE"
+    # A later worker build can discover a separate historical zero-effect
+    # recovery event while this shared durable fixture database is draining.
+    # It must be delivered through the normal outbox before the worker is idle.
+    for _ in range(8):
+        drained = second_worker.run_once()
+        if drained.status == "IDLE":
+            break
+        assert drained.status == "DELIVERED"
+    assert drained.status == "IDLE"
 
     with factory() as check:
         run = check.get(ProductionWorkflowRun, started.id)

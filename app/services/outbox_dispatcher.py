@@ -43,6 +43,7 @@ from app.services.production_workflow import (
     command_id_for,
     semantic_hash,
 )
+from app.services.stale_workflow_recovery import STALE_WORKFLOW_RECOVERY_EVENT_TYPE
 
 
 DEFAULT_QUEUE_NAME = "production-workflow"
@@ -149,6 +150,12 @@ class DurableOutboxDispatcher:
                             == ANALYTICS_WINDOW_AGGREGATE_TYPE,
                             DomainEvent.workflow_run_id.is_(None),
                         ),
+                        and_(
+                            DomainEvent.event_type
+                            == STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
+                            DomainEvent.aggregate_type == "production_workflow_run",
+                            DomainEvent.workflow_run_id.is_not(None),
+                        ),
                     ),
                     DomainEvent.delivered_at.is_(None),
                     DomainEvent.published_at.is_(None),
@@ -175,7 +182,8 @@ class DurableOutboxDispatcher:
                 return None
             cadence_event = event.event_type == CADENCE_EVALUATION_EVENT_TYPE
             analytics_event = event.event_type == ANALYTICS_WINDOW_EVENT_TYPE
-            if cadence_event or analytics_event:
+            recovery_event = event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
+            if cadence_event or analytics_event or recovery_event:
                 if event.command_id is None or not isinstance(event.payload, dict):
                     self._dead_letter_cadence_event(
                         event,
@@ -183,7 +191,11 @@ class DurableOutboxDispatcher:
                         error_code=(
                             "CADENCE_EVENT_IDENTITY_INVALID"
                             if cadence_event
-                            else "ANALYTICS_EVENT_IDENTITY_INVALID"
+                            else (
+                                "ANALYTICS_EVENT_IDENTITY_INVALID"
+                                if analytics_event
+                                else "STALE_WORKFLOW_RECOVERY_EVENT_IDENTITY_INVALID"
+                            )
                         ),
                         summary="scheduler command identity or payload is invalid",
                     )
@@ -195,7 +207,11 @@ class DurableOutboxDispatcher:
                         error_code=(
                             "CADENCE_RETRY_EXHAUSTED"
                             if cadence_event
-                            else "ANALYTICS_RETRY_EXHAUSTED"
+                            else (
+                                "ANALYTICS_RETRY_EXHAUSTED"
+                                if analytics_event
+                                else "STALE_WORKFLOW_RECOVERY_RETRY_EXHAUSTED"
+                            )
                         ),
                         summary="scheduler event reached its bounded attempt limit",
                     )
@@ -378,6 +394,7 @@ class DurableOutboxDispatcher:
         if event.event_type in {
             CADENCE_EVALUATION_EVENT_TYPE,
             ANALYTICS_WINDOW_EVENT_TYPE,
+            STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
         }:
             return self._record_cadence_failure(
                 event=event,
@@ -637,6 +654,8 @@ class DurableOutboxDispatcher:
                         DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
                     ),
                     DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                    DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
+                    DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
                 ),
                 DomainEvent.lease_owner == worker_id,
                 DomainEvent.delivered_at.is_(None),
@@ -672,6 +691,8 @@ class DurableOutboxDispatcher:
                         DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
                     ),
                     DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                    DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
+                    DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
                 ),
                 DomainEvent.delivered_at.is_(None),
                 DomainEvent.published_at.is_(None),
@@ -685,15 +706,17 @@ class DurableOutboxDispatcher:
         ).all()
         reclaimed = 0
         for event in events:
-            if event.event_type == CADENCE_EVALUATION_EVENT_TYPE:
+            if event.event_type in {
+                CADENCE_EVALUATION_EVENT_TYPE,
+                ANALYTICS_WINDOW_EVENT_TYPE,
+                STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
+            }:
                 event.lease_owner = None
                 event.lease_expires_at = None
                 event.heartbeat_at = None
                 event.next_attempt_at = now
                 event.last_error_code = "WORKER_LEASE_EXPIRED"
-                event.last_error_summary = (
-                    "expired cadence lease was released for deterministic replay"
-                )
+                event.last_error_summary = "expired scheduler or recovery lease was released for deterministic replay"
                 reclaimed += 1
                 continue
             run = self._lock_run(event.workflow_run_id, skip_locked=True)

@@ -80,6 +80,7 @@ TERMINAL_WORKFLOW_STATES = frozenset(
         ProductionWorkflowState.CANCELED.value,
         ProductionWorkflowState.FAILED_TERMINAL.value,
         ProductionWorkflowState.DEAD_LETTERED.value,
+        ProductionWorkflowState.SUPERSEDED.value,
     }
 )
 

@@ -135,7 +135,6 @@ _ACTIVE_WORKFLOW_STATES = {
     "ARCHIVE_RUNNING",
     "RETRY_SCHEDULED",
     "BLOCKED",
-    "DEAD_LETTERED",
 }
 
 
@@ -857,7 +856,8 @@ class LongFormCadenceService:
             for item in strict_candidates
             if item.rights_policy_state == "PASS" and item.quality_state == "PASS"
         ]
-        budget_blocked = budget_provider_readiness["state"] == "BLOCKED"
+        budget_blocked = budget_readiness["state"] != "READY"
+        provider_blocked = provider_readiness["state"] != "READY"
         blocked_candidate_states = self._blocked_candidate_states(
             run=run,
             policy=policy,
@@ -892,6 +892,7 @@ class LongFormCadenceService:
             candidates=candidates,
             incidents=incidents,
             budget_blocked=budget_blocked,
+            provider_blocked=provider_blocked,
             rights_blocked=rights_blocked,
             quality_blocked=quality_blocked,
         )
@@ -1026,6 +1027,7 @@ class LongFormCadenceService:
         budget_blocked: bool,
         rights_blocked: bool,
         quality_blocked: bool,
+        provider_blocked: bool = False,
     ) -> tuple[CadenceDecision, list[str]]:
         if policy.state != "APPROVED" or run.state != "ACTIVE":
             return CadenceDecision.WAIT_LAUNCH_NOT_ACTIVE, ["LAUNCH_NOT_ACTIVE"]
@@ -1041,6 +1043,10 @@ class LongFormCadenceService:
             ]
         if budget_blocked:
             return CadenceDecision.WAIT_BUDGET_BLOCKED, ["BUDGET_PROVIDER_BLOCKED"]
+        if provider_blocked:
+            return CadenceDecision.WAIT_PROVIDER_AUTHORITY, [
+                "MANDATORY_REAL_PROVIDER_AUTHORITY_BLOCKED"
+            ]
         if not candidates:
             if rights_blocked:
                 return CadenceDecision.WAIT_POLICY_OR_RIGHTS_BLOCKED, [

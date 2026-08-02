@@ -57,6 +57,7 @@ WORKFLOW_STATES = (
     "CANCELED",
     "FAILED_TERMINAL",
     "DEAD_LETTERED",
+    "SUPERSEDED",
 )
 
 WORKFLOW_STAGES = (
@@ -325,6 +326,64 @@ class WorkflowCommandReceipt(Base):
     )
 
 
+class WorkflowRecoveryReceipt(Base):
+    """Immutable proof for an automatic, zero-effect workflow supersession."""
+
+    __tablename__ = "workflow_recovery_receipts"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    workflow_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("production_workflow_runs.id"),
+        nullable=False,
+        unique=True,
+    )
+    dead_letter_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dead_letter_jobs.id"),
+        nullable=False,
+        unique=True,
+    )
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ops_incidents.id")
+    )
+    recovery_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domain_events.id"), nullable=False, unique=True
+    )
+    recovery_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    classification: Mapped[str] = mapped_column(String(80), nullable=False)
+    decision: Mapped[str] = mapped_column(String(120), nullable=False)
+    failed_stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    failure_reason_code: Mapped[str] = mapped_column(String(160), nullable=False)
+    proof: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    decision_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        CheckConstraint(
+            "classification = 'STALE_PRE_REPAIR_ZERO_EFFECT_WORKFLOW'",
+            name="workflow_recovery_receipts_classification",
+        ),
+        CheckConstraint(
+            "decision = 'AUTO_SUPERSEDE_STALE_PRE_REPAIR_WORKFLOW'",
+            name="workflow_recovery_receipts_decision",
+        ),
+        CheckConstraint(
+            "failed_stage in ("
+            + ",".join(f"'{stage}'" for stage in WORKFLOW_STAGES)
+            + ")",
+            name="workflow_recovery_receipts_stage",
+        ),
+        CheckConstraint(
+            "input_hash ~ '^[0-9a-f]{64}$' and decision_hash ~ '^[0-9a-f]{64}$'",
+            name="workflow_recovery_receipts_hashes",
+        ),
+        Index("ix_workflow_recovery_receipts_created_at", "created_at"),
+    )
+
+
 @event.listens_for(WorkflowCommandReceipt, "before_update")
 def _workflow_receipt_update_forbidden(
     _mapper: Mapper[WorkflowCommandReceipt],
@@ -341,3 +400,21 @@ def _workflow_receipt_delete_forbidden(
     _target: WorkflowCommandReceipt,
 ) -> None:
     raise RuntimeError("WORKFLOW_COMMAND_RECEIPT_IMMUTABLE")
+
+
+@event.listens_for(WorkflowRecoveryReceipt, "before_update")
+def _workflow_recovery_receipt_update_forbidden(
+    _mapper: Mapper[WorkflowRecoveryReceipt],
+    _connection: Any,
+    _target: WorkflowRecoveryReceipt,
+) -> None:
+    raise RuntimeError("WORKFLOW_RECOVERY_RECEIPT_IMMUTABLE")
+
+
+@event.listens_for(WorkflowRecoveryReceipt, "before_delete")
+def _workflow_recovery_receipt_delete_forbidden(
+    _mapper: Mapper[WorkflowRecoveryReceipt],
+    _connection: Any,
+    _target: WorkflowRecoveryReceipt,
+) -> None:
+    raise RuntimeError("WORKFLOW_RECOVERY_RECEIPT_IMMUTABLE")
