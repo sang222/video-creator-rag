@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.contracts.caption_voice_quality import (
     CanonicalCaptionCue,
-    CaptionBBoxMetrics,
     CaptionReadingMetrics,
     CreativeQualityGateResult,
 )
@@ -300,7 +299,6 @@ class CanonicalTimelineSegment(BaseModel):
     caption_cue_ids: list[str] = Field(default_factory=list)
     caption_spoken_token_ids: list[str] = Field(default_factory=list)
     caption_reading_metrics: list[CaptionReadingMetrics] = Field(default_factory=list)
-    caption_bbox_metrics: list[CaptionBBoxMetrics] = Field(default_factory=list)
     caption_gate_results: list[CreativeQualityGateResult] = Field(default_factory=list)
     scene_start_ms: int = Field(ge=0)
     scene_end_ms: int = Field(gt=0)

@@ -861,12 +861,6 @@ class RenderSpecCompilerService:
                         z_index=0,
                         metadata={"placeholder": True},
                     ),
-                    LayerSpec(
-                        layer_id=f"layer_{scene.scene_id}_caption",
-                        layer_type="CAPTION",
-                        z_index=10,
-                        metadata={"caption_ids": scene.caption_ids},
-                    ),
                 ],
                 overlay_text=scene.overlay_text,
             )
@@ -881,7 +875,6 @@ class RenderSpecCompilerService:
             resolution_height=720,
             fps=30,
             crop_strategy="LETTERBOX",
-            caption_placement={"placement_key": "lower_third", "vertical_anchor": "BOTTOM", "max_lines": 2, "safe_area_aware": True},
             safe_area_profile={"profile_key": "youtube_16x9_default", "top_pct": 0.08, "bottom_pct": 0.12, "left_pct": 0.06, "right_pct": 0.06},
             overlay_scale=1.0,
             export_filename=f"{project.id}_default_16x9.mp4",

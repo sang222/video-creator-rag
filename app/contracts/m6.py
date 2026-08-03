@@ -445,15 +445,6 @@ class SafeAreaProfileContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CaptionPlacementProfileContract(BaseModel):
-    placement_key: str = "lower_third"
-    vertical_anchor: Literal["TOP", "MIDDLE", "BOTTOM"] = "BOTTOM"
-    max_lines: int = Field(default=2, ge=1, le=4)
-    safe_area_aware: bool = True
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class ExportProfileContract(BaseModel):
     aspect_ratio: AspectRatio
     resolution_width: int = Field(gt=0)
@@ -475,7 +466,6 @@ class RenderVariantSpec(BaseModel):
     resolution_height: int = Field(gt=0)
     fps: int = Field(gt=0, le=120)
     crop_strategy: CropStrategy
-    caption_placement: CaptionPlacementProfileContract
     safe_area_profile: SafeAreaProfileContract
     overlay_scale: float = Field(default=1.0, gt=0, le=4)
     export_filename: str = Field(min_length=1)
@@ -502,7 +492,7 @@ class RenderVariantSpec(BaseModel):
 
 class LayerSpec(BaseModel):
     layer_id: str
-    layer_type: Literal["VIDEO", "IMAGE", "TEXT", "CAPTION", "AUDIO_PLACEHOLDER"]
+    layer_type: Literal["VIDEO", "IMAGE", "TEXT", "AUDIO_PLACEHOLDER"]
     asset_ref: str | None = None
     text: str | None = None
     z_index: int = 0
@@ -543,15 +533,6 @@ class AudioTrackSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CaptionStyleSpec(BaseModel):
-    style_key: str = "default_caption"
-    font_family: str = "system"
-    font_size: int = Field(default=42, gt=0)
-    max_lines: int = Field(default=2, ge=1, le=4)
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class AudioDuckingSpec(BaseModel):
     enabled: bool = False
     ducking_db: float = 0
@@ -579,7 +560,6 @@ class RenderSpecContract(BaseModel):
     audio_tracks: list[AudioTrackSpec] = Field(min_length=1)
     caption_track_ref: str
     default_export_profile: ExportProfileContract
-    caption_style: CaptionStyleSpec = Field(default_factory=CaptionStyleSpec)
     audio_ducking: AudioDuckingSpec = Field(default_factory=AudioDuckingSpec)
     thumbnail_compositor: ThumbnailCompositorSpec = Field(
         default_factory=ThumbnailCompositorSpec

@@ -38,10 +38,7 @@ items:
         max_abs_delta_percent_without_human: 2
         human_approval_required_above_percent: 2
         block_above_percent: 3
-    caption_style_policy:
-      font_family: Arial
-      outline_ratio: 0.055
-      shadow_ratio: 0.025
+    subtitle_sidecar_policy:
       global:
         max_lines_per_cue: 2
         cue_duration_seconds:
@@ -56,17 +53,9 @@ items:
           review_p95_max: 20
           block_any_above: 20
       longform_16_9:
-        font_scale_pass: [0.044, 0.050]
-        font_scale_review: [0.040, 0.054]
-        block_outside: [0.040, 0.054]
         max_chars_per_line_pass: 42
         max_chars_per_line_review: 46
         max_chars_per_line_block: 46
-        max_block_width_pass: 0.68
-        max_block_width_review: 0.74
-        max_block_width_block: 0.74
-        bottom_safe_margin_pass: 0.08
-        bottom_safe_margin_review_min: 0.05
     caption_sync_policy:
       median_abs_start_offset_ms: {pass_max: 80, review_max: 120, block_above: 120}
       p95_abs_start_offset_ms: {pass_max: 150, review_max: 220, block_above: 220}

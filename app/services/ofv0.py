@@ -677,7 +677,7 @@ class PlatformNativePackagePlanService:
                     "hook_adaptation": "canonical long-form hook",
                     "duration_target": "long_form",
                     "aspect_ratio": "16:9",
-                    "caption_behavior": "burn-in/local caption plan",
+                    "caption_delivery": "SIDECAR_SRT_ONLY",
                     "title_metadata_behavior": "manual-publish review",
                     "disclosure_state": "PRE_RENDER_PLANNED",
                     "originality_relationship_to_source": "canonical",

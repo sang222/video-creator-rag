@@ -703,8 +703,8 @@ class ChannelProfileCompiler:
         publish_dump = policy.publish_policy.model_dump(mode="json")
         caption_hash = content_hash(
             {
-                "caption_style_policy": creative_quality_policies.get(
-                    "caption_style_policy"
+                "subtitle_sidecar_policy": creative_quality_policies.get(
+                    "subtitle_sidecar_policy"
                 ),
                 "caption_sync_policy": creative_quality_policies.get(
                     "caption_sync_policy"

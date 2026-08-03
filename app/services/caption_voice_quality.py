@@ -3,21 +3,15 @@ from __future__ import annotations
 import math
 import re
 import statistics
-import subprocess
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from app.contracts.caption_voice_quality import (
-    ASSCaptionEvent,
     CanonicalCaptionCue,
-    CaptionBBoxMetrics,
-    CaptionBoundsPreflightReport,
     CaptionDisplayToken,
-    CaptionFormatPolicy,
     CaptionReadingMetrics,
-    CaptionStylePolicy,
+    SubtitleSidecarFormatPolicy,
+    SubtitleSidecarPolicy,
     CaptionSyncMetrics,
     CaptionSyncPolicy,
     CaptionTextSpan,
@@ -42,16 +36,10 @@ from app.contracts.temporal_authority import (
     TextSpan,
     VerifiedNarrationAlignment,
 )
-from app.services.caption_ass import (
-    build_caption_ass_document,
-    caption_render_payload,
-    resolved_caption_render_style,
-)
 from app.services.native_render_plan import stable_hash
 
 
 CAPTION_COMPILATION_VERSION = "readable-caption-compiler/v1.1.0"
-FFMPEG_FULL_DEFAULT = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
 ALLOWED_DISPLAY_TRANSFORMS = {
     "APPROVED_CASING",
     "APPROVED_BRANDED_CASING",
@@ -98,9 +86,6 @@ PREPOSITIONS = {
     "without",
 }
 _WORD_KEY_RE = re.compile(r"[^a-z0-9]")
-_BBOX_RE = re.compile(
-    r"x1:\s*(-?\d+)\s+x2:\s*(-?\d+)\s+y1:\s*(-?\d+)\s+y2:\s*(-?\d+)\s+w:\s*(\d+)\s+h:\s*(\d+)"
-)
 
 
 def _policy_hash(policy: Any) -> str:
@@ -135,9 +120,17 @@ def _narration_policy(policy: Any) -> NarrationPacingPolicy:
     )
 
 
-def _caption_style_policy(policy: Any) -> CaptionStylePolicy:
+def _subtitle_sidecar_policy(policy: Any) -> SubtitleSidecarPolicy:
+    if (
+        isinstance(policy, dict)
+        and "subtitle_sidecar_policy" not in policy
+        and isinstance(policy.get("caption_style_policy"), dict)
+    ):
+        # Historical immutable policy blobs used the old family key.  Parse
+        # their sidecar constraints while the model ignores render-only keys.
+        policy = {**policy, "subtitle_sidecar_policy": policy["caption_style_policy"]}
     return _coerce_policy(
-        policy, family="caption_style_policy", model=CaptionStylePolicy
+        policy, family="subtitle_sidecar_policy", model=SubtitleSidecarPolicy
     )
 
 
@@ -719,14 +712,14 @@ class ReadableCaptionCompiler:
         normalized: SpokenTextNormalized,
         alignment: VerifiedNarrationAlignment,
         timeline: CanonicalMediaTimeline,
-        policy: CaptionStylePolicy | dict[str, Any],
+        policy: SubtitleSidecarPolicy | dict[str, Any],
         final_cue_trailing_hold_policy: FinalCueTrailingHoldPolicy
         | dict[str, Any]
         | None = None,
         display_caption_text: DisplayCaptionText | None = None,
         aspect_ratio: str = "16:9",
     ) -> CaptionCompilationOutput:
-        policy = _caption_style_policy(policy)
+        policy = _subtitle_sidecar_policy(policy)
         trailing_hold_policy = (
             _final_cue_trailing_hold_policy(final_cue_trailing_hold_policy)
             if final_cue_trailing_hold_policy is not None
@@ -748,12 +741,6 @@ class ReadableCaptionCompiler:
             raise ValueError("CAPTION_DISPLAY_SPOKEN_HASH_MISMATCH")
 
         format_policy = self._format_policy(policy, aspect_ratio)
-        render_style = resolved_caption_render_style(
-            policy=policy,
-            format_policy=format_policy,
-            aspect_ratio=aspect_ratio,
-            policy_hash=_resolved_policy_hash(policy),
-        )
         units = self._display_units(normalized, display_caption_text)
         expected_ids = [item.token_id for item in normalized.spoken_tokens]
         actual_ids = [token_id for unit in units for token_id in unit.spoken_token_ids]
@@ -824,7 +811,6 @@ class ReadableCaptionCompiler:
                         unit.display_token.model_dump(mode="json") for unit in batch
                     ],
                     "reading_metrics": reading.model_dump(mode="json"),
-                    "bbox_metrics": None,
                     "gate_results": [],
                     "timing_source": "CANONICAL_MEDIA_TIMELINE",
                 }
@@ -861,7 +847,6 @@ class ReadableCaptionCompiler:
                         "caption_reading_metrics": [
                             cue.reading_metrics for cue in segment_cues
                         ],
-                        "caption_bbox_metrics": [],
                         "caption_gate_results": [],
                     }
                 )
@@ -886,6 +871,9 @@ class ReadableCaptionCompiler:
         )
         if compilation_gate.status == "BLOCK":
             raise ValueError(";".join(compilation_gate.reason_codes))
+        subtitle_qc_gate = SubtitleSidecarGate().evaluate(cues=cues, policy=policy)
+        if subtitle_qc_gate.status == "BLOCK":
+            raise ValueError(";".join(subtitle_qc_gate.reason_codes))
         caption_compilation_payload = {
             "compilation_version": CAPTION_COMPILATION_VERSION,
             "source_timeline_hash": timeline.timeline_hash,
@@ -899,7 +887,6 @@ class ReadableCaptionCompiler:
             "cues": [cue.model_dump(mode="json") for cue in cues],
         }
         compilation_hash = stable_hash(caption_compilation_payload)
-        render_payload_hash = stable_hash(caption_render_payload(cues))
         timeline_payload = timeline.model_dump(mode="json", exclude={"timeline_hash"})
         timeline_payload["segments"] = [
             item.model_dump(mode="json") for item in updated_segments
@@ -909,12 +896,11 @@ class ReadableCaptionCompiler:
             "caption_compilation_ref": f"caption-compilation:{compilation_hash}",
             "caption_compilation_hash": compilation_hash,
             "caption_compilation_version": CAPTION_COMPILATION_VERSION,
-            "caption_render_payload_hash": render_payload_hash,
-            "caption_render_style": render_style,
             "caption_policy_ref": policy.policy_ref,
             "caption_policy_version": policy.policy_version,
             "caption_policy_hash": _resolved_policy_hash(policy),
             "caption_compilation_gate": compilation_gate.status,
+            "subtitle_sidecar_gate": subtitle_qc_gate.status,
             "caption_spoken_token_coverage": 1.0,
             "caption_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "caption_final_cue_trailing_hold": (
@@ -935,15 +921,6 @@ class ReadableCaptionCompiler:
             timeline_hash=stable_hash(timeline_payload),
         )
         srt_text = self._srt(cues)
-        ass_events = [
-            ASSCaptionEvent(
-                cue_id=cue.cue_id,
-                start_ms=cue.caption_start_ms,
-                end_ms=cue.caption_end_ms,
-                text=r"\N".join(self._ass_escape(line) for line in cue.caption_lines),
-            )
-            for cue in cues
-        ]
         track_payload = {
             "compilation_version": CAPTION_COMPILATION_VERSION,
             "spoken_text_hash": normalized.spoken_text_hash,
@@ -951,11 +928,11 @@ class ReadableCaptionCompiler:
             "canonical_timeline_hash": compiled_timeline.timeline_hash,
             "cues": [cue.model_dump(mode="json") for cue in cues],
             "srt_text": srt_text,
-            "ass_events": [event.model_dump(mode="json") for event in ass_events],
             "spoken_token_coverage": 1.0,
             "missing_spoken_token_ids": [],
             "extra_spoken_token_ids": [],
             "compilation_gate": compilation_gate.model_dump(mode="json"),
+            "subtitle_qc_gate": subtitle_qc_gate.model_dump(mode="json"),
             "final_cue_trailing_hold": (
                 trailing_hold_evidence.model_dump(mode="json")
                 if trailing_hold_evidence is not None
@@ -1081,8 +1058,8 @@ class ReadableCaptionCompiler:
 
     @staticmethod
     def _format_policy(
-        policy: CaptionStylePolicy, aspect_ratio: str
-    ) -> CaptionFormatPolicy:
+        policy: SubtitleSidecarPolicy, aspect_ratio: str
+    ) -> SubtitleSidecarFormatPolicy:
         normalized = aspect_ratio.replace(" ", "")
         if normalized in {"16:9", "longform_16_9", "LANDSCAPE"}:
             return policy.longform_16_9
@@ -1158,8 +1135,8 @@ class ReadableCaptionCompiler:
         units: list[_DisplayUnit],
         *,
         word_by_token: dict[str, Any],
-        format_policy: CaptionFormatPolicy,
-        policy: CaptionStylePolicy,
+        format_policy: SubtitleSidecarFormatPolicy,
+        policy: SubtitleSidecarPolicy,
     ) -> list[list[_DisplayUnit]]:
         if not units:
             return []
@@ -1234,7 +1211,7 @@ class ReadableCaptionCompiler:
 
     @classmethod
     def _wrap_lines(
-        cls, units: list[_DisplayUnit], policy: CaptionFormatPolicy
+        cls, units: list[_DisplayUnit], policy: SubtitleSidecarFormatPolicy
     ) -> list[str]:
         full = " ".join(item.rendered_text for item in units)
         if len(full) <= policy.max_chars_per_line_pass:
@@ -1292,11 +1269,6 @@ class ReadableCaptionCompiler:
             )
         return "\n\n".join(blocks) + "\n"
 
-    @staticmethod
-    def _ass_escape(value: str) -> str:
-        return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
-
-
 def _srt_timestamp(milliseconds: int) -> str:
     hours, remainder = divmod(milliseconds, 3_600_000)
     minutes, remainder = divmod(remainder, 60_000)
@@ -1311,9 +1283,9 @@ class CaptionCompilationGate:
         cues: Sequence[CanonicalCaptionCue],
         normalized: SpokenTextNormalized,
         timeline: CanonicalMediaTimeline,
-        policy: CaptionStylePolicy | dict[str, Any],
+        policy: SubtitleSidecarPolicy | dict[str, Any],
     ) -> CreativeQualityGateResult:
-        policy = _caption_style_policy(policy)
+        policy = _subtitle_sidecar_policy(policy)
         reasons: list[str] = []
         expected = [item.token_id for item in normalized.spoken_tokens]
         actual = [token_id for cue in cues for token_id in cue.spoken_token_ids]
@@ -1365,24 +1337,20 @@ class CaptionCompilationGate:
         )
 
 
-class CaptionLayoutGate:
+class SubtitleSidecarGate:
     def evaluate(
         self,
         *,
         cues: Sequence[CanonicalCaptionCue],
-        bbox_metrics: Sequence[CaptionBBoxMetrics],
-        policy: CaptionStylePolicy | dict[str, Any],
-        aspect_ratio: str,
+        policy: SubtitleSidecarPolicy | dict[str, Any],
     ) -> CreativeQualityGateResult:
-        policy = _caption_style_policy(policy)
-        format_policy = ReadableCaptionCompiler._format_policy(policy, aspect_ratio)
+        policy = _subtitle_sidecar_policy(policy)
+        format_policy = ReadableCaptionCompiler._format_policy(policy, "16:9")
         statuses: list[str] = []
         reasons: list[str] = []
-        metric_by_id = {item.cue_id: item for item in bbox_metrics}
         all_cps = [cue.reading_metrics.characters_per_second for cue in cues]
         for cue in cues:
             status = "PASS"
-            bbox = metric_by_id.get(cue.cue_id)
             reading = cue.reading_metrics
             duration = reading.duration_seconds
             if reading.line_count > policy.global_policy.max_lines_per_cue:
@@ -1416,30 +1384,6 @@ class CaptionLayoutGate:
             ):
                 status = _worst_status([status, "REVIEW_REQUIRED"])
                 reasons.append("CAPTION_READING_SPEED_REVIEW")
-            if bbox is None or bbox.width <= 0 or bbox.height <= 0:
-                status = "BLOCK"
-                reasons.append("CAPTION_BBOX_MISSING")
-            else:
-                if bbox.block_width_ratio > format_policy.max_block_width_block:
-                    status = "BLOCK"
-                    reasons.append("CAPTION_BBOX_OVERFLOW")
-                elif bbox.block_width_ratio > format_policy.max_block_width_pass:
-                    status = _worst_status([status, "REVIEW_REQUIRED"])
-                    reasons.append("CAPTION_BLOCK_WIDTH_REVIEW")
-                if (
-                    not format_policy.block_outside[0]
-                    <= bbox.font_scale
-                    <= format_policy.block_outside[1]
-                ):
-                    status = "BLOCK"
-                    reasons.append("CAPTION_FONT_SCALE_OUTSIDE_POLICY")
-                elif (
-                    not format_policy.font_scale_pass[0]
-                    <= bbox.font_scale
-                    <= format_policy.font_scale_pass[1]
-                ):
-                    status = _worst_status([status, "REVIEW_REQUIRED"])
-                    reasons.append("CAPTION_FONT_SCALE_REVIEW")
             statuses.append(status)
         average_cps = statistics.fmean(all_cps) if all_cps else 0.0
         p95_cps = _percentile(all_cps, 0.95)
@@ -1456,312 +1400,15 @@ class CaptionLayoutGate:
             statuses.append("REVIEW_REQUIRED")
             reasons.append("CAPTION_P95_READING_SPEED_REVIEW")
         return _gate(
-            "CaptionLayoutGate",
+            "SubtitleSidecarGate",
             _worst_status(statuses),
             reasons,
             {
                 "cue_count": len(cues),
                 "average_cps": round(average_cps, 3),
                 "p95_cps": p95_cps,
-                "bbox_count": len(bbox_metrics),
             },
             policy,
-        )
-
-
-class CaptionSafeAreaGate:
-    def evaluate(
-        self,
-        *,
-        bbox_metrics: Sequence[CaptionBBoxMetrics],
-        policy: CaptionStylePolicy | dict[str, Any],
-        aspect_ratio: str,
-    ) -> CreativeQualityGateResult:
-        policy = _caption_style_policy(policy)
-        format_policy = ReadableCaptionCompiler._format_policy(policy, aspect_ratio)
-        statuses: list[str] = []
-        reasons: list[str] = []
-        for metric in bbox_metrics:
-            status = "PASS"
-            if metric.text_outside_frame or metric.width <= 0 or metric.height <= 0:
-                status = "BLOCK"
-                reasons.append("CAPTION_TEXT_OUTSIDE_FRAME")
-            if metric.required_safe_zone_overlap:
-                status = "BLOCK"
-                reasons.append("CAPTION_REQUIRED_VISUAL_SAFE_ZONE_OVERLAP")
-            if metric.bottom_margin_ratio < format_policy.bottom_safe_margin_review_min:
-                status = "BLOCK"
-                reasons.append("CAPTION_UNSAFE_BOTTOM_MARGIN")
-            elif metric.bottom_margin_ratio < format_policy.bottom_safe_margin_pass:
-                status = _worst_status([status, "REVIEW_REQUIRED"])
-                reasons.append("CAPTION_BOTTOM_MARGIN_REVIEW")
-            if metric.block_width_ratio > format_policy.max_block_width_block:
-                status = "BLOCK"
-                reasons.append("CAPTION_BBOX_OVERFLOW")
-            statuses.append(status)
-        if not bbox_metrics:
-            statuses.append("BLOCK")
-            reasons.append("CAPTION_BBOX_MISSING")
-        return _gate(
-            "CaptionSafeAreaGate",
-            _worst_status(statuses),
-            reasons,
-            {"cue_count": len(bbox_metrics)},
-            policy,
-        )
-
-
-class CaptionBoundsPreflight:
-    """Uses the production libass chain and parses FFmpeg's measured bbox evidence."""
-
-    def __init__(
-        self,
-        *,
-        ffmpeg_binary: str = FFMPEG_FULL_DEFAULT,
-        runner: Callable[..., Any] | None = None,
-    ):
-        self.ffmpeg_binary = ffmpeg_binary
-        self.runner = runner or subprocess.run
-
-    def preflight(
-        self,
-        *,
-        cues: Sequence[CanonicalCaptionCue],
-        frame_width: int,
-        frame_height: int,
-        policy: CaptionStylePolicy | dict[str, Any],
-        aspect_ratio: str,
-        evidence_dir: Path | None = None,
-        required_safe_zones: Sequence[dict[str, int]] = (),
-    ) -> CaptionBoundsPreflightReport:
-        policy = _caption_style_policy(policy)
-        format_policy = ReadableCaptionCompiler._format_policy(policy, aspect_ratio)
-        render_style = resolved_caption_render_style(
-            policy=policy,
-            format_policy=format_policy,
-            aspect_ratio=aspect_ratio,
-            policy_hash=_resolved_policy_hash(policy),
-        )
-        font_scale = float(render_style["font_scale"])
-        metrics: list[CaptionBBoxMetrics] = []
-        with tempfile.TemporaryDirectory(prefix="cqr1b-caption-bbox-") as temporary:
-            work = evidence_dir.resolve() if evidence_dir else Path(temporary)
-            work.mkdir(parents=True, exist_ok=True)
-            for cue in cues:
-                ass_path = work / f"{cue.cue_id}.ass"
-                preview_path = work / f"{cue.cue_id}-alpha.png"
-                ass_path.write_text(
-                    build_caption_ass_document(
-                        cues=[cue],
-                        frame_width=frame_width,
-                        frame_height=frame_height,
-                        render_style=render_style,
-                        force_event_window_ms=(0, 1_000),
-                    ),
-                    encoding="utf-8",
-                )
-                filter_value = (
-                    "format=rgba,"
-                    f"ass=filename='{self._filter_escape(ass_path)}':alpha=1,"
-                    "alphaextract,bbox=min_val=1"
-                )
-                argv = [
-                    self.ffmpeg_binary,
-                    "-hide_banner",
-                    "-nostdin",
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    # The color source defaults to an opaque YUV format even when
-                    # its color carries @0.0 alpha.  Converting that opaque frame
-                    # to RGBA later would make alphaextract/bbox report the whole
-                    # canvas.  Preserve transparency at the source boundary so
-                    # bbox measures only the libass glyph/outline pixels.
-                    (
-                        f"color=c=black@0.0:s={frame_width}x{frame_height}:r=1:d=1,"
-                        "format=rgba"
-                    ),
-                    "-vf",
-                    filter_value,
-                    "-frames:v",
-                    "1",
-                    str(preview_path),
-                ]
-                completed = self.runner(
-                    argv, capture_output=True, text=True, shell=False
-                )
-                stderr = str(getattr(completed, "stderr", "") or "")
-                if getattr(completed, "returncode", 1) != 0:
-                    raise ValueError(
-                        f"CAPTION_BBOX_PREFLIGHT_FAILED:{cue.cue_id}:{stderr[-500:]}"
-                    )
-                matches = list(_BBOX_RE.finditer(stderr))
-                if not matches:
-                    raise ValueError(f"CAPTION_BBOX_NOT_DETECTED:{cue.cue_id}")
-                match = matches[-1]
-                x1, x2, y1, y2, width, height = (int(value) for value in match.groups())
-                outside = x1 < 0 or y1 < 0 or x2 >= frame_width or y2 >= frame_height
-                overlap = any(
-                    x1 < zone["x"] + zone["width"]
-                    and x2 + 1 > zone["x"]
-                    and y1 < zone["y"] + zone["height"]
-                    and y2 + 1 > zone["y"]
-                    for zone in required_safe_zones
-                )
-                metrics.append(
-                    CaptionBBoxMetrics(
-                        cue_id=cue.cue_id,
-                        frame_width=frame_width,
-                        frame_height=frame_height,
-                        x=max(0, x1),
-                        y=max(0, y1),
-                        width=width,
-                        height=height,
-                        block_width_ratio=round(width / frame_width, 6),
-                        left_margin_ratio=round(max(0, x1) / frame_width, 6),
-                        right_margin_ratio=round(
-                            max(0, frame_width - (x2 + 1)) / frame_width, 6
-                        ),
-                        top_margin_ratio=round(max(0, y1) / frame_height, 6),
-                        bottom_margin_ratio=round(
-                            max(0, frame_height - (y2 + 1)) / frame_height, 6
-                        ),
-                        font_scale=font_scale,
-                        line_count=cue.reading_metrics.line_count,
-                        cpl=cue.reading_metrics.max_chars_per_line,
-                        cps=cue.reading_metrics.characters_per_second,
-                        duration_seconds=cue.reading_metrics.duration_seconds,
-                        text_outside_frame=outside,
-                        required_safe_zone_overlap=overlap,
-                        preview_frame_ref=str(preview_path) if evidence_dir else None,
-                        ffmpeg_stderr_excerpt="\n".join(
-                            line for line in stderr.splitlines() if "bbox" in line
-                        )[-2_000:],
-                    )
-                )
-        layout = CaptionLayoutGate().evaluate(
-            cues=cues,
-            bbox_metrics=metrics,
-            policy=policy,
-            aspect_ratio=aspect_ratio,
-        )
-        safe = CaptionSafeAreaGate().evaluate(
-            bbox_metrics=metrics,
-            policy=policy,
-            aspect_ratio=aspect_ratio,
-        )
-        payload = {
-            "ffmpeg_binary": self.ffmpeg_binary,
-            "frame_width": frame_width,
-            "frame_height": frame_height,
-            "cue_metrics": [item.model_dump(mode="json") for item in metrics],
-            "layout_gate": layout.model_dump(mode="json"),
-            "safe_area_gate": safe.model_dump(mode="json"),
-            "policy_ref": policy.policy_ref,
-            "policy_version": policy.policy_version,
-            "policy_hash": _resolved_policy_hash(policy),
-        }
-        return CaptionBoundsPreflightReport(
-            **payload, content_hash=stable_hash(payload)
-        )
-
-    def apply_to_timeline(
-        self,
-        timeline: CanonicalMediaTimeline,
-        report: CaptionBoundsPreflightReport,
-    ) -> CanonicalMediaTimeline:
-        metrics = {item.cue_id: item for item in report.cue_metrics}
-        segments = []
-        for segment in timeline.segments:
-            cues = []
-            for cue in segment.caption_cues:
-                bbox = metrics.get(cue.cue_id)
-                cue_payload = cue.model_dump(mode="json", exclude={"content_hash"})
-                cue_payload["bbox_metrics"] = (
-                    bbox.model_dump(mode="json") if bbox else None
-                )
-                cue_payload["gate_results"] = [
-                    *[item.model_dump(mode="json") for item in cue.gate_results],
-                    report.layout_gate.model_dump(mode="json"),
-                    report.safe_area_gate.model_dump(mode="json"),
-                ]
-                cues.append(
-                    CanonicalCaptionCue(
-                        **cue_payload, content_hash=stable_hash(cue_payload)
-                    )
-                )
-            segments.append(
-                segment.model_copy(
-                    update={
-                        "caption_cues": cues,
-                        "caption_bbox_metrics": [
-                            item.bbox_metrics for item in cues if item.bbox_metrics
-                        ],
-                        "caption_gate_results": [
-                            report.layout_gate,
-                            report.safe_area_gate,
-                        ],
-                    }
-                )
-            )
-        payload = timeline.model_dump(mode="json", exclude={"timeline_hash"})
-        payload["segments"] = [item.model_dump(mode="json") for item in segments]
-        payload["qc_metrics"] = {
-            **timeline.qc_metrics,
-            "caption_bbox_preflight_hash": report.content_hash,
-            "caption_layout_gate": report.layout_gate.status,
-            "caption_safe_area_gate": report.safe_area_gate.status,
-        }
-        return CanonicalMediaTimeline(**payload, timeline_hash=stable_hash(payload))
-
-    @staticmethod
-    def _filter_escape(path: Path) -> str:
-        return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-
-    @staticmethod
-    def _ass_time(milliseconds: int) -> str:
-        hours, remainder = divmod(milliseconds, 3_600_000)
-        minutes, remainder = divmod(remainder, 60_000)
-        seconds, millis = divmod(remainder, 1_000)
-        return f"{hours}:{minutes:02d}:{seconds:02d}.{millis // 10:02d}"
-
-    @classmethod
-    def _ass_document(
-        cls,
-        *,
-        cue: CanonicalCaptionCue,
-        frame_width: int,
-        frame_height: int,
-        font_scale: float,
-        bottom_margin_ratio: float,
-        policy: CaptionStylePolicy,
-    ) -> str:
-        format_policy = CaptionFormatPolicy(
-            font_scale_pass=(font_scale, font_scale),
-            font_scale_review=(font_scale, font_scale),
-            block_outside=(font_scale, font_scale),
-            max_chars_per_line_pass=1,
-            max_chars_per_line_review=1,
-            max_chars_per_line_block=1,
-            max_block_width_pass=1,
-            max_block_width_review=1,
-            max_block_width_block=1,
-            bottom_safe_margin_pass=bottom_margin_ratio,
-            bottom_safe_margin_review_min=bottom_margin_ratio,
-        )
-        style = resolved_caption_render_style(
-            policy=policy,
-            format_policy=format_policy,
-            aspect_ratio="PREFLIGHT_COMPAT",
-            policy_hash=_resolved_policy_hash(policy),
-        )
-        return build_caption_ass_document(
-            cues=[cue],
-            frame_width=frame_width,
-            frame_height=frame_height,
-            render_style=style,
-            force_event_window_ms=(0, 1_000),
         )
 
 

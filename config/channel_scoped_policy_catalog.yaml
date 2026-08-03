@@ -71,7 +71,7 @@ items:
       source_run_id: pa1r-cqr1-20260716-paid-canary-009
       required_families:
         - narration_pacing_policy
-        - caption_style_policy
+        - subtitle_sidecar_policy
         - caption_sync_policy
         - visual_language_policy
         - visual_continuity_policy

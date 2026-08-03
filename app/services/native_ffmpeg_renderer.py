@@ -22,7 +22,6 @@ from app.contracts.native_renderer import (
     NativeRenderExecutionReceipt,
     V2ProductionRenderExecutionEnvelope,
 )
-from app.services.caption_ass import write_caption_ass
 from app.services.native_media_qc import NativeMediaQC
 from app.services.native_render_plan import stable_hash
 
@@ -105,23 +104,6 @@ def _v2_native_font_path() -> Path:
     if font is None:
         raise FileNotFoundError("V2_NATIVE_FONT_NOT_FOUND")
     return font.resolve()
-
-
-def _write_canonical_ass(
-    path: Path,
-    *,
-    cues: list[dict],
-    width: int,
-    height: int,
-    caption_policy: dict,
-) -> None:
-    write_caption_ass(
-        path,
-        cues=cues,
-        frame_width=width,
-        frame_height=height,
-        render_style=caption_policy,
-    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -513,7 +495,6 @@ class FFmpegCommandBuilder:
             raise ValueError("SYNTHETIC_BUILDER_REJECTS_PAID_CANARY")
         work = _inside(self.root, Path("runs") / run_key)
         work.mkdir(parents=True, exist_ok=True)
-        canonical_cues = list(manifest.caption_schedule.get("cues") or [])
         canonical_strict = manifest.temporal_authority_mode == "CANONICAL_STRICT"
         if canonical_strict:
             if not manifest.compiled_scenes or not manifest.canonical_duration_ms:
@@ -531,43 +512,10 @@ class FFmpegCommandBuilder:
         filtergraph = _inside(self.root, work / "filtergraph.txt")
         available_filters = _available_filters(self.ffmpeg)
         drawtext_available = "drawtext" in available_filters
-        caption_filter = (
-            "ass"
-            if canonical_cues and "ass" in available_filters
-            else (
-                "subtitles"
-                if not canonical_cues and "subtitles" in available_filters
-                else None
-            )
-        )
-        if canonical_cues and caption_filter is None:
-            raise ValueError("CANONICAL_CAPTION_FILTER_UNAVAILABLE")
-        # Registry-owned graph only; never accepts raw payload syntax.
-        generated_caption_path: str | None = None
+        # Narration captions are a canonical SRT sidecar.  The renderer never
+        # consumes their cues or source file: only semantic overlays are
+        # composited into the video graph below.
         generated_text_files: list[str] = []
-        if canonical_cues:
-            caption_path = _inside(self.root, work / "canonical-captions.ass")
-            _write_canonical_ass(
-                caption_path,
-                cues=canonical_cues,
-                width=width,
-                height=height,
-                caption_policy=dict(
-                    manifest.caption_schedule.get("render_style")
-                    or manifest.normalized_caption
-                ),
-            )
-            generated_caption_path = str(caption_path)
-            generated_text_files.append(str(caption_path))
-        else:
-            legacy_caption = str(
-                manifest.normalized_caption.get("srt_ref")
-                or manifest.caption_schedule.get("srt_ref")
-                or ""
-            )
-            generated_caption_path = (
-                legacy_caption if legacy_caption and caption_filter else None
-            )
         panel_x, panel_y = round(width * 0.0625), round(height * 0.102)
         panel_w, panel_h = round(width * 0.875), round(height * 0.796)
         title_size = max(28, round(min(width, height) * 0.067))
@@ -615,16 +563,6 @@ class FFmpegCommandBuilder:
                 f"text='VCOS':fontcolor=black:fontsize={badge_size}:"
                 f"x={round(width * 0.91)}:y={round(height * 0.072)}"
             )
-        if generated_caption_path:
-            caption_filter_path = (
-                generated_caption_path.replace("\\", "\\\\")
-                .replace(":", "\\:")
-                .replace("'", "\\'")
-            )
-            if caption_filter == "ass":
-                graph += f",ass=filename='{caption_filter_path}'"
-            else:
-                graph += f",subtitles=filename='{caption_filter_path}':force_style='FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=3,Alignment=2,MarginV=55'"
         graph += "[v]"
         filtergraph.write_text(graph + "\n", encoding="utf-8")
         part = str(output) + ".part.mp4"
@@ -684,15 +622,9 @@ class FFmpegCommandBuilder:
             "expected_duration_seconds": duration_seconds,
             "max_av_drift_ms": 250,
             "drawtext_filter_available": drawtext_available,
-            "caption_render_mode": (
-                "BURNED_IN" if generated_caption_path else "SIDECAR_ONLY"
-            ),
+            "subtitle_stream_count": 0,
         }
         generated_file_checksums = {str(filtergraph): _sha256_file(filtergraph)}
-        if generated_caption_path and canonical_cues:
-            generated_file_checksums[generated_caption_path] = _sha256_file(
-                Path(generated_caption_path)
-            )
         core = {
             "run_key": run_key,
             "compiled_manifest_ref": manifest.compiled_manifest_id,
@@ -704,7 +636,6 @@ class FFmpegCommandBuilder:
             "input_files": [],
             "generated_filtergraph_path": str(filtergraph),
             "generated_text_files": generated_text_files,
-            "generated_caption_path": generated_caption_path,
             "generated_file_checksums": generated_file_checksums,
             "output_file": str(output),
             "output_profile": manifest.renderer_profile_refs[0],
@@ -718,7 +649,6 @@ class FFmpegCommandBuilder:
             "canonical_duration_ms": manifest.canonical_duration_ms,
             "canonical_caption_compilation_ref": manifest.canonical_caption_compilation_ref,
             "canonical_caption_compilation_hash": manifest.canonical_caption_compilation_hash,
-            "canonical_caption_render_payload_hash": manifest.canonical_caption_render_payload_hash,
         }
         command_hash = stable_hash(core)
         command = FFmpegCommandManifest(
@@ -909,7 +839,7 @@ class FFmpegCommandBuilder:
             "black_output_check_required": True,
             "scene_coverage_required": len(probe_seconds) > 1,
             "scene_probe_seconds": probe_seconds,
-            "caption_required": False,
+            "subtitle_stream_count": 0,
             "faststart": True,
         }
         generated_file_checksums = {
@@ -929,7 +859,6 @@ class FFmpegCommandBuilder:
             "input_files": input_files,
             "generated_filtergraph_path": str(filtergraph),
             "generated_text_files": generated_text_files,
-            "generated_caption_path": None,
             "generated_file_checksums": generated_file_checksums,
             "output_file": str(output),
             "output_profile": manifest.renderer_profile_refs[0],
@@ -943,7 +872,6 @@ class FFmpegCommandBuilder:
             "canonical_duration_ms": manifest.canonical_duration_ms,
             "canonical_caption_compilation_ref": None,
             "canonical_caption_compilation_hash": None,
-            "canonical_caption_render_payload_hash": None,
         }
         command = FFmpegCommandManifest(
             **core,
@@ -997,20 +925,6 @@ class FFmpegCommandBuilder:
         work.mkdir(parents=True, exist_ok=True)
         output = _inside(self.root, work / "lpro1-review-candidate.mp4")
         filtergraph = _inside(self.root, work / "filtergraph.txt")
-        caption_path = _inside(self.root, work / "canonical-captions.ass")
-        cues = list(manifest.caption_schedule.get("cues") or [])
-        if not cues:
-            raise ValueError("LPRO1_CANONICAL_CAPTIONS_REQUIRED")
-        _write_canonical_ass(
-            caption_path,
-            cues=cues,
-            width=width,
-            height=height,
-            caption_policy=dict(
-                manifest.caption_schedule.get("render_style")
-                or manifest.normalized_caption
-            ),
-        )
         font_candidates = (
             Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
@@ -1020,7 +934,7 @@ class FFmpegCommandBuilder:
             raise FileNotFoundError("LPRO1_NATIVE_FONT_NOT_FOUND")
 
         graph_parts: list[str] = []
-        generated_text_files: list[str] = [str(caption_path)]
+        generated_text_files: list[str] = []
         for index, scene in enumerate(manifest.compiled_scenes):
             route = str(
                 (scene.get("visual_routing") or {}).get("preferred_source_route")
@@ -1050,13 +964,7 @@ class FFmpegCommandBuilder:
         graph_parts.append(
             f"{concat_inputs}concat=n={len(asset_paths)}:v=1:a=0[scenevideo]"
         )
-        escaped_caption = (
-            str(caption_path)
-            .replace("\\", "\\\\")
-            .replace(":", "\\:")
-            .replace("'", "\\'")
-        )
-        graph_parts.append(f"[scenevideo]ass=filename='{escaped_caption}'[v]")
+        graph_parts.append("[scenevideo]null[v]")
         filtergraph.write_text(";\n".join(graph_parts) + "\n", encoding="utf-8")
 
         duration_seconds = manifest.canonical_duration_ms / 1000.0
@@ -1108,28 +1016,22 @@ class FFmpegCommandBuilder:
         version = subprocess.run(
             [self.ffmpeg, "-version"], capture_output=True, text=True, check=True
         ).stdout.splitlines()[0]
-        caption_midpoint = (
-            float(cues[0]["caption_start_ms"]) + float(cues[0]["caption_end_ms"])
-        ) / 2000.0
         expected_qc = {
             **manifest.output_specs[0],
             "expected_duration_seconds": duration_seconds,
             "max_av_drift_ms": 250,
             "black_output_check_required": True,
-            "caption_required": True,
-            "caption_probe_seconds": caption_midpoint,
+            "subtitle_stream_count": 0,
             "scene_coverage_required": True,
             "scene_probe_seconds": scene_midpoints,
         }
         checksums = {
             str(filtergraph): _sha256_file(filtergraph),
-            str(caption_path): _sha256_file(caption_path),
             str(audio): _sha256_file(audio),
             **{str(path): _sha256_file(path) for path in asset_paths},
             **{
                 path: _sha256_file(Path(path))
                 for path in generated_text_files
-                if path != str(caption_path)
             },
         }
         core = {
@@ -1143,7 +1045,6 @@ class FFmpegCommandBuilder:
             "input_files": [str(path) for path in [*asset_paths, audio]],
             "generated_filtergraph_path": str(filtergraph),
             "generated_text_files": generated_text_files,
-            "generated_caption_path": str(caption_path),
             "generated_file_checksums": checksums,
             "output_file": str(output),
             "output_profile": manifest.renderer_profile_refs[0],
@@ -1157,7 +1058,6 @@ class FFmpegCommandBuilder:
             "canonical_duration_ms": manifest.canonical_duration_ms,
             "canonical_caption_compilation_ref": manifest.canonical_caption_compilation_ref,
             "canonical_caption_compilation_hash": manifest.canonical_caption_compilation_hash,
-            "canonical_caption_render_payload_hash": manifest.canonical_caption_render_payload_hash,
         }
         command = FFmpegCommandManifest(
             **core,
@@ -1353,7 +1253,6 @@ class FFmpegCommandBuilder:
             "input_files": [str(image)],
             "generated_filtergraph_path": str(filtergraph),
             "generated_text_files": [str(headline_path)],
-            "generated_caption_path": None,
             "generated_file_checksums": generated_file_checksums,
             "output_file": str(output),
             "output_profile": manifest.renderer_profile_refs[0],
@@ -1367,7 +1266,6 @@ class FFmpegCommandBuilder:
             "canonical_duration_ms": None,
             "canonical_caption_compilation_ref": None,
             "canonical_caption_compilation_hash": None,
-            "canonical_caption_render_payload_hash": None,
         }
         command = FFmpegCommandManifest(
             **core,
@@ -1513,12 +1411,6 @@ class NativeFFmpegRenderer:
                 raise ValueError("GENERATED_FILE_CHECKSUM_MISMATCH")
         if command.generated_filtergraph_path not in command.generated_file_checksums:
             raise ValueError("FILTERGRAPH_CHECKSUM_REQUIRED")
-        if (
-            command.generated_caption_path
-            and manifest.temporal_authority_mode == "CANONICAL_STRICT"
-        ):
-            if command.generated_caption_path not in command.generated_file_checksums:
-                raise ValueError("CAPTION_ASS_CHECKSUM_REQUIRED")
         if manifest.temporal_authority_mode == "CANONICAL_STRICT":
             if not (
                 manifest.canonical_media_timeline_ref
@@ -1542,8 +1434,6 @@ class NativeFFmpegRenderer:
                 != manifest.canonical_caption_compilation_ref
                 or command.canonical_caption_compilation_hash
                 != manifest.canonical_caption_compilation_hash
-                or command.canonical_caption_render_payload_hash
-                != manifest.canonical_caption_render_payload_hash
             ):
                 raise ValueError("CAPTION_RENDER_COMMAND_AUTHORITY_MISMATCH")
         output = _inside(self.root, Path(command.output_file))

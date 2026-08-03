@@ -314,7 +314,7 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
                     narration_end_ms=segment.scene_end_ms,
                     duration_ms=segment.target_scene_duration_ms,
                     visual_treatment=treatment,
-                    layout_type="FULL_FRAME_WITH_NATIVE_CAPTION_SAFE_AREA",
+                    layout_type="FULL_FRAME_WITH_NATIVE_OVERLAY_SAFE_AREA",
                     asset_requirements=[AssetRequirement(key=asset.asset_id)],
                     resolved_asset_refs=[
                         ResolvedAssetRef(
@@ -350,8 +350,7 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             for name in (
                 "NarrationPacingGate",
                 "CaptionCompilationGate",
-                "CaptionLayoutGate",
-                "CaptionSafeAreaGate",
+                "SubtitleSidecarGate",
                 "CaptionAudioSyncGate",
                 "CaptionCoverageGate",
                 "TimelineDriftGate",
@@ -391,9 +390,6 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             "canonical_audio_asset_ref": str(audio_path),
             "canonical_caption_compilation_ref": metrics["caption_compilation_ref"],
             "canonical_caption_compilation_hash": metrics["caption_compilation_hash"],
-            "canonical_caption_render_payload_hash": metrics[
-                "caption_render_payload_hash"
-            ],
             "scene_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "caption_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "parallel_timing_inputs": [],
@@ -405,7 +401,7 @@ class LongFormRenderPackageToNativeRenderPlanAdapter:
             "canvas_spec": CanvasSpec(width=1920, height=1080, fps=30),
             "scenes": scenes,
             "global_motion_policy": {"motion_pack": "NativeMotionPack_v1"},
-            "caption_policy": {"authority": "CANONICAL_MEDIA_TIMELINE"},
+            "caption_policy": {"authority": "SIDECAR_SRT_ONLY"},
             "audio_policy": {
                 "narration_asset_ref": str(audio_path),
                 "narration_asset_hash": audio_hash,
@@ -885,7 +881,6 @@ class LongProductionOrchestrator:
             "fast_start": measured.get("fast_start") is True,
             "checksum": measured.get("checksum_sha256") == receipt.output_checksum,
             "black_output": measured.get("black_output_absent") is True,
-            "caption_presence": measured.get("caption_likely_present") is True,
             "scene_coverage": measured.get("timeline_coverage") is True,
         }
         technical = TechnicalMediaQC().evaluate(
@@ -1873,20 +1868,12 @@ class LongProductionOrchestrator:
     @staticmethod
     def _caption_policy() -> dict[str, Any]:
         return {
-            "policy_ref": "fixture-policy://caption-style/lpro1-v1",
-            "policy_version": "lpro1-caption-style-v1",
+            "policy_ref": "fixture-policy://subtitle-sidecar/lpro1-v1",
+            "policy_version": "lpro1-subtitle-sidecar-v1",
             "longform_16_9": {
-                "font_scale_pass": [0.044, 0.050],
-                "font_scale_review": [0.040, 0.054],
-                "block_outside": [0.040, 0.054],
                 "max_chars_per_line_pass": 42,
                 "max_chars_per_line_review": 46,
                 "max_chars_per_line_block": 46,
-                "max_block_width_pass": 0.68,
-                "max_block_width_review": 0.74,
-                "max_block_width_block": 0.74,
-                "bottom_safe_margin_pass": 0.08,
-                "bottom_safe_margin_review_min": 0.05,
             },
             "global": {
                 "max_lines_per_cue": 2,
@@ -1904,9 +1891,6 @@ class LongProductionOrchestrator:
                     "block_any_above": 20,
                 },
             },
-            "font_family": "Arial",
-            "outline_ratio": 0.055,
-            "shadow_ratio": 0.025,
         }
 
 

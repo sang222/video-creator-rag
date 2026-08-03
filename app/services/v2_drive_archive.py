@@ -180,9 +180,11 @@ class V2VerifiedDriveArchiveArtifact:
 
     final_media: FinalMediaRef
     cloud_media: CloudMediaRef
+    caption_cloud_media: CloudMediaRef
     lineage: ArtifactVersion
     archive_receipt_hash: str
     archive_object_ref: str
+    caption_archive_object_ref: str
 
 
 class V2GoogleDriveArchiveAdapter:
@@ -259,6 +261,9 @@ class V2GoogleDriveArchiveAdapter:
                 "storage_provider": "GOOGLE_DRIVE",
                 "cloud_media_ref_id": str(artifact.cloud_media.id),
                 "drive_file_id": artifact.cloud_media.drive_file_id,
+                "caption_cloud_media_ref_id": str(artifact.caption_cloud_media.id),
+                "caption_drive_file_id": artifact.caption_cloud_media.drive_file_id,
+                "caption_archive_object_ref": artifact.caption_archive_object_ref,
                 "checksum_sha256": artifact.final_media.checksum_sha256,
                 "automatic_publish": False,
                 "external_effect_performed": False,
@@ -367,6 +372,16 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             if render_ledger is None:
                 raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_RENDER_REQUIRED")
             render_journal = dict(render_ledger.effect_journal or {})
+            media_ledger = session.scalar(
+                select(V2ProductionEffectLedger).where(
+                    V2ProductionEffectLedger.workflow_run_id == run.id,
+                    V2ProductionEffectLedger.stage == "MEDIA",
+                    V2ProductionEffectLedger.state == "VERIFIED",
+                )
+            )
+            if media_ledger is None:
+                raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_CAPTION_REQUIRED")
+            media_journal = dict(media_ledger.effect_journal or {})
         source = self._from_relative(
             _required_text(render_journal, "output_relative_path")
         )
@@ -380,6 +395,14 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
         )
         if measured_duration_ms <= 0:
             raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_DURATION_REQUIRED")
+        sidecar = _sidecar_archive_authority(media_journal)
+        caption_source = self._from_relative(sidecar["caption_relative_path"])
+        if (
+            not caption_source.is_file()
+            or caption_source.is_symlink()
+            or _sha256_file(caption_source) != sidecar["caption_checksum"]
+        ):
+            raise ValidationFailureError("CAPTION_SIDECAR_MISSING")
 
         self._readiness_gate.require_ready(
             session=context.session,
@@ -392,6 +415,8 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             source=source,
             checksum=checksum,
             measured_duration_ms=measured_duration_ms,
+            caption_source=caption_source,
+            sidecar=sidecar,
         )
         destination = _normalized_destination_for_drive(context)
         journal = {
@@ -410,6 +435,12 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             "measured_render_duration_ms": measured_duration_ms,
             "cloud_media_ref_id": str(artifact.cloud_media.id),
             "drive_file_id": artifact.cloud_media.drive_file_id,
+            "caption_ref": sidecar["caption_ref"],
+            "caption_checksum": sidecar["caption_checksum"],
+            "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+            "caption_cloud_media_ref_id": str(artifact.caption_cloud_media.id),
+            "caption_drive_file_id": artifact.caption_cloud_media.drive_file_id,
+            "caption_archive_object_ref": artifact.caption_archive_object_ref,
             "archive_receipt_hash": artifact.archive_receipt_hash,
             "archive_object_ref": artifact.archive_object_ref,
             "external_effect_performed": True,
@@ -429,6 +460,9 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
                     "storage_provider": "GOOGLE_DRIVE",
                     "cloud_media_ref_id": str(artifact.cloud_media.id),
                     "drive_file_id": artifact.cloud_media.drive_file_id,
+                    "caption_cloud_media_ref_id": str(artifact.caption_cloud_media.id),
+                    "caption_drive_file_id": artifact.caption_cloud_media.drive_file_id,
+                    "caption_archive_object_ref": artifact.caption_archive_object_ref,
                     "checksum_sha256": artifact.final_media.checksum_sha256,
                     "external_effect_performed": True,
                     "automatic_publish": False,
@@ -464,6 +498,8 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
         source: Any,
         checksum: str,
         measured_duration_ms: int,
+        caption_source: Any,
+        sidecar: dict[str, str],
     ) -> V2VerifiedDriveArchiveArtifact:
         try:
             return _resolve_or_create_v2_drive_archive(
@@ -488,6 +524,12 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             "source_checksum": checksum,
             "source_size_bytes": source.stat().st_size,
             "measured_render_duration_ms": measured_duration_ms,
+            "caption_relative_path": self._relative(caption_source),
+            "caption_checksum": sidecar["caption_checksum"],
+            "caption_ref": sidecar["caption_ref"],
+            "caption_artifact_hash": sidecar["caption_artifact_hash"],
+            "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+            "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
             "attempt_limit": 1,
         }
         if request_path.exists():
@@ -507,9 +549,8 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             )
         _write_json_atomic(request_path, {**identity, "state": "SUBMITTED"})
         try:
-            cloud, verification = self._upload_service_factory(
-                context.session
-            ).upload_verified(
+            upload_service = self._upload_service_factory(context.session)
+            cloud, verification = upload_service.upload_verified(
                 local_path=source,
                 media_type="LONG_FORM_FINAL",
                 company_id=context.run.company_id,
@@ -536,6 +577,25 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
                 },
                 idempotency_key=details["idempotency_key"],
             )
+            caption_cloud, caption_verification = upload_service.upload_verified(
+                local_path=caption_source,
+                media_type="CAPTION",
+                company_id=context.run.company_id,
+                channel_workspace_id=context.run.channel_workspace_id,
+                video_project_id=context.run.video_project_id,
+                uploaded_video_id=None,
+                render_package_id=None,
+                source_refs=[
+                    _caption_sidecar_source_ref(context.run, sidecar)
+                ],
+                retention_policy={
+                    "keep_local": True,
+                    "cleanup_authorized": False,
+                    "source": "v2-real-archive-sidecar",
+                    "sidecar_only": True,
+                },
+                idempotency_key=details["idempotency_key"] + ".caption",
+            )
         except Exception as exc:
             raise WorkflowStageError(
                 classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
@@ -550,6 +610,8 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
         if (
             verification.verification_status != "CHECKSUM_VERIFIED"
             or verification.checksum_verified is not True
+            or caption_verification.verification_status != "CHECKSUM_VERIFIED"
+            or caption_verification.checksum_verified is not True
         ):
             raise WorkflowStageError(
                 classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
@@ -567,6 +629,16 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             "v2_archive_command_id": context.command_id,
             "v2_archive_idempotency_key": details["idempotency_key"],
             "v2_remote_archive": True,
+        }
+        caption_cloud.technical_appendix = {
+            **(caption_cloud.technical_appendix or {}),
+            "v2_caption_sidecar": True,
+            "caption_ref": sidecar["caption_ref"],
+            "caption_artifact_hash": sidecar["caption_artifact_hash"],
+            "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+            "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+            "v2_archive_command_id": context.command_id,
+            "v2_archive_idempotency_key": details["idempotency_key"] + ".caption",
         }
         context.session.flush()
         artifact = _resolve_or_create_v2_drive_archive(
@@ -609,6 +681,12 @@ def require_v2_google_drive_final_media(
         if lineage is not None and isinstance(lineage.content, dict)
         else {}
     )
+    caption_cloud_id = _uuid_or_none(content.get("caption_cloud_media_ref_id"))
+    caption_cloud = (
+        session.get(CloudMediaRef, caption_cloud_id)
+        if caption_cloud_id is not None
+        else None
+    )
     measured_duration_ms = _verified_duration_ms(cloud) if cloud is not None else None
     if (
         media is None
@@ -649,14 +727,35 @@ def require_v2_google_drive_final_media(
         or content.get("storage_provider") != "GOOGLE_DRIVE"
         or content.get("invokes_mr1") is not False
         or content.get("automatic_publish") is not False
+        or caption_cloud is None
+        or caption_cloud.company_id != media.company_id
+        or caption_cloud.channel_workspace_id != media.channel_workspace_id
+        or caption_cloud.video_project_id != project_id
+        or caption_cloud.storage_provider != "GOOGLE_DRIVE"
+        or caption_cloud.media_type != "CAPTION"
+        or caption_cloud.checksum_sha256 != content.get("caption_checksum")
+        or caption_cloud.upload_status != "VERIFIED"
+        or caption_cloud.verification_status != "CHECKSUM_VERIFIED"
+        or not _drive_sidecar_identity_valid(caption_cloud)
+        or not _cloud_appendix_verifies_checksum(caption_cloud)
+        or not _has_caption_sidecar_source(caption_cloud, content)
+        or not _caption_appendix_matches_lineage(caption_cloud, content)
+        or content.get("caption_archive_object_ref")
+        != _drive_caption_object_ref(caption_cloud.drive_file_id)
+        or not isinstance(content.get("caption_ref"), str)
+        or not isinstance(content.get("subtitle_qc_ref"), str)
+        or not isinstance(content.get("caption_artifact_hash"), str)
+        or not isinstance(content.get("subtitle_qc_hash"), str)
     ):
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_FINAL_MEDIA_AUTHORITY_MISMATCH")
     return V2VerifiedDriveArchiveArtifact(
         final_media=media,
         cloud_media=cloud,
+        caption_cloud_media=caption_cloud,
         lineage=lineage,
         archive_receipt_hash=expected_archive_hash,
         archive_object_ref=archive_object_ref,
+        caption_archive_object_ref=_drive_caption_object_ref(caption_cloud.drive_file_id),
     )
 
 
@@ -686,6 +785,7 @@ def _resolve_or_create_v2_drive_archive(
         or package.production_lane.value != run.production_lane
     ):
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_PACKAGE_MISMATCH")
+    sidecar = _sidecar_archive_authority_for_run(session, run)
     candidates = list(
         session.scalars(
             select(CloudMediaRef).where(
@@ -715,6 +815,36 @@ def _resolve_or_create_v2_drive_archive(
     if len(candidates) != 1:
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_ARTIFACT_AMBIGUOUS")
     cloud = candidates[0]
+    caption_candidates = list(
+        session.scalars(
+            select(CloudMediaRef).where(
+                CloudMediaRef.company_id == run.company_id,
+                CloudMediaRef.channel_workspace_id == run.channel_workspace_id,
+                CloudMediaRef.video_project_id == project.id,
+                CloudMediaRef.storage_provider == "GOOGLE_DRIVE",
+                CloudMediaRef.media_type == "CAPTION",
+                CloudMediaRef.checksum_sha256 == sidecar["caption_checksum"],
+                CloudMediaRef.upload_status == "VERIFIED",
+                CloudMediaRef.verification_status == "CHECKSUM_VERIFIED",
+            )
+        )
+    )
+    caption_candidates = [
+        candidate
+        for candidate in caption_candidates
+        if _drive_sidecar_identity_valid(candidate)
+        and _cloud_appendix_verifies_checksum(candidate)
+        and _has_exact_caption_sidecar_source(candidate, run, sidecar)
+        and _caption_appendix_matches_sidecar(candidate, sidecar)
+    ]
+    if not caption_candidates:
+        raise _external_block(
+            "V2_DRIVE_ARCHIVE_CAPTION_ARTIFACT_REQUIRED",
+            "A checksum-verified Google Drive SRT sidecar for this exact caption artifact is required before final review.",
+        )
+    if len(caption_candidates) != 1:
+        raise ValidationFailureError("V2_DRIVE_ARCHIVE_CAPTION_ARTIFACT_AMBIGUOUS")
+    caption_cloud = caption_candidates[0]
     measured_duration_ms = _verified_duration_ms(cloud)
     if measured_duration_ms is None:
         raise _external_block(
@@ -728,6 +858,7 @@ def _resolve_or_create_v2_drive_archive(
     ):
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_DURATION_OUTSIDE_CONTRACT")
     archive_object_ref = _drive_object_ref(cloud.drive_file_id)
+    caption_archive_object_ref = _drive_caption_object_ref(caption_cloud.drive_file_id)
     receipt = {
         "schema_version": V2_DRIVE_ARCHIVE_RECEIPT_SCHEMA,
         "workflow_run_id": str(run.id),
@@ -746,6 +877,14 @@ def _resolve_or_create_v2_drive_archive(
         "size_bytes": cloud.size_bytes,
         "checksum_sha256": cloud.checksum_sha256,
         "measured_render_duration_ms": measured_duration_ms,
+        "caption_ref": sidecar["caption_ref"],
+        "caption_checksum": sidecar["caption_checksum"],
+        "caption_artifact_hash": sidecar["caption_artifact_hash"],
+        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+        "caption_cloud_media_ref_id": str(caption_cloud.id),
+        "caption_drive_file_id": caption_cloud.drive_file_id,
+        "caption_archive_object_ref": caption_archive_object_ref,
         "verification_status": cloud.verification_status,
         "archive_state": "VERIFIED",
         "invokes_mr1": False,
@@ -776,6 +915,13 @@ def _resolve_or_create_v2_drive_archive(
         "cloud_media_ref_id": str(cloud.id),
         "archive_object_ref": archive_object_ref,
         "storage_provider": "GOOGLE_DRIVE",
+        "caption_ref": sidecar["caption_ref"],
+        "caption_checksum": sidecar["caption_checksum"],
+        "caption_artifact_hash": sidecar["caption_artifact_hash"],
+        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+        "caption_cloud_media_ref_id": str(caption_cloud.id),
+        "caption_archive_object_ref": caption_archive_object_ref,
         "invokes_mr1": False,
         "automatic_publish": False,
         "external_effect_performed": external_effect_performed,
@@ -882,6 +1028,13 @@ def _ensure_lineage(
                         "type": "checksum_verified_google_drive_cloud_media",
                         "cloud_media_ref_id": content["cloud_media_ref_id"],
                         "render_output_checksum": content["render_output_checksum"],
+                    },
+                    {
+                        "type": "checksum_verified_google_drive_caption_sidecar",
+                        "cloud_media_ref_id": content["caption_cloud_media_ref_id"],
+                        "caption_ref": content["caption_ref"],
+                        "caption_checksum": content["caption_checksum"],
+                        "subtitle_qc_ref": content["subtitle_qc_ref"],
                     },
                 ]
             },
@@ -1020,6 +1173,108 @@ def _has_final_media_render_source(
     )
 
 
+def _sidecar_archive_authority_for_run(session: Session, run: Any) -> dict[str, str]:
+    ledger = session.scalar(
+        select(V2ProductionEffectLedger).where(
+            V2ProductionEffectLedger.workflow_run_id == run.id,
+            V2ProductionEffectLedger.stage == "MEDIA",
+            V2ProductionEffectLedger.state == "VERIFIED",
+        )
+    )
+    if ledger is None:
+        raise ValidationFailureError("V2_DRIVE_ARCHIVE_CAPTION_AUTHORITY_REQUIRED")
+    return _sidecar_archive_authority(dict(ledger.effect_journal or {}))
+
+
+def _sidecar_archive_authority(journal: dict[str, Any]) -> dict[str, str]:
+    required = (
+        "caption_relative_path",
+        "caption_checksum",
+        "caption_ref",
+        "caption_artifact_hash",
+        "subtitle_qc_ref",
+        "subtitle_qc_hash",
+    )
+    values = {key: journal.get(key) for key in required}
+    if (
+        journal.get("subtitle_qc_state") != "PASS"
+        or any(not isinstance(value, str) or not value for value in values.values())
+    ):
+        raise ValidationFailureError("SUBTITLE_QC_FAILED")
+    return {key: str(value) for key, value in values.items()}
+
+
+def _caption_sidecar_source_ref(run: Any, sidecar: dict[str, str]) -> dict[str, str]:
+    return {
+        "type": "v2_caption_sidecar",
+        "workflow_run_id": str(run.id),
+        "caption_ref": sidecar["caption_ref"],
+        "caption_checksum": sidecar["caption_checksum"],
+        "caption_artifact_hash": sidecar["caption_artifact_hash"],
+        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+    }
+
+
+def _has_exact_caption_sidecar_source(
+    cloud: CloudMediaRef,
+    run: Any,
+    sidecar: dict[str, str],
+) -> bool:
+    required = _caption_sidecar_source_ref(run, sidecar)
+    return any(
+        isinstance(item, dict)
+        and all(item.get(key) == value for key, value in required.items())
+        for item in (cloud.source_refs or [])
+    )
+
+
+def _has_caption_sidecar_source(cloud: CloudMediaRef, lineage: dict[str, Any]) -> bool:
+    required = {
+        "type": "v2_caption_sidecar",
+        "workflow_run_id": lineage.get("workflow_run_id"),
+        "caption_ref": lineage.get("caption_ref"),
+        "caption_checksum": lineage.get("caption_checksum"),
+        "caption_artifact_hash": lineage.get("caption_artifact_hash"),
+        "subtitle_qc_ref": lineage.get("subtitle_qc_ref"),
+        "subtitle_qc_hash": lineage.get("subtitle_qc_hash"),
+    }
+    return all(isinstance(value, str) and value for value in required.values()) and any(
+        isinstance(item, dict)
+        and all(item.get(key) == value for key, value in required.items())
+        for item in (cloud.source_refs or [])
+    )
+
+
+def _caption_appendix_matches_sidecar(
+    cloud: CloudMediaRef, sidecar: dict[str, str]
+) -> bool:
+    appendix = cloud.technical_appendix
+    return bool(
+        isinstance(appendix, dict)
+        and appendix.get("v2_caption_sidecar") is True
+        and appendix.get("caption_ref") == sidecar["caption_ref"]
+        and appendix.get("caption_artifact_hash") == sidecar["caption_artifact_hash"]
+        and appendix.get("subtitle_qc_ref") == sidecar["subtitle_qc_ref"]
+        and appendix.get("subtitle_qc_hash") == sidecar["subtitle_qc_hash"]
+    )
+
+
+def _caption_appendix_matches_lineage(
+    cloud: CloudMediaRef, lineage: dict[str, Any]
+) -> bool:
+    appendix = cloud.technical_appendix
+    return bool(
+        isinstance(appendix, dict)
+        and appendix.get("v2_caption_sidecar") is True
+        and appendix.get("caption_ref") == lineage.get("caption_ref")
+        and appendix.get("caption_artifact_hash")
+        == lineage.get("caption_artifact_hash")
+        and appendix.get("subtitle_qc_ref") == lineage.get("subtitle_qc_ref")
+        and appendix.get("subtitle_qc_hash") == lineage.get("subtitle_qc_hash")
+    )
+
+
 def _cloud_appendix_verifies_checksum(cloud: CloudMediaRef) -> bool:
     appendix = cloud.technical_appendix
     return bool(
@@ -1056,6 +1311,24 @@ def _drive_remote_identity_valid(cloud: CloudMediaRef) -> bool:
         or cloud.mime_type != "video/mp4"
     ):
         return False
+    return _drive_web_identity_valid(cloud)
+
+
+def _drive_sidecar_identity_valid(cloud: CloudMediaRef) -> bool:
+    if (
+        not cloud.drive_file_id
+        or not cloud.web_view_link
+        or cloud.size_bytes is None
+        or cloud.size_bytes <= 0
+        or not cloud.checksum_sha256
+        or cloud.mime_type not in {"application/x-subrip", "text/plain"}
+        or not str(cloud.file_name or "").endswith(".srt")
+    ):
+        return False
+    return _drive_web_identity_valid(cloud)
+
+
+def _drive_web_identity_valid(cloud: CloudMediaRef) -> bool:
     parsed = urlparse(cloud.web_view_link)
     if parsed.scheme != "https" or parsed.netloc not in {
         "drive.google.com",
@@ -1080,6 +1353,25 @@ def _drive_object_ref(drive_file_id: str) -> str:
     ):
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_FILE_ID_INVALID")
     return f"drive://{drive_file_id}/final.mp4"
+
+
+def _drive_caption_object_ref(drive_file_id: str) -> str:
+    if not drive_file_id or any(
+        character
+        not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        for character in drive_file_id
+    ):
+        raise ValidationFailureError("V2_DRIVE_ARCHIVE_CAPTION_FILE_ID_INVALID")
+    return f"drive://{drive_file_id}/canonical-captions.srt"
+
+
+def _uuid_or_none(value: Any) -> uuid.UUID | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return None
 
 
 def _external_block(error_code: str, summary: str) -> WorkflowStageError:

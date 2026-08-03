@@ -113,7 +113,7 @@ PRE_RENDER_GATES = (
 POST_MEDIA_GATES = (
     "NarrationPacingGate",
     "CaptionAudioSyncGate",
-    "CaptionSafeAreaGate",
+    "SubtitleSidecarGate",
     "TimelineDriftGate",
     "TechnicalMediaQC",
     "CreativePerceptualMediaQC",
@@ -1785,19 +1785,19 @@ class PKG1PackageService:
         }
         caption_plan = {
             "schema_version": "pkg1.caption-plan.v1",
-            "caption_style_policy_ref": f"{project.creative_quality_policy_ref}#caption_style_policy",
-            "caption_style_policy_hash": content_hash(
-                creative.get("caption_style_policy") or {}
+            "subtitle_sidecar_policy_ref": f"{project.creative_quality_policy_ref}#subtitle_sidecar_policy",
+            "subtitle_sidecar_policy_hash": content_hash(
+                creative.get("subtitle_sidecar_policy") or {}
             ),
             "caption_sync_policy_ref": f"{project.creative_quality_policy_ref}#caption_sync_policy",
             "caption_sync_policy_hash": content_hash(
                 creative.get("caption_sync_policy") or {}
             ),
             "readable_caption_compiler_version": "readable-caption-compiler.cqr1.v1",
-            "safe_area_policy": (creative.get("caption_style_policy") or {}).get(
+            "sidecar_format_policy": (creative.get("subtitle_sidecar_policy") or {}).get(
                 "longform_16_9", {}
             ),
-            "cps_cpl_policy": (creative.get("caption_style_policy") or {}).get(
+            "cps_cpl_policy": (creative.get("subtitle_sidecar_policy") or {}).get(
                 "global", {}
             ),
             "final_cues": [],

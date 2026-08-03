@@ -143,6 +143,14 @@ items:
     description: Immutable MR1 final-media lineage binding exact MP4 bytes, candidate, Drive and cloud proofs, technical QC, human PASS, package, profile, snapshot, and market authority.
   - key: v2_drive_final_media_lineage_receipt
     description: Immutable V2 final-media lineage binding one checksum-verified Google Drive artifact to exact V2 render, QC, package, and manual-review authorities; never invokes MR1.
+  - key: v2_transcript
+    description: Immutable V2 approved narration transcript bound to final ElevenLabs audio.
+  - key: v2_timed_words
+    description: Immutable V2 ElevenLabs timestamp-derived timed words for sidecar captions.
+  - key: v2_caption_srt
+    description: Immutable canonical UTF-8 SRT sidecar; never a render or mux instruction.
+  - key: v2_subtitle_qc
+    description: Immutable V2 sidecar-only SubtitleQC receipt bound to transcript, timed words, and SRT checksum.
   - key: mr1_drive_finalization_supplement_receipt
     description: Immutable live-verified Drive supplement receipt archiving the exact human full-watch and final-lineage artifacts without reopening the canonical review archive.
   - key: effective_ads_only_monetization_policy

@@ -22,10 +22,7 @@ from app.contracts.visual_routing import (
 )
 from app.core.errors import ValidationFailureError
 from app.services.native_motion_compiler import NativeMotionCompiler
-from app.services.native_render_plan import (
-    canonical_caption_render_hash,
-    canonical_plan_hash,
-)
+from app.services.native_render_plan import canonical_plan_hash
 from app.services.sc07_sc09_visual_route_audit import (
     AUDIT_INPUT_SNAPSHOT_HASH,
     RUN_ID,
@@ -459,16 +456,6 @@ def _overlay(
         minimum_contrast_requirement=4.5,
         alignment="center",
     )
-    caption_region = TextSafeRegion(
-        id=f"{scene_id.lower()}-caption-safe",
-        x=0.08,
-        y=0.80,
-        width=0.84,
-        height=0.12,
-        purpose="Reserved canonical caption area",
-        minimum_contrast_requirement=4.5,
-        alignment="bottom-center",
-    )
     label_ref = (
         f"script-segment://4c0ac729-32c5-4005-9078-013b399e8802/"
         f"{SCENE_CONTEXT[scene_id]['segment_id']}"
@@ -505,7 +492,7 @@ def _overlay(
         "preferred_source_route": route,
         "exact_text_contract": exact,
         "text_safe_regions": [text_region],
-        "reserved_overlay_regions": [caption_region],
+        "reserved_overlay_regions": [],
         "overlay_content_refs": authoritative_refs,
         "native_overlay_required": True,
     }
@@ -513,7 +500,7 @@ def _overlay(
         **overlay_payload,
         content_hash=stable_hash(overlay_payload),
     )
-    return overlay, [text_region], [caption_region]
+    return overlay, [text_region], []
 
 
 def _projected_timeline() -> CanonicalMediaTimeline:
@@ -535,7 +522,6 @@ def _projected_timeline() -> CanonicalMediaTimeline:
         "caption_compilation_ref": (
             f"caption-compilation:{caption_compilation_hash}"
         ),
-        "caption_render_payload_hash": canonical_caption_render_hash(cues),
         "scene_anchor_count": 2,
         "scene_timeline_contiguous": False,
         "offline_projection_only": True,
@@ -589,8 +575,7 @@ def compile_native_rehearsal(
                 transition_in="FADE_SOFT",
                 transition_out="FADE_SOFT",
                 emphasis_targets=list(SCENE_CONTEXT[scene_id]["native_nodes"]),
-                caption_behavior="CANONICAL_BURN_IN",
-                safe_area_policy="VSR1_TEXT_AND_CAPTION_SAFE",
+                safe_area_policy="VSR1_TEXT_SAFE",
                 originality_role="PRIMARY_NATIVE_EXPLANATION",
                 scene_notes="Offline compiler rehearsal; milliseconds derived from projected canonical authority only.",
                 visual_routing_mode="VSR1_STRICT",
@@ -645,9 +630,6 @@ def compile_native_rehearsal(
         canonical_audio_asset_ref=timeline.audio_asset_id,
         canonical_caption_compilation_ref=metrics["caption_compilation_ref"],
         canonical_caption_compilation_hash=metrics["caption_compilation_hash"],
-        canonical_caption_render_payload_hash=metrics[
-            "caption_render_payload_hash"
-        ],
         scene_timing_source="CANONICAL_MEDIA_TIMELINE",
         caption_timing_source="CANONICAL_MEDIA_TIMELINE",
         parallel_timing_inputs=[],

@@ -70,6 +70,9 @@ class NativeMediaQC:
         audio = next(
             (item for item in streams if item.get("codec_type") == "audio"), {}
         )
+        subtitle_streams = [
+            item for item in streams if item.get("codec_type") == "subtitle"
+        ]
         duration = float(data.get("format", {}).get("duration", 0) or 0)
         fps = _fps(video.get("avg_frame_rate"))
         full_decode = False
@@ -168,25 +171,6 @@ class NativeMediaQC:
             black_output_absent = (
                 black_probe.returncode == 0 and "black_start:" not in black_probe.stderr
             )
-        caption_likely_present: bool | None = None
-        if expected.get("caption_required"):
-            caption_frame = _frame_bytes(
-                self.ffmpeg,
-                output,
-                seconds=float(expected.get("caption_probe_seconds") or 0.5),
-                # Keep enough raster detail for a policy-compliant 51 px ASS
-                # caption to survive the probe.  At 320x90 an eight-letter
-                # caption can collapse to fewer than eight white pixels even
-                # though it is plainly present in the decoded 1080p frame.
-                # This remains an actual-byte lower-band frame probe; the
-                # larger sample removes that downsampling false negative.
-                filtergraph="crop=iw:ih*0.30:0:ih*0.70,scale=640:180,format=gray",
-            )
-            caption_likely_present = bool(
-                caption_frame
-                and max(caption_frame) - min(caption_frame) >= 120
-                and sum(value >= 220 for value in caption_frame) >= 8
-            )
         scene_coverage: bool | None = None
         if expected.get("scene_coverage_required"):
             frames = [
@@ -234,7 +218,10 @@ class NativeMediaQC:
                 "dimensions_match_expected": dimensions_match_expected,
                 "fps_matches_expected": fps_matches_expected,
                 "audio_format_matches_expected": audio_format_matches_expected,
-                "caption_likely_present": caption_likely_present,
+                "subtitle_stream_count": len(subtitle_streams),
+                "subtitle_stream_codecs": sorted(
+                    str(item.get("codec_name") or "") for item in subtitle_streams
+                ),
                 "black_output_absent": black_output_absent,
                 "blackdetect": "PASS"
                 if black_output_absent is True
@@ -268,8 +255,10 @@ class NativeMediaQC:
             requirements["color_space"] = expected["color"]
         if expected.get("black_output_check_required"):
             requirements["black_output_absent"] = True
-        if expected.get("caption_required"):
-            requirements["caption_likely_present"] = True
+        if expected.get("subtitle_stream_count") is not None:
+            requirements["subtitle_stream_count"] = int(
+                expected["subtitle_stream_count"]
+            )
         if expected.get("scene_coverage_required"):
             requirements["timeline_coverage"] = True
         for key, value in requirements.items():

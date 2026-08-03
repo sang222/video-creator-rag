@@ -52,7 +52,6 @@ from app.contracts.visual_routing import (
     SourceFallbackClass,
     VisualSourceRoute,
 )
-from app.services.caption_ass import write_caption_ass
 from app.services.caption_voice_quality import ReadableCaptionCompiler
 from app.services.creative_media_qc import CreativePerceptualMediaQC, TechnicalMediaQC
 from app.services.native_ffmpeg_renderer import (
@@ -82,7 +81,6 @@ OUTPUT_PROFILE = "YT_LONG_1080P30_SDR_H264_VT"
 HUMAN_DETERMINISTIC_REPAIR_CLASSES = frozenset(
     {
         "crop",
-        "caption",
         "overlay",
         "motion",
         "transition",
@@ -620,7 +618,6 @@ class MR1LocalProductionContinuation:
                 "repair_classes": [],
                 "rejected_output_sha256": None,
                 "repair_profile": {
-                    "caption_font_scale_multiplier": 1.0,
                     "mechanism_transition_fraction": 0.42,
                     "overlay_fade_ms": 350,
                     "crop_mode": "COVER",
@@ -657,9 +654,6 @@ class MR1LocalProductionContinuation:
         if not re.fullmatch(r"[0-9a-f]{64}", rejected_hash):
             raise ValueError("MR1_HUMAN_REPAIR_REJECTED_HASH_INVALID")
         profile = {
-            "caption_font_scale_multiplier": (
-                1.10 if {"caption", "readability"}.intersection(classes) else 1.0
-            ),
             "mechanism_transition_fraction": (
                 0.52
                 if {"motion", "transition"}.intersection(classes)
@@ -1905,22 +1899,14 @@ class MR1LocalProductionContinuation:
         ) or {}
         return {
             "policy_ref": _binding_ref(
-                snapshot, "compiled-policy-snapshot://mr1/caption-style"
+                snapshot, "compiled-policy-snapshot://mr1/subtitle-sidecar"
             )
-            + "/caption-style",
-            "policy_version": "mr1-production-caption-style-v1",
+            + "/subtitle-sidecar",
+            "policy_version": "mr1-production-subtitle-sidecar-v1",
             "longform_16_9": {
-                "font_scale_pass": [0.044, 0.050],
-                "font_scale_review": [0.040, 0.054],
-                "block_outside": [0.040, 0.054],
                 "max_chars_per_line_pass": 42,
                 "max_chars_per_line_review": 46,
                 "max_chars_per_line_block": 46,
-                "max_block_width_pass": 0.68,
-                "max_block_width_review": 0.74,
-                "max_block_width_block": 0.74,
-                "bottom_safe_margin_pass": 0.08,
-                "bottom_safe_margin_review_min": 0.05,
             },
             "global": {
                 "max_lines_per_cue": 2,
@@ -1938,9 +1924,6 @@ class MR1LocalProductionContinuation:
                     "block_any_above": 20,
                 },
             },
-            "font_family": "Arial",
-            "outline_ratio": 0.055,
-            "shadow_ratio": 0.025,
         }
 
     @staticmethod
@@ -3076,18 +3059,7 @@ class MR1LocalProductionContinuation:
                     alignment="CENTER",
                 )
             ]
-            reserved_regions = [
-                TextSafeRegion(
-                    id=f"{segment.segment_id}-canonical-caption-band",
-                    x=0.04,
-                    y=0.80,
-                    width=0.92,
-                    height=0.18,
-                    purpose="CANONICAL_CAPTION_EXCLUSION_ZONE",
-                    minimum_contrast_requirement=4.5,
-                    alignment="BOTTOM_CENTER",
-                )
-            ]
+            reserved_regions: list[TextSafeRegion] = []
             overlay_payload = {
                 "plan_id": (
                     f"mr1-native-overlay:{segment.segment_id}:"
@@ -3116,7 +3088,7 @@ class MR1LocalProductionContinuation:
                     duration_ms=segment.target_scene_duration_ms,
                     visual_treatment=str(blueprint["visual_treatment"]),
                     layout_type=(
-                        f"{blueprint['mechanism']}_WITH_CANONICAL_CAPTION_SAFE_AREA"
+                        f"{blueprint['mechanism']}_WITH_NATIVE_OVERLAY_SAFE_AREA"
                     ),
                     asset_requirements=[AssetRequirement(key=asset.asset_id)],
                     resolved_asset_refs=[
@@ -3239,9 +3211,6 @@ class MR1LocalProductionContinuation:
             "canonical_caption_compilation_hash": caption_metrics[
                 "caption_compilation_hash"
             ],
-            "canonical_caption_render_payload_hash": caption_metrics[
-                "caption_render_payload_hash"
-            ],
             "scene_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "caption_timing_source": "CANONICAL_MEDIA_TIMELINE",
             "parallel_timing_inputs": [],
@@ -3353,31 +3322,7 @@ class MR1LocalProductionContinuation:
         )
         output = _inside(root, render_dir / output_name)
         filtergraph = _inside(root, render_dir / "filtergraph.txt")
-        caption_path = _inside(root, render_dir / "canonical-captions.ass")
-        cues = list(manifest.caption_schedule.get("cues") or [])
-        if not cues:
-            raise ValueError("MR1_CANONICAL_CAPTIONS_REQUIRED")
-        caption_part = caption_path.with_name(caption_path.stem + ".part.ass")
-        caption_part.unlink(missing_ok=True)
-        render_style = dict(
-            manifest.caption_schedule.get("render_style") or manifest.normalized_caption
-        )
         repair_profile = dict(repair.get("repair_profile") or {})
-        font_multiplier = float(
-            repair_profile.get("caption_font_scale_multiplier", 1.0)
-        )
-        if font_multiplier != 1.0:
-            render_style["font_scale"] = min(
-                0.10, float(render_style["font_scale"]) * font_multiplier
-            )
-        write_caption_ass(
-            caption_part,
-            cues=cues,
-            frame_width=1920,
-            frame_height=1080,
-            render_style=render_style,
-        )
-        os.replace(caption_part, caption_path)
 
         asset_paths: list[Path] = []
         graph_parts: list[str] = []
@@ -3404,13 +3349,7 @@ class MR1LocalProductionContinuation:
         graph_parts.append(
             f"{concat_inputs}concat=n={len(asset_paths)}:v=1:a=0[scenevideo]"
         )
-        escaped_caption = (
-            str(caption_path)
-            .replace("\\", "\\\\")
-            .replace(":", "\\:")
-            .replace("'", "\\'")
-        )
-        graph_parts.append(f"[scenevideo]ass=filename='{escaped_caption}'[v]")
+        graph_parts.append("[scenevideo]null[v]")
         _write_text_atomic(filtergraph, ";\n".join(graph_parts) + "\n")
 
         duration_seconds = manifest.canonical_duration_ms / 1000.0
@@ -3471,16 +3410,12 @@ class MR1LocalProductionContinuation:
             check=True,
             shell=False,
         ).stdout.splitlines()[0]
-        caption_probe_seconds = (
-            float(cues[0]["caption_start_ms"]) + float(cues[0]["caption_end_ms"])
-        ) / 2000.0
         expected_qc = {
             **manifest.output_specs[0],
             "expected_duration_seconds": duration_seconds,
             "max_av_drift_ms": 250,
             "black_output_check_required": True,
-            "caption_required": True,
-            "caption_probe_seconds": caption_probe_seconds,
+            "subtitle_stream_count": 0,
             "scene_coverage_required": True,
             "scene_probe_seconds": scene_probe_seconds,
             "review_round": review_round,
@@ -3491,7 +3426,6 @@ class MR1LocalProductionContinuation:
         inputs = [*asset_paths, _inside(root, audio_path, must_exist=True)]
         checksums = {
             str(filtergraph): _sha256_file(filtergraph),
-            str(caption_path): _sha256_file(caption_path),
             **{str(path): _sha256_file(path) for path in inputs},
         }
         core = {
@@ -3504,8 +3438,7 @@ class MR1LocalProductionContinuation:
             "command_builder_version": "mr1-production-command-builder/1.0.0",
             "input_files": [str(path) for path in inputs],
             "generated_filtergraph_path": str(filtergraph),
-            "generated_text_files": [str(caption_path)],
-            "generated_caption_path": str(caption_path),
+            "generated_text_files": [],
             "generated_file_checksums": checksums,
             "output_file": str(output),
             "output_profile": OUTPUT_PROFILE,
@@ -3519,7 +3452,6 @@ class MR1LocalProductionContinuation:
             "canonical_duration_ms": manifest.canonical_duration_ms,
             "canonical_caption_compilation_ref": manifest.canonical_caption_compilation_ref,
             "canonical_caption_compilation_hash": manifest.canonical_caption_compilation_hash,
-            "canonical_caption_render_payload_hash": manifest.canonical_caption_render_payload_hash,
         }
         candidate = FFmpegCommandManifest(
             **core, command_hash=stable_hash(core), created_at=datetime.now(UTC)
@@ -3650,8 +3582,8 @@ class MR1LocalProductionContinuation:
             reason_codes.append("TECHNICAL_ASSET_DECODE_INTEGRITY_FAILED")
         if native_qc.checks.get("black_output_absent") is not True:
             reason_codes.append("TECHNICAL_BLACK_EMPTY_FRAME_RISK")
-        if native_qc.checks.get("caption_likely_present") is not True:
-            reason_codes.append("TECHNICAL_CAPTION_PRESENCE_FAILED")
+        if native_qc.checks.get("subtitle_stream_count") != 0:
+            reason_codes.append("TECHNICAL_SUBTITLE_STREAM_PRESENT")
         if native_qc.checks.get("timeline_coverage") is not True:
             reason_codes.append("TECHNICAL_SCENE_COVERAGE_FAILED")
         if native_qc.checks.get("checksum_sha256") != receipt.output_checksum:
@@ -3666,9 +3598,8 @@ class MR1LocalProductionContinuation:
                 **deepcopy(base.checks),
                 "black_empty_frame_risk": native_qc.checks.get("black_output_absent")
                 is True,
-                "caption_presence_sync": native_qc.checks.get("caption_likely_present")
-                is True
-                and native_qc.checks.get("av_drift_within_limit") is True,
+                "no_subtitle_stream": native_qc.checks.get("subtitle_stream_count")
+                == 0,
                 "scene_coverage": native_qc.checks.get("timeline_coverage") is True,
                 "asset_decode_integrity": normalized_items_pass,
                 "pixel_format": native_qc.checks.get("pixel_format"),

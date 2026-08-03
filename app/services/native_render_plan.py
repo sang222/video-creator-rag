@@ -7,7 +7,6 @@ from typing import Any
 
 from app.contracts.native_renderer import GateResult, NativeRenderPlan
 from app.contracts.temporal_authority import CanonicalMediaTimeline
-from app.services.caption_ass import caption_render_payload
 
 
 def stable_hash(value: Any) -> str:
@@ -52,10 +51,6 @@ def canonical_caption_compilation_hash(
             for item in cues
         ]
     )
-
-
-def canonical_caption_render_hash(cues: list[Any]) -> str:
-    return stable_hash(caption_render_payload(cues))
 
 
 class NativeRenderPlanValidator:
@@ -261,12 +256,6 @@ class NativeRenderPlanValidator:
                 metrics = canonical_timeline.qc_metrics or {}
                 expected_caption_hash = metrics.get("caption_compilation_hash")
                 expected_caption_ref = metrics.get("caption_compilation_ref")
-                expected_render_hash = metrics.get("caption_render_payload_hash")
-                actual_render_hash = (
-                    canonical_caption_render_hash(canonical_cues)
-                    if canonical_cues
-                    else None
-                )
                 caption_refs_ok = bool(
                     canonical_cues
                     and expected_caption_hash
@@ -282,29 +271,6 @@ class NativeRenderPlanValidator:
                         "CAPTION_CANONICAL_COMPILATION_REQUIRED",
                     )
                 )
-                render_payload_ok = bool(
-                    expected_render_hash
-                    and actual_render_hash == expected_render_hash
-                    and plan.canonical_caption_render_payload_hash
-                    == expected_render_hash
-                )
-                results.append(
-                    self._gate(
-                        "CanonicalCaptionRenderPayloadGate",
-                        render_payload_ok,
-                        "CAPTION_RENDER_PAYLOAD_HASH_MISMATCH",
-                    )
-                )
-                render_style = metrics.get("caption_render_style")
-                results.append(
-                    self._gate(
-                        "CanonicalCaptionRenderStyleGate",
-                        isinstance(render_style, dict)
-                        and bool(render_style.get("policy_hash"))
-                        and bool(render_style.get("style_version")),
-                        "CAPTION_RENDER_STYLE_REQUIRED",
-                    )
-                )
                 no_independent_srt = bool(
                     expected_caption_hash
                     and plan.srt_ref == expected_caption_ref
@@ -313,7 +279,7 @@ class NativeRenderPlanValidator:
                 )
                 results.append(
                     self._gate(
-                        "CanonicalCaptionArtifactGate",
+                        "CanonicalCaptionSidecarLineageGate",
                         no_independent_srt,
                         "SYNC_PARALLEL_TIMELINE",
                     )
@@ -345,8 +311,7 @@ class NativeRenderPlanValidator:
                 caption_gate_names = (
                     "NarrationPacingGate",
                     "CaptionCompilationGate",
-                    "CaptionLayoutGate",
-                    "CaptionSafeAreaGate",
+                    "SubtitleSidecarGate",
                     "CaptionAudioSyncGate",
                     "CaptionCoverageGate",
                     "TimelineDriftGate",

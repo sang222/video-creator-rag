@@ -293,7 +293,6 @@ class MediaQCGateCheckRequest(BaseModel):
     duration_ok: bool = True
     aspect_ratio_ok: bool = True
     audio_present: bool = True
-    captions_readable: bool = True
     black_frames_detected: bool = False
 
     model_config = ConfigDict(extra="forbid")

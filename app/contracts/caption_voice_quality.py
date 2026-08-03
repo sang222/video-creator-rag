@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 CreativeGateStatus = Literal["PASS", "REVIEW_REQUIRED", "BLOCK"]
@@ -71,46 +71,22 @@ class NarrationPacingPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class CaptionFormatPolicy(BaseModel):
-    font_scale_pass: tuple[float, float]
-    font_scale_review: tuple[float, float]
-    block_outside: tuple[float, float]
+class SubtitleSidecarFormatPolicy(BaseModel):
     max_chars_per_line_pass: int = Field(gt=0)
     max_chars_per_line_review: int = Field(gt=0)
     max_chars_per_line_block: int = Field(gt=0)
-    max_block_width_pass: float = Field(gt=0, le=1)
-    max_block_width_review: float = Field(gt=0, le=1)
-    max_block_width_block: float = Field(gt=0, le=1)
-    bottom_safe_margin_pass: float = Field(ge=0, le=1)
-    bottom_safe_margin_review_min: float = Field(ge=0, le=1)
-
-    model_config = ConfigDict(extra="forbid")
+    # Historical style snapshots may include burn-in-only fields. They remain
+    # readable but are intentionally ignored by the sidecar-only compiler.
+    model_config = ConfigDict(extra="ignore")
 
     @model_validator(mode="after")
-    def ordered(self) -> "CaptionFormatPolicy":
-        if not (
-            self.block_outside[0]
-            <= self.font_scale_review[0]
-            <= self.font_scale_pass[0]
-            <= self.font_scale_pass[1]
-            <= self.font_scale_review[1]
-            <= self.block_outside[1]
-        ):
-            raise ValueError("CAPTION_FONT_SCALE_POLICY_INVALID")
+    def ordered(self) -> "SubtitleSidecarFormatPolicy":
         if (
             not self.max_chars_per_line_pass
             <= self.max_chars_per_line_review
             <= self.max_chars_per_line_block
         ):
             raise ValueError("CAPTION_CPL_POLICY_INVALID")
-        if (
-            not self.max_block_width_pass
-            <= self.max_block_width_review
-            <= self.max_block_width_block
-        ):
-            raise ValueError("CAPTION_BLOCK_WIDTH_POLICY_INVALID")
-        if self.bottom_safe_margin_review_min > self.bottom_safe_margin_pass:
-            raise ValueError("CAPTION_SAFE_MARGIN_POLICY_INVALID")
         return self
 
 
@@ -154,40 +130,15 @@ class CaptionGlobalPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CaptionStylePolicy(BaseModel):
+class SubtitleSidecarPolicy(BaseModel):
     policy_ref: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
     policy_hash: str | None = None
     channel_id: str | None = None
-    longform_16_9: CaptionFormatPolicy
+    longform_16_9: SubtitleSidecarFormatPolicy
     global_policy: CaptionGlobalPolicy = Field(alias="global")
-    font_family: str = Field(default="Arial", min_length=1)
-    primary_colour: str = "&H00FFFFFF"
-    outline_colour: str = "&H80000000"
-    border_style: int = Field(default=3, ge=1, le=4)
-    outline_ratio: float = Field(default=0.055, ge=0, le=0.2)
-    shadow_ratio: float = Field(default=0.025, ge=0, le=0.2)
-    alignment: int = Field(default=2, ge=1, le=9)
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    @field_validator("font_family")
-    @classmethod
-    def ass_safe_font_family(cls, value: str) -> str:
-        if any(character in value for character in (",", "\r", "\n", "{", "}", "\\")):
-            raise ValueError("CAPTION_ASS_FONT_FAMILY_UNSAFE")
-        return value
-
-    @field_validator("primary_colour", "outline_colour")
-    @classmethod
-    def ass_safe_colour(cls, value: str) -> str:
-        if (
-            len(value) != 10
-            or not value.startswith("&H")
-            or any(character not in "0123456789abcdefABCDEF" for character in value[2:])
-        ):
-            raise ValueError("CAPTION_ASS_COLOUR_INVALID")
-        return value
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
 class OffsetThreshold(BaseModel):
@@ -444,32 +395,6 @@ class CaptionReadingMetrics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CaptionBBoxMetrics(BaseModel):
-    cue_id: str = Field(min_length=1)
-    frame_width: int = Field(gt=0)
-    frame_height: int = Field(gt=0)
-    x: int | None = Field(default=None, ge=0)
-    y: int | None = Field(default=None, ge=0)
-    width: int = Field(default=0, ge=0)
-    height: int = Field(default=0, ge=0)
-    block_width_ratio: float = Field(default=0, ge=0)
-    left_margin_ratio: float = Field(default=0, ge=0)
-    right_margin_ratio: float = Field(default=0, ge=0)
-    top_margin_ratio: float = Field(default=0, ge=0)
-    bottom_margin_ratio: float = Field(default=0, ge=0)
-    font_scale: float = Field(gt=0)
-    line_count: int = Field(ge=1)
-    cpl: int = Field(ge=0)
-    cps: float = Field(ge=0)
-    duration_seconds: float = Field(gt=0)
-    text_outside_frame: bool = False
-    required_safe_zone_overlap: bool = False
-    preview_frame_ref: str | None = None
-    ffmpeg_stderr_excerpt: str | None = None
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class CanonicalCaptionCue(BaseModel):
     cue_id: str = Field(min_length=1)
     source_segment_ids: list[str] = Field(min_length=1)
@@ -480,7 +405,6 @@ class CanonicalCaptionCue(BaseModel):
     spoken_token_ids: list[str] = Field(min_length=1)
     display_tokens: list[CaptionDisplayToken] = Field(min_length=1)
     reading_metrics: CaptionReadingMetrics
-    bbox_metrics: CaptionBBoxMetrics | None = None
     gate_results: list[CreativeQualityGateResult] = Field(default_factory=list)
     timing_source: CaptionTimingSource = "CANONICAL_MEDIA_TIMELINE"
     content_hash: str = Field(min_length=1)
@@ -493,25 +417,13 @@ class CanonicalCaptionCue(BaseModel):
             raise ValueError("CAPTION_CUE_TIME_INVALID")
         if any(not line.strip() for line in self.caption_lines):
             raise ValueError("CAPTION_EMPTY_LINE")
-        if any(
-            any(character in line for character in ("\r", "\n", "\\", "{", "}"))
-            for line in self.caption_lines
-        ):
-            raise ValueError("CAPTION_ASS_CONTROL_SEQUENCE_BLOCKED")
+        if any(any(character in line for character in ("\r", "\n")) for line in self.caption_lines):
+            raise ValueError("CAPTION_SRT_LINE_BREAK_INVALID")
         return self
 
     @property
     def display_text(self) -> str:
         return "\n".join(self.caption_lines)
-
-
-class ASSCaptionEvent(BaseModel):
-    cue_id: str = Field(min_length=1)
-    start_ms: int = Field(ge=0)
-    end_ms: int = Field(gt=0)
-    text: str = Field(min_length=1)
-
-    model_config = ConfigDict(extra="forbid")
 
 
 class CompiledCaptionTrack(BaseModel):
@@ -521,27 +433,12 @@ class CompiledCaptionTrack(BaseModel):
     canonical_timeline_hash: str = Field(min_length=1)
     cues: list[CanonicalCaptionCue] = Field(min_length=1)
     srt_text: str = Field(min_length=1)
-    ass_events: list[ASSCaptionEvent] = Field(min_length=1)
     spoken_token_coverage: float = Field(ge=0, le=1)
     missing_spoken_token_ids: list[str] = Field(default_factory=list)
     extra_spoken_token_ids: list[str] = Field(default_factory=list)
     compilation_gate: CreativeQualityGateResult
+    subtitle_qc_gate: CreativeQualityGateResult | None = None
     final_cue_trailing_hold: FinalCueTrailingHoldEvidence | None = None
-    policy_ref: str = Field(min_length=1)
-    policy_version: str = Field(min_length=1)
-    policy_hash: str = Field(min_length=1)
-    content_hash: str = Field(min_length=1)
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class CaptionBoundsPreflightReport(BaseModel):
-    ffmpeg_binary: str = Field(min_length=1)
-    frame_width: int = Field(gt=0)
-    frame_height: int = Field(gt=0)
-    cue_metrics: list[CaptionBBoxMetrics] = Field(default_factory=list)
-    layout_gate: CreativeQualityGateResult
-    safe_area_gate: CreativeQualityGateResult
     policy_ref: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
     policy_hash: str = Field(min_length=1)

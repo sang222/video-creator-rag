@@ -1062,8 +1062,6 @@ class MediaQCGateService:
             failures.append("MEDIA_ASPECT_RATIO_INVALID")
         if not data.audio_present:
             failures.append("MEDIA_AUDIO_MISSING")
-        if not data.captions_readable:
-            failures.append("MEDIA_CAPTIONS_UNREADABLE")
         if data.black_frames_detected:
             failures.append("MEDIA_BLACK_FRAMES_DETECTED")
         if failures:

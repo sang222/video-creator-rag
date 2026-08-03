@@ -141,7 +141,6 @@ class NativeRenderScene(BaseModel):
     transition_in: str | None = None
     transition_out: str | None = None
     emphasis_targets: list[str] = Field(default_factory=list)
-    caption_behavior: str = "BURN_IN"
     safe_area_policy: str = "DEFAULT"
     originality_role: str
     provider_intent: str | None = None
@@ -313,7 +312,6 @@ class NativeRenderPlan(BaseModel):
     canonical_audio_asset_ref: str | None = None
     canonical_caption_compilation_ref: str | None = None
     canonical_caption_compilation_hash: str | None = None
-    canonical_caption_render_payload_hash: str | None = None
     scene_timing_source: str | None = None
     caption_timing_source: str | None = None
     parallel_timing_inputs: list[str] = Field(default_factory=list)
@@ -412,7 +410,6 @@ class CompiledNativeRenderManifest(BaseModel):
     canonical_duration_ms: int | None = Field(default=None, gt=0)
     canonical_caption_compilation_ref: str | None = None
     canonical_caption_compilation_hash: str | None = None
-    canonical_caption_render_payload_hash: str | None = None
     visual_direction_contract_ref: str | None = None
     visual_direction_contract_hash: str | None = None
     creative_gate_results: dict[str, Any] = Field(default_factory=dict)
@@ -432,7 +429,6 @@ class FFmpegCommandManifest(BaseModel):
     input_files: list[str]
     generated_filtergraph_path: str
     generated_text_files: list[str]
-    generated_caption_path: str | None
     generated_file_checksums: dict[str, str] = Field(default_factory=dict)
     output_file: str
     output_profile: str
@@ -448,7 +444,6 @@ class FFmpegCommandManifest(BaseModel):
     canonical_duration_ms: int | None = Field(default=None, gt=0)
     canonical_caption_compilation_ref: str | None = None
     canonical_caption_compilation_hash: str | None = None
-    canonical_caption_render_payload_hash: str | None = None
     command_hash: str
     created_at: datetime
 

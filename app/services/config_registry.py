@@ -282,7 +282,7 @@ class CreativeQualityPolicyCatalogItem(BaseModel):
     channel_key: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
     narration_pacing_policy: dict[str, Any]
-    caption_style_policy: dict[str, Any]
+    subtitle_sidecar_policy: dict[str, Any]
     caption_sync_policy: dict[str, Any]
     visual_language_policy: dict[str, Any]
     visual_continuity_policy: dict[str, Any]

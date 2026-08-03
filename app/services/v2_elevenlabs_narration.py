@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
+
+from sqlalchemy import select
 
 from app.contracts.production_workflow import (
     ProductionWorkflowStage,
@@ -13,12 +16,16 @@ from app.contracts.production_workflow import (
     WorkflowFailureClassification,
     WorkflowStageResult,
 )
+from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
+from app.contracts.temporal_authority import NarrationTimingSeed
 from app.core.config import Settings, get_settings
 from app.core.errors import ValidationFailureError
 from app.services.config_registry import content_hash
 from app.services.cqr1_real_provider import ElevenLabsConvertWithTimestampsClient
 from app.services.mr1_provider_gateways import _temporal_normalized
 from app.services.production_workflow import WorkflowStageContext, WorkflowStageError
+from app.services.workflow import ArtifactService
+from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.v2_native_effects import (
     V2_ELEVENLABS_NARRATION_STRATEGY,
     V2_TIMELINE_SCHEMA,
@@ -37,6 +44,11 @@ from app.services.v2_provider_production import (
 
 
 V2_ELEVENLABS_NARRATION_ADAPTER_KEY = "v2-elevenlabs-narration"
+V2_TRANSCRIPT_ARTIFACT_TYPE = "v2_transcript"
+V2_TIMED_WORDS_ARTIFACT_TYPE = "v2_timed_words"
+V2_CAPTION_SRT_ARTIFACT_TYPE = "v2_caption_srt"
+V2_SUBTITLE_QC_ARTIFACT_TYPE = "v2_subtitle_qc"
+V2_SIDECAR_SCHEMA = "vcos.v2-sidecar-srt.v1"
 
 
 class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
@@ -117,6 +129,20 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             script=script,
             operation=operation,
         )
+        with self._session_factory() as session:
+            persisted_project = session.get(VideoProject, project.id)
+            if persisted_project is None:
+                raise ValidationFailureError("V2_CAPTION_SIDECAR_PROJECT_REQUIRED")
+            sidecar = _persist_sidecar_artifacts(
+                session=session,
+                project=persisted_project,
+                command_id=context.command_id,
+                script_content=dict(script.content or {}),
+                script_content_hash=script.content_hash,
+                audio=audio,
+                effect_dir=effect_dir,
+            )
+            session.commit()
         timeline_ref = f"v2-effect://{ledger_id}/canonical-media-timeline"
         timeline = _build_timeline(
             run=run,
@@ -125,7 +151,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             script=script,
             visual=visual,
             timeline_ref=timeline_ref,
-            audio=audio,
+            audio={**audio, **sidecar},
         )
         timeline_hash = content_hash(timeline)
         timeline_path = effect_dir / "canonical-media-timeline.json"
@@ -151,6 +177,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             "provider_request_id": audio.get("provider_request_id"),
             "estimated_cost_usd": audio["estimated_cost_usd"],
             "actual_cost_usd": audio["actual_cost_usd"],
+            **sidecar,
         }
         _persist_exact_json(
             effect_dir / "effect-journal.json", journal, allow_reconciled_update=True
@@ -171,6 +198,10 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
                     "alignment_method": audio["alignment_method"],
                     "provider_request_id": audio.get("provider_request_id"),
                     "actual_cost_usd": audio["actual_cost_usd"],
+                    "caption_ref": sidecar["caption_ref"],
+                    "caption_checksum": sidecar["caption_checksum"],
+                    "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+                    "subtitle_qc_state": sidecar["subtitle_qc_state"],
                 },
                 authority_refs=WorkflowAuthorityRefs(
                     video_project_id=project.id,
@@ -281,6 +312,8 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             "alignment_method": "ELEVENLABS_TIMESTAMPS",
             "provider_request_hash": execution.request_hash,
             "provider_request_id": execution.timing_seed.provider_request_id,
+            "timing_seed": execution.timing_seed.model_dump(mode="json"),
+            "timing_seed_hash": execution.timing_seed.content_hash,
             "usage_metadata": execution.usage_metadata,
             "actual_cost_usd": None,
             "secret_values_exposed": False,
@@ -289,4 +322,446 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
         return receipt
 
 
-__all__ = ["V2_ELEVENLABS_NARRATION_ADAPTER_KEY", "V2ElevenLabsNarrationAdapter"]
+def _persist_sidecar_artifacts(
+    *,
+    session: Any,
+    project: VideoProject,
+    command_id: str,
+    script_content: dict[str, Any],
+    script_content_hash: str,
+    audio: dict[str, Any],
+    effect_dir: Path,
+) -> dict[str, Any]:
+    """Persist V2's canonical SRT lineage without exposing it to FFmpeg.
+
+    The narrator already owns the exact provider timestamps.  Keeping this
+    materialization in that stage prevents a later renderer from deriving a
+    new, parallel caption timeline or silently replacing an invalid sidecar.
+    """
+
+    transcript = str(script_content.get("narration_text") or "").strip()
+    locale = str(script_content.get("locale") or script_content.get("language") or "").strip()
+    if not transcript:
+        raise ValidationFailureError("CAPTION_SIDECAR_TRANSCRIPT_MISSING")
+    if not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?", locale):
+        raise ValidationFailureError("CAPTION_SIDECAR_LOCALE_INVALID")
+    raw_seed = audio.get("timing_seed")
+    try:
+        timing_seed = NarrationTimingSeed.model_validate(raw_seed)
+    except (TypeError, ValueError) as exc:
+        raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_MISSING") from exc
+    if (
+        timing_seed.content_hash != audio.get("timing_seed_hash")
+        or not timing_seed.timing_available
+        or timing_seed.audio_asset_ref != audio.get("audio_asset_ref")
+        or timing_seed.audio_duration_ms != int(audio.get("duration_ms") or 0)
+    ):
+        raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+    seed_payload = timing_seed.model_dump(mode="json", exclude={"content_hash"})
+    if content_hash(seed_payload) != timing_seed.content_hash:
+        raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+
+    timed_words = _timed_words_from_seed(timing_seed, transcript)
+    cues = _build_srt_cues(timed_words)
+    srt_text = _render_srt(cues)
+    try:
+        srt_bytes = srt_text.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise ValidationFailureError("CAPTION_SIDECAR_UTF8_INVALID") from exc
+    caption_path = effect_dir / "canonical-captions.srt"
+    _write_srt_once(caption_path, srt_bytes)
+    caption_checksum = _sha256_file(caption_path)
+    transcript_content = {
+        "schema_version": V2_SIDECAR_SCHEMA,
+        "kind": "TRANSCRIPT",
+        "language": locale.split("-", 1)[0].lower(),
+        "locale": locale,
+        "text": transcript,
+        "script_content_hash": script_content_hash,
+        "audio_asset_ref": audio["audio_asset_ref"],
+    }
+    transcript_version = _ensure_sidecar_artifact_version(
+        session=session,
+        project=project,
+        artifact_type=V2_TRANSCRIPT_ARTIFACT_TYPE,
+        command_id=command_id,
+        content=transcript_content,
+        source_manifest={
+            "items": [
+                {"type": "approved_script", "content_hash": script_content_hash},
+                {"type": "narration_audio", "ref": audio["audio_asset_ref"]},
+            ]
+        },
+    )
+    timed_words_content = {
+        "schema_version": V2_SIDECAR_SCHEMA,
+        "kind": "TIMED_WORDS",
+        "language": locale.split("-", 1)[0].lower(),
+        "locale": locale,
+        "audio_asset_ref": audio["audio_asset_ref"],
+        "audio_duration_ms": timing_seed.audio_duration_ms,
+        "timing_seed_hash": timing_seed.content_hash,
+        "transcript_ref": f"artifact-version://{transcript_version.id}",
+        "transcript_hash": transcript_version.content_hash,
+        "words": timed_words,
+    }
+    timed_words_version = _ensure_sidecar_artifact_version(
+        session=session,
+        project=project,
+        artifact_type=V2_TIMED_WORDS_ARTIFACT_TYPE,
+        command_id=command_id,
+        content=timed_words_content,
+        source_manifest={
+            "items": [
+                {"type": "transcript", "artifact_version_id": str(transcript_version.id)},
+                {"type": "elevenlabs_timing_seed", "content_hash": timing_seed.content_hash},
+            ]
+        },
+    )
+    caption_content = {
+        "schema_version": V2_SIDECAR_SCHEMA,
+        "kind": "SRT",
+        "language": locale.split("-", 1)[0].lower(),
+        "locale": locale,
+        "file_name": "canonical-captions.srt",
+        "mime_type": "application/x-subrip",
+        "checksum_sha256": caption_checksum,
+        "size_bytes": len(srt_bytes),
+        "srt_text": srt_text,
+        "transcript_ref": f"artifact-version://{transcript_version.id}",
+        "transcript_hash": transcript_version.content_hash,
+        "timed_words_ref": f"artifact-version://{timed_words_version.id}",
+        "timed_words_hash": timed_words_version.content_hash,
+        "audio_asset_ref": audio["audio_asset_ref"],
+        "audio_duration_ms": timing_seed.audio_duration_ms,
+        "cues": cues,
+    }
+    caption_version = _ensure_sidecar_artifact_version(
+        session=session,
+        project=project,
+        artifact_type=V2_CAPTION_SRT_ARTIFACT_TYPE,
+        command_id=command_id,
+        content=caption_content,
+        source_manifest={
+            "items": [
+                {"type": "timed_words", "artifact_version_id": str(timed_words_version.id)},
+                {"type": "transcript", "artifact_version_id": str(transcript_version.id)},
+            ]
+        },
+    )
+    qc_content = _subtitle_qc_content(
+        caption_content=caption_content,
+        timed_words=timed_words,
+        transcript_hash=transcript_version.content_hash,
+        caption_artifact_hash=caption_version.content_hash,
+        caption_ref=f"artifact-version://{caption_version.id}",
+    )
+    if qc_content["status"] != "PASS":
+        raise ValidationFailureError("SUBTITLE_QC_FAILED:" + ",".join(qc_content["reason_codes"]))
+    qc_version = _ensure_sidecar_artifact_version(
+        session=session,
+        project=project,
+        artifact_type=V2_SUBTITLE_QC_ARTIFACT_TYPE,
+        command_id=command_id,
+        content=qc_content,
+        source_manifest={
+            "items": [
+                {"type": "caption_srt", "artifact_version_id": str(caption_version.id)},
+                {"type": "timed_words", "artifact_version_id": str(timed_words_version.id)},
+            ]
+        },
+    )
+    return {
+        "caption_relative_path": str(caption_path.relative_to(effect_dir.parents[1])),
+        "caption_checksum": caption_checksum,
+        "caption_ref": f"artifact-version://{caption_version.id}",
+        "caption_artifact_version_id": str(caption_version.id),
+        "caption_artifact_hash": caption_version.content_hash,
+        "transcript_ref": f"artifact-version://{transcript_version.id}",
+        "transcript_artifact_version_id": str(transcript_version.id),
+        "transcript_hash": transcript_version.content_hash,
+        "timed_words_ref": f"artifact-version://{timed_words_version.id}",
+        "timed_words_artifact_version_id": str(timed_words_version.id),
+        "timed_words_hash": timed_words_version.content_hash,
+        "subtitle_qc_ref": f"artifact-version://{qc_version.id}",
+        "subtitle_qc_artifact_version_id": str(qc_version.id),
+        "subtitle_qc_hash": qc_version.content_hash,
+        "subtitle_qc_state": "PASS",
+        "caption_language": locale.split("-", 1)[0].lower(),
+        "caption_locale": locale,
+    }
+
+
+def _timed_words_from_seed(
+    seed: NarrationTimingSeed,
+    transcript: str,
+) -> list[dict[str, Any]]:
+    characters = sorted(seed.normalized_character_alignment, key=lambda item: item.character_index)
+    if not characters or [item.character_index for item in characters] != list(range(len(characters))):
+        raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+    reconstructed = "".join(item.character for item in characters)
+    if reconstructed != transcript:
+        raise ValidationFailureError("CAPTION_SIDECAR_TRANSCRIPT_PROVENANCE_INVALID")
+    words: list[dict[str, Any]] = []
+    previous_end = -1
+    for index, match in enumerate(re.finditer(r"\S+", reconstructed), start=1):
+        span = characters[match.start() : match.end()]
+        start_ms, end_ms = span[0].start_ms, span[-1].end_ms
+        if start_ms < previous_end or end_ms <= start_ms or end_ms > seed.audio_duration_ms:
+            raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_INVALID")
+        words.append(
+            {
+                "index": index,
+                "text": match.group(),
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+            }
+        )
+        previous_end = end_ms
+    if not words:
+        raise ValidationFailureError("CAPTION_SIDECAR_TIMED_WORDS_MISSING")
+    return words
+
+
+def _build_srt_cues(words: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    cues: list[dict[str, Any]] = []
+    group: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        nonlocal group
+        if not group:
+            return
+        text = " ".join(str(word["text"]) for word in group)
+        lines = _subtitle_lines(text)
+        cues.append(
+            {
+                "index": len(cues) + 1,
+                "start_ms": int(group[0]["start_ms"]),
+                "end_ms": int(group[-1]["end_ms"]),
+                "lines": lines,
+                "word_start_index": int(group[0]["index"]),
+                "word_end_index": int(group[-1]["index"]),
+            }
+        )
+        group = []
+
+    for word in words:
+        candidate = [*group, word]
+        candidate_text = " ".join(str(item["text"]) for item in candidate)
+        duration_ms = int(candidate[-1]["end_ms"]) - int(candidate[0]["start_ms"])
+        if group and (len(candidate_text) > 84 or duration_ms > 6_000):
+            flush()
+            candidate = [word]
+        group = candidate
+        duration_ms = int(group[-1]["end_ms"]) - int(group[0]["start_ms"])
+        if duration_ms >= 1_000 and re.search(r"[.!?;:]$", str(word["text"])):
+            flush()
+    flush()
+    if len(cues) > 1 and (cues[-1]["end_ms"] - cues[-1]["start_ms"]) < 800:
+        previous, final = cues[-2], cues[-1]
+        merged_text = " ".join([*previous["lines"], *final["lines"]])
+        if len(merged_text) <= 84:
+            previous.update(
+                {
+                    "end_ms": final["end_ms"],
+                    "lines": _subtitle_lines(merged_text),
+                    "word_end_index": final["word_end_index"],
+                }
+            )
+            cues.pop()
+    for index, cue in enumerate(cues, start=1):
+        cue["index"] = index
+    return cues
+
+
+def _subtitle_lines(text: str) -> list[str]:
+    if len(text) <= 42:
+        return [text]
+    words = text.split()
+    best: tuple[int, str, str] | None = None
+    for split in range(1, len(words)):
+        left, right = " ".join(words[:split]), " ".join(words[split:])
+        if len(left) <= 46 and len(right) <= 46:
+            score = abs(len(left) - len(right))
+            if best is None or score < best[0]:
+                best = (score, left, right)
+    if best is None:
+        raise ValidationFailureError("CAPTION_SIDECAR_LINE_LENGTH_INVALID")
+    return [best[1], best[2]]
+
+
+def _render_srt(cues: Sequence[dict[str, Any]]) -> str:
+    return "\n\n".join(
+        f"{cue['index']}\n{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
+        + "\n".join(cue["lines"])
+        for cue in cues
+    ) + "\n"
+
+
+def _srt_timestamp(milliseconds: int) -> str:
+    hours, remainder = divmod(int(milliseconds), 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _subtitle_qc_content(
+    *,
+    caption_content: dict[str, Any],
+    timed_words: Sequence[dict[str, Any]],
+    transcript_hash: str,
+    caption_artifact_hash: str,
+    caption_ref: str,
+) -> dict[str, Any]:
+    cues = list(caption_content["cues"])
+    reasons: list[str] = []
+    previous_end = -1
+    expected_word_index = 1
+    cps_values: list[float] = []
+    for expected_index, cue in enumerate(cues, start=1):
+        start, end = int(cue["start_ms"]), int(cue["end_ms"])
+        lines = list(cue["lines"])
+        text = " ".join(lines)
+        if cue.get("index") != expected_index or start < previous_end:
+            reasons.append("CAPTION_SIDECAR_ORDER_INVALID")
+        if end <= start:
+            reasons.append("CAPTION_SIDECAR_DURATION_INVALID")
+        if not lines or any(not str(line).strip() for line in lines):
+            reasons.append("CAPTION_SIDECAR_EMPTY_CUE")
+        if len(lines) > 2 or any(len(str(line)) > 46 for line in lines):
+            reasons.append("CAPTION_SIDECAR_LINE_LENGTH_INVALID")
+        duration_seconds = (end - start) / 1000
+        if not 0.8 <= duration_seconds <= 7.0:
+            reasons.append("CAPTION_SIDECAR_DURATION_INVALID")
+        cps = len(text) / max(duration_seconds, 0.001)
+        cps_values.append(cps)
+        if cps > 20:
+            reasons.append("CAPTION_SIDECAR_READING_SPEED_INVALID")
+        if (
+            int(cue["word_start_index"]) != expected_word_index
+            or int(cue["word_end_index"]) < expected_word_index
+        ):
+            reasons.append("CAPTION_SIDECAR_ALIGNMENT_INVALID")
+        expected_word_index = int(cue["word_end_index"]) + 1
+        previous_end = end
+    if expected_word_index != len(timed_words) + 1:
+        reasons.append("CAPTION_SIDECAR_ALIGNMENT_INVALID")
+    duration_ms = int(caption_content["audio_duration_ms"])
+    if not cues or cues[0]["start_ms"] < 0 or cues[-1]["end_ms"] > duration_ms:
+        reasons.append("CAPTION_SIDECAR_COVERAGE_INVALID")
+    if cues and duration_ms - int(cues[-1]["end_ms"]) > 2_000:
+        reasons.append("CAPTION_SIDECAR_COVERAGE_INVALID")
+    if cps_values and (sum(cps_values) / len(cps_values)) > 17.5:
+        reasons.append("CAPTION_SIDECAR_READING_SPEED_INVALID")
+    return {
+        "schema_version": V2_SIDECAR_SCHEMA,
+        "kind": "SUBTITLE_QC",
+        "status": "BLOCK" if reasons else "PASS",
+        "reason_codes": sorted(set(reasons)),
+        "language": caption_content["language"],
+        "locale": caption_content["locale"],
+        "caption_ref": caption_ref,
+        "caption_artifact_hash": caption_artifact_hash,
+        "caption_checksum": caption_content["checksum_sha256"],
+        "transcript_hash": transcript_hash,
+        "timed_words_hash": caption_content["timed_words_hash"],
+        "cue_count": len(cues),
+        "timed_word_count": len(timed_words),
+        "encoding": "UTF-8",
+        "punctuation_normalized": True,
+        "provenance_valid": True,
+    }
+
+
+def _ensure_sidecar_artifact_version(
+    *,
+    session: Any,
+    project: VideoProject,
+    artifact_type: str,
+    command_id: str,
+    content: dict[str, Any],
+    source_manifest: dict[str, Any],
+) -> ArtifactVersion:
+    expected_hash = content_hash(content)
+    existing = session.execute(
+        select(ArtifactVersion, Artifact)
+        .join(Artifact, Artifact.id == ArtifactVersion.artifact_id)
+        .where(
+            Artifact.video_project_id == project.id,
+            Artifact.artifact_type == artifact_type,
+            ArtifactVersion.content_hash == expected_hash,
+        )
+    ).one_or_none()
+    if existing is not None:
+        version, artifact = existing
+        if (
+            artifact.current_version_id != version.id
+            or artifact.status != "approved"
+            or version.status != "approved"
+            or version.content != content
+        ):
+            raise ValidationFailureError("CAPTION_SIDECAR_ARTIFACT_MISMATCH")
+        return version
+    service = ArtifactService(session)
+    artifact = service.create_artifact(
+        data=ArtifactCreate(
+            video_project_id=project.id,
+            artifact_type=artifact_type,
+            status="approved",
+            created_by_user_id=project.created_by_user_id,
+        ),
+        correlation_id=f"v2-sidecar-{command_id}",
+        trusted_authority_write=True,
+    )
+    version = service.create_artifact_version(
+        data=ArtifactVersionCreate(
+            artifact_id=artifact.id,
+            content=content,
+            status="approved",
+            created_by_user_id=project.created_by_user_id,
+            external_entity_refs=[],
+            packaging_metadata={
+                "producer": V2_ELEVENLABS_NARRATION_ADAPTER_KEY,
+                "command_id": command_id,
+                "sidecar_only": True,
+            },
+            media_qc_metadata={},
+            source_manifest=source_manifest,
+            evidence_refs=[],
+            context_refs=[],
+            claim_refs=[],
+        ),
+        correlation_id=f"v2-sidecar-{command_id}",
+        trusted_authority_write=True,
+    )
+    if version.content_hash != expected_hash:
+        raise ValidationFailureError("CAPTION_SIDECAR_ARTIFACT_HASH_MISMATCH")
+    artifact.status = "approved"
+    session.flush()
+    return version
+
+
+def _write_srt_once(path: Path, payload: bytes) -> None:
+    if path.exists():
+        if not path.is_file() or path.is_symlink() or path.read_bytes() != payload:
+            raise ValidationFailureError("CAPTION_SIDECAR_FILE_MISMATCH")
+        return
+    part = path.with_name(path.name + ".part")
+    part.unlink(missing_ok=True)
+    try:
+        with part.open("wb") as stream:
+            stream.write(payload)
+            stream.flush()
+        part.replace(path)
+    finally:
+        part.unlink(missing_ok=True)
+
+
+__all__ = [
+    "V2_CAPTION_SRT_ARTIFACT_TYPE",
+    "V2_ELEVENLABS_NARRATION_ADAPTER_KEY",
+    "V2_SUBTITLE_QC_ARTIFACT_TYPE",
+    "V2_TIMED_WORDS_ARTIFACT_TYPE",
+    "V2_TRANSCRIPT_ARTIFACT_TYPE",
+    "V2ElevenLabsNarrationAdapter",
+]

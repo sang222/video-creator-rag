@@ -155,7 +155,7 @@ class NativeQualificationService:
                 )
             ],
             global_motion_policy={"mode": "LOCAL_DETERMINISTIC"},
-            caption_policy={"format": "SRT", "burn_in": True},
+            caption_policy={"format": "SRT", "delivery": "SIDECAR_SRT_ONLY"},
             audio_policy={"source": "LOCAL_SYNTHETIC_TONE", "sample_rate": 48000},
             output_profiles=[output_profile],
             character_policy_mode="NO_CHARACTER",

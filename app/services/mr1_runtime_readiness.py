@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -31,9 +30,10 @@ def probe_mr1_production_toolchain(
 
     The probe creates only a short-lived local clip below ``workspace_root``.  It
     neither imports a provider adapter nor performs a network request.  Listing
-    a codec/filter is not enough: the probe actually renders ASS and drawtext,
-    runs blackdetect, encodes libx264/AAC, probes both streams, and fully decodes
-    the resulting bytes.
+    a codec/filter is not enough: the probe actually renders a semantic native
+    drawtext overlay, runs blackdetect, encodes libx264/AAC, probes both
+    streams, and fully decodes the resulting bytes. Captions remain external
+    SRT sidecars and are deliberately outside this MP4 capability probe.
     """
 
     requested_workspace = Path(workspace_root)
@@ -58,10 +58,8 @@ def probe_mr1_production_toolchain(
         "ffprobe_executable": ffprobe_path is not None,
         "libx264_encoder_available": False,
         "aac_encoder_available": False,
-        "ass_libass_filter_available": False,
         "drawtext_filter_available": False,
         "blackdetect_filter_available": False,
-        "arial_font_available": False,
         "actual_local_encode_pass": False,
         "actual_h264_stream_verified": False,
         "actual_aac_stream_verified": False,
@@ -122,9 +120,6 @@ def probe_mr1_production_toolchain(
             if filters.returncode != 0:
                 raise RuntimeError("MR1_TOOLCHAIN_FILTER_LIST_FAILED")
             filter_listing = (filters.stdout or "") + (filters.stderr or "")
-            checks["ass_libass_filter_available"] = _listing_contains(
-                filter_listing, "ass"
-            )
             checks["drawtext_filter_available"] = _listing_contains(
                 filter_listing, "drawtext"
             )
@@ -134,20 +129,16 @@ def probe_mr1_production_toolchain(
             listed_requirements = (
                 "libx264_encoder_available",
                 "aac_encoder_available",
-                "ass_libass_filter_available",
                 "drawtext_filter_available",
                 "blackdetect_filter_available",
             )
             if not all(checks[name] for name in listed_requirements):
                 raise RuntimeError("MR1_TOOLCHAIN_REQUIRED_CAPABILITY_MISSING")
 
-            caption = work / "probe.ass"
-            caption.write_text(_ASS_PROBE, encoding="utf-8")
             output = work / "probe.mp4"
             filtergraph = (
                 "[0:v]drawtext=font='Arial':text='MR1':fontcolor=white:"
                 "fontsize=22:x=12:y=12,"
-                "ass=filename='probe.ass',"
                 "blackdetect=d=0.10:pix_th=0.10:pic_th=0.98,"
                 "format=yuv420p[v]"
             )
@@ -201,14 +192,6 @@ def probe_mr1_production_toolchain(
             ):
                 raise RuntimeError("MR1_TOOLCHAIN_ACTUAL_ENCODE_FAILED")
             checks["actual_local_encode_pass"] = True
-            font_log = (encoded.stdout or "") + (encoded.stderr or "")
-            checks["arial_font_available"] = bool(
-                re.search(r"fontselect[^\n]*arial", font_log, flags=re.IGNORECASE)
-                or re.search(r"arial[^\n]*\.(?:ttf|otf)", font_log, flags=re.IGNORECASE)
-            )
-            if not checks["arial_font_available"]:
-                raise RuntimeError("MR1_TOOLCHAIN_ARIAL_FONT_UNVERIFIED")
-
             probed = _run_probe_command(
                 [
                     ffprobe_path,
@@ -349,18 +332,3 @@ def _safe_reason(exc: Exception) -> str:
     if value.startswith("MR1_TOOLCHAIN_") and " " not in value:
         return value
     return "MR1_TOOLCHAIN_LOCAL_PROBE_FAILED"
-
-
-_ASS_PROBE = """[Script Info]
-ScriptType: v4.00+
-PlayResX: 320
-PlayResY: 180
-
-[V4+ Styles]
-Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Default,Arial,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,2,0,2,12,12,16,1
-
-[Events]
-Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
-Dialogue: 0,0:00:00.00,0:00:00.55,Default,,0,0,0,,MR1 readiness
-"""

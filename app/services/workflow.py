@@ -414,6 +414,10 @@ _DOMAIN_SERVICE_ONLY_ARTIFACT_TYPES = frozenset(
     {
         "mr1_final_media_lineage_receipt",
         "v2_drive_final_media_lineage_receipt",
+        "v2_transcript",
+        "v2_timed_words",
+        "v2_caption_srt",
+        "v2_subtitle_qc",
         "production_package",
         "production_readiness_receipt",
         "v2_frozen_support_envelope",

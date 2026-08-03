@@ -9,9 +9,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.contracts.caption_voice_quality import (
-    CaptionStylePolicy,
     CaptionSyncPolicy,
     NarrationPacingPolicy,
+    SubtitleSidecarPolicy,
 )
 from app.contracts.visual_direction import (
     VeoDurationFitThresholds,
@@ -22,7 +22,7 @@ from app.contracts.visual_direction import (
 
 POLICY_FAMILIES = (
     "narration_pacing_policy",
-    "caption_style_policy",
+    "subtitle_sidecar_policy",
     "caption_sync_policy",
     "visual_language_policy",
     "visual_continuity_policy",
@@ -142,7 +142,7 @@ class TypedCreativeQualityPolicySnapshot(BaseModel):
     policy_hash: str = Field(min_length=1)
     catalog_version: str = Field(min_length=1)
     narration_pacing_policy: NarrationPacingPolicy
-    caption_style_policy: CaptionStylePolicy
+    subtitle_sidecar_policy: SubtitleSidecarPolicy
     caption_sync_policy: CaptionSyncPolicy
     visual_language_policy: VisualLanguagePolicyConfig
     visual_continuity_policy: VisualContinuityPolicyConfig
@@ -209,33 +209,46 @@ def policy_family(snapshot: dict[str, Any], family: str) -> dict[str, Any]:
 
 
 def typed_policy_snapshot(snapshot: Mapping[str, Any]) -> TypedCreativeQualityPolicySnapshot:
+    # Historical immutable snapshots used the burn-in style-family name.  Read
+    # that persisted data as a sidecar policy without rewriting its authority
+    # blob; newly compiled snapshots can only use subtitle_sidecar_policy.
+    normalized_snapshot = dict(snapshot)
+    if (
+        "subtitle_sidecar_policy" not in normalized_snapshot
+        and isinstance(normalized_snapshot.get("caption_style_policy"), Mapping)
+    ):
+        normalized_snapshot["subtitle_sidecar_policy"] = dict(
+            normalized_snapshot["caption_style_policy"]
+        )
     metadata = {
-        "policy_ref": snapshot.get("policy_ref"),
-        "policy_version": snapshot.get("policy_version"),
-        "policy_hash": snapshot.get("policy_hash"),
-        "channel_id": snapshot.get("channel_id"),
+        "policy_ref": normalized_snapshot.get("policy_ref"),
+        "policy_version": normalized_snapshot.get("policy_version"),
+        "policy_hash": normalized_snapshot.get("policy_hash"),
+        "channel_id": normalized_snapshot.get("channel_id"),
     }
 
     def typed_family(name: str, model: type[BaseModel]) -> BaseModel:
-        raw = snapshot.get(name)
+        raw = normalized_snapshot.get(name)
         if not isinstance(raw, Mapping):
             raise ValueError(f"CREATIVE_POLICY_FAMILY_MISSING:{name}")
         return model.model_validate({**dict(raw), **metadata})
 
     payload = {
-        "channel_id": snapshot.get("channel_id"),
-        "policy_ref": snapshot.get("policy_ref"),
-        "policy_version": snapshot.get("policy_version"),
-        "policy_hash": snapshot.get("policy_hash"),
-        "catalog_version": snapshot.get("catalog_version"),
+        "channel_id": normalized_snapshot.get("channel_id"),
+        "policy_ref": normalized_snapshot.get("policy_ref"),
+        "policy_version": normalized_snapshot.get("policy_version"),
+        "policy_hash": normalized_snapshot.get("policy_hash"),
+        "catalog_version": normalized_snapshot.get("catalog_version"),
         "narration_pacing_policy": typed_family("narration_pacing_policy", NarrationPacingPolicy),
-        "caption_style_policy": typed_family("caption_style_policy", CaptionStylePolicy),
+        "subtitle_sidecar_policy": typed_family(
+            "subtitle_sidecar_policy", SubtitleSidecarPolicy
+        ),
         "caption_sync_policy": typed_family("caption_sync_policy", CaptionSyncPolicy),
         "visual_language_policy": VisualLanguagePolicyConfig.model_validate(
-            snapshot.get("visual_language_policy")
+            normalized_snapshot.get("visual_language_policy")
         ),
         "visual_continuity_policy": VisualContinuityPolicyConfig.model_validate(
-            snapshot.get("visual_continuity_policy")
+            normalized_snapshot.get("visual_continuity_policy")
         ),
         "creative_media_qc_policy": CreativeMediaQCPolicyConfig.model_validate(
             snapshot.get("creative_media_qc_policy")

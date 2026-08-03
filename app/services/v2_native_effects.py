@@ -88,6 +88,7 @@ _CREATIVE_GATES = (
     "FinalDurationConsistencyGate",
     "AudioStrategyTruthfulnessGate",
     "StreamIntegrityGate",
+    "SubtitleSidecarGate",
 )
 
 
@@ -647,6 +648,15 @@ class V2LocalNativeProductionAdapter:
             script=script,
             audio_strategy=audio_strategy,
         )
+        if "caption_ref" not in audio:
+            audio = {
+                **audio,
+                **self._prepare_qualification_sidecar(
+                    effect_dir=effect_dir,
+                    script=script,
+                    audio=audio,
+                ),
+            }
         timeline_ref = f"v2-effect://{ledger_id}/canonical-media-timeline"
         timeline = _build_timeline(
             run=run,
@@ -679,6 +689,14 @@ class V2LocalNativeProductionAdapter:
             "audio_effect_invocation_count": audio["effect_invocation_count"],
             "narration_present": audio["narration_present"],
             "alignment_method": audio["alignment_method"],
+            "caption_relative_path": audio["caption_relative_path"],
+            "caption_checksum": audio["caption_checksum"],
+            "caption_ref": audio["caption_ref"],
+            "transcript_ref": audio["transcript_ref"],
+            "timed_words_ref": audio["timed_words_ref"],
+            "subtitle_qc_ref": audio["subtitle_qc_ref"],
+            "subtitle_qc_hash": audio["subtitle_qc_hash"],
+            "subtitle_qc_state": audio["subtitle_qc_state"],
         }
         _persist_exact_json(journal_path, journal, allow_reconciled_update=True)
         result = WorkflowStageResult(
@@ -853,6 +871,72 @@ class V2LocalNativeProductionAdapter:
             package=package,
         )
 
+    def _prepare_qualification_sidecar(
+        self,
+        *,
+        effect_dir: Path,
+        script: ArtifactVersion,
+        audio: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create deterministic fixture-only SRT evidence for local qualification.
+
+        Real long-form production uses the ElevenLabs adapter's persisted
+        transcript/timed-words/SRT/SubtitleQC artifacts.  This branch is
+        unreachable in that route and exists solely to keep the existing local
+        qualification media fixture sidecar-only as well.
+        """
+
+        text = str((script.content or {}).get("narration_text") or "").strip()
+        locale = str((script.content or {}).get("language") or "").strip()
+        words = text.split()
+        duration_ms = int(audio.get("duration_ms") or 0)
+        if not text or not locale or not words or duration_ms <= 0:
+            raise ValidationFailureError("CAPTION_SIDECAR_MISSING")
+        groups = [words[index : index + 8] for index in range(0, len(words), 8)]
+        cues: list[tuple[int, int, list[str]]] = []
+        cursor = 0
+        for index, group in enumerate(groups):
+            end = duration_ms if index == len(groups) - 1 else round(
+                duration_ms * (index + 1) / len(groups)
+            )
+            cue_text = " ".join(group)
+            if len(cue_text) > 84:
+                raise ValidationFailureError("CAPTION_SIDECAR_LINE_LENGTH_INVALID")
+            lines = [cue_text] if len(cue_text) <= 42 else _split_sidecar_line(cue_text)
+            if end - cursor < 800:
+                raise ValidationFailureError("CAPTION_SIDECAR_DURATION_INVALID")
+            cues.append((cursor, end, lines))
+            cursor = end
+        srt = "\n\n".join(
+            f"{index}\n{_srt_timestamp_for_sidecar(start)} --> {_srt_timestamp_for_sidecar(end)}\n"
+            + "\n".join(lines)
+            for index, (start, end, lines) in enumerate(cues, start=1)
+        ) + "\n"
+        path = effect_dir / "qualification-captions.srt"
+        _write_bytes_atomic(path, srt.encode("utf-8"))
+        checksum = _sha256_file(path)
+        identity = content_hash(
+            {
+                "script_content_hash": script.content_hash,
+                "audio_asset_ref": audio["audio_asset_ref"],
+                "caption_checksum": checksum,
+                "qualification_only": True,
+            }
+        )
+        return {
+            "caption_relative_path": self._relative(path),
+            "caption_checksum": checksum,
+            "caption_ref": f"qualification-sidecar://{identity}",
+            "caption_artifact_hash": identity,
+            "transcript_ref": f"qualification-transcript://{script.content_hash}",
+            "timed_words_ref": f"qualification-timed-words://{identity}",
+            "subtitle_qc_ref": f"qualification-subtitle-qc://{identity}",
+            "subtitle_qc_hash": identity,
+            "subtitle_qc_state": "PASS",
+            "caption_language": locale.split("-", 1)[0].lower(),
+            "caption_locale": locale,
+        }
+
     def _seal_narration_output(
         self,
         *,
@@ -951,6 +1035,14 @@ class V2LocalNativeProductionAdapter:
             or media_journal.get("audio_strategy") != audio_strategy
         ):
             raise ValidationFailureError("V2_NATIVE_RENDER_TIMELINE_MISMATCH")
+        caption_path = self._from_relative(
+            _required_text(media_journal, "caption_relative_path")
+        )
+        _require_render_sidecar(
+            caption_path=caption_path,
+            media_journal=media_journal,
+            timeline=timeline,
+        )
         narration_audio_strategy = audio_strategy in {
             V2_LOCAL_NARRATION_STRATEGY,
             V2_ELEVENLABS_NARRATION_STRATEGY,
@@ -1069,6 +1161,10 @@ class V2LocalNativeProductionAdapter:
             "audio_checksum": timeline.get("audio_checksum"),
             "narration_present": timeline["narration_present"],
             "alignment_method": timeline["alignment_method"],
+            "caption_ref": timeline["caption_ref"],
+            "caption_checksum": timeline["caption_checksum"],
+            "subtitle_qc_ref": timeline["subtitle_qc_ref"],
+            "subtitle_qc_state": timeline["subtitle_qc_state"],
             "duration_ms": timeline["duration_ms"],
             "measured_render_duration_ms": measured_render_duration_ms,
         }
@@ -1141,6 +1237,22 @@ class V2LocalNativeProductionAdapter:
         )
         audio_strategy = str(timeline.get("audio_strategy") or "")
         narration_present = timeline.get("narration_present")
+        caption_path = self._from_relative(
+            _required_text(media_journal, "caption_relative_path")
+        )
+        caption_sidecar_valid = bool(
+            caption_path.is_file()
+            and not caption_path.is_symlink()
+            and media_journal.get("caption_checksum") == _sha256_file(caption_path)
+            and media_journal.get("caption_ref") == timeline.get("caption_ref")
+            and media_journal.get("subtitle_qc_state") == "PASS"
+            and media_journal.get("subtitle_qc_ref")
+            and media_journal.get("timed_words_ref")
+            and media_journal.get("transcript_ref")
+            and timeline.get("subtitle_qc_state") == "PASS"
+        )
+        if not caption_sidecar_valid:
+            raise ValidationFailureError("SUBTITLE_QC_FAILED")
         if native_qc.result != "PASS" or (
             native_qc.checks.get("checksum_sha256") != run.render_output_checksum
         ):
@@ -1206,7 +1318,9 @@ class V2LocalNativeProductionAdapter:
             "StreamIntegrityGate": (
                 native_qc.checks.get("stream_integrity") is True
                 and native_qc.checks.get("audio_format_matches_expected") is True
+                and native_qc.checks.get("subtitle_stream_count") == 0
             ),
+            "SubtitleSidecarGate": caption_sidecar_valid,
         }
         failed_checks = sorted(name for name, passed in checks.items() if not passed)
         if failed_checks:
@@ -1227,6 +1341,10 @@ class V2LocalNativeProductionAdapter:
             "audio_checksum": timeline.get("audio_checksum"),
             "narration_present": narration_present,
             "alignment_method": timeline["alignment_method"],
+            "caption_ref": timeline["caption_ref"],
+            "caption_checksum": timeline["caption_checksum"],
+            "subtitle_qc_ref": timeline["subtitle_qc_ref"],
+            "subtitle_qc_hash": timeline["subtitle_qc_hash"],
             "production_eligible": True,
             "human_final_review_required": True,
         }
@@ -1259,6 +1377,10 @@ class V2LocalNativeProductionAdapter:
             "audio_checksum": timeline.get("audio_checksum"),
             "narration_present": narration_present,
             "alignment_method": timeline["alignment_method"],
+            "caption_ref": timeline["caption_ref"],
+            "caption_checksum": timeline["caption_checksum"],
+            "subtitle_qc_ref": timeline["subtitle_qc_ref"],
+            "subtitle_qc_state": timeline["subtitle_qc_state"],
             "technical_pass_does_not_imply_human_watchability": True,
             "human_final_review_required": True,
             "production_eligible": True,
@@ -1285,6 +1407,10 @@ class V2LocalNativeProductionAdapter:
             "audio_checksum": timeline.get("audio_checksum"),
             "narration_present": narration_present,
             "alignment_method": timeline["alignment_method"],
+            "caption_ref": timeline["caption_ref"],
+            "caption_checksum": timeline["caption_checksum"],
+            "subtitle_qc_ref": timeline["subtitle_qc_ref"],
+            "subtitle_qc_state": timeline["subtitle_qc_state"],
         }
         _persist_exact_json(
             effect_dir / "effect-journal.json",
@@ -2126,6 +2252,15 @@ def _build_timeline(
         "audio_checksum": audio.get("audio_checksum"),
         "narration_present": audio["narration_present"],
         "alignment_method": audio["alignment_method"],
+        "caption_ref": audio.get("caption_ref"),
+        "caption_artifact_hash": audio.get("caption_artifact_hash"),
+        "caption_checksum": audio.get("caption_checksum"),
+        "caption_language": audio.get("caption_language"),
+        "caption_locale": audio.get("caption_locale"),
+        "timed_words_ref": audio.get("timed_words_ref"),
+        "subtitle_qc_ref": audio.get("subtitle_qc_ref"),
+        "subtitle_qc_hash": audio.get("subtitle_qc_hash"),
+        "subtitle_qc_state": audio.get("subtitle_qc_state"),
         "audio_description": (
             "Approved script rendered by the local operating-system speech "
             "engine; measured audio endpoint and proportional script alignment."
@@ -2173,6 +2308,10 @@ def _build_render_plan(
         "audio_checksum": timeline.get("audio_checksum"),
         "narration_present": timeline["narration_present"],
         "alignment_method": timeline["alignment_method"],
+        "caption_ref": timeline.get("caption_ref"),
+        "caption_artifact_hash": timeline.get("caption_artifact_hash"),
+        "caption_checksum": timeline.get("caption_checksum"),
+        "subtitle_qc_ref": timeline.get("subtitle_qc_ref"),
         "renderer": "native_ffmpeg",
         "production_eligible": True,
         "paid_provider_calls": False,
@@ -2221,8 +2360,12 @@ def _build_manifest(
             "alignment_method": timeline["alignment_method"],
         },
         "normalized_caption": {
-            "mode": "TEXT_LED_NATIVE_SCENES",
-            "separate_caption_track": False,
+            "mode": "SIDECAR_SRT_ONLY",
+            "caption_ref": timeline.get("caption_ref"),
+            "caption_checksum": timeline.get("caption_checksum"),
+            "subtitle_qc_ref": timeline.get("subtitle_qc_ref"),
+            "separate_caption_track": True,
+            "render_consumes_caption_cues": False,
         },
         "compiled_scenes": timeline["scenes"],
         "transition_schedule": [],
@@ -2233,7 +2376,13 @@ def _build_manifest(
             "narration_present": timeline["narration_present"],
             "alignment_method": timeline["alignment_method"],
         },
-        "caption_schedule": {"cues": []},
+        "caption_schedule": {
+            "authority": "SIDECAR_SRT_ONLY",
+            "caption_ref": timeline.get("caption_ref"),
+            "timed_words_ref": timeline.get("timed_words_ref"),
+            "subtitle_qc_ref": timeline.get("subtitle_qc_ref"),
+            "render_consumes_caption_cues": False,
+        },
         "output_specs": [
             {
                 "width": 1920,
@@ -2252,6 +2401,7 @@ def _build_manifest(
             timeline["script_ref"]["ref"],
             timeline["visual_plan_ref"]["ref"],
             timeline["timeline_ref"],
+            *([timeline["caption_ref"]] if timeline.get("caption_ref") else []),
         ],
         "unresolved_inputs": [],
         "compilation_warnings": [],
@@ -2269,9 +2419,8 @@ def _build_manifest(
         "canonical_media_timeline_hash": timeline_hash,
         "canonical_audio_asset_ref": timeline["audio_asset_ref"],
         "canonical_duration_ms": timeline["duration_ms"],
-        "canonical_caption_compilation_ref": None,
-        "canonical_caption_compilation_hash": None,
-        "canonical_caption_render_payload_hash": None,
+        "canonical_caption_compilation_ref": timeline.get("caption_ref"),
+        "canonical_caption_compilation_hash": timeline.get("caption_artifact_hash"),
         "visual_direction_contract_ref": timeline["visual_plan_ref"]["ref"],
         "visual_direction_contract_hash": timeline["visual_plan_ref"]["content_hash"],
         "creative_gate_results": {
@@ -2451,6 +2600,72 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         _fsync_directory(path.parent)
     finally:
         part.unlink(missing_ok=True)
+
+
+def _write_bytes_atomic(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if not path.is_file() or path.is_symlink() or path.read_bytes() != payload:
+            raise ValidationFailureError("CAPTION_SIDECAR_FILE_MISMATCH")
+        return
+    part = path.with_name(path.name + ".part")
+    part.unlink(missing_ok=True)
+    try:
+        with part.open("xb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(part, path)
+        _fsync_directory(path.parent)
+    finally:
+        part.unlink(missing_ok=True)
+
+
+def _split_sidecar_line(text: str) -> list[str]:
+    words = text.split()
+    choices = [
+        (abs(len(" ".join(words[:index])) - len(" ".join(words[index:]))), index)
+        for index in range(1, len(words))
+        if len(" ".join(words[:index])) <= 46
+        and len(" ".join(words[index:])) <= 46
+    ]
+    if not choices:
+        raise ValidationFailureError("CAPTION_SIDECAR_LINE_LENGTH_INVALID")
+    _, split = min(choices)
+    return [" ".join(words[:split]), " ".join(words[split:])]
+
+
+def _srt_timestamp_for_sidecar(milliseconds: int) -> str:
+    hours, remainder = divmod(int(milliseconds), 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _require_render_sidecar(
+    *,
+    caption_path: Path,
+    media_journal: dict[str, Any],
+    timeline: dict[str, Any],
+) -> None:
+    """Fail before FFmpeg if canonical SRT evidence is absent or unapproved."""
+
+    if (
+        not caption_path.is_file()
+        or caption_path.is_symlink()
+        or media_journal.get("caption_checksum") != _sha256_file(caption_path)
+        or timeline.get("caption_checksum") != media_journal.get("caption_checksum")
+        or timeline.get("caption_ref") != media_journal.get("caption_ref")
+    ):
+        raise ValidationFailureError("CAPTION_SIDECAR_MISSING")
+    if (
+        media_journal.get("subtitle_qc_state") != "PASS"
+        or not media_journal.get("subtitle_qc_ref")
+        or not media_journal.get("timed_words_ref")
+        or not media_journal.get("transcript_ref")
+        or timeline.get("subtitle_qc_state") != "PASS"
+    ):
+        raise ValidationFailureError("SUBTITLE_QC_FAILED")
 
 
 def _sha256_file(path: Path) -> str:

@@ -23,8 +23,7 @@ from app.services.native_render_plan import stable_hash
 REQUIRED_CREATIVE_MEDIA_QC_GATES = (
     "NarrationPacingGate",
     "CaptionCompilationGate",
-    "CaptionLayoutGate",
-    "CaptionSafeAreaGate",
+    "SubtitleSidecarGate",
     "CaptionAudioSyncGate",
     "CaptionCoverageGate",
     "TimelineDriftGate",
@@ -189,7 +188,6 @@ class TechnicalMediaQC:
                 "av_drift_ms": native.get("av_drift_ms"),
                 "max_av_drift_ms": native.get("max_av_drift_ms"),
                 "checksum_sha256": checksum if checksum_valid else None,
-                "caption_likely_present": None,
                 "timeline_coverage": None,
             },
         }
