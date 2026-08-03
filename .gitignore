@@ -14,7 +14,10 @@ build/
 artifacts/
 reports/
 docs/
-tests/
+tests/*
+!tests/test_long_form_launch_cadence.py
+!tests/test_editorial_evidence_provider_activation.py
+!tests/test_openai_responses_provider.py
 var/generated/
 var/credentials/
 var/logs/

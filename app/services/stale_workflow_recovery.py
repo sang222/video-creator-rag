@@ -19,8 +19,10 @@ from app.core.actor import ActorContext, ActorType
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
+from app.db.models.launch_cadence import LongFormPublishSlot
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
+from app.db.models.m5 import EditorialIdeaCandidate, ProjectAdmissionDecision
 from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
 from app.db.models.ops import CostEvent, DeadLetterJob, OpsIncident, ProviderAttempt
 from app.db.models.production_workflow import (
@@ -36,6 +38,7 @@ STALE_WORKFLOW_RECOVERY_EVENT_TYPE = "production.workflow.stale_recovery.request
 STALE_WORKFLOW_RECOVERY_VERSION = "vcos.stale-workflow-recovery.v1"
 STALE_WORKFLOW_RECOVERY_CLASSIFICATION = "STALE_PRE_REPAIR_ZERO_EFFECT_WORKFLOW"
 STALE_WORKFLOW_RECOVERY_DECISION = "AUTO_SUPERSEDE_STALE_PRE_REPAIR_WORKFLOW"
+STALE_WORKFLOW_ADMISSION_LINEAGE_CLOSED = "ZERO_EFFECT_ADMISSION_LINEAGE_CLOSED"
 _RECOVERY_COMMAND_NAMESPACE = uuid.UUID("567475c1-7d3d-56f5-b747-c91221444582")
 
 
@@ -232,6 +235,14 @@ class StaleWorkflowRecoveryService:
         run.completed_at = now
         run.last_progress_at = now
         run.projection_version += 1
+        lineage_closure = self._close_zero_effect_admission_lineage(run=run)
+        run.metadata_ = {
+            **(run.metadata_ or {}),
+            "stale_workflow_recovery": {
+                **((run.metadata_ or {}).get("stale_workflow_recovery") or {}),
+                "admission_lineage_closure": lineage_closure,
+            },
+        }
         dead_letter.replay_state = "DISCARDED"
         dead_letter.retry_eligible = False
         dead_letter.next_action = "Superseded by zero-effect stale-workflow recovery."
@@ -257,6 +268,77 @@ class StaleWorkflowRecoveryService:
             }
         self.session.flush()
         return receipt
+
+    def _close_zero_effect_admission_lineage(
+        self, *, run: ProductionWorkflowRun
+    ) -> dict[str, Any]:
+        """Close the cadence reservation that cannot outlive a superseded run.
+
+        This is deliberately narrower than general project cancellation: it only
+        applies after this service has proved zero provider, budget, media, and
+        package effects for a pre-repair workflow.  The admitted project and
+        immutable admission receipt remain historical evidence; the candidate
+        and publish-slot states stop claiming that production is still active.
+        """
+
+        if run.video_project_id is None or run.project_admission_decision_id is None:
+            return {"state": "NOT_APPLICABLE", "reason": "ADMISSION_LINEAGE_MISSING"}
+        admission = self.session.scalar(
+            select(ProjectAdmissionDecision)
+            .where(
+                ProjectAdmissionDecision.id == run.project_admission_decision_id,
+                ProjectAdmissionDecision.decision == "ADMIT",
+                ProjectAdmissionDecision.admitted_video_project_id
+                == run.video_project_id,
+            )
+            .with_for_update()
+        )
+        if admission is None or admission.editorial_idea_candidate_id is None:
+            return {
+                "state": "NOT_APPLICABLE",
+                "reason": "CADENCE_CANDIDATE_LINEAGE_MISSING",
+            }
+        candidate = self.session.scalar(
+            select(EditorialIdeaCandidate)
+            .where(EditorialIdeaCandidate.id == admission.editorial_idea_candidate_id)
+            .with_for_update()
+        )
+        if candidate is None:
+            return {
+                "state": "NOT_APPLICABLE",
+                "reason": "CADENCE_CANDIDATE_MISSING",
+            }
+
+        candidate_closed = False
+        if candidate.stage == "IN_PRODUCTION":
+            candidate.stage = "REJECTED"
+            candidate.reason_codes = [
+                *(candidate.reason_codes or []),
+                STALE_WORKFLOW_ADMISSION_LINEAGE_CLOSED,
+            ]
+            candidate_closed = True
+
+        publish_slots = list(
+            self.session.scalars(
+                select(LongFormPublishSlot)
+                .where(
+                    LongFormPublishSlot.admitted_video_project_id
+                    == run.video_project_id,
+                    LongFormPublishSlot.reserved_candidate_id == candidate.id,
+                    LongFormPublishSlot.state == "RESERVED",
+                )
+                .with_for_update()
+            ).all()
+        )
+        for publish_slot in publish_slots:
+            publish_slot.state = "CANCELED"
+
+        return {
+            "state": "CLOSED",
+            "candidate_id": str(candidate.id),
+            "candidate_closed": candidate_closed,
+            "publish_slot_ids": [str(item.id) for item in publish_slots],
+        }
 
     def _dead_letter_for(self, workflow_run_id: uuid.UUID) -> DeadLetterJob | None:
         return self.session.scalar(

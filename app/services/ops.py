@@ -679,6 +679,84 @@ class ProviderHealthService:
         )
         return snapshot
 
+    def record_observation(
+        self,
+        *,
+        provider_key: str,
+        health_state: str,
+        reason_codes: list[str],
+        metadata: dict[str, Any] | None = None,
+        latency_ms: int | None = None,
+        next_action: str | None = None,
+    ) -> ProviderHealthSnapshot:
+        """Persist a real, redacted provider-operation observation.
+
+        ``check_provider`` intentionally performs metadata-only checks.  A
+        caller that has completed an authorized provider operation needs a
+        separate truth-preserving path rather than relabeling that result as a
+        synthetic readiness probe.
+        """
+
+        entry = ProviderRegistryService(self.session).require_entry(provider_key)
+        if health_state not in {
+            "HEALTHY",
+            "DEGRADED",
+            "UNAVAILABLE",
+            "RATE_LIMITED",
+            "QUOTA_EXHAUSTED",
+        }:
+            raise ValidationFailureError("PROVIDER_HEALTH_OBSERVATION_INVALID")
+        snapshot = ProviderHealthSnapshot(
+            provider_key=provider_key,
+            provider_type=entry.provider_type,
+            health_state=health_state,
+            latency_ms=latency_ms,
+            error_rate=None,
+            quota_state=None,
+            reason_codes=list(dict.fromkeys(reason_codes)),
+            next_action=next_action,
+            metadata_=metadata or {},
+        )
+        self.session.add(snapshot)
+        self.session.flush()
+        _record_ops_event(
+            self.session,
+            event_type="provider_health_snapshot.observed",
+            aggregate_type="provider_health_snapshot",
+            aggregate_id=snapshot.id,
+            target_type="provider_health_snapshot",
+            target_id=snapshot.id,
+            correlation_id="m4-provider-health-observation",
+            payload={
+                "provider_key": provider_key,
+                "health_state": health_state,
+                "reason_codes": snapshot.reason_codes,
+            },
+        )
+        ComponentHealthService(self.session).create_snapshot(
+            data=ComponentHealthSnapshotCreate(
+                component_type="PROVIDER",
+                component_key=provider_key,
+                health_state=(
+                    "HEALTHY"
+                    if health_state == "HEALTHY"
+                    else "DEGRADED"
+                    if health_state in {"DEGRADED", "RATE_LIMITED", "QUOTA_EXHAUSTED"}
+                    else "UNAVAILABLE"
+                ),
+                reason_codes=snapshot.reason_codes,
+                next_action=next_action
+                or (
+                    "Investigate the provider observation before another attempt."
+                    if health_state != "HEALTHY"
+                    else None
+                ),
+                metadata={"provider_health_snapshot_id": str(snapshot.id)},
+            ),
+            correlation_id="m4-provider-health-observation-component",
+        )
+        return snapshot
+
     def list_health(self, provider_key: str) -> list[ProviderHealthSnapshot]:
         return list(
             self.session.scalars(

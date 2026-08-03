@@ -55,6 +55,7 @@ from app.db.models.production_workflow import (
     WorkflowCommandReceipt,
 )
 from app.db.models.production_publish import FinalReviewCandidate
+from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.company_access import require_company_permission
 from app.services.production_package import (
@@ -1910,6 +1911,31 @@ class ProductionWorkflowCoordinator:
             raise ValidationFailureError(
                 "WORKFLOW_PROJECT_ADMISSION_AUTHORITY_MISMATCH"
             )
+        effective = (
+            self.session.get(
+                EffectiveChannelRuntimeContextSnapshot,
+                project.effective_context_snapshot_id,
+            )
+            if project.effective_context_snapshot_id is not None
+            else None
+        )
+        if (
+            effective is None
+            or effective.video_project_id != project.id
+            or effective.company_id != project.company_id
+            or effective.channel_workspace_id != project.channel_workspace_id
+            or effective.channel_profile_version_id
+            != project.channel_profile_version_id
+            or effective.compiled_policy_snapshot_id != project.policy_snapshot_id
+            or effective.compile_status != "PASS"
+            or not effective.context_hash
+        ):
+            # Every entry point must fail before its first PLANNING command is
+            # scheduled.  The cadence path compiles this snapshot immediately
+            # after admission; this coordinator guard closes direct/API starts
+            # as well, so a RESEARCH command can never recover a missing or
+            # mismatched runtime authority later.
+            raise ValidationFailureError("WORKFLOW_EFFECTIVE_CONTEXT_NOT_PASS")
         source_type = PlanningSourceType.LONG_FORM_PLAN
         source_id = admission.editorial_calendar_slot_id
         if source_id is None:

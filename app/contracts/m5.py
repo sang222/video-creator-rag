@@ -43,6 +43,7 @@ ContextPackPurpose = Literal[
 FreshnessState = Literal["FRESH", "STALE", "UNKNOWN", "NOT_REQUIRED"]
 ConfidenceLevel = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 SearchDemandSourceType = Literal[
+    "OFFICIAL_DOCUMENT",
     "OFFICIAL_MANUAL",
     "PAID_TOOL_CSV",
     "GOOGLE_TRENDS_CSV",

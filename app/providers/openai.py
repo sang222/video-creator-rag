@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import ssl
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+from urllib.parse import urlsplit, urlunsplit
 
 import certifi
 
 from app.providers.base import ProviderResponse
 
 
+TransportResult = (
+    tuple[int, dict[str, Any]] | tuple[int, dict[str, Any], dict[str, str]]
+)
 Transport = Callable[
-    [str, str, dict[str, Any] | None, dict[str, str], int], tuple[int, dict[str, Any]]
+    [str, str, dict[str, Any] | None, dict[str, str], int], TransportResult
 ]
 
 
@@ -30,6 +37,22 @@ class OpenAIResponsesRequest:
     response_format: str = "text"
 
 
+@dataclass(frozen=True)
+class OpenAIWebSearchRequest:
+    """Bounded hosted-web-search request for an already-authorized workflow.
+
+    This intentionally keeps web search separate from ``respond``: callers
+    must opt into the dedicated operation, supply a bounded domain policy, and
+    consume the returned URLs as discovery metadata only.
+    """
+
+    model: str
+    reasoning_effort: str
+    query: str
+    allowed_domains: list[str]
+    search_context_size: str = "low"
+
+
 class OpenAIResponsesProvider:
     """OpenAI Responses adapter with no provider/model fallback behaviour."""
 
@@ -42,11 +65,13 @@ class OpenAIResponsesProvider:
         base_url: str = "https://api.openai.com/v1",
         timeout_seconds: int = 30,
         transport: Transport | None = None,
+        runtime_origin: str | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self._transport = transport or self._urllib_transport
+        self.runtime_origin = _safe_runtime_origin(runtime_origin)
 
     def respond(self, *, request: OpenAIResponsesRequest) -> ProviderResponse:
         started = time.monotonic()
@@ -58,34 +83,16 @@ class OpenAIResponsesProvider:
                 retryable=False,
             )
         payload = self.build_responses_payload(request=request)
-        try:
-            status, response_payload = self._transport(
-                "POST",
-                f"{self.base_url}/responses",
-                payload,
-                {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                self.timeout_seconds,
-            )
-        except TimeoutError as exc:
-            return _error_response(
-                "PROVIDER_TIMEOUT", str(exc), started, retryable=True
-            )
-        except OSError as exc:
-            return _error_response(
-                "PROVIDER_UNREACHABLE", str(exc), started, retryable=True
-            )
-
-        if status >= 400:
-            code, retryable = _http_error(status, response_payload)
-            return _error_response(
-                code,
-                _redacted_api_error(response_payload, status),
-                started,
-                retryable=retryable,
-            )
+        result = self._responses_request(
+            payload=payload,
+            model=request.model,
+            operation="responses",
+            tool_type=None,
+            started=started,
+        )
+        if isinstance(result, ProviderResponse):
+            return result
+        status, response_payload, _ = result
 
         content = _response_output_text(response_payload)
         output: dict[str, Any] = {
@@ -107,6 +114,126 @@ class OpenAIResponsesProvider:
                 )
             output["json"] = parsed
         return ProviderResponse(ok=True, output=output, latency_ms=_latency_ms(started))
+
+    def web_search(self, *, request: OpenAIWebSearchRequest) -> ProviderResponse:
+        """Call the official hosted web-search tool without a fallback path.
+
+        The raw provider result is deliberately retained for the evidence
+        executor to extract only tool-returned URLs and citations.  Model prose
+        is never promoted to source authority by this adapter.
+        """
+
+        started = time.monotonic()
+        if not self.api_key:
+            return _error_response(
+                "OPENAI_CREDENTIAL_MISSING",
+                "OPENAI_API_KEY is not configured.",
+                started,
+                retryable=False,
+            )
+        try:
+            payload = self.build_web_search_payload(request=request)
+        except ValueError as exc:
+            return _error_response(
+                "OPENAI_WEB_SEARCH_REQUEST_INVALID",
+                str(exc),
+                started,
+                retryable=False,
+            )
+        result = self._responses_request(
+            payload=payload,
+            model=request.model,
+            operation="web_search",
+            tool_type="web_search",
+            started=started,
+        )
+        if isinstance(result, ProviderResponse):
+            return result
+        status, response_payload, _ = result
+        return ProviderResponse(
+            ok=True,
+            output={
+                "provider_key": self.provider_key,
+                "model": str(response_payload.get("model") or request.model),
+                "request_id": response_payload.get("id"),
+                "usage": self.extract_usage(response_payload),
+                "raw": response_payload,
+            },
+            latency_ms=_latency_ms(started),
+        )
+
+    def _responses_request(
+        self,
+        *,
+        payload: dict[str, Any],
+        model: str,
+        operation: str,
+        tool_type: str | None,
+        started: float,
+    ) -> tuple[int, dict[str, Any], dict[str, str]] | ProviderResponse:
+        """Make exactly one Responses request and retain only safe diagnostics.
+
+        The adapter never retries here.  Callers receive a stable error class and
+        an ``output["error"]`` receipt that can be durably persisted without
+        storing a prompt, credential, or response body.
+        """
+
+        endpoint = f"{self.base_url}/responses"
+        try:
+            result = _normalize_transport_result(
+                self._transport(
+                    "POST",
+                    endpoint,
+                    payload,
+                    {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    self.timeout_seconds,
+                )
+            )
+        except (TimeoutError, OSError) as exc:
+            return _error_response(
+                "OPENAI_NETWORK_FAILURE",
+                _redacted_network_error(exc),
+                started,
+                retryable=True,
+                output={
+                    "error": _network_error_details(
+                        endpoint=endpoint,
+                        operation=operation,
+                        request_payload=payload,
+                        model=model,
+                        tool_type=tool_type,
+                        runtime_origin=self.runtime_origin,
+                        exc=exc,
+                    )
+                },
+            )
+
+        status, response_payload, response_headers = result
+        if status >= 400:
+            code, retryable = _http_error(status, response_payload)
+            return _error_response(
+                code,
+                _redacted_api_error(response_payload, status),
+                started,
+                retryable=retryable,
+                output={
+                    "error": _http_error_details(
+                        endpoint=endpoint,
+                        operation=operation,
+                        status=status,
+                        response_payload=response_payload,
+                        response_headers=response_headers,
+                        request_payload=payload,
+                        model=model,
+                        tool_type=tool_type,
+                        runtime_origin=self.runtime_origin,
+                    )
+                },
+            )
+        return result
 
     def build_responses_payload(
         self, *, request: OpenAIResponsesRequest
@@ -137,6 +264,46 @@ class OpenAIResponsesProvider:
             }
         return payload
 
+    def build_web_search_payload(
+        self, *, request: OpenAIWebSearchRequest
+    ) -> dict[str, Any]:
+        if request.reasoning_effort not in {"none", "low", "medium", "high"}:
+            raise ValueError(
+                "OpenAI reasoning_effort must be none, low, medium, or high"
+            )
+        if request.search_context_size not in {"low", "medium", "high"}:
+            raise ValueError("OpenAI web-search context size is invalid")
+        query = request.query.strip()
+        if not query:
+            raise ValueError("OpenAI web-search query is required")
+        domains = sorted(
+            {
+                item.strip().lower().lstrip(".")
+                for item in request.allowed_domains
+                if isinstance(item, str) and item.strip()
+            }
+        )
+        if not domains or any("/" in item or ":" in item for item in domains):
+            raise ValueError("OpenAI web-search domains are invalid")
+        return {
+            "model": request.model,
+            "input": query,
+            "reasoning": {"effort": request.reasoning_effort},
+            "tools": [
+                {
+                    "type": "web_search",
+                    "search_context_size": request.search_context_size,
+                    "external_web_access": True,
+                    "filters": {"allowed_domains": domains},
+                }
+            ],
+            # Discovery is mandatory for this explicit operation.  A normal
+            # language response cannot silently replace a missing search call.
+            "tool_choice": "required",
+            "include": ["web_search_call.action.sources"],
+            "store": False,
+        }
+
     def extract_usage(self, payload: dict[str, Any]) -> dict[str, int | None]:
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
         input_details = (
@@ -164,7 +331,7 @@ class OpenAIResponsesProvider:
         payload: dict[str, Any] | None,
         headers: dict[str, str],
         timeout_seconds: int,
-    ) -> tuple[int, dict[str, Any]]:
+    ) -> tuple[int, dict[str, Any], dict[str, str]]:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib_request.Request(url, data=body, method=method, headers=headers)
         try:
@@ -176,14 +343,18 @@ class OpenAIResponsesProvider:
                 request, timeout=timeout_seconds, context=ssl_context
             ) as response:
                 raw = response.read().decode("utf-8")
-                return response.status, json.loads(raw or "{}")
+                return (
+                    response.status,
+                    json.loads(raw or "{}"),
+                    dict(response.headers.items()),
+                )
         except urllib_error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
             try:
                 payload = json.loads(raw or "{}")
             except json.JSONDecodeError:
                 payload = {"error": {"message": "OpenAI returned an unreadable error."}}
-            return exc.code, payload
+            return exc.code, payload, dict(exc.headers.items()) if exc.headers else {}
         except TimeoutError:
             raise
         except urllib_error.URLError as exc:
@@ -270,27 +441,160 @@ def _parse_json_content(content: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else {"value": parsed}
 
 
+def _normalize_transport_result(
+    result: TransportResult,
+) -> tuple[int, dict[str, Any], dict[str, str]]:
+    """Keep existing two-value test transports working while retaining headers."""
+
+    if len(result) == 2:
+        status, payload = result
+        headers: dict[str, str] = {}
+    else:
+        status, payload, headers = result
+    normalized_payload = payload if isinstance(payload, dict) else {}
+    normalized_headers = {
+        str(key).lower(): str(value)
+        for key, value in (headers or {}).items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    return int(status), normalized_payload, normalized_headers
+
+
 def _http_error(status: int, payload: dict[str, Any]) -> tuple[str, bool]:
     error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
     error_type = str(error.get("type") or "").lower()
+    error_code = str(error.get("code") or "").lower()
+    error_signature = f"{error_type} {error_code}"
+    if status == 400:
+        return "OPENAI_INVALID_REQUEST", False
+    if status == 401:
+        return "OPENAI_AUTHENTICATION_FAILED", False
+    if status == 403:
+        return "OPENAI_PERMISSION_DENIED", False
+    if status == 404:
+        return "OPENAI_ENDPOINT_OR_MODEL_NOT_FOUND", False
     if status == 429:
-        return (
-            "PROVIDER_QUOTA_EXCEEDED"
-            if "quota" in error_type or "insufficient" in error_type
-            else "PROVIDER_RATE_LIMITED",
-            True,
-        )
-    if status in {401, 403}:
-        return "OPENAI_CREDENTIAL_REJECTED", False
+        if any(
+            marker in error_signature
+            for marker in ("quota", "insufficient", "billing", "budget", "balance")
+        ):
+            return "OPENAI_QUOTA_OR_BILLING_BLOCKED", False
+        return "OPENAI_RATE_LIMITED", True
     if status >= 500:
-        return "PROVIDER_HTTP_ERROR", True
-    return "PROVIDER_HTTP_ERROR", False
+        return "OPENAI_PROVIDER_TRANSIENT_FAILURE", True
+    return "OPENAI_INVALID_REQUEST", False
 
 
 def _redacted_api_error(payload: dict[str, Any], status: int) -> str:
     error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
     code = str(error.get("code") or error.get("type") or "unknown")
     return f"OpenAI returned HTTP {status} ({code})."
+
+
+def _http_error_details(
+    *,
+    endpoint: str,
+    operation: str,
+    status: int,
+    response_payload: dict[str, Any],
+    response_headers: dict[str, str],
+    request_payload: dict[str, Any],
+    model: str,
+    tool_type: str | None,
+    runtime_origin: str,
+) -> dict[str, Any]:
+    error = (
+        response_payload.get("error")
+        if isinstance(response_payload.get("error"), dict)
+        else {}
+    )
+    return {
+        "endpoint": _sanitized_endpoint(endpoint),
+        "operation": operation,
+        "http_status": status,
+        "openai_error_type": _safe_optional_string(error.get("type")),
+        "openai_error_code": _safe_optional_string(error.get("code")),
+        "openai_error_message": _sanitize_error_message(error.get("message")),
+        "x_request_id": response_headers.get("x-request-id"),
+        "response_body_hash": _stable_hash(response_payload),
+        "request_payload_hash": _stable_hash(request_payload),
+        "model": model,
+        "tool_type": tool_type,
+        "retry_after": response_headers.get("retry-after"),
+        "runtime_origin": runtime_origin,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _network_error_details(
+    *,
+    endpoint: str,
+    operation: str,
+    request_payload: dict[str, Any],
+    model: str,
+    tool_type: str | None,
+    runtime_origin: str,
+    exc: Exception,
+) -> dict[str, Any]:
+    return {
+        "endpoint": _sanitized_endpoint(endpoint),
+        "operation": operation,
+        "http_status": None,
+        "openai_error_type": type(exc).__name__,
+        "openai_error_code": "NETWORK_FAILURE",
+        "openai_error_message": _sanitize_error_message(str(exc)),
+        "x_request_id": None,
+        "response_body_hash": None,
+        "request_payload_hash": _stable_hash(request_payload),
+        "model": model,
+        "tool_type": tool_type,
+        "retry_after": None,
+        "runtime_origin": runtime_origin,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _stable_hash(value: dict[str, Any]) -> str:
+    serialized = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _safe_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return _sanitize_error_message(str(value))
+
+
+def _sanitize_error_message(value: Any) -> str | None:
+    if value is None:
+        return None
+    message = str(value).replace("\x00", " ").strip()
+    message = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [REDACTED]", message)
+    message = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", message)
+    return message[:512] or None
+
+
+def _sanitized_endpoint(endpoint: str) -> str:
+    parsed = urlsplit(endpoint)
+    if not parsed.scheme or not parsed.hostname:
+        return "unrecognized-endpoint"
+    netloc = parsed.hostname
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+
+
+def _safe_runtime_origin(value: str | None) -> str:
+    if not value:
+        return "unspecified-runtime"
+    normalized = str(value).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", normalized):
+        return "unspecified-runtime"
+    return normalized
+
+
+def _redacted_network_error(exc: Exception) -> str:
+    return _sanitize_error_message(str(exc)) or "OpenAI network request failed."
 
 
 def _maybe_int(value: Any) -> int | None:
@@ -305,10 +609,16 @@ def _latency_ms(started: float) -> int:
 
 
 def _error_response(
-    error_code: str, message: str, started: float, *, retryable: bool
+    error_code: str,
+    message: str,
+    started: float,
+    *,
+    retryable: bool,
+    output: dict[str, Any] | None = None,
 ) -> ProviderResponse:
     return ProviderResponse(
         ok=False,
+        output=output or {},
         error_code=error_code,
         error_message=message,
         retryable=retryable,

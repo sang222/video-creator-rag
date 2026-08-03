@@ -26,7 +26,6 @@ services:
     environment:
       VCOS_DATABASE_URL: ${VCOS_DOCKER_DATABASE_URL:-postgresql+psycopg://vcos:vcos@postgres:5432/vcos}
       VCOS_LLM_PROVIDER: ${VCOS_LLM_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       VCOS_CORS_ALLOWED_ORIGINS: ${VCOS_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     ports:
@@ -57,7 +56,6 @@ services:
     environment:
       VCOS_DATABASE_URL: ${VCOS_DOCKER_DATABASE_URL:-postgresql+psycopg://vcos:vcos@postgres:5432/vcos}
       VCOS_LLM_PROVIDER: ${VCOS_LLM_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       VCOS_WORKFLOW_LEASE_SECONDS: ${VCOS_WORKFLOW_LEASE_SECONDS:-60}
       VCOS_WORKFLOW_MAX_EXECUTION_SECONDS: ${VCOS_WORKFLOW_MAX_EXECUTION_SECONDS:-3600}

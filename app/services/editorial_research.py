@@ -20,7 +20,7 @@ from app.contracts.vcos_v2 import (
     StrategicIntent,
     StrategicLineageV2,
 )
-from app.core.actor import ActorContext
+from app.core.actor import ActorContext, ActorType
 from app.core.errors import ConflictError, NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.channel import (
@@ -75,12 +75,7 @@ class EditorialResearchService:
         data: EditorialResearchRunCreate,
         actor: ActorContext,
     ) -> EditorialResearchRun:
-        require_company_permission(
-            self.session,
-            actor=actor,
-            permission="editorial.manage",
-            company_id=data.company_id,
-        )
+        self._authorize_company(company_id=data.company_id, actor=actor)
         workspace = self.session.get(ChannelWorkspace, data.channel_workspace_id)
         profile = self.session.get(
             ChannelProfileVersion, data.channel_profile_version_id
@@ -106,7 +101,14 @@ class EditorialResearchService:
             **payload,
             metadata_=metadata,
             candidate_count=0,
-            created_by_user_id=actor.actor_id,
+            # A system worker is a trusted execution identity, not a User row.
+            # Keep the nullable user FK truthful while the run metadata/audit
+            # records retain the automation provenance.
+            created_by_user_id=(
+                actor.actor_id
+                if actor.actor_type == ActorType.HUMAN_USER
+                else None
+            ),
         )
         self.session.add(record)
         self.session.flush()
@@ -535,6 +537,75 @@ class EditorialResearchService:
         self.session.flush()
         return run
 
+    def block_run(
+        self,
+        *,
+        run_id: uuid.UUID,
+        reason_codes: list[str],
+        actor: ActorContext,
+    ) -> EditorialResearchRun:
+        """Persist a terminal, operator-visible safe stop for a research run."""
+
+        run = self._locked_run(run_id)
+        self._authorize(run, actor)
+        if run.status == "BLOCKED":
+            return run
+        if run.status not in {"PENDING", "RUNNING"}:
+            raise ConflictError(f"research run cannot block from {run.status}")
+        run.status = "BLOCKED"
+        run.started_at = run.started_at or utc_now()
+        run.completed_at = utc_now()
+        run.reason_codes = list(dict.fromkeys(reason_codes))
+        self.session.flush()
+        return run
+
+    def attach_context_snapshots(
+        self,
+        *,
+        run_id: uuid.UUID,
+        context_pack_snapshot_id: uuid.UUID,
+        channel_state_pack_snapshot_id: uuid.UUID,
+        actor: ActorContext,
+    ) -> EditorialResearchRun:
+        """Bind immutable research context once, refusing cross-scope rewrites."""
+
+        from app.db.models.m5 import ChannelStatePackSnapshot, ContextPackSnapshot
+
+        run = self._locked_run(run_id)
+        self._authorize(run, actor)
+        context = self.session.get(ContextPackSnapshot, context_pack_snapshot_id)
+        state = self.session.get(ChannelStatePackSnapshot, channel_state_pack_snapshot_id)
+        if (
+            context is None
+            or state is None
+            or context.company_id != run.company_id
+            or context.channel_workspace_id != run.channel_workspace_id
+            or context.channel_profile_version_id != run.channel_profile_version_id
+            or context.policy_snapshot_id != run.policy_snapshot_id
+            or state.company_id != run.company_id
+            or state.channel_workspace_id != run.channel_workspace_id
+            or state.policy_snapshot_id != run.policy_snapshot_id
+            or state.context_pack_snapshot_id != context.id
+            or (
+                state.editorial_research_run_id is not None
+                and state.editorial_research_run_id != run.id
+            )
+        ):
+            raise ValidationFailureError("EDITORIAL_RESEARCH_CONTEXT_SCOPE_MISMATCH")
+        if (
+            run.context_pack_snapshot_id is not None
+            and run.context_pack_snapshot_id != context.id
+        ) or (
+            run.channel_state_pack_snapshot_id is not None
+            and run.channel_state_pack_snapshot_id != state.id
+        ):
+            raise ConflictError("EDITORIAL_RESEARCH_CONTEXT_ALREADY_FROZEN")
+        run.context_pack_snapshot_id = context.id
+        run.channel_state_pack_snapshot_id = state.id
+        state.editorial_research_run_id = run.id
+        self.session.flush()
+        return run
+
     def transition_candidate(
         self,
         *,
@@ -639,9 +710,20 @@ class EditorialResearchService:
         return record
 
     def _authorize(self, run: EditorialResearchRun, actor: ActorContext) -> None:
-        require_company_permission(
-            self.session,
-            actor=actor,
-            permission="editorial.manage",
-            company_id=run.company_id,
-        )
+        self._authorize_company(company_id=run.company_id, actor=actor)
+
+    def _authorize_company(self, *, company_id: uuid.UUID, actor: ActorContext) -> None:
+        if actor.actor_type == ActorType.HUMAN_USER:
+            require_company_permission(
+                self.session,
+                actor=actor,
+                permission="editorial.manage",
+                company_id=company_id,
+            )
+            return
+        if (
+            actor.actor_type != ActorType.SYSTEM_WORKER
+            or actor.actor_role != "SYSTEM_WORKER"
+            or not actor.has_permission("editorial.manage")
+        ):
+            raise ValidationFailureError("EDITORIAL_RESEARCH_SYSTEM_WORKER_UNTRUSTED")

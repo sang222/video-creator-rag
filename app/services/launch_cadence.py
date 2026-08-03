@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.contracts.launch_cadence import (
@@ -534,6 +534,53 @@ class LaunchRunwayService:
             )
             or 0
         )
+        # ``IN_PRODUCTION`` is an editorial projection, not execution proof.
+        # Count it as runway occupancy only while its canonical long-form
+        # workflow is still nonterminal.  This keeps an auditable, terminal
+        # zero-effect lineage from permanently satisfying the greenlit pool
+        # after recovery without changing the historical candidate row.
+        active_workflow_for_candidate = (
+            select(ProductionWorkflowRun.id)
+            .join(
+                ProjectAdmissionDecision,
+                ProjectAdmissionDecision.admitted_video_project_id
+                == ProductionWorkflowRun.video_project_id,
+            )
+            .where(
+                ProjectAdmissionDecision.editorial_idea_candidate_id
+                == EditorialIdeaCandidate.id,
+                ProductionWorkflowRun.channel_workspace_id
+                == run.channel_workspace_id,
+                ProductionWorkflowRun.production_lane == "LONG_FORM",
+                ProductionWorkflowRun.state.in_(_ACTIVE_WORKFLOW_STATES),
+            )
+            .exists()
+        )
+        greenlit_occupancy = int(
+            self.session.scalar(
+                select(func.count(EditorialIdeaCandidate.id)).where(
+                    EditorialIdeaCandidate.channel_workspace_id
+                    == run.channel_workspace_id,
+                    EditorialIdeaCandidate.policy_snapshot_id
+                    == policy.policy_snapshot_id,
+                    or_(
+                        EditorialIdeaCandidate.stage.in_(
+                            {
+                                "GREENLIT",
+                                "SELECTED_FOR_SLOT",
+                                "FINAL_REVIEW_READY",
+                                "PUBLISHED",
+                            }
+                        ),
+                        and_(
+                            EditorialIdeaCandidate.stage == "IN_PRODUCTION",
+                            active_workflow_for_candidate,
+                        ),
+                    ),
+                )
+            )
+            or 0
+        )
         counts = RunwayCounts(
             idea_candidates=sum(stage_counts.values()),
             preflight_passed_candidates=sum(
@@ -547,16 +594,7 @@ class LaunchRunwayService:
                     "PUBLISHED",
                 }
             ),
-            greenlit_candidates=sum(
-                stage_counts.get(stage, 0)
-                for stage in {
-                    "GREENLIT",
-                    "SELECTED_FOR_SLOT",
-                    "IN_PRODUCTION",
-                    "FINAL_REVIEW_READY",
-                    "PUBLISHED",
-                }
-            ),
+            greenlit_candidates=greenlit_occupancy,
             in_production_videos=active,
             final_review_ready_videos=final_ready,
             upload_approved_videos=upload_approved,

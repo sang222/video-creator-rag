@@ -123,9 +123,11 @@ class ProductionWorkflowWorker:
         self._stop = threading.Event()
         self._actor = _trusted_system_worker_actor()
         self._next_cadence_scan_at: datetime | None = None
+        self._next_editorial_replenishment_scan_at: datetime | None = None
 
     def run_once(self) -> WorkerRunResult:
         self._enqueue_due_stale_workflow_recoveries()
+        self._run_due_editorial_replenishments()
         self._enqueue_due_cadence_evaluations()
         self._enqueue_due_analytics_windows()
         claim = self._claim()
@@ -301,6 +303,41 @@ class ProductionWorkflowWorker:
         finally:
             session.close()
 
+    def _run_due_editorial_replenishments(self) -> int:
+        """Replenish editorial runway before the production-cadence phase.
+
+        ``EditorialResearchRun`` is the durable execution identity.  The
+        replenishment service locks each active launch and records terminal
+        blockers, so no synthetic candidate or production side effect can be
+        produced by this scheduler phase.
+        """
+
+        scan_started_at = self.now()
+        if (
+            self._next_editorial_replenishment_scan_at is not None
+            and scan_started_at < self._next_editorial_replenishment_scan_at
+        ):
+            return 0
+        session = self.session_factory()
+        try:
+            from app.services.editorial_runway_replenishment import (
+                EditorialRunwayReplenishmentService,
+            )
+
+            results = EditorialRunwayReplenishmentService(
+                session, now=self.now
+            ).reconcile_active_launches(actor=self._actor)
+            session.commit()
+            self._next_editorial_replenishment_scan_at = scan_started_at + timedelta(
+                seconds=self.cadence_scan_interval_seconds
+            )
+            return len(results)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def _enqueue_due_stale_workflow_recoveries(self) -> int:
         """Use the normal worker outbox for zero-effect stale recovery only."""
 
@@ -456,6 +493,7 @@ def _trusted_system_worker_actor() -> ActorContext:
     return _system_worker_actor(
         "vcos-durable-worker",
         permissions={
+            "editorial.manage",
             "production.workflow.execute",
             "production.start",
             "production.cancel",

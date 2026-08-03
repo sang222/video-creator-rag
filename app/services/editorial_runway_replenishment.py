@@ -1,0 +1,954 @@
+"""Durable, fail-closed replenishment of the editorial runway.
+
+This service deliberately stops at editorial research.  It never admits a
+project, reserves a production slot, or dispatches the production workflow.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.contracts.m5 import (
+    ChannelStatePackSnapshotCreate,
+    ContextPackSnapshotCreate,
+    EditorialCalendarSlotCreate,
+    EditorialIdeaCandidateCreate,
+    EditorialIdeaCandidateTransition,
+    EditorialResearchRunCreate,
+    IdeaMarketPreflightCreate,
+    RetrievalPlanSnapshotCreate,
+)
+from app.contracts.vcos_v2 import (
+    AssignmentMode,
+    AssignmentResolverInput,
+    ContentMode,
+    ProductionLane,
+)
+from app.core.actor import ActorContext
+from app.core.config import get_settings
+from app.core.errors import ValidationFailureError
+from app.core.time import utc_now
+from app.db.models.channel import (
+    ChannelProfileVersion,
+    ChannelWorkspace,
+    CompiledChannelPolicySnapshot,
+)
+from app.db.models.launch_cadence import (
+    FirstChannelLaunchPolicyVersion,
+    LaunchRun,
+)
+from app.db.models.m5 import (
+    EditorialCalendarSlot,
+    EditorialResearchRun,
+    SearchDemandEvidence,
+)
+from app.db.models.r3d1 import ContentCategory
+from app.services.editorial_fresh_evidence import (
+    EditorialEvidenceProviderActivationService,
+    FreshEvidenceCollector,
+    OpenAIWebEvidenceProvider,
+)
+from app.services.editorial_research import EditorialResearchService
+from app.services.launch_cadence import LaunchRunwayService
+from app.services.m5 import (
+    ChannelStatePackService,
+    EditorialCalendarService,
+    IdeaMarketPreflightService,
+    ResourceResolverService,
+)
+from app.services.production_start_readiness import (
+    resolve_budget_authority,
+    resolve_provider_authority,
+)
+from app.services.vcos_v2 import AssignmentResolutionError, DeterministicAssignmentResolver
+
+
+RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v2"
+_METADATA_KEY = "runway_replenishment"
+_ACTIVE_STATUSES = {"PENDING", "RUNNING"}
+
+
+def _canonical_hash(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class RunwayReplenishmentResult:
+    launch_run_id: uuid.UUID
+    status: str
+    editorial_research_run_id: uuid.UUID | None = None
+    reason_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class EditorialModeDecision:
+    """Frozen assignment outcome before any source/evidence work starts."""
+
+    content_mode: str | None
+    assignment_mode: str | None
+    reason_codes: tuple[str, ...]
+    resolver_version: str | None = None
+    resolver_input_hash: str | None = None
+    standalone_authority: dict[str, Any] | None = None
+
+
+class EditorialRunwayReplenishmentService:
+    """Reconcile active launches with one idempotent editorial run per day.
+
+    The locked ``LaunchRun`` row is the concurrency boundary.  All paths that
+    create automatic runs enter through this service, so two worker processes
+    cannot manufacture equivalent scheduled research work.
+    """
+
+    def __init__(
+        self, session: Session, *, now: Callable[[], datetime] = utc_now
+    ) -> None:
+        self.session = session
+        self.now = now
+
+    def reconcile_active_launches(
+        self, *, actor: ActorContext
+    ) -> list[RunwayReplenishmentResult]:
+        launches = list(
+            self.session.scalars(
+                select(LaunchRun)
+                .where(LaunchRun.state == "ACTIVE")
+                .order_by(LaunchRun.id)
+                .with_for_update(skip_locked=True)
+            ).all()
+        )
+        return [self._reconcile_locked(run=run, actor=actor) for run in launches]
+
+    def _reconcile_locked(
+        self, *, run: LaunchRun, actor: ActorContext
+    ) -> RunwayReplenishmentResult:
+        policy = self.session.get(
+            FirstChannelLaunchPolicyVersion, run.launch_policy_version_id
+        )
+        if policy is None or policy.state != "APPROVED":
+            return RunwayReplenishmentResult(
+                launch_run_id=run.id,
+                status="SKIPPED",
+                reason_codes=("RUNWAY_REPLENISHMENT_LAUNCH_POLICY_NOT_APPROVED",),
+            )
+        if (
+            policy.company_id != run.company_id
+            or policy.channel_workspace_id != run.channel_workspace_id
+        ):
+            return RunwayReplenishmentResult(
+                launch_run_id=run.id,
+                status="SKIPPED",
+                reason_codes=("RUNWAY_REPLENISHMENT_LAUNCH_AUTHORITY_MISMATCH",),
+            )
+        projection = LaunchRunwayService(self.session).project(run.id)
+        if projection.counts.greenlit_candidates >= policy.greenlight_target:
+            return RunwayReplenishmentResult(
+                launch_run_id=run.id,
+                status="SATISFIED",
+                reason_codes=("RUNWAY_REPLENISHMENT_GREENLIGHT_TARGET_MET",),
+            )
+
+        policy_snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, policy.policy_snapshot_id
+        )
+        if policy_snapshot is None:
+            return RunwayReplenishmentResult(
+                launch_run_id=run.id,
+                status="SKIPPED",
+                reason_codes=("RUNWAY_REPLENISHMENT_POLICY_SNAPSHOT_MISSING",),
+            )
+        activation = EditorialEvidenceProviderActivationService(self.session).activate(
+            policy_snapshot_id=str(policy_snapshot.id),
+            policy_snapshot_hash=policy_snapshot.content_hash,
+            company_id=str(run.company_id),
+        )
+        run_date = self._run_date(policy=policy)
+        scope_key = _canonical_hash(
+            {
+                "schema": RUNWAY_REPLENISHMENT_SCHEMA,
+                "launch_run_id": str(run.id),
+                "launch_policy_version_id": str(policy.id),
+                "policy_snapshot_id": str(policy.policy_snapshot_id),
+                "policy_hash": policy.canonical_hash,
+                # A new source-provider authority is a new, deterministic
+                # research generation.  Historical blocked runs remain
+                # immutable and cannot suppress the newly authorized flow.
+                "editorial_evidence_provider_key": activation.authority.provider_key,
+                "editorial_evidence_provider_config_hash": activation.authority.config_hash,
+                "editorial_evidence_provider_state": activation.authority.state,
+            }
+        )
+        attempt_key = _canonical_hash({"scope_key": scope_key, "run_date": run_date})
+        existing = self._existing_equivalent(
+            run=run,
+            policy=policy,
+            scope_key=scope_key,
+            attempt_key=attempt_key,
+        )
+        if existing is not None:
+            return RunwayReplenishmentResult(
+                launch_run_id=run.id,
+                status=("ACTIVE" if existing.status in _ACTIVE_STATUSES else "COOLDOWN"),
+                editorial_research_run_id=existing.id,
+                reason_codes=tuple(existing.reason_codes or []),
+            )
+
+        research_slot, slot_blocker = self._create_research_slot(
+            run=run,
+            policy=policy,
+            run_date=run_date,
+        )
+        mode_decision = self._resolve_mode(
+            run=run,
+            policy=policy,
+            editorial_calendar_slot=research_slot,
+        )
+        blockers, diagnostics = self._capability_blockers(
+            run=run,
+            policy=policy,
+            mode_decision=mode_decision,
+        )
+        if slot_blocker is not None:
+            blockers.append(slot_blocker)
+        if research_slot is not None:
+            diagnostics["editorial_calendar_slot_id"] = str(research_slot.id)
+        diagnostics["mode_decision"] = {
+            "content_mode": mode_decision.content_mode,
+            "assignment_mode": mode_decision.assignment_mode,
+            "reason_codes": list(mode_decision.reason_codes),
+            "resolver_version": mode_decision.resolver_version,
+            "resolver_input_hash": mode_decision.resolver_input_hash,
+            "standalone_authority": mode_decision.standalone_authority,
+        }
+
+        editorial = EditorialResearchService(self.session)
+        research_run = editorial.create_run(
+            data=EditorialResearchRunCreate(
+                company_id=run.company_id,
+                channel_workspace_id=run.channel_workspace_id,
+                channel_profile_version_id=policy.channel_profile_version_id,
+                policy_snapshot_id=policy.policy_snapshot_id,
+                editorial_calendar_slot_id=(
+                    research_slot.id if research_slot is not None else None
+                ),
+                run_date=run_date,
+                trigger_type="SCHEDULED",
+                reason_codes=["RUNWAY_REPLENISHMENT_REQUESTED"],
+                metadata={
+                    _METADATA_KEY: {
+                        "schema_version": RUNWAY_REPLENISHMENT_SCHEMA,
+                        "launch_run_id": str(run.id),
+                        "launch_policy_version_id": str(policy.id),
+                        "policy_snapshot_id": str(policy.policy_snapshot_id),
+                        "policy_hash": policy.canonical_hash,
+                        "scope_key": scope_key,
+                        "attempt_key": attempt_key,
+                        "greenlit_count_before": projection.counts.greenlit_candidates,
+                        "greenlight_target": policy.greenlight_target,
+                        "provider_calls_allowed": False,
+                        "mode_decision": diagnostics["mode_decision"],
+                    }
+                },
+            ),
+            actor=actor,
+        )
+        editorial.start_run(run_id=research_run.id, actor=actor)
+
+        context_id: uuid.UUID | None = None
+        state_id: uuid.UUID | None = None
+        if research_slot is not None:
+            try:
+                context_id, state_id = self._freeze_context(
+                    run=run,
+                    policy=policy,
+                    research_run=research_run,
+                    editorial_calendar_slot=research_slot,
+                )
+                editorial.attach_context_snapshots(
+                    run_id=research_run.id,
+                    context_pack_snapshot_id=context_id,
+                    channel_state_pack_snapshot_id=state_id,
+                    actor=actor,
+                )
+            except ValidationFailureError as exc:
+                blockers.append("RUNWAY_REPLENISHMENT_CONTEXT_FREEZE_BLOCKED")
+                diagnostics["context_freeze_error"] = str(exc)
+        fresh_evidence = FreshEvidenceCollector(self.session).inspect_authority(
+            policy_snapshot_id=str(policy.policy_snapshot_id),
+            policy_snapshot_hash=policy_snapshot.content_hash,
+        )
+        diagnostics["fresh_evidence"] = {
+            "provider_state": fresh_evidence.state,
+            "provider_key": fresh_evidence.provider_key,
+            "provider_config_hash": fresh_evidence.config_hash,
+            "reason_codes": list(fresh_evidence.reason_codes),
+            "network_call_made": False,
+            "collector_receipt": {
+                "schema_version": "vcos.editorial-fresh-evidence.v1",
+                "editorial_research_run_id": str(research_run.id),
+                "context_pack_snapshot_id": str(context_id) if context_id else None,
+                "provider_state": fresh_evidence.state,
+                "provider_key": fresh_evidence.provider_key,
+                "network_call_made": False,
+                "reason_codes": list(fresh_evidence.reason_codes),
+            },
+        }
+        if not fresh_evidence.ready:
+            blockers.extend(fresh_evidence.reason_codes)
+        elif context_id is None or research_slot is None:
+            blockers.append("RUNWAY_REPLENISHMENT_CONTEXT_FREEZE_BLOCKED")
+        elif not blockers:
+            research_question = self._research_question(
+                research_slot=research_slot,
+                mode_decision=mode_decision,
+            )
+            settings = get_settings()
+            provider = OpenAIWebEvidenceProvider(
+                api_key=(
+                    settings.openai_api_key.get_secret_value()
+                    if settings.openai_api_key is not None
+                    else None
+                ),
+                policy=fresh_evidence.policy or {},
+            )
+            collection = FreshEvidenceCollector(self.session).collect(
+                authority=fresh_evidence,
+                provider=provider,
+                company_id=str(run.company_id),
+                channel_workspace_id=str(run.channel_workspace_id),
+                editorial_research_run_id=str(research_run.id),
+                context_pack_snapshot_id=str(context_id),
+                research_question=research_question,
+            )
+            diagnostics["fresh_evidence"] = {
+                "provider_state": collection.authority.state,
+                "provider_key": collection.authority.provider_key,
+                "provider_config_hash": collection.authority.config_hash,
+                "reason_codes": list(collection.authority.reason_codes),
+                "network_call_made": bool(
+                    (collection.receipt or {}).get("network_call_made")
+                ),
+                "collector_receipt": collection.receipt,
+                "research_question_hash": _canonical_hash(
+                    {"research_question": research_question}
+                ),
+            }
+            if collection.ok:
+                try:
+                    candidate, preflight = self._create_candidate_and_preflight(
+                        editorial=editorial,
+                        research_run=research_run,
+                        research_slot=research_slot,
+                        context_pack_snapshot_id=context_id,
+                        channel_state_pack_snapshot_id=state_id,
+                        mode_decision=mode_decision,
+                        collection_receipt=collection.receipt or {},
+                        evidence_refs=list(collection.evidence_refs),
+                        actor=actor,
+                    )
+                except ValidationFailureError as exc:
+                    blockers.append("RUNWAY_REPLENISHMENT_STRICT_PREFLIGHT_BLOCKED")
+                    diagnostics["editorial_processing_error"] = str(exc)
+                else:
+                    diagnostics["editorial_outcome"] = {
+                        "candidate_id": str(candidate.id),
+                        "candidate_stage": candidate.stage,
+                        "strict_preflight_id": str(preflight.id),
+                        "strict_preflight_decision": preflight.decision,
+                        "strict_preflight_reason_codes": list(preflight.reason_codes),
+                    }
+            else:
+                blockers.extend(collection.authority.reason_codes)
+        research_run.metadata_ = {
+            **(research_run.metadata_ or {}),
+            _METADATA_KEY: {
+                **((research_run.metadata_ or {}).get(_METADATA_KEY) or {}),
+                "context_pack_snapshot_id": str(context_id) if context_id else None,
+                "channel_state_pack_snapshot_id": str(state_id) if state_id else None,
+                "capability_diagnostics": diagnostics,
+            },
+        }
+        blockers = list(dict.fromkeys(blockers))
+        if blockers:
+            editorial.block_run(
+                run_id=research_run.id,
+                reason_codes=blockers,
+                actor=actor,
+            )
+            status = "BLOCKED"
+            reason_codes = tuple(blockers)
+        else:
+            editorial.complete_run(run_id=research_run.id, actor=actor)
+            outcome = diagnostics.get("editorial_outcome") or {}
+            status = "COMPLETED"
+            reason_codes = tuple(
+                outcome.get("strict_preflight_reason_codes")
+                or ["EDITORIAL_RESEARCH_COMPLETED"]
+            )
+        return RunwayReplenishmentResult(
+            launch_run_id=run.id,
+            status=status,
+            editorial_research_run_id=research_run.id,
+            reason_codes=reason_codes,
+        )
+
+    @staticmethod
+    def _research_question(
+        *,
+        research_slot: EditorialCalendarSlot,
+        mode_decision: EditorialModeDecision,
+    ) -> str:
+        """Derive one bounded discovery question from frozen editorial facts."""
+
+        goal = (research_slot.production_goal or "").strip()
+        pillar = (research_slot.content_pillar or "").strip()
+        if not goal or not pillar or mode_decision.content_mode != "STANDALONE":
+            raise ValidationFailureError("EDITORIAL_RESEARCH_QUESTION_AUTHORITY_MISSING")
+        return (
+            "Find current first-party OpenAI documentation that can ground a "
+            "US English long-form standalone editorial idea for the approved "
+            f"pillar '{pillar}' and frozen production goal '{goal}'. Return "
+            "only official documentation URLs; do not make market, ROI, "
+            "time-saving, or earnings claims."
+        )
+
+    def _create_candidate_and_preflight(
+        self,
+        *,
+        editorial: EditorialResearchService,
+        research_run: EditorialResearchRun,
+        research_slot: EditorialCalendarSlot,
+        context_pack_snapshot_id: uuid.UUID,
+        channel_state_pack_snapshot_id: uuid.UUID | None,
+        mode_decision: EditorialModeDecision,
+        collection_receipt: dict[str, Any],
+        evidence_refs: list[dict[str, Any]],
+        actor: ActorContext,
+    ):
+        if mode_decision.content_mode != ContentMode.STANDALONE.value:
+            raise ValidationFailureError("EDITORIAL_CANDIDATE_MODE_AUTHORITY_MISSING")
+        if not evidence_refs:
+            raise ValidationFailureError("EDITORIAL_CANONICAL_EVIDENCE_REQUIRED")
+        try:
+            first_evidence_id = uuid.UUID(str(evidence_refs[0]["id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationFailureError("EDITORIAL_EVIDENCE_REF_INVALID") from exc
+        first_evidence = self.session.get(SearchDemandEvidence, first_evidence_id)
+        source_snapshot = (
+            ((first_evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get(
+                "source_snapshot"
+            )
+            if first_evidence is not None
+            else None
+        )
+        source_snapshot = source_snapshot if isinstance(source_snapshot, dict) else {}
+        source_title = str(source_snapshot.get("title") or "").strip()
+        if not source_title:
+            raise ValidationFailureError("EDITORIAL_SOURCE_TITLE_REQUIRED")
+        candidate = editorial.add_candidate(
+            data=EditorialIdeaCandidateCreate(
+                editorial_research_run_id=research_run.id,
+                context_pack_snapshot_id=context_pack_snapshot_id,
+                channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
+                stage="RESEARCHED",
+                # The title is source-derived.  No topic/title is hard-coded
+                # into the scheduler merely to obtain a passing candidate.
+                proposed_title=source_title,
+                proposed_angle=(
+                    "A source-grounded standalone explanation constrained to "
+                    "the fetched official documentation."
+                ),
+                proposed_format="LONG_FORM",
+                proposed_pillar=research_slot.content_pillar,
+                rationale={
+                    "schema_version": "vcos.editorial-evidence-candidate.v1",
+                    "source_pack": collection_receipt.get("source_pack"),
+                    "research_pack": collection_receipt.get("research_pack"),
+                    "claim_evidence_map": [
+                        {
+                            "claim_scope": "source-grounded editorial explanation",
+                            "evidence_refs": evidence_refs,
+                            "coverage_state": "PRESENT",
+                        }
+                    ],
+                },
+                evidence_refs=evidence_refs,
+                reason_codes=["FRESH_EVIDENCE_COLLECTED", "STRICT_PREFLIGHT_PENDING"],
+                confidence_level="HIGH",
+            ),
+            actor=actor,
+        )
+        preflight = IdeaMarketPreflightService(self.session).create_preflight(
+            data=IdeaMarketPreflightCreate(
+                company_id=research_run.company_id,
+                channel_workspace_id=research_run.channel_workspace_id,
+                editorial_calendar_slot_id=research_slot.id,
+                editorial_research_run_id=research_run.id,
+                editorial_idea_candidate_id=candidate.id,
+                evidence_blob={
+                    "search_demand_evidence_ids": [
+                        str(item["id"]) for item in evidence_refs
+                    ],
+                    "source_pack_hash": (
+                        (collection_receipt.get("source_pack") or {}).get("content_hash")
+                    ),
+                    "research_pack_hash": (
+                        (collection_receipt.get("research_pack") or {}).get("content_hash")
+                    ),
+                },
+            ),
+            correlation_id=f"runway-replenishment:{research_run.id}",
+        )
+        if preflight.decision == "PASS":
+            candidate = editorial.transition_candidate(
+                candidate_id=candidate.id,
+                data=EditorialIdeaCandidateTransition(
+                    target_stage="PREFLIGHT_PASS",
+                    idea_market_preflight_id=preflight.id,
+                    reason_codes=list(preflight.reason_codes),
+                ),
+                actor=actor,
+            )
+            candidate = editorial.transition_candidate(
+                candidate_id=candidate.id,
+                data=EditorialIdeaCandidateTransition(
+                    target_stage="GREENLIT",
+                    idea_market_preflight_id=preflight.id,
+                    reason_codes=[*preflight.reason_codes, "DETERMINISTIC_GREENLIGHT"],
+                ),
+                actor=actor,
+            )
+        elif preflight.decision == "BLOCK":
+            candidate = editorial.transition_candidate(
+                candidate_id=candidate.id,
+                data=EditorialIdeaCandidateTransition(
+                    target_stage="PREFLIGHT_BLOCK",
+                    idea_market_preflight_id=preflight.id,
+                    reason_codes=list(preflight.reason_codes),
+                ),
+                actor=actor,
+            )
+        return candidate, preflight
+
+    def _freeze_context(
+        self,
+        *,
+        run: LaunchRun,
+        policy: FirstChannelLaunchPolicyVersion,
+        research_run: EditorialResearchRun,
+        editorial_calendar_slot: EditorialCalendarSlot,
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        resolver = ResourceResolverService(self.session)
+        plan = resolver.create_retrieval_plan(
+            data=RetrievalPlanSnapshotCreate(
+                purpose="EDITORIAL_RESEARCH",
+                company_id=run.company_id,
+                channel_workspace_id=run.channel_workspace_id,
+                channel_profile_version_id=policy.channel_profile_version_id,
+                policy_snapshot_id=policy.policy_snapshot_id,
+                editorial_calendar_slot_id=editorial_calendar_slot.id,
+                # Deliberately omit search evidence until an automatic source
+                # authority supplies fresh, run-bound evidence.
+                allowed_sources=[
+                    "channel_profile",
+                    "policy_snapshot",
+                    "editorial_slot",
+                    "review_tasks",
+                    "gate_runs",
+                    "provider_health",
+                    "quota_ledger",
+                    "niche_contract_digest",
+                ],
+                source_order=[
+                    "channel_profile",
+                    "policy_snapshot",
+                    "editorial_slot",
+                    "quota_ledger",
+                ],
+            ),
+            correlation_id=f"runway-replenishment:{research_run.id}",
+        )
+        context = resolver.build_context_pack(
+            data=ContextPackSnapshotCreate(
+                retrieval_plan_snapshot_id=plan.id,
+                freshness_state="UNKNOWN",
+                confidence_level="UNKNOWN",
+            ),
+            correlation_id=f"runway-replenishment:{research_run.id}",
+        )
+        state = ChannelStatePackService(self.session).build_snapshot(
+            data=ChannelStatePackSnapshotCreate(
+                editorial_research_run_id=research_run.id,
+                company_id=run.company_id,
+                channel_workspace_id=run.channel_workspace_id,
+                policy_snapshot_id=policy.policy_snapshot_id,
+                context_pack_snapshot_id=context.id,
+            ),
+            correlation_id=f"runway-replenishment:{research_run.id}",
+        )
+        return context.id, state.id
+
+    def _create_research_slot(
+        self,
+        *,
+        run: LaunchRun,
+        policy: FirstChannelLaunchPolicyVersion,
+        run_date: date,
+    ) -> tuple[EditorialCalendarSlot | None, str | None]:
+        """Create a v2 research envelope from already-approved channel facts."""
+
+        category = self.session.scalar(
+            select(ContentCategory)
+            .where(
+                ContentCategory.company_id == run.company_id,
+                ContentCategory.channel_workspace_id == run.channel_workspace_id,
+                ContentCategory.status == "ACTIVE",
+            )
+            .order_by(ContentCategory.created_at, ContentCategory.id)
+            .limit(1)
+        )
+        snapshot = self.session.get(CompiledChannelPolicySnapshot, policy.policy_snapshot_id)
+        payload = snapshot.compiled_payload if snapshot is not None else {}
+        payload = payload if isinstance(payload, dict) else {}
+        channel_contract = payload.get("channel_contract_json") or {}
+        channel_contract = (
+            channel_contract if isinstance(channel_contract, dict) else {}
+        )
+        editorial = channel_contract.get("editorial_strategy") or {}
+        editorial = editorial if isinstance(editorial, dict) else {}
+        allowed_pillars = editorial.get("content_pillars") or []
+        category_pillar = category.content_pillar if category is not None else None
+        if (
+            category is None
+            or not category_pillar
+            or category_pillar not in allowed_pillars
+        ):
+            return None, "RUNWAY_REPLENISHMENT_EDITORIAL_SLOT_AUTHORITY_UNAVAILABLE"
+        initial_runway = payload.get("initial_content_runway") or []
+        initial_item = initial_runway[0] if initial_runway else {}
+        production_goal = (
+            initial_item.get("title") if isinstance(initial_item, dict) else None
+        )
+        if not isinstance(production_goal, str) or not production_goal.strip():
+            channel_identity = channel_contract.get("channel_identity") or {}
+            channel_identity = (
+                channel_identity if isinstance(channel_identity, dict) else {}
+            )
+            production_goal = channel_identity.get("niche")
+        platform_strategy = channel_contract.get("platform_strategy") or {}
+        platform_strategy = (
+            platform_strategy if isinstance(platform_strategy, dict) else {}
+        )
+        primary_platform = platform_strategy.get("primary_platform")
+        if not isinstance(production_goal, str) or not production_goal.strip():
+            return None, "RUNWAY_REPLENISHMENT_EDITORIAL_SLOT_AUTHORITY_UNAVAILABLE"
+        target_platforms = (
+            [str(primary_platform).upper().replace(" ", "_")]
+            if isinstance(primary_platform, str) and primary_platform.strip()
+            else []
+        )
+        try:
+            slot = EditorialCalendarService(self.session).create_slot(
+                data=EditorialCalendarSlotCreate(
+                    company_id=run.company_id,
+                    channel_workspace_id=run.channel_workspace_id,
+                    policy_snapshot_id=policy.policy_snapshot_id,
+                    category_id=category.id,
+                    slot_date=run_date,
+                    slot_type="RESEARCH",
+                    schema_version="v2",
+                    production_lane="LONG_FORM",
+                    assignment_mode="OPEN_MIX",
+                    production_goal=production_goal,
+                    target_platforms=target_platforms,
+                    content_pillar=category_pillar,
+                    risk_level="UNKNOWN",
+                ),
+                correlation_id=f"runway-replenishment:{run.id}",
+            )
+        except ValidationFailureError:
+            return None, "RUNWAY_REPLENISHMENT_EDITORIAL_SLOT_AUTHORITY_UNAVAILABLE"
+        return slot, None
+
+    def _resolve_mode(
+        self,
+        *,
+        run: LaunchRun,
+        policy: FirstChannelLaunchPolicyVersion,
+        editorial_calendar_slot: EditorialCalendarSlot | None,
+    ) -> EditorialModeDecision:
+        """Resolve the v2 content mode before applying mode-specific checks.
+
+        The synthetic replenishment slot is a real, persisted ``OPEN_MIX``
+        authority.  ``OPEN_MIX`` with no eligible active series resolves to
+        ``STANDALONE`` through the same versioned resolver used by admission;
+        it is never silently treated as a series episode.
+        """
+
+        if editorial_calendar_slot is None:
+            return EditorialModeDecision(
+                content_mode=None,
+                assignment_mode=None,
+                reason_codes=("EDITORIAL_CONTENT_MODE_UNRESOLVED",),
+            )
+        try:
+            assignment_mode = AssignmentMode(editorial_calendar_slot.assignment_mode)
+        except (TypeError, ValueError):
+            return EditorialModeDecision(
+                content_mode=None,
+                assignment_mode=editorial_calendar_slot.assignment_mode,
+                reason_codes=("EDITORIAL_CONTENT_MODE_UNRESOLVED",),
+            )
+        try:
+            resolution = DeterministicAssignmentResolver().resolve(
+                AssignmentResolverInput(
+                    production_lane=ProductionLane.LONG_FORM,
+                    assignment_mode=assignment_mode,
+                    preferred_series_plan_id=(
+                        editorial_calendar_slot.preferred_series_plan_id
+                    ),
+                    preferred_series_run_id=(
+                        editorial_calendar_slot.preferred_series_run_id
+                    ),
+                    # Replenishment resolves *routing* before market evidence.
+                    # Strict preflight is still the only market PASS authority.
+                    candidates=[],
+                    niche_gate_passed=True,
+                    market_gate_passed=True,
+                )
+            )
+        except AssignmentResolutionError as exc:
+            return EditorialModeDecision(
+                content_mode=None,
+                assignment_mode=assignment_mode.value,
+                reason_codes=tuple(exc.reason_codes),
+            )
+        if resolution.content_mode == ContentMode.STANDALONE:
+            authority = self._standalone_authority(
+                run=run,
+                policy=policy,
+                editorial_calendar_slot=editorial_calendar_slot,
+            )
+            if authority is None:
+                return EditorialModeDecision(
+                    content_mode=None,
+                    assignment_mode=assignment_mode.value,
+                    reason_codes=("STANDALONE_AUTHORITY_UNAVAILABLE",),
+                    resolver_version=resolution.resolver_version,
+                    resolver_input_hash=resolution.resolver_input_hash,
+                )
+            return EditorialModeDecision(
+                content_mode=ContentMode.STANDALONE.value,
+                assignment_mode=assignment_mode.value,
+                reason_codes=tuple(str(item) for item in resolution.reason_codes),
+                resolver_version=resolution.resolver_version,
+                resolver_input_hash=resolution.resolver_input_hash,
+                standalone_authority=authority,
+            )
+        if (
+            resolution.series_plan_id is None
+            or resolution.series_run_id is None
+            or resolution.episode_number is None
+        ):
+            return EditorialModeDecision(
+                content_mode=None,
+                assignment_mode=assignment_mode.value,
+                reason_codes=("SERIES_EPISODE_BINDING_INVALID",),
+                resolver_version=resolution.resolver_version,
+                resolver_input_hash=resolution.resolver_input_hash,
+            )
+        return EditorialModeDecision(
+            content_mode=ContentMode.SERIES_EPISODE.value,
+            assignment_mode=assignment_mode.value,
+            reason_codes=tuple(str(item) for item in resolution.reason_codes),
+            resolver_version=resolution.resolver_version,
+            resolver_input_hash=resolution.resolver_input_hash,
+        )
+
+    def _standalone_authority(
+        self,
+        *,
+        run: LaunchRun,
+        policy: FirstChannelLaunchPolicyVersion,
+        editorial_calendar_slot: EditorialCalendarSlot,
+    ) -> dict[str, Any] | None:
+        """Prove standalone authority from current immutable channel facts."""
+
+        snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, policy.policy_snapshot_id
+        )
+        category = self.session.get(ContentCategory, editorial_calendar_slot.category_id)
+        if snapshot is None or category is None:
+            return None
+        payload = snapshot.compiled_payload or {}
+        contract = payload.get("channel_contract_json") or {}
+        contract = contract if isinstance(contract, dict) else {}
+        editorial = contract.get("editorial_strategy") or {}
+        editorial = editorial if isinstance(editorial, dict) else {}
+        platform = contract.get("platform_strategy") or {}
+        platform = platform if isinstance(platform, dict) else {}
+        identity = contract.get("channel_identity") or {}
+        identity = identity if isinstance(identity, dict) else {}
+        allowed_pillars = editorial.get("content_pillars") or payload.get(
+            "content_pillars"
+        ) or []
+        initial_runway = payload.get("initial_content_runway") or []
+        long_form_runway = any(
+            isinstance(item, dict)
+            and str(item.get("format") or "").lower().replace("-", "_")
+            == "long_form"
+            for item in initial_runway
+        )
+        initial_series_ids = list(policy.approved_initial_series_plan_ids or [])
+        if (
+            policy.initial_series_count != 0
+            or initial_series_ids
+            or snapshot.channel_workspace_id != run.channel_workspace_id
+            or snapshot.channel_profile_version_id != policy.channel_profile_version_id
+            or snapshot.status not in {"approved", "active"}
+            or category.company_id != run.company_id
+            or category.channel_workspace_id != run.channel_workspace_id
+            or category.status != "ACTIVE"
+            or not category.content_pillar
+            or category.content_pillar != editorial_calendar_slot.content_pillar
+            or category.content_pillar not in allowed_pillars
+            or not long_form_runway
+            or str(platform.get("primary_platform") or "").lower() != "youtube"
+            or not identity
+            or "YOUTUBE" not in set(editorial_calendar_slot.target_platforms or [])
+        ):
+            return None
+        return {
+            "channel_profile_version_id": str(policy.channel_profile_version_id),
+            "policy_snapshot_id": str(snapshot.id),
+            "policy_snapshot_hash": snapshot.content_hash,
+            "category_id": str(category.id),
+            "content_pillar": category.content_pillar,
+            "platform": "YOUTUBE",
+            "launch_initial_series_count": policy.initial_series_count,
+            "launch_approved_initial_series_plan_ids": initial_series_ids,
+            "channel_constitution_present": bool(
+                payload.get("channel_constitution") or identity
+            ),
+            "operating_blueprint_present": bool(
+                payload.get("operating_blueprint") or platform
+            ),
+        }
+
+    def _capability_blockers(
+        self,
+        *,
+        run: LaunchRun,
+        policy: FirstChannelLaunchPolicyVersion,
+        mode_decision: EditorialModeDecision,
+    ) -> tuple[list[str], dict[str, Any]]:
+        workspace = self.session.get(ChannelWorkspace, run.channel_workspace_id)
+        profile = self.session.get(ChannelProfileVersion, policy.channel_profile_version_id)
+        snapshot = self.session.get(CompiledChannelPolicySnapshot, policy.policy_snapshot_id)
+        category = self.session.scalar(
+            select(ContentCategory)
+            .where(
+                ContentCategory.company_id == run.company_id,
+                ContentCategory.channel_workspace_id == run.channel_workspace_id,
+                ContentCategory.status == "ACTIVE",
+            )
+            .order_by(ContentCategory.created_at, ContentCategory.id)
+            .limit(1)
+        )
+        budget = resolve_budget_authority(
+            self.session,
+            policy_snapshot_id=policy.policy_snapshot_id,
+            channel_workspace_id=run.channel_workspace_id,
+        )
+        providers = resolve_provider_authority(
+            self.session,
+            policy_snapshot_id=policy.policy_snapshot_id,
+            channel_workspace_id=run.channel_workspace_id,
+        )
+        blockers: list[str] = []
+        if (
+            workspace is None
+            or workspace.company_id != run.company_id
+            or profile is None
+            or profile.channel_workspace_id != run.channel_workspace_id
+            or profile.status not in {"approved", "active"}
+            or snapshot is None
+            or snapshot.channel_workspace_id != run.channel_workspace_id
+            or snapshot.channel_profile_version_id != profile.id
+            or snapshot.status not in {"approved", "active"}
+        ):
+            blockers.append("RUNWAY_REPLENISHMENT_CHANNEL_AUTHORITY_MISMATCH")
+        if category is None:
+            blockers.append("RUNWAY_REPLENISHMENT_CATEGORY_AUTHORITY_UNAVAILABLE")
+        if mode_decision.content_mode is None:
+            blockers.extend(mode_decision.reason_codes)
+        elif mode_decision.content_mode == ContentMode.SERIES_EPISODE.value:
+            # The resolver has already required typed plan/run/episode binding.
+            # Retain an explicit invariant for this scheduler boundary.
+            if "SERIES_EPISODE_BINDING_INVALID" in mode_decision.reason_codes:
+                blockers.append("SERIES_EPISODE_BINDING_INVALID")
+        elif mode_decision.content_mode != ContentMode.STANDALONE.value:
+            blockers.append("EDITORIAL_CONTENT_MODE_UNRESOLVED")
+        if budget.get("state") != "READY":
+            blockers.append("RUNWAY_REPLENISHMENT_BUDGET_AUTHORITY_BLOCKED")
+        if providers.get("state") != "READY":
+            blockers.append("RUNWAY_REPLENISHMENT_PROVIDER_AUTHORITY_BLOCKED")
+        return blockers, {
+            "category_id": str(category.id) if category else None,
+            "budget": budget,
+            "providers": providers,
+        }
+
+    def _existing_equivalent(
+        self,
+        *,
+        run: LaunchRun,
+        policy: FirstChannelLaunchPolicyVersion,
+        scope_key: str,
+        attempt_key: str,
+    ) -> EditorialResearchRun | None:
+        candidates = self.session.scalars(
+            select(EditorialResearchRun)
+            .where(
+                EditorialResearchRun.company_id == run.company_id,
+                EditorialResearchRun.channel_workspace_id == run.channel_workspace_id,
+                EditorialResearchRun.channel_profile_version_id == policy.channel_profile_version_id,
+                EditorialResearchRun.policy_snapshot_id == policy.policy_snapshot_id,
+                EditorialResearchRun.trigger_type == "SCHEDULED",
+            )
+            .order_by(EditorialResearchRun.created_at.desc())
+        ).all()
+        for candidate in candidates:
+            metadata = (candidate.metadata_ or {}).get(_METADATA_KEY) or {}
+            if metadata.get("schema_version") != RUNWAY_REPLENISHMENT_SCHEMA:
+                continue
+            if metadata.get("scope_key") != scope_key:
+                continue
+            if (
+                candidate.status in _ACTIVE_STATUSES
+                or metadata.get("attempt_key") == attempt_key
+            ):
+                return candidate
+        return None
+
+    def _run_date(self, *, policy: FirstChannelLaunchPolicyVersion) -> date:
+        try:
+            return self.now().astimezone(ZoneInfo(policy.timezone)).date()
+        except ZoneInfoNotFoundError as exc:
+            raise ValidationFailureError("RUNWAY_REPLENISHMENT_TIMEZONE_INVALID") from exc
