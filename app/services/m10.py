@@ -22,6 +22,7 @@ from app.db.models import (
     LearningEvidenceBundle,
     LearningPromotionEligibilityRun,
     LearningReviewQueueItem,
+    LongFormAnalyticsWindow,
     NoViewDiagnosticRun,
     PackagingDiagnosticRun,
     PlaybookCandidateDraft,
@@ -31,6 +32,8 @@ from app.db.models import (
     UploadedVideo,
     UploadedVideoMetricsSummary,
 )
+from app.db.models.m9 import PostPublishHealthRun
+from app.services.config_registry import content_hash
 from app.services.audit import AuditService
 from app.services.domain_events import DomainEventBus
 
@@ -55,6 +58,7 @@ class LearningEvidenceSet:
     metrics_summary: UploadedVideoMetricsSummary | None
     failure_trace_report: FailureTraceReport | None
     recovery_proposal: RecoveryProposal | None
+    post_publish_health_run: PostPublishHealthRun | None
     diagnostics: dict[str, Any]
 
 
@@ -85,6 +89,15 @@ class LearningCandidateGenerationService:
         data: LearningCandidateGenerationRunCreate,
         correlation_id: str = "m10-learning-generation-create",
     ) -> LearningCandidateGenerationRun:
+        if data.learning_command_key:
+            existing = self.session.scalar(
+                select(LearningCandidateGenerationRun).where(
+                    LearningCandidateGenerationRun.learning_command_key
+                    == data.learning_command_key
+                )
+            )
+            if existing is not None:
+                return existing
         uploaded = _require_uploaded(self.session, data.uploaded_video_id)
         evidence = _load_evidence_set(
             self.session,
@@ -93,6 +106,9 @@ class LearningCandidateGenerationService:
             recovery_proposal_id=data.source_recovery_proposal_id,
             analytics_snapshot_id=data.source_analytics_snapshot_id,
             metrics_summary_id=data.source_uploaded_video_metrics_summary_id,
+            post_publish_health_run_id=_uuid_from_metadata(
+                data.metadata, "post_publish_health_run_id"
+            ),
         )
         run_state = "PENDING"
         reason_codes = ["LEARNING_CANDIDATE_GENERATED"]
@@ -106,6 +122,8 @@ class LearningCandidateGenerationService:
             channel_workspace_id=uploaded.channel_workspace_id,
             video_project_id=uploaded.video_project_id,
             uploaded_video_id=uploaded.id,
+            long_form_analytics_window_id=data.long_form_analytics_window_id,
+            learning_command_key=data.learning_command_key,
             source_failure_trace_report_id=evidence.failure_trace_report.id if evidence.failure_trace_report else None,
             source_recovery_proposal_id=evidence.recovery_proposal.id if evidence.recovery_proposal else None,
             source_analytics_snapshot_id=evidence.analytics_snapshot.id if evidence.analytics_snapshot else None,
@@ -158,6 +176,77 @@ class LearningCandidateGenerationService:
             )
         return run
 
+    def execute_window_command(
+        self,
+        *,
+        analytics_window_id: uuid.UUID,
+        command_key: str,
+        policy: dict[str, Any],
+        policy_hash: str,
+    ) -> LearningCandidateGenerationRun:
+        """Consume one scheduler-owned command with deterministic identity."""
+
+        window = self.session.get(LongFormAnalyticsWindow, analytics_window_id)
+        if (
+            window is None
+            or window.state != "DIAGNOSTICS_COMPLETE"
+            or window.analytics_snapshot_id is None
+            or window.post_publish_health_run_id is None
+        ):
+            raise ValidationFailureError("LEARNING_WINDOW_DIAGNOSTICS_AUTHORITY_MISSING")
+        if content_hash(policy) != policy_hash or not policy.get("version"):
+            raise ValidationFailureError("LEARNING_WINDOW_POLICY_HASH_MISMATCH")
+        if window.window_type not in {
+            *(policy.get("provisional_windows") or []),
+            *(policy.get("mature_windows") or []),
+        }:
+            raise ValidationFailureError("LEARNING_WINDOW_MATURITY_POLICY_BLOCKED")
+        health = self.session.get(
+            PostPublishHealthRun, window.post_publish_health_run_id
+        )
+        if (
+            health is None
+            or health.uploaded_video_id != window.uploaded_video_id
+            or health.run_state != "COMPLETED"
+        ):
+            raise ValidationFailureError("LEARNING_WINDOW_HEALTH_AUTHORITY_MISMATCH")
+        existing = self.session.scalar(
+            select(LearningCandidateGenerationRun).where(
+                LearningCandidateGenerationRun.learning_command_key == command_key
+            )
+        )
+        if existing is None:
+            run = self.create_run(
+                data=LearningCandidateGenerationRunCreate(
+                    uploaded_video_id=window.uploaded_video_id,
+                    long_form_analytics_window_id=window.id,
+                    learning_command_key=command_key,
+                    source_analytics_snapshot_id=window.analytics_snapshot_id,
+                    run_mode="RULE_BASED",
+                    metadata={
+                        "automated_learning": True,
+                        "analytics_window_type": window.window_type,
+                        "learning_policy_version": policy["version"],
+                        "learning_policy_hash": policy_hash,
+                        "maturity": (
+                            "MATURE"
+                            if window.window_type in set(policy.get("mature_windows") or [])
+                            else "PROVISIONAL"
+                        ),
+                        "post_publish_health_run_id": str(window.post_publish_health_run_id),
+                    },
+                ),
+                correlation_id=f"learning-window:{window.id}",
+            )
+        else:
+            run = existing
+            if run.long_form_analytics_window_id != window.id:
+                raise ValidationFailureError("LEARNING_COMMAND_WINDOW_MISMATCH")
+        return self.execute_run(
+            run_id=run.id,
+            correlation_id=f"learning-window:{window.id}",
+        )
+
     def execute_run(
         self,
         *,
@@ -178,6 +267,9 @@ class LearningCandidateGenerationService:
             recovery_proposal_id=run.source_recovery_proposal_id,
             analytics_snapshot_id=run.source_analytics_snapshot_id,
             metrics_summary_id=run.source_uploaded_video_metrics_summary_id,
+            post_publish_health_run_id=_uuid_from_metadata(
+                run.metadata_ or {}, "post_publish_health_run_id"
+            ),
         )
         run.started_at = utc_now()
         run.run_state = "RUNNING"
@@ -204,20 +296,40 @@ class LearningCandidateGenerationService:
             evidence_bundle=bundle,
             correlation_id=correlation_id,
         )
-        LearningReviewQueueService(self.session).create_for_candidate(
-            candidate=candidate,
-            evidence_bundle=bundle,
-            eligibility_run=eligibility,
-            correlation_id=correlation_id,
-        )
+        if (
+            bool((run.metadata_ or {}).get("automated_learning"))
+            and (run.metadata_ or {}).get("maturity") == "MATURE"
+        ):
+            # The promotion service re-checks recurrence, scope, rights and
+            # risk.  A non-passing candidate remains evidence-only.
+            from app.services.r3d7 import LearningToMemoryPromotionService
+
+            LearningToMemoryPromotionService(self.session).promote_system_governed_candidate(
+                learning_candidate_id=candidate.id,
+                policy_version=str((run.metadata_ or {}).get("learning_policy_version")),
+                policy_hash=str((run.metadata_ or {}).get("learning_policy_hash")),
+            )
+        if not bool((run.metadata_ or {}).get("automated_learning")):
+            # Historical/manual M10 keeps its optional M11 surface.  The new
+            # scheduler path has no mandatory intermediate human boundary.
+            LearningReviewQueueService(self.session).create_for_candidate(
+                candidate=candidate,
+                evidence_bundle=bundle,
+                eligibility_run=eligibility,
+                correlation_id=correlation_id,
+            )
         if eligibility.result == "ELIGIBLE_FOR_REVIEW":
             PlaybookCandidateDraftService(self.session).create_for_candidate(
                 candidate=candidate,
                 evidence_bundle=bundle,
                 correlation_id=correlation_id,
             )
-        run.source_failure_trace_report_id = evidence.failure_trace_report.id
-        run.source_recovery_proposal_id = evidence.recovery_proposal.id
+        run.source_failure_trace_report_id = (
+            evidence.failure_trace_report.id if evidence.failure_trace_report else None
+        )
+        run.source_recovery_proposal_id = (
+            evidence.recovery_proposal.id if evidence.recovery_proposal else None
+        )
         run.source_analytics_snapshot_id = evidence.analytics_snapshot.id
         run.source_uploaded_video_metrics_summary_id = evidence.metrics_summary.id
         run.run_state = "COMPLETED"
@@ -229,12 +341,16 @@ class LearningCandidateGenerationService:
                 "LEARNING_CANDIDATE_GENERATED",
                 "LEARNING_EVIDENCE_BUNDLE_CREATED",
                 "PROMOTION_ELIGIBILITY_RUN_CREATED",
-                "DASHBOARD_QUEUE_ITEM_CREATED",
+                *([] if bool((run.metadata_ or {}).get("automated_learning")) else ["DASHBOARD_QUEUE_ITEM_CREATED"]),
                 "NO_AUTO_PROMOTION",
-                "M11_APPROVAL_REQUIRED",
+                *([] if bool((run.metadata_ or {}).get("automated_learning")) else ["M11_APPROVAL_REQUIRED"]),
             ]
         )
-        run.next_action = "Learning candidate is prepared for M11 human review workflow."
+        run.next_action = (
+            "Governed recurrence evaluation will keep this automated learning as evidence-only until mature and recurrent."
+            if bool((run.metadata_ or {}).get("automated_learning"))
+            else "Learning candidate is prepared for optional M11 human review workflow."
+        )
         self.session.flush()
         _record_m10_event(
             self.session,
@@ -299,12 +415,24 @@ class LearningCandidateGenerationService:
     ) -> LearningCandidate:
         assert evidence.analytics_snapshot is not None
         assert evidence.metrics_summary is not None
-        assert evidence.failure_trace_report is not None
-        assert evidence.recovery_proposal is not None
-        candidate_type, category = _classify_candidate(evidence.failure_trace_report, evidence.recovery_proposal)
+        failure_path = evidence.failure_trace_report is not None
+        if failure_path and evidence.recovery_proposal is None:
+            raise ValidationFailureError("FAILURE_LEARNING_RECOVERY_PROPOSAL_REQUIRED")
+        if failure_path:
+            assert evidence.failure_trace_report is not None
+            assert evidence.recovery_proposal is not None
+            candidate_type, category = _classify_candidate(
+                evidence.failure_trace_report, evidence.recovery_proposal
+            )
+        else:
+            candidate_type, category = _classify_positive_candidate(evidence)
         source_refs = _source_refs(evidence)
         diagnostic_refs = _diagnostic_refs(evidence)
-        recovery_refs = [{"type": "RecoveryProposal", "id": str(evidence.recovery_proposal.id), "proposal_type": evidence.recovery_proposal.proposal_type}]
+        recovery_refs = (
+            [{"type": "RecoveryProposal", "id": str(evidence.recovery_proposal.id), "proposal_type": evidence.recovery_proposal.proposal_type}]
+            if evidence.recovery_proposal is not None
+            else []
+        )
         metric_support = _metric_support(evidence.analytics_snapshot, evidence.metrics_summary)
         metric_refs = [
             {"type": "metric_support", "metric_key": item["metric_key"], "source_snapshot_id": item["source_snapshot_id"]}
@@ -314,8 +442,24 @@ class LearningCandidateGenerationService:
         policy_flags, rights_flags = _policy_rights_flags(evidence)
         counter_evidence = _counter_evidence(evidence)
         limitations = _limitations(evidence, metric_support)
-        confidence = _candidate_confidence(evidence.failure_trace_report.confidence_level, counter_evidence, metric_support)
-        risk_level = _candidate_risk(evidence.recovery_proposal.risk_level, policy_flags, rights_flags)
+        confidence = _candidate_confidence(
+            (
+                evidence.failure_trace_report.confidence_level
+                if evidence.failure_trace_report is not None
+                else "MEDIUM"
+            ),
+            counter_evidence,
+            metric_support,
+        )
+        risk_level = _candidate_risk(
+            (
+                evidence.recovery_proposal.risk_level
+                if evidence.recovery_proposal is not None
+                else "LOW"
+            ),
+            policy_flags,
+            rights_flags,
+        )
         candidate = LearningCandidate(
             generation_run_id=run.id,
             company_id=evidence.uploaded.company_id,
@@ -324,11 +468,31 @@ class LearningCandidateGenerationService:
             uploaded_video_id=evidence.uploaded.id,
             candidate_type=candidate_type,
             candidate_state="GENERATED",
-            operator_summary=_candidate_operator_summary(evidence.failure_trace_report, evidence.recovery_proposal),
-            friendly_status="Có tín hiệu tốt, nhưng cần human review trước khi dùng lại.",
-            candidate_summary=_candidate_summary(candidate_type, evidence.failure_trace_report),
-            suggested_learning=_suggested_learning(candidate_type, evidence.failure_trace_report),
-            suggested_playbook_text=_suggested_playbook_text(category, evidence.failure_trace_report),
+            operator_summary=(
+                _candidate_operator_summary(evidence.failure_trace_report, evidence.recovery_proposal)
+                if failure_path
+                else _positive_operator_summary(evidence)
+            ),
+            friendly_status=(
+                "Tín hiệu tích cực được lưu làm bằng chứng; chưa tự động thay đổi production."
+                if not failure_path
+                else "Tín hiệu thất bại được lưu làm bằng chứng; chưa tự động thay đổi production."
+            ),
+            candidate_summary=(
+                _candidate_summary(candidate_type, evidence.failure_trace_report)
+                if failure_path
+                else _positive_candidate_summary(candidate_type, evidence)
+            ),
+            suggested_learning=(
+                _suggested_learning(candidate_type, evidence.failure_trace_report)
+                if failure_path
+                else _positive_suggested_learning(candidate_type)
+            ),
+            suggested_playbook_text=(
+                _suggested_playbook_text(category, evidence.failure_trace_report)
+                if failure_path
+                else _positive_playbook_text(category)
+            ),
             recommended_scope="CHANNEL" if not policy_flags and not rights_flags else "DO_NOT_PROMOTE",
             confidence_label=confidence,
             risk_level=risk_level,
@@ -344,8 +508,9 @@ class LearningCandidateGenerationService:
                 "lineage_refs": _lineage_refs(evidence.uploaded),
                 "metric_support": metric_support,
                 "policy_snapshot_ref_lineage_only": str(evidence.uploaded.policy_snapshot_id),
-                "single_case_review_rule": "A single M9 evidence set may enter human review with bounded confidence; it cannot auto-promote.",
+                "single_case_review_rule": "A single evidence set cannot auto-promote or permanently change production behavior.",
                 "category_hint": category,
+                "learning_path": "FAILURE" if failure_path else "POSITIVE",
                 "m10_no_approval": True,
                 "m10_no_config_recommendation": True,
                 "m10_no_provider_routing": True,
@@ -728,6 +893,16 @@ class LearningReadService:
         return draft
 
 
+def _uuid_from_metadata(metadata: dict[str, Any], key: str) -> uuid.UUID | None:
+    value = metadata.get(key)
+    if value is None:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValidationFailureError(f"LEARNING_METADATA_{key.upper()}_INVALID") from exc
+
+
 def _load_evidence_set(
     session: Session,
     uploaded: UploadedVideo,
@@ -736,6 +911,7 @@ def _load_evidence_set(
     recovery_proposal_id: uuid.UUID | None = None,
     analytics_snapshot_id: uuid.UUID | None = None,
     metrics_summary_id: uuid.UUID | None = None,
+    post_publish_health_run_id: uuid.UUID | None = None,
 ) -> LearningEvidenceSet:
     summary = session.get(UploadedVideoMetricsSummary, metrics_summary_id) if metrics_summary_id else None
     if summary is None:
@@ -771,6 +947,20 @@ def _load_evidence_set(
             .where(RecoveryProposal.uploaded_video_id == uploaded.id)
             .order_by(RecoveryProposal.created_at.desc(), RecoveryProposal.id.desc())
         ).first()
+    health = (
+        session.get(PostPublishHealthRun, post_publish_health_run_id)
+        if post_publish_health_run_id is not None
+        else session.scalars(
+            select(PostPublishHealthRun)
+            .where(PostPublishHealthRun.uploaded_video_id == uploaded.id)
+            .order_by(
+                PostPublishHealthRun.created_at.desc(),
+                PostPublishHealthRun.id.desc(),
+            )
+        ).first()
+    )
+    if health is not None and health.uploaded_video_id != uploaded.id:
+        raise ValidationFailureError("LEARNING_HEALTH_RUN_UPLOADED_VIDEO_MISMATCH")
     diagnostics: dict[str, Any] = {}
     if report is not None:
         health_run_id = report.post_publish_health_run_id
@@ -795,6 +985,7 @@ def _load_evidence_set(
         metrics_summary=summary,
         failure_trace_report=report,
         recovery_proposal=proposal,
+        post_publish_health_run=health,
         diagnostics={key: value for key, value in diagnostics.items() if value is not None},
     )
 
@@ -805,10 +996,15 @@ def _missing_required_sources(evidence: LearningEvidenceSet) -> list[str]:
         missing.append("AnalyticsSnapshot")
     if evidence.metrics_summary is None:
         missing.append("UploadedVideoMetricsSummary")
-    if evidence.failure_trace_report is None:
-        missing.append("FailureTraceReport")
-    if evidence.recovery_proposal is None:
-        missing.append("RecoveryProposal")
+    if evidence.failure_trace_report is not None:
+        if evidence.recovery_proposal is None:
+            missing.append("RecoveryProposal")
+    elif (
+        evidence.post_publish_health_run is None
+        or evidence.post_publish_health_run.run_state != "COMPLETED"
+        or evidence.post_publish_health_run.health_state != "HEALTHY"
+    ):
+        missing.append("CompletedHealthyPostPublishHealthRun")
     return missing
 
 
@@ -832,6 +1028,43 @@ def _classify_candidate(report: FailureTraceReport, proposal: RecoveryProposal) 
     return "OTHER", "OTHER"
 
 
+def _classify_positive_candidate(evidence: LearningEvidenceSet) -> tuple[str, str]:
+    """Keep healthy learning bounded to observed, low-risk production guidance."""
+
+    return "RETENTION_PATTERN", "RETENTION"
+
+
+def _positive_operator_summary(evidence: LearningEvidenceSet) -> str:
+    health = evidence.post_publish_health_run
+    return (
+        "M9 completed with HEALTHY status; this positive signal is evidence-only "
+        "until the governed recurrence and maturity gates pass."
+        if health is not None
+        else "Healthy learning source missing."
+    )
+
+
+def _positive_candidate_summary(candidate_type: str, evidence: LearningEvidenceSet) -> str:
+    return (
+        f"{candidate_type}: a completed healthy M9 observation and owner analytics "
+        "support a bounded positive learning candidate."
+    )
+
+
+def _positive_suggested_learning(candidate_type: str) -> str:
+    return (
+        f"Observed {candidate_type.lower()} signal may guide future pacing only after "
+        "mature, recurrent compatible evidence; it is not factual claim evidence."
+    )
+
+
+def _positive_playbook_text(category: str) -> str:
+    return (
+        f"Draft {category.lower()} pattern: retain the observed treatment only when "
+        "the governed evidence bundle has recurrent mature support."
+    )
+
+
 def _source_refs(evidence: LearningEvidenceSet) -> list[dict[str, Any]]:
     refs = [
         {"type": "UploadedVideo", "id": str(evidence.uploaded.id)},
@@ -847,6 +1080,15 @@ def _source_refs(evidence: LearningEvidenceSet) -> list[dict[str, Any]]:
         refs.append({"type": "AnalyticsSnapshot", "id": str(evidence.analytics_snapshot.id)})
     if evidence.metrics_summary:
         refs.append({"type": "UploadedVideoMetricsSummary", "id": str(evidence.metrics_summary.id)})
+    if evidence.post_publish_health_run:
+        refs.append(
+            {
+                "type": "PostPublishHealthRun",
+                "id": str(evidence.post_publish_health_run.id),
+                "health_state": evidence.post_publish_health_run.health_state,
+                "run_state": evidence.post_publish_health_run.run_state,
+            }
+        )
     if evidence.failure_trace_report:
         refs.append({"type": "FailureTraceReport", "id": str(evidence.failure_trace_report.id)})
     if evidence.recovery_proposal:
@@ -1016,6 +1258,8 @@ def _evidence_summary(candidate: LearningCandidate, evidence: LearningEvidenceSe
     proposal = evidence.recovery_proposal
     status = report.primary_status if report else "UNKNOWN"
     proposal_type = proposal.proposal_type if proposal else "UNKNOWN"
+    if report is None:
+        return "M10 bundle uses UploadedVideo, owner analytics, metrics summary, and a completed HEALTHY M9 observation."
     return f"M10 bundle uses UploadedVideo, M8 analytics, M9 failure trace ({status}), and recovery proposal ({proposal_type})."
 
 
@@ -1024,7 +1268,12 @@ def _evaluate_gate(candidate: LearningCandidate, evidence_bundle: LearningEviden
     warnings: list[dict[str, Any]] = []
     metric_support = evidence_bundle.metric_support or []
     source_types = {item.get("type") for item in candidate.source_refs}
-    min_evidence_met = {"UploadedVideo", "AnalyticsSnapshot", "FailureTraceReport", "RecoveryProposal"} <= source_types
+    required_sources = (
+        {"UploadedVideo", "AnalyticsSnapshot", "PostPublishHealthRun"}
+        if candidate.technical_appendix.get("learning_path") == "POSITIVE"
+        else {"UploadedVideo", "AnalyticsSnapshot", "FailureTraceReport", "RecoveryProposal"}
+    )
+    min_evidence_met = required_sources <= source_types
     metric_freshness_ok = evidence_bundle.freshness_summary.get("analytics_freshness_state") == "FRESH"
     policy_flags_ok = not candidate.policy_flags
     rights_flags_ok = not candidate.rights_flags

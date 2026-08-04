@@ -32,6 +32,9 @@ from app.contracts.vcos_v2 import (
     AssignmentResolverInput,
     ContentMode,
     ProductionLane,
+    DecisionReversibility,
+    StrategicIntent,
+    StrategicLineageV2,
 )
 from app.core.actor import ActorContext
 from app.core.config import get_settings
@@ -51,6 +54,8 @@ from app.db.models.m5 import (
     EditorialResearchRun,
     SearchDemandEvidence,
 )
+from app.db.models.m7 import UploadedVideo
+from app.services.config_registry import content_hash
 from app.db.models.r3d1 import ContentCategory
 from app.services.editorial_fresh_evidence import (
     EditorialEvidenceProviderActivationService,
@@ -461,6 +466,9 @@ class EditorialRunwayReplenishmentService:
         source_title = str(source_snapshot.get("title") or "").strip()
         if not source_title:
             raise ValidationFailureError("EDITORIAL_SOURCE_TITLE_REQUIRED")
+        launch_lineage = self._first_launch_candidate_lineage(
+            research_run=research_run,
+        )
         candidate = editorial.add_candidate(
             data=EditorialIdeaCandidateCreate(
                 editorial_research_run_id=research_run.id,
@@ -491,6 +499,8 @@ class EditorialRunwayReplenishmentService:
                 evidence_refs=evidence_refs,
                 reason_codes=["FRESH_EVIDENCE_COLLECTED", "STRICT_PREFLIGHT_PENDING"],
                 confidence_level="HIGH",
+                experiment_phase="AUDIENCE_PROMISE",
+                **launch_lineage,
             ),
             actor=actor,
         )
@@ -502,9 +512,10 @@ class EditorialRunwayReplenishmentService:
                 editorial_research_run_id=research_run.id,
                 editorial_idea_candidate_id=candidate.id,
                 evidence_blob={
-                    "search_demand_evidence_ids": [
+                    "claim_evidence_refs": [
                         str(item["id"]) for item in evidence_refs
                     ],
+                    "market_demand_evidence_refs": [],
                     "source_pack_hash": (
                         (collection_receipt.get("source_pack") or {}).get("content_hash")
                     ),
@@ -545,6 +556,90 @@ class EditorialRunwayReplenishmentService:
                 actor=actor,
             )
         return candidate, preflight
+
+    def _first_launch_candidate_lineage(
+        self,
+        *,
+        research_run: EditorialResearchRun,
+    ) -> dict[str, Any]:
+        """Freeze the approved first-launch experiment authority on its candidate.
+
+        This is editorial authority, not an invented market score.  The strict
+        preflight later validates its current policy/run and first-N position.
+        """
+        run = self.session.scalar(
+            select(LaunchRun).where(
+                LaunchRun.company_id == research_run.company_id,
+                LaunchRun.channel_workspace_id == research_run.channel_workspace_id,
+                LaunchRun.state == "ACTIVE",
+            )
+        )
+        if run is None:
+            raise ValidationFailureError("FIRST_LAUNCH_EXPERIMENT_ACTIVE_RUN_REQUIRED")
+        policy = self.session.get(FirstChannelLaunchPolicyVersion, run.launch_policy_version_id)
+        snapshot = self.session.get(CompiledChannelPolicySnapshot, research_run.policy_snapshot_id)
+        payload = snapshot.compiled_payload if snapshot is not None else {}
+        contract = payload.get("channel_contract_json") if isinstance(payload, dict) else None
+        identity = contract.get("channel_identity") if isinstance(contract, dict) else None
+        target = contract.get("target_audience") if isinstance(contract, dict) else None
+        market = contract.get("market_locale") if isinstance(contract, dict) else None
+        promise = identity.get("brand_promise") if isinstance(identity, dict) else None
+        persona = target.get("primary_persona") if isinstance(target, dict) else None
+        if policy is None or policy.state != "APPROVED" or not isinstance(promise, str) or not promise.strip() or not isinstance(persona, str) or not persona.strip():
+            raise ValidationFailureError("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+        target_definition = {
+            "audience_level": target.get("audience_level"),
+            "audience_notes": target.get("audience_notes"),
+            "desired_outcome": target.get("desired_outcome"),
+            "market_locale": dict(market) if isinstance(market, dict) else {},
+            "pain_points": list(target.get("pain_points") or []),
+            "primary_persona": persona,
+        }
+        promise_version = f"channel-contract-snapshot-{snapshot.snapshot_version}"
+        drift_version = f"channel-contract-drift-guard-{snapshot.snapshot_version}"
+        criteria = {
+            "criterion": "AUDIENCE_PROMISE_VALIDATION",
+            "launch_policy_hash": policy.canonical_hash,
+            "measurement_scope": "FIRST_N_PUBLIC_VIDEOS",
+            "required_candidate_phase": "AUDIENCE_PROMISE",
+        }
+        criteria_version = "launch-audience-promise-v1"
+        hypothesis = (
+            "The frozen channel promise is relevant to the approved target audience "
+            "when demonstrated through one bounded long-form video."
+        )
+        decision = DecisionReversibility.TWO_WAY_DOOR
+        return StrategicLineageV2(
+            audience_promise=promise.strip(),
+            audience_promise_version=promise_version,
+            audience_promise_hash=StrategicLineageV2.calculate_audience_promise_hash(
+                audience_promise=promise.strip(), audience_promise_version=promise_version,
+                target_audience_definition=target_definition, audience_drift_guard_version=drift_version,
+            ),
+            target_audience_definition=target_definition,
+            audience_drift_guard_version=drift_version,
+            strategic_intent=StrategicIntent.ACQUISITION,
+            intent_success_criteria=criteria,
+            intent_success_criteria_version=criteria_version,
+            intent_success_criteria_hash=StrategicLineageV2.calculate_intent_success_criteria_hash(
+                strategic_intent=StrategicIntent.ACQUISITION, intent_success_criteria=criteria,
+                intent_success_criteria_version=criteria_version, experiment_hypothesis=hypothesis,
+                primary_variable_under_test="audience_promise_validation", decision_reversibility=decision,
+            ),
+            experiment_hypothesis=hypothesis,
+            primary_variable_under_test="audience_promise_validation",
+            decision_reversibility=decision,
+            active_launch_policy_version_id=policy.id,
+            active_launch_policy_hash=policy.canonical_hash,
+            active_launch_run_id=run.id,
+            active_launch_run_hash=content_hash({
+                "launch_key": run.launch_key, "launch_policy_hash": policy.canonical_hash,
+                "launch_policy_version_id": str(policy.id), "launch_run_id": str(run.id),
+                "launch_started_at": run.launch_started_at.isoformat() if run.launch_started_at else None,
+                "preparation_started_on": run.preparation_started_on.isoformat(),
+                "reason_codes": list(run.reason_codes or []), "state": run.state,
+            }),
+        ).model_dump(mode="python")
 
     def _freeze_context(
         self,

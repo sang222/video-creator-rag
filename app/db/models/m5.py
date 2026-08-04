@@ -379,6 +379,7 @@ class SearchDemandEvidence(Base):
         UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
     )
     evidence_source_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    authority_purpose: Mapped[str | None] = mapped_column(String(40))
     source_ref: Mapped[str | None] = mapped_column(Text)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     platform: Mapped[str] = mapped_column(String(40), nullable=False)

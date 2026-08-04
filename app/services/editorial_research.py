@@ -660,7 +660,7 @@ class EditorialResearchService:
         if target == "PREFLIGHT_BLOCK" and preflight.decision != "BLOCK":
             raise ValidationFailureError("EDITORIAL_PREFLIGHT_NOT_BLOCKED")
         canonical_evidence_refs = (
-            (preflight.evidence_blob or {}).get("evidence_refs")
+            (preflight.evidence_blob or {}).get("claim_evidence_refs")
             if preflight is not None
             else None
         )
@@ -674,7 +674,12 @@ class EditorialResearchService:
                 for item in canonical_evidence_refs
             )
         ):
-            raise ValidationFailureError("EDITORIAL_CANONICAL_EVIDENCE_REQUIRED")
+                raise ValidationFailureError("EDITORIAL_CANONICAL_EVIDENCE_REQUIRED")
+        if target == "PREFLIGHT_PASS" and (
+            (preflight.evidence_blob or {}).get("demand_state")
+            not in {"PASS", "EXPERIMENT_AUTHORIZED"}
+        ):
+            raise ValidationFailureError("EDITORIAL_MARKET_DEMAND_AUTHORITY_REQUIRED")
         if target == "GREENLIT":
             if candidate.stage != "PREFLIGHT_PASS":
                 raise ValidationFailureError("GREENLIGHT_REQUIRES_PREFLIGHT_PASS")

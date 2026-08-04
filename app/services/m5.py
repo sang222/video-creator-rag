@@ -54,6 +54,8 @@ from app.db.models import (
     User,
     VideoProject,
 )
+from app.db.models.m7 import UploadedVideo
+from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion, LaunchRun
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
 from app.services.domain_events import DomainEventBus
@@ -119,6 +121,16 @@ SAFE_SEARCH_SOURCES = {
     "INTERNAL_ANALYTICS",
     "MANUAL_RESEARCH",
 }
+# Only these sources can carry active, quantitative market-demand authority.
+# Official documents stay valuable claim evidence, but a search result or an
+# official-doc citation is not itself a demand metric.
+QUANTITATIVE_DEMAND_SOURCES = {
+    "PAID_TOOL_CSV",
+    "GOOGLE_TRENDS_CSV",
+    "YOUTUBE_ANALYTICS",
+    "INTERNAL_ANALYTICS",
+}
+CLAIM_SOURCE_TYPES = {"OFFICIAL_DOCUMENT", "OFFICIAL_MANUAL"}
 RAW_SECRET_MARKERS = (
     "sk-",
     "pk_live_",
@@ -960,7 +972,36 @@ class SearchDemandEvidenceService:
             raise ValidationFailureError("search demand source type is not M5-safe")
         _ensure_no_secret_payload(data.model_dump(mode="json"))
         payload = data.model_dump()
+        purpose = payload.get("authority_purpose") or _infer_evidence_authority_purpose(
+            data.evidence_source_type
+        )
+        if purpose == "CLAIM_SOURCE" and data.evidence_source_type not in CLAIM_SOURCE_TYPES:
+            raise ValidationFailureError("CLAIM_EVIDENCE_SOURCE_TYPE_INVALID")
+        if purpose == "MARKET_DEMAND":
+            if data.evidence_source_type not in QUANTITATIVE_DEMAND_SOURCES:
+                raise ValidationFailureError("MARKET_DEMAND_SOURCE_NOT_QUANTITATIVE")
+            if data.search_volume_30d is None and data.relative_interest_index is None:
+                raise ValidationFailureError("MARKET_DEMAND_QUANTITATIVE_METRIC_REQUIRED")
+        if purpose == "CLAIM_SOURCE" and any(
+            value is not None
+            for value in (
+                data.search_volume_30d,
+                data.relative_interest_index,
+                data.competition_index,
+                data.trending_velocity,
+            )
+        ):
+            raise ValidationFailureError("OFFICIAL_DOCUMENT_NOT_DEMAND_METRIC")
+        payload["authority_purpose"] = purpose
         metadata = payload.pop("metadata")
+        metadata = {
+            **metadata,
+            "authority": {
+                "purpose": purpose,
+                "source_category": data.evidence_source_type,
+                "schema_version": "vcos.evidence-authority.v1",
+            },
+        }
         if payload.get("captured_at") is None:
             payload.pop("captured_at")
         evidence = SearchDemandEvidence(**payload, metadata_=metadata)
@@ -1674,100 +1715,121 @@ def _evaluate_v2_long_form_preflight(
             "V2_LONG_FORM_PREFLIGHT_TARGET_MARKET_DIGEST_STALE"
         )
 
-    raw_evidence_ids = (data.evidence_blob or {}).get("search_demand_evidence_ids")
-    if not isinstance(raw_evidence_ids, list) or not raw_evidence_ids:
-        raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_PERSISTED_DEMAND_REQUIRED")
-    evidence_refs: list[dict[str, Any]] = []
-    evidence_ids: list[uuid.UUID] = []
-    seen: set[uuid.UUID] = set()
-    for raw_id in raw_evidence_ids:
-        try:
-            evidence_id = uuid.UUID(str(raw_id))
-        except (TypeError, ValueError) as exc:
-            raise ValidationFailureError(
-                "V2_LONG_FORM_PREFLIGHT_DEMAND_ID_INVALID"
-            ) from exc
-        if evidence_id in seen:
-            continue
-        seen.add(evidence_id)
-        evidence = session.get(SearchDemandEvidence, evidence_id)
-        if evidence is None:
-            raise NotFoundError(f"search demand evidence not found: {evidence_id}")
-        if (
-            evidence.company_id != slot.company_id
-            or evidence.channel_workspace_id != slot.channel_workspace_id
-        ):
-            raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_DEMAND_SCOPE_MISMATCH")
-        if evidence.evidence_source_type not in SAFE_SEARCH_SOURCES:
-            raise ValidationFailureError(
-                "V2_LONG_FORM_PREFLIGHT_DEMAND_SOURCE_FORBIDDEN"
-            )
-        evidence_ids.append(evidence_id)
-        evidence_refs.append(
-            {
-                "type": "search_demand_evidence",
-                "id": str(evidence.id),
-                "evidence_source_type": evidence.evidence_source_type,
-                "query": evidence.query,
-                "platform": evidence.platform,
-                "geo": evidence.geo,
-                "search_volume_30d": evidence.search_volume_30d,
-                "relative_interest_index": (
-                    str(evidence.relative_interest_index)
-                    if evidence.relative_interest_index is not None
-                    else None
-                ),
-                "competition_index": (
-                    str(evidence.competition_index)
-                    if evidence.competition_index is not None
-                    else None
-                ),
-                "confidence": evidence.evidence_confidence,
-                "captured_at": (
-                    evidence.captured_at.isoformat()
-                    if evidence.captured_at is not None
-                    else None
-                ),
-            }
-        )
-
-    demand_input = data.model_copy(
-        update={
-            "demand_score": None,
-            "channel_fit_score": None,
-            "policy_fit_state": "PASS",
-            "evidence_blob": {"search_led": True},
-        }
+    # The legacy table name is retained for compatibility, but its records are
+    # no longer a single mixed authority.  Fresh official documents bind
+    # factual claims; only typed quantitative rows can prove steady-state
+    # demand.  Historical generic lists are classified conservatively.
+    evidence_blob_input = data.evidence_blob or {}
+    legacy_refs = evidence_blob_input.get("search_demand_evidence_ids")
+    claim_raw_refs = (
+        data.claim_evidence_refs
+        or evidence_blob_input.get("claim_evidence_refs")
+        or legacy_refs
+        or []
     )
-    decision, reasons, confidence, demand_score = _evaluate_preflight(
-        demand_input,
-        evidence_refs,
+    demand_raw_refs = (
+        data.market_demand_evidence_refs
+        or evidence_blob_input.get("market_demand_evidence_refs")
+        or legacy_refs
+        or []
+    )
+    claim_evidence_refs, claim_evidence_ids, claim_issues = _resolve_authority_evidence_refs(
+        session,
+        raw_refs=claim_raw_refs,
+        slot=slot,
+        expected_purpose="CLAIM_SOURCE",
+    )
+    market_demand_evidence_refs, market_demand_evidence_ids, demand_issues = (
+        _resolve_authority_evidence_refs(
+            session,
+            raw_refs=demand_raw_refs,
+            slot=slot,
+            expected_purpose="MARKET_DEMAND",
+        )
     )
     target_market = target_digest.primary_market.upper()
     market_scope = sorted(
-        {str(item["geo"]).upper() for item in evidence_refs if item.get("geo")}
+        {
+            str(item["geo"]).upper()
+            for item in market_demand_evidence_refs
+            if item.get("geo")
+        }
     )
-    market_fit_score = (
-        min(Decimal("1"), demand_score / Decimal("100"))
-        if demand_score is not None
-        else None
-    )
+    demand_score: Decimal | None = None
+    market_fit_score: Decimal | None = None
     market_fit_threshold = Decimal("0.75")
-    if target_market not in market_scope:
-        decision = "BLOCK"
-        reasons.append("MARKET_DEMAND_SCOPE_MISSING")
-        confidence = "LOW"
-    elif market_fit_score is None or market_fit_score < market_fit_threshold:
-        decision = "BLOCK"
-        reasons.append("TOPIC_MARKET_DEMAND_WEAK")
-        confidence = "LOW"
-    elif decision == "PASS":
-        reasons.append("STRICT_LONG_FORM_PREFLIGHT_PASS")
+    reasons: list[str] = ["CLAIM_EVIDENCE_AUTHORITY_PASS"] if claim_evidence_refs else ["CLAIM_EVIDENCE_AUTHORITY_MISSING"]
+    confidence = "LOW"
+    decision = "BLOCK"
+    demand_authority_type = "NONE"
+    demand_state = "BLOCK"
+
+    if claim_issues:
+        reasons.extend(claim_issues)
+    elif not claim_evidence_refs:
+        reasons.append("CLAIM_EVIDENCE_AUTHORITY_MISSING")
+    elif demand_issues:
+        reasons.extend(demand_issues)
+    elif market_demand_evidence_refs:
+        demand_input = data.model_copy(
+            update={
+                "demand_score": None,
+                "channel_fit_score": None,
+                "policy_fit_state": "PASS",
+                "evidence_blob": {"search_led": True},
+            }
+        )
+        decision, scored_reasons, confidence, demand_score = _evaluate_preflight(
+            demand_input,
+            market_demand_evidence_refs,
+        )
+        reasons.extend(scored_reasons)
+        demand_authority_type = "QUANTITATIVE_DEMAND"
+        market_fit_score = (
+            min(Decimal("1"), demand_score / Decimal("100"))
+            if demand_score is not None
+            else None
+        )
+        if target_market not in market_scope:
+            decision = "BLOCK"
+            reasons.append("MARKET_DEMAND_SCOPE_MISSING")
+            confidence = "LOW"
+        elif market_fit_score is None or market_fit_score < market_fit_threshold:
+            decision = "BLOCK"
+            reasons.append("TOPIC_MARKET_DEMAND_WEAK")
+            confidence = "LOW"
+        elif decision == "PASS":
+            demand_state = "PASS"
+            reasons.append("STRICT_LONG_FORM_PREFLIGHT_PASS")
+    else:
+        experiment = _first_launch_experiment_authority(
+            session,
+            candidate=candidate,
+            slot=slot,
+            snapshot=snapshot,
+            target_digest=target_digest,
+            claim_evidence_refs=claim_evidence_refs,
+        )
+        if experiment["authorized"]:
+            decision = "PASS"
+            confidence = "HIGH"
+            demand_authority_type = "FIRST_LAUNCH_EXPERIMENT"
+            demand_state = "EXPERIMENT_AUTHORIZED"
+            # Deliberately do not fabricate either score.  This is a bounded
+            # launch experiment, not proof of steady-state market demand.
+            demand_score = None
+            market_fit_score = None
+            reasons.extend(experiment["reason_codes"])
+            reasons.append("STRICT_LONG_FORM_PREFLIGHT_PASS")
+        else:
+            reasons.extend(experiment["reason_codes"])
+            if not any(code == "OFFICIAL_DOCUMENT_NOT_DEMAND_METRIC" for code in reasons):
+                reasons.append("MARKET_DEMAND_AUTHORITY_MISSING")
 
     niche_ref = niche_digest.editorial_slot_ref + "#niche_contract_digest"
     target_ref = target_market_digest_ref_from_digest(target_digest)
     evidence_blob = {
-        "schema_version": "vcos.idea-market-preflight.v2",
+        "schema_version": "vcos.idea-market-preflight.v3",
         "authority_source": "PERSISTED_LONG_FORM_SLOT",
         "canonical_authority_verified": True,
         "editorial_calendar_slot_id": str(slot.id),
@@ -1784,10 +1846,16 @@ def _evaluate_v2_long_form_preflight(
         "niche_contract_digest_hash": niche_digest.content_hash,
         "target_market_digest_ref": target_ref,
         "target_market_digest_hash": target_digest.content_hash,
-        "search_demand_evidence_ids": [
-            str(evidence_id) for evidence_id in evidence_ids
-        ],
-        "evidence_refs": evidence_refs,
+        # ``search_demand_evidence_ids`` stays as a read-only compatibility
+        # projection; active consumers must use the explicit collections.
+        "search_demand_evidence_ids": sorted(
+            {str(item) for item in [*claim_evidence_ids, *market_demand_evidence_ids]}
+        ),
+        "claim_evidence_refs": claim_evidence_refs,
+        "market_demand_evidence_refs": market_demand_evidence_refs,
+        "demand_authority_type": demand_authority_type,
+        "demand_state": demand_state,
+        "evidence_refs": market_demand_evidence_refs,
         "market_scope": market_scope,
         "market_fit_score": (
             float(market_fit_score) if market_fit_score is not None else None
@@ -1829,6 +1897,211 @@ def _evaluate_v2_long_form_preflight(
         "market_fit_score": market_fit_score,
         "market_fit_threshold": market_fit_threshold,
         "evidence_blob": evidence_blob,
+    }
+
+
+def _infer_evidence_authority_purpose(source_type: str) -> str:
+    """Conservative interpretation for old rows without the new column."""
+
+    if source_type in CLAIM_SOURCE_TYPES:
+        return "CLAIM_SOURCE"
+    if source_type in QUANTITATIVE_DEMAND_SOURCES:
+        return "MARKET_DEMAND"
+    return "HISTORICAL_UNCLASSIFIED"
+
+
+def _authority_ref(evidence: SearchDemandEvidence) -> dict[str, Any]:
+    return {
+        "type": "search_demand_evidence",
+        "id": str(evidence.id),
+        "evidence_source_type": evidence.evidence_source_type,
+        "authority_purpose": (
+            evidence.authority_purpose
+            or _infer_evidence_authority_purpose(evidence.evidence_source_type)
+        ),
+        "query": evidence.query,
+        "platform": evidence.platform,
+        "geo": evidence.geo,
+        "search_volume_30d": evidence.search_volume_30d,
+        "relative_interest_index": (
+            str(evidence.relative_interest_index)
+            if evidence.relative_interest_index is not None
+            else None
+        ),
+        "competition_index": (
+            str(evidence.competition_index)
+            if evidence.competition_index is not None
+            else None
+        ),
+        "confidence": evidence.evidence_confidence,
+        "captured_at": (
+            evidence.captured_at.isoformat() if evidence.captured_at is not None else None
+        ),
+    }
+
+
+def _raw_evidence_id(value: Any) -> uuid.UUID:
+    raw_id = value.get("id") if isinstance(value, dict) else value
+    try:
+        return uuid.UUID(str(raw_id))
+    except (TypeError, ValueError) as exc:
+        raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_EVIDENCE_ID_INVALID") from exc
+
+
+def _resolve_authority_evidence_refs(
+    session: Session,
+    *,
+    raw_refs: Any,
+    slot: EditorialCalendarSlot,
+    expected_purpose: str,
+) -> tuple[list[dict[str, Any]], list[uuid.UUID], list[str]]:
+    """Reload persisted refs and reject cross-purpose authority laundering."""
+
+    if not isinstance(raw_refs, list):
+        raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_EVIDENCE_REFS_INVALID")
+    refs: list[dict[str, Any]] = []
+    ids: list[uuid.UUID] = []
+    issues: list[str] = []
+    seen: set[uuid.UUID] = set()
+    for raw_ref in raw_refs:
+        evidence_id = _raw_evidence_id(raw_ref)
+        if evidence_id in seen:
+            continue
+        seen.add(evidence_id)
+        evidence = session.get(SearchDemandEvidence, evidence_id)
+        if evidence is None:
+            raise NotFoundError(f"search demand evidence not found: {evidence_id}")
+        if (
+            evidence.company_id != slot.company_id
+            or evidence.channel_workspace_id != slot.channel_workspace_id
+        ):
+            raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_EVIDENCE_SCOPE_MISMATCH")
+        if evidence.evidence_source_type not in SAFE_SEARCH_SOURCES:
+            raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_EVIDENCE_SOURCE_FORBIDDEN")
+        purpose = evidence.authority_purpose or _infer_evidence_authority_purpose(
+            evidence.evidence_source_type
+        )
+        if expected_purpose == "CLAIM_SOURCE":
+            if purpose != "CLAIM_SOURCE":
+                issues.append("CLAIM_EVIDENCE_AUTHORITY_INVALID")
+                continue
+        elif expected_purpose == "MARKET_DEMAND":
+            if evidence.evidence_source_type in CLAIM_SOURCE_TYPES:
+                issues.append("OFFICIAL_DOCUMENT_NOT_DEMAND_METRIC")
+                continue
+            if (
+                purpose != "MARKET_DEMAND"
+                or evidence.evidence_source_type not in QUANTITATIVE_DEMAND_SOURCES
+                or (
+                    evidence.search_volume_30d is None
+                    and evidence.relative_interest_index is None
+                )
+            ):
+                issues.append("MARKET_DEMAND_AUTHORITY_INVALID")
+                continue
+        else:  # pragma: no cover - private call sites are fixed literals.
+            raise AssertionError(f"unsupported authority purpose: {expected_purpose}")
+        refs.append(_authority_ref(evidence))
+        ids.append(evidence.id)
+    return refs, ids, list(dict.fromkeys(issues))
+
+
+def _launch_run_authority_hash(
+    policy: FirstChannelLaunchPolicyVersion,
+    run: LaunchRun,
+) -> str:
+    return content_hash(
+        {
+            "launch_key": run.launch_key,
+            "launch_policy_hash": policy.canonical_hash,
+            "launch_policy_version_id": str(policy.id),
+            "launch_run_id": str(run.id),
+            "launch_started_at": (
+                run.launch_started_at.isoformat() if run.launch_started_at else None
+            ),
+            "preparation_started_on": run.preparation_started_on.isoformat(),
+            "reason_codes": list(run.reason_codes or []),
+            "state": run.state,
+        }
+    )
+
+
+def _first_launch_experiment_authority(
+    session: Session,
+    *,
+    candidate: Any,
+    slot: EditorialCalendarSlot,
+    snapshot: CompiledChannelPolicySnapshot,
+    target_digest: TargetMarketDigest,
+    claim_evidence_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate the only scoreless exception to steady-state demand proof."""
+
+    failure = lambda *codes: {"authorized": False, "reason_codes": list(codes)}
+    if candidate is None or not claim_evidence_refs:
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    if candidate.experiment_phase != "AUDIENCE_PROMISE" or str(candidate.strategic_intent) != "ACQUISITION":
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    if not candidate.active_launch_policy_version_id or not candidate.active_launch_run_id:
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    policy = session.get(
+        FirstChannelLaunchPolicyVersion, candidate.active_launch_policy_version_id
+    )
+    run = session.get(LaunchRun, candidate.active_launch_run_id)
+    if (
+        policy is None
+        or run is None
+        or policy.state != "APPROVED"
+        or run.state != "ACTIVE"
+        or run.launch_policy_version_id != policy.id
+        or policy.company_id != slot.company_id
+        or policy.channel_workspace_id != slot.channel_workspace_id
+        or policy.policy_snapshot_id != snapshot.id
+        or candidate.active_launch_policy_hash != policy.canonical_hash
+        or candidate.active_launch_run_hash != _launch_run_authority_hash(policy, run)
+    ):
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    published_count = int(
+        session.scalar(
+            select(func.count(UploadedVideo.id)).where(
+                UploadedVideo.channel_workspace_id == slot.channel_workspace_id,
+                UploadedVideo.verification_status == "VERIFIED",
+            )
+        )
+        or 0
+    )
+    if published_count >= policy.first_n_public_videos:
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    payload = snapshot.compiled_payload if isinstance(snapshot.compiled_payload, dict) else {}
+    contract = payload.get("channel_contract_json") if isinstance(payload, dict) else None
+    identity = contract.get("channel_identity") if isinstance(contract, dict) else None
+    market = contract.get("market_locale") if isinstance(contract, dict) else None
+    target = candidate.target_audience_definition or {}
+    candidate_market = (
+        (target.get("market_locale") or {}).get("primary_market")
+        if isinstance(target, dict)
+        else None
+    )
+    if (
+        not isinstance(identity, dict)
+        or candidate.audience_promise != identity.get("brand_promise")
+        or not isinstance(market, dict)
+        or str(candidate_market or "").upper() != target_digest.primary_market.upper()
+    ):
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    claim_text = " ".join(
+        str(value or "")
+        for value in (
+            candidate.proposed_title,
+            candidate.proposed_angle,
+            candidate.rationale,
+        )
+    ).lower()
+    if any(term in claim_text for term in ("roi", "earnings", "make money", "time-saving", "time saving")):
+        return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
+    return {
+        "authorized": True,
+        "reason_codes": ["FIRST_LAUNCH_EXPERIMENT_AUTHORIZED"],
     }
 
 

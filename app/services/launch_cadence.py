@@ -1155,8 +1155,14 @@ class LongFormCadenceService:
         return [
             candidate
             for candidate in candidates
-            if candidate.suggested_series_plan_id is None
-            or str(candidate.suggested_series_plan_id) in approved_initial_series
+            if (
+                candidate.suggested_series_plan_id is None
+                or str(candidate.suggested_series_plan_id) in approved_initial_series
+            )
+            if _preflight_has_active_demand_authority(
+                self.session,
+                candidate_id=candidate.id,
+            )
         ]
 
     def _blocked_candidate_states(
@@ -1191,17 +1197,26 @@ class LongFormCadenceService:
         run: LaunchRun,
         budget_gate_result: dict[str, Any],
     ) -> tuple[ProjectAdmissionDecision, ProductionWorkflowRun]:
-        preflight = self.session.scalar(
-            select(IdeaMarketPreflight)
+        preflight = next(
+            (
+                item
+                for item in self.session.scalars(
+                    select(IdeaMarketPreflight)
             .where(
                 IdeaMarketPreflight.editorial_idea_candidate_id == candidate.id,
                 IdeaMarketPreflight.decision == "PASS",
                 IdeaMarketPreflight.policy_fit_state == "PASS",
             )
             .order_by(IdeaMarketPreflight.created_at.desc())
+                ).all()
+                if _preflight_demand_authority_valid(item)
+            ),
+            None,
         )
         if preflight is None:
             raise ValidationFailureError("CADENCE_PREFLIGHT_AUTHORITY_MISSING")
+        if not _preflight_demand_authority_valid(preflight):
+            raise ValidationFailureError("CADENCE_MARKET_DEMAND_AUTHORITY_MISSING")
         existing_admission = self.session.scalar(
             select(ProjectAdmissionDecision).where(
                 ProjectAdmissionDecision.editorial_idea_candidate_id == candidate.id,
@@ -1491,6 +1506,45 @@ class LongFormCadenceService:
         if len(categories) != 1:
             raise ValidationFailureError("CADENCE_CATEGORY_SCOPE_AMBIGUOUS")
         return categories[0]
+
+
+def _preflight_demand_authority_valid(preflight: IdeaMarketPreflight) -> bool:
+    """Reject legacy/mixed preflights from the current cadence path.
+
+    Historical preflights remain readable, but only v3 evidence blobs with a
+    real quantitative pass or an active first-launch exception are eligible to
+    start the long-form cadence.
+    """
+
+    blob = preflight.evidence_blob or {}
+    claim_refs = blob.get("claim_evidence_refs")
+    demand_state = blob.get("demand_state")
+    demand_type = blob.get("demand_authority_type")
+    if not isinstance(claim_refs, list) or not claim_refs:
+        return False
+    if demand_state == "PASS" and demand_type == "QUANTITATIVE_DEMAND":
+        refs = blob.get("market_demand_evidence_refs")
+        return isinstance(refs, list) and bool(refs)
+    if demand_state == "EXPERIMENT_AUTHORIZED" and demand_type == "FIRST_LAUNCH_EXPERIMENT":
+        return preflight.demand_score is None and preflight.market_fit_score is None
+    return False
+
+
+def _preflight_has_active_demand_authority(
+    session: Session,
+    *,
+    candidate_id: uuid.UUID,
+) -> bool:
+    preflights = session.scalars(
+        select(IdeaMarketPreflight)
+        .where(
+            IdeaMarketPreflight.editorial_idea_candidate_id == candidate_id,
+            IdeaMarketPreflight.decision == "PASS",
+            IdeaMarketPreflight.policy_fit_state == "PASS",
+        )
+        .order_by(IdeaMarketPreflight.created_at.desc())
+    ).all()
+    return any(_preflight_demand_authority_valid(item) for item in preflights)
 
 
 class LaunchDashboardService:

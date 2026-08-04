@@ -11,6 +11,7 @@ MemoryReuseScope = Literal["CHANNEL", "CATEGORY", "SERIES", "CHARACTER", "COMPAN
 MemoryFreshnessState = Literal["FRESH", "STALE", "EXPIRED", "NEEDS_REVIEW"]
 MemoryReviewQueueStatus = Literal["PENDING", "IN_REVIEW", "APPROVED", "REJECTED", "NEEDS_CHANGES"]
 MemoryApprovalDecisionValue = Literal["APPROVE", "REJECT", "REQUEST_CHANGES", "ARCHIVE"]
+MemoryApprovalAuthorityType = Literal["HUMAN", "SYSTEM_POLICY"]
 MemoryUsageStatus = Literal["PLANNED", "USED_IN_DIGEST", "BLOCKED", "IGNORED"]
 
 
@@ -119,6 +120,10 @@ class ChannelMemoryItemRead(BaseModel):
     created_from_approved_playbook_entry_id: uuid.UUID | None
     human_approved_at: AwareDatetime | None
     approved_by: uuid.UUID | None
+    approval_authority_type: MemoryApprovalAuthorityType | None
+    approval_policy_version: str | None
+    approval_policy_hash: str | None
+    approval_evidence_json: dict[str, Any]
     content_hash: str
     created_at: AwareDatetime
     updated_at: AwareDatetime
@@ -166,6 +171,10 @@ class MemoryApprovalDecisionRead(BaseModel):
     memory_item_id: uuid.UUID
     decision: MemoryApprovalDecisionValue
     decided_by: uuid.UUID | None
+    approval_authority_type: MemoryApprovalAuthorityType | None
+    policy_version: str | None
+    policy_hash: str | None
+    evidence_json: dict[str, Any]
     rationale: str
     approved_prompt_use_cases_json: list[str]
     rejected_reason_codes_json: list[str]

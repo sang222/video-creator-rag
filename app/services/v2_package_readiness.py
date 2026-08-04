@@ -40,6 +40,10 @@ from app.db.models.m5 import (
     SearchIntentMap,
 )
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
+from app.db.models.r3d7 import (
+    AgentMemoryApplicationRecord,
+    MemoryInfluenceManifest,
+)
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.production_package import (
     ProductionPackageService,
@@ -640,6 +644,12 @@ def _require_frozen_support_envelope(
         envelope=envelope,
     )
     _validate_frozen_script_receipt(envelope)
+    _validate_memory_guidance_authority(
+        context=context,
+        project=project,
+        effective=effective,
+        envelope=envelope,
+    )
     _validate_frozen_gate_receipts(envelope)
     return artifact, version, envelope
 
@@ -764,6 +774,41 @@ def _validate_frozen_script_receipt(
         )
 
 
+def _validate_memory_guidance_authority(
+    *,
+    context: WorkflowStageContext,
+    project: VideoProject,
+    effective: EffectiveChannelRuntimeContextSnapshot,
+    envelope: V2FrozenSupportEnvelope,
+) -> None:
+    authority = envelope.memory_guidance_authority
+    if authority is None:
+        return
+    manifest = context.session.get(
+        MemoryInfluenceManifest, authority.memory_influence_manifest_id
+    )
+    application = context.session.get(
+        AgentMemoryApplicationRecord,
+        authority.agent_memory_application_record_id,
+    )
+    if (
+        manifest is None
+        or application is None
+        or manifest.video_project_id != project.id
+        or manifest.effective_context_snapshot_id != effective.id
+        or manifest.retrieval_manifest_id != authority.retrieval_manifest_id
+        or manifest.digest_hash != authority.digest_hash
+        or manifest.scope_status != authority.scope_status
+        or application.video_project_id != project.id
+        or application.memory_influence_manifest_id != manifest.id
+        or application.memory_digest_hash != authority.digest_hash
+        or application.agent_key != "ScriptWriterAgent"
+    ):
+        raise _support_envelope_integrity_error(
+            "V2_MEMORY_GUIDANCE_AUTHORITY_DRIFT"
+        )
+
+
 def _validate_frozen_gate_receipts(
     envelope: V2FrozenSupportEnvelope,
 ) -> None:
@@ -793,6 +838,10 @@ def _validate_frozen_gate_receipts(
         "zero_cost_budget": envelope.zero_cost_budget.content_hash,
         "verified_destination": envelope.verified_destination.content_hash,
     }
+    if envelope.memory_guidance_authority is not None:
+        expected["memory_guidance_digest"] = (
+            envelope.memory_guidance_authority.content_hash
+        )
     actual: dict[str, str] = {}
     for receipt in envelope.gate_receipts:
         if (
@@ -1033,6 +1082,30 @@ def _support_payloads(
         if authority.support_envelope is not None
         else {}
     )
+    visual_rights = (
+        authority.support_envelope.local_generated_card_rights
+        if authority.support_envelope is not None
+        else None
+    )
+    visual_source_policy = (
+        "POLICY_SELECTED_ASSET_REQUEST_REQUIRED"
+        if visual_rights is not None
+        and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
+        else "LOCAL_GENERATED_CARDS_ONLY"
+        if authority.support_envelope is not None
+        else "LOCAL_OR_RIGHTS_VERIFIED_ONLY"
+    )
+    if (
+        visual_rights is not None
+        and visual_rights.visual_source_mode == "NATIVE_BACKBONE_POLICY_ONLY"
+    ):
+        visual_source_policy = "NATIVE_BACKBONE_POLICY_ONLY"
+    visual_provider_plan = (
+        list(visual_rights.allowed_provider_keys)
+        if visual_rights is not None
+        and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
+        else ["NATIVE_FFMPEG"]
+    )
     for stage in (*stage_modes, "ARCHIVE"):
         route = route_by_stage.get(stage)
         adapter_key = (
@@ -1169,8 +1242,24 @@ def _support_payloads(
                         for key in (
                             "frozen_source_preflight",
                             "claim_source_bindings",
+                            *(
+                                ("memory_guidance_digest",)
+                                if envelope.memory_guidance_authority is not None
+                                else ()
+                            ),
                         )
                     },
+                    **(
+                        {
+                            "memory_guidance_authority": (
+                                envelope.memory_guidance_authority.model_dump(
+                                    mode="json"
+                                )
+                            )
+                        }
+                        if envelope.memory_guidance_authority is not None
+                        else {}
+                    ),
                 }
                 if envelope is not None
                 else {}
@@ -1230,15 +1319,54 @@ def _support_payloads(
                     "scene_id": f"scene-{index + 1:03d}",
                     "section_id": section["section_id"],
                     "visual_intent": ("Illustrate only the approved section evidence."),
-                    "source_policy": (
-                        "LOCAL_GENERATED_CARDS_ONLY"
-                        if envelope is not None
-                        else "LOCAL_OR_RIGHTS_VERIFIED_ONLY"
+                    "source_policy": visual_source_policy,
+                    "asset_request_state": (
+                        "PENDING_POST_READINESS"
+                        if visual_rights is not None
+                        and visual_rights.visual_source_mode
+                        == "POLICY_SELECTED_ASSET_REQUESTS"
+                        else "NATIVE_COMPOSITION_AUTHORIZED"
                     ),
+                    "provider_fallback_allowed": False,
                 }
                 for index, section in enumerate(sections)
             ],
             "aspect_ratio": "16:9",
+            **(
+                {
+                    "memory_guidance_ref": {
+                        "memory_influence_manifest_id": str(
+                            envelope.memory_guidance_authority.memory_influence_manifest_id
+                        ),
+                        "digest_hash": (
+                            envelope.memory_guidance_authority.digest_hash
+                        ),
+                        "non_factual_guidance_only": True,
+                        "no_raw_analytics": True,
+                        "no_raw_memory": True,
+                    }
+                }
+                if envelope is not None
+                and envelope.memory_guidance_authority is not None
+                else {}
+            ),
+            **(
+                {
+                    "asset_request_policy": {
+                        "authority_hash": visual_rights.content_hash,
+                        "allowed_provider_keys": (
+                            visual_rights.allowed_provider_keys
+                        ),
+                        "asset_request_compiler_required": True,
+                        "execution_phase": "POST_READINESS_ONLY",
+                        "provider_fallback_allowed": False,
+                        "one_source_decision_per_scene": True,
+                    }
+                }
+                if visual_rights is not None
+                and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
+                else {}
+            ),
             "lineage": lineage,
         },
         "thumbnail_brief": {
@@ -1266,9 +1394,7 @@ def _support_payloads(
                 else "APPROVED_PLANNING_AUTHORITY"
             ),
             "asset_policy": (
-                "LOCAL_GENERATED_CARDS_ONLY"
-                if envelope is not None
-                else "LOCAL_OR_RIGHTS_VERIFIED_ONLY"
+                visual_source_policy
             ),
             "audio_strategy": audio_strategy,
             "unresolved_exceptions": [],
@@ -1304,7 +1430,18 @@ def _support_payloads(
             "archive_provider": (
                 "GOOGLE_DRIVE" if real_production else "QUALIFICATION_ONLY"
             ),
-            "visual_provider_plan": ["NATIVE_FFMPEG"],
+            "visual_provider_plan": visual_provider_plan,
+            "visual_asset_acquisition": (
+                {
+                    "authority": visual_rights.model_dump(mode="json"),
+                    "request_compiler": "AssetRequestCompiler",
+                    "execution_phase": "POST_READINESS_ONLY",
+                    "provider_fallback_allowed": False,
+                }
+                if visual_rights is not None
+                and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
+                else None
+            ),
             "adapter_operations": adapter_operations,
             **(
                 {

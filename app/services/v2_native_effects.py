@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -21,11 +22,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.contracts.m10_2 import FinalMediaRefCreate
+from app.contracts.asset_acquisition import (
+    ChannelVisualStrategyProfile,
+    FormatIdentitySnapshot,
+    ProviderUsagePolicy,
+)
 from app.contracts.native_renderer import (
+    CanvasSpec,
     CompiledNativeRenderManifest,
     MediaQCReport,
+    NativeRenderPlan,
+    NativeRenderScene,
     V2ProductionRenderExecutionEnvelope,
 )
+from app.contracts.channel_policy import ChannelScopedPolicy
 from app.contracts.production_package import ProductionPackageContentV2
 from app.contracts.production_workflow import (
     ProductionWorkflowStage,
@@ -41,7 +51,9 @@ from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.v2_effect import V2ProductionEffectLedger
+from app.db.models.channel import CompiledChannelPolicySnapshot
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
+from app.services.asset_request_compiler import AssetRequestCompiler, CompilationEvidence
 from app.services.config_registry import content_hash
 from app.services.m10_2 import FinalMediaRefService
 from app.services.native_ffmpeg_renderer import (
@@ -639,6 +651,9 @@ class V2LocalNativeProductionAdapter:
             run, project, package, script, visual = _production_inputs(
                 session, context.run.id
             )
+            policy_snapshot = session.get(
+                CompiledChannelPolicySnapshot, project.policy_snapshot_id
+            )
         audio_strategy = str(operation.parameters["audio_strategy"])
         effect_dir = self._effect_dir(context.command_id)
         audio = self._prepare_audio_authority(
@@ -667,6 +682,17 @@ class V2LocalNativeProductionAdapter:
             timeline_ref=timeline_ref,
             audio=audio,
         )
+        asset_request_plan = _compile_post_readiness_asset_request_plan(
+            run=run,
+            project=project,
+            package=package,
+            script=script,
+            visual=visual,
+            timeline=timeline,
+            policy_snapshot=policy_snapshot,
+        )
+        if asset_request_plan is not None:
+            timeline["asset_request_plan"] = asset_request_plan
         timeline_hash = content_hash(timeline)
         timeline_path = effect_dir / "canonical-media-timeline.json"
         journal_path = effect_dir / "effect-journal.json"
@@ -2274,6 +2300,175 @@ def _build_timeline(
     }
 
 
+def _compile_post_readiness_asset_request_plan(
+    *,
+    run: ProductionWorkflowRun,
+    project: VideoProject,
+    package: ProductionPackageContentV2,
+    script: ArtifactVersion,
+    visual: ArtifactVersion,
+    timeline: dict[str, Any],
+    policy_snapshot: CompiledChannelPolicySnapshot | None,
+) -> dict[str, Any] | None:
+    """Compile (but never execute) policy-authorized visual requests.
+
+    This is intentionally called only after the canonical package is ready.
+    It creates no Pexels, Gemini, or Veo effect.  Any non-native request must
+    later be acquired by a separately package/budget-bound operation; no
+    renderer fallback is permitted here.
+    """
+    plan_policy = (visual.content or {}).get("asset_request_policy")
+    if not isinstance(plan_policy, dict):
+        return None
+    if plan_policy.get("execution_phase") != "POST_READINESS_ONLY":
+        raise ValidationFailureError("V2_ASSET_REQUEST_PHASE_INVALID")
+    if plan_policy.get("provider_fallback_allowed") is not False:
+        raise ValidationFailureError("V2_ASSET_PROVIDER_FALLBACK_FORBIDDEN")
+    try:
+        scoped = ChannelScopedPolicy.model_validate(
+            (policy_snapshot.compiled_payload or {}).get("channel_scoped_policy")
+            if policy_snapshot is not None
+            else None
+        )
+    except Exception as exc:
+        raise ValidationFailureError("V2_ASSET_REQUEST_POLICY_INVALID") from exc
+    visual_binding = scoped.visual_source_policy_binding
+    if visual_binding is None:
+        raise ValidationFailureError("V2_ASSET_REQUEST_VISUAL_BINDING_REQUIRED")
+
+    provider_keys = set(plan_policy.get("allowed_provider_keys") or [])
+    expected_provider_keys = {"native_ffmpeg_renderer"}
+    if scoped.provider_usage_policy.pexels.enabled:
+        expected_provider_keys.add("pexels_api")
+    if scoped.provider_usage_policy.google_veo.enabled:
+        expected_provider_keys.add("google_veo")
+    if scoped.provider_usage_policy.google_gemini_image is not None:
+        expected_provider_keys.add("google_gemini_image")
+    if provider_keys != expected_provider_keys:
+        raise ValidationFailureError("V2_ASSET_REQUEST_PROVIDER_POLICY_DRIFT")
+
+    supported_providers = ["NATIVE"]
+    if "pexels_api" in provider_keys:
+        supported_providers.append("PEXELS")
+    if "google_veo" in provider_keys:
+        supported_providers.append("GOOGLE_VEO")
+    if "google_gemini_image" in provider_keys:
+        supported_providers.append("GOOGLE_GEMINI_IMAGE")
+    allowed_roles = ["NATIVE_VISUAL"]
+    if "pexels_api" in provider_keys:
+        allowed_roles.append("SUPPORTING_STOCK")
+    if "google_veo" in provider_keys:
+        allowed_roles.append("AI_HERO")
+    if "google_gemini_image" in provider_keys:
+        allowed_roles.append("AI_EDITORIAL_STILL")
+
+    # The script support authority does not invent a visual provider choice.
+    # Until the visual-routing service seals a non-native source decision, the
+    # native backbone remains the only compiled request.  This is a real
+    # request-plan outcome, not an implicit Pexels/Gemini/Veo fallback.
+    scenes = [
+        NativeRenderScene(
+            scene_id=str(scene["scene_id"]),
+            source_segment_ids=[str(scene["scene_id"])],
+            narration_start_ms=int(scene["start_ms"]),
+            narration_end_ms=int(scene["end_ms"]),
+            duration_ms=int(scene["duration_ms"]),
+            visual_treatment="NATIVE_SLIDE",
+            layout_type="NATIVE_EXPLANATORY_BACKBONE",
+            originality_role="MECHANISM_EXPLANATION",
+            provider_intent="NATIVE",
+            scene_notes=str(scene.get("body") or scene.get("headline") or "").strip(),
+        )
+        for scene in timeline["scenes"]
+    ]
+    plan_body = {
+        "plan_id": f"v2-asset-request-plan:{run.id}",
+        "plan_version": 1,
+        "package_id": str(run.production_package_artifact_version_id),
+        "production_package_schema_version": "v2",
+        "production_package_artifact_version_id": str(run.production_package_artifact_version_id),
+        "production_package_hash": run.production_package_hash,
+        "duration_contract": package.duration_contract.model_dump(mode="json"),
+        "video_project_id": str(project.id),
+        "company_id": str(project.company_id),
+        "channel_id": str(project.channel_workspace_id),
+        "channel_profile_version_id": str(project.channel_profile_version_id),
+        "effective_context_snapshot_id": str(project.effective_context_snapshot_id),
+        "effective_context_hash": str(package.effective_context_ref.content_hash),
+        "format_identity_contract_ref": scoped.format_identity_contract.ref,
+        "format_identity_contract_hash": scoped.format_identity_contract.content_hash,
+        "episode_originality_manifest_ref": package.support_envelope_ref.ref,
+        "episode_originality_manifest_hash": package.support_envelope_ref.content_hash,
+        "claim_evidence_ledger_refs": [package.research_refs[0].ref],
+        "synthetic_media_disclosure_receipt_ref": package.rights_disclosure_refs[0].ref,
+        "script_ref": package.script_ref.ref,
+        "script_hash": script.content_hash,
+        "srt_ref": str(timeline.get("caption_ref") or package.script_ref.ref),
+        "srt_hash": str(timeline.get("caption_artifact_hash") or script.content_hash),
+        "visual_plan_ref": package.visual_plan_ref.ref,
+        "visual_plan_hash": visual.content_hash,
+        "canvas_spec": CanvasSpec(width=1920, height=1080, fps=30),
+        "scenes": scenes,
+        "output_profiles": ["YT_LONG_1080P30_SDR_H264_VT"],
+        "character_policy_mode": scoped.character_policy.mode,
+        "purpose": "VCOS_V2_POST_READINESS_ASSET_REQUEST_COMPILATION",
+        "production_eligible": True,
+        "status": "COMPILED",
+        "created_at": project.created_at or datetime(1970, 1, 1, tzinfo=UTC),
+        "created_by": "VCOS_V2_ASSET_REQUEST_COMPILER",
+    }
+    native_plan = NativeRenderPlan(**plan_body)
+    native_plan.content_hash = stable_hash(
+        native_plan.model_dump(mode="json", exclude={"content_hash"})
+    )
+    compiled = AssetRequestCompiler().compile(
+        native_plan,
+        format_identity=FormatIdentitySnapshot(
+            contract_ref=scoped.format_identity_contract.ref,
+            contract_hash=scoped.format_identity_contract.content_hash,
+            status=scoped.format_identity_contract.status,
+            channel_id=str(project.channel_workspace_id),
+            character_policy_mode=scoped.character_policy.mode,
+            allowed_asset_roles=allowed_roles,
+            native_explanatory_backbone_required=True,
+        ),
+        strategy_profile=ChannelVisualStrategyProfile(
+            profile_ref=(
+                f"compiled-channel-policy://{project.policy_snapshot_id}"
+                "#channel_visual_strategy_profile"
+            ),
+            profile_hash=content_hash(
+                scoped.channel_visual_strategy_profile.model_dump(mode="json")
+            ),
+            channel_id=str(project.channel_workspace_id),
+            strategy_key=scoped.channel_key,
+            native_is_backbone=True,
+            allowed_roles=allowed_roles,
+            character_policy_mode=scoped.character_policy.mode,
+        ),
+        provider_policy=ProviderUsagePolicy(
+            policy_ref=(
+                f"compiled-channel-policy://{project.policy_snapshot_id}"
+                "#provider_usage_policy"
+            ),
+            policy_hash=content_hash(
+                scoped.provider_usage_policy.model_dump(mode="json")
+            ),
+            supported_providers=supported_providers,
+            # This permits only the later package/budget-bound acquisition
+            # adapter. Compilation itself remains side-effect free.
+            provider_execution_allowed=True,
+        ),
+        evidence=CompilationEvidence(
+            originality_manifest_ref=package.support_envelope_ref.ref,
+            originality_manifest_hash=package.support_envelope_ref.content_hash,
+            claim_ledger_refs=tuple(ref.ref for ref in package.research_refs),
+            disclosure_receipt_ref=package.rights_disclosure_refs[0].ref,
+        ),
+    )
+    return compiled.model_dump(mode="json")
+
+
 def _build_render_plan(
     *,
     project: VideoProject,
@@ -2315,6 +2510,7 @@ def _build_render_plan(
         "renderer": "native_ffmpeg",
         "production_eligible": True,
         "paid_provider_calls": False,
+        "asset_request_plan": timeline.get("asset_request_plan"),
         "scenes": timeline["scenes"],
     }
 
@@ -2368,6 +2564,7 @@ def _build_manifest(
             "render_consumes_caption_cues": False,
         },
         "compiled_scenes": timeline["scenes"],
+        "asset_request_plan": timeline.get("asset_request_plan"),
         "transition_schedule": [],
         "overlay_schedule": [],
         "audio_mix_schedule": {

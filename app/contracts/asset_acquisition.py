@@ -9,7 +9,12 @@ from app.contracts.native_renderer import TextSafeRegion
 from app.contracts.ai_image import ai_image_stable_hash
 
 
-AssetRole = Literal["NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO"]
+AssetRole = Literal[
+    "NATIVE_VISUAL",
+    "SUPPORTING_STOCK",
+    "AI_HERO",
+    "AI_EDITORIAL_STILL",
+]
 Orientation = Literal["landscape", "portrait", "square"]
 ProjectedCostClass = Literal["NONE", "LOW", "MEDIUM", "HIGH"]
 AssetState = Literal[
@@ -38,7 +43,12 @@ class ChannelVisualStrategyProfile(BaseModel):
     strategy_key: str
     native_is_backbone: bool = True
     allowed_roles: list[AssetRole] = Field(
-        default_factory=lambda: ["NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO"]
+        default_factory=lambda: [
+            "NATIVE_VISUAL",
+            "SUPPORTING_STOCK",
+            "AI_HERO",
+            "AI_EDITORIAL_STILL",
+        ]
     )
     character_policy_mode: str = "NO_CHARACTER"
     model_config = ConfigDict(extra="forbid")
@@ -48,7 +58,12 @@ class ProviderUsagePolicy(BaseModel):
     policy_ref: str
     policy_hash: str
     supported_providers: list[str] = Field(
-        default_factory=lambda: ["NATIVE", "PEXELS", "GOOGLE_VEO"]
+        default_factory=lambda: [
+            "NATIVE",
+            "PEXELS",
+            "GOOGLE_VEO",
+            "GOOGLE_GEMINI_IMAGE",
+        ]
     )
     stock_factual_evidence_forbidden: bool = True
     stock_recurring_host_forbidden: bool = True
@@ -101,6 +116,8 @@ class AssetRequest(BaseModel):
                 raise ValueError("STOCK_RECURRING_HOST_FORBIDDEN")
         if self.requested_role == "AI_HERO" and self.purpose.upper() == "FILLER":
             raise ValueError("AI_HERO_FILLER_FORBIDDEN")
+        if self.requested_role == "AI_EDITORIAL_STILL" and self.purpose.upper() == "FILLER":
+            raise ValueError("AI_EDITORIAL_STILL_FILLER_FORBIDDEN")
         return self
 
 
@@ -118,6 +135,7 @@ class CompiledAssetRequestPlan(BaseModel):
     native_request_count: int = Field(ge=0)
     supporting_stock_request_count: int = Field(ge=0)
     ai_hero_request_count: int = Field(ge=0)
+    ai_editorial_still_request_count: int = Field(default=0, ge=0)
     unresolved_request_count: int = Field(ge=0)
     provider_execution_allowed: bool = False
     content_hash: str

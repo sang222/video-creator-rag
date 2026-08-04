@@ -54,6 +54,8 @@ PlaybookCandidateState = Literal["DRAFT", "READY_FOR_REVIEW", "BLOCKED", "EXPIRE
 
 class LearningCandidateGenerationRunCreate(BaseModel):
     uploaded_video_id: uuid.UUID
+    long_form_analytics_window_id: uuid.UUID | None = None
+    learning_command_key: str | None = Field(default=None, min_length=16, max_length=128)
     source_failure_trace_report_id: uuid.UUID | None = None
     source_recovery_proposal_id: uuid.UUID | None = None
     source_analytics_snapshot_id: uuid.UUID | None = None
@@ -76,6 +78,8 @@ class LearningCandidateGenerationRunRead(BaseModel):
     channel_workspace_id: uuid.UUID | None
     video_project_id: uuid.UUID | None
     uploaded_video_id: uuid.UUID | None
+    long_form_analytics_window_id: uuid.UUID | None
+    learning_command_key: str | None
     source_failure_trace_report_id: uuid.UUID | None
     source_recovery_proposal_id: uuid.UUID | None
     source_analytics_snapshot_id: uuid.UUID | None

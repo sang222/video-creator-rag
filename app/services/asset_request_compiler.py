@@ -14,7 +14,12 @@ from app.contracts.temporal_authority import CanonicalMediaTimeline
 from app.services.native_render_plan import NativeRenderPlanValidator, canonical_plan_hash, stable_hash
 
 
-ROLE_PRIORITY = ("NATIVE_VISUAL", "SUPPORTING_STOCK", "AI_HERO")
+ROLE_PRIORITY = (
+    "NATIVE_VISUAL",
+    "SUPPORTING_STOCK",
+    "AI_HERO",
+    "AI_EDITORIAL_STILL",
+)
 NATIVE_TREATMENTS = {
     "NATIVE_SLIDE",
     "DIAGRAM",
@@ -26,7 +31,12 @@ NATIVE_TREATMENTS = {
     "TIMELINE",
     "STATIC_COMPOSITION",
 }
-PROVIDER_BY_ROLE = {"NATIVE_VISUAL": "NATIVE", "SUPPORTING_STOCK": "PEXELS", "AI_HERO": "GOOGLE_VEO"}
+PROVIDER_BY_ROLE = {
+    "NATIVE_VISUAL": "NATIVE",
+    "SUPPORTING_STOCK": "PEXELS",
+    "AI_HERO": "GOOGLE_VEO",
+    "AI_EDITORIAL_STILL": "GOOGLE_GEMINI_IMAGE",
+}
 CHANNEL_SCOPED_STRATEGIES = {"NR2_B_BALANCED": "small-team-ai"}
 
 
@@ -78,8 +88,12 @@ class AssetRequestCompiler:
             "native_request_count": counts["NATIVE_VISUAL"],
             "supporting_stock_request_count": counts["SUPPORTING_STOCK"],
             "ai_hero_request_count": counts["AI_HERO"],
+            "ai_editorial_still_request_count": counts["AI_EDITORIAL_STILL"],
             "unresolved_request_count": 0,
-            "provider_execution_allowed": False,
+            # Compilation itself never makes provider calls.  This flag
+            # freezes whether a later, separately authorized post-readiness
+            # operation may execute the selected request.
+            "provider_execution_allowed": provider_policy.provider_execution_allowed,
         }
         return CompiledAssetRequestPlan(**payload, content_hash=stable_hash(payload))
 
@@ -137,8 +151,6 @@ class AssetRequestCompiler:
             raise ValueError("CHARACTER_POLICY_CONFLICT")
         if plan.character_policy_mode != "NO_CHARACTER":
             raise ValueError("CHARACTER_POLICY_CONFLICT")
-        if provider_policy.provider_execution_allowed:
-            raise ValueError("AS1_PROVIDER_EXECUTION_MUST_BE_DISABLED")
         if not evidence.originality_manifest_ref or not evidence.originality_manifest_hash or not evidence.disclosure_receipt_ref:
             raise ValueError("ASSET_COMPILATION_EVIDENCE_INCOMPLETE")
         roles = {AssetRequestCompiler._scene_role(scene) for scene in plan.scenes}
@@ -166,7 +178,7 @@ class AssetRequestCompiler:
         semantic_intent = scene.scene_notes.strip() or f"{scene.originality_role}: {scene.visual_treatment.replace('_', ' ').lower()}"
         purpose = self._purpose(scene)
         duration = scene.duration_ms / 1000
-        minimum_duration = 0 if role == "NATIVE_VISUAL" else min(duration, 4)
+        minimum_duration = 0 if role in {"NATIVE_VISUAL", "AI_EDITORIAL_STILL"} else min(duration, 4)
         maximum_duration = duration if role != "AI_HERO" else min(8, max(4, duration))
         request_payload = {
             "request_id": f"asset-{scene.scene_id}",
@@ -184,14 +196,33 @@ class AssetRequestCompiler:
             "person_policy": "NO_RECURRING_HOST" if role == "SUPPORTING_STOCK" else format_identity.character_policy_mode,
             "logo_text_policy": "REJECT_VISIBLE_LOGO_OR_EMBEDDED_TEXT" if role != "NATIVE_VISUAL" else "NATIVE_TEXT_ONLY",
             "evidence_usage_policy": "NOT_FACTUAL_EVIDENCE" if role != "NATIVE_VISUAL" else "CLAIM_LEDGER_BOUND",
-            "fallback_order": [role, "NATIVE_VISUAL"] if role != "NATIVE_VISUAL" else ["NATIVE_VISUAL"],
+            # Post-readiness V2 authority chooses exactly one source. Legacy
+            # AS1 rehearsal artifacts remain readable with their historical
+            # native fallback until they are explicitly recompiled under the
+            # policy-selected execution mode.
+            "fallback_order": (
+                [role]
+                if provider_policy.provider_execution_allowed
+                else [role, "NATIVE_VISUAL"]
+                if role != "NATIVE_VISUAL"
+                else ["NATIVE_VISUAL"]
+            ),
             "projected_cost_class": "NONE" if role == "NATIVE_VISUAL" else "LOW" if role == "SUPPORTING_STOCK" else "MEDIUM",
-            "human_review_required": role != "NATIVE_VISUAL",
+            "human_review_required": (
+                False
+                if provider_policy.provider_execution_allowed
+                else role != "NATIVE_VISUAL"
+            ),
         }
         return AssetRequest(**request_payload, request_hash=stable_hash(request_payload))
 
     @staticmethod
     def _scene_role(scene: NativeRenderScene) -> str:
+        if (
+            scene.visual_treatment == "STATIC_COMPOSITION"
+            and (scene.provider_intent or "").upper() == "GOOGLE_GEMINI_IMAGE"
+        ):
+            return "AI_EDITORIAL_STILL"
         if scene.visual_treatment in NATIVE_TREATMENTS:
             return "NATIVE_VISUAL"
         if scene.visual_treatment == "STOCK_VIDEO":
@@ -203,13 +234,14 @@ class AssetRequestCompiler:
     @staticmethod
     def _purpose(scene: NativeRenderScene) -> str:
         role = AssetRequestCompiler._scene_role(scene)
-        if role == "AI_HERO":
+        if role in {"AI_HERO", "AI_EDITORIAL_STILL"}:
             mapping = {
                 "HOOK": "HOOK",
                 "METAPHOR": "METAPHOR",
                 "EMOTIONAL_PAYOFF": "EMOTIONAL_PAYOFF",
                 "VISUAL_SIGNATURE": "VISUAL_SIGNATURE",
                 "NATIVE_MOTION_INSUFFICIENT": "NATIVE_MOTION_INSUFFICIENT",
+                "EDITORIAL_STILL": "EDITORIAL_STILL",
             }
             purpose = mapping.get(scene.originality_role.upper())
             if not purpose:

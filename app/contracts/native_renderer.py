@@ -391,6 +391,7 @@ class CompiledNativeRenderManifest(BaseModel):
     normalized_audio: dict[str, Any]
     normalized_caption: dict[str, Any]
     compiled_scenes: list[dict[str, Any]]
+    asset_request_plan: dict[str, Any] | None = None
     transition_schedule: list[dict[str, Any]]
     overlay_schedule: list[dict[str, Any]]
     audio_mix_schedule: dict[str, Any]

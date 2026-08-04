@@ -52,6 +52,11 @@ SearchDemandSourceType = Literal[
     "INTERNAL_ANALYTICS",
     "MANUAL_RESEARCH",
 ]
+EvidenceAuthorityPurpose = Literal[
+    "CLAIM_SOURCE",
+    "MARKET_DEMAND",
+    "HISTORICAL_UNCLASSIFIED",
+]
 SearchPlatform = Literal[
     "YOUTUBE", "TIKTOK", "FACEBOOK", "INSTAGRAM", "GOOGLE", "GENERIC"
 ]
@@ -243,6 +248,10 @@ class SearchDemandEvidenceCreate(BaseModel):
     company_id: uuid.UUID
     channel_workspace_id: uuid.UUID
     evidence_source_type: SearchDemandSourceType
+    # ``search_demand_evidence`` predates the authority split.  Keep this
+    # optional for historical/API compatibility, but require new writes to be
+    # explicit or safely inferable by the service.
+    authority_purpose: EvidenceAuthorityPurpose | None = None
     source_ref: str | None = None
     query: str = Field(min_length=1)
     platform: SearchPlatform = "GENERIC"
@@ -337,6 +346,11 @@ class IdeaMarketPreflightCreate(BaseModel):
     market_scope: list[str] = Field(default_factory=list)
     market_fit_score: Decimal | None = Field(default=None, ge=0, le=1)
     market_fit_threshold: Decimal | None = Field(default=None, ge=0, le=1)
+    # Current strict preflight persists two independently-auditable authority
+    # collections in ``evidence_blob``.  These fields are deliberately not
+    # trusted caller scores; ids are reloaded and re-evaluated by the service.
+    claim_evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    market_demand_evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     evidence_blob: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")

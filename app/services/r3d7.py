@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.contracts.r3d5 import MemoryFromApprovedPlaybookCreate
+from app.contracts.r3d5 import ChannelMemoryDraftCreate, MemoryFacetInput, MemoryFromApprovedPlaybookCreate
 from app.contracts.r3d6 import RetrievalPolicy, RetrievalRequest
 from app.contracts.r3d7 import LearningToMemoryPromotionRequest, QualityDeltaAttributionRunRequest
 from app.core.errors import NotFoundError, ValidationFailureError
@@ -23,6 +23,7 @@ from app.db.models import (
     EmbeddingJob,
     FailureTraceReport,
     LearningCandidate,
+    LearningCandidateGenerationRun,
     LearningEvidenceBundle,
     LearningReviewDecision,
     LearningToMemoryPromotionRun,
@@ -178,6 +179,126 @@ class LearningToMemoryPromotionService:
         run.reason_codes_json = ["HUMAN_APPROVED_LEARNING_MEMORY_DRAFT_CREATED", "MEMORY_REVIEW_REQUIRED"]
         self.session.flush()
         return run
+
+    def promote_system_governed_candidate(
+        self,
+        *,
+        learning_candidate_id: uuid.UUID,
+        policy_version: str,
+        policy_hash: str,
+    ) -> LearningToMemoryPromotionRun:
+        """Apply only mature, recurrent low-risk guidance without M11 gating."""
+
+        candidate = self.session.get(LearningCandidate, learning_candidate_id)
+        if candidate is None:
+            raise NotFoundError(f"learning candidate not found: {learning_candidate_id}")
+        run = LearningToMemoryPromotionRun(
+            learning_candidate_id=candidate.id,
+            evidence_bundle_id=candidate.evidence_bundle_id,
+            source_uploaded_video_id=candidate.uploaded_video_id,
+            created_memory_item_ids_json=[],
+            created_memory_facet_ids_json=[],
+            run_status="CREATED",
+            reason_codes_json=[],
+            human_approval_ref=None,
+        )
+        self.session.add(run)
+        self.session.flush()
+        allowed_types = {
+            "PACKAGING_PATTERN", "HOOK_PATTERN", "RETENTION_PATTERN",
+            "VISUAL_SOURCE_PATTERN", "COST_EFFICIENCY_PATTERN",
+        }
+        blockers: list[str] = []
+        if candidate.candidate_type not in allowed_types:
+            blockers.append("HIGH_RISK_OR_UNSUPPORTED_LEARNING_SCOPE")
+        if candidate.risk_level != "LOW" or candidate.policy_flags or candidate.rights_flags:
+            blockers.append("HIGH_RISK_OR_POLICY_RIGHTS_CHANGE_NON_APPLIED")
+        if not policy_version or len(policy_hash) != 64:
+            blockers.append("SYSTEM_POLICY_PROVENANCE_INVALID")
+        comparable = self._mature_recurrent_candidates(candidate)
+        source_video_ids = sorted({str(item.uploaded_video_id) for item in comparable if item.uploaded_video_id})
+        if len(source_video_ids) < 2:
+            blockers.append("LEARNING_RECURRENCE_INSUFFICIENT")
+        if blockers:
+            run.run_status = "REVIEW_REQUIRED" if any("HIGH_RISK" in item for item in blockers) else "BLOCKED"
+            run.reason_codes_json = list(dict.fromkeys(blockers + ["PROPOSAL_ONLY_NON_APPLIED"]))
+            self.session.flush()
+            return run
+        existing = self.session.scalars(
+            select(ChannelMemoryItem).where(
+                ChannelMemoryItem.created_from_learning_candidate_id == candidate.id,
+                ChannelMemoryItem.approval_authority_type == "SYSTEM_POLICY",
+            )
+        ).first()
+        if existing is not None:
+            run.created_memory_item_ids_json = [str(existing.id)]
+            run.run_status = "COMPLETED"
+            run.reason_codes_json = ["SYSTEM_POLICY_MEMORY_ALREADY_PROMOTED"]
+            self.session.flush()
+            return run
+        text = candidate.suggested_playbook_text or candidate.suggested_learning
+        item = ControlledMemoryService(self.session).create_draft(
+            data=ChannelMemoryDraftCreate(
+                company_id=candidate.company_id,
+                channel_workspace_id=candidate.channel_workspace_id,
+                memory_type=_system_memory_type(candidate.candidate_type),
+                source_type="SYSTEM_POLICY_LEARNING",
+                source_ref=f"learning-candidate:{candidate.id}",
+                source_content={"candidate_id": str(candidate.id), "learning": text},
+                summary=candidate.candidate_summary,
+                rights_status="SAFE",
+                prompt_safety_state="PROMPT_SAFE",
+                reuse_scope="CHANNEL",
+                created_from_learning_candidate_id=candidate.id,
+                facets=[
+                    MemoryFacetInput(
+                        facet_type=_system_facet_type(candidate.candidate_type),
+                        facet_text=text[:420],
+                        allowed_use_cases_json=["script", "visual", "packaging", "metadata"],
+                        polarity="NEGATIVE" if "FAILED" in candidate.candidate_type else "POSITIVE",
+                        confidence_label="MEDIUM",
+                        prompt_safety_state="PROMPT_SAFE",
+                    )
+                ],
+            )
+        )
+        ControlledMemoryService(self.session).approve_system_policy(
+            memory_item_id=item.id,
+            policy_version=policy_version,
+            policy_hash=policy_hash,
+            evidence={
+                "eligibility_run_id": str(candidate.eligibility_run_id),
+                "evidence_bundle_id": str(candidate.evidence_bundle_id),
+                "source_uploaded_video_ids": source_video_ids,
+                "mature_sample_count": len(source_video_ids),
+                "reason_codes": ["LOW_RISK_MATURE_RECURRENT_SYSTEM_POLICY_PROMOTION"],
+            },
+        )
+        run.created_memory_item_ids_json = [str(item.id)]
+        run.created_memory_facet_ids_json = [str(facet.id) for facet in ControlledMemoryService(self.session).list_facets(memory_item_id=item.id)]
+        run.run_status = "COMPLETED"
+        run.reason_codes_json = ["SYSTEM_POLICY_MEMORY_PROMOTED", "NO_HUMAN_APPROVAL_FIELDS"]
+        self.session.flush()
+        return run
+
+    def _mature_recurrent_candidates(self, candidate: LearningCandidate) -> list[LearningCandidate]:
+        rows = self.session.execute(
+            select(LearningCandidate, LearningCandidateGenerationRun)
+            .join(LearningCandidateGenerationRun, LearningCandidate.generation_run_id == LearningCandidateGenerationRun.id)
+            .where(
+                LearningCandidate.company_id == candidate.company_id,
+                LearningCandidate.channel_workspace_id == candidate.channel_workspace_id,
+                LearningCandidate.candidate_type == candidate.candidate_type,
+                LearningCandidate.risk_level == "LOW",
+            )
+        ).all()
+        return [
+            item
+            for item, generation in rows
+            if (generation.metadata_ or {}).get("maturity") == "MATURE"
+            and not item.policy_flags
+            and not item.rights_flags
+        ]
 
     def _blocked_run(self, *, data: LearningToMemoryPromotionRequest, reason_codes: list[str]) -> LearningToMemoryPromotionRun:
         run = LearningToMemoryPromotionRun(
@@ -378,7 +499,7 @@ class AgentMemoryDigestInjectionService:
     def retrieve_and_record_digest(
         self,
         *,
-        package_id: uuid.UUID,
+        package_id: uuid.UUID | None,
         effective: EffectiveChannelRuntimeContextSnapshot,
         agent_key: str,
         use_case: str,
@@ -410,7 +531,7 @@ class AgentMemoryDigestInjectionService:
         pending_prompt_context_hash = stable_hash(
             {
                 "pending_memory_prompt_context": True,
-                "package_id": package_id,
+                "package_id": str(package_id) if package_id is not None else None,
                 "agent_key": agent_key,
                 "digest_hash": digest.get("digest_hash"),
                 "retrieval_manifest_id": result.manifest_id,
@@ -803,6 +924,26 @@ class ClosedLearningLoopService:
             self.session.scalars(select(EmbeddingFacet).where(EmbeddingFacet.memory_facet_id.in_(facet_ids)).limit(1)).first() is not None
             or self.session.scalars(select(EmbeddingJob).where(EmbeddingJob.memory_facet_id.in_(facet_ids)).limit(1)).first() is not None
         )
+
+
+def _system_memory_type(candidate_type: str) -> str:
+    return {
+        "PACKAGING_PATTERN": "PACKAGING_PATTERN",
+        "HOOK_PATTERN": "WINNING_HOOK",
+        "RETENTION_PATTERN": "RETENTION_LESSON",
+        "VISUAL_SOURCE_PATTERN": "VISUAL_PATTERN",
+        "COST_EFFICIENCY_PATTERN": "COST_EFFICIENCY_LESSON",
+    }[candidate_type]
+
+
+def _system_facet_type(candidate_type: str) -> str:
+    return {
+        "PACKAGING_PATTERN": "PACKAGING_PATTERN",
+        "HOOK_PATTERN": "WINNING_HOOK",
+        "RETENTION_PATTERN": "RETENTION_LESSON",
+        "VISUAL_SOURCE_PATTERN": "VISUAL_PATTERN",
+        "COST_EFFICIENCY_PATTERN": "COST_EFFICIENCY_LESSON",
+    }[candidate_type]
 
 
 def _manifest_stub(video_project_id: uuid.UUID, effective_context_snapshot_id: uuid.UUID) -> MemoryInfluenceManifest:

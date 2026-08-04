@@ -62,6 +62,7 @@ SOURCE_TYPES = {
     "APPROVED_PLAYBOOK_ENTRY",
     "APPROVED_ARTIFACT",
     "MANUAL_REJECTED_EXAMPLE",
+    "SYSTEM_POLICY_LEARNING",
 }
 APPROVAL_STATUSES = {"DRAFT", "REVIEW_REQUIRED", "APPROVED", "REJECTED", "ARCHIVED"}
 RIGHTS_STATUSES = {"UNKNOWN", "SAFE", "RESTRICTED", "EXPIRED", "BLOCKED"}
@@ -531,11 +532,62 @@ class ControlledMemoryService:
         item.approval_status = "APPROVED"
         item.human_approved_at = utc_now()
         item.approved_by = data.decided_by
+        item.approval_authority_type = "HUMAN"
+        item.approval_policy_version = None
+        item.approval_policy_hash = None
+        item.approval_evidence_json = {}
         if data.mark_facets_embedding_eligible:
             for facet in self.list_facets(memory_item_id=item.id):
                 facet.embedding_eligible = True
         decision = self._record_decision(item=item, decision="APPROVE", data=data)
         self._update_latest_queue(item.id, "APPROVED")
+        return decision
+
+    def approve_system_policy(
+        self,
+        *,
+        memory_item_id: uuid.UUID,
+        policy_version: str,
+        policy_hash: str,
+        evidence: dict[str, Any],
+    ) -> MemoryApprovalDecision:
+        """Approve only a pre-gated low-risk memory without inventing a human."""
+
+        item = self.require_item(memory_item_id)
+        if (
+            item.source_type != "SYSTEM_POLICY_LEARNING"
+            or not policy_version
+            or not re.fullmatch(r"[0-9a-f]{64}", policy_hash)
+            or not evidence.get("eligibility_run_id")
+            or not evidence.get("evidence_bundle_id")
+            or not evidence.get("source_uploaded_video_ids")
+        ):
+            raise ValidationFailureError("SYSTEM_MEMORY_APPROVAL_AUTHORITY_INVALID")
+        self._validate_approval_preconditions(item, allow_system_policy=True)
+        item.approval_status = "APPROVED"
+        item.human_approved_at = None
+        item.approved_by = None
+        item.approval_authority_type = "SYSTEM_POLICY"
+        item.approval_policy_version = policy_version
+        item.approval_policy_hash = policy_hash
+        item.approval_evidence_json = dict(evidence)
+        for facet in self.list_facets(memory_item_id=item.id):
+            facet.embedding_eligible = True
+        decision = MemoryApprovalDecision(
+            memory_item_id=item.id,
+            decision="APPROVE",
+            decided_by=None,
+            approval_authority_type="SYSTEM_POLICY",
+            policy_version=policy_version,
+            policy_hash=policy_hash,
+            evidence_json=dict(evidence),
+            rationale="System-policy approval after mature recurrent low-risk evidence.",
+            approved_prompt_use_cases_json=[],
+            rejected_reason_codes_json=[],
+        )
+        self.session.add(decision)
+        self._update_latest_queue(item.id, "APPROVED")
+        self.session.flush()
         return decision
 
     def reject(self, *, memory_item_id: uuid.UUID, data: MemoryApprovalRequest) -> MemoryApprovalDecision:
@@ -635,7 +687,11 @@ class ControlledMemoryService:
                 raise NotFoundError(f"learning candidate not found: {data.created_from_learning_candidate_id}")
             if candidate.candidate_state in {"EXPIRED", "CANCELLED", "INELIGIBLE_LOW_EVIDENCE", "BLOCKED_POLICY_RISK", "BLOCKED_RIGHTS_RISK"}:
                 raise ValidationFailureError("rejected/suppressed/expired learning cannot become memory")
-            if data.created_from_approved_playbook_entry_id is None and not self._learning_candidate_has_human_approval(candidate.id):
+            if (
+                data.created_from_approved_playbook_entry_id is None
+                and data.source_type != "SYSTEM_POLICY_LEARNING"
+                and not self._learning_candidate_has_human_approval(candidate.id)
+            ):
                 raise ValidationFailureError("LearningCandidate requires human approval or ApprovedPlaybookEntry link")
 
     def _learning_candidate_has_human_approval(self, candidate_id: uuid.UUID) -> bool:
@@ -655,14 +711,18 @@ class ControlledMemoryService:
         ).first()
         return decision is not None
 
-    def _validate_approval_preconditions(self, item: ChannelMemoryItem) -> None:
+    def _validate_approval_preconditions(
+        self, item: ChannelMemoryItem, *, allow_system_policy: bool = False
+    ) -> None:
         if item.created_from_learning_candidate_id is not None:
             candidate = self.session.get(LearningCandidate, item.created_from_learning_candidate_id)
             if candidate is None:
                 raise NotFoundError(f"learning candidate not found: {item.created_from_learning_candidate_id}")
             if candidate.candidate_state in {"EXPIRED", "CANCELLED", "INELIGIBLE_LOW_EVIDENCE", "BLOCKED_POLICY_RISK", "BLOCKED_RIGHTS_RISK"}:
                 raise ValidationFailureError("rejected/suppressed/expired learning cannot become approved memory")
-            if not self._learning_candidate_has_human_approval(candidate.id):
+            if not (
+                allow_system_policy and item.source_type == "SYSTEM_POLICY_LEARNING"
+            ) and not self._learning_candidate_has_human_approval(candidate.id):
                 raise ValidationFailureError("learning candidate memory cannot be approved without human approval")
 
     def _record_decision(self, *, item: ChannelMemoryItem, decision: str, data: MemoryApprovalRequest) -> MemoryApprovalDecision:
@@ -670,6 +730,10 @@ class ControlledMemoryService:
             memory_item_id=item.id,
             decision=decision,
             decided_by=data.decided_by,
+            approval_authority_type=("HUMAN" if decision == "APPROVE" else None),
+            policy_version=None,
+            policy_hash=None,
+            evidence_json={},
             rationale=data.rationale,
             approved_prompt_use_cases_json=data.approved_prompt_use_cases_json,
             rejected_reason_codes_json=data.rejected_reason_codes_json,

@@ -54,6 +54,7 @@ from app.services.m10_2 import (
 )
 from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.production_package import semantic_hash
+from app.services.r3d7 import AgentMemoryDigestInjectionService
 from app.services.workflow import ArtifactService
 
 
@@ -212,6 +213,9 @@ class V2SupportProductionContext(_StrictFrozenModel):
     frozen_sources: list[V2FrozenSourceRef] = Field(min_length=1)
     forbidden_claims: list[str] = Field(default_factory=list)
     forbidden_style_terms: list[str] = Field(default_factory=list)
+    # This is a prompt-safe digest only. It is never evidence for a script
+    # claim and never contains raw analytics or raw controlled-memory rows.
+    memory_guidance_digest: dict[str, Any] | None = None
 
 
 @runtime_checkable
@@ -269,12 +273,14 @@ class LLMRouterV2SupportProducer:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "Return strict JSON only. Write an original production "
-                            "script using only the frozen source statements supplied. "
-                            "Every material claim must quote an exact source statement "
-                            "as source_excerpt and cite its source_ref_id. Do not add "
-                            "external assets, URLs, provider calls, or facts."
+                            "content": (
+                                "Return strict JSON only. Write an original production "
+                                "script using only the frozen source statements supplied. "
+                                "Every material claim must quote an exact source statement "
+                                "as source_excerpt and cite its source_ref_id. Do not add "
+                                "external assets, URLs, provider calls, or facts. Any "
+                                "memory guidance is non-factual creative guidance only; "
+                                "never cite it as evidence or turn it into a claim."
                         ),
                     },
                     {
@@ -339,6 +345,7 @@ class LLMRouterV2SupportProducer:
                                     }
                                     for source in context.frozen_sources
                                 ],
+                                "memory_guidance_digest": context.memory_guidance_digest,
                             },
                             sort_keys=True,
                             separators=(",", ":"),
@@ -451,24 +458,101 @@ class V2ClaimSourceBinding(_StrictFrozenModel):
 
 
 class V2LocalGeneratedCardRights(_StrictFrozenModel):
-    schema_version: Literal["vcos.local-generated-card-rights.v1"] = (
+    """Frozen visual-use authority (historical name retained for reads).
+
+    V1 envelopes were local-card only.  V2 keeps that record readable while
+    allowing a later support envelope to freeze a policy-selected asset
+    request route.  This is an authorization of *requests*, not a fabricated
+    claim that an external asset was already acquired.
+    """
+
+    schema_version: Literal[
+        "vcos.local-generated-card-rights.v1",
+        "vcos.visual-asset-request-authority.v2",
+    ] = (
         "vcos.local-generated-card-rights.v1"
     )
     rights_state: Literal["PASS"] = "PASS"
-    visual_source_mode: Literal["LOCAL_GENERATED_CARDS_ONLY"] = (
+    visual_source_mode: Literal[
+        "LOCAL_GENERATED_CARDS_ONLY",
+        "NATIVE_BACKBONE_POLICY_ONLY",
+        "POLICY_SELECTED_ASSET_REQUESTS",
+    ] = (
         "LOCAL_GENERATED_CARDS_ONLY"
     )
     external_asset_refs: list[Any] = Field(default_factory=list, max_length=0)
     stock_asset_refs: list[Any] = Field(default_factory=list, max_length=0)
     license_evidence_required: Literal[False] = False
     synthetic_media_disclosure_required: Literal[False] = False
+    policy_refs: list[str] = Field(default_factory=list)
+    allowed_provider_keys: list[str] = Field(default_factory=list)
+    one_source_decision_per_scene: bool = True
+    provider_fallback_allowed: Literal[False] = False
+    asset_request_compiler_required: bool = False
+    post_readiness_acquisition_required: bool = False
+    content_hash: str = Field(pattern=_SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_hash(self) -> Self:
+        body = self.model_dump(mode="json", exclude={"content_hash"})
+        # V1 artifacts did not have the V2 policy/request fields.  Excluding
+        # their harmless defaults keeps historical frozen envelopes readable
+        # without rewriting their durable hash.
+        if self.schema_version == "vcos.local-generated-card-rights.v1":
+            for key in (
+                "policy_refs",
+                "allowed_provider_keys",
+                "one_source_decision_per_scene",
+                "provider_fallback_allowed",
+                "asset_request_compiler_required",
+                "post_readiness_acquisition_required",
+            ):
+                body.pop(key, None)
+        expected = semantic_hash(body)
+        if self.content_hash != expected:
+            raise ValueError("LOCAL_CARD_RIGHTS_HASH_MISMATCH")
+        if self.visual_source_mode == "LOCAL_GENERATED_CARDS_ONLY" and (
+            self.schema_version != "vcos.local-generated-card-rights.v1"
+            or self.policy_refs
+            or self.allowed_provider_keys
+            or self.asset_request_compiler_required
+            or self.post_readiness_acquisition_required
+        ):
+            raise ValueError("V2_HISTORICAL_LOCAL_CARD_RIGHTS_INVALID")
+        if self.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS" and (
+            self.schema_version != "vcos.visual-asset-request-authority.v2"
+            or not self.policy_refs
+            or not self.allowed_provider_keys
+            or not self.asset_request_compiler_required
+            or not self.post_readiness_acquisition_required
+        ):
+            raise ValueError("V2_VISUAL_ASSET_REQUEST_AUTHORITY_INVALID")
+        if self.visual_source_mode == "NATIVE_BACKBONE_POLICY_ONLY" and (
+            self.schema_version != "vcos.visual-asset-request-authority.v2"
+            or not self.policy_refs
+            or self.allowed_provider_keys != ["native_ffmpeg_renderer"]
+            or self.asset_request_compiler_required
+            or self.post_readiness_acquisition_required
+        ):
+            raise ValueError("V2_NATIVE_BACKBONE_VISUAL_AUTHORITY_INVALID")
+        return self
+
+
+class V2MemoryGuidanceAuthority(_StrictFrozenModel):
+    """Reference-only proof that a prompt-safe memory digest influenced planning."""
+
+    memory_influence_manifest_id: uuid.UUID
+    retrieval_manifest_id: uuid.UUID
+    agent_memory_application_record_id: uuid.UUID
+    digest_hash: str = Field(pattern=_SHA256_PATTERN)
+    scope_status: Literal["PASS", "EMPTY_SAFE_DIGEST"]
     content_hash: str = Field(pattern=_SHA256_PATTERN)
 
     @model_validator(mode="after")
     def validate_hash(self) -> Self:
         expected = semantic_hash(self.model_dump(mode="json", exclude={"content_hash"}))
         if self.content_hash != expected:
-            raise ValueError("LOCAL_CARD_RIGHTS_HASH_MISMATCH")
+            raise ValueError("V2_MEMORY_GUIDANCE_AUTHORITY_HASH_MISMATCH")
         return self
 
 
@@ -599,6 +683,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     approved_script: V2ApprovedScriptProvenance
     claim_source_bindings: list[V2ClaimSourceBinding] = Field(min_length=3)
     local_generated_card_rights: V2LocalGeneratedCardRights
+    memory_guidance_authority: V2MemoryGuidanceAuthority | None = None
     native_routes: list[V2NativeRouteReceipt] = Field(min_length=4, max_length=4)
     zero_cost_budget: V2ZeroCostBudgetAuthority
     verified_destination: V2VerifiedDestinationAuthority
@@ -765,6 +850,11 @@ class V2SupportAuthorityService:
             project_id=project.id,
             reservation_run_id=command.budget_reservation_run_id,
         )
+        memory_digest, memory_guidance = self._memory_guidance(
+            project=project,
+            effective_context_id=resolved.effective_context_ref.id,
+            title=resolved.title,
+        )
         production_context = V2SupportProductionContext(
             video_project_id=project.id,
             production_lane=resolved.production_lane,
@@ -774,19 +864,26 @@ class V2SupportAuthorityService:
             frozen_sources=resolved.frozen_sources,
             forbidden_claims=resolved.forbidden_claims,
             forbidden_style_terms=resolved.forbidden_style_terms,
+            memory_guidance_digest=memory_digest,
         )
         draft = (producer or self.producer).produce(production_context)
         validated = self._validate_draft(
             draft=draft,
             context=production_context,
         )
-        rights = _build_local_card_rights()
+        rights = _build_visual_rights(
+            policy_snapshot=self.session.get(
+                CompiledChannelPolicySnapshot, project.policy_snapshot_id
+            ),
+            execution_mode=resolved.execution_mode,
+        )
         gate_receipts = self._gate_receipts(
             resolved=resolved,
             validated=validated,
             rights=rights,
             routes=routes,
             budget=budget,
+            memory_guidance=memory_guidance,
         )
         envelope = V2FrozenSupportEnvelope(
             idempotency_hash=resolved.idempotency_hash,
@@ -803,6 +900,7 @@ class V2SupportAuthorityService:
             approved_script=validated["script"],
             claim_source_bindings=validated["claim_bindings"],
             local_generated_card_rights=rights,
+            memory_guidance_authority=memory_guidance,
             native_routes=routes,
             zero_cost_budget=budget,
             verified_destination=resolved.verified_destination,
@@ -819,6 +917,79 @@ class V2SupportAuthorityService:
             replayed=False,
             reason_code="V2_SUPPORT_ENVELOPE_PREPARED",
         )
+
+    def _memory_guidance(
+        self,
+        *,
+        project: VideoProject,
+        effective_context_id: uuid.UUID,
+        title: str,
+    ) -> tuple[dict[str, Any], V2MemoryGuidanceAuthority]:
+        """Retrieve a prompt-safe digest and freeze only its provenance refs."""
+
+        effective = self.session.get(
+            EffectiveChannelRuntimeContextSnapshot, effective_context_id
+        )
+        if effective is None or effective.video_project_id != project.id:
+            raise ValidationFailureError("V2_MEMORY_GUIDANCE_CONTEXT_MISMATCH")
+        try:
+            digest = AgentMemoryDigestInjectionService(
+                self.session
+            ).retrieve_and_record_digest(
+                package_id=None,
+                effective=effective,
+                agent_key="ScriptWriterAgent",
+                use_case="script",
+                query_text=title,
+                max_selected_facets=3,
+                max_digest_chars=1200,
+                requested_facet_types=[],
+                vector_enabled=get_settings().vector_retrieval_enabled,
+            )
+            manifest_id = uuid.UUID(str(digest["memory_influence_manifest_id"]))
+            retrieval_id = uuid.UUID(str(digest["retrieval_manifest_id"]))
+            record_id = uuid.UUID(str(digest["agent_memory_application_record_id"]))
+            scope_status = str(
+                (digest.get("r3d7_influence_manifest_ref") or {}).get(
+                    "scope_status"
+                )
+            )
+            digest_hash = str(digest["digest_hash"])
+        except (KeyError, TypeError, ValueError, ValidationFailureError) as exc:
+            raise ValidationFailureError("V2_MEMORY_GUIDANCE_RETRIEVAL_FAILED") from exc
+        if (
+            digest.get("no_raw_memory") is not True
+            or len(digest_hash) != 64
+            or scope_status not in {"PASS", "EMPTY_SAFE_DIGEST"}
+        ):
+            raise ValidationFailureError("V2_MEMORY_GUIDANCE_DIGEST_UNSAFE")
+        authority_payload = {
+            "memory_influence_manifest_id": str(manifest_id),
+            "retrieval_manifest_id": str(retrieval_id),
+            "agent_memory_application_record_id": str(record_id),
+            "digest_hash": digest_hash,
+            "scope_status": scope_status,
+        }
+        authority = V2MemoryGuidanceAuthority(
+            **authority_payload,
+            content_hash=semantic_hash(authority_payload),
+        )
+        prompt_digest = {
+            "digest_type": digest.get("digest_type"),
+            "digest_version": digest.get("digest_version"),
+            "status": digest.get("status"),
+            "reason_codes": list(digest.get("reason_codes") or []),
+            "lessons": list(digest.get("lessons") or []),
+            "selected_memory_facet_refs": list(
+                digest.get("selected_memory_facet_refs") or []
+            ),
+            "memory_influence_manifest_id": str(manifest_id),
+            "digest_hash": digest_hash,
+            "non_factual_guidance_only": True,
+            "no_raw_analytics": True,
+            "no_raw_memory": True,
+        }
+        return prompt_digest, authority
 
     def _resolve(
         self,
@@ -1481,6 +1652,7 @@ class V2SupportAuthorityService:
         rights: V2LocalGeneratedCardRights,
         routes: list[V2NativeRouteReceipt],
         budget: V2ZeroCostBudgetAuthority,
+        memory_guidance: V2MemoryGuidanceAuthority,
     ) -> list[dict[str, Any]]:
         receipts = [
             {
@@ -1524,6 +1696,11 @@ class V2SupportAuthorityService:
                 "gate_key": "local_generated_card_rights",
                 "status": "PASS",
                 "receipt_hash": rights.content_hash,
+            },
+            {
+                "gate_key": "memory_guidance_digest",
+                "status": "PASS",
+                "receipt_hash": memory_guidance.content_hash,
             },
             {
                 "gate_key": "native_provider_capability",
@@ -2046,6 +2223,93 @@ def _effective_context_hash(
             "source_refs": snapshot.source_refs_json,
             "subcontexts": subcontexts,
         }
+    )
+
+
+def _build_visual_rights(
+    *,
+    policy_snapshot: CompiledChannelPolicySnapshot | None,
+    execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"],
+) -> V2LocalGeneratedCardRights:
+    """Freeze only policy-selected visual request authority.
+
+    A real long-form envelope must carry the CH1 visual binding.  We do not
+    turn an absent binding into an invented local-card permission.  Existing
+    qualification envelopes retain their historical local-only shape for
+    backward readability.
+    """
+    try:
+        scoped = ChannelScopedPolicy.model_validate(
+            (policy_snapshot.compiled_payload or {}).get("channel_scoped_policy")
+            if policy_snapshot is not None
+            else None
+        )
+    except ValidationError as exc:
+        if execution_mode == "REAL_LONG_FORM_PRODUCTION":
+            raise ValidationFailureError("V2_REAL_VISUAL_POLICY_INVALID") from exc
+        return _build_local_card_rights()
+
+    visual = scoped.visual_source_policy_binding
+    if visual is None:
+        if execution_mode == "REAL_LONG_FORM_PRODUCTION":
+            payload = {
+                "schema_version": "vcos.visual-asset-request-authority.v2",
+                "rights_state": "PASS",
+                "visual_source_mode": "NATIVE_BACKBONE_POLICY_ONLY",
+                "external_asset_refs": [],
+                "stock_asset_refs": [],
+                "license_evidence_required": False,
+                "synthetic_media_disclosure_required": False,
+                "policy_refs": [
+                    scoped.approval_ref,
+                    scoped.format_identity_contract.ref,
+                ],
+                "allowed_provider_keys": ["native_ffmpeg_renderer"],
+                "one_source_decision_per_scene": True,
+                "provider_fallback_allowed": False,
+                "asset_request_compiler_required": False,
+                "post_readiness_acquisition_required": False,
+            }
+            return V2LocalGeneratedCardRights(
+                **payload,
+                content_hash=semantic_hash(payload),
+            )
+        return _build_local_card_rights()
+
+    providers = ["native_ffmpeg_renderer"]
+    if scoped.provider_usage_policy.pexels.enabled:
+        providers.append("pexels_api")
+    if scoped.provider_usage_policy.google_veo.enabled:
+        providers.append("google_veo")
+    if scoped.provider_usage_policy.google_gemini_image is not None:
+        providers.append("google_gemini_image")
+    policy_refs = [
+        visual.visual_source_routing_policy.ref,
+        visual.visual_source_routing_catalog.ref,
+        visual.gemini_image_provider_registry.ref,
+        visual.gemini_image_model_catalog.ref,
+        visual.image_visual_quality_control.ref,
+        visual.image_canary_v3_qualification.ref,
+        visual.drive_verified_canary_receipt.ref,
+    ]
+    payload = {
+        "schema_version": "vcos.visual-asset-request-authority.v2",
+        "rights_state": "PASS",
+        "visual_source_mode": "POLICY_SELECTED_ASSET_REQUESTS",
+        "external_asset_refs": [],
+        "stock_asset_refs": [],
+        "license_evidence_required": False,
+        "synthetic_media_disclosure_required": False,
+        "policy_refs": policy_refs,
+        "allowed_provider_keys": providers,
+        "one_source_decision_per_scene": True,
+        "provider_fallback_allowed": False,
+        "asset_request_compiler_required": True,
+        "post_readiness_acquisition_required": True,
+    }
+    return V2LocalGeneratedCardRights(
+        **payload,
+        content_hash=semantic_hash(payload),
     )
 
 

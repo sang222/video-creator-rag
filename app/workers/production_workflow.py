@@ -28,6 +28,7 @@ from app.services.outbox_dispatcher import (
 from app.services.cadence_events import CADENCE_EVALUATION_EVENT_TYPE
 from app.services.long_form_analytics import (
     ANALYTICS_WINDOW_EVENT_TYPE,
+    LEARNING_GENERATION_EVENT_TYPE,
     LongFormAnalyticsScheduler,
 )
 from app.services.production_workflow import (
@@ -176,6 +177,15 @@ class ProductionWorkflowWorker:
             elif event.event_type == ANALYTICS_WINDOW_EVENT_TYPE:
                 LongFormAnalyticsScheduler(session, now=self.now).execute_window(
                     uuid.UUID(str(event.payload["analytics_window_id"]))
+                )
+            elif event.event_type == LEARNING_GENERATION_EVENT_TYPE:
+                from app.services.m10 import LearningCandidateGenerationService
+
+                LearningCandidateGenerationService(session).execute_window_command(
+                    analytics_window_id=uuid.UUID(str(event.payload["analytics_window_id"])),
+                    command_key=str(event.payload["learning_command_key"]),
+                    policy=dict(event.payload.get("learning_policy") or {}),
+                    policy_hash=str(event.payload["learning_policy_hash"]),
                 )
             else:
                 coordinator = ProductionWorkflowCoordinator(

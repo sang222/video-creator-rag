@@ -771,6 +771,7 @@ class FreshEvidenceCollector:
                     company_id=company_id,
                     channel_workspace_id=channel_workspace_id,
                     evidence_source_type="OFFICIAL_DOCUMENT",
+                    authority_purpose="CLAIM_SOURCE",
                     source_ref=source.source_ref,
                     query=source.query,
                     platform=source.platform,

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,10 @@ class LearningCandidateGenerationRun(Base):
     channel_workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("channel_workspaces.id"))
     video_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"))
     uploaded_video_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("uploaded_videos.id"))
+    long_form_analytics_window_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("long_form_analytics_windows.id")
+    )
+    learning_command_key: Mapped[str | None] = mapped_column(String(128))
     source_failure_trace_report_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("failure_trace_reports.id")
     )
@@ -42,6 +46,8 @@ class LearningCandidateGenerationRun(Base):
         Index("ix_learning_runs_channel_workspace_id", "channel_workspace_id"),
         Index("ix_learning_runs_video_project_id", "video_project_id"),
         Index("ix_learning_runs_uploaded_video_id", "uploaded_video_id"),
+        Index("ix_learning_runs_analytics_window", "long_form_analytics_window_id"),
+        UniqueConstraint("learning_command_key", name="uq_learning_generation_command_key"),
         Index("ix_learning_runs_state", "run_state"),
         Index("ix_learning_runs_mode", "run_mode"),
         Index("ix_learning_runs_created_at", "created_at"),

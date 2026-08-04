@@ -39,6 +39,7 @@ from app.contracts.m9 import PostPublishHealthRunCreate
 
 
 ANALYTICS_WINDOW_EVENT_TYPE = "LONG_FORM_ANALYTICS_WINDOW_DUE"
+LEARNING_GENERATION_EVENT_TYPE = "LONG_FORM_LEARNING_GENERATION_DUE"
 ANALYTICS_WINDOW_AGGREGATE_TYPE = "long_form_analytics_window"
 PRIMARY_METRIC_AUTHORITY = "YOUTUBE_OWNER"
 WINDOW_DELTAS = {
@@ -46,6 +47,14 @@ WINDOW_DELTAS = {
     "H72": timedelta(hours=72),
     "D7": timedelta(days=7),
     "D30": timedelta(days=30),
+}
+# This versioned, hash-bound maturity policy is persisted into every command.
+# Early windows are diagnostic only; D7 is provisional and D30 is mature.
+LEARNING_WINDOW_MATURITY_POLICY = {
+    "version": "vcos.long-form-learning-maturity.v1",
+    "provisional_windows": ["D7"],
+    "mature_windows": ["D30"],
+    "diagnostic_only_windows": ["H24", "H72"],
 }
 TERMINAL_STATES = {
     "DIAGNOSTICS_COMPLETE",
@@ -289,8 +298,76 @@ class LongFormAnalyticsScheduler:
         window.reason_codes = _dedupe(
             [*window.reason_codes, "ANALYTICS_WINDOW_COMPLETE"]
         )
+        self.enqueue_learning_generation_for_window(window)
         self.session.flush()
         return window
+
+    def enqueue_learning_generation_for_window(
+        self, window: LongFormAnalyticsWindow
+    ) -> bool:
+        """Enqueue one durable learning command after diagnostics complete.
+
+        It is intentionally an outbox command, not an untracked M10 call.  The
+        command hash binds the exact window/snapshot/health result and policy,
+        so rescans and worker restarts cannot produce a second learning run.
+        """
+
+        if window.state != "DIAGNOSTICS_COMPLETE":
+            return False
+        policy = dict(LEARNING_WINDOW_MATURITY_POLICY)
+        policy_hash = content_hash(policy)
+        if window.window_type in set(policy["diagnostic_only_windows"]):
+            window.reason_codes = _dedupe(
+                [*window.reason_codes, "LEARNING_DIAGNOSTIC_WINDOW_ONLY"]
+            )
+            return False
+        if window.window_type not in {
+            *policy["provisional_windows"],
+            *policy["mature_windows"],
+        }:
+            window.reason_codes = _dedupe(
+                [*window.reason_codes, "LEARNING_WINDOW_POLICY_BLOCKED"]
+            )
+            return False
+        command_key = content_hash(
+            {
+                "uploaded_video_id": str(window.uploaded_video_id),
+                "analytics_window_id": str(window.id),
+                "analytics_snapshot_id": str(window.analytics_snapshot_id),
+                "health_run_id": str(window.post_publish_health_run_id),
+                "diagnostic_result_hash": window.result_hash,
+                "learning_policy_version": policy["version"],
+                "learning_policy_hash": policy_hash,
+            }
+        )
+        event_id = uuid.uuid5(uuid.NAMESPACE_URL, f"vcos/learning-generation/{command_key}")
+        if self.session.get(DomainEvent, event_id) is not None:
+            return False
+        event = DomainEventBus(self.session).append(
+            EventEnvelope(
+                event_id=event_id,
+                event_type=LEARNING_GENERATION_EVENT_TYPE,
+                event_version=1,
+                aggregate_type="long_form_analytics_window",
+                aggregate_id=window.id,
+                correlation_id=f"learning-window:{window.id}",
+                payload={
+                    "analytics_window_id": str(window.id),
+                    "uploaded_video_id": str(window.uploaded_video_id),
+                    "learning_command_key": command_key,
+                    "learning_policy": policy,
+                    "learning_policy_hash": policy_hash,
+                },
+                metadata={"queue": "production-workflow", "learning_generation": True},
+            ),
+            company_id=window.company_id,
+        )
+        event.command_id = f"learning-generation:{command_key}"
+        event.max_attempts = window.max_attempts
+        window.reason_codes = _dedupe(
+            [*window.reason_codes, "LEARNING_GENERATION_ENQUEUED"]
+        )
+        return True
 
     def list_windows(
         self, uploaded_video_id: uuid.UUID

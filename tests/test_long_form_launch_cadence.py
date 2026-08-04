@@ -622,11 +622,25 @@ def _greenlit_candidate(session, scope, actor):
         actor=actor,
     )
     research.start_run(run_id=run.id, actor=actor)
+    claim_evidence = SearchDemandEvidenceService(session).create_evidence(
+        data=SearchDemandEvidenceCreate(
+            company_id=scope.company.id,
+            channel_workspace_id=scope.channel.id,
+            evidence_source_type="OFFICIAL_DOCUMENT",
+            authority_purpose="CLAIM_SOURCE",
+            source_ref="https://docs.example.test/automation/audit",
+            query="small team automation audit",
+            platform="YOUTUBE",
+            geo="US",
+            evidence_confidence="HIGH",
+        )
+    )
     evidence = SearchDemandEvidenceService(session).create_evidence(
         data=SearchDemandEvidenceCreate(
             company_id=scope.company.id,
             channel_workspace_id=scope.channel.id,
-            evidence_source_type="MANUAL_RESEARCH",
+            evidence_source_type="GOOGLE_TRENDS_CSV",
+            authority_purpose="MARKET_DEMAND",
             query="small team automation audit",
             platform="YOUTUBE",
             geo="US",
@@ -643,7 +657,7 @@ def _greenlit_candidate(session, scope, actor):
             proposed_angle="A bounded evidence-led operating walkthrough.",
             proposed_format="long-form explainer",
             proposed_pillar="AI automation workflows",
-            evidence_refs=[{"type": "search_demand_evidence", "id": str(evidence.id)}],
+            evidence_refs=[{"type": "search_demand_evidence", "id": str(claim_evidence.id)}],
             confidence_level="MEDIUM",
             budget_readiness="READY",
             rights_policy_state="PASS",
@@ -675,7 +689,8 @@ def _greenlit_candidate(session, scope, actor):
             market_scope=["US"],
             market_fit_score=Decimal("0.90"),
             market_fit_threshold=Decimal("0.60"),
-            evidence_blob={"search_demand_evidence_ids": [str(evidence.id)]},
+            claim_evidence_refs=[{"id": str(claim_evidence.id)}],
+            market_demand_evidence_refs=[{"id": str(evidence.id)}],
         )
     )
     research.transition_candidate(
@@ -693,16 +708,17 @@ def _greenlit_candidate(session, scope, actor):
     assert candidate.evidence_refs == [
         {
             "type": "search_demand_evidence",
-            "id": str(evidence.id),
-            "evidence_source_type": "MANUAL_RESEARCH",
+            "id": str(claim_evidence.id),
+            "evidence_source_type": "OFFICIAL_DOCUMENT",
+            "authority_purpose": "CLAIM_SOURCE",
             "query": "small team automation audit",
             "platform": "YOUTUBE",
             "geo": "US",
-            "search_volume_30d": 1200,
-            "relative_interest_index": "70",
-            "competition_index": "0.30",
-            "confidence": "MEDIUM",
-            "captured_at": evidence.captured_at.isoformat(),
+            "search_volume_30d": None,
+            "relative_interest_index": None,
+            "competition_index": None,
+            "confidence": "HIGH",
+            "captured_at": claim_evidence.captured_at.isoformat(),
         }
     ]
     research.transition_candidate(
