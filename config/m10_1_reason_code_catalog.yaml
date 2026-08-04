@@ -1,5 +1,5 @@
 catalog_key: m10_1_reason_code_catalog
-catalog_version: "3.0.0"
+catalog_version: "4.0.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -17,5 +17,5 @@ items:
     description: LLM route attempt was created.
   - code: NO_MODEL_FALLBACK
     description: The exact lane model was used without automatic substitution.
-  - code: OPENAI_LUNA_TERRA_MODELS_REQUIRED
-    description: Only the approved Luna/Terra model identities are allowed.
+  - code: OPENAI_LUNA_MODEL_REQUIRED
+    description: Only the approved Luna model identity is allowed.

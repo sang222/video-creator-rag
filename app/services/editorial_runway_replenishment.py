@@ -77,7 +77,10 @@ from app.services.production_start_readiness import (
 from app.services.vcos_v2 import AssignmentResolutionError, DeterministicAssignmentResolver
 
 
-RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v2"
+# v6 records a distinct, automatically scheduled attempt after correcting the
+# system-worker User FK handling. Historical blocked attempts stay terminal
+# and cannot be replayed under this execution authority.
+RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v7"
 _METADATA_KEY = "runway_replenishment"
 _ACTIVE_STATUSES = {"PENDING", "RUNNING"}
 
@@ -466,9 +469,6 @@ class EditorialRunwayReplenishmentService:
         source_title = str(source_snapshot.get("title") or "").strip()
         if not source_title:
             raise ValidationFailureError("EDITORIAL_SOURCE_TITLE_REQUIRED")
-        launch_lineage = self._first_launch_candidate_lineage(
-            research_run=research_run,
-        )
         candidate = editorial.add_candidate(
             data=EditorialIdeaCandidateCreate(
                 editorial_research_run_id=research_run.id,
@@ -500,7 +500,6 @@ class EditorialRunwayReplenishmentService:
                 reason_codes=["FRESH_EVIDENCE_COLLECTED", "STRICT_PREFLIGHT_PENDING"],
                 confidence_level="HIGH",
                 experiment_phase="AUDIENCE_PROMISE",
-                **launch_lineage,
             ),
             actor=actor,
         )

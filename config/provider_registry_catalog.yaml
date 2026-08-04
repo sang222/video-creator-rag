@@ -1,5 +1,5 @@
 catalog_key: provider_registry_catalog
-catalog_version: "3.0.0"
+catalog_version: "4.0.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -11,12 +11,6 @@ items:
       llm_router_lane_bound: true
       models:
         gpt-5.6-luna:
-          structured_outputs: true
-          function_calling: true
-          image_input: true
-          context_window: 1050000
-          max_output: 128000
-        gpt-5.6-terra:
           structured_outputs: true
           function_calling: true
           image_input: true

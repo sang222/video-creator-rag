@@ -204,8 +204,18 @@ class EditorialResearchService:
             raise ValidationFailureError(
                 "EDITORIAL_CANDIDATE_EXPERIMENT_PHASE_MISMATCH"
             )
-        if data.primary_variable_under_test and (
-            not data.baseline_refs or not data.comparison_group
+        first_launch_audience_promise_exception = (
+            launch_policy is not None
+            and launch_run is not None
+            and published_count == 0
+            and data.experiment_phase == "AUDIENCE_PROMISE"
+            and data.primary_variable_under_test == "audience_promise_validation"
+            and data.strategic_intent == StrategicIntent.ACQUISITION
+        )
+        if (
+            data.primary_variable_under_test
+            and (not data.baseline_refs or not data.comparison_group)
+            and not first_launch_audience_promise_exception
         ):
             raise ValidationFailureError(
                 "EXPERIMENT_VARIABLE_REQUIRES_BASELINE_AND_COMPARISON"
@@ -264,7 +274,11 @@ class EditorialResearchService:
             policy_snapshot_id=run.policy_snapshot_id,
             experiment_phase=data.experiment_phase or expected_phase,
             canonical_hash=digest,
-            created_by_user_id=actor.actor_id,
+            # The durable worker identity is auditable but is not a ``users``
+            # row. Preserve a real user FK only for a human-originated idea.
+            created_by_user_id=(
+                actor.actor_id if actor.actor_type == ActorType.HUMAN_USER else None
+            ),
         )
         self.session.add(record)
         run.candidate_count += 1
@@ -415,19 +429,10 @@ class EditorialResearchService:
             raise ValidationFailureError(
                 "EDITORIAL_CANDIDATE_POLICY_AUTHORITY_MISMATCH"
             )
-        existing_candidate_count = int(
-            self.session.scalar(
-                select(func.count(EditorialIdeaCandidate.id)).where(
-                    EditorialIdeaCandidate.channel_workspace_id
-                    == run.channel_workspace_id,
-                    EditorialIdeaCandidate.active_launch_policy_version_id
-                    == launch_policy.id,
-                    EditorialIdeaCandidate.active_launch_run_id == launch_run.id,
-                )
-            )
-            or 0
-        )
-        first_launch_candidate = published_count == 0 and existing_candidate_count == 0
+        # The first-launch authority is defined by verified public videos, not
+        # by candidate rows.  Historical orphan candidates must remain
+        # immutable and cannot consume the first-N public-video allowance.
+        first_launch_candidate = published_count == 0
         if first_launch_candidate:
             intent = StrategicIntent.ACQUISITION
             primary_variable = "audience_promise_validation"

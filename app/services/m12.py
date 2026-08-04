@@ -53,11 +53,11 @@ from app.services.m2 import ProviderReadinessM2Service
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_OPENAI_LANE_MODELS = {
     "cheap_structured": "gpt-5.6-luna",
-    "default_multimodal": "gpt-5.6-terra",
-    "visual_creative_review": "gpt-5.6-terra",
-    "long_context_text": "gpt-5.6-terra",
-    "engineering_architect": "gpt-5.6-terra",
-    "gatekeeper_soft_review": "gpt-5.6-terra",
+    "default_multimodal": "gpt-5.6-luna",
+    "visual_creative_review": "gpt-5.6-luna",
+    "long_context_text": "gpt-5.6-luna",
+    "engineering_architect": "gpt-5.6-luna",
+    "gatekeeper_soft_review": "gpt-5.6-luna",
 }
 ALLOWED_OPENAI_ROUTER_MODELS = frozenset(REQUIRED_OPENAI_LANE_MODELS.values())
 REQUIRED_YOUTUBE_SCOPES = {
@@ -483,12 +483,12 @@ class OpenAIReadinessCheck(_BaseReadinessCheck):
             self._check(
                 "CAPABILITY",
                 "PASS" if lane_evidence["valid"] else "BLOCKED",
-                "Tất cả lane OpenAI chỉ dùng Luna/Terra theo authority đã chốt, không có fallback."
+                "Tất cả lane OpenAI chỉ dùng Luna theo authority đã chốt, không có fallback."
                 if lane_evidence["valid"]
-                else "LLM router không khớp authority OpenAI Luna/Terra không-fallback.",
+                else "LLM router không khớp authority OpenAI Luna-only không-fallback.",
                 next_action=None
                 if lane_evidence["valid"]
-                else "Áp dụng migration/cutover LLMRouter rồi seed lại đúng sáu lane Luna/Terra, không cấu hình fallback.",
+                else "Seed lại đúng sáu lane Luna, không cấu hình fallback.",
                 reason_codes=("OPENAI_LANES_EXACT",)
                 if lane_evidence["valid"]
                 else ("OPENAI_LANES_INVALID",),
@@ -1259,7 +1259,7 @@ class RealSmokeOrchestratorService:
         if not lane_evidence["valid"]:
             return _smoke_result(
                 "BLOCKED",
-                "OpenAI canary bị chặn vì lane authority Luna/Terra không hợp lệ.",
+                "OpenAI canary bị chặn vì lane authority Luna-only không hợp lệ.",
                 env_flags=flags,
                 error_code="OPENAI_LANES_INVALID",
                 technical_appendix=lane_evidence,

@@ -101,7 +101,7 @@ CANARY_INVENTORY: tuple[dict[str, str], ...] = (
     {"artifact_key": "upload-card-copy", "lane_name": "cheap_structured"},
     {"artifact_key": "structured-extraction", "lane_name": "cheap_structured"},
     {"artifact_key": "structured-classification", "lane_name": "cheap_structured"},
-    # Terra: fourteen representative planning/review tasks.
+    # Luna: fourteen representative planning/review tasks.
     {"artifact_key": "research-summary", "lane_name": "long_context_text"},
     {"artifact_key": "script-plan", "lane_name": "long_context_text"},
     {"artifact_key": "script-generation", "lane_name": "long_context_text"},
@@ -485,6 +485,12 @@ class OpenAICutoverService:
         if existing is not None:
             if existing.status != "ACTIVE" or existing.provider_type != "LLM":
                 raise ValidationFailureError("OPENAI_PROVIDER_REGISTRY_CONTRADICTORY")
+            existing.capability_blob = {
+                **(existing.capability_blob or {}),
+                "models": _model_capabilities(),
+                "responses_api": True,
+                "automatic_model_fallback": False,
+            }
             return existing
         return service.create_entry(
             data=ProviderRegistryEntryCreate(
@@ -934,7 +940,8 @@ def _model_capabilities() -> dict[str, Any]:
             "service_tier": OPENAI_SERVICE_TIER,
             "pricing": {key: str(value) for key, value in prices.items()},
         }
-        for model_id, prices in OPENAI_STANDARD_PRICING_PER_MILLION.items()
+        for model_id in {str(lane["primary_model"]) for lane in FINAL_LANES}
+        if (prices := OPENAI_STANDARD_PRICING_PER_MILLION.get(model_id)) is not None
     }
 
 

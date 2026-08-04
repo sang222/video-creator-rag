@@ -148,6 +148,16 @@ SECRET_KEY_FRAGMENTS = {
     "private_key",
     "credential_value",
 }
+# These are metering counters emitted by the canonical OpenAI provider, not
+# credential material.  Keep the exception exact and numeric so a real token
+# field or a string payload cannot bypass the secret guard.
+SAFE_USAGE_COUNTER_KEYS = {
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "reasoning_tokens",
+    "cached_input_tokens",
+}
 INITIAL_M5_ARTIFACT_TYPES = ("creative_brief", "research_pack", "source_pack")
 
 
@@ -2089,20 +2099,45 @@ def _first_launch_experiment_authority(
         or str(candidate_market or "").upper() != target_digest.primary_market.upper()
     ):
         return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
-    claim_text = " ".join(
-        str(value or "")
-        for value in (
-            candidate.proposed_title,
-            candidate.proposed_angle,
-            candidate.rationale,
-        )
-    ).lower()
+    claim_text = _candidate_declared_claim_text(candidate)
     if any(term in claim_text for term in ("roi", "earnings", "make money", "time-saving", "time saving")):
         return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
     return {
         "authorized": True,
         "reason_codes": ["FIRST_LAUNCH_EXPERIMENT_AUTHORIZED"],
     }
+
+
+def _candidate_declared_claim_text(candidate: Any) -> str:
+    """Return editorial claims, excluding immutable evidence provenance.
+
+    Source-pack queries may explicitly prohibit phrases such as ``time-saving``.
+    Those instructions are not claims made by the candidate and must not make a
+    first-launch experiment fail closed.  Non-provenance rationale remains in
+    scope so manually supplied editorial claims keep their validation.
+    """
+
+    rationale = candidate.rationale
+    values: list[Any] = [candidate.proposed_title, candidate.proposed_angle]
+    if isinstance(rationale, dict):
+        values.extend(
+            value
+            for key, value in rationale.items()
+            if key not in {"source_pack", "research_pack", "claim_evidence_map"}
+        )
+    else:
+        values.append(rationale)
+
+    def _text(value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            return [part for item in value.values() for part in _text(item)]
+        if isinstance(value, (list, tuple, set)):
+            return [part for item in value for part in _text(item)]
+        return []
+
+    return " ".join(part for value in values for part in _text(value)).lower()
 
 
 def _evaluate_preflight(
@@ -2333,9 +2368,16 @@ def _decimal_or_none(value: Any) -> Decimal | None:
 def _ensure_no_secret_payload(value: Any) -> None:
     for key, item in _walk_items(value):
         normalized = key.lower().replace("-", "_")
+        if normalized in SAFE_USAGE_COUNTER_KEYS and (
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+        ):
+            raise ValidationFailureError(
+                f"usage counter must be a non-negative integer: {key}"
+            )
         if (
             any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS)
             and normalized != "secret_ref"
+            and normalized not in SAFE_USAGE_COUNTER_KEYS
         ):
             raise ValidationFailureError(
                 f"secret-like payload key is not allowed: {key}"

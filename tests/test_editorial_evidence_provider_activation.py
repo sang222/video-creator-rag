@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import socket
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 import app.services.editorial_fresh_evidence as evidence_module
 from app.contracts.ops import BudgetPolicyCreate, CredentialReferenceCreate
+from app.core.errors import ValidationFailureError
 from app.providers.openai import OpenAIResponsesProvider, OpenAIWebSearchRequest
 from app.services.editorial_fresh_evidence import (
     EditorialEvidenceProviderActivationService,
@@ -17,6 +20,8 @@ from app.services.editorial_fresh_evidence import (
     _tool_discovery_candidates,
 )
 from app.services.m10_1 import LLMRouterConfigLoader
+from app.db.models.m10_1 import LLMModelProfile, LLMRouterLane
+from app.services.m5 import _candidate_declared_claim_text, _ensure_no_secret_payload
 from app.services.ops import (
     BudgetGateService,
     CredentialReferenceService,
@@ -26,7 +31,7 @@ from tests.qualification.conftest import QualificationFactory
 
 
 POLICY = {
-    "search_model": "gpt-5.6-terra",
+    "search_model": "gpt-5.6-luna",
     "search_reasoning_effort": "low",
     "allowed_domains": ["openai.com"],
     "maximum_search_results": 5,
@@ -60,7 +65,7 @@ def _search_provider(*, urls: list[str], status: int = 200) -> OpenAIResponsesPr
             return status, {"error": {"type": "invalid_api_key"}}
         return 200, {
             "id": "resp_editorial_evidence_1",
-            "model": "gpt-5.6-terra",
+            "model": "gpt-5.6-luna",
             "usage": {"input_tokens": 12, "output_tokens": 9, "total_tokens": 21},
             "output": [
                 {
@@ -101,7 +106,7 @@ def _search_provider(*, urls: list[str], status: int = 200) -> OpenAIResponsesPr
 def test_openai_web_search_payload_is_bounded_and_has_no_fallback() -> None:
     payload = OpenAIResponsesProvider(api_key="test-key").build_web_search_payload(
         request=OpenAIWebSearchRequest(
-            model="gpt-5.6-terra",
+            model="gpt-5.6-luna",
             reasoning_effort="low",
             query="Current official documentation for small-team AI workflows",
             allowed_domains=["openai.com"],
@@ -113,6 +118,46 @@ def test_openai_web_search_payload_is_bounded_and_has_no_fallback() -> None:
     assert payload["tool_choice"] == "required"
     assert payload["store"] is False
     assert "fallback" not in payload
+
+
+def test_m5_allows_only_numeric_openai_usage_counters() -> None:
+    _ensure_no_secret_payload(
+        {
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 9,
+                "total_tokens": 21,
+                "reasoning_tokens": 3,
+                "cached_input_tokens": 0,
+            }
+        }
+    )
+
+    with pytest.raises(ValidationFailureError, match="secret-like payload key"):
+        _ensure_no_secret_payload({"token": "not-allowed"})
+    with pytest.raises(ValidationFailureError, match="usage counter must be"):
+        _ensure_no_secret_payload({"input_tokens": "not-a-counter"})
+
+
+def test_first_launch_claim_scan_excludes_evidence_provenance_directives() -> None:
+    claim_text = _candidate_declared_claim_text(
+        SimpleNamespace(
+            proposed_title="Bounded OpenAI workflow",
+            proposed_angle="A source-grounded practical explanation.",
+            rationale={
+                "editorial_summary": "Show one controlled workflow.",
+                "source_pack": {
+                    "research_question": "Do not make time-saving claims."
+                },
+                "research_pack": {"query": "No ROI claims."},
+                "claim_evidence_map": [{"claim_scope": "source-grounded"}],
+            },
+        )
+    )
+
+    assert "controlled workflow" in claim_text
+    assert "time-saving" not in claim_text
+    assert "roi" not in claim_text
 
 
 def test_existing_openai_registry_activation_is_idempotent(db_session) -> None:
@@ -160,7 +205,47 @@ def test_existing_openai_registry_activation_is_idempotent(db_session) -> None:
         "search",
         "fetch",
     ]
+    assert entry.policy_fit_blob["editorial_evidence_authority"]["allowed_domains"] == [
+        "developers.openai.com"
+    ]
+    assert entry.policy_fit_blob["editorial_evidence_authority"]["max_response_bytes"] == 524_288
     assert entry.policy_fit_blob["editorial_evidence_authority"]["automatic_fallback"] is False
+
+
+def test_default_router_retires_terra_and_routes_every_lane_to_luna(db_session) -> None:
+    loader = LLMRouterConfigLoader(db_session)
+    profile = loader.ensure_default_profile(profile_key="default")
+    db_session.add(
+        LLMModelProfile(
+            provider_key="OPENAI",
+            model_id="gpt-5.6-terra",
+            model_role="PRIMARY",
+            lane_names=["long_context_text"],
+            is_enabled=True,
+            critical_path_allowed=False,
+            capability_blob={},
+        )
+    )
+    db_session.flush()
+
+    loader.ensure_default_profile(profile_key="default")
+    lanes = list(
+        db_session.scalars(
+            select(LLMRouterLane).where(LLMRouterLane.router_profile_id == profile.id)
+        )
+    )
+    enabled_models = list(
+        db_session.scalars(
+            select(LLMModelProfile).where(LLMModelProfile.is_enabled.is_(True))
+        )
+    )
+    terra = db_session.scalar(
+        select(LLMModelProfile).where(LLMModelProfile.model_id == "gpt-5.6-terra")
+    )
+
+    assert {lane.primary_model for lane in lanes} == {"gpt-5.6-luna"}
+    assert {model.model_id for model in enabled_models} == {"gpt-5.6-luna"}
+    assert terra is not None and terra.is_enabled is False and terra.lane_names == []
 
 
 def test_discovery_normalizes_and_deduplicates_tool_urls() -> None:
@@ -264,6 +349,55 @@ def test_search_then_fetch_records_distinct_receipts(monkeypatch) -> None:
     assert source.fetch_receipt["content_type"] == "text/html"
     assert source.fetch_receipt["raw_response_hash"]
     assert "Discovery metadata only" not in source.retrieved_content
+
+
+def test_fetches_later_official_result_after_ranked_http_failures(monkeypatch) -> None:
+    monkeypatch.setattr(evidence_module.socket, "getaddrinfo", _public_dns)
+    fetches: list[str] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        fetches.append(str(request.url))
+        if len(fetches) < 3:
+            return httpx.Response(403, request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            content=(
+                b"<html><title>Reachable official guide</title><body>"
+                b"A sufficiently long, current first-party documentation extract "
+                b"for bounded editorial evidence collection and validation."
+                b"</body></html>"
+            ),
+            request=request,
+        )
+
+    provider = OpenAIWebEvidenceProvider(
+        api_key="test-key",
+        policy={**POLICY, "maximum_fetches_per_run": 3},
+        search_provider=_search_provider(
+            urls=[
+                "https://help.openai.com/en/articles/first-blocked",
+                "https://help.openai.com/en/articles/second-blocked",
+                "https://developers.openai.com/api/docs/guides/tools-web-search",
+            ]
+        ),
+        http_client=httpx.Client(transport=httpx.MockTransport(transport)),
+    )
+
+    sources = provider.collect(
+        research_question="Find a current official source.",
+        maximum_sources=1,
+        timeout_seconds=10,
+    )
+
+    assert len(sources) == 1
+    assert sources[0].source_ref == "https://developers.openai.com/api/docs/guides/tools-web-search"
+    assert len(fetches) == 3
+    assert [item["status"] for item in provider.last_fetch_receipts] == [
+        "NON_RETRYABLE_FAILURE",
+        "NON_RETRYABLE_FAILURE",
+        "SUCCESS",
+    ]
 
 
 @pytest.mark.parametrize(

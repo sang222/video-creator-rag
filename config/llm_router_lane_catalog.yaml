@@ -1,5 +1,5 @@
 catalog_key: llm_router_lane_catalog
-catalog_version: "2.0.0"
+catalog_version: "3.0.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -19,7 +19,7 @@ items:
   - lane_name: default_multimodal
     lane_description: General multimodal reasoning and non-critical creative checks.
     allowed_task_types: [multimodal_reasoning, creative_check]
-    primary_model: gpt-5.6-terra
+    primary_model: gpt-5.6-luna
     fallback_models: []
     premium_model: null
     emergency_model: null
@@ -32,7 +32,7 @@ items:
   - lane_name: visual_creative_review
     lane_description: Visual-plan, contact-sheet, scene-concept, and thumbnail-direction review.
     allowed_task_types: [visual_plan_review, scene_concept_review, thumbnail_direction_review]
-    primary_model: gpt-5.6-terra
+    primary_model: gpt-5.6-luna
     fallback_models: []
     premium_model: null
     emergency_model: null
@@ -45,7 +45,7 @@ items:
   - lane_name: long_context_text
     lane_description: Long-form script outline, generation, research synthesis, deep rewrite, and review.
     allowed_task_types: [long_form_script, long_context_synthesis, research_pack_to_script, deep_rewrite]
-    primary_model: gpt-5.6-terra
+    primary_model: gpt-5.6-luna
     fallback_models: []
     premium_model: null
     emergency_model: null
@@ -58,7 +58,7 @@ items:
   - lane_name: engineering_architect
     lane_description: Internal architecture reasoning, test planning, and implementation prompt review.
     allowed_task_types: [engineering_design_review, code_architecture, test_planning, implementation_prompt]
-    primary_model: gpt-5.6-terra
+    primary_model: gpt-5.6-luna
     fallback_models: []
     premium_model: null
     emergency_model: null
@@ -71,7 +71,7 @@ items:
   - lane_name: gatekeeper_soft_review
     lane_description: Policy, compliance, factuality, monetization-risk, and final content soft review.
     allowed_task_types: [policy_soft_review, monetization_risk_review, script_risk_review, factuality_review]
-    primary_model: gpt-5.6-terra
+    primary_model: gpt-5.6-luna
     fallback_models: []
     premium_model: null
     emergency_model: null

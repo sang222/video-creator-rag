@@ -37,7 +37,7 @@ def test_responses_payload_accepts_still_contact_sheet_but_not_raw_video() -> No
     provider = OpenAIResponsesProvider(api_key="test-key")
     payload = provider.build_responses_payload(
         request=OpenAIResponsesRequest(
-            model="gpt-5.6-terra",
+            model="gpt-5.6-luna",
             reasoning_effort="medium",
             prompt="Review the supplied contact sheet.",
             image_inputs=[
@@ -56,7 +56,7 @@ def test_responses_payload_accepts_still_contact_sheet_but_not_raw_video() -> No
     with pytest.raises(ValueError, match="OPENAI_VISUAL_INPUT_MUST_BE_STILL_IMAGE"):
         provider.build_responses_payload(
             request=OpenAIResponsesRequest(
-                model="gpt-5.6-terra",
+                model="gpt-5.6-luna",
                 reasoning_effort="medium",
                 prompt="Never review raw video.",
                 image_inputs=[
@@ -77,7 +77,7 @@ def test_responses_provider_parses_usage_and_request_id_without_fallback() -> No
         assert headers["Authorization"] == "Bearer test-key"
         return 200, {
             "id": "resp_canary_1",
-            "model": "gpt-5.6-terra",
+            "model": "gpt-5.6-luna",
             "output_text": '{"ok": true}',
             "usage": {
                 "input_tokens": 20,
@@ -93,7 +93,7 @@ def test_responses_provider_parses_usage_and_request_id_without_fallback() -> No
     )
     response = provider.respond(
         request=OpenAIResponsesRequest(
-            model="gpt-5.6-terra",
+            model="gpt-5.6-luna",
             reasoning_effort="medium",
             prompt="Return JSON.",
             response_format="json",
@@ -162,7 +162,7 @@ def test_responses_provider_classifies_http_errors_and_preserves_safe_receipt(
         runtime_origin="production-workflow-worker",
     ).respond(
         request=OpenAIResponsesRequest(
-            model="gpt-5.6-terra",
+            model="gpt-5.6-luna",
             reasoning_effort="low",
             prompt="Reply with exactly OK",
         )
@@ -182,7 +182,7 @@ def test_responses_provider_classifies_http_errors_and_preserves_safe_receipt(
         "x_request_id": "req_diagnostic_123",
         "response_body_hash": response.output["error"]["response_body_hash"],
         "request_payload_hash": response.output["error"]["request_payload_hash"],
-        "model": "gpt-5.6-terra",
+        "model": "gpt-5.6-luna",
         "tool_type": None,
         "retry_after": "7",
         "runtime_origin": "production-workflow-worker",
@@ -203,7 +203,7 @@ def test_responses_provider_maps_network_failure_without_retry_or_secret_leak() 
 
     response = OpenAIResponsesProvider(api_key="test-key", transport=transport).respond(
         request=OpenAIResponsesRequest(
-            model="gpt-5.6-terra",
+            model="gpt-5.6-luna",
             reasoning_effort="low",
             prompt="Private prompt that must only be hashed.",
         )
@@ -225,7 +225,7 @@ def test_responses_provider_maps_network_failure_without_retry_or_secret_leak() 
 def test_web_search_payload_matches_supported_schema_without_fallback() -> None:
     payload = OpenAIResponsesProvider(api_key="test-key").build_web_search_payload(
         request=OpenAIWebSearchRequest(
-            model="gpt-5.6-terra",
+            model="gpt-5.6-luna",
             reasoning_effort="low",
             query="Find the official OpenAI API key safety documentation.",
             allowed_domains=["openai.com"],
@@ -233,7 +233,7 @@ def test_web_search_payload_matches_supported_schema_without_fallback() -> None:
     )
 
     assert payload == {
-        "model": "gpt-5.6-terra",
+        "model": "gpt-5.6-luna",
         "input": "Find the official OpenAI API key safety documentation.",
         "reasoning": {"effort": "low"},
         "tools": [

@@ -48,7 +48,7 @@ FINAL_LANES: list[dict[str, Any]] = [
         "lane_name": "default_multimodal",
         "lane_description": "General multimodal reasoning and non-critical creative checks.",
         "allowed_task_types": ["multimodal_reasoning", "creative_check"],
-        "primary_model": "gpt-5.6-terra",
+        "primary_model": "gpt-5.6-luna",
         "reasoning_effort": "low",
         "cost_tier": "MEDIUM",
         "latency_tier": "NORMAL",
@@ -62,7 +62,7 @@ FINAL_LANES: list[dict[str, Any]] = [
             "scene_concept_review",
             "thumbnail_direction_review",
         ],
-        "primary_model": "gpt-5.6-terra",
+        "primary_model": "gpt-5.6-luna",
         "reasoning_effort": "medium",
         "cost_tier": "MEDIUM",
         "latency_tier": "NORMAL",
@@ -77,7 +77,7 @@ FINAL_LANES: list[dict[str, Any]] = [
             "research_pack_to_script",
             "deep_rewrite",
         ],
-        "primary_model": "gpt-5.6-terra",
+        "primary_model": "gpt-5.6-luna",
         "reasoning_effort": "medium",
         "cost_tier": "MEDIUM",
         "latency_tier": "NORMAL",
@@ -92,7 +92,7 @@ FINAL_LANES: list[dict[str, Any]] = [
             "test_planning",
             "implementation_prompt",
         ],
-        "primary_model": "gpt-5.6-terra",
+        "primary_model": "gpt-5.6-luna",
         "reasoning_effort": "high",
         "cost_tier": "HIGH",
         "latency_tier": "SLOW",
@@ -108,7 +108,7 @@ FINAL_LANES: list[dict[str, Any]] = [
             "script_risk_review",
             "factuality_review",
         ],
-        "primary_model": "gpt-5.6-terra",
+        "primary_model": "gpt-5.6-luna",
         "reasoning_effort": "medium",
         "cost_tier": "HIGH",
         "latency_tier": "NORMAL",
@@ -328,6 +328,16 @@ class LLMRouterConfigLoader:
             lane_by_model.setdefault(lane["primary_model"], set()).add(
                 lane["lane_name"]
             )
+        active_model_ids = set(lane_by_model)
+        for profile in self.session.scalars(
+            select(LLMModelProfile).where(LLMModelProfile.provider_key == "OPENAI")
+        ).all():
+            if profile.model_id not in active_model_ids:
+                # Retain the row for historical receipts, but make a retired
+                # model unavailable to every new router decision.
+                profile.is_enabled = False
+                profile.lane_names = []
+                profile.notes = "Retired from the active Luna-only VCOS router."
         for model_id, lane_names in sorted(lane_by_model.items()):
             _assert_allowed_models([model_id])
             profile = self.session.scalars(
@@ -528,7 +538,7 @@ class LLMRouterService:
             prompt="Reply with one short sentence confirming the long context lane is reachable.",
             response_format="text",
             profile_key=profile_key,
-            correlation_id="m10-1-openai-smoke-terra",
+            correlation_id="m10-1-openai-smoke-luna",
         )
         route_attempt_ids = [cheap.route_attempt_id, long_context.route_attempt_id]
         status = (
@@ -778,10 +788,10 @@ def _assert_allowed_models(models: list[str | None]) -> None:
     invalid = [
         model
         for model in models
-        if model and model not in {"gpt-5.6-luna", "gpt-5.6-terra"}
+        if model and model != "gpt-5.6-luna"
     ]
     if invalid:
-        raise ValidationFailureError("OPENAI_LUNA_TERRA_MODELS_REQUIRED")
+        raise ValidationFailureError("OPENAI_LUNA_MODEL_REQUIRED")
 
 
 def _reasoning_effort_for_lane(lane_name: str) -> str:

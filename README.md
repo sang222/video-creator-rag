@@ -43,7 +43,7 @@ make frontend-up
 
 The dashboard runs at `http://localhost:3000` and calls the API at `http://localhost:8000` by default. Keep both URLs on the same hostname so the local httpOnly auth cookie survives refresh. Override `VCOS_FRONTEND_PORT`, `VCOS_API_PORT`, or `NEXT_PUBLIC_VCOS_API_BASE_URL` in `.env` before building the frontend image when needed.
 
-VCOS uses the OpenAI Responses API with `gpt-5.6-luna` for the structured lane and `gpt-5.6-terra` for every other LLM lane. Configure `OPENAI_API_KEY` only in local environment/secret management; the router persists redacted request identity, usage, pricing version, and actual token-based cost receipts. The lane mapping is source-controlled, OpenAI-only, and has no automatic model fallback.
+VCOS uses the OpenAI Responses API with `gpt-5.6-luna` for every LLM lane. Configure `OPENAI_API_KEY` only in local environment/secret management; the router persists redacted request identity, usage, pricing version, and actual token-based cost receipts. The lane mapping is source-controlled, OpenAI-only, and has no automatic model fallback.
 
 Provider API keys are env-driven. `.env.example` declares `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `GEMINI_API_KEY`, `PEXELS_API_KEY`, and `PIXABAY_API_KEY`. NativeFFmpegRenderer is the local final assembly authority. Credential references should point to env handles such as `env://OPENAI_API_KEY`, never raw secret values.
 
@@ -249,7 +249,7 @@ GET /human-upload-tasks
 GET /human-upload-tasks/{task_id}
 ```
 
-M10.1 adds guarded OpenAI Luna/Terra LLMRouter lanes, route attempts, and
+M10.1 adds guarded OpenAI Luna-only LLMRouter lanes, route attempts, and
 ProviderAttempt/LLMRunSnapshot logging. Real execution is disabled by default
 and the bounded Responses smoke is skipped unless explicitly enabled.
 `UploadedVideo` remains canonical published video truth.

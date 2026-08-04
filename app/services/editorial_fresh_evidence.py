@@ -48,7 +48,7 @@ EDITORIAL_EVIDENCE_PROVIDER_CAPABILITY = "editorial_evidence_collection"
 EDITORIAL_EVIDENCE_AUTHORITY_KEY = "editorial_evidence_authority"
 EDITORIAL_EVIDENCE_SCHEMA = "vcos.editorial-fresh-evidence.v1"
 EDITORIAL_EVIDENCE_PROVIDER_KEY = "openai"
-EDITORIAL_EVIDENCE_PROVIDER_CONFIG_VERSION = "openai-web-search-https-fetch.v1"
+EDITORIAL_EVIDENCE_PROVIDER_CONFIG_VERSION = "openai-web-search-https-fetch.v4"
 MAX_SOURCE_SNAPSHOT_CHARS = 4_000
 _ALLOWED_CONTENT_TYPES = {"text/html", "text/plain"}
 _PRIVATE_HOST_SUFFIXES = (".local", ".internal", ".localhost")
@@ -184,7 +184,7 @@ class EditorialEvidenceProviderActivationService:
         )
         if (
             lane is None
-            or lane.primary_model != "gpt-5.6-terra"
+            or lane.primary_model != "gpt-5.6-luna"
             or lane.real_execution_enabled is not True
             or list(lane.fallback_models or [])
         ):
@@ -221,17 +221,23 @@ class EditorialEvidenceProviderActivationService:
             "executor_key": "openai_responses_web_search_https_fetch",
             "search_model": lane.primary_model,
             "search_reasoning_effort": lane.reasoning_effort,
-            # The provider is initially restricted to first-party OpenAI
-            # documentation.  This is a conservative, explicit source-class
-            # authority, not an inferred or topic-specific domain list.
-            "allowed_domains": ["openai.com"],
+            # The guarded transport is intentionally restricted to the
+            # first-party API Docs host.  ``help.openai.com`` is not a usable
+            # evidence origin for this flow because it returns upstream 403
+            # responses to the bounded server-side fetcher.
+            "allowed_domains": ["developers.openai.com"],
             "allowed_source_classes": ["OFFICIAL_DOCUMENT"],
             "maximum_search_calls": 1,
             "maximum_search_results": 5,
             "maximum_sources_per_run": 2,
-            "maximum_fetches_per_run": 2,
+            # Discovery can rank a temporarily inaccessible first-party page
+            # ahead of a reachable official document.  Fetch the bounded
+            # discovery set, but still stop as soon as enough snapshots pass.
+            "maximum_fetches_per_run": 5,
             "timeout_seconds": min(settings.openai_timeout_seconds, 30),
-            "max_response_bytes": 262_144,
+            # First-party Docs pages currently range to roughly 426 KiB; keep
+            # the capture bounded while allowing one complete HTML document.
+            "max_response_bytes": 524_288,
             "max_redirects": 3,
             "freshness_days": 30,
             "minimum_sources": 1,
@@ -364,7 +370,10 @@ class OpenAIWebEvidenceProvider:
         candidates = self._search(research_question=research_question)
         accepted: list[FreshEvidenceSource] = []
         self.last_fetch_receipts = []
-        for candidate in candidates[:maximum_sources]:
+        maximum_fetches = int(
+            self.policy.get("maximum_fetches_per_run") or maximum_sources
+        )
+        for candidate in candidates[:maximum_fetches]:
             try:
                 source = self._fetch(candidate=candidate, research_question=research_question)
             except FreshEvidenceProviderError as exc:
@@ -381,6 +390,8 @@ class OpenAIWebEvidenceProvider:
                 continue
             self.last_fetch_receipts.append(source.fetch_receipt)
             accepted.append(source)
+            if len(accepted) >= maximum_sources:
+                break
         if not accepted:
             raise FreshEvidenceProviderError("SOURCE_FETCH_INSUFFICIENT", retryable=False)
         return accepted

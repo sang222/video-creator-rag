@@ -332,7 +332,7 @@ function checkTypeLabel(value: string) {
 
 function roleCopy(summary: ProviderSummary) {
   const role: Record<string, string> = {
-    openai: "Router Luna/Terra theo lane, không có model fallback tự động",
+    openai: "Router Luna-only cho mọi lane, không có model fallback tự động",
     "youtube-public": "Theo dõi thống kê công khai, độ tin cậy học yếu",
     "youtube-owner": "Analytics chủ sở hữu qua OAuth, độ tin cậy học mạnh",
     "google-drive": "Offload media qua quyền drive.file",

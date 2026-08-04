@@ -118,7 +118,7 @@ MEDIA_PROVIDER_BOUNDARY_NEXT_ACTION = (
     "Hoàn tất ElevenLabs readiness/budget authority; Google Veo/Pexels là nguồn asset "
     "giới hạn và NativeFFmpeg vẫn là render authority."
 )
-FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + OpenAI Luna/Terra Rehearsal"
+FULL_REHEARSAL_MILESTONE = "M12.2S Full Agent + OpenAI Luna Rehearsal"
 
 VISUAL_SOURCE_ALLOWLIST = {
     "DIAGRAM",
@@ -1426,7 +1426,7 @@ class FirstScriptedVideoPackageService:
 
         return M122SPreflightRead(
             status="READY",
-            next_action="Có thể chạy M12.2S full agent rehearsal bằng OpenAI Luna/Terra.",
+            next_action="Có thể chạy M12.2S full agent rehearsal bằng OpenAI Luna.",
             company_id=channel.company_id,
             channel_id=channel.id,
             channel_profile_version_id=profile_version.id,
@@ -2083,7 +2083,7 @@ class FirstScriptedVideoPackageService:
         next_action = AUTOMATED_V2_PRODUCTION_NEXT_ACTION
         pre_gatekeeper_batch = None
         limitations: list[str] = [
-            "M12.2S chỉ chạy agent text/review bằng OpenAI Luna/Terra; không generate media, không TTS, không upload/publish.",
+            "M12.2S chỉ chạy agent text/review bằng OpenAI Luna; không generate media, không TTS, không upload/publish.",
             "ElevenLabs/Google Veo API/Pexels API chỉ xuất hiện trong readiness/boundary, không được gọi runtime.",
         ]
 
