@@ -26,6 +26,7 @@ from app.services.outbox_dispatcher import (
     OutboxLeaseLostError,
 )
 from app.services.cadence_events import CADENCE_EVALUATION_EVENT_TYPE
+from app.services.script_qualification import SCRIPT_QUALIFICATION_EVENT_TYPE
 from app.services.long_form_analytics import (
     ANALYTICS_WINDOW_EVENT_TYPE,
     LEARNING_GENERATION_EVENT_TYPE,
@@ -169,6 +170,18 @@ class ProductionWorkflowWorker:
                     ),
                     actor=self._actor,
                 )
+            elif event.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE:
+                from app.services.launch_cadence import LongFormCadenceService
+                from app.services.script_qualification import ScriptQualificationService
+
+                run_id = uuid.UUID(str(event.payload["script_qualification_run_id"]))
+                if run_id != event.aggregate_id:
+                    raise ValueError("SCRIPT_QUALIFICATION_EVENT_AUTHORITY_MISMATCH")
+                qualification = ScriptQualificationService(session, now=self.now).execute(run_id)
+                if qualification.state == "QUALIFIED":
+                    LongFormCadenceService(session, now=self.now).finalize_qualified_script_run(
+                        script_qualification_run_id=run_id, actor=self._actor
+                    )
             elif event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE:
                 StaleWorkflowRecoveryService(session, now=self.now).execute_event(
                     event=event,

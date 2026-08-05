@@ -603,6 +603,13 @@ class EditorialIdeaCandidate(Base):
         UUID(as_uuid=True), ForeignKey("llm_run_snapshots.id")
     )
     stage: Mapped[str] = mapped_column(String(40), nullable=False, default="RESEARCHED")
+    # Historical candidates are never rewritten to make them eligible under a
+    # newer editorial contract.  Bounded research repairs create a child and
+    # retain this immutable discovery lineage.
+    parent_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("editorial_idea_candidates.id")
+    )
+    topic_repair_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
     proposed_angle: Mapped[str | None] = mapped_column(Text)
     proposed_format: Mapped[str | None] = mapped_column(Text)
@@ -667,6 +674,10 @@ class EditorialIdeaCandidate(Base):
             name="ck_editorial_idea_candidates_stage",
         ),
         CheckConstraint(
+            "topic_repair_depth between 0 and 2",
+            name="ck_editorial_candidate_topic_repair_depth",
+        ),
+        CheckConstraint(
             "budget_readiness in ('READY','BLOCKED','UNKNOWN') "
             "and rights_policy_state in ('PASS','BLOCK','UNKNOWN') "
             "and quality_state in ('PASS','BLOCK','UNKNOWN')",
@@ -694,6 +705,7 @@ class EditorialIdeaCandidate(Base):
             "ix_editorial_idea_candidates_context_pack_id", "context_pack_snapshot_id"
         ),
         Index("ix_editorial_idea_candidates_stage", "stage"),
+        Index("ix_editorial_candidate_parent", "parent_candidate_id"),
         Index(
             "ix_editorial_idea_candidates_active_launch_policy",
             "active_launch_policy_version_id",

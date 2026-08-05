@@ -1156,7 +1156,7 @@ def _publish_slot_for_project(
     criteria = [
         LongFormPublishSlot.channel_workspace_id == channel_id,
         LongFormPublishSlot.admitted_video_project_id == video_project_id,
-        LongFormPublishSlot.state.in_(("OPEN", "RESERVED", "FULFILLED")),
+        LongFormPublishSlot.state.in_(("OPEN", "QUALIFICATION_RESERVED", "RESERVED", "FULFILLED")),
     ]
     if launch_policy_version_id is not None:
         criteria.append(

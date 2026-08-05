@@ -862,7 +862,7 @@ class LongFormCadenceService:
             None,
         )
         projection = LaunchRunwayService(self.session).project(run.id)
-        active_count = projection.counts.in_production_videos
+        active_count = projection.counts.in_production_videos + self._active_qualification_count(run.id)
         budget_readiness = resolve_budget_authority(
             self.session,
             policy_snapshot_id=policy.policy_snapshot_id,
@@ -934,11 +934,7 @@ class LongFormCadenceService:
             rights_blocked=rights_blocked,
             quality_blocked=quality_blocked,
         )
-        selected = (
-            candidates[0]
-            if decision == CadenceDecision.START_LONG_FORM_PRODUCTION
-            else None
-        )
+        selected = candidates[0] if decision == CadenceDecision.START_SCRIPT_QUALIFICATION else None
         input_payload = {
             "channel_workspace_id": str(run.channel_workspace_id),
             "launch_policy_version_id": str(policy.id),
@@ -964,17 +960,20 @@ class LongFormCadenceService:
         admission_id: uuid.UUID | None = None
         project_id: uuid.UUID | None = None
         workflow_id: uuid.UUID | None = None
+        qualification_run_id: uuid.UUID | None = None
         if selected is not None and slot is not None:
-            admission, workflow = self._start_selected_candidate(
-                candidate=selected,
-                publish_slot=slot,
-                policy=policy,
-                run=run,
-                budget_gate_result=budget_readiness,
+            # This is a lightweight, durable reservation only.  The candidate
+            # remains historical GREENLIT; no admission, project, workflow or
+            # media authority exists until the outbox-owned qualification PASS.
+            from app.services.script_qualification import ScriptQualificationService
+
+            qualification = ScriptQualificationService(self.session).reserve(
+                candidate=selected, publish_slot_id=slot.id, launch_run_id=run.id,
             )
-            admission_id = admission.id
-            project_id = admission.admitted_video_project_id
-            workflow_id = workflow.id
+            qualification_run_id = qualification.id
+            slot.state = "QUALIFICATION_RESERVED"
+            slot.reserved_candidate_id = selected.id
+            self.session.flush()
         decision_payload = {
             "input_hash": input_hash,
             "decision": decision.value,
@@ -985,6 +984,7 @@ class LongFormCadenceService:
             else None,
             "admitted_video_project_id": str(project_id) if project_id else None,
             "production_workflow_run_id": str(workflow_id) if workflow_id else None,
+            "script_qualification_run_id": str(qualification_run_id) if qualification_run_id else None,
         }
         receipt = CadenceEvaluationReceipt(
             launch_run_id=run.id,
@@ -993,6 +993,7 @@ class LongFormCadenceService:
             selected_candidate_id=selected.id if selected else None,
             admitted_video_project_id=project_id,
             production_workflow_run_id=workflow_id,
+            script_qualification_run_id=qualification_run_id,
             evaluated_at=now,
             evaluation_window_key=window_key,
             timezone=policy.timezone,
@@ -1107,10 +1108,11 @@ class LongFormCadenceService:
                 if next_open is not None
                 else "NO_ELIGIBLE_PUBLISH_SLOT"
             ]
-        return CadenceDecision.START_LONG_FORM_PRODUCTION, [
+        return CadenceDecision.START_SCRIPT_QUALIFICATION, [
             "BUFFER_BELOW_TARGET",
             "STRICT_PREFLIGHT_CANDIDATE_SELECTED",
             "LONG_FORM_SLOT_ELIGIBLE",
+            "SCRIPT_QUALIFICATION_RESERVED",
         ]
 
     def _strict_candidates(
@@ -1152,6 +1154,8 @@ class LongFormCadenceService:
             ).all()
         )
         approved_initial_series = set(policy.approved_initial_series_plan_ids or [])
+        from app.services.script_qualification import TopicDefinitionService
+
         return [
             candidate
             for candidate in candidates
@@ -1163,7 +1167,30 @@ class LongFormCadenceService:
                 self.session,
                 candidate_id=candidate.id,
             )
+            and TopicDefinitionService(self.session).current_eligibility(candidate).eligible
         ]
+
+    def _active_qualification_count(self, launch_run_id: uuid.UUID) -> int:
+        """Count in-flight pre-admission work against cadence capacity."""
+
+        from app.db.models.script_qualification import ScriptQualificationRun
+
+        terminal = {
+            "QUALIFIED",
+            "BLOCKED_NON_REPAIRABLE",
+            "BLOCKED_REPAIR_BUDGET_EXHAUSTED",
+            "COOLDOWN",
+            "SUPERSEDED",
+        }
+        return int(
+            self.session.scalar(
+                select(func.count(ScriptQualificationRun.id)).where(
+                    ScriptQualificationRun.launch_run_id == launch_run_id,
+                    ScriptQualificationRun.state.not_in(terminal),
+                )
+            )
+            or 0
+        )
 
     def _blocked_candidate_states(
         self,
@@ -1196,6 +1223,7 @@ class LongFormCadenceService:
         policy: FirstChannelLaunchPolicyVersion,
         run: LaunchRun,
         budget_gate_result: dict[str, Any],
+        script_qualification_run_id: uuid.UUID,
     ) -> tuple[ProjectAdmissionDecision, ProductionWorkflowRun]:
         preflight = next(
             (
@@ -1399,12 +1427,60 @@ class LongFormCadenceService:
                     ),
                     execution_mode="REAL_LONG_FORM_PRODUCTION",
                     budget_reservation_run_id=workflow.id,
+                    script_qualification_run_id=script_qualification_run_id,
                 )
             )
         candidate.stage = "IN_PRODUCTION"
         publish_slot.state = "RESERVED"
         publish_slot.reserved_candidate_id = candidate.id
         publish_slot.admitted_video_project_id = admission.admitted_video_project_id
+        self.session.flush()
+        return admission, workflow
+
+    def finalize_qualified_script_run(
+        self,
+        *,
+        script_qualification_run_id: uuid.UUID,
+        actor: ActorContext,
+    ) -> tuple[ProjectAdmissionDecision, ProductionWorkflowRun]:
+        """Cross the final-admission boundary after an immutable PASS only."""
+
+        from app.db.models.script_qualification import ScriptQualificationRun
+        from app.services.script_qualification import ScriptQualificationService
+
+        qualification = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == script_qualification_run_id)
+            .with_for_update()
+        )
+        if qualification is None:
+            raise NotFoundError(f"script qualification run not found: {script_qualification_run_id}")
+        ScriptQualificationService(self.session).require_pass(
+            qualification.id, candidate_id=qualification.editorial_idea_candidate_id
+        )
+        if qualification.admitted_video_project_id is not None or qualification.production_workflow_run_id is not None:
+            admission = self.session.scalar(select(ProjectAdmissionDecision).where(ProjectAdmissionDecision.admitted_video_project_id == qualification.admitted_video_project_id))
+            workflow = self.session.get(ProductionWorkflowRun, qualification.production_workflow_run_id)
+            if admission is None or workflow is None:
+                raise ValidationFailureError("SCRIPT_QUALIFICATION_FINAL_ADMISSION_DRIFT")
+            return admission, workflow
+        candidate = self.session.get(EditorialIdeaCandidate, qualification.editorial_idea_candidate_id)
+        slot = self.session.scalar(select(LongFormPublishSlot).where(LongFormPublishSlot.id == qualification.publish_slot_id).with_for_update())
+        run = self.session.scalar(select(LaunchRun).where(LaunchRun.id == qualification.launch_run_id).with_for_update())
+        if candidate is None or slot is None or run is None or candidate.stage != "GREENLIT" or slot.state != "QUALIFICATION_RESERVED" or slot.reserved_candidate_id != candidate.id:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_FINAL_ADMISSION_AUTHORITY_MISMATCH")
+        policy = self.session.get(FirstChannelLaunchPolicyVersion, run.launch_policy_version_id)
+        if policy is None:
+            raise ValidationFailureError("LAUNCH_POLICY_MISSING")
+        budget = resolve_budget_authority(self.session, policy_snapshot_id=policy.policy_snapshot_id, channel_workspace_id=run.channel_workspace_id)
+        if budget.get("state") != "READY":
+            raise ValidationFailureError("BUDGET_PROVIDER_BLOCKED")
+        admission, workflow = self._start_selected_candidate(
+            candidate=candidate, publish_slot=slot, policy=policy, run=run,
+            budget_gate_result=budget, script_qualification_run_id=qualification.id,
+        )
+        qualification.admitted_video_project_id = admission.admitted_video_project_id
+        qualification.production_workflow_run_id = workflow.id
         self.session.flush()
         return admission, workflow
 

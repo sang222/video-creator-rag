@@ -51,6 +51,7 @@ from app.db.models.launch_cadence import (
 )
 from app.db.models.m5 import (
     EditorialCalendarSlot,
+    EditorialIdeaCandidate,
     EditorialResearchRun,
     SearchDemandEvidence,
 )
@@ -77,10 +78,10 @@ from app.services.production_start_readiness import (
 from app.services.vcos_v2 import AssignmentResolutionError, DeterministicAssignmentResolver
 
 
-# v6 records a distinct, automatically scheduled attempt after correcting the
-# system-worker User FK handling. Historical blocked attempts stay terminal
-# and cannot be replayed under this execution authority.
-RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v7"
+# v8 makes the current Topic Definition gate part of the durable scheduled
+# attempt identity. A same-day historical run that only produced generic,
+# discovery-derived candidates cannot suppress one bounded repair attempt.
+RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v8"
 _METADATA_KEY = "runway_replenishment"
 _ACTIVE_STATUSES = {"PENDING", "RUNNING"}
 
@@ -165,7 +166,27 @@ class EditorialRunwayReplenishmentService:
                 reason_codes=("RUNWAY_REPLENISHMENT_LAUNCH_AUTHORITY_MISMATCH",),
             )
         projection = LaunchRunwayService(self.session).project(run.id)
-        if projection.counts.greenlit_candidates >= policy.greenlight_target:
+        # Historical GREENLIT is not current production eligibility.  A
+        # candidate with no current Topic Definition receipt cannot satisfy the
+        # runway target or suppress bounded editorial repair.
+        from app.services.script_qualification import (
+            TOPIC_GATE_VERSION,
+            TopicDefinitionService,
+        )
+
+        topic_service = TopicDefinitionService(self.session)
+        current_greenlit = [
+            candidate
+            for candidate in self.session.scalars(
+                select(EditorialIdeaCandidate).where(
+                    EditorialIdeaCandidate.channel_workspace_id == run.channel_workspace_id,
+                    EditorialIdeaCandidate.policy_snapshot_id == policy.policy_snapshot_id,
+                    EditorialIdeaCandidate.stage == "GREENLIT",
+                )
+            ).all()
+            if topic_service.current_eligibility(candidate).eligible
+        ]
+        if len(current_greenlit) >= policy.greenlight_target:
             return RunwayReplenishmentResult(
                 launch_run_id=run.id,
                 status="SATISFIED",
@@ -194,6 +215,7 @@ class EditorialRunwayReplenishmentService:
                 "launch_policy_version_id": str(policy.id),
                 "policy_snapshot_id": str(policy.policy_snapshot_id),
                 "policy_hash": policy.canonical_hash,
+                "topic_gate_version": TOPIC_GATE_VERSION,
                 # A new source-provider authority is a new, deterministic
                 # research generation.  Historical blocked runs remain
                 # immutable and cannot suppress the newly authorized flow.
@@ -267,7 +289,7 @@ class EditorialRunwayReplenishmentService:
                         "policy_hash": policy.canonical_hash,
                         "scope_key": scope_key,
                         "attempt_key": attempt_key,
-                        "greenlit_count_before": projection.counts.greenlit_candidates,
+                        "greenlit_count_before": len(current_greenlit),
                         "greenlight_target": policy.greenlight_target,
                         "provider_calls_allowed": False,
                         "mode_decision": diagnostics["mode_decision"],
@@ -453,11 +475,21 @@ class EditorialRunwayReplenishmentService:
             raise ValidationFailureError("EDITORIAL_CANDIDATE_MODE_AUTHORITY_MISSING")
         if not evidence_refs:
             raise ValidationFailureError("EDITORIAL_CANONICAL_EVIDENCE_REQUIRED")
-        try:
-            first_evidence_id = uuid.UUID(str(evidence_refs[0]["id"]))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValidationFailureError("EDITORIAL_EVIDENCE_REF_INVALID") from exc
-        first_evidence = self.session.get(SearchDemandEvidence, first_evidence_id)
+        from app.services.script_qualification import TopicDefinitionService, classify_source
+
+        topic_evidence = None
+        for ref in evidence_refs:
+            try:
+                evidence_id = uuid.UUID(str(ref["id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            candidate_evidence = self.session.get(SearchDemandEvidence, evidence_id)
+            if candidate_evidence is not None and classify_source(candidate_evidence) == "TOPIC_CAPABLE":
+                topic_evidence = candidate_evidence
+                break
+        if topic_evidence is None:
+            raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
+        first_evidence = topic_evidence
         source_snapshot = (
             ((first_evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get(
                 "source_snapshot"
@@ -469,19 +501,44 @@ class EditorialRunwayReplenishmentService:
         source_title = str(source_snapshot.get("title") or "").strip()
         if not source_title:
             raise ValidationFailureError("EDITORIAL_SOURCE_TITLE_REQUIRED")
+        parent = self.session.scalar(
+            select(EditorialIdeaCandidate)
+            .where(
+                EditorialIdeaCandidate.channel_workspace_id == research_run.channel_workspace_id,
+                EditorialIdeaCandidate.policy_snapshot_id == research_run.policy_snapshot_id,
+                EditorialIdeaCandidate.stage == "GREENLIT",
+                EditorialIdeaCandidate.parent_candidate_id.is_(None),
+            )
+            .order_by(EditorialIdeaCandidate.created_at)
+        )
+        parent_eligibility = (
+            TopicDefinitionService(self.session).current_eligibility(parent)
+            if parent is not None
+            else None
+        )
+        repair_parent = (
+            parent
+            if parent_eligibility is not None
+            and not parent_eligibility.eligible
+            and parent.topic_repair_depth < 2
+            else None
+        )
         candidate = editorial.add_candidate(
             data=EditorialIdeaCandidateCreate(
                 editorial_research_run_id=research_run.id,
                 context_pack_snapshot_id=context_pack_snapshot_id,
                 channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
                 stage="RESEARCHED",
-                # The title is source-derived.  No topic/title is hard-coded
-                # into the scheduler merely to obtain a passing candidate.
+                # The title and assignment are source-derived.  A homepage or
+                # documentation index cannot be selected as a production topic.
                 proposed_title=source_title,
                 proposed_angle=(
-                    "A source-grounded standalone explanation constrained to "
-                    "the fetched official documentation."
+                    f"A bounded standalone walkthrough of what {source_title} "
+                    "documents, what remains outside the source scope, and how "
+                    "small teams can use that evidence to decide what to verify next."
                 ),
+                parent_candidate_id=repair_parent.id if repair_parent is not None else None,
+                topic_repair_depth=(repair_parent.topic_repair_depth + 1 if repair_parent is not None else 0),
                 proposed_format="LONG_FORM",
                 proposed_pillar=research_slot.content_pillar,
                 rationale={
@@ -503,6 +560,13 @@ class EditorialRunwayReplenishmentService:
             ),
             actor=actor,
         )
+        topic_definition = TopicDefinitionService(self.session).create_from_topic_capable_evidence(
+            candidate=candidate,
+            parent_topic_definition_id=(parent_eligibility.definition.id if parent_eligibility and parent_eligibility.definition else None),
+        )
+        topic_receipt = TopicDefinitionService(self.session).evaluate(topic_definition)
+        if topic_receipt.state != "PASS":
+            raise ValidationFailureError(topic_receipt.primary_reason_code or "EDITORIAL_TOPIC_GATE_BLOCK")
         preflight = IdeaMarketPreflightService(self.session).create_preflight(
             data=IdeaMarketPreflightCreate(
                 company_id=research_run.company_id,

@@ -35,6 +35,7 @@ class OpenAIResponsesRequest:
     messages: list[dict[str, str]] | None = None
     image_inputs: list[dict[str, str]] | None = None
     response_format: str = "text"
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class OpenAIResponsesProvider:
             operation="responses",
             tool_type=None,
             started=started,
+            idempotency_key=request.idempotency_key,
         )
         if isinstance(result, ProviderResponse):
             return result
@@ -170,6 +172,7 @@ class OpenAIResponsesProvider:
         operation: str,
         tool_type: str | None,
         started: float,
+        idempotency_key: str | None = None,
     ) -> tuple[int, dict[str, Any], dict[str, str]] | ProviderResponse:
         """Make exactly one Responses request and retain only safe diagnostics.
 
@@ -188,6 +191,11 @@ class OpenAIResponsesProvider:
                     {
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
+                        **(
+                            {"Idempotency-Key": idempotency_key}
+                            if idempotency_key
+                            else {}
+                        ),
                     },
                     self.timeout_seconds,
                 )

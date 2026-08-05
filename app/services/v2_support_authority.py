@@ -128,17 +128,26 @@ class V2SupportAuthorityPrepareCommand(_StrictFrozenModel):
         "QUALIFICATION_LOCAL"
     )
     budget_reservation_run_id: uuid.UUID | None = None
+    # Real production is permitted only after the pre-admission authority has
+    # sealed a current ScriptQualificationReceipt.
+    script_qualification_run_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def validate_execution_mode(self) -> Self:
         if (
             self.execution_mode == "REAL_LONG_FORM_PRODUCTION"
-            and self.budget_reservation_run_id is None
+            and (
+                self.budget_reservation_run_id is None
+                or self.script_qualification_run_id is None
+            )
         ):
-            raise ValueError("V2_REAL_PROVIDER_BUDGET_RESERVATION_RUN_REQUIRED")
+            raise ValueError("V2_REAL_PROVIDER_SCRIPT_QUALIFICATION_REQUIRED")
         if (
             self.execution_mode == "QUALIFICATION_LOCAL"
-            and self.budget_reservation_run_id is not None
+            and (
+                self.budget_reservation_run_id is not None
+                or self.script_qualification_run_id is not None
+            )
         ):
             raise ValueError("V2_QUALIFICATION_BUDGET_RESERVATION_FORBIDDEN")
         return self
@@ -820,6 +829,29 @@ class V2SupportAuthorityService:
         if project is None:
             raise NotFoundError(f"video project not found: {command.video_project_id}")
         resolved = self._resolve(command=command, project=project)
+        qualified_run = None
+        if command.execution_mode == "REAL_LONG_FORM_PRODUCTION":
+            from app.db.models.script_qualification import ScriptQualificationRun
+            from app.services.script_qualification import ScriptQualificationService
+
+            admission = self.session.get(ProjectAdmissionDecision, project.project_admission_decision_id)
+            if admission is None or admission.editorial_idea_candidate_id is None:
+                raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_LINEAGE_MISSING")
+            ScriptQualificationService(self.session).require_pass(
+                command.script_qualification_run_id,
+                candidate_id=admission.editorial_idea_candidate_id,
+            )
+            qualified_run = self.session.get(ScriptQualificationRun, command.script_qualification_run_id)
+            if qualified_run is None or qualified_run.script_payload is None:
+                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_SCRIPT_MISSING")
+            resolved = resolved.model_copy(
+                update={
+                    "frozen_sources": [
+                        *resolved.frozen_sources,
+                        *self._qualification_frozen_sources(qualified_run),
+                    ]
+                }
+            )
         # Resolve only idempotent catalog/role/capability authorities before
         # replay.  No MediaRenderRoutingDecision or provider effect is created.
         routes = self._create_native_routes(
@@ -866,11 +898,14 @@ class V2SupportAuthorityService:
             forbidden_style_terms=resolved.forbidden_style_terms,
             memory_guidance_digest=memory_digest,
         )
-        draft = (producer or self.producer).produce(production_context)
-        validated = self._validate_draft(
-            draft=draft,
-            context=production_context,
-        )
+        if qualified_run is not None:
+            validated = self._qualified_validated(
+                qualified_run=qualified_run,
+                context=production_context,
+            )
+        else:
+            draft = (producer or self.producer).produce(production_context)
+            validated = self._validate_draft(draft=draft, context=production_context)
         rights = _build_visual_rights(
             policy_snapshot=self.session.get(
                 CompiledChannelPolicySnapshot, project.policy_snapshot_id
@@ -884,6 +919,7 @@ class V2SupportAuthorityService:
             routes=routes,
             budget=budget,
             memory_guidance=memory_guidance,
+            script_qualification_run_id=command.script_qualification_run_id,
         )
         envelope = V2FrozenSupportEnvelope(
             idempotency_hash=resolved.idempotency_hash,
@@ -917,6 +953,92 @@ class V2SupportAuthorityService:
             replayed=False,
             reason_code="V2_SUPPORT_ENVELOPE_PREPARED",
         )
+
+    @staticmethod
+    def _qualification_frozen_sources(qualified_run: Any) -> list[V2FrozenSourceRef]:
+        sources: list[V2FrozenSourceRef] = []
+        seen: set[uuid.UUID] = set()
+        for span in (qualified_run.factual_evidence_pack or {}).get("spans", []):
+            try:
+                evidence_id = uuid.UUID(str(span["evidence_id"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_INVALID") from exc
+            if evidence_id in seen:
+                continue
+            seen.add(evidence_id)
+            text = str(span.get("text") or "")
+            if len(text) < 8:
+                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_INVALID")
+            sources.append(V2FrozenSourceRef(
+                type="search_demand_evidence", id=evidence_id,
+                ref=str(span.get("canonical_url") or f"evidence://{evidence_id}"),
+                content_hash=str(span.get("source_snapshot_hash") or semantic_hash(span)),
+                source_kind="FACTUAL_SOURCE_SNAPSHOT", fact_statements=[text],
+            ))
+        if not sources:
+            raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_MISSING")
+        return sources
+
+    def _qualified_validated(
+        self,
+        *,
+        qualified_run: Any,
+        context: V2SupportProductionContext,
+    ) -> dict[str, Any]:
+        """Project the already-qualified writer result without a third LLM call."""
+
+        from app.contracts.script_qualification import QualifiedScriptOutput
+
+        try:
+            qualified = QualifiedScriptOutput.model_validate(qualified_run.script_payload)
+            sections = [
+                V2GeneratedSection.model_validate(item.model_dump(mode="json"))
+                for item in qualified.sections
+            ]
+        except (ValidationError, ValueError) as exc:
+            raise ValidationFailureError("V2_SUPPORT_QUALIFIED_SCRIPT_INVALID") from exc
+        evidence_by_span = {
+            str(item.get("evidence_span_id")): item
+            for item in (qualified_run.factual_evidence_pack or {}).get("spans", [])
+            if isinstance(item, dict)
+        }
+        claims: list[V2GeneratedClaim] = []
+        for claim in qualified.claims:
+            citations: list[V2GeneratedCitation] = []
+            for evidence_span_id in claim.evidence_span_ids:
+                evidence = evidence_by_span.get(evidence_span_id)
+                if evidence is None:
+                    raise ValidationFailureError("V2_SUPPORT_QUALIFIED_CLAIM_UNBOUND")
+                try:
+                    evidence_id = uuid.UUID(str(evidence["evidence_id"]))
+                except (KeyError, ValueError) as exc:
+                    raise ValidationFailureError("V2_SUPPORT_QUALIFIED_CLAIM_UNBOUND") from exc
+                excerpt = str(evidence.get("text") or "")[:1000]
+                if len(excerpt) < 8:
+                    raise ValidationFailureError("V2_SUPPORT_QUALIFIED_CLAIM_UNBOUND")
+                citations.append(V2GeneratedCitation(source_ref_id=evidence_id, source_excerpt=excerpt))
+            claims.append(V2GeneratedClaim(claim_id=claim.claim_id, claim_text=claim.claim_text, citations=citations))
+        output_payload = {
+            "approved_script_text": qualified.canonical_script,
+            "language": qualified.language,
+            "sections": [item.model_dump(mode="json") for item in sections],
+            "claims": [item.model_dump(mode="json") for item in claims],
+        }
+        writer = qualified_run.writer_receipt or {}
+        try:
+            producer_receipt = V2ProducerReceipt(
+                producer_type="LLM_ROUTER", producer_version="script-qualification-writer.v1",
+                lane_name=str(writer["lane_name"]), selected_model=str(writer["selected_model"]),
+                fallback_level=str(writer["fallback_level"]), route_attempt_id=uuid.UUID(str(writer["route_attempt_id"])),
+                provider_attempt_id=(uuid.UUID(str(writer["provider_attempt_id"])) if writer.get("provider_attempt_id") else None),
+                llm_run_snapshot_id=(uuid.UUID(str(writer["llm_run_snapshot_id"])) if writer.get("llm_run_snapshot_id") else None),
+                producer_input_hash=semantic_hash(context.model_dump(mode="json")),
+                producer_output_hash=semantic_hash(output_payload),
+            )
+            draft = V2TrustedSupportDraft(**output_payload, producer_receipt=producer_receipt)
+        except (KeyError, ValidationError, ValueError) as exc:
+            raise ValidationFailureError("V2_SUPPORT_QUALIFIED_WRITER_RECEIPT_INVALID") from exc
+        return self._validate_draft(draft=draft, context=context)
 
     def _memory_guidance(
         self,
@@ -1653,6 +1775,7 @@ class V2SupportAuthorityService:
         routes: list[V2NativeRouteReceipt],
         budget: V2ZeroCostBudgetAuthority,
         memory_guidance: V2MemoryGuidanceAuthority,
+        script_qualification_run_id: uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
         receipts = [
             {
@@ -1718,6 +1841,24 @@ class V2SupportAuthorityService:
                 "receipt_hash": resolved.verified_destination.content_hash,
             },
         ]
+        if script_qualification_run_id is not None:
+            from app.services.script_qualification import ScriptQualificationService
+
+            receipt = ScriptQualificationService(self.session).require_pass(script_qualification_run_id)
+            receipts.append({
+                "gate_key": "script_qualification",
+                "status": "PASS",
+                "receipt_hash": receipt.content_hash,
+                "script_qualification_run_id": str(script_qualification_run_id),
+                "script_hash": receipt.script_hash,
+                "assignment_hash": receipt.script_assignment_hash,
+                "evidence_pack_hash": receipt.factual_evidence_pack_hash,
+                "research_coverage_ratio": float(
+                    ((receipt.content or {}).get("receipts") or {})
+                    .get("fulfillment", {})
+                    .get("research_coverage_ratio", 0.0)
+                ),
+            })
         return receipts
 
     def _seal(

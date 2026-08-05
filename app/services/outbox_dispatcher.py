@@ -33,6 +33,10 @@ from app.services.cadence_events import (
     CADENCE_AGGREGATE_TYPE,
     CADENCE_EVALUATION_EVENT_TYPE,
 )
+from app.services.script_qualification import (
+    SCRIPT_QUALIFICATION_AGGREGATE_TYPE,
+    SCRIPT_QUALIFICATION_EVENT_TYPE,
+)
 from app.services.long_form_analytics import (
     ANALYTICS_WINDOW_AGGREGATE_TYPE,
     ANALYTICS_WINDOW_EVENT_TYPE,
@@ -145,6 +149,11 @@ class DurableOutboxDispatcher:
                             DomainEvent.workflow_run_id.is_(None),
                         ),
                         and_(
+                            DomainEvent.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE,
+                            DomainEvent.aggregate_type == SCRIPT_QUALIFICATION_AGGREGATE_TYPE,
+                            DomainEvent.workflow_run_id.is_(None),
+                        ),
+                        and_(
                             DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
                             DomainEvent.aggregate_type
                             == ANALYTICS_WINDOW_AGGREGATE_TYPE,
@@ -181,9 +190,10 @@ class DurableOutboxDispatcher:
             if event is None:
                 return None
             cadence_event = event.event_type == CADENCE_EVALUATION_EVENT_TYPE
+            qualification_event = event.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE
             analytics_event = event.event_type == ANALYTICS_WINDOW_EVENT_TYPE
             recovery_event = event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
-            if cadence_event or analytics_event or recovery_event:
+            if cadence_event or qualification_event or analytics_event or recovery_event:
                 if event.command_id is None or not isinstance(event.payload, dict):
                     self._dead_letter_cadence_event(
                         event,
@@ -192,9 +202,13 @@ class DurableOutboxDispatcher:
                             "CADENCE_EVENT_IDENTITY_INVALID"
                             if cadence_event
                             else (
+                                "SCRIPT_QUALIFICATION_EVENT_IDENTITY_INVALID"
+                                if qualification_event
+                                else (
                                 "ANALYTICS_EVENT_IDENTITY_INVALID"
                                 if analytics_event
                                 else "STALE_WORKFLOW_RECOVERY_EVENT_IDENTITY_INVALID"
+                                )
                             )
                         ),
                         summary="scheduler command identity or payload is invalid",
@@ -208,9 +222,13 @@ class DurableOutboxDispatcher:
                             "CADENCE_RETRY_EXHAUSTED"
                             if cadence_event
                             else (
+                                "SCRIPT_QUALIFICATION_RETRY_EXHAUSTED"
+                                if qualification_event
+                                else (
                                 "ANALYTICS_RETRY_EXHAUSTED"
                                 if analytics_event
                                 else "STALE_WORKFLOW_RECOVERY_RETRY_EXHAUSTED"
+                                )
                             )
                         ),
                         summary="scheduler event reached its bounded attempt limit",

@@ -381,6 +381,7 @@ class LLMRouterService:
         response_format: str = "text",
         profile_key: str = "default",
         correlation_id: str = "m10-1-llm-router",
+        idempotency_key: str | None = None,
     ) -> LLMRouteResponse:
         if prompt is None and messages is None:
             raise ValidationFailureError(
@@ -397,6 +398,7 @@ class LLMRouterService:
             "image_inputs": image_inputs,
             "response_format": response_format,
             "profile_key": profile.profile_key,
+            "idempotency_key": idempotency_key,
         }
         request_hash = _hash_payload(request_payload)
         if not self._real_execution_allowed(profile, lane):
@@ -455,6 +457,7 @@ class LLMRouterService:
                 messages=messages,
                 image_inputs=image_inputs,
                 response_format=response_format,
+                idempotency_key=idempotency_key,
             )
         )
         status = "SUCCESS" if response.ok else "FAILED"

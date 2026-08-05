@@ -28,6 +28,7 @@ class LaunchRunState(StrEnum):
 
 class CadenceDecision(StrEnum):
     START_LONG_FORM_PRODUCTION = "START_LONG_FORM_PRODUCTION"
+    START_SCRIPT_QUALIFICATION = "START_SCRIPT_QUALIFICATION"
     WAIT_BUFFER_FULL = "WAIT_BUFFER_FULL"
     WAIT_NO_ELIGIBLE_CANDIDATE = "WAIT_NO_ELIGIBLE_CANDIDATE"
     WAIT_ACTIVE_PRODUCTION = "WAIT_ACTIVE_PRODUCTION"
@@ -281,6 +282,7 @@ class CadenceEvaluationRead(BaseModel):
     selected_candidate_id: uuid.UUID | None
     admitted_video_project_id: uuid.UUID | None
     production_workflow_run_id: uuid.UUID | None
+    script_qualification_run_id: uuid.UUID | None
     evaluated_at: AwareDatetime
     evaluation_window_key: str
     timezone: str

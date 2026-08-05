@@ -51,6 +51,10 @@ from app.db.models import (
     VideoProject,
 )
 from app.db.models.foundation import DomainEvent
+from app.db.models.script_qualification import (
+    ScriptQualificationReceipt,
+    ScriptQualificationRun,
+)
 from app.db.models.launch_cadence import (
     CadenceEvaluationReceipt,
     FirstChannelLaunchPolicyVersion,
@@ -94,6 +98,11 @@ from app.services.stale_workflow_recovery import (
 from app.services.r3d1 import R3D1AdminService
 from app.services.ops import ProviderRegistryService
 from app.services.rbac import RBACService
+from app.services.script_qualification import (
+    ScriptQualificationService,
+    TopicDefinitionService,
+    span_hash,
+)
 from app.services.vcos_v2 import (
     AssignmentResolutionError,
     DeterministicAssignmentResolver,
@@ -633,6 +642,26 @@ def _greenlit_candidate(session, scope, actor):
             platform="YOUTUBE",
             geo="US",
             evidence_confidence="HIGH",
+            metadata={
+                "editorial_fresh_evidence": {
+                    "source_snapshot": {
+                        "canonical_url": "https://docs.example.test/automation/audit",
+                        "content_hash": "c" * 64,
+                        "title": "How a Small Team Audits One Automation",
+                        "content_excerpt": (
+                            "The official automation-audit document defines a bounded "
+                            "audit workflow for a small team."
+                        ),
+                        "freshness_state": "FRESH",
+                        "quality_decision": "PASS",
+                        "source_class": "OFFICIAL_DOCUMENT",
+                    },
+                    "fetch_receipt": {
+                        "status": "PASS",
+                        "source_ref": "https://docs.example.test/automation/audit",
+                    },
+                }
+            },
         )
     )
     evidence = SearchDemandEvidenceService(session).create_evidence(
@@ -734,6 +763,56 @@ def _greenlit_candidate(session, scope, actor):
     return run, candidate, preflight
 
 
+def _bind_current_topic_authority(session, candidate) -> None:
+    """Give a test candidate one current, topic-capable factual snapshot."""
+
+    evidence_id = uuid.UUID(str(candidate.evidence_refs[0]["id"]))
+    evidence = session.get(SearchDemandEvidence, evidence_id)
+    assert evidence is not None
+    topic = TopicDefinitionService(session).create_from_topic_capable_evidence(
+        candidate=candidate
+    )
+    receipt = TopicDefinitionService(session).evaluate(topic)
+    assert receipt.current_production_eligibility is True
+
+
+def _fixture_qualification_pass(session, run_id: uuid.UUID) -> ScriptQualificationRun:
+    """Seed a previously verified PASS when a test needs a later-stage fixture."""
+
+    qualification = session.get(ScriptQualificationRun, run_id)
+    assert qualification is not None
+    qualification.state = "QUALIFIED"
+    content = {
+        "schema_version": "fixture-script-qualification-receipt.v1",
+        "run_id": str(qualification.id),
+        "result": "PASS",
+        "receipts": {
+            "structural": {"status": "PASS", "script_hash": "a" * 64},
+            "inventory": {"status": "PASS"},
+            "grounding": {
+                "status": "PASS",
+                "assignment_hash": qualification.script_assignment_hash,
+                "evidence_pack_hash": qualification.factual_evidence_pack_hash,
+            },
+            "fulfillment": {"status": "PASS", "research_coverage_ratio": 1.0},
+            "memory": {"status": "PASS_EMPTY"},
+        },
+    }
+    session.add(
+        ScriptQualificationReceipt(
+            script_qualification_run_id=qualification.id,
+            result="PASS",
+            script_hash="a" * 64,
+            script_assignment_hash=qualification.script_assignment_hash,
+            factual_evidence_pack_hash=qualification.factual_evidence_pack_hash,
+            content=content,
+            content_hash=content_hash(content),
+        )
+    )
+    session.flush()
+    return qualification
+
+
 def test_launch_policy_is_exact_channel_scoped_and_hash_bound(
     db_session, qualification_factory
 ) -> None:
@@ -808,7 +887,7 @@ def test_tuesday_slots_use_policy_timezone_and_minimum_interval(
     assert len({item.local_publish_date for item in slots}) == len(slots)
 
 
-def test_buffer_below_target_starts_exactly_one_long_form_workflow(
+def test_buffer_below_target_reserves_exactly_one_script_qualification_before_admission(
     db_session, qualification_factory
 ) -> None:
     scope = qualification_factory.channel_scope(
@@ -822,6 +901,7 @@ def test_buffer_below_target_starts_exactly_one_long_form_workflow(
     )
     producer_actor = _actor(db_session, scope)
     _, candidate, _ = _greenlit_candidate(db_session, scope, producer_actor)
+    _bind_current_topic_authority(db_session, candidate)
     fixed_now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
     service = LongFormCadenceService(
         db_session,
@@ -847,26 +927,29 @@ def test_buffer_below_target_starts_exactly_one_long_form_workflow(
     )
 
     assert first.id == replay.id
-    assert first.decision == CadenceDecision.START_LONG_FORM_PRODUCTION
+    assert first.decision == CadenceDecision.START_SCRIPT_QUALIFICATION
     assert first.selected_candidate_id == candidate.id
-    assert first.admitted_video_project_id is not None
-    assert first.production_workflow_run_id is not None
-    project = db_session.get(VideoProject, first.admitted_video_project_id)
-    workflow = db_session.get(ProductionWorkflowRun, first.production_workflow_run_id)
-    assert project.production_lane == "LONG_FORM"
-    assert project.planning_source_type == "LONG_FORM_PLAN"
-    assert workflow.production_lane == "LONG_FORM"
-    assert project.effective_context_snapshot_id is not None
-    effective = db_session.get(
-        EffectiveChannelRuntimeContextSnapshot,
-        project.effective_context_snapshot_id,
+    assert first.script_qualification_run_id is not None
+    assert first.admitted_video_project_id is None
+    assert first.production_workflow_run_id is None
+    qualification = db_session.get(
+        ScriptQualificationRun, first.script_qualification_run_id
     )
-    assert effective is not None
-    assert effective.compile_status == "PASS"
-    assert effective.video_project_id == project.id
-    assert effective.compiled_policy_snapshot_id == policy.policy_snapshot_id
+    assert qualification is not None
+    assert qualification.state == "RESERVED"
+    assert qualification.editorial_idea_candidate_id == candidate.id
+    assert qualification.writer_attempt_key.endswith(":writer")
+    assert qualification.verifier_attempt_key.endswith(":verifier")
+    pending = TopicDefinitionService(db_session).current_eligibility(candidate)
+    assert pending.eligible is False
+    assert pending.primary_reason_code == "SCRIPT_QUALIFICATION_PENDING"
+    slot = db_session.get(LongFormPublishSlot, first.publish_slot_id)
+    assert slot is not None
+    assert slot.state == "QUALIFICATION_RESERVED"
+    assert slot.reserved_candidate_id == candidate.id
+    assert slot.admitted_video_project_id is None
     runway = LaunchRunwayService(db_session).project(run.id)
-    assert runway.counts.in_production_videos == 1
+    assert runway.counts.in_production_videos == 0
     assert runway.counts.greenlit_candidates == 1
     assert (
         db_session.scalar(
@@ -874,9 +957,138 @@ def test_buffer_below_target_starts_exactly_one_long_form_workflow(
                 ProductionWorkflowRun.channel_workspace_id == scope.channel.id
             )
         )
-        == 1
+        == 0
     )
     assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
+
+
+def test_qualification_pass_is_the_only_path_to_cadence_admission(
+    db_session, qualification_factory
+) -> None:
+    scope = qualification_factory.channel_scope(
+        name="Cadence Qualification Finalization", strict_long_form=True
+    )
+    policy, admin_actor, _ = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    run = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_current_topic_authority(db_session, candidate)
+    fixed_now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    service = LongFormCadenceService(
+        db_session,
+        now=lambda: fixed_now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    )
+    receipt = service.evaluate(
+        launch_run_id=run.id,
+        data=CadenceEvaluationCommand(evaluation_key="qualification-finalization"),
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    assert receipt.script_qualification_run_id is not None
+
+    class _PassingProducer:
+        sentences = [
+            "The documented audit workflow has a bounded scope.",
+            "It answers the central question with evidence first.",
+            "Small teams need the exact scope before acting.",
+            "The source establishes which workflow details are documented.",
+            "The viewer can use that boundary for the next decision.",
+            "This explanation stands alone without a prior episode.",
+        ]
+        section_ids = ["hook", "hook", "body", "body", "close", "close"]
+
+        def write(self, context, *, idempotency_key):
+            evidence_id = context["factual_evidence_pack"]["spans"][0]["evidence_span_id"]
+            return (
+                {
+                    "canonical_script": " ".join(self.sentences),
+                    "language": "en",
+                    "sections": [
+                        {"section_id": "hook", "heading": "Hook", "narration": " ".join(self.sentences[:2])},
+                        {"section_id": "body", "heading": "Body", "narration": " ".join(self.sentences[2:4])},
+                        {"section_id": "close", "heading": "Close", "narration": " ".join(self.sentences[4:])},
+                    ],
+                    "claims": [
+                        {"claim_id": f"writer-{index}", "claim_text": text, "evidence_span_ids": [evidence_id]}
+                        for index, text in enumerate(self.sentences, start=1)
+                    ],
+                },
+                {"status": "SUCCESS", "idempotency_key": idempotency_key},
+            )
+
+        def verify(self, context, *, idempotency_key):
+            script = context["canonical_script"]
+            spans = []
+            for index, (text, section_id) in enumerate(zip(self.sentences, self.section_ids, strict=True), start=1):
+                start = script.encode("utf-8").find(text.encode("utf-8"))
+                spans.append({
+                    "text": text,
+                    "start_byte": start,
+                    "end_byte": start + len(text.encode("utf-8")),
+                    "span_hash": span_hash(text),
+                    "section_id": section_id,
+                })
+            evidence_id = context["factual_evidence_pack"]["spans"][0]["evidence_span_id"]
+            requirements = [
+                item["requirement_id"]
+                for item in context["script_assignment"]["required_requirement_units"]
+            ]
+            return (
+                {
+                    "material_claim_inventory": [
+                        {
+                            "observed_claim_id": f"observed-{index}",
+                            "span": span,
+                            "claim_type": "FACTUAL_ASSERTION",
+                            "materiality_state": "MATERIAL",
+                            "writer_declared_claim_id": f"writer-{index}",
+                            "factual_evidence_span_ids": [evidence_id],
+                            "semantic_relation": "ENTAILED",
+                            "assignment_requirement_ids": [requirements[index - 1]],
+                        }
+                        for index, span in enumerate(spans, start=1)
+                    ],
+                    "assignment_fulfillment_observations": [
+                        {"requirement_id": requirement, "status": "SUFFICIENT", "spans": [spans[index]], "evidence_span_ids": [evidence_id]}
+                        for index, requirement in enumerate(requirements)
+                    ],
+                    "section_purpose_observations": [
+                        {"section_id": "hook", "observed_primary_role": "HOOK", "fulfilled_requirement_ids": requirements[:2], "editorial_delta": "Establishes the bounded subject and question.", "genericity_state": "SPECIFIC"},
+                        {"section_id": "body", "observed_primary_role": "MECHANISM", "fulfilled_requirement_ids": requirements[2:4], "editorial_delta": "Connects scope to the audience decision.", "genericity_state": "SPECIFIC"},
+                        {"section_id": "close", "observed_primary_role": "CLOSING_INSIGHT", "fulfilled_requirement_ids": requirements[4:], "editorial_delta": "Turns the evidence boundary into a standalone next step.", "genericity_state": "SPECIFIC"},
+                    ],
+                },
+                {"status": "SUCCESS", "idempotency_key": idempotency_key},
+            )
+
+    qualification = ScriptQualificationService(
+        db_session, producer=_PassingProducer(), now=lambda: fixed_now
+    ).execute(receipt.script_qualification_run_id)
+    assert qualification.state == "QUALIFIED"
+    qualification_receipt = db_session.scalar(
+        select(ScriptQualificationReceipt).where(
+            ScriptQualificationReceipt.script_qualification_run_id == qualification.id
+        )
+    )
+    assert qualification_receipt is not None
+    assert qualification_receipt.result == "PASS"
+
+    admission, workflow = service.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    assert admission.admitted_video_project_id is not None
+    assert workflow.video_project_id == admission.admitted_video_project_id
+    assert candidate.stage == "IN_PRODUCTION"
+    assert qualification.admitted_video_project_id == admission.admitted_video_project_id
+    slot = db_session.get(LongFormPublishSlot, receipt.publish_slot_id)
+    assert slot is not None
+    assert slot.state == "RESERVED"
+    assert slot.admitted_video_project_id == admission.admitted_video_project_id
 
 
 def test_runway_excludes_terminal_in_production_orphan_but_cadence_cannot_reselect_it(
@@ -947,21 +1159,32 @@ def _stale_zero_effect_workflow(db_session, qualification_factory):
         db_session, policy, admin_actor, started_on=date(2026, 7, 20)
     )
     producer_actor = _actor(db_session, scope)
-    _greenlit_candidate(db_session, scope, producer_actor)
-    receipt = LongFormCadenceService(
+    _, candidate, _ = _greenlit_candidate(db_session, scope, producer_actor)
+    _bind_current_topic_authority(db_session, candidate)
+    cadence = LongFormCadenceService(
         db_session,
         now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
         provider_readiness_snapshot=_ready_provider_snapshot,
         support_authority_preparer=_test_support_authority_preparer,
-    ).evaluate(
+    )
+    receipt = cadence.evaluate(
         launch_run_id=launch_run.id,
         data=CadenceEvaluationCommand(evaluation_key="stale-zero-effect-start"),
         actor=_system_worker_actor(
             "vcos-durable-worker", permissions={"production.start"}
         ),
     )
-    workflow = db_session.get(ProductionWorkflowRun, receipt.production_workflow_run_id)
-    project = db_session.get(VideoProject, receipt.admitted_video_project_id)
+    assert receipt.script_qualification_run_id is not None
+    qualification = _fixture_qualification_pass(
+        db_session, receipt.script_qualification_run_id
+    )
+    admission, workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    project = db_session.get(VideoProject, admission.admitted_video_project_id)
     origin_event = db_session.scalar(
         select(DomainEvent)
         .where(DomainEvent.workflow_run_id == workflow.id)

@@ -619,7 +619,49 @@ class ProductionPackageService:
                 content,
                 resolved["support_envelope_ref"][0],
             )
+            self._validate_current_script_qualification(
+                content=content,
+                envelope_version=resolved["support_envelope_ref"][0],
+                script_version=resolved["script_ref"][0],
+            )
         _validate_derived_readiness_evidence(content, resolved)
+
+    def _validate_current_script_qualification(
+        self,
+        *,
+        content: ProductionPackageContentV2,
+        envelope_version: ArtifactVersion,
+        script_version: ArtifactVersion,
+    ) -> None:
+        """Reject forged/stale readiness projections before gate evaluation."""
+
+        envelope = envelope_version.content if isinstance(envelope_version.content, dict) else {}
+        if envelope.get("execution_mode") != "REAL_LONG_FORM_PRODUCTION":
+            return
+        qualification = next(
+            (item for item in (envelope.get("gate_receipts") or []) if isinstance(item, dict) and item.get("gate_key") == "script_qualification"),
+            None,
+        )
+        if not isinstance(qualification, dict) or qualification.get("status") != "PASS" or not qualification.get("script_qualification_run_id"):
+            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_REQUIRED")
+        from app.services.script_qualification import ScriptQualificationService, script_hash
+
+        try:
+            receipt = ScriptQualificationService(self.session).require_pass(
+                uuid.UUID(str(qualification["script_qualification_run_id"]))
+            )
+        except (ValueError, ValidationFailureError) as exc:
+            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_REQUIRED") from exc
+        if (
+            receipt.content_hash != qualification.get("receipt_hash")
+            or receipt.script_assignment_hash != qualification.get("assignment_hash")
+            or receipt.factual_evidence_pack_hash != qualification.get("evidence_pack_hash")
+        ):
+            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_RECEIPT_STALE")
+        script = script_version.content if isinstance(script_version.content, dict) else {}
+        narration = str(script.get("narration_text") or "")
+        if not narration or script_hash(narration) != receipt.script_hash:
+            raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_SCRIPT_MISMATCH")
 
     def _package_artifact(self, project_id: uuid.UUID) -> Artifact | None:
         return self.session.scalars(

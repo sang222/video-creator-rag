@@ -298,7 +298,7 @@ def create_router() -> APIRouter:
                         .where(
                             LongFormPublishSlot.launch_run_id == launch_run_id,
                             LongFormPublishSlot.intended_publish_at > utc_now(),
-                            LongFormPublishSlot.state.in_(["OPEN", "RESERVED"]),
+                            LongFormPublishSlot.state.in_(["OPEN", "QUALIFICATION_RESERVED", "RESERVED"]),
                         )
                         .order_by(LongFormPublishSlot.intended_publish_at)
                     ).all()

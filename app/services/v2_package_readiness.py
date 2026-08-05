@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, runtime_checkable
@@ -152,6 +153,7 @@ class CanonicalV2SupportCompiler:
     def build_package(self, context: WorkflowStageContext) -> ProductionPackageCreateV2:
         authority = _support_authority(context)
         versions = _ensure_support_versions(context, authority)
+        qualification = _qualification_projection(context, authority)
         admission = authority.admission
         project_lineage = strategic_lineage_from_record(
             authority.project,
@@ -245,15 +247,17 @@ class CanonicalV2SupportCompiler:
                     research_evidence_complete=True,
                     niche_market_gates_pass=True,
                     assignment_integrity_pass=True,
-                    editorial_depth_sufficient=True,
+                    # These values are projections from the immutable current
+                    # qualification receipt, never caller/package assertions.
+                    editorial_depth_sufficient=qualification["editorial_depth_sufficient"],
                     supported_claim_count=len(claims),
                     distinct_editorial_section_count=len(sections),
-                    research_coverage_ratio=float(script["research_coverage_ratio"]),
+                    research_coverage_ratio=qualification["research_coverage_ratio"],
                     script_duration_ms=int(script["estimated_duration_ms"]),
-                    anti_padding_pass=True,
+                    anti_padding_pass=qualification["anti_padding_pass"],
                     padding_phrase_hits=0,
                     repeated_sentence_ratio=float(script["repeated_sentence_ratio"]),
-                    script_gates_pass=True,
+                    script_gates_pass=qualification["script_gates_pass"],
                     visual_thumbnail_metadata_gates_pass=True,
                     rights_disclosure_gates_pass=True,
                     provider_plan_valid=True,
@@ -1622,7 +1626,9 @@ def _script_payload(
         "speech_rate_wpm": 150,
         "supported_claims": claims,
         "sections": sections,
-        "research_coverage_ratio": 1.0,
+        "research_coverage_ratio": _qualification_projection_value(
+            authority, "research_coverage_ratio", default=0.0
+        ),
         "repeated_sentence_ratio": repeated_ratio,
         **(
             {
@@ -1639,6 +1645,82 @@ def _script_payload(
         ),
         "lineage": lineage,
     }
+
+
+def _qualification_projection(
+    context: WorkflowStageContext,
+    authority: _SupportAuthority,
+) -> dict[str, Any]:
+    """Recompute readiness projections from a current immutable receipt."""
+
+    envelope = authority.support_envelope
+    if envelope is None or envelope.execution_mode != "REAL_LONG_FORM_PRODUCTION":
+        return {
+            "editorial_depth_sufficient": False,
+            "anti_padding_pass": False,
+            "script_gates_pass": False,
+            "research_coverage_ratio": 0.0,
+        }
+    gate = next(
+        (item for item in envelope.gate_receipts if item.get("gate_key") == "script_qualification"),
+        None,
+    )
+    if not isinstance(gate, dict) or gate.get("status") != "PASS" or not gate.get("script_qualification_run_id"):
+        raise ValidationFailureError("V2_REAL_PROVIDER_SCRIPT_QUALIFICATION_REQUIRED")
+    from app.services.script_qualification import ScriptQualificationService
+
+    receipt = ScriptQualificationService(context.session).require_pass(
+        uuid.UUID(str(gate["script_qualification_run_id"]))
+    )
+    if receipt.content_hash != gate.get("receipt_hash"):
+        raise ValidationFailureError("V2_SCRIPT_QUALIFICATION_RECEIPT_HASH_MISMATCH")
+    content = receipt.content or {}
+    gates = content.get("receipts") if isinstance(content, dict) else None
+    if not isinstance(gates, dict):
+        raise ValidationFailureError("V2_SCRIPT_QUALIFICATION_RECEIPT_INVALID")
+    structural = gates.get("structural") or {}
+    inventory = gates.get("inventory") or {}
+    grounding = gates.get("grounding") or {}
+    fulfillment = gates.get("fulfillment") or {}
+    memory = gates.get("memory") or {}
+    if not (
+        structural.get("status") == "PASS"
+        and inventory.get("status") == "PASS"
+        and grounding.get("status") == "PASS"
+        and fulfillment.get("status") == "PASS"
+        and memory.get("status") in {"PASS", "PASS_EMPTY"}
+        and structural.get("script_hash") == receipt.script_hash
+        and grounding.get("assignment_hash") == receipt.script_assignment_hash
+        and grounding.get("evidence_pack_hash") == receipt.factual_evidence_pack_hash
+    ):
+        raise ValidationFailureError("V2_SCRIPT_QUALIFICATION_RECEIPT_NOT_CURRENT")
+    return {
+        "editorial_depth_sufficient": True,
+        "anti_padding_pass": True,
+        "script_gates_pass": True,
+        "research_coverage_ratio": float(fulfillment.get("research_coverage_ratio", 0.0)),
+    }
+
+
+def _qualification_projection_value(
+    authority: _SupportAuthority,
+    key: str,
+    *,
+    default: float,
+) -> float:
+    envelope = authority.support_envelope
+    if envelope is None:
+        return default
+    gate = next((item for item in envelope.gate_receipts if item.get("gate_key") == "script_qualification"), None)
+    # The authoritative check occurs above when a package is created.  This
+    # helper only prevents the support artifact itself from hardcoding 1.0.
+    if not isinstance(gate, dict):
+        return default
+    try:
+        value = float(gate.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return value if 0.0 <= value <= 1.0 else default
 
 
 def _claim_binding_payload(

@@ -72,6 +72,12 @@ from app.db.models.launch_cadence import (
     LaunchRun,
     LongFormPublishSlot,
 )
+from app.db.models.script_qualification import (
+    EditorialTopicDefinition,
+    EditorialTopicDefinitionGateReceipt,
+    ScriptQualificationReceipt,
+    ScriptQualificationRun,
+)
 from app.db.models.m6 import (
     AccessibilityQCReport,
     AssetManifestSnapshot,
@@ -335,6 +341,10 @@ __all__ = [
     "LaunchRun",
     "LongFormPublishSlot",
     "CadenceEvaluationReceipt",
+    "EditorialTopicDefinition",
+    "EditorialTopicDefinitionGateReceipt",
+    "ScriptQualificationRun",
+    "ScriptQualificationReceipt",
     "AccessibilityQCReport",
     "AssetManifestSnapshot",
     "CaptionTrackSnapshot",

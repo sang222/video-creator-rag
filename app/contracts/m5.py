@@ -369,6 +369,8 @@ class EditorialIdeaCandidateCreate(BaseModel):
     context_pack_snapshot_id: uuid.UUID | None = None
     channel_state_pack_snapshot_id: uuid.UUID | None = None
     stage: EditorialIdeaCandidateStage = "RESEARCHED"
+    parent_candidate_id: uuid.UUID | None = None
+    topic_repair_depth: int = Field(default=0, ge=0, le=2)
     proposed_title: str = Field(min_length=1)
     proposed_angle: str | None = None
     proposed_format: str | None = None
@@ -468,6 +470,8 @@ class EditorialIdeaCandidateRead(BaseModel):
     channel_state_pack_snapshot_id: uuid.UUID | None
     llm_run_snapshot_id: uuid.UUID | None
     stage: EditorialIdeaCandidateStage
+    parent_candidate_id: uuid.UUID | None
+    topic_repair_depth: int
     proposed_title: str
     proposed_angle: str | None
     proposed_format: str | None

@@ -303,7 +303,7 @@ class LongFormPublishSlot(Base):
         Index("ix_long_form_publish_slots_run", "launch_run_id"),
         Index("ix_long_form_publish_slots_intended", "intended_publish_at"),
         CheckConstraint(
-            "state in ('OPEN','RESERVED','FULFILLED','SKIPPED','CANCELED')",
+            "state in ('OPEN','QUALIFICATION_RESERVED','RESERVED','FULFILLED','SKIPPED','CANCELED')",
             name="ck_long_form_publish_slots_state",
         ),
         CheckConstraint(
@@ -337,6 +337,9 @@ class CadenceEvaluationReceipt(Base):
     )
     production_workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("production_workflow_runs.id")
+    )
+    script_qualification_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("script_qualification_runs.id")
     )
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -373,7 +376,7 @@ class CadenceEvaluationReceipt(Base):
         ),
         CheckConstraint(
             "decision in ("
-            "'START_LONG_FORM_PRODUCTION','WAIT_BUFFER_FULL',"
+            "'START_LONG_FORM_PRODUCTION','START_SCRIPT_QUALIFICATION','WAIT_BUFFER_FULL',"
             "'WAIT_NO_ELIGIBLE_CANDIDATE','WAIT_ACTIVE_PRODUCTION',"
             "'WAIT_OUTSIDE_PRODUCTION_HORIZON','WAIT_BUDGET_BLOCKED',"
             "'WAIT_PROVIDER_AUTHORITY','WAIT_POLICY_OR_RIGHTS_BLOCKED',"
