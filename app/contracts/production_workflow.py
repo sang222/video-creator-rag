@@ -332,7 +332,7 @@ class ProductionWorkflowList(BaseModel):
 
 class DeadLetterRetryRead(BaseModel):
     dead_letter_job_id: uuid.UUID
-    workflow_run_id: uuid.UUID
+    workflow_run_id: uuid.UUID | None = None
     domain_event_id: uuid.UUID
     command_id: str
     replay_state: str

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+
+from sqlalchemy import select
 
 from app.contracts.script_qualification import (
     AssignmentObservation,
@@ -12,12 +16,20 @@ from app.contracts.script_qualification import (
 )
 from app.db.models.m5 import EditorialIdeaCandidate
 from app.db.models.script_qualification import ScriptQualificationRun
+from app.db.models.foundation import DomainEvent
+from app.db.models.ops import DeadLetterJob
+from app.services.outbox_dispatcher import DurableOutboxDispatcher
 from app.services.script_qualification import (
     ScriptQualificationService,
     TopicDefinitionService,
     canonical_hash,
     script_hash,
     span_hash,
+)
+from app.contracts.production_package import ProductionDurationContractV2
+from app.services.v2_support_authority import (
+    V2SupportAuthorityService,
+    V2SupportProductionContext,
 )
 from tests.qualification.conftest import QualificationFactory
 
@@ -168,3 +180,340 @@ def test_undeclared_or_partially_supported_material_claim_blocks(db_session):
     assert "SCRIPT_MATERIAL_CLAIM_UNDECLARED" in receipts["inventory"]["reason_codes"]
     assert receipts["grounding"]["status"] == "BLOCK"
     assert "SCRIPT_CLAIM_PARTIALLY_SUPPORTED" in receipts["grounding"]["reason_codes"]
+
+
+def test_assignment_contains_angle_scope_action_and_mode_specific_obligation(db_session):
+    service = ScriptQualificationService(db_session)
+    candidate = SimpleNamespace(proposed_title="Bounded walkthrough", proposed_angle="Compare the documented boundary before adopting it.")
+    standalone = SimpleNamespace(
+        id=uuid.uuid4(), topic_definition_hash="a" * 64,
+        subject_canonical_id="official-document:one", subject_name="One",
+        central_question_or_thesis="What is actually documented?",
+        target_audience="Small teams", audience_problem="Need a safe decision.",
+        scope_inclusions=["The documented setup boundary"], exclusions=["Undocumented ROI"],
+        learning_outcome="Separate evidence from inference.", viewer_value="A bounded decision frame.",
+        content_mode="STANDALONE", series_binding=None,
+    )
+    assignment = service._assignment(candidate, standalone)
+    required = {item["requirement_id"] for item in assignment["required_requirement_units"]}
+    assert {"subject", "accepted-angle", "question", "audience", "scope-inclusion:1", "outcome", "viewer-value", "viewer-action", "self-containment"} <= required
+
+    episode = SimpleNamespace(**{**standalone.__dict__, "content_mode": "SERIES_EPISODE", "series_binding": {"episode_delta": "Explains the operational limit not covered by episode one."}})
+    episode_assignment = service._assignment(candidate, episode)
+    episode_required = {item["requirement_id"] for item in episode_assignment["required_requirement_units"]}
+    assert "episode-delta" in episode_required
+    assert "self-containment" not in episode_required
+
+
+def test_out_of_scope_assignment_observation_blocks(db_session):
+    run, draft, verifier = _qualified_inputs()
+    verifier.assignment_fulfillment_observations[0] = AssignmentObservation(
+        requirement_id="subject", status="OUT_OF_SCOPE", reason_codes=["forbidden scope used"]
+    )
+    receipts = ScriptQualificationService(db_session)._semantic_receipts(
+        run, draft, verifier, ScriptQualificationService(db_session)._structural_receipt(run, draft)
+    )
+    assert receipts["fulfillment"]["status"] == "BLOCK"
+    assert "SCRIPT_ASSIGNMENT_OUT_OF_SCOPE:subject" in receipts["fulfillment"]["reason_codes"]
+
+
+def test_duplicate_section_purpose_blocks_but_justified_role_reuse_passes(db_session):
+    run, draft, verifier = _qualified_inputs()
+    service = ScriptQualificationService(db_session)
+    verifier.section_purpose_observations[2] = SectionPurposeObservation(
+        section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["outcome"],
+        editorial_delta="Establishes the bounded subject.", genericity_state="SPECIFIC",
+    )
+    blocked = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    assert "SCRIPT_SECTION_PURPOSE_DUPLICATE" in blocked["fulfillment"]["reason_codes"]
+
+    verifier.section_purpose_observations[2] = SectionPurposeObservation(
+        section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["outcome", "viewer-value", "self-containment"],
+        editorial_delta="Returns to the opening question with a distinct viewer decision.",
+        genericity_state="SPECIFIC", role_reuse_justification="The closing hook reframes the decision after the evidence walk-through.",
+    )
+    passed = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    assert passed["fulfillment"]["status"] == "PASS"
+
+
+def test_verifier_must_reference_the_writer_exact_evidence_span_ids(db_session):
+    run, draft, verifier = _qualified_inputs()
+    run.factual_evidence_pack["spans"].append({
+        "evidence_span_id": "evidence-2", "evidence_id": "00000000-0000-0000-0000-000000000001",
+        "text": "Another exact evidence span with a distinct identity.", "source_snapshot_hash": "b" * 64,
+    })
+    verifier.material_claim_inventory[0] = verifier.material_claim_inventory[0].model_copy(
+        update={"factual_evidence_span_ids": ["evidence-2"]}
+    )
+    service = ScriptQualificationService(db_session)
+    receipts = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    assert receipts["grounding"]["status"] == "BLOCK"
+    assert "SCRIPT_MATERIAL_CLAIM_EVIDENCE_SPAN_MISMATCH" in receipts["grounding"]["reason_codes"]
+
+
+def test_qualification_frozen_sources_preserve_multi_source_long_exact_spans():
+    long_text = "Official evidence " + ("x" * 1500)
+    first_id, second_id = uuid.uuid4(), uuid.uuid4()
+    spans = [
+        {
+            "evidence_span_id": f"search_demand_evidence:{first_id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(first_id),
+            "canonical_url": "https://docs.example.test/one", "authority_purpose": "CLAIM_SOURCE", "evidence_source_type": "OFFICIAL_DOCUMENT",
+            "source_class": "OFFICIAL_DOCUMENTATION", "source_classification": "TOPIC_CAPABLE", "source_snapshot_hash": "a" * 64,
+            "text": long_text, "start_byte": 0, "end_byte": len(long_text.encode("utf-8")), "span_hash": span_hash(long_text),
+            "freshness_state": "FRESH", "source_quality_state": "PASS",
+        },
+        {
+            "evidence_span_id": f"search_demand_evidence:{second_id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(second_id),
+            "canonical_url": "https://docs.example.test/two", "authority_purpose": "CLAIM_SOURCE", "evidence_source_type": "OFFICIAL_MANUAL",
+            "source_class": "OFFICIAL_DOCUMENTATION", "source_classification": "TOPIC_CAPABLE", "source_snapshot_hash": "b" * 64,
+            "text": "A distinct source span is preserved independently.", "start_byte": 0, "end_byte": 50, "span_hash": span_hash("A distinct source span is preserved independently."),
+            "freshness_state": "FRESH", "source_quality_state": "PASS",
+        },
+    ]
+    # Keep offsets faithful to the exact source text in the fixture.
+    spans[1]["end_byte"] = len(spans[1]["text"].encode("utf-8"))
+    evidence = {"spans": spans}
+    content = {"qualified_script": {"canonical_script": "placeholder", "language": "en", "sections": [{"section_id": "one", "heading": "One", "narration": "placeholder"}], "claims": []}, "factual_evidence_pack": evidence, "memory_digest": {"status": "EMPTY_SAFE_DIGEST"}, "producer_provenance": {}}
+    receipt = SimpleNamespace(content=content, factual_evidence_pack_hash=canonical_hash(evidence))
+    sources = V2SupportAuthorityService._qualification_frozen_sources(receipt)
+
+    assert {(source.type, source.id) for source in sources} == {("search_demand_evidence", first_id), ("search_demand_evidence", second_id)}
+    first = next(source for source in sources if source.id == first_id)
+    assert first.evidence_spans[0].text == long_text
+    assert first.fact_statements == [long_text]
+
+
+def test_support_projects_qualification_provenance_and_memory_without_new_retrieval(db_session):
+    evidence_id = uuid.uuid4()
+    evidence_text = "The official workflow document defines a bounded verification sequence for small teams."
+    script_lines = [
+        "The documented workflow establishes a bounded verification sequence before a team acts.",
+        "That evidence boundary answers the central decision question without inventing performance claims.",
+        "A small team can use the documented sequence as its next verification action.",
+    ]
+    script_payload = QualifiedScriptOutput(
+        canonical_script=" ".join(script_lines), language="en",
+        sections=[
+            {"section_id": "hook", "heading": "Hook", "narration": script_lines[0]},
+            {"section_id": "body", "heading": "Body", "narration": script_lines[1]},
+            {"section_id": "close", "heading": "Close", "narration": script_lines[2]},
+        ],
+        claims=[
+            {"claim_id": f"claim-{index}", "claim_text": line, "evidence_span_ids": [f"search_demand_evidence:{evidence_id}:0"]}
+            for index, line in enumerate(script_lines, start=1)
+        ],
+    ).model_dump(mode="json")
+    evidence_pack = {"spans": [{
+        "evidence_span_id": f"search_demand_evidence:{evidence_id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(evidence_id),
+        "canonical_url": "https://docs.example.test/bounded-workflow", "authority_purpose": "CLAIM_SOURCE", "evidence_source_type": "OFFICIAL_DOCUMENT",
+        "source_class": "OFFICIAL_DOCUMENTATION", "source_classification": "TOPIC_CAPABLE", "source_snapshot_hash": "d" * 64,
+        "text": evidence_text, "start_byte": 0, "end_byte": len(evidence_text.encode("utf-8")), "span_hash": span_hash(evidence_text),
+        "freshness_state": "FRESH", "source_quality_state": "PASS",
+    }]}
+    memory_without_retrieval = {"status": "EMPTY_SAFE_DIGEST", "digest_type": "EMPTY_SAFE_DIGEST"}
+    memory_without_retrieval["digest_hash"] = canonical_hash(memory_without_retrieval)
+    writer_input_hash = "1" * 64
+    provenance = {"writer": {
+        "producer_input_hash": writer_input_hash,
+        "producer_output_hash": canonical_hash(script_payload),
+        "prompt_version": "script-writer-assignment.v1", "lane_name": "long_context_text",
+        "selected_model": "gpt-5.6-luna", "fallback_level": "PRIMARY",
+        "route_attempt_id": str(uuid.uuid4()), "provider_attempt_id": str(uuid.uuid4()),
+        "llm_run_snapshot_id": str(uuid.uuid4()),
+    }}
+    receipt_content = {
+        "qualified_script": script_payload, "factual_evidence_pack": evidence_pack,
+        "memory_digest": memory_without_retrieval, "producer_provenance": provenance,
+    }
+    receipt = SimpleNamespace(
+        content=receipt_content, content_hash=canonical_hash(receipt_content),
+        factual_evidence_pack_hash=canonical_hash(evidence_pack),
+    )
+    profile_id, policy_id = uuid.uuid4(), uuid.uuid4()
+    duration = ProductionDurationContractV2(
+        minimum_duration_ms=1_000, target_duration_ms=10_000, maximum_duration_ms=20_000,
+        duration_contract_version="test", source_profile_version_id=profile_id, source_policy_snapshot_id=policy_id,
+        duration_contract_hash=ProductionDurationContractV2.calculate_hash(
+            minimum_duration_ms=1_000, target_duration_ms=10_000, maximum_duration_ms=20_000,
+            duration_contract_version="test", source_profile_version_id=profile_id, source_policy_snapshot_id=policy_id,
+        ),
+    )
+    sources = V2SupportAuthorityService._qualification_frozen_sources(receipt)
+    context = V2SupportProductionContext(
+        video_project_id=uuid.uuid4(), production_lane="LONG_FORM", title="Bounded Workflow",
+        expected_language="en", duration_contract=duration, frozen_sources=sources,
+        memory_guidance_digest=memory_without_retrieval,
+    )
+    validated = V2SupportAuthorityService(db_session)._qualified_validated(
+        qualification_receipt=receipt, context=context
+    )
+
+    producer = validated["script"].producer_receipt
+    assert producer.producer_input_hash == writer_input_hash
+    assert producer.producer_output_hash == canonical_hash(script_payload)
+    assert producer.qualification_receipt_hash == receipt.content_hash
+    assert context.memory_guidance_digest == memory_without_retrieval
+    assert validated["claim_bindings"][0].evidence_span_refs[0].text == evidence_text
+
+
+def _qualified_outbox_authority(db_session):
+    """Reserve a real cadence-owned qualification event and seal a PASS fixture."""
+
+    from app.contracts.launch_cadence import CadenceEvaluationCommand
+    from app.core.actor import _system_worker_actor
+    from app.services.launch_cadence import LongFormCadenceService
+    from tests.test_long_form_launch_cadence import (
+        _active_launch_run,
+        _actor,
+        _approved_launch_policy,
+        _bind_current_topic_authority,
+        _fixture_qualification_pass,
+        _greenlit_candidate,
+        _ready_provider_snapshot,
+        _test_support_authority_preparer,
+    )
+
+    scope = QualificationFactory(db_session).channel_scope(
+        name="Qualification Outbox", strict_long_form=True
+    )
+    policy, admin_actor, _ = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=datetime(2026, 7, 20).date()
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_current_topic_authority(db_session, candidate)
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    cadence = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    )
+    evaluation = cadence.evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="qualification-outbox"),
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    assert evaluation.script_qualification_run_id is not None
+    qualification = _fixture_qualification_pass(
+        db_session, evaluation.script_qualification_run_id
+    )
+    event = db_session.scalar(
+        select(DomainEvent).where(
+            DomainEvent.aggregate_id == qualification.id,
+            DomainEvent.event_type == "script_qualification.execute.v1",
+        )
+    )
+    assert event is not None
+    # Reservation uses the qualification service's own clock; make this
+    # outbox fixture explicitly due for the deterministic dispatcher clock.
+    event.next_attempt_at = now
+    db_session.flush()
+    return scope, now, qualification, event
+
+
+def test_qualified_finalization_retry_never_reinvokes_producers(db_session):
+    _scope, now, qualification, event = _qualified_outbox_authority(db_session)
+    dispatcher = DurableOutboxDispatcher(db_session, now=lambda: now)
+    claim = dispatcher.claim_next(worker_id="qualification-retry-worker")
+    assert claim is not None and claim.event_id == event.id
+    disposition = dispatcher.record_failure(
+        event_id=event.id,
+        worker_id="qualification-retry-worker",
+        error=RuntimeError("admission transaction failed"),
+    )
+    assert disposition.retry_scheduled is True
+    assert event.last_error_code == "SCRIPT_QUALIFICATION_FINALIZATION_FAILED"
+
+    calls = {"writer": 0, "verifier": 0}
+
+    class _NeverInvokeProducer:
+        def write(self, *_args, **_kwargs):
+            calls["writer"] += 1
+            raise AssertionError("writer must not be replayed after qualification PASS")
+
+        def verify(self, *_args, **_kwargs):
+            calls["verifier"] += 1
+            raise AssertionError("verifier must not be replayed after qualification PASS")
+
+    assert ScriptQualificationService(db_session, producer=_NeverInvokeProducer()).execute(qualification.id).state == "QUALIFIED"
+    assert calls == {"writer": 0, "verifier": 0}
+
+
+def test_qualification_shutdown_and_expired_lease_reconcile_without_orphaning(db_session):
+    _scope, now, qualification, event = _qualified_outbox_authority(db_session)
+    dispatcher = DurableOutboxDispatcher(db_session, now=lambda: now)
+    event.lease_owner = "qualification-shutdown-worker"
+    event.lease_expires_at = now + timedelta(seconds=30)
+    db_session.flush()
+    assert dispatcher.release_worker_leases(worker_id="qualification-shutdown-worker") == 1
+    assert event.lease_owner is None
+    assert event.next_attempt_at == now
+
+    event.lease_owner = "qualification-expired-worker"
+    event.lease_expires_at = now - timedelta(seconds=1)
+    db_session.flush()
+    assert dispatcher.reclaim_expired() == 1
+    assert event.dead_lettered_at is None
+    assert qualification.state == "QUALIFIED"
+    assert event.next_attempt_at == now
+
+
+def test_unknown_provider_outcome_fails_closed_after_worker_restart(db_session):
+    _scope, now, qualification, event = _qualified_outbox_authority(db_session)
+    qualification.state = "WRITER_DISPATCHED"
+    event.lease_owner = "crashed-qualification-worker"
+    event.lease_expires_at = now - timedelta(seconds=1)
+    db_session.flush()
+    dispatcher = DurableOutboxDispatcher(db_session, now=lambda: now)
+    assert dispatcher.reclaim_expired() == 1
+
+    class _NeverRetryProvider:
+        def write(self, *_args, **_kwargs):
+            raise AssertionError("unknown writer outcome must fail closed")
+
+        def verify(self, *_args, **_kwargs):
+            raise AssertionError("unknown verifier outcome must fail closed")
+
+    result = ScriptQualificationService(
+        db_session, producer=_NeverRetryProvider()
+    ).execute(qualification.id)
+    assert result.state == "BLOCKED_NON_REPAIRABLE"
+    assert result.failure_receipt["reason_codes"] == [
+        "SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY"
+    ]
+
+
+def test_only_qualified_finalization_dead_letters_are_replayable(db_session):
+    scope, now, qualification, event = _qualified_outbox_authority(db_session)
+    dispatcher = DurableOutboxDispatcher(db_session, now=lambda: now)
+    event.lease_owner = "qualification-dead-letter-worker"
+    event.lease_expires_at = now + timedelta(seconds=30)
+    event.attempt_count = event.max_attempts
+    db_session.flush()
+    disposition = dispatcher.record_failure(
+        event_id=event.id,
+        worker_id="qualification-dead-letter-worker",
+        error=RuntimeError("final admission still unavailable"),
+    )
+    assert disposition.retry_scheduled is False
+    assert disposition.dead_letter_job_id is not None
+    job = db_session.get(DeadLetterJob, disposition.dead_letter_job_id)
+    assert job is not None and job.workflow_run_id is None and job.retry_eligible is True
+
+    from app.contracts.production_workflow import DeadLetterRetryRequest
+    from tests.test_long_form_launch_cadence import _actor
+
+    replay = dispatcher.retry_dead_letter(
+        dead_letter_job_id=job.id,
+        company_id=scope.company.id,
+        data=DeadLetterRetryRequest(reason_code="RETRY_FINAL_ADMISSION", additional_attempts=1),
+        actor=_actor(db_session, scope, admin=True),
+    )
+    assert replay.workflow_run_id is None
+    assert event.dead_lettered_at is None
+    assert qualification.state == "QUALIFIED"

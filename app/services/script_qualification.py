@@ -439,8 +439,11 @@ class ScriptQualificationService:
             event_version=1, aggregate_type=SCRIPT_QUALIFICATION_AGGREGATE_TYPE, aggregate_id=run.id,
             company_id=candidate.company_id, channel_workspace_id=candidate.channel_workspace_id, workflow_run_id=None,
             correlation_id=f"script-qualification:{run.id}", command_id=command_id, payload_hash=canonical_hash(payload), payload=payload,
-            metadata_={"queue_name": "production-workflow", "retry_policy": {"policy_key": "script-qualification-v1", "automatic_retry_allowed": False, "provider_substitution_allowed": False}},
-            attempt_count=0, max_attempts=1, next_attempt_at=self.now(), occurred_at=self.now(),
+            metadata_={"queue_name": "production-workflow", "retry_policy": {"policy_key": "script-qualification-v1", "automatic_retry_allowed": False, "provider_substitution_allowed": False, "finalization_retry_allowed": True}},
+            # Provider execution is never retried.  The extra bounded attempts
+            # are reserved solely for a zero-provider-spend final-admission
+            # replay after the qualification receipt has already been sealed.
+            attempt_count=0, max_attempts=3, next_attempt_at=self.now(), occurred_at=self.now(),
         ))
         self.session.flush()
         return run
@@ -460,14 +463,21 @@ class ScriptQualificationService:
         run.state = "WRITER_DISPATCHED"
         self.session.flush()
         self.session.commit()
+        writer_context = self._writer_context(run)
         try:
-            writer_output, writer_receipt = self.producer.write(self._writer_context(run), idempotency_key=run.writer_attempt_key)
+            writer_output, writer_receipt = self.producer.write(writer_context, idempotency_key=run.writer_attempt_key)
             draft = QualifiedScriptOutput.model_validate(writer_output)
         except Exception as exc:
             return self._block_after_dispatch(run.id, "SCRIPT_WRITER_FAILED", exc)
         run = self._locked(run.id)
         run.script_payload = draft.model_dump(mode="json")
-        run.writer_receipt = writer_receipt
+        run.writer_receipt = self._freeze_producer_provenance(
+            receipt=writer_receipt,
+            input_context=writer_context,
+            accepted_output=draft.model_dump(mode="json"),
+            prompt_version=run.writer_prompt_version,
+            attempt_key=run.writer_attempt_key,
+        )
         run.state = "SCRIPT_GENERATED"
         self.session.flush()
         self.session.commit()
@@ -482,13 +492,20 @@ class ScriptQualificationService:
         run.state = "VERIFIER_DISPATCHED"
         self.session.flush()
         self.session.commit()
+        verifier_context = self._verifier_context(run, draft)
         try:
-            verifier_output, verifier_receipt = self.producer.verify(self._verifier_context(run, draft), idempotency_key=run.verifier_attempt_key)
+            verifier_output, verifier_receipt = self.producer.verify(verifier_context, idempotency_key=run.verifier_attempt_key)
             verifier = SemanticVerificationOutput.model_validate(verifier_output)
         except Exception as exc:
             return self._block_after_dispatch(run.id, "SCRIPT_VERIFIER_FAILED", exc)
         run = self._locked(run.id)
-        run.verifier_receipt = verifier_receipt
+        run.verifier_receipt = self._freeze_producer_provenance(
+            receipt=verifier_receipt,
+            input_context=verifier_context,
+            accepted_output=verifier.model_dump(mode="json"),
+            prompt_version=run.verifier_prompt_version,
+            attempt_key=run.verifier_attempt_key,
+        )
         receipts = self._semantic_receipts(run, draft, verifier, structural)
         result = "PASS" if all(item["status"] in {"PASS", "PASS_EMPTY"} for item in receipts.values()) else "BLOCK"
         if result == "PASS":
@@ -512,7 +529,30 @@ class ScriptQualificationService:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_CANDIDATE_MISMATCH")
         if receipt.script_assignment_hash != run.script_assignment_hash or receipt.factual_evidence_pack_hash != run.factual_evidence_pack_hash:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_STALE")
+        content = receipt.content if isinstance(receipt.content, dict) else {}
+        if "qualified_script" in content and (
+            canonical_hash(content) != receipt.content_hash
+            or content.get("script_hash") != receipt.script_hash
+            or content.get("assignment_hash") != receipt.script_assignment_hash
+            or content.get("evidence_pack_hash") != receipt.factual_evidence_pack_hash
+        ):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_CONTENT_HASH_MISMATCH")
         return receipt
+
+    @staticmethod
+    def qualification_output(receipt: ScriptQualificationReceipt) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Read the immutable qualification projection carried by its receipt."""
+
+        content = receipt.content if isinstance(receipt.content, dict) else {}
+        script = content.get("qualified_script")
+        evidence = content.get("factual_evidence_pack")
+        memory = content.get("memory_digest")
+        provenance = content.get("producer_provenance")
+        if not all(isinstance(item, dict) for item in (script, evidence, memory, provenance)):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_OUTPUT_MISSING")
+        if canonical_hash(evidence) != receipt.factual_evidence_pack_hash:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_EVIDENCE_PACK_MISMATCH")
+        return dict(script), dict(evidence), dict(memory), dict(provenance)
 
     def _locked(self, run_id: uuid.UUID) -> ScriptQualificationRun:
         run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run_id).with_for_update())
@@ -523,13 +563,26 @@ class ScriptQualificationService:
     def _assignment(self, candidate: EditorialIdeaCandidate, topic: EditorialTopicDefinition) -> dict[str, Any]:
         units = [
             {"requirement_id": "subject", "requirement_type": "SUBJECT_PRESERVATION", "required": True, "obligation": topic.subject_name},
+            {"requirement_id": "accepted-angle", "requirement_type": "ACCEPTED_ANGLE", "required": True, "obligation": candidate.proposed_angle},
             {"requirement_id": "question", "requirement_type": "CENTRAL_QUESTION_ANSWER", "required": True, "obligation": topic.central_question_or_thesis},
             {"requirement_id": "audience", "requirement_type": "AUDIENCE_PROBLEM", "required": True, "obligation": topic.audience_problem},
             {"requirement_id": "outcome", "requirement_type": "LEARNING_OUTCOME", "required": True, "obligation": topic.learning_outcome},
             {"requirement_id": "viewer-value", "requirement_type": "VIEWER_VALUE", "required": True, "obligation": topic.viewer_value},
+            {"requirement_id": "viewer-action", "requirement_type": "VIEWER_ACTION_OR_DECISION", "required": True, "obligation": "Give the viewer a bounded next verification or adoption decision."},
         ]
+        units.extend(
+            {
+                "requirement_id": f"scope-inclusion:{index}",
+                "requirement_type": "REQUIRED_SCOPE_INCLUSION",
+                "required": True,
+                "obligation": inclusion,
+            }
+            for index, inclusion in enumerate(topic.scope_inclusions, start=1)
+        )
         if topic.content_mode == "STANDALONE":
             units.append({"requirement_id": "self-containment", "requirement_type": "STANDALONE_SELF_CONTAINMENT", "required": True, "obligation": "The narration must stand alone without a previous episode."})
+        else:
+            units.append({"requirement_id": "episode-delta", "requirement_type": "EPISODE_DELTA", "required": True, "obligation": _clean((topic.series_binding or {}).get("episode_delta"))})
         body = {
             "schema_version": "script-assignment.v1", "topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash,
             "subject_canonical_id": topic.subject_canonical_id, "subject_name": topic.subject_name, "candidate_title": candidate.proposed_title,
@@ -546,6 +599,7 @@ class ScriptQualificationService:
 
     def _factual_evidence_pack(self, candidate: EditorialIdeaCandidate, assignment: dict[str, Any]) -> dict[str, Any]:
         entries: list[dict[str, Any]] = []
+        seen_source_ids: set[uuid.UUID] = set()
         for ref in candidate.evidence_refs or []:
             if not isinstance(ref, dict) or not ref.get("id"):
                 continue
@@ -553,19 +607,30 @@ class ScriptQualificationService:
                 evidence = self.session.get(SearchDemandEvidence, uuid.UUID(str(ref["id"])))
             except ValueError:
                 evidence = None
-            if evidence is None or evidence.authority_purpose != "CLAIM_SOURCE" or evidence.evidence_source_type != "OFFICIAL_DOCUMENT":
+            if evidence is None or evidence.authority_purpose != "CLAIM_SOURCE" or evidence.evidence_source_type not in {"OFFICIAL_DOCUMENT", "OFFICIAL_MANUAL"}:
+                continue
+            if evidence.id in seen_source_ids:
                 continue
             snapshot = _source_snapshot(evidence)
             text = _clean(snapshot.get("content_excerpt"))
-            if not text or snapshot.get("freshness_state") != "FRESH" or snapshot.get("quality_decision") != "PASS":
+            snapshot_hash = _clean(snapshot.get("content_hash"))
+            if (
+                not text
+                or not re.fullmatch(r"[0-9a-f]{64}", snapshot_hash)
+                or snapshot.get("freshness_state") != "FRESH"
+                or snapshot.get("quality_decision") != "PASS"
+                or not _clean(snapshot.get("source_class"))
+            ):
                 continue
             if classify_source(evidence) == "DISCOVERY_ONLY":
                 continue
+            seen_source_ids.add(evidence.id)
             excerpt = text[:8000]
             entries.append({
-                "evidence_span_id": f"evidence:{evidence.id}:0", "evidence_id": str(evidence.id), "canonical_url": snapshot.get("canonical_url") or evidence.source_ref,
-                "source_class": snapshot.get("source_class"), "retrieval_receipt": ((evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get("fetch_receipt"),
-                "source_snapshot_hash": snapshot.get("content_hash"), "text": excerpt, "start_byte": 0,
+                "evidence_span_id": f"search_demand_evidence:{evidence.id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(evidence.id), "canonical_url": snapshot.get("canonical_url") or evidence.source_ref,
+                "authority_purpose": evidence.authority_purpose, "evidence_source_type": evidence.evidence_source_type,
+                "source_class": snapshot.get("source_class"), "source_classification": classify_source(evidence), "retrieval_receipt": ((evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get("fetch_receipt"),
+                "source_snapshot_hash": snapshot_hash, "text": excerpt, "start_byte": 0,
                 "end_byte": len(excerpt.encode("utf-8")), "span_hash": span_hash(excerpt), "freshness_state": "FRESH", "source_quality_state": "PASS",
                 "allowed_claim_boundaries": ["Only claims entailed by this exact snapshot span"],
                 "assignment_requirement_ids": [item["requirement_id"] for item in assignment["required_requirement_units"]],
@@ -589,7 +654,7 @@ class ScriptQualificationService:
         return {"script_assignment": run.script_assignment, "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "writer_output_contract": "canonical_script, language, sections, claims with factual evidence span ids; writer claims are hints only", "forbidden": ["Do not use planning authority or memory as factual evidence.", "Do not assert facts outside exact factual evidence spans."]}
 
     def _verifier_context(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
-        return {"script_assignment": run.script_assignment, "factual_evidence_pack": run.factual_evidence_pack, "canonical_script": draft.canonical_script, "sections": [item.model_dump(mode="json") for item in draft.sections], "writer_claims": [item.model_dump(mode="json") for item in draft.claims], "verifier_output_contract": "complete material claim inventory, entailment observations, assignment fulfillment observations, section purposes, and memory application observations. Never return a final PASS."}
+        return {"script_assignment": run.script_assignment, "factual_evidence_pack": run.factual_evidence_pack, "canonical_script": draft.canonical_script, "sections": [item.model_dump(mode="json") for item in draft.sections], "writer_claims": [item.model_dump(mode="json") for item in draft.claims], "verifier_output_contract": "complete material claim inventory, entailment observations, assignment fulfillment observations, section purposes, and memory application observations. Emit OUT_OF_SCOPE for any forbidden-scope violation. Never return a final PASS."}
 
     def _structural_receipt(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
         script = unicodedata.normalize("NFC", draft.canonical_script).replace("\r\n", "\n").replace("\r", "\n")
@@ -638,7 +703,7 @@ class ScriptQualificationService:
                     declared_text = re.sub(r"\s+", " ", writer_claim.claim_text).casefold()
                     if declared_text not in observed_text and observed_text not in declared_text:
                         inventory_reasons.append("SCRIPT_WRITER_CLAIM_SPAN_MISMATCH")
-                    if any(evidence_id not in evidence for evidence_id in writer_claim.evidence_span_ids):
+                    if len(writer_claim.evidence_span_ids) != len(set(writer_claim.evidence_span_ids)) or any(evidence_id not in evidence for evidence_id in writer_claim.evidence_span_ids):
                         inventory_reasons.append("SCRIPT_WRITER_CLAIM_EVIDENCE_UNBOUND")
                 if not observation.factual_evidence_span_ids:
                     inventory_reasons.append("SCRIPT_MATERIAL_CLAIM_UNBOUND")
@@ -648,6 +713,10 @@ class ScriptQualificationService:
                     grounding_reasons.append(f"SCRIPT_CLAIM_{observation.semantic_relation}")
                 if not observation.assignment_requirement_ids:
                     grounding_reasons.append("SCRIPT_CLAIM_ASSIGNMENT_IRRELEVANT")
+                if len(observation.factual_evidence_span_ids) != len(set(observation.factual_evidence_span_ids)):
+                    grounding_reasons.append("SCRIPT_MATERIAL_CLAIM_EVIDENCE_DUPLICATE")
+                if writer_claim is not None and set(observation.factual_evidence_span_ids) != set(writer_claim.evidence_span_ids):
+                    grounding_reasons.append("SCRIPT_MATERIAL_CLAIM_EVIDENCE_SPAN_MISMATCH")
                 for evidence_id in observation.factual_evidence_span_ids:
                     if evidence_id not in evidence:
                         grounding_reasons.append("SCRIPT_MATERIAL_CLAIM_UNBOUND")
@@ -710,6 +779,9 @@ class ScriptQualificationService:
         coverage_owners: dict[tuple[int, int], str] = {}
         if set(observed) - requirements:
             reasons.append("SCRIPT_ASSIGNMENT_UNKNOWN_REQUIREMENT_OBSERVATION")
+        for item in observed.values():
+            if item.status == "OUT_OF_SCOPE":
+                reasons.append(f"SCRIPT_ASSIGNMENT_OUT_OF_SCOPE:{item.requirement_id}")
         for requirement_id in requirements:
             item = observed.get(requirement_id)
             if item is None or item.status != "SUFFICIENT" or not item.spans or item.missing_reasoning_step:
@@ -720,11 +792,13 @@ class ScriptQualificationService:
                 if span.end_byte > len(script_bytes) or script_bytes[span.start_byte:span.end_byte] != span.text.encode("utf-8") or span_hash(span.text) != span.span_hash or not self._span_in_section(span, bounds):
                     reasons.append("SCRIPT_COVERAGE_MANIFEST_SPAN_INVALID")
                     continue
+                if any(evidence_span_id not in {item["evidence_span_id"] for item in (run.factual_evidence_pack or {}).get("spans", [])} for evidence_span_id in item.evidence_span_ids):
+                    reasons.append("SCRIPT_ASSIGNMENT_EVIDENCE_SPAN_UNBOUND")
                 key = (span.start_byte, span.end_byte)
                 owner = coverage_owners.setdefault(key, requirement_id)
                 if owner != requirement_id:
                     reasons.append("SCRIPT_ASSIGNMENT_COVERAGE_SPAN_REUSED")
-        seen_roles: set[str] = set()
+        observed_roles: dict[str, tuple[frozenset[str], str]] = {}
         observed_sections: set[str] = set()
         for section in verifier.section_purpose_observations:
             if section.section_id not in bounds or section.section_id in observed_sections:
@@ -732,9 +806,18 @@ class ScriptQualificationService:
             observed_sections.add(section.section_id)
             if section.genericity_state != "SPECIFIC" or not section.editorial_delta:
                 reasons.append("SCRIPT_SECTION_EDITORIAL_DELTA_MISSING")
-            if section.observed_primary_role in seen_roles:
-                reasons.append("SCRIPT_SECTION_PURPOSE_DUPLICATE")
-            seen_roles.add(section.observed_primary_role)
+            purpose = frozenset(section.fulfilled_requirement_ids)
+            delta = re.sub(r"\s+", " ", section.editorial_delta).strip().casefold()
+            previous = observed_roles.get(section.observed_primary_role)
+            if previous is not None:
+                previous_purpose, previous_delta = previous
+                if (
+                    not section.role_reuse_justification
+                    or purpose == previous_purpose
+                    or delta == previous_delta
+                ):
+                    reasons.append("SCRIPT_SECTION_PURPOSE_DUPLICATE")
+            observed_roles[section.observed_primary_role] = (purpose, delta)
         if observed_sections != set(bounds):
             reasons.append("SCRIPT_SECTION_PURPOSE_INCOMPLETE")
         total = len(requirements)
@@ -754,11 +837,40 @@ class ScriptQualificationService:
                 reasons.append("SCRIPT_MEMORY_MANDATORY_AVOID_PATTERN_VIOLATED")
         return reasons
 
+    @staticmethod
+    def _freeze_producer_provenance(
+        *,
+        receipt: dict[str, Any],
+        input_context: dict[str, Any],
+        accepted_output: dict[str, Any],
+        prompt_version: str,
+        attempt_key: str,
+    ) -> dict[str, Any]:
+        """Seal facts observed at the two producer boundaries.
+
+        The hashes are computed from the exact typed input handed to the
+        producer and the accepted typed response.  They are not derived later
+        from project/support state, which would fabricate a new provenance
+        story for an already-produced script.
+        """
+
+        body = dict(receipt or {})
+        body.update(
+            {
+                "producer_input_hash": canonical_hash(input_context),
+                "producer_output_hash": canonical_hash(accepted_output),
+                "prompt_version": prompt_version,
+                "attempt_key": attempt_key,
+                "model": str(body.get("selected_model") or LUNA_MODEL),
+            }
+        )
+        return body
+
     def _create_receipt(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput, result: str, receipts: dict[str, Any]) -> ScriptQualificationReceipt:
         existing = self.session.scalar(select(ScriptQualificationReceipt).where(ScriptQualificationReceipt.script_qualification_run_id == run.id))
         if existing is not None:
             return existing
-        body = {"schema_version": "script-qualification-receipt.v1", "run_id": str(run.id), "result": result, "script_hash": script_hash(draft.canonical_script), "assignment_hash": run.script_assignment_hash, "evidence_pack_hash": run.factual_evidence_pack_hash, "topic_definition_hash": run.topic_definition_hash, "receipts": receipts, "writer_receipt": run.writer_receipt, "verifier_receipt": run.verifier_receipt, "repair_attempts": run.repair_attempts}
+        body = {"schema_version": "script-qualification-receipt.v2", "run_id": str(run.id), "result": result, "script_hash": script_hash(draft.canonical_script), "assignment_hash": run.script_assignment_hash, "evidence_pack_hash": run.factual_evidence_pack_hash, "topic_definition_hash": run.topic_definition_hash, "receipts": receipts, "qualified_script": draft.model_dump(mode="json"), "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "producer_provenance": {"writer": run.writer_receipt, "verifier": run.verifier_receipt}, "repair_attempts": run.repair_attempts}
         receipt = ScriptQualificationReceipt(script_qualification_run_id=run.id, result=result, script_hash=body["script_hash"], script_assignment_hash=run.script_assignment_hash, factual_evidence_pack_hash=run.factual_evidence_pack_hash, content=body, content_hash=canonical_hash(body))
         self.session.add(receipt)
         return receipt

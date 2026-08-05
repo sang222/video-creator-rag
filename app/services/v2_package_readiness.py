@@ -676,8 +676,20 @@ def _validate_frozen_source_refs(
         "editorial_calendar_slot": admission.editorial_calendar_slot_id,
         "idea_market_preflight": admission.idea_market_preflight_id,
     }
-    source_by_type = {source.type: source for source in envelope.frozen_sources}
-    if len(source_by_type) != len(envelope.frozen_sources) or any(
+    builders: dict[str, tuple[type[Any], Any]] = {
+        "editorial_calendar_slot": (
+            EditorialCalendarSlot,
+            _editorial_slot_source,
+        ),
+        "idea_market_preflight": (IdeaMarketPreflight, _preflight_source),
+        "search_intent_map": (SearchIntentMap, _search_intent_source),
+        "audience_target_pack": (AudienceTargetPack, _audience_source),
+    }
+    planning_sources = [
+        source for source in envelope.frozen_sources if source.type in builders
+    ]
+    source_by_type = {source.type: source for source in planning_sources}
+    if len(source_by_type) != len(planning_sources) or any(
         source_by_type.get(source_type) is None
         or source_by_type[source_type].id != source_id
         for source_type, source_id in required_ids.items()
@@ -707,21 +719,8 @@ def _validate_frozen_source_refs(
             "V2_FROZEN_SUPPORT_TYPED_SOURCE_MISMATCH"
         )
 
-    builders: dict[str, tuple[type[Any], Any]] = {
-        "editorial_calendar_slot": (
-            EditorialCalendarSlot,
-            _editorial_slot_source,
-        ),
-        "idea_market_preflight": (IdeaMarketPreflight, _preflight_source),
-        "search_intent_map": (SearchIntentMap, _search_intent_source),
-        "audience_target_pack": (AudienceTargetPack, _audience_source),
-    }
-    for source in envelope.frozen_sources:
-        binding = builders.get(source.type)
-        if binding is None:
-            raise _support_envelope_integrity_error(
-                "V2_FROZEN_SUPPORT_SOURCE_TYPE_INVALID"
-            )
+    for source in planning_sources:
+        binding = builders[source.type]
         model, builder = binding
         row = context.session.get(model, source.id)
         try:
@@ -732,6 +731,45 @@ def _validate_frozen_source_refs(
             ) from exc
         if current is None or current != source:
             raise _support_envelope_integrity_error("V2_FROZEN_SUPPORT_SOURCE_DRIFT")
+
+    factual_sources = [
+        source
+        for source in envelope.frozen_sources
+        if source.type == "search_demand_evidence"
+    ]
+    if len(planning_sources) + len(factual_sources) != len(envelope.frozen_sources):
+        raise _support_envelope_integrity_error("V2_FROZEN_SUPPORT_SOURCE_TYPE_INVALID")
+    qualification_gate = next(
+        (
+            item
+            for item in envelope.gate_receipts
+            if isinstance(item, dict) and item.get("gate_key") == "script_qualification"
+        ),
+        None,
+    )
+    if factual_sources and not isinstance(qualification_gate, dict):
+        raise _support_envelope_integrity_error(
+            "V2_FROZEN_SUPPORT_QUALIFICATION_EVIDENCE_UNBOUND"
+        )
+    if qualification_gate is not None:
+        from app.services.script_qualification import ScriptQualificationService
+        from app.services.v2_support_authority import V2SupportAuthorityService
+
+        try:
+            qualification = ScriptQualificationService(context.session).require_pass(
+                uuid.UUID(str(qualification_gate["script_qualification_run_id"]))
+            )
+            expected = V2SupportAuthorityService._qualification_frozen_sources(
+                qualification
+            )
+        except Exception as exc:
+            raise _support_envelope_integrity_error(
+                "V2_FROZEN_SUPPORT_QUALIFICATION_EVIDENCE_DRIFT"
+            ) from exc
+        if factual_sources != expected:
+            raise _support_envelope_integrity_error(
+                "V2_FROZEN_SUPPORT_QUALIFICATION_EVIDENCE_DRIFT"
+            )
 
 
 def _validate_frozen_script_receipt(
@@ -846,14 +884,42 @@ def _validate_frozen_gate_receipts(
         expected["memory_guidance_digest"] = (
             envelope.memory_guidance_authority.content_hash
         )
+    qualification_gate = next(
+        (
+            item
+            for item in envelope.gate_receipts
+            if isinstance(item, dict) and item.get("gate_key") == "script_qualification"
+        ),
+        None,
+    )
+    if isinstance(qualification_gate, dict):
+        qualification_receipt_hash = qualification_gate.get("receipt_hash")
+        memory_hash = qualification_gate.get("memory_digest_hash")
+        if (
+            not isinstance(qualification_receipt_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", qualification_receipt_hash)
+            or not isinstance(memory_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", memory_hash)
+        ):
+            raise _support_envelope_integrity_error(
+                "V2_FROZEN_SUPPORT_QUALIFICATION_MEMORY_INVALID"
+            )
+        expected["script_qualification"] = qualification_receipt_hash
+        expected["qualification_memory_digest"] = memory_hash
     actual: dict[str, str] = {}
     for receipt in envelope.gate_receipts:
         if (
             not isinstance(receipt, dict)
-            or receipt.get("status") != "PASS"
             or not isinstance(receipt.get("gate_key"), str)
             or not isinstance(receipt.get("receipt_hash"), str)
             or receipt["gate_key"] in actual
+            or (
+                receipt.get("status") != "PASS"
+                and not (
+                    receipt.get("gate_key") == "qualification_memory_digest"
+                    and receipt.get("status") == "PASS_EMPTY"
+                )
+            )
         ):
             raise _support_envelope_integrity_error(
                 "V2_FROZEN_SUPPORT_GATE_RECEIPT_INVALID"
@@ -1683,6 +1749,12 @@ def _qualification_projection(
     grounding = gates.get("grounding") or {}
     fulfillment = gates.get("fulfillment") or {}
     memory = gates.get("memory") or {}
+    try:
+        _script, _evidence, qualification_memory, _provenance = (
+            ScriptQualificationService.qualification_output(receipt)
+        )
+    except ValidationFailureError as exc:
+        raise ValidationFailureError("V2_SCRIPT_QUALIFICATION_RECEIPT_INVALID") from exc
     if not (
         structural.get("status") == "PASS"
         and inventory.get("status") == "PASS"
@@ -1692,6 +1764,7 @@ def _qualification_projection(
         and structural.get("script_hash") == receipt.script_hash
         and grounding.get("assignment_hash") == receipt.script_assignment_hash
         and grounding.get("evidence_pack_hash") == receipt.factual_evidence_pack_hash
+        and gate.get("memory_digest_hash") == qualification_memory.get("digest_hash")
     ):
         raise ValidationFailureError("V2_SCRIPT_QUALIFICATION_RECEIPT_NOT_CURRENT")
     return {
@@ -1733,6 +1806,9 @@ def _claim_binding_payload(
         "evidence_ref": refs[0],
         "evidence_refs": refs,
         "source_excerpts": binding.source_excerpts,
+        "evidence_span_refs": [
+            span.model_dump(mode="json") for span in binding.evidence_span_refs
+        ],
         "binding_hash": binding.binding_hash,
     }
 

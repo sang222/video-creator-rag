@@ -80,6 +80,10 @@ class SectionPurposeObservation(_Strict):
     fulfilled_requirement_ids: list[str] = Field(default_factory=list)
     editorial_delta: str = Field(min_length=1)
     genericity_state: Literal["SPECIFIC", "GENERIC", "BOILERPLATE"]
+    # Roles are intentionally reusable when the verifier can explain why a
+    # second instance advances a distinct editorial purpose.  This must be a
+    # durable observation, rather than an implicit exception in the gate.
+    role_reuse_justification: str | None = None
 
 
 class SemanticVerificationOutput(_Strict):

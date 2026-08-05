@@ -991,33 +991,51 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
     assert receipt.script_qualification_run_id is not None
 
     class _PassingProducer:
-        sentences = [
-            "The documented audit workflow has a bounded scope.",
-            "It answers the central question with evidence first.",
-            "Small teams need the exact scope before acting.",
-            "The source establishes which workflow details are documented.",
-            "The viewer can use that boundary for the next decision.",
-            "This explanation stands alone without a prior episode.",
-        ]
-        section_ids = ["hook", "hook", "body", "body", "close", "close"]
+        sentences: list[str] = []
+        section_ids: list[str] = []
+
+        @staticmethod
+        def _receipt(*, idempotency_key: str, lane_name: str) -> dict[str, str]:
+            return {
+                "status": "SUCCESS",
+                "idempotency_key": idempotency_key,
+                "lane_name": lane_name,
+                "selected_model": "gpt-5.6-luna",
+                "fallback_level": "PRIMARY",
+                "route_attempt_id": str(uuid.uuid4()),
+                "provider_attempt_id": str(uuid.uuid4()),
+                "llm_run_snapshot_id": str(uuid.uuid4()),
+            }
 
         def write(self, context, *, idempotency_key):
             evidence_id = context["factual_evidence_pack"]["spans"][0]["evidence_span_id"]
+            requirements = [
+                item["requirement_id"]
+                for item in context["script_assignment"]["required_requirement_units"]
+            ]
+            self.sentences = [
+                f"The documented audit workflow fulfills the {requirement} obligation with its exact evidence boundary."
+                for requirement in requirements
+            ]
+            self.section_ids = [
+                "hook" if index < 3 else "body" if index < 6 else "close"
+                for index in range(len(self.sentences))
+            ]
             return (
                 {
                     "canonical_script": " ".join(self.sentences),
                     "language": "en",
                     "sections": [
-                        {"section_id": "hook", "heading": "Hook", "narration": " ".join(self.sentences[:2])},
-                        {"section_id": "body", "heading": "Body", "narration": " ".join(self.sentences[2:4])},
-                        {"section_id": "close", "heading": "Close", "narration": " ".join(self.sentences[4:])},
+                        {"section_id": "hook", "heading": "Hook", "narration": " ".join(self.sentences[:3])},
+                        {"section_id": "body", "heading": "Body", "narration": " ".join(self.sentences[3:6])},
+                        {"section_id": "close", "heading": "Close", "narration": " ".join(self.sentences[6:])},
                     ],
                     "claims": [
                         {"claim_id": f"writer-{index}", "claim_text": text, "evidence_span_ids": [evidence_id]}
                         for index, text in enumerate(self.sentences, start=1)
                     ],
                 },
-                {"status": "SUCCESS", "idempotency_key": idempotency_key},
+                    self._receipt(idempotency_key=idempotency_key, lane_name="long_context_text"),
             )
 
         def verify(self, context, *, idempotency_key):
@@ -1057,12 +1075,12 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
                         for index, requirement in enumerate(requirements)
                     ],
                     "section_purpose_observations": [
-                        {"section_id": "hook", "observed_primary_role": "HOOK", "fulfilled_requirement_ids": requirements[:2], "editorial_delta": "Establishes the bounded subject and question.", "genericity_state": "SPECIFIC"},
-                        {"section_id": "body", "observed_primary_role": "MECHANISM", "fulfilled_requirement_ids": requirements[2:4], "editorial_delta": "Connects scope to the audience decision.", "genericity_state": "SPECIFIC"},
-                        {"section_id": "close", "observed_primary_role": "CLOSING_INSIGHT", "fulfilled_requirement_ids": requirements[4:], "editorial_delta": "Turns the evidence boundary into a standalone next step.", "genericity_state": "SPECIFIC"},
+                        {"section_id": "hook", "observed_primary_role": "HOOK", "fulfilled_requirement_ids": requirements[:3], "editorial_delta": "Establishes the bounded subject, angle, and question.", "genericity_state": "SPECIFIC"},
+                        {"section_id": "body", "observed_primary_role": "MECHANISM", "fulfilled_requirement_ids": requirements[3:6], "editorial_delta": "Connects scope to the audience decision.", "genericity_state": "SPECIFIC"},
+                        {"section_id": "close", "observed_primary_role": "CLOSING_INSIGHT", "fulfilled_requirement_ids": requirements[6:], "editorial_delta": "Turns the evidence boundary into a standalone next step.", "genericity_state": "SPECIFIC"},
                     ],
                 },
-                {"status": "SUCCESS", "idempotency_key": idempotency_key},
+                    self._receipt(idempotency_key=idempotency_key, lane_name="gatekeeper_soft_review"),
             )
 
     qualification = ScriptQualificationService(
@@ -1076,6 +1094,13 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
     )
     assert qualification_receipt is not None
     assert qualification_receipt.result == "PASS"
+    provenance = qualification_receipt.content["producer_provenance"]
+    assert provenance["writer"]["producer_input_hash"]
+    assert provenance["writer"]["producer_output_hash"]
+    assert provenance["writer"]["prompt_version"] == qualification.writer_prompt_version
+    assert provenance["writer"]["route_attempt_id"]
+    assert provenance["verifier"]["producer_input_hash"]
+    assert qualification_receipt.content["memory_digest"]["status"] == "EMPTY_SAFE_DIGEST"
 
     admission, workflow = service.finalize_qualified_script_run(
         script_qualification_run_id=qualification.id,
@@ -1429,13 +1454,15 @@ def test_open_mix_admission_filters_series_outside_launch_policy(
     db_session.flush()
 
     producer_actor = _actor(db_session, scope)
-    _greenlit_candidate(db_session, scope, producer_actor)
-    receipt = LongFormCadenceService(
+    _, candidate, _ = _greenlit_candidate(db_session, scope, producer_actor)
+    _bind_current_topic_authority(db_session, candidate)
+    cadence = LongFormCadenceService(
         db_session,
         now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
         provider_readiness_snapshot=_ready_provider_snapshot,
         support_authority_preparer=_test_support_authority_preparer,
-    ).evaluate(
+    )
+    receipt = cadence.evaluate(
         launch_run_id=launch_run.id,
         data=CadenceEvaluationCommand(evaluation_key="open-mix-launch-guard"),
         actor=_system_worker_actor(
@@ -1444,9 +1471,21 @@ def test_open_mix_admission_filters_series_outside_launch_policy(
         ),
     )
 
-    assert receipt.admitted_video_project_id is not None
-    project = db_session.get(VideoProject, receipt.admitted_video_project_id)
-    assert receipt.decision == CadenceDecision.START_LONG_FORM_PRODUCTION
+    assert receipt.admitted_video_project_id is None
+    assert receipt.decision == CadenceDecision.START_SCRIPT_QUALIFICATION
+    assert receipt.script_qualification_run_id is not None
+    qualification = _fixture_qualification_pass(
+        db_session, receipt.script_qualification_run_id
+    )
+    admission, workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    project = db_session.get(VideoProject, admission.admitted_video_project_id)
+    assert project is not None
+    assert workflow.video_project_id == project.id
     assert project.content_mode == "SERIES_EPISODE"
     assert project.series_plan_id == plans[0].id
     assert project.series_run_id == allowed_run.id

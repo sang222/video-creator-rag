@@ -24,6 +24,7 @@ from app.core.errors import ConflictError, NotFoundError
 from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
 from app.db.models.ops import DeadLetterJob, OpsIncident
+from app.db.models.script_qualification import ScriptQualificationRun
 from app.db.models.production_workflow import (
     ProductionWorkflowRun,
     WorkflowCommandReceipt,
@@ -195,44 +196,65 @@ class DurableOutboxDispatcher:
             recovery_event = event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
             if cadence_event or qualification_event or analytics_event or recovery_event:
                 if event.command_id is None or not isinstance(event.payload, dict):
-                    self._dead_letter_cadence_event(
-                        event,
-                        now=now,
-                        error_code=(
-                            "CADENCE_EVENT_IDENTITY_INVALID"
-                            if cadence_event
-                            else (
-                                "SCRIPT_QUALIFICATION_EVENT_IDENTITY_INVALID"
-                                if qualification_event
+                    if qualification_event:
+                        self._dead_letter_qualification_event(
+                            event,
+                            now=now,
+                            error_code="SCRIPT_QUALIFICATION_EVENT_IDENTITY_INVALID",
+                            summary="qualification command identity or payload is invalid",
+                            retry_eligible=False,
+                        )
+                    else:
+                        self._dead_letter_cadence_event(
+                            event,
+                            now=now,
+                            error_code=(
+                                "CADENCE_EVENT_IDENTITY_INVALID"
+                                if cadence_event
                                 else (
-                                "ANALYTICS_EVENT_IDENTITY_INVALID"
-                                if analytics_event
-                                else "STALE_WORKFLOW_RECOVERY_EVENT_IDENTITY_INVALID"
+                                    "ANALYTICS_EVENT_IDENTITY_INVALID"
+                                    if analytics_event
+                                    else "STALE_WORKFLOW_RECOVERY_EVENT_IDENTITY_INVALID"
                                 )
-                            )
-                        ),
-                        summary="scheduler command identity or payload is invalid",
-                    )
+                            ),
+                            summary="scheduler command identity or payload is invalid",
+                        )
                     continue
                 if event.attempt_count >= event.max_attempts:
-                    self._dead_letter_cadence_event(
-                        event,
-                        now=now,
-                        error_code=(
-                            "CADENCE_RETRY_EXHAUSTED"
-                            if cadence_event
-                            else (
-                                "SCRIPT_QUALIFICATION_RETRY_EXHAUSTED"
-                                if qualification_event
+                    if qualification_event:
+                        qualification = self.session.get(
+                            ScriptQualificationRun, event.aggregate_id
+                        )
+                        self._dead_letter_qualification_event(
+                            event,
+                            now=now,
+                            error_code=(
+                                "SCRIPT_QUALIFICATION_FINALIZATION_RETRY_EXHAUSTED"
+                                if qualification is not None
+                                and qualification.state == "QUALIFIED"
+                                else "SCRIPT_QUALIFICATION_EXECUTION_FAILED_NO_PROVIDER_RETRY"
+                            ),
+                            summary="qualification event reached its bounded attempt limit",
+                            retry_eligible=(
+                                qualification is not None
+                                and qualification.state == "QUALIFIED"
+                            ),
+                        )
+                    else:
+                        self._dead_letter_cadence_event(
+                            event,
+                            now=now,
+                            error_code=(
+                                "CADENCE_RETRY_EXHAUSTED"
+                                if cadence_event
                                 else (
-                                "ANALYTICS_RETRY_EXHAUSTED"
-                                if analytics_event
-                                else "STALE_WORKFLOW_RECOVERY_RETRY_EXHAUSTED"
+                                    "ANALYTICS_RETRY_EXHAUSTED"
+                                    if analytics_event
+                                    else "STALE_WORKFLOW_RECOVERY_RETRY_EXHAUSTED"
                                 )
-                            )
-                        ),
-                        summary="scheduler event reached its bounded attempt limit",
-                    )
+                            ),
+                            summary="scheduler event reached its bounded attempt limit",
+                        )
                     continue
                 run = None
             else:
@@ -419,6 +441,12 @@ class DurableOutboxDispatcher:
                 error=error,
                 now=now,
             )
+        if event.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE:
+            return self._record_script_qualification_failure(
+                event=event,
+                error=error,
+                now=now,
+            )
         run = self._lock_run(event.workflow_run_id)
         if run is None:
             self._dead_letter_orphan(event, now=now)
@@ -511,6 +539,95 @@ class DurableOutboxDispatcher:
             incident_id=incident.id,
         )
 
+    def _record_script_qualification_failure(
+        self,
+        *,
+        event: DomainEvent,
+        error: WorkflowStageError | Exception,
+        now: datetime,
+    ) -> FailureDisposition:
+        """Retry only final admission after a sealed qualification PASS.
+
+        Qualification owns paid writer/verifier calls, so every state before
+        ``QUALIFIED`` fails closed.  The only safe automatic replay is the
+        local final-admission transaction after its immutable receipt exists.
+        """
+
+        qualification = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == event.aggregate_id)
+            .with_for_update()
+        )
+        summary = _redact_summary(str(error) or type(error).__name__)
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        if qualification is not None and qualification.state == "QUALIFIED":
+            event.last_error_code = "SCRIPT_QUALIFICATION_FINALIZATION_FAILED"
+            event.last_error_summary = summary
+            if event.attempt_count < event.max_attempts:
+                event.next_attempt_at = now + timedelta(
+                    seconds=self.retry_delay_seconds(event.attempt_count)
+                )
+                metadata = dict(event.metadata_ or {})
+                metadata["qualification_phase"] = "FINALIZATION_RETRY"
+                event.metadata_ = metadata
+                self.session.flush()
+                return FailureDisposition(
+                    event_id=event.id,
+                    classification=WorkflowFailureClassification.AUTO_RETRY_WITHIN_POLICY,
+                    retry_scheduled=True,
+                    next_attempt_at=event.next_attempt_at,
+                    dead_letter_job_id=None,
+                    incident_id=None,
+                )
+            job, incident = self._dead_letter_qualification_event(
+                event,
+                now=now,
+                error_code="SCRIPT_QUALIFICATION_FINALIZATION_RETRY_EXHAUSTED",
+                summary=summary,
+                retry_eligible=True,
+            )
+            return FailureDisposition(
+                event_id=event.id,
+                classification=WorkflowFailureClassification.FAIL_PERMANENT_POLICY,
+                retry_scheduled=False,
+                next_attempt_at=None,
+                dead_letter_job_id=job.id,
+                incident_id=incident.id,
+            )
+
+        event.last_error_code = "SCRIPT_QUALIFICATION_EXECUTION_FAILED_NO_PROVIDER_RETRY"
+        event.last_error_summary = summary
+        if qualification is not None and qualification.state not in {
+            "QUALIFIED",
+            "BLOCKED_NON_REPAIRABLE",
+            "BLOCKED_REPAIR_BUDGET_EXHAUSTED",
+            "COOLDOWN",
+            "SUPERSEDED",
+        }:
+            qualification.state = "BLOCKED_NON_REPAIRABLE"
+            qualification.failure_receipt = {
+                "reason_codes": ["SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY"],
+                "detail": summary[:512],
+                "logical_identity_hash": qualification.logical_identity_hash,
+            }
+        job, incident = self._dead_letter_qualification_event(
+            event,
+            now=now,
+            error_code="SCRIPT_QUALIFICATION_EXECUTION_FAILED_NO_PROVIDER_RETRY",
+            summary=summary,
+            retry_eligible=False,
+        )
+        return FailureDisposition(
+            event_id=event.id,
+            classification=WorkflowFailureClassification.FAIL_PERMANENT_INTEGRITY,
+            retry_scheduled=False,
+            next_attempt_at=None,
+            dead_letter_job_id=job.id,
+            incident_id=incident.id,
+        )
+
     def _record_cadence_failure(
         self,
         *,
@@ -583,8 +700,15 @@ class DurableOutboxDispatcher:
         )
         if job is None:
             raise NotFoundError(f"dead-letter job not found: {dead_letter_job_id}")
-        if job.workflow_run_id is None or job.domain_event_id is None:
+        if job.domain_event_id is None:
             raise ConflictError("WORKFLOW_DEAD_LETTER_BINDING_REQUIRED")
+        if job.workflow_run_id is None:
+            return self._retry_qualification_dead_letter(
+                job=job,
+                company_id=company_id,
+                data=data,
+                actor=actor,
+            )
         run = self._lock_run(job.workflow_run_id)
         if run is None or run.company_id != company_id:
             raise NotFoundError(f"dead-letter job not found: {dead_letter_job_id}")
@@ -658,6 +782,78 @@ class DurableOutboxDispatcher:
             next_attempt_at=now,
         )
 
+    def _retry_qualification_dead_letter(
+        self,
+        *,
+        job: DeadLetterJob,
+        company_id: uuid.UUID,
+        data: DeadLetterRetryRequest,
+        actor: ActorContext,
+    ) -> DeadLetterRetryRead:
+        """Replay only a previously exhausted final-admission transaction."""
+
+        event = self.session.scalar(
+            select(DomainEvent)
+            .where(DomainEvent.id == job.domain_event_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            event is None
+            or event.event_type != SCRIPT_QUALIFICATION_EVENT_TYPE
+            or event.company_id != company_id
+            or not job.retry_eligible
+            or job.replay_state != "REPLAYABLE"
+        ):
+            raise ConflictError("DEAD_LETTER_NOT_RETRYABLE")
+        qualification = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == event.aggregate_id)
+            .with_for_update()
+        )
+        if qualification is None or qualification.state != "QUALIFIED":
+            raise ConflictError("SCRIPT_QUALIFICATION_FINALIZATION_NOT_RETRYABLE")
+        now = self.now()
+        event.dead_lettered_at = None
+        event.delivered_at = None
+        event.published_at = None
+        event.next_attempt_at = now
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        event.last_error_code = None
+        event.last_error_summary = None
+        event.max_attempts = max(
+            event.max_attempts,
+            event.attempt_count + data.additional_attempts,
+        )
+        metadata = dict(event.metadata_ or {})
+        retry_policy = dict(metadata.get("retry_policy") or {})
+        retry_policy["max_attempts"] = event.max_attempts
+        retry_policy["ops_replay_authorized"] = True
+        retry_policy["ops_replay_reason_code"] = data.reason_code
+        metadata["retry_policy"] = retry_policy
+        metadata["qualification_phase"] = "FINALIZATION_RETRY"
+        event.metadata_ = metadata
+        job.replay_state = "REPLAYED"
+        job.metadata_ = {
+            **dict(job.metadata_ or {}),
+            "replayed_at": now.isoformat(),
+            "replayed_by_user_id": str(actor.actor_id),
+            "replay_reason_code": data.reason_code,
+            "additional_attempts": data.additional_attempts,
+        }
+        self.session.flush()
+        assert event.command_id is not None
+        return DeadLetterRetryRead(
+            dead_letter_job_id=job.id,
+            workflow_run_id=None,
+            domain_event_id=event.id,
+            command_id=event.command_id,
+            replay_state=job.replay_state,
+            next_attempt_at=now,
+        )
+
     def release_worker_leases(self, *, worker_id: str) -> int:
         """Recoverably release this worker's leases during graceful shutdown."""
 
@@ -672,6 +868,7 @@ class DurableOutboxDispatcher:
                         DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
                     ),
                     DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                    DomainEvent.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE,
                     DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
                     DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
                 ),
@@ -709,6 +906,7 @@ class DurableOutboxDispatcher:
                         DomainEvent.workflow_run_id.in_(_long_form_run_ids()),
                     ),
                     DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
+                    DomainEvent.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE,
                     DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
                     DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
                 ),
@@ -735,6 +933,30 @@ class DurableOutboxDispatcher:
                 event.next_attempt_at = now
                 event.last_error_code = "WORKER_LEASE_EXPIRED"
                 event.last_error_summary = "expired scheduler or recovery lease was released for deterministic replay"
+                reclaimed += 1
+                continue
+            if event.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE:
+                qualification = self.session.scalar(
+                    select(ScriptQualificationRun)
+                    .where(ScriptQualificationRun.id == event.aggregate_id)
+                    .with_for_update(skip_locked=True)
+                )
+                if qualification is None:
+                    self._dead_letter_qualification_event(
+                        event,
+                        now=now,
+                        error_code="SCRIPT_QUALIFICATION_RUN_NOT_FOUND",
+                        summary="qualification authority is missing",
+                        retry_eligible=False,
+                    )
+                    reclaimed += 1
+                    continue
+                event.lease_owner = None
+                event.lease_expires_at = None
+                event.heartbeat_at = None
+                event.next_attempt_at = now
+                event.last_error_code = "WORKER_LEASE_EXPIRED"
+                event.last_error_summary = "expired qualification lease was released for deterministic reconciliation"
                 reclaimed += 1
                 continue
             run = self._lock_run(event.workflow_run_id, skip_locked=True)
@@ -1079,6 +1301,92 @@ class DurableOutboxDispatcher:
                 ],
                 reason_codes=[error_code],
                 next_action=job.next_action or "Inspect cadence authority.",
+                metadata_={
+                    "channel_workspace_id": (
+                        str(event.channel_workspace_id)
+                        if event.channel_workspace_id
+                        else None
+                    )
+                },
+            )
+            self.session.add(incident)
+        self.session.flush()
+        return job, incident
+
+    def _dead_letter_qualification_event(
+        self,
+        event: DomainEvent,
+        *,
+        now: datetime,
+        error_code: str,
+        summary: str,
+        retry_eligible: bool,
+    ) -> tuple[DeadLetterJob, OpsIncident]:
+        """Dead-letter qualification without pretending it is a workflow run."""
+
+        event.dead_lettered_at = now
+        event.next_attempt_at = None
+        event.lease_owner = None
+        event.lease_expires_at = None
+        event.heartbeat_at = None
+        event.last_error_code = error_code
+        event.last_error_summary = _redact_summary(summary)
+        job = self.session.scalar(
+            select(DeadLetterJob).where(DeadLetterJob.domain_event_id == event.id)
+        )
+        if job is None:
+            job = DeadLetterJob(
+                queue_name=self.queue_name,
+                job_type=event.event_type,
+                payload_ref=f"domain-event:{event.id}",
+                target_type=event.aggregate_type,
+                target_id=event.aggregate_id,
+                domain_event_id=event.id,
+                workflow_run_id=None,
+                command_id=event.command_id,
+                fail_count=event.attempt_count,
+                first_failed_at=now,
+                last_failed_at=now,
+                replay_state="REPLAYABLE" if retry_eligible else "NOT_REPLAYABLE",
+                retry_eligible=retry_eligible,
+                reason_code=error_code,
+                next_action=(
+                    "Retry final admission from the immutable qualification receipt."
+                    if retry_eligible
+                    else "Do not retry provider execution; inspect the immutable qualification failure receipt."
+                ),
+                metadata_={"learning_excluded": True, "qualification_event": True},
+            )
+            self.session.add(job)
+            self.session.flush()
+        incident = self.session.scalar(
+            select(OpsIncident)
+            .where(
+                OpsIncident.domain_event_id == event.id,
+                OpsIncident.incident_type == "DEAD_LETTER_JOB",
+                OpsIncident.state.in_(["OPEN", "ACKNOWLEDGED"]),
+            )
+            .order_by(OpsIncident.created_at)
+        )
+        if incident is None:
+            incident = OpsIncident(
+                incident_type="DEAD_LETTER_JOB",
+                severity="ERROR",
+                state="OPEN",
+                workflow_run_id=None,
+                stage="SCRIPT_QUALIFICATION",
+                domain_event_id=event.id,
+                command_id=event.command_id,
+                retry_eligible=retry_eligible,
+                learning_excluded=True,
+                operator_visible_blocker=_redact_summary(summary),
+                resolution_evidence={},
+                impacted_refs=[
+                    {"type": "script_qualification_run", "id": str(event.aggregate_id)},
+                    {"type": "domain_event", "id": str(event.id)},
+                ],
+                reason_codes=[error_code],
+                next_action=job.next_action or "Inspect qualification authority.",
                 metadata_={
                     "channel_workspace_id": (
                         str(event.channel_workspace_id)
