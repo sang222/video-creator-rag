@@ -137,6 +137,12 @@ class ScriptQualificationRun(Base):
     model: Mapped[str] = mapped_column(String(160), nullable=False)
     logical_attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     logical_identity_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    supersedes_qualification_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("script_qualification_runs.id")
+    )
+    recovery_key: Mapped[str | None] = mapped_column(String(300), unique=True)
+    recovery_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    logical_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     state: Mapped[str] = mapped_column(String(48), nullable=False, default="RESERVED")
     writer_attempt_key: Mapped[str] = mapped_column(String(200), nullable=False)
     verifier_attempt_key: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -166,9 +172,9 @@ class ScriptQualificationRun(Base):
 
     __table_args__ = (
         UniqueConstraint("logical_identity_hash", name="uq_script_qualification_logical_identity"),
-        UniqueConstraint("publish_slot_id", name="uq_script_qualification_slot"),
+        UniqueConstraint("publish_slot_id", "logical_attempt_number", name="uq_script_qualification_slot_attempt"),
         CheckConstraint("logical_attempt_number > 0 and repair_attempts between 0 and 1", name="ck_script_qualification_attempts"),
-        CheckConstraint("state in ('RESERVED','WRITER_DISPATCHED','SCRIPT_GENERATED','STRUCTURAL_CHECKED','CLAIM_INVENTORY_CHECKED','GROUNDING_CHECKED','VERIFIER_DISPATCHED','EDITORIAL_CHECKED','MEMORY_CHECKED','REPAIRABLE_BLOCK','REPAIR_DISPATCHED','REVERIFYING','QUALIFIED','BLOCKED_NON_REPAIRABLE','BLOCKED_REPAIR_BUDGET_EXHAUSTED','COOLDOWN','SUPERSEDED')", name="ck_script_qualification_state"),
+        CheckConstraint("state in ('RESERVED','RECOVERY_AUTHORIZED','WRITER_SUBMIT_PENDING','WRITER_BACKGROUND_SUBMITTED','WRITER_QUEUED','WRITER_IN_PROGRESS','WRITER_DISPATCHED','SCRIPT_GENERATED','STRUCTURAL_CHECKED','CLAIM_INVENTORY_CHECKED','GROUNDING_CHECKED','VERIFIER_SUBMIT_PENDING','VERIFIER_BACKGROUND_SUBMITTED','VERIFIER_QUEUED','VERIFIER_IN_PROGRESS','VERIFIER_DISPATCHED','EDITORIAL_CHECKED','MEMORY_CHECKED','REPAIRABLE_BLOCK','REPAIR_DISPATCHED','REVERIFYING','QUALIFIED','BLOCKED_NON_REPAIRABLE','BLOCKED_REPAIR_BUDGET_EXHAUSTED','COOLDOWN','SUPERSEDED')", name="ck_script_qualification_state"),
         CheckConstraint("topic_definition_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and memory_digest_hash ~ '^[0-9a-f]{64}$' and logical_identity_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_hashes"),
         CheckConstraint("runtime_contract_hash is null or runtime_contract_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_runtime_contract_hash"),
         CheckConstraint("assignment_resolution_hash is null or assignment_resolution_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_assignment_resolution_hash"),
@@ -283,3 +289,63 @@ class ScriptQualificationReceipt(Base):
         CheckConstraint("result in ('PASS','BLOCK')", name="ck_script_qualification_receipt_result"),
         CheckConstraint("script_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and content_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_receipt_hashes"),
     )
+
+
+class ScriptQualificationBackgroundAttempt(Base):
+    """Durable OpenAI Background lifecycle for one qualification phase."""
+
+    __tablename__ = "script_qualification_background_attempts"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    script_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("script_qualification_runs.id"), nullable=False
+    )
+    phase: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    lane: Mapped[str] = mapped_column(String(160), nullable=False)
+    task: Mapped[str] = mapped_column(String(160), nullable=False)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    immutable_input_hashes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    client_correlation_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    provider_response_id: Mapped[str | None] = mapped_column(String(200), unique=True)
+    provider_request_id: Mapped[str | None] = mapped_column(String(200))
+    background_status: Mapped[str] = mapped_column(String(48), nullable=False, default="SUBMIT_PENDING")
+    provider_outcome: Mapped[str | None] = mapped_column(String(80))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    logical_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    poll_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    submission_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_network_error: Mapped[str | None] = mapped_column(Text)
+    output_hash: Mapped[str | None] = mapped_column(String(64))
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    actual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    created_at: Mapped[datetime] = utc_created_at()
+    updated_at: Mapped[datetime] = utc_updated_at()
+
+    __table_args__ = (
+        UniqueConstraint("script_qualification_run_id", "phase", name="uq_qualification_background_phase"),
+        CheckConstraint("phase in ('WRITER','VERIFIER')", name="ck_qualification_background_phase"),
+        CheckConstraint("background_status in ('SUBMIT_PENDING','SUBMITTED','QUEUED','IN_PROGRESS','COMPLETED','FAILED','CANCELLED','INCOMPLETE','DEADLINE_EXCEEDED','SUBMISSION_OUTCOME_UNKNOWN')", name="ck_qualification_background_status"),
+        CheckConstraint("poll_count >= 0 and submission_attempt_count between 0 and 1", name="ck_qualification_background_counts"),
+        CheckConstraint("input_fingerprint ~ '^[0-9a-f]{64}$'", name="ck_qualification_background_input_fingerprint"),
+        Index("ix_qualification_background_due", "background_status", "next_poll_at"),
+    )
+
+
+class ScriptQualificationProviderReclassificationReceipt(Base):
+    __tablename__ = "script_qualification_provider_reclassification_receipts"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    original_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("script_qualification_runs.id"), nullable=False, unique=True
+    )
+    original_route_attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("llm_route_attempts.id")
+    )
+    receipt: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    receipt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()

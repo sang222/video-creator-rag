@@ -218,6 +218,59 @@ def test_responses_provider_maps_network_failure_without_retry_or_secret_leak() 
     assert response.output["error"]["openai_error_message"] == "request failed with Bearer [REDACTED]"
     serialized = repr(response)
     assert "test-key" not in serialized
+
+
+def test_background_submit_persists_response_identity_without_waiting_for_output() -> None:
+    calls: list[tuple[str, str, dict | None, int]] = []
+
+    def transport(method, url, payload, _headers, timeout_seconds):
+        calls.append((method, url, payload, timeout_seconds))
+        return 202, {"id": "resp_background_1", "status": "queued"}, {
+            "x-request-id": "req_background_1"
+        }
+
+    response = OpenAIResponsesProvider(api_key="test-key", transport=transport).submit_background(
+        request=OpenAIResponsesRequest(
+            model="gpt-5.6-luna",
+            reasoning_effort="medium",
+            prompt="Return JSON.",
+            response_format="json",
+            idempotency_key="qualification-writer-1",
+        ),
+        timeout_seconds=7,
+    )
+
+    assert response.ok is True
+    assert response.output["provider_response_id"] == "resp_background_1"
+    assert response.output["provider_request_id"] == "req_background_1"
+    assert len(calls) == 1
+    method, url, payload, timeout_seconds = calls[0]
+    assert (method, url, timeout_seconds) == (
+        "POST",
+        "https://api.openai.com/v1/responses",
+        7,
+    )
+    assert payload is not None and payload["background"] is True
+    assert "output_text" not in payload
+
+
+def test_background_poll_uses_durable_response_id_and_network_error_is_retryable() -> None:
+    calls: list[tuple[str, str, dict | None, int]] = []
+
+    def transport(method, url, payload, _headers, timeout_seconds):
+        calls.append((method, url, payload, timeout_seconds))
+        raise TimeoutError("poll timed out")
+
+    response = OpenAIResponsesProvider(api_key="test-key", transport=transport).retrieve_background(
+        response_id="resp_background_1", timeout_seconds=4
+    )
+
+    assert response.ok is False
+    assert response.error_code == "OPENAI_NETWORK_FAILURE"
+    assert response.retryable is True
+    assert calls == [
+        ("GET", "https://api.openai.com/v1/responses/resp_background_1", None, 4)
+    ]
     assert "Authorization" not in serialized
     assert "Private prompt" not in serialized
 

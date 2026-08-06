@@ -745,6 +745,11 @@ class ScriptQualificationService:
             raise NotFoundError(f"script qualification run not found: {run_id}")
         if run.state in {"QUALIFIED", "BLOCKED_NON_REPAIRABLE", "BLOCKED_REPAIR_BUDGET_EXHAUSTED", "COOLDOWN", "SUPERSEDED"}:
             return run
+        if isinstance(self.producer, LunaScriptQualificationProducer):
+            # Production Luna execution is durable Background mode.  Fixtures
+            # retain their injected producer and synchronous unit semantics.
+            from app.services.script_qualification_background import ScriptQualificationBackgroundService
+            return ScriptQualificationBackgroundService(self.session, now=self.now).execute(run.id)
         # A previous worker may have reached the provider boundary but not
         # durably recorded its response.  Retrying would risk duplicate spend.
         if run.state in {"WRITER_DISPATCHED", "VERIFIER_DISPATCHED", "REPAIR_DISPATCHED", "REVERIFYING"}:

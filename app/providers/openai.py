@@ -36,6 +36,7 @@ class OpenAIResponsesRequest:
     image_inputs: list[dict[str, str]] | None = None
     response_format: str = "text"
     idempotency_key: str | None = None
+    background: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,71 @@ class OpenAIResponsesProvider:
             output["json"] = parsed
         return ProviderResponse(ok=True, output=output, latency_ms=_latency_ms(started))
 
+    def submit_background(
+        self, *, request: OpenAIResponsesRequest, timeout_seconds: int
+    ) -> ProviderResponse:
+        """Submit a Responses Background job and return only its durable id.
+
+        This deliberately does not wait for reasoning completion.  A submit
+        timeout has an unknown provider outcome, so callers must never retry it
+        as a new generation without first resolving that uncertainty.
+        """
+        started = time.monotonic()
+        if not self.api_key:
+            return _error_response("OPENAI_CREDENTIAL_MISSING", "OPENAI_API_KEY is not configured.", started, retryable=False)
+        payload = self.build_responses_payload(request=request)
+        payload["background"] = True
+        result = self._responses_request(
+            payload=payload, model=request.model, operation="background_submit",
+            tool_type=None, started=started, idempotency_key=request.idempotency_key,
+            timeout_seconds=timeout_seconds,
+        )
+        if isinstance(result, ProviderResponse):
+            return result
+        _status, response_payload, headers = result
+        response_id = response_payload.get("id")
+        if not isinstance(response_id, str) or not response_id:
+            return _error_response("OPENAI_BACKGROUND_RESPONSE_ID_MISSING", "OpenAI accepted a background submission without a response id.", started, retryable=False)
+        return ProviderResponse(ok=True, output={
+            "provider_key": self.provider_key,
+            "model": str(response_payload.get("model") or request.model),
+            "provider_response_id": response_id,
+            "provider_request_id": headers.get("x-request-id") or headers.get("X-Request-Id"),
+            "background_status": str(response_payload.get("status") or "submitted"),
+            "raw": response_payload,
+        }, latency_ms=_latency_ms(started))
+
+    def retrieve_background(
+        self, *, response_id: str, timeout_seconds: int
+    ) -> ProviderResponse:
+        """Retrieve one durable Background response; never long-poll."""
+        started = time.monotonic()
+        if not self.api_key:
+            return _error_response("OPENAI_CREDENTIAL_MISSING", "OPENAI_API_KEY is not configured.", started, retryable=False)
+        endpoint = f"{self.base_url}/responses/{response_id}"
+        try:
+            status, payload, headers = _normalize_transport_result(self._transport(
+                "GET", endpoint, None,
+                {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                timeout_seconds,
+            ))
+        except (TimeoutError, OSError) as exc:
+            return _error_response("OPENAI_NETWORK_FAILURE", _redacted_network_error(exc), started, retryable=True,
+                output={"error": _network_error_details(endpoint=endpoint, operation="background_poll", request_payload={"response_id": response_id}, model=None, tool_type=None, runtime_origin=self.runtime_origin, exc=exc)})
+        if status >= 400:
+            code, retryable = _http_error(status, payload)
+            return _error_response(code, _redacted_api_error(payload, status), started, retryable=retryable)
+        return ProviderResponse(ok=True, output={
+            "provider_key": self.provider_key,
+            "provider_response_id": response_id,
+            "provider_request_id": headers.get("x-request-id") or headers.get("X-Request-Id"),
+            "model": payload.get("model"),
+            "background_status": str(payload.get("status") or "unknown"),
+            "content": _response_output_text(payload),
+            "usage": self.extract_usage(payload),
+            "raw": payload,
+        }, latency_ms=_latency_ms(started))
+
     def web_search(self, *, request: OpenAIWebSearchRequest) -> ProviderResponse:
         """Call the official hosted web-search tool without a fallback path.
 
@@ -173,6 +239,7 @@ class OpenAIResponsesProvider:
         tool_type: str | None,
         started: float,
         idempotency_key: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> tuple[int, dict[str, Any], dict[str, str]] | ProviderResponse:
         """Make exactly one Responses request and retain only safe diagnostics.
 
@@ -197,7 +264,7 @@ class OpenAIResponsesProvider:
                             else {}
                         ),
                     },
-                    self.timeout_seconds,
+                    timeout_seconds or self.timeout_seconds,
                 )
             )
         except (TimeoutError, OSError) as exc:

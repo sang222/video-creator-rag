@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
-REQUIRED_RUNTIME_DB_REVISION = "0062_series_reservation_width"
+REQUIRED_RUNTIME_DB_REVISION = "0063_background_script_qual"
 RUNTIME_DB_REVISION_BLOCKED = "RUNTIME_DB_REVISION_BELOW_QUALIFICATION_RECOVERY_AUTHORITY"
 
 

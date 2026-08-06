@@ -65,6 +65,30 @@ class Settings(BaseSettings):
             "VCOS_OPENAI_TIMEOUT_SECONDS", "OPENAI_TIMEOUT_SECONDS"
         ),
     )
+    # Synchronous Responses calls still use this legacy timeout.  Long-running
+    # script qualification never does: it submits a Background response and
+    # polls the durable response id with bounded individual requests.
+    openai_background_submit_timeout_seconds: int = Field(
+        default=15,
+        ge=1,
+        validation_alias=AliasChoices(
+            "VCOS_OPENAI_BACKGROUND_SUBMIT_TIMEOUT_SECONDS",
+            "OPENAI_BACKGROUND_SUBMIT_TIMEOUT_SECONDS",
+        ),
+    )
+    openai_background_poll_request_timeout_seconds: int = Field(
+        default=10,
+        ge=1,
+        validation_alias=AliasChoices(
+            "VCOS_OPENAI_BACKGROUND_POLL_REQUEST_TIMEOUT_SECONDS",
+            "OPENAI_BACKGROUND_POLL_REQUEST_TIMEOUT_SECONDS",
+        ),
+    )
+    script_qualification_background_poll_seconds: int = Field(
+        default=15,
+        ge=1,
+        validation_alias="VCOS_SCRIPT_QUALIFICATION_BACKGROUND_POLL_SECONDS",
+    )
     llm_provider: str = Field(
         default="openai",
         validation_alias=AliasChoices("VCOS_LLM_PROVIDER", "LLM_PROVIDER"),

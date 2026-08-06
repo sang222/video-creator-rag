@@ -38,6 +38,10 @@ from app.services.script_qualification import (
     SCRIPT_QUALIFICATION_AGGREGATE_TYPE,
     SCRIPT_QUALIFICATION_EVENT_TYPE,
 )
+from app.services.script_qualification_background import (
+    BACKGROUND_EVENT_TYPE,
+    BACKGROUND_POLL_EVENT_TYPE,
+)
 from app.services.long_form_analytics import (
     ANALYTICS_WINDOW_AGGREGATE_TYPE,
     ANALYTICS_WINDOW_EVENT_TYPE,
@@ -155,6 +159,11 @@ class DurableOutboxDispatcher:
                             DomainEvent.workflow_run_id.is_(None),
                         ),
                         and_(
+                            DomainEvent.event_type.in_((BACKGROUND_EVENT_TYPE, BACKGROUND_POLL_EVENT_TYPE)),
+                            DomainEvent.aggregate_type == SCRIPT_QUALIFICATION_AGGREGATE_TYPE,
+                            DomainEvent.workflow_run_id.is_(None),
+                        ),
+                        and_(
                             DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
                             DomainEvent.aggregate_type
                             == ANALYTICS_WINDOW_AGGREGATE_TYPE,
@@ -191,7 +200,7 @@ class DurableOutboxDispatcher:
             if event is None:
                 return None
             cadence_event = event.event_type == CADENCE_EVALUATION_EVENT_TYPE
-            qualification_event = event.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE
+            qualification_event = event.event_type in {SCRIPT_QUALIFICATION_EVENT_TYPE, BACKGROUND_EVENT_TYPE, BACKGROUND_POLL_EVENT_TYPE}
             analytics_event = event.event_type == ANALYTICS_WINDOW_EVENT_TYPE
             recovery_event = event.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
             if cadence_event or qualification_event or analytics_event or recovery_event:
@@ -441,7 +450,7 @@ class DurableOutboxDispatcher:
                 error=error,
                 now=now,
             )
-        if event.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE:
+        if event.event_type in {SCRIPT_QUALIFICATION_EVENT_TYPE, BACKGROUND_EVENT_TYPE, BACKGROUND_POLL_EVENT_TYPE}:
             return self._record_script_qualification_failure(
                 event=event,
                 error=error,
@@ -876,6 +885,7 @@ class DurableOutboxDispatcher:
                     ),
                     DomainEvent.event_type == CADENCE_EVALUATION_EVENT_TYPE,
                     DomainEvent.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE,
+                    DomainEvent.event_type.in_((BACKGROUND_EVENT_TYPE, BACKGROUND_POLL_EVENT_TYPE)),
                     DomainEvent.event_type == ANALYTICS_WINDOW_EVENT_TYPE,
                     DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE,
                 ),

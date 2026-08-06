@@ -27,6 +27,11 @@ from app.services.outbox_dispatcher import (
 )
 from app.services.cadence_events import CADENCE_EVALUATION_EVENT_TYPE
 from app.services.script_qualification import SCRIPT_QUALIFICATION_EVENT_TYPE
+from app.services.script_qualification_background import (
+    BACKGROUND_EVENT_TYPE,
+    BACKGROUND_POLL_EVENT_TYPE,
+    ScriptQualificationBackgroundService,
+)
 from app.services.long_form_analytics import (
     ANALYTICS_WINDOW_EVENT_TYPE,
     LEARNING_GENERATION_EVENT_TYPE,
@@ -133,6 +138,7 @@ class ProductionWorkflowWorker:
             # reach a provider boundary against a pre-authority database.
             return WorkerRunResult(status="SCHEMA_BLOCKED")
         self._enqueue_due_stale_workflow_recoveries()
+        self._enqueue_due_script_qualification_background_polls()
         self._run_due_editorial_replenishments()
         self._enqueue_due_cadence_evaluations()
         self._enqueue_due_analytics_windows()
@@ -188,6 +194,14 @@ class ProductionWorkflowWorker:
                     # deterministic admission/support phase.  A later local
                     # failure can therefore retry only finalization.
                     session.commit()
+                    LongFormCadenceService(session, now=self.now).finalize_qualified_script_run(
+                        script_qualification_run_id=run_id, actor=self._actor
+                    )
+            elif event.event_type in {BACKGROUND_EVENT_TYPE, BACKGROUND_POLL_EVENT_TYPE}:
+                run_id = uuid.UUID(str(event.payload["script_qualification_run_id"]))
+                qualification = ScriptQualificationBackgroundService(session, now=self.now).execute(run_id)
+                if qualification.state == "QUALIFIED":
+                    from app.services.launch_cadence import LongFormCadenceService
                     LongFormCadenceService(session, now=self.now).finalize_qualified_script_run(
                         script_qualification_run_id=run_id, actor=self._actor
                     )
@@ -381,6 +395,15 @@ class ProductionWorkflowWorker:
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+    def _enqueue_due_script_qualification_background_polls(self) -> int:
+        session = self.session_factory()
+        try:
+            count = ScriptQualificationBackgroundService(session, now=self.now).enqueue_due_polls()
+            session.commit()
+            return count
         finally:
             session.close()
 
