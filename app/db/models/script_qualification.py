@@ -145,6 +145,16 @@ class ScriptQualificationRun(Base):
     script_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     result_receipts: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     failure_receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # A terminal qualification settlement is a separate, durable authority
+    # from the writer/verifier result.  It records what happened to the
+    # cadence slot and any series capacity, so a blocked run cannot silently
+    # leave a future publish slot reserved forever.
+    terminal_settlement_receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Provider-outcome recovery may be revisited as new evidence arrives.
+    # Entries are appended only and each carries its own content hash.
+    provider_outcome_reconciliation_receipts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     repair_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reserved_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0"))
     consumed_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0"))
@@ -197,13 +207,15 @@ class SeriesEpisodeReservation(Base):
     reservation_authority_version: Mapped[str] = mapped_column(
         String(120), nullable=False
     )
-    state: Mapped[str] = mapped_column(String(24), nullable=False, default="RESERVED")
+    state: Mapped[str] = mapped_column(String(48), nullable=False, default="RESERVED")
     released_reason_code: Mapped[str | None] = mapped_column(String(160))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consumed_admission_decision_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("project_admission_decisions.id")
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    abandoned_reason_code: Mapped[str | None] = mapped_column(String(160))
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
@@ -221,7 +233,7 @@ class SeriesEpisodeReservation(Base):
             name="uq_series_episode_reservations_run_episode",
         ),
         CheckConstraint(
-            "state in ('RESERVED','RELEASED','CONSUMED')",
+            "state in ('RESERVED','RELEASED','CONSUMED','ABANDONED_AFTER_ADMISSION')",
             name="ck_series_episode_reservations_state",
         ),
         CheckConstraint(
@@ -234,11 +246,13 @@ class SeriesEpisodeReservation(Base):
         ),
         CheckConstraint(
             "(state = 'RESERVED' and released_at is null and consumed_at is null "
-            "and consumed_admission_decision_id is null) or "
+            "and consumed_admission_decision_id is null and abandoned_at is null) or "
             "(state = 'RELEASED' and released_at is not null and consumed_at is null "
-            "and consumed_admission_decision_id is null) or "
+            "and consumed_admission_decision_id is null and abandoned_at is null) or "
             "(state = 'CONSUMED' and consumed_at is not null "
-            "and consumed_admission_decision_id is not null)",
+            "and consumed_admission_decision_id is not null and abandoned_at is null) or "
+            "(state = 'ABANDONED_AFTER_ADMISSION' and consumed_at is not null "
+            "and consumed_admission_decision_id is not null and abandoned_at is not null)",
             name="ck_series_episode_reservations_lifecycle",
         ),
         Index("ix_series_episode_reservations_series_run", "series_run_id"),

@@ -37,12 +37,14 @@ from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
 from app.db.models.m5 import EditorialIdeaCandidate, SearchDemandEvidence
 from app.db.models.channel import ChannelProfileVersion, CompiledChannelPolicySnapshot
+from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion
 from app.db.models.script_qualification import (
     EditorialTopicDefinition,
     EditorialTopicDefinitionGateReceipt,
     ScriptQualificationReceipt,
     ScriptQualificationRun,
 )
+from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.services.config_registry import content_hash
 from app.services.production_package import ChannelDurationContractResolver
 from app.services.script_qualification_authority import (
@@ -376,9 +378,9 @@ class TopicDefinitionService:
         if definition.content_mode == "STANDALONE" and not definition.standalone_self_containment_required:
             reasons.append("EDITORIAL_STANDALONE_SELF_CONTAINMENT_MISSING")
         if definition.content_mode == "SERIES_EPISODE":
-            binding = definition.series_binding or {}
-            if not all(binding.get(key) for key in ("series_ref", "run_ref", "episode_number", "episode_delta", "learning_outcome")):
-                reasons.append("EDITORIAL_EPISODE_DELTA_MISSING")
+            reasons.extend(self._series_binding_reasons(definition=definition, candidate=candidate))
+        elif definition.content_mode != "STANDALONE":
+            reasons.append("EDITORIAL_CONTENT_MODE_INVALID")
         reasons = sorted(set(reasons))
         primary = reasons[0] if reasons else None
         payload = {
@@ -395,6 +397,85 @@ class TopicDefinitionService:
         self.session.add(receipt)
         self.session.flush()
         return receipt
+
+    def _series_binding_reasons(
+        self,
+        *,
+        definition: EditorialTopicDefinition,
+        candidate: EditorialIdeaCandidate,
+    ) -> list[str]:
+        """Validate typed series intent before it can become GREENLIT work."""
+
+        binding = definition.series_binding if isinstance(definition.series_binding, dict) else {}
+        plan_ref = _clean(binding.get("series_plan_id") or binding.get("series_ref"))
+        run_ref = _clean(binding.get("series_run_id") or binding.get("run_ref"))
+        reasons: list[str] = []
+        try:
+            plan_id = uuid.UUID(plan_ref)
+        except ValueError:
+            plan_id = None
+            reasons.append("EDITORIAL_SERIES_PLAN_ID_INVALID")
+        try:
+            run_id = uuid.UUID(run_ref)
+        except ValueError:
+            run_id = None
+            reasons.append("EDITORIAL_SERIES_RUN_ID_INVALID")
+        if not _clean(binding.get("episode_role")):
+            reasons.append("EDITORIAL_SERIES_EPISODE_ROLE_MISSING")
+        if not _clean(binding.get("episode_delta")):
+            reasons.append("EDITORIAL_SERIES_EPISODE_DELTA_MISSING")
+        if not _clean(binding.get("learning_outcome")):
+            reasons.append("EDITORIAL_SERIES_LEARNING_OUTCOME_MISSING")
+        if plan_id is None or run_id is None:
+            return reasons
+        plan = self.session.get(SeriesPlan, plan_id)
+        run = self.session.get(SeriesRun, run_id)
+        if plan is None:
+            reasons.append("EDITORIAL_SERIES_PLAN_MISSING")
+        if run is None:
+            reasons.append("EDITORIAL_SERIES_RUN_MISSING")
+        if plan is None or run is None:
+            return reasons
+        if plan.state != "APPROVED":
+            reasons.append("EDITORIAL_SERIES_PLAN_NOT_APPROVED")
+        if run.state != "ACTIVE":
+            reasons.append("EDITORIAL_SERIES_RUN_NOT_ACTIVE")
+        if run.series_plan_id != plan.id:
+            reasons.append("EDITORIAL_SERIES_RUN_PLAN_MISMATCH")
+        if (
+            plan.company_id != candidate.company_id
+            or plan.channel_workspace_id != candidate.channel_workspace_id
+            or plan.policy_snapshot_id != candidate.policy_snapshot_id
+            or run.company_id != candidate.company_id
+            or run.channel_workspace_id != candidate.channel_workspace_id
+            or run.policy_snapshot_id != candidate.policy_snapshot_id
+            or definition.company_id != candidate.company_id
+            or definition.channel_workspace_id != candidate.channel_workspace_id
+            or definition.policy_snapshot_id != candidate.policy_snapshot_id
+        ):
+            reasons.append("EDITORIAL_SERIES_CHANNEL_POLICY_BINDING_MISMATCH")
+        launch_policy = self.session.scalar(
+            select(FirstChannelLaunchPolicyVersion).where(
+                FirstChannelLaunchPolicyVersion.company_id == candidate.company_id,
+                FirstChannelLaunchPolicyVersion.channel_workspace_id
+                == candidate.channel_workspace_id,
+                FirstChannelLaunchPolicyVersion.state == "APPROVED",
+            )
+        )
+        if (
+            launch_policy is None
+            or launch_policy.policy_snapshot_id != candidate.policy_snapshot_id
+            or launch_policy.channel_profile_version_id
+            not in {plan.channel_profile_version_id, run.channel_profile_version_id}
+            or plan.channel_profile_version_id != run.channel_profile_version_id
+            or str(plan.id)
+            not in set(
+                str(item) for item in launch_policy.approved_initial_series_plan_ids
+                or []
+            )
+        ):
+            reasons.append("EDITORIAL_SERIES_LAUNCH_POLICY_NOT_PERMITTED")
+        return reasons
 
     def topic_capable_evidence(self, candidate: EditorialIdeaCandidate) -> SearchDemandEvidence | None:
         ids = [str(item.get("id")) for item in (candidate.evidence_refs or []) if isinstance(item, dict) and item.get("id")]
@@ -449,6 +530,75 @@ class TopicDefinitionService:
                 "viewer_value": "A bounded evidence-first decision frame instead of a broad product overview.",
                 "content_mode": "STANDALONE", "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
                 "source_classification_refs": [source_ref], "standalone_self_containment_required": True,
+            },
+        )
+
+    def create_series_from_topic_capable_evidence(
+        self,
+        *,
+        candidate: EditorialIdeaCandidate,
+        series_plan: SeriesPlan,
+        series_run: SeriesRun,
+        episode_role: str,
+        episode_delta: str,
+        series_learning_outcome: str,
+        parent_topic_definition_id: uuid.UUID | None = None,
+    ) -> EditorialTopicDefinition:
+        """Production constructor for a typed, allocation-pending series topic."""
+
+        if (
+            series_plan.state != "APPROVED"
+            or series_run.state != "ACTIVE"
+            or series_run.series_plan_id != series_plan.id
+            or series_plan.company_id != candidate.company_id
+            or series_plan.channel_workspace_id != candidate.channel_workspace_id
+            or series_plan.policy_snapshot_id != candidate.policy_snapshot_id
+            or series_run.company_id != candidate.company_id
+            or series_run.channel_workspace_id != candidate.channel_workspace_id
+            or series_run.policy_snapshot_id != candidate.policy_snapshot_id
+        ):
+            raise ValidationFailureError("EDITORIAL_SERIES_TOPIC_AUTHORITY_INVALID")
+        evidence = self.topic_capable_evidence(candidate)
+        if evidence is None:
+            raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
+        snapshot = _source_snapshot(evidence)
+        title = _clean(snapshot.get("title"))
+        subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", title, flags=re.I).strip() or title
+        excerpt = _clean(snapshot.get("content_excerpt"))
+        subject_span = subject if subject and subject in excerpt else excerpt[:400]
+        evidence_ref = _evidence_ref(evidence)
+        audience = (candidate.target_audience_definition or {}).get("primary_persona") or "small professional teams"
+        pains = (candidate.target_audience_definition or {}).get("pain_points") or []
+        problem = _clean(pains[0] if pains else "need an evidence-first workflow")
+        return self.create(
+            candidate=candidate,
+            parent_topic_definition_id=parent_topic_definition_id,
+            fields={
+                "subject_type": "OFFICIAL_DOCUMENTED_PRODUCT_OR_FEATURE",
+                "subject_name": subject,
+                "subject_canonical_id": f"official-document:{evidence.id}",
+                "subject_evidence_refs": [evidence_ref],
+                "subject_evidence_spans": [{"evidence_id": str(evidence.id), "text": subject_span, "span_hash": span_hash(subject_span)}],
+                "target_audience": audience,
+                "audience_problem": problem,
+                "content_pillar": candidate.proposed_pillar or "AI workflows",
+                "production_goal": candidate.proposed_title,
+                "scope_inclusions": [f"Only the documented scope in {snapshot.get('canonical_url') or evidence.source_ref}"],
+                "exclusions": ["Undocumented performance, ROI, market, and product-family claims"],
+                "central_question_or_thesis": f"What does the official documentation for {subject} establish for this episode of {series_plan.display_name}?",
+                "learning_outcome": series_learning_outcome,
+                "viewer_value": "A bounded evidence-first decision frame that advances the active series.",
+                "content_mode": "SERIES_EPISODE",
+                "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+                "source_classification_refs": [{**evidence_ref, "source_classification": "TOPIC_CAPABLE"}],
+                "series_binding": {
+                    "series_plan_id": str(series_plan.id),
+                    "series_run_id": str(series_run.id),
+                    "episode_role": episode_role.strip(),
+                    "episode_delta": episode_delta.strip(),
+                    "learning_outcome": series_learning_outcome.strip(),
+                },
+                "standalone_self_containment_required": False,
             },
         )
 
@@ -526,7 +676,7 @@ class ScriptQualificationService:
         )
         assignment_resolution = self._assignment_resolution(topic.definition)
         identity_body = {
-            "candidate_id": str(candidate.id), "candidate_hash": candidate.canonical_hash,
+            "candidate_id": str(candidate.id),
             "topic_definition_hash": topic.definition.topic_definition_hash,
             "assignment_hash": assignment["assignment_hash"], "evidence_pack_hash": evidence_pack["evidence_pack_hash"],
             "memory_digest_hash": memory["digest_hash"], "writer_prompt_version": WRITER_PROMPT_VERSION,
@@ -567,6 +717,12 @@ class ScriptQualificationService:
         )
 
         EpisodeReservationAuthorityService(self.session).reserve_for_qualification(run)
+        # A series TopicDefinition owns intent, not a speculative episode
+        # number.  The reservation authority has now allocated the exact
+        # number under the SeriesRun lock, before any provider call.  Bind the
+        # durable attempt identity to that final authority.
+        self._refresh_logical_identity_after_allocation(run)
+        identity = run.logical_identity_hash
         payload = {"script_qualification_run_id": str(run.id), "logical_identity_hash": identity}
         command_id = f"script-qualification:{identity}"
         self.session.add(DomainEvent(
@@ -661,10 +817,7 @@ class ScriptQualificationService:
             run.result_receipts = receipts
             self._create_receipt(run, draft, "PASS", receipts)
         else:
-            run.state = "BLOCKED_NON_REPAIRABLE"
-            run.failure_receipt = {"reason_codes": sorted({code for item in receipts.values() for code in item.get("reason_codes", [])}), "receipts": receipts}
-            run.result_receipts = receipts
-            self._create_receipt(run, draft, "BLOCK", receipts)
+            return self._seal_block(run, draft, receipts)
         self.session.flush()
         return run
 
@@ -869,10 +1022,6 @@ class ScriptQualificationService:
             binding = topic.series_binding if isinstance(topic.series_binding, dict) else {}
             plan_id = _clean(binding.get("series_plan_id") or binding.get("series_ref"))
             run_id = _clean(binding.get("series_run_id") or binding.get("run_ref"))
-            try:
-                episode_number = int(binding.get("episode_number"))
-            except (TypeError, ValueError):
-                episode_number = None
             body = {
                 "schema_version": "script-assignment-resolution.v1",
                 "assignment_mode": "SERIES_REQUIRED",
@@ -880,12 +1029,54 @@ class ScriptQualificationService:
                 "standalone_reason_code": None,
                 "standalone_self_containment_required": False,
                 "series_plan_id": plan_id or None, "series_run_id": run_id or None,
-                "episode_number": episode_number, "episode_role": _clean(binding.get("episode_role")) or None,
+                # Only reserve() may allocate the exact episode under a
+                # locked SeriesRun.  Ignore any historical/topic-proposed
+                # number so two stale candidates cannot both freeze episode 1.
+                "episode_number": None, "episode_role": _clean(binding.get("episode_role")) or None,
                 "episode_delta": _clean(binding.get("episode_delta")) or None,
                 "series_learning_outcome": _clean(binding.get("learning_outcome")) or None,
                 "authority_refs": {"topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash},
             }
         return hashed_payload(body, "resolution_hash")
+
+    @staticmethod
+    def _logical_identity(run: ScriptQualificationRun) -> str:
+        return canonical_hash(
+            {
+                "candidate_id": str(run.editorial_idea_candidate_id),
+                "topic_definition_hash": run.topic_definition_hash,
+                "assignment_hash": run.script_assignment_hash,
+                "evidence_pack_hash": run.factual_evidence_pack_hash,
+                "memory_digest_hash": run.memory_digest_hash,
+                "writer_prompt_version": run.writer_prompt_version,
+                "verifier_prompt_version": run.verifier_prompt_version,
+                "gate_policy_version": run.gate_policy_version,
+                "runtime_contract_hash": run.runtime_contract_hash,
+                "assignment_resolution_hash": run.assignment_resolution_hash,
+                "model": run.model,
+                "launch_run_id": str(run.launch_run_id),
+                "publish_slot_id": str(run.publish_slot_id),
+            }
+        )
+
+    def _refresh_logical_identity_after_allocation(
+        self, run: ScriptQualificationRun
+    ) -> None:
+        identity = self._logical_identity(run)
+        if run.logical_identity_hash == identity:
+            return
+        conflict = self.session.scalar(
+            select(ScriptQualificationRun.id).where(
+                ScriptQualificationRun.logical_identity_hash == identity,
+                ScriptQualificationRun.id != run.id,
+            )
+        )
+        if conflict is not None:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_LOGICAL_IDENTITY_CONFLICT")
+        run.logical_identity_hash = identity
+        run.writer_attempt_key = f"{identity}:writer"
+        run.verifier_attempt_key = f"{identity}:verifier"
+        self.session.flush()
 
     @staticmethod
     def _validate_assignment_resolution(run: ScriptQualificationRun) -> dict[str, Any]:
@@ -1190,13 +1381,12 @@ class ScriptQualificationService:
         run.result_receipts = receipts
         run.failure_receipt = {"reason_codes": [code for receipt in receipts.values() for code in receipt.get("reason_codes", [])]}
         self._create_receipt(run, draft, "BLOCK", receipts)
-        from app.services.series_episode_reservation import (
-            EpisodeReservationAuthorityService,
+        from app.services.script_qualification_recovery import (
+            ScriptQualificationRecoveryService,
         )
 
-        EpisodeReservationAuthorityService(self.session).release_for_terminal_qualification(
-            run,
-            reason_code="SCRIPT_QUALIFICATION_BLOCKED",
+        ScriptQualificationRecoveryService(self.session, now=self.now).settle_deterministic_block(
+            run, reason_code="SCRIPT_QUALIFICATION_BLOCKED"
         )
         self.session.flush()
         return run
@@ -1210,6 +1400,13 @@ class ScriptQualificationService:
             "reason_codes": ["SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY"],
             "logical_identity_hash": run.logical_identity_hash,
         }
+        from app.services.script_qualification_recovery import (
+            ScriptQualificationRecoveryService,
+        )
+
+        ScriptQualificationRecoveryService(
+            self.session, now=self.now
+        ).settle_unknown_provider_outcome(run)
         self.session.flush()
         return run
 
@@ -1220,13 +1417,12 @@ class ScriptQualificationService:
     def _block(self, run: ScriptQualificationRun, code: str, detail: str | None = None) -> ScriptQualificationRun:
         run.state = "BLOCKED_NON_REPAIRABLE"
         run.failure_receipt = {"reason_codes": [code], "detail": detail[:512] if detail else None, "logical_identity_hash": run.logical_identity_hash}
-        from app.services.series_episode_reservation import (
-            EpisodeReservationAuthorityService,
+        from app.services.script_qualification_recovery import (
+            ScriptQualificationRecoveryService,
         )
 
-        EpisodeReservationAuthorityService(self.session).release_for_terminal_qualification(
-            run,
-            reason_code=code,
+        ScriptQualificationRecoveryService(self.session, now=self.now).settle_deterministic_block(
+            run, reason_code=code
         )
         self.session.flush()
         return run

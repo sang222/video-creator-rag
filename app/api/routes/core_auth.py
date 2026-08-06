@@ -17,6 +17,7 @@ from app.api.routes.imports import (
 from app.api.routes.serializers_publish_learning import (
     _as_http_error,
 )
+from app.services.runtime_migration_guard import RuntimeMigrationGuard
 
 
 
@@ -32,7 +33,16 @@ def create_router(settings) -> APIRouter:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="database unavailable",
             ) from exc
-        return {"status": "ok", "app": settings.app_name, "database": "ok"}
+        with session_scope() as session:
+            migration = RuntimeMigrationGuard(session).inspect()
+        return {
+            "status": "ok" if migration.ready else "blocked",
+            "app": settings.app_name,
+            "database": "ok",
+            "migration_current": migration.current_revision or "missing",
+            "migration_required": migration.required_revision,
+            "migration_reason_code": migration.reason_code or "NONE",
+        }
 
     @router.post("/auth/login", response_model=AuthSessionRead)
     def auth_login(data: AuthLoginRequest, response: Response) -> AuthSessionRead:

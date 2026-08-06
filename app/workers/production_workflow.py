@@ -128,6 +128,10 @@ class ProductionWorkflowWorker:
         self._next_editorial_replenishment_scan_at: datetime | None = None
 
     def run_once(self) -> WorkerRunResult:
+        if not self._runtime_schema_ready():
+            # Do not enqueue cadence/recovery work, claim an outbox event, or
+            # reach a provider boundary against a pre-authority database.
+            return WorkerRunResult(status="SCHEMA_BLOCKED")
         self._enqueue_due_stale_workflow_recoveries()
         self._run_due_editorial_replenishments()
         self._enqueue_due_cadence_evaluations()
@@ -179,6 +183,11 @@ class ProductionWorkflowWorker:
                     raise ValueError("SCRIPT_QUALIFICATION_EVENT_AUTHORITY_MISMATCH")
                 qualification = ScriptQualificationService(session, now=self.now).execute(run_id)
                 if qualification.state == "QUALIFIED":
+                    # Qualification owns paid provider provenance.  Seal its
+                    # PASS receipt in its own transaction before entering the
+                    # deterministic admission/support phase.  A later local
+                    # failure can therefore retry only finalization.
+                    session.commit()
                     LongFormCadenceService(session, now=self.now).finalize_qualified_script_run(
                         script_qualification_run_id=run_id, actor=self._actor
                     )
@@ -434,6 +443,15 @@ class ProductionWorkflowWorker:
             max_execution_seconds=self.max_execution_seconds,
             now=self.now,
         )
+
+    def _runtime_schema_ready(self) -> bool:
+        from app.services.runtime_migration_guard import RuntimeMigrationGuard
+
+        session = self.session_factory()
+        try:
+            return RuntimeMigrationGuard(session).inspect().ready
+        finally:
+            session.close()
 
 
 class _HeartbeatPump:

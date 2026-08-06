@@ -73,6 +73,11 @@ from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.workflow import VideoProject
 from app.db.models.r3d1 import ContentCategory
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
+from app.db.models.script_qualification import (
+    ScriptQualificationReceipt,
+    ScriptQualificationRun,
+    SeriesEpisodeReservation,
+)
 from app.services.cadence_events import (
     CADENCE_AGGREGATE_TYPE,
     CADENCE_EVALUATION_EVENT_TYPE,
@@ -1765,6 +1770,7 @@ class LaunchDashboardService:
             if blockers
             else "Đánh giá cadence khi vào cửa sổ sản xuất kế tiếp."
         )
+        qualification_summary = self._qualification_summary(run)
         return LaunchDashboardRead(
             launch_run=LaunchRunRead.model_validate(run),
             launch_day=max(1, (date.today() - run.preparation_started_on).days + 1),
@@ -1786,4 +1792,114 @@ class LaunchDashboardService:
             current_experiment_phase=phase,
             blockers=blockers,
             next_action=next_action,
+            qualification_summary=qualification_summary,
         )
+
+    def _qualification_summary(self, run: LaunchRun) -> dict[str, Any]:
+        """Expose recovery state through the existing launch dashboard."""
+
+        qualifications = list(
+            self.session.scalars(
+                select(ScriptQualificationRun)
+                .where(ScriptQualificationRun.launch_run_id == run.id)
+                .order_by(ScriptQualificationRun.created_at.desc())
+            ).all()
+        )
+        reservation_counts = dict(
+            self.session.execute(
+                select(
+                    SeriesEpisodeReservation.state,
+                    func.count(SeriesEpisodeReservation.id),
+                )
+                .join(
+                    ScriptQualificationRun,
+                    ScriptQualificationRun.id
+                    == SeriesEpisodeReservation.script_qualification_run_id,
+                )
+                .where(ScriptQualificationRun.launch_run_id == run.id)
+                .group_by(SeriesEpisodeReservation.state)
+            ).all()
+        )
+        receipts = {
+            item.script_qualification_run_id: item
+            for item in self.session.scalars(
+                select(ScriptQualificationReceipt).where(
+                    ScriptQualificationReceipt.script_qualification_run_id.in_(
+                        [item.id for item in qualifications] or [uuid.uuid4()]
+                    )
+                )
+            ).all()
+        }
+        retry_counts = dict(
+            self.session.execute(
+                select(DomainEvent.aggregate_id, DomainEvent.attempt_count).where(
+                    DomainEvent.aggregate_id.in_([item.id for item in qualifications] or [uuid.uuid4()]),
+                    DomainEvent.event_type == "script_qualification.execute.v1",
+                )
+            ).all()
+        )
+        active_states = {
+            "RESERVED",
+            "WRITER_DISPATCHED",
+            "SCRIPT_GENERATED",
+            "STRUCTURAL_CHECKED",
+            "CLAIM_INVENTORY_CHECKED",
+            "GROUNDING_CHECKED",
+            "VERIFIER_DISPATCHED",
+            "EDITORIAL_CHECKED",
+            "MEMORY_CHECKED",
+        }
+        active = [item for item in qualifications if item.state in active_states]
+        blocked = [
+            item
+            for item in qualifications
+            if item.state in {"BLOCKED_NON_REPAIRABLE", "BLOCKED_REPAIR_BUDGET_EXHAUSTED"}
+        ]
+        reconciliation = [
+            item
+            for item in blocked
+            if "SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY"
+            in ((item.failure_receipt or {}).get("reason_codes") or [])
+        ]
+        stuck_slots = list(
+            self.session.scalars(
+                select(LongFormPublishSlot).where(
+                    LongFormPublishSlot.launch_run_id == run.id,
+                    LongFormPublishSlot.state == "QUALIFICATION_RESERVED",
+                    LongFormPublishSlot.target_start_window_open_at < utc_now(),
+                )
+            ).all()
+        )
+
+        def _row(item: ScriptQualificationRun) -> dict[str, Any]:
+            receipt = receipts.get(item.id)
+            return {
+                "run_id": str(item.id),
+                "state": item.state,
+                "receipt_id": str(receipt.id) if receipt else None,
+                "receipt_hash": receipt.content_hash if receipt else None,
+                "finalization_retry_count": int(retry_counts.get(item.id, 0)),
+                "next_operator_action": (
+                    "Reconcile provider outcome with evidence."
+                    if item in reconciliation
+                    else "Wait for deterministic finalization retry."
+                    if item.state == "QUALIFIED" and retry_counts.get(item.id, 0)
+                    else "No operator action required."
+                ),
+            }
+
+        return {
+            "active_runs": [_row(item) for item in active],
+            "blocked_runs": [_row(item) for item in blocked],
+            "reconciliation_required_runs": [_row(item) for item in reconciliation],
+            "stuck_slot_ids": [str(item.id) for item in stuck_slots],
+            "reservation_counts": {
+                state: int(reservation_counts.get(state, 0))
+                for state in (
+                    "RESERVED",
+                    "CONSUMED",
+                    "RELEASED",
+                    "ABANDONED_AFTER_ADMISSION",
+                )
+            },
+        }

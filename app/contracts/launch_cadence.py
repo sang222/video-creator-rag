@@ -243,7 +243,15 @@ class LongFormPublishSlotRead(BaseModel):
     intended_publish_at: AwareDatetime
     target_start_window_open_at: AwareDatetime
     target_start_window_close_at: AwareDatetime
-    state: Literal["OPEN", "RESERVED", "FULFILLED", "SKIPPED", "CANCELED"]
+    state: Literal[
+        "OPEN",
+        "QUALIFICATION_RESERVED",
+        "QUALIFICATION_RECONCILIATION_REQUIRED",
+        "RESERVED",
+        "FULFILLED",
+        "SKIPPED",
+        "CANCELED",
+    ]
     reserved_candidate_id: uuid.UUID | None
     admitted_video_project_id: uuid.UUID | None
     created_at: AwareDatetime
@@ -314,3 +322,4 @@ class LaunchDashboardRead(BaseModel):
     ypp_progress: None = None
     blockers: list[str]
     next_action: str
+    qualification_summary: dict[str, Any] = Field(default_factory=dict)

@@ -28,10 +28,13 @@ from app.contracts.m5 import (
     RetrievalPlanSnapshotCreate,
 )
 from app.contracts.vcos_v2 import (
+    AssignmentCandidate,
     AssignmentMode,
     AssignmentResolverInput,
     ContentMode,
     ProductionLane,
+    SeriesPlanState,
+    SeriesRunState,
     DecisionReversibility,
     StrategicIntent,
     StrategicLineageV2,
@@ -55,7 +58,7 @@ from app.db.models.m5 import (
     EditorialResearchRun,
     SearchDemandEvidence,
 )
-from app.db.models.m7 import UploadedVideo
+from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.services.config_registry import content_hash
 from app.db.models.r3d1 import ContentCategory
 from app.services.editorial_fresh_evidence import (
@@ -64,7 +67,6 @@ from app.services.editorial_fresh_evidence import (
     OpenAIWebEvidenceProvider,
 )
 from app.services.editorial_research import EditorialResearchService
-from app.services.launch_cadence import LaunchRunwayService
 from app.services.m5 import (
     ChannelStatePackService,
     EditorialCalendarService,
@@ -115,6 +117,7 @@ class EditorialModeDecision:
     resolver_version: str | None = None
     resolver_input_hash: str | None = None
     standalone_authority: dict[str, Any] | None = None
+    series_binding: dict[str, Any] | None = None
 
 
 class EditorialRunwayReplenishmentService:
@@ -165,7 +168,6 @@ class EditorialRunwayReplenishmentService:
                 status="SKIPPED",
                 reason_codes=("RUNWAY_REPLENISHMENT_LAUNCH_AUTHORITY_MISMATCH",),
             )
-        projection = LaunchRunwayService(self.session).project(run.id)
         # Historical GREENLIT is not current production eligibility.  A
         # candidate with no current Topic Definition receipt cannot satisfy the
         # runway target or suppress bounded editorial repair.
@@ -448,7 +450,19 @@ class EditorialRunwayReplenishmentService:
 
         goal = (research_slot.production_goal or "").strip()
         pillar = (research_slot.content_pillar or "").strip()
-        if not goal or not pillar or mode_decision.content_mode != "STANDALONE":
+        if not goal or not pillar or mode_decision.content_mode is None:
+            raise ValidationFailureError("EDITORIAL_RESEARCH_QUESTION_AUTHORITY_MISSING")
+        if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value:
+            binding = mode_decision.series_binding or {}
+            series_title = str(binding.get("series_display_name") or "the active series")
+            episode_delta = str(binding.get("episode_delta") or "the next bounded episode")
+            return (
+                "Find current first-party OpenAI documentation that can ground "
+                f"a US English long-form episode for {series_title}. The episode "
+                f"must {episode_delta}. Return only official documentation URLs; "
+                "do not make market, ROI, or performance claims."
+            )
+        if mode_decision.content_mode != ContentMode.STANDALONE.value:
             raise ValidationFailureError("EDITORIAL_RESEARCH_QUESTION_AUTHORITY_MISSING")
         return (
             "Find current first-party OpenAI documentation that can ground a "
@@ -471,7 +485,10 @@ class EditorialRunwayReplenishmentService:
         evidence_refs: list[dict[str, Any]],
         actor: ActorContext,
     ):
-        if mode_decision.content_mode != ContentMode.STANDALONE.value:
+        if mode_decision.content_mode not in {
+            ContentMode.STANDALONE.value,
+            ContentMode.SERIES_EPISODE.value,
+        }:
             raise ValidationFailureError("EDITORIAL_CANDIDATE_MODE_AUTHORITY_MISSING")
         if not evidence_refs:
             raise ValidationFailureError("EDITORIAL_CANONICAL_EVIDENCE_REQUIRED")
@@ -533,14 +550,26 @@ class EditorialRunwayReplenishmentService:
                 # documentation index cannot be selected as a production topic.
                 proposed_title=source_title,
                 proposed_angle=(
-                    f"A bounded standalone walkthrough of what {source_title} "
-                    "documents, what remains outside the source scope, and how "
-                    "small teams can use that evidence to decide what to verify next."
+                    (
+                        f"The next bounded series episode uses {source_title} to "
+                        "advance one documented workflow without extending beyond the source."
+                    )
+                    if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value
+                    else (
+                        f"A bounded standalone walkthrough of what {source_title} "
+                        "documents, what remains outside the source scope, and how "
+                        "small teams can use that evidence to decide what to verify next."
+                    )
                 ),
                 parent_candidate_id=repair_parent.id if repair_parent is not None else None,
                 topic_repair_depth=(repair_parent.topic_repair_depth + 1 if repair_parent is not None else 0),
                 proposed_format="LONG_FORM",
                 proposed_pillar=research_slot.content_pillar,
+                suggested_series_plan_id=(
+                    uuid.UUID(str((mode_decision.series_binding or {})["series_plan_id"]))
+                    if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value
+                    else None
+                ),
                 rationale={
                     "schema_version": "vcos.editorial-evidence-candidate.v1",
                     "source_pack": collection_receipt.get("source_pack"),
@@ -560,10 +589,35 @@ class EditorialRunwayReplenishmentService:
             ),
             actor=actor,
         )
-        topic_definition = TopicDefinitionService(self.session).create_from_topic_capable_evidence(
-            candidate=candidate,
-            parent_topic_definition_id=(parent_eligibility.definition.id if parent_eligibility and parent_eligibility.definition else None),
+        parent_topic_definition_id = (
+            parent_eligibility.definition.id
+            if parent_eligibility and parent_eligibility.definition
+            else None
         )
+        if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value:
+            binding = mode_decision.series_binding or {}
+            plan = self.session.get(SeriesPlan, uuid.UUID(str(binding["series_plan_id"])))
+            series_run = self.session.get(SeriesRun, uuid.UUID(str(binding["series_run_id"])))
+            if plan is None or series_run is None:
+                raise ValidationFailureError("EDITORIAL_SERIES_TOPIC_AUTHORITY_INVALID")
+            topic_definition = TopicDefinitionService(
+                self.session
+            ).create_series_from_topic_capable_evidence(
+                candidate=candidate,
+                series_plan=plan,
+                series_run=series_run,
+                episode_role=str(binding["episode_role"]),
+                episode_delta=str(binding["episode_delta"]),
+                series_learning_outcome=str(binding["learning_outcome"]),
+                parent_topic_definition_id=parent_topic_definition_id,
+            )
+        else:
+            topic_definition = TopicDefinitionService(
+                self.session
+            ).create_from_topic_capable_evidence(
+                candidate=candidate,
+                parent_topic_definition_id=parent_topic_definition_id,
+            )
         topic_receipt = TopicDefinitionService(self.session).evaluate(topic_definition)
         if topic_receipt.state != "PASS":
             raise ValidationFailureError(topic_receipt.primary_reason_code or "EDITORIAL_TOPIC_GATE_BLOCK")
@@ -886,7 +940,7 @@ class EditorialRunwayReplenishmentService:
                     ),
                     # Replenishment resolves *routing* before market evidence.
                     # Strict preflight is still the only market PASS authority.
-                    candidates=[],
+                    candidates=self._series_assignment_candidates(run=run, policy=policy),
                     niche_gate_passed=True,
                     market_gate_passed=True,
                 )
@@ -922,8 +976,38 @@ class EditorialRunwayReplenishmentService:
         if (
             resolution.series_plan_id is None
             or resolution.series_run_id is None
-            or resolution.episode_number is None
         ):
+            return EditorialModeDecision(
+                content_mode=None,
+                assignment_mode=assignment_mode.value,
+                reason_codes=("SERIES_EPISODE_BINDING_INVALID",),
+                resolver_version=resolution.resolver_version,
+                resolver_input_hash=resolution.resolver_input_hash,
+            )
+        plan = self.session.get(SeriesPlan, resolution.series_plan_id)
+        series_run = self.session.get(SeriesRun, resolution.series_run_id)
+        if plan is None or series_run is None:
+            return EditorialModeDecision(
+                content_mode=None,
+                assignment_mode=assignment_mode.value,
+                reason_codes=("SERIES_EPISODE_BINDING_INVALID",),
+                resolver_version=resolution.resolver_version,
+                resolver_input_hash=resolution.resolver_input_hash,
+            )
+        role_policy = plan.episode_role_policy if isinstance(plan.episode_role_policy, dict) else {}
+        episode_role = str(
+            role_policy.get("default_role")
+            or role_policy.get("episode_role")
+            or "SERIES_EPISODE"
+        ).strip()
+        episode_delta = str(
+            role_policy.get("episode_delta")
+            or f"advance {plan.display_name} with one bounded documented workflow"
+        ).strip()
+        learning_outcome = str(
+            role_policy.get("learning_outcome") or plan.editorial_promise
+        ).strip()
+        if not episode_role or not episode_delta or not learning_outcome:
             return EditorialModeDecision(
                 content_mode=None,
                 assignment_mode=assignment_mode.value,
@@ -937,7 +1021,73 @@ class EditorialRunwayReplenishmentService:
             reason_codes=tuple(str(item) for item in resolution.reason_codes),
             resolver_version=resolution.resolver_version,
             resolver_input_hash=resolution.resolver_input_hash,
+            series_binding={
+                "series_plan_id": str(plan.id),
+                "series_run_id": str(series_run.id),
+                "series_display_name": plan.display_name,
+                "episode_role": episode_role,
+                "episode_delta": episode_delta,
+                "learning_outcome": learning_outcome,
+            },
         )
+
+    def _series_assignment_candidates(
+        self, *, run: LaunchRun, policy: FirstChannelLaunchPolicyVersion
+    ) -> list[AssignmentCandidate]:
+        """Build typed current-series candidates for the shared resolver."""
+
+        approved_plan_ids = {
+            str(item) for item in policy.approved_initial_series_plan_ids or []
+        }
+        rows = self.session.execute(
+            select(SeriesRun, SeriesPlan)
+            .join(SeriesPlan, SeriesPlan.id == SeriesRun.series_plan_id)
+            .where(
+                SeriesPlan.company_id == run.company_id,
+                SeriesPlan.channel_workspace_id == run.channel_workspace_id,
+                SeriesPlan.channel_profile_version_id == policy.channel_profile_version_id,
+                SeriesPlan.policy_snapshot_id == policy.policy_snapshot_id,
+            )
+            .order_by(SeriesRun.id)
+        ).all()
+        now = self.now()
+        candidates: list[AssignmentCandidate] = []
+        for series_run, plan in rows:
+            if str(plan.id) not in approved_plan_ids:
+                continue
+            role_policy = (
+                plan.episode_role_policy
+                if isinstance(plan.episode_role_policy, dict)
+                else {}
+            )
+            schedule_eligible = (
+                (series_run.schedule_window_start is None or now >= series_run.schedule_window_start)
+                and (series_run.schedule_window_end is None or now <= series_run.schedule_window_end)
+            )
+            try:
+                candidates.append(
+                    AssignmentCandidate(
+                        series_plan_id=plan.id,
+                        series_run_id=series_run.id,
+                        production_lane=ProductionLane.LONG_FORM,
+                        plan_state=SeriesPlanState(plan.state),
+                        run_state=SeriesRunState(series_run.state),
+                        next_episode_number=series_run.next_episode_number,
+                        capacity=series_run.capacity,
+                        reserved_episode_count=series_run.reserved_episode_count,
+                        priority=series_run.priority,
+                        coherence_score=100,
+                        schedule_eligible=schedule_eligible,
+                        episode_role=str(
+                            role_policy.get("default_role")
+                            or role_policy.get("episode_role")
+                            or "SERIES_EPISODE"
+                        ),
+                    )
+                )
+            except ValueError:
+                continue
+        return candidates
 
     def _standalone_authority(
         self,
@@ -1057,7 +1207,8 @@ class EditorialRunwayReplenishmentService:
         if mode_decision.content_mode is None:
             blockers.extend(mode_decision.reason_codes)
         elif mode_decision.content_mode == ContentMode.SERIES_EPISODE.value:
-            # The resolver has already required typed plan/run/episode binding.
+            # The resolver has selected typed plan/run intent.  Exact episode
+            # allocation belongs to pre-writer reservation.
             # Retain an explicit invariant for this scheduler boundary.
             if "SERIES_EPISODE_BINDING_INVALID" in mode_decision.reason_codes:
                 blockers.append("SERIES_EPISODE_BINDING_INVALID")

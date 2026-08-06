@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.orm import sessionmaker
 
 from app.contracts.script_qualification import (
     AssignmentObservation,
@@ -16,8 +17,10 @@ from app.contracts.script_qualification import (
     SectionPurposeObservation,
     SemanticVerificationOutput,
 )
-from app.db.models.m5 import EditorialIdeaCandidate
-from app.db.models.script_qualification import ScriptQualificationRun
+from app.db.models.script_qualification import (
+    ScriptQualificationReceipt,
+    ScriptQualificationRun,
+)
 from app.db.models.foundation import DomainEvent
 from app.db.models.ops import DeadLetterJob
 from app.services.outbox_dispatcher import DurableOutboxDispatcher
@@ -28,9 +31,14 @@ from app.services.script_qualification import (
     script_hash,
     span_hash,
 )
+from app.workers.production_workflow import ProductionWorkflowWorker
 from app.services.script_qualification_authority import (
     canonical_memory_digest_hash,
     validate_memory_digest,
+)
+from app.services.runtime_migration_guard import (
+    REQUIRED_RUNTIME_DB_REVISION,
+    RuntimeMigrationGuard,
 )
 from app.contracts.production_package import ProductionDurationContractV2
 from app.services.v2_support_authority import (
@@ -529,6 +537,151 @@ def test_qualified_finalization_retry_never_reinvokes_producers(db_session):
 
     assert ScriptQualificationService(db_session, producer=_NeverInvokeProducer()).execute(qualification.id).state == "QUALIFIED"
     assert calls == {"writer": 0, "verifier": 0}
+
+
+def test_worker_seals_qualification_pass_before_finalization_failure(
+    db_session, engine, monkeypatch
+):
+    """Admission rollback cannot erase the committed two-call PASS authority."""
+
+    from app.contracts.launch_cadence import CadenceEvaluationCommand
+    from app.core.actor import _system_worker_actor
+    from app.services.launch_cadence import LongFormCadenceService
+    from tests.test_long_form_launch_cadence import (
+        _DeterministicPassingQualificationProducer,
+        _active_launch_run,
+        _actor,
+        _approved_launch_policy,
+        _bind_current_topic_authority,
+        _greenlit_candidate,
+        _ready_provider_snapshot,
+        _test_support_authority_preparer,
+    )
+
+    scope = QualificationFactory(db_session).channel_scope(
+        name="Qualification pass boundary", strict_long_form=True
+    )
+    policy, admin_actor, _ = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=datetime(2026, 7, 20).date()
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_current_topic_authority(db_session, candidate)
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    evaluation = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    ).evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="durable-pass-boundary"),
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    assert evaluation.script_qualification_run_id is not None
+    db_session.commit()
+    qualification_event_id = db_session.scalar(
+        select(DomainEvent.id).where(
+            DomainEvent.aggregate_id == evaluation.script_qualification_run_id,
+            DomainEvent.event_type == "script_qualification.execute.v1",
+        )
+    )
+    assert qualification_event_id is not None
+    qualification_event = db_session.get(DomainEvent, qualification_event_id)
+    assert qualification_event is not None
+    qualification_event.next_attempt_at = now
+    db_session.commit()
+
+    producer = _DeterministicPassingQualificationProducer()
+    monkeypatch.setattr(
+        "app.services.script_qualification.LunaScriptQualificationProducer",
+        lambda _session: producer,
+    )
+
+    original_finalize = LongFormCadenceService.finalize_qualified_script_run
+
+    def _fail_finalization(*_args, **_kwargs):
+        raise RuntimeError("inject final admission failure")
+
+    monkeypatch.setattr(
+        LongFormCadenceService, "finalize_qualified_script_run", _fail_finalization
+    )
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    first_worker = ProductionWorkflowWorker(
+        session_factory=factory,
+        worker_id="durable-pass-boundary-first",
+        now=lambda: now,
+    )
+    first = next(
+        result
+        for _ in range(4)
+        if (result := first_worker.run_once()).event_id == qualification_event_id
+    )
+    assert first.event_id == qualification_event_id
+    assert first.status == "RETRY_SCHEDULED"
+    assert first.retry_scheduled is True
+    assert producer.writer_calls == 1
+    assert producer.verifier_calls == 1
+
+    db_session.expire_all()
+    qualification = db_session.get(
+        ScriptQualificationRun, evaluation.script_qualification_run_id
+    )
+    receipt = db_session.scalar(
+        select(ScriptQualificationReceipt).where(
+            ScriptQualificationReceipt.script_qualification_run_id == qualification.id
+        )
+    )
+    assert qualification is not None and qualification.state == "QUALIFIED"
+    assert receipt is not None and receipt.result == "PASS"
+    assert canonical_hash(receipt.content) == receipt.content_hash
+
+    monkeypatch.setattr(
+        LongFormCadenceService,
+        "finalize_qualified_script_run",
+        lambda *_args, **_kwargs: (None, None),
+    )
+    second_worker = ProductionWorkflowWorker(
+        session_factory=factory,
+        worker_id="durable-pass-boundary-retry",
+        now=lambda: now + timedelta(days=1),
+    )
+    second = next(
+        result
+        for _ in range(4)
+        if (result := second_worker.run_once()).event_id == qualification_event_id
+    )
+    assert second.status == "DELIVERED"
+    assert producer.writer_calls == 1
+    assert producer.verifier_calls == 1
+    assert original_finalize is not None
+
+
+def test_runtime_migration_guard_blocks_worker_before_any_production_claim(
+    db_session, engine
+):
+    db_session.execute(
+        text("update alembic_version set version_num = '0060_series_episode_reservations'")
+    )
+    db_session.commit()
+    try:
+        assert RuntimeMigrationGuard(db_session).inspect().ready is False
+        result = ProductionWorkflowWorker(
+            session_factory=sessionmaker(bind=engine, expire_on_commit=False),
+            worker_id="schema-guard-worker",
+        ).run_once()
+        assert result.status == "SCHEMA_BLOCKED"
+    finally:
+        db_session.execute(
+            text("update alembic_version set version_num = :revision"),
+            {"revision": REQUIRED_RUNTIME_DB_REVISION},
+        )
+        db_session.commit()
+    assert RuntimeMigrationGuard(db_session).inspect().ready is True
 
 
 def test_qualification_shutdown_and_expired_lease_reconcile_without_orphaning(db_session):

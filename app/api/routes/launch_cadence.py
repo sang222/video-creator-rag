@@ -22,6 +22,7 @@ from app.contracts.launch_cadence import (
     LaunchRunwayProjection,
     LongFormPublishSlotRead,
 )
+from app.contracts.script_qualification import ProviderOutcomeReconciliationCommand
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.launch_cadence import (
@@ -30,6 +31,8 @@ from app.db.models.launch_cadence import (
     LaunchRun,
     LongFormPublishSlot,
 )
+from app.db.models.m5 import EditorialIdeaCandidate
+from app.db.models.script_qualification import ScriptQualificationRun
 from app.db.session import session_scope
 from app.services.launch_cadence import (
     FirstChannelLaunchPolicyService,
@@ -38,12 +41,54 @@ from app.services.launch_cadence import (
     LaunchRunwayService,
     LongFormCadenceService,
 )
+from app.services.script_qualification_recovery import (
+    ScriptQualificationRecoveryService,
+)
 from app.services.company_access import require_company_permission
 from app.services.security_boundary import actor_from_request
 
 
 def create_router() -> APIRouter:
     router = APIRouter()
+
+    @router.post("/script-qualifications/{run_id}/provider-outcome-reconciliation")
+    def reconcile_script_qualification_provider_outcome(
+        run_id: uuid.UUID,
+        data: ProviderOutcomeReconciliationCommand,
+        request: Request,
+    ) -> dict:
+        """Close an unknown provider outcome without direct database edits."""
+
+        try:
+            actor = actor_from_request(request)
+            with session_scope() as session:
+                run = session.get(ScriptQualificationRun, run_id)
+                if run is None:
+                    raise NotFoundError(f"script qualification run not found: {run_id}")
+                candidate = session.get(
+                    EditorialIdeaCandidate, run.editorial_idea_candidate_id
+                )
+                if candidate is None:
+                    raise ValidationFailureError(
+                        "SCRIPT_PROVIDER_RECONCILIATION_CANDIDATE_MISSING"
+                    )
+                require_company_permission(
+                    session,
+                    actor=actor,
+                    permission="production.start",
+                    company_id=candidate.company_id,
+                )
+                return ScriptQualificationRecoveryService(
+                    session
+                ).reconcile_provider_outcome(
+                    run_id=run_id,
+                    decision=data.decision,
+                    evidence_refs=data.evidence_refs,
+                    reason_code=data.reason_code,
+                    actor=actor,
+                )
+        except Exception as exc:
+            raise _as_http_error(exc) from exc
 
     @router.post(
         "/channels/{channel_id}/launch-policies",

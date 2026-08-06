@@ -612,6 +612,13 @@ class DurableOutboxDispatcher:
                 "detail": summary[:512],
                 "logical_identity_hash": qualification.logical_identity_hash,
             }
+            from app.services.script_qualification_recovery import (
+                ScriptQualificationRecoveryService,
+            )
+
+            ScriptQualificationRecoveryService(
+                self.session, now=self.now
+            ).settle_unknown_provider_outcome(qualification)
         job, incident = self._dead_letter_qualification_event(
             event,
             now=now,

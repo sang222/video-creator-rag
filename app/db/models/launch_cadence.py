@@ -279,7 +279,7 @@ class LongFormPublishSlot(Base):
     target_start_window_close_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    state: Mapped[str] = mapped_column(String(24), nullable=False, default="OPEN")
+    state: Mapped[str] = mapped_column(String(48), nullable=False, default="OPEN")
     reserved_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("editorial_idea_candidates.id")
     )
@@ -303,7 +303,8 @@ class LongFormPublishSlot(Base):
         Index("ix_long_form_publish_slots_run", "launch_run_id"),
         Index("ix_long_form_publish_slots_intended", "intended_publish_at"),
         CheckConstraint(
-            "state in ('OPEN','QUALIFICATION_RESERVED','RESERVED','FULFILLED','SKIPPED','CANCELED')",
+            "state in ('OPEN','QUALIFICATION_RESERVED','QUALIFICATION_RECONCILIATION_REQUIRED',"
+            "'RESERVED','FULFILLED','SKIPPED','CANCELED')",
             name="ck_long_form_publish_slots_state",
         ),
         CheckConstraint(

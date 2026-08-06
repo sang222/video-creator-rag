@@ -23,6 +23,7 @@ from app.db.models.launch_cadence import LongFormPublishSlot
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
 from app.db.models.m5 import EditorialIdeaCandidate, ProjectAdmissionDecision
+from app.db.models.script_qualification import ScriptQualificationRun
 from app.db.models.mr1_budget import MR1MonthlyBudgetReservation
 from app.db.models.ops import CostEvent, DeadLetterJob, OpsIncident, ProviderAttempt
 from app.db.models.production_workflow import (
@@ -32,6 +33,7 @@ from app.db.models.production_workflow import (
 from app.db.models.v2_effect import V2ProductionEffectLedger
 from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
+from app.services.series_episode_reservation import EpisodeReservationAuthorityService
 
 
 STALE_WORKFLOW_RECOVERY_EVENT_TYPE = "production.workflow.stale_recovery.requested"
@@ -333,11 +335,32 @@ class StaleWorkflowRecoveryService:
         for publish_slot in publish_slots:
             publish_slot.state = "CANCELED"
 
+        qualification = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.production_workflow_run_id == run.id)
+            .with_for_update()
+        )
+        abandoned_reservation = None
+        if qualification is not None:
+            abandoned_reservation = EpisodeReservationAuthorityService(
+                self.session
+            ).abandon_after_admission(
+                qualification,
+                reason_code="ZERO_EFFECT_WORKFLOW_ABANDONED_AFTER_ADMISSION",
+            )
+
         return {
             "state": "CLOSED",
             "candidate_id": str(candidate.id),
             "candidate_closed": candidate_closed,
             "publish_slot_ids": [str(item.id) for item in publish_slots],
+            "qualification_run_id": str(qualification.id) if qualification else None,
+            "series_reservation_id": (
+                str(abandoned_reservation.id) if abandoned_reservation else None
+            ),
+            "series_reservation_state": (
+                abandoned_reservation.state if abandoned_reservation else None
+            ),
         }
 
     def _dead_letter_for(self, workflow_run_id: uuid.UUID) -> DeadLetterJob | None:

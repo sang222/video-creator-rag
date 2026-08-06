@@ -146,6 +146,18 @@ class ScriptAssignmentResolution(_Strict):
         return self
 
 
+class ProviderOutcomeReconciliationCommand(_Strict):
+    """Operator-evidenced resolution of a non-retryable provider outcome."""
+
+    decision: Literal[
+        "PROVIDER_EFFECT_CONFIRMED",
+        "NO_PROVIDER_EFFECT_CONFIRMED",
+        "UNRESOLVED",
+    ]
+    evidence_refs: list[dict[str, Any]] = Field(min_length=1)
+    reason_code: str = Field(min_length=1, max_length=160)
+
+
 class SemanticVerificationOutput(_Strict):
     material_claim_inventory: list[MaterialClaimObservation] = Field(min_length=1)
     assignment_fulfillment_observations: list[AssignmentObservation] = Field(default_factory=list)

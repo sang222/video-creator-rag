@@ -77,6 +77,7 @@ from app.db.models.m5 import (
 )
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.production_workflow import WorkflowRecoveryReceipt
+from app.db.models.vcos_v2 import SeriesRun
 from app.db.models.ops import DeadLetterJob, OpsIncident, ProviderAttempt
 from app.db.models.workflow import Artifact, ArtifactVersion
 from app.services.editorial_research import EditorialResearchService
@@ -110,6 +111,9 @@ from app.services.script_qualification import (
     ScriptQualificationService,
     TopicDefinitionService,
     span_hash,
+)
+from app.services.script_qualification_recovery import (
+    ScriptQualificationRecoveryService,
 )
 from app.services.v2_support_authority import (
     V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
@@ -541,7 +545,7 @@ def test_runway_replenishment_is_single_durable_block_without_fresh_evidence(
             status="ACTIVE",
         )
     )
-    launch = _active_launch_run(
+    _active_launch_run(
         db_session,
         policy,
         actor,
@@ -551,7 +555,8 @@ def test_runway_replenishment_is_single_durable_block_without_fresh_evidence(
         "vcos-durable-worker",
         permissions={"editorial.manage", "production.start"},
     )
-    now = lambda: datetime(2026, 8, 3, 14, tzinfo=timezone.utc)
+    def now() -> datetime:
+        return datetime(2026, 8, 3, 14, tzinfo=timezone.utc)
     service = EditorialRunwayReplenishmentService(db_session, now=now)
 
     first = service.reconcile_active_launches(actor=worker_actor)
@@ -599,6 +604,54 @@ def test_series_required_still_fails_closed_without_typed_binding() -> None:
                 market_gate_passed=True,
             )
         )
+
+
+def test_open_mix_runway_naturally_resolves_active_series_intent(
+    db_session, qualification_factory
+) -> None:
+    """The production runway feeds typed active series to OPEN_MIX."""
+
+    scope = qualification_factory.channel_scope(
+        name="Natural series runway", strict_long_form=True
+    )
+    policy, actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    R3D1AdminService(db_session).create_content_category(
+        ContentCategoryCreate(
+            company_id=scope.company.id,
+            channel_workspace_id=scope.channel.id,
+            category_key="natural-series-runway",
+            name="Natural Series Runway",
+            sub_niche="small-team systems",
+            audience_segment="small professional teams",
+            content_pillar="AI automation workflows",
+            character_policy_mode="NO_CHARACTER",
+            status="ACTIVE",
+        )
+    )
+    launch = _active_launch_run(
+        db_session, policy, actor, started_on=date(2026, 8, 3)
+    )
+    service = EditorialRunwayReplenishmentService(
+        db_session,
+        now=lambda: datetime(2026, 8, 3, 14, tzinfo=timezone.utc),
+    )
+    slot, blocker = service._create_research_slot(
+        run=launch, policy=policy, run_date=date(2026, 8, 3)
+    )
+    assert blocker is None and slot is not None
+    mode = service._resolve_mode(
+        run=launch, policy=policy, editorial_calendar_slot=slot
+    )
+    assert mode.content_mode == "SERIES_EPISODE"
+    assert mode.series_binding is not None
+    assert mode.series_binding["series_plan_id"] == str(plans[0].id)
+    assert mode.series_binding["series_run_id"] == str(series_run.id)
+    assert "episode_number" not in mode.series_binding
 
 
 class _DeterministicOfficialDocsProvider:
@@ -1312,6 +1365,126 @@ def test_series_episode_reservation_is_pre_writer_idempotent_and_released_on_sup
     assert db_session.scalar(select(func.count()).select_from(VideoProject)) == 0
 
 
+def test_structural_block_settles_series_slot_and_releases_capacity_once(
+    db_session, qualification_factory
+) -> None:
+    """A deterministic failure closes the slot without reopening its episode."""
+
+    scope = qualification_factory.channel_scope(
+        name="Series terminal qualification settlement", strict_long_form=True
+    )
+    policy, admin_actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_series_topic_authority(
+        db_session, candidate, plan=plans[0], run=series_run
+    )
+    qualification_start = LongFormCadenceService(
+        db_session,
+        now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    ).evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="structural-settlement"),
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    assert qualification_start.script_qualification_run_id is not None
+    qualification = db_session.get(
+        ScriptQualificationRun, qualification_start.script_qualification_run_id
+    )
+    assert qualification is not None
+
+    class _StructuralBlockProducer(_DeterministicPassingQualificationProducer):
+        def write(self, context, *, idempotency_key):
+            output, receipt = super().write(context, idempotency_key=idempotency_key)
+            output["language"] = "vi"
+            return output, receipt
+
+    producer = _StructuralBlockProducer()
+    result = ScriptQualificationService(db_session, producer=producer).execute(
+        qualification.id
+    )
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    slot = db_session.get(LongFormPublishSlot, qualification.publish_slot_id)
+    assert result.state == "BLOCKED_NON_REPAIRABLE"
+    assert producer.writer_calls == 1 and producer.verifier_calls == 0
+    assert reservation is not None and reservation.state == "RELEASED"
+    assert series_run.reserved_episode_count == 0
+    assert slot is not None and slot.state == "CANCELED"
+    assert candidate.stage == "REJECTED"
+    assert result.terminal_settlement_receipt is not None
+    receipt = result.terminal_settlement_receipt
+    assert receipt["capacity_released"] is True
+    assert receipt["content_hash"] == content_hash(
+        {key: value for key, value in receipt.items() if key != "content_hash"}
+    )
+    repeated = ScriptQualificationRecoveryService(
+        db_session
+    ).settle_deterministic_block(
+        result, reason_code="SCRIPT_QUALIFICATION_BLOCKED"
+    )
+    assert repeated == receipt
+    assert series_run.reserved_episode_count == 0
+    assert db_session.scalar(select(func.count()).select_from(VideoProject)) == 0
+
+
+def test_series_reservation_allocates_sequential_episodes_from_stale_topic_intent(
+    db_session, qualification_factory
+) -> None:
+    scope = qualification_factory.channel_scope(
+        name="Sequential series episode allocation", strict_long_form=True
+    )
+    policy, admin_actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    actor = _actor(db_session, scope)
+    _, first_candidate, _ = _greenlit_candidate(db_session, scope, actor)
+    _, second_candidate, _ = _greenlit_candidate(db_session, scope, actor)
+    # Both TopicDefinitions are intentionally created while next_episode is 1.
+    _bind_series_topic_authority(
+        db_session, first_candidate, plan=plans[0], run=series_run
+    )
+    _bind_series_topic_authority(
+        db_session, second_candidate, plan=plans[0], run=series_run
+    )
+    slots = LongFormCadenceService(db_session).ensure_slots(launch.id)
+    assert len(slots) >= 2
+
+    first = ScriptQualificationService(db_session).reserve(
+        candidate=first_candidate,
+        publish_slot_id=slots[0].id,
+        launch_run_id=launch.id,
+    )
+    second = ScriptQualificationService(db_session).reserve(
+        candidate=second_candidate,
+        publish_slot_id=slots[1].id,
+        launch_run_id=launch.id,
+    )
+    assert first.assignment_resolution["episode_number"] == 1
+    assert second.assignment_resolution["episode_number"] == 2
+    assert first.writer_attempt_key != second.writer_attempt_key
+    assert series_run.next_episode_number == 3
+    assert series_run.reserved_episode_count == 2
+
+
 def test_unknown_series_writer_outcome_keeps_episode_reserved(
     db_session, qualification_factory
 ) -> None:
@@ -1368,6 +1541,41 @@ def test_unknown_series_writer_outcome_keeps_episode_reserved(
     assert reservation is not None and reservation.state == "RESERVED"
     assert qualification.episode_reservation_active is True
     assert series_run.reserved_episode_count == 1
+    slot = db_session.get(LongFormPublishSlot, qualification.publish_slot_id)
+    terminal_receipt = result.terminal_settlement_receipt
+    assert slot is not None and slot.state == "QUALIFICATION_RECONCILIATION_REQUIRED"
+    assert terminal_receipt is not None
+    assert terminal_receipt["capacity_released"] is False
+    assert terminal_receipt["content_hash"] == content_hash(
+        {key: value for key, value in terminal_receipt.items() if key != "content_hash"}
+    )
+
+    actor = _actor(db_session, scope, admin=True)
+    reconciliation = ScriptQualificationRecoveryService(
+        db_session
+    ).reconcile_provider_outcome(
+        run_id=qualification.id,
+        decision="NO_PROVIDER_EFFECT_CONFIRMED",
+        evidence_refs=[{"ref": "provider-audit://writer/no-effect"}],
+        reason_code="PROVIDER_AUDIT_CONFIRMED_NO_EFFECT",
+        actor=actor,
+    )
+    assert reconciliation["outcome"] == "SUPERSEDED_AND_CAPACITY_RELEASED"
+    assert reconciliation["content_hash"] == content_hash(
+        {key: value for key, value in reconciliation.items() if key != "content_hash"}
+    )
+    assert qualification.state == "SUPERSEDED"
+    assert reservation.state == "RELEASED"
+    assert series_run.reserved_episode_count == 0
+    assert slot.state == "CANCELED"
+    assert ScriptQualificationRecoveryService(db_session).reconcile_provider_outcome(
+        run_id=qualification.id,
+        decision="NO_PROVIDER_EFFECT_CONFIRMED",
+        evidence_refs=[{"ref": "provider-audit://writer/no-effect"}],
+        reason_code="PROVIDER_AUDIT_CONFIRMED_NO_EFFECT",
+        actor=actor,
+    ) == reconciliation
+    assert series_run.reserved_episode_count == 0
 
 
 def test_series_qualification_pass_consumes_the_exact_reserved_episode_once(
@@ -1972,11 +2180,11 @@ def test_workflow_start_blocks_missing_effective_context_before_research_dispatc
         )
 
 
-def _stale_zero_effect_workflow(db_session, qualification_factory):
+def _stale_zero_effect_workflow(db_session, qualification_factory, *, series: bool = False):
     scope = qualification_factory.channel_scope(
         name="Stale workflow recovery", strict_long_form=True
     )
-    policy, admin_actor, _ = _approved_launch_policy(
+    policy, admin_actor, plans = _approved_launch_policy(
         db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
     )
     launch_run = _active_launch_run(
@@ -1984,7 +2192,15 @@ def _stale_zero_effect_workflow(db_session, qualification_factory):
     )
     producer_actor = _actor(db_session, scope)
     _, candidate, _ = _greenlit_candidate(db_session, scope, producer_actor)
-    _bind_current_topic_authority(db_session, candidate)
+    if series:
+        series_run = _approved_series_run(
+            db_session, plan=plans[0], actor_user_id=scope.admin.id
+        )
+        _bind_series_topic_authority(
+            db_session, candidate, plan=plans[0], run=series_run
+        )
+    else:
+        _bind_current_topic_authority(db_session, candidate)
     cadence = LongFormCadenceService(
         db_session,
         now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
@@ -2125,11 +2341,61 @@ def test_zero_effect_stale_dead_letter_auto_supersedes_once(
     assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
 
 
+def test_zero_effect_stale_series_workflow_abandons_capacity_once(
+    db_session, qualification_factory
+) -> None:
+    workflow, dead_letter, _incident, _origin_event = _stale_zero_effect_workflow(
+        db_session, qualification_factory, series=True
+    )
+    qualification = db_session.scalar(
+        select(ScriptQualificationRun).where(
+            ScriptQualificationRun.production_workflow_run_id == workflow.id
+        )
+    )
+    assert qualification is not None
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    assert reservation is not None and reservation.state == "CONSUMED"
+    series_run = db_session.get(SeriesRun, reservation.series_run_id)
+    assert series_run is not None and series_run.reserved_episode_count == 1
+
+    recovery = StaleWorkflowRecoveryService(db_session)
+    assert recovery.enqueue_due() == 1
+    event = db_session.scalar(
+        select(DomainEvent).where(
+            DomainEvent.event_type == STALE_WORKFLOW_RECOVERY_EVENT_TYPE
+        )
+    )
+    assert event is not None
+    receipt = recovery.execute_event(
+        event=event,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    assert receipt.dead_letter_job_id == dead_letter.id
+    assert reservation.state == "ABANDONED_AFTER_ADMISSION"
+    assert reservation.abandoned_reason_code == (
+        "ZERO_EFFECT_WORKFLOW_ABANDONED_AFTER_ADMISSION"
+    )
+    assert series_run.reserved_episode_count == 0
+    assert recovery.execute_event(
+        event=event,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    ).id == receipt.id
+    assert series_run.reserved_episode_count == 0
+
+
 def test_effectful_stale_dead_letter_is_never_auto_superseded(
     db_session, qualification_factory
 ) -> None:
     workflow, _dead_letter, _incident, _origin_event = _stale_zero_effect_workflow(
-        db_session, qualification_factory
+        db_session, qualification_factory, series=True
     )
     db_session.add(
         ProviderAttempt(
@@ -2147,6 +2413,18 @@ def test_effectful_stale_dead_letter_is_never_auto_superseded(
 
     assert StaleWorkflowRecoveryService(db_session).enqueue_due() == 0
     assert workflow.state == "DEAD_LETTERED"
+    qualification = db_session.scalar(
+        select(ScriptQualificationRun).where(
+            ScriptQualificationRun.production_workflow_run_id == workflow.id
+        )
+    )
+    assert qualification is not None
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    assert reservation is not None and reservation.state == "CONSUMED"
     assert (
         db_session.scalar(
             select(func.count(WorkflowRecoveryReceipt.id)).where(
