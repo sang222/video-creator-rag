@@ -54,6 +54,10 @@ from app.db.models.m5 import (
     ProjectAdmissionDecision,
 )
 from app.db.models.m7 import UploadedVideo
+from app.db.models.script_qualification import (
+    ScriptQualificationRun,
+    SeriesEpisodeReservation,
+)
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
@@ -664,6 +668,10 @@ class ProjectAdmissionV2Service:
         data = self._resolve_server_lineage(data=data, context=context)
         existing = self._lock_source_and_existing(data)
         if existing is not None:
+            self._consume_qualification_reservation_if_present(
+                data=data,
+                admission=existing,
+            )
             return existing
         budget_gate_result = resolve_budget_authority(
             self.session,
@@ -678,7 +686,12 @@ class ProjectAdmissionV2Service:
                 "LONG_FORM_ADMISSION_BUDGET_AUTHORITY_MISMATCH"
             )
         data = data.model_copy(update={"budget_gate_result": budget_gate_result})
-        resolver_input = self._resolver_input(data, context)
+        episode_reservation = self._qualification_episode_reservation(data)
+        resolver_input = self._resolver_input(
+            data,
+            context,
+            episode_reservation=episode_reservation,
+        )
         gate_reasons = self._gate_reasons(data, context)
         if gate_reasons:
             return self._persist_block(
@@ -700,6 +713,7 @@ class ProjectAdmissionV2Service:
             frozen=data.qualification_assignment_resolution,
             resolution=resolution,
             assignment_mode=data.assignment_mode,
+            episode_reservation=episode_reservation,
         )
         if resolution.content_mode == ContentMode.SERIES_EPISODE:
             return self._admit_series(
@@ -708,6 +722,7 @@ class ProjectAdmissionV2Service:
                 resolver_input=resolver_input,
                 resolution=resolution,
                 frozen_assignment_resolution=data.qualification_assignment_resolution,
+                episode_reservation=episode_reservation,
             )
         return self._admit_standalone(
             data=data,
@@ -722,6 +737,7 @@ class ProjectAdmissionV2Service:
         frozen: dict[str, Any] | None,
         resolution: AssignmentResolution,
         assignment_mode: AssignmentMode,
+        episode_reservation: SeriesEpisodeReservation | None,
     ) -> None:
         """Admission may project qualification authority, never reinterpret it."""
 
@@ -740,14 +756,98 @@ class ProjectAdmissionV2Service:
         if resolution.content_mode == ContentMode.STANDALONE:
             if not frozen.get("standalone_self_containment_required"):
                 raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+            if episode_reservation is not None:
+                raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
             return
         if (
             str(resolution.series_plan_id) != str(frozen.get("series_plan_id"))
             or str(resolution.series_run_id) != str(frozen.get("series_run_id"))
+            or resolution.episode_number != frozen.get("episode_number")
             or resolution.episode_role != frozen.get("episode_role")
             or not frozen.get("episode_delta")
         ):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        if episode_reservation is not None and (
+            episode_reservation.series_plan_id != resolution.series_plan_id
+            or episode_reservation.series_run_id != resolution.series_run_id
+            or episode_reservation.episode_number != resolution.episode_number
+            or episode_reservation.episode_role != resolution.episode_role
+        ):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+
+    def _qualification_episode_reservation(
+        self,
+        data: ProjectAdmissionV2Request,
+    ) -> SeriesEpisodeReservation | None:
+        """Load the DB authority for a cadence finalization, never a caller copy."""
+
+        if data.script_qualification_run_id is None:
+            return None
+        if data.qualification_assignment_resolution is None:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        from app.services.script_qualification import ScriptQualificationService
+        from app.services.series_episode_reservation import (
+            EpisodeReservationAuthorityService,
+        )
+
+        qualification = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == data.script_qualification_run_id)
+            .with_for_update()
+        )
+        if (
+            qualification is None
+            or qualification.editorial_idea_candidate_id
+            != data.editorial_idea_candidate_id
+        ):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        ScriptQualificationService(self.session).require_pass(
+            qualification.id,
+            candidate_id=data.editorial_idea_candidate_id,
+        )
+        frozen = ScriptQualificationService._validate_assignment_resolution(
+            qualification
+        )
+        if content_hash(frozen) != content_hash(data.qualification_assignment_resolution):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        return EpisodeReservationAuthorityService(
+            self.session
+        ).reservation_for_final_admission(qualification)
+
+    def _consume_qualification_reservation_if_present(
+        self,
+        *,
+        data: ProjectAdmissionV2Request,
+        admission: ProjectAdmissionDecision,
+    ) -> None:
+        """Make repeated cadence finalization return the same exact admission."""
+
+        if data.script_qualification_run_id is None:
+            return
+        from app.services.script_qualification import ScriptQualificationService
+        from app.services.series_episode_reservation import (
+            EpisodeReservationAuthorityService,
+        )
+
+        qualification = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == data.script_qualification_run_id)
+            .with_for_update()
+        )
+        if qualification is None:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        ScriptQualificationService(self.session).require_pass(
+            qualification.id,
+            candidate_id=data.editorial_idea_candidate_id,
+        )
+        EpisodeReservationAuthorityService(self.session).consume_for_admission(
+            qualification=qualification,
+            admission_decision_id=admission.id,
+            series_plan_id=admission.series_plan_id,
+            series_run_id=admission.series_run_id,
+            episode_number=admission.episode_number,
+            episode_role=admission.episode_role,
+        )
 
     def _active_launch_authority(
         self,
@@ -1213,6 +1313,8 @@ class ProjectAdmissionV2Service:
         self,
         data: ProjectAdmissionV2Request,
         context: _AdmissionContext,
+        *,
+        episode_reservation: SeriesEpisodeReservation | None = None,
     ) -> AssignmentResolverInput:
         gate_passed = not self._gate_reasons(data, context)
         return AssignmentResolverInput(
@@ -1220,7 +1322,11 @@ class ProjectAdmissionV2Service:
             assignment_mode=data.assignment_mode,
             preferred_series_plan_id=context.slot.preferred_series_plan_id,
             preferred_series_run_id=context.slot.preferred_series_run_id,
-            candidates=self._candidates(data, context),
+            candidates=self._candidates(
+                data,
+                context,
+                episode_reservation=episode_reservation,
+            ),
             niche_gate_passed=gate_passed,
             market_gate_passed=gate_passed,
             timely_niche_opportunity=data.timely_niche_opportunity,
@@ -1231,6 +1337,8 @@ class ProjectAdmissionV2Service:
         self,
         data: ProjectAdmissionV2Request,
         context: _AdmissionContext,
+        *,
+        episode_reservation: SeriesEpisodeReservation | None = None,
     ) -> list[AssignmentCandidate]:
         launch_policy = _approved_launch_policy_for_channel(
             self.session,
@@ -1268,6 +1376,11 @@ class ProjectAdmissionV2Service:
             except ValueError:
                 continue
             run_key = str(run.id)
+            uses_reserved_episode = (
+                episode_reservation is not None
+                and episode_reservation.series_plan_id == plan.id
+                and episode_reservation.series_run_id == run.id
+            )
             candidates.append(
                 AssignmentCandidate(
                     series_plan_id=plan.id,
@@ -1275,9 +1388,17 @@ class ProjectAdmissionV2Service:
                     production_lane=ProductionLane.LONG_FORM,
                     plan_state=plan_state,
                     run_state=run_state,
-                    next_episode_number=run.next_episode_number,
+                    next_episode_number=(
+                        episode_reservation.episode_number
+                        if uses_reserved_episode
+                        else run.next_episode_number
+                    ),
                     capacity=run.capacity,
-                    reserved_episode_count=run.reserved_episode_count,
+                    reserved_episode_count=(
+                        run.reserved_episode_count - 1
+                        if uses_reserved_episode
+                        else run.reserved_episode_count
+                    ),
                     priority=run.priority,
                     coherence_score=self._mapping_int(
                         envelope,
@@ -1316,7 +1437,9 @@ class ProjectAdmissionV2Service:
                         0,
                     ),
                     episode_role=(
-                        data.episode_role
+                        episode_reservation.episode_role
+                        if uses_reserved_episode
+                        else data.episode_role
                         or (plan.episode_role_policy or {}).get("default_episode_role")
                     ),
                 )
@@ -1375,6 +1498,7 @@ class ProjectAdmissionV2Service:
         resolver_input: AssignmentResolverInput,
         resolution: AssignmentResolution,
         frozen_assignment_resolution: dict[str, Any] | None = None,
+        episode_reservation: SeriesEpisodeReservation | None = None,
     ) -> ProjectAdmissionDecision:
         with self.session.begin_nested():
             run = self.session.scalar(
@@ -1396,6 +1520,7 @@ class ProjectAdmissionV2Service:
                     data=data,
                     run=run,
                     candidate=candidate,
+                    episode_reservation=episode_reservation,
                 )
                 if run is not None
                 else AssignmentReasonCode.SERIES_BINDING_INVALID
@@ -1421,6 +1546,27 @@ class ProjectAdmissionV2Service:
                     resolution=fallback,
                 )
             assert run is not None
+            if episode_reservation is not None:
+                if (
+                    episode_reservation.series_plan_id != resolution.series_plan_id
+                    or episode_reservation.series_run_id != run.id
+                    or episode_reservation.episode_number != resolution.episode_number
+                    or episode_reservation.episode_role != resolution.episode_role
+                ):
+                    raise ValidationFailureError(
+                        "SCRIPT_EPISODE_RESERVATION_DRIFT"
+                    )
+                receipt = self._create_admitted(
+                    data=data,
+                    context=context,
+                    resolver_input=resolver_input,
+                    resolution=resolution,
+                )
+                self._consume_qualification_reservation_if_present(
+                    data=data,
+                    admission=receipt,
+                )
+                return receipt
             episode_number = run.next_episode_number
             if (
                 frozen_assignment_resolution is not None
@@ -1447,6 +1593,7 @@ class ProjectAdmissionV2Service:
         data: ProjectAdmissionV2Request,
         run: SeriesRun,
         candidate: AssignmentCandidate | None,
+        episode_reservation: SeriesEpisodeReservation | None = None,
     ) -> AssignmentReasonCode | None:
         plan = self.session.get(SeriesPlan, run.series_plan_id)
         if (
@@ -1478,7 +1625,10 @@ class ProjectAdmissionV2Service:
             return AssignmentReasonCode.SERIES_SCHEDULE_INELIGIBLE
         if candidate.coherence_score <= 0:
             return AssignmentReasonCode.SERIES_COHERENCE_FAILED
-        if run.reserved_episode_count >= run.capacity:
+        if (
+            episode_reservation is None
+            and run.reserved_episode_count >= run.capacity
+        ):
             return AssignmentReasonCode.SERIES_CAPACITY_EXHAUSTED
         return None
 
@@ -1799,6 +1949,7 @@ class LongFormPlanningService:
                 bridge_or_special=data.bridge_or_special,
                 evidence_refs=data.evidence_refs,
                 budget_gate_result=data.budget_gate_result,
+                script_qualification_run_id=data.script_qualification_run_id,
                 qualification_assignment_resolution=data.qualification_assignment_resolution,
                 duration_contract=data.duration_contract,
                 audience_promise=data.audience_promise,

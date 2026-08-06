@@ -562,6 +562,7 @@ class ProjectAdmissionV2Request(StrategicLineageClaimV2):
     budget_gate_result: dict[str, Any] | None = None
     # Present only for pre-admission Script Qualification.  It is a sealed
     # authority, never caller-provided editorial preference.
+    script_qualification_run_id: uuid.UUID | None = None
     qualification_assignment_resolution: dict[str, Any] | None = None
     created_by_user_id: uuid.UUID
     model_config = ConfigDict(extra="forbid")
@@ -634,6 +635,7 @@ class LongFormPlanningRequest(StrategicLineageClaimV2):
     bridge_or_special: bool = False
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
     budget_gate_result: dict[str, Any] | None = None
+    script_qualification_run_id: uuid.UUID | None = None
     qualification_assignment_resolution: dict[str, Any] | None = None
     duration_contract: DurationContractV2
     created_by_user_id: uuid.UUID

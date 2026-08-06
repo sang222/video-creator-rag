@@ -28,6 +28,10 @@ from app.contracts.launch_cadence import (
     LongFormPublishSlotRead,
     RunwayCounts,
 )
+from app.contracts.m5 import (
+    EditorialCalendarSlotCreate,
+    IdeaMarketPreflightCreate,
+)
 from app.contracts.production_workflow import ProductionWorkflowProjectStart
 from app.contracts.vcos_v2 import (
     AssignmentMode,
@@ -79,6 +83,7 @@ from app.services.nich1 import (
     NicheContractDigestCompiler,
 )
 from app.services.production_package import ChannelDurationContractResolver
+from app.services.m5 import EditorialCalendarService, IdeaMarketPreflightService
 from app.services.production_start_readiness import (
     resolve_budget_authority,
     resolve_provider_authority,
@@ -1302,33 +1307,42 @@ class LongFormCadenceService:
                 and (preferred_plan_id is None or preferred_run_id is None)
             ):
                 raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
-            editorial_slot = EditorialCalendarSlot(
-                company_id=run.company_id,
-                channel_workspace_id=run.channel_workspace_id,
-                policy_snapshot_id=policy.policy_snapshot_id,
-                category_id=category.id,
-                slot_date=publish_slot.local_publish_date,
-                slot_type="PUBLISH",
-                status="OPEN",
-                schema_version="v2",
-                production_lane="LONG_FORM",
-                assignment_mode=assignment_mode.value,
-                preferred_series_plan_id=preferred_plan_id,
-                preferred_series_run_id=preferred_run_id,
-                production_goal=candidate.proposed_title,
-                target_platforms=["YOUTUBE"],
-                content_pillar=candidate.proposed_pillar,
-                risk_level="LOW",
-                operational_envelope={
-                    "launch_run_id": str(run.id),
-                    "launch_policy_version_id": str(policy.id),
-                    "long_form_publish_slot_id": str(publish_slot.id),
-                    "editorial_idea_candidate_id": str(candidate.id),
-                },
-                created_by_user_id=run.updated_by_user_id,
+            # The PUBLISH slot is a new immutable authority, not a relabelled
+            # research slot.  Create it through the normal editorial service
+            # so NICH1's exact slot validation is persisted for the later
+            # support/preflight gates.
+            editorial_slot = EditorialCalendarService(self.session).create_slot(
+                data=EditorialCalendarSlotCreate(
+                    company_id=run.company_id,
+                    channel_workspace_id=run.channel_workspace_id,
+                    policy_snapshot_id=policy.policy_snapshot_id,
+                    category_id=category.id,
+                    slot_date=publish_slot.local_publish_date,
+                    slot_type="PUBLISH",
+                    status="OPEN",
+                    schema_version="v2",
+                    production_lane=ProductionLane.LONG_FORM,
+                    assignment_mode=assignment_mode,
+                    preferred_series_plan_id=preferred_plan_id,
+                    preferred_series_run_id=preferred_run_id,
+                    production_goal=candidate.proposed_title,
+                    target_platforms=["YOUTUBE"],
+                    content_pillar=candidate.proposed_pillar,
+                    risk_level="LOW",
+                    operational_envelope={
+                        "launch_run_id": str(run.id),
+                        "launch_policy_version_id": str(policy.id),
+                        "long_form_publish_slot_id": str(publish_slot.id),
+                        "editorial_idea_candidate_id": str(candidate.id),
+                    },
+                    created_by_user_id=run.updated_by_user_id,
+                )
             )
-            self.session.add(editorial_slot)
-            self.session.flush()
+            publish_preflight = self._create_publish_preflight(
+                source_preflight=preflight,
+                candidate=candidate,
+                editorial_slot=editorial_slot,
+            )
             duration = ChannelDurationContractResolver(self.session).resolve(
                 profile_version_id=policy.channel_profile_version_id,
                 policy_snapshot_id=policy.policy_snapshot_id,
@@ -1342,7 +1356,7 @@ class LongFormCadenceService:
                     policy_snapshot_id=policy.policy_snapshot_id,
                     editorial_calendar_slot_id=editorial_slot.id,
                     editorial_idea_candidate_id=candidate.id,
-                    idea_market_preflight_id=preflight.id,
+                    idea_market_preflight_id=publish_preflight.id,
                     assignment_mode=assignment_mode,
                     title=candidate.proposed_title,
                     description=candidate.proposed_angle,
@@ -1358,6 +1372,7 @@ class LongFormCadenceService:
                     market_gate_passed=True,
                     evidence_refs=list(candidate.evidence_refs or []),
                     budget_gate_result=budget_gate_result,
+                    script_qualification_run_id=script_qualification_run_id,
                     qualification_assignment_resolution=frozen_assignment,
                     duration_contract=duration,
                     created_by_user_id=run.updated_by_user_id,
@@ -1498,6 +1513,55 @@ class LongFormCadenceService:
         qualification.production_workflow_run_id = workflow.id
         self.session.flush()
         return admission, workflow
+
+    def _create_publish_preflight(
+        self,
+        *,
+        source_preflight: IdeaMarketPreflight,
+        candidate: EditorialIdeaCandidate,
+        editorial_slot: EditorialCalendarSlot,
+    ) -> IdeaMarketPreflight:
+        """Re-evaluate evidence against the exact admitted PUBLISH slot.
+
+        A research-slot preflight is useful selection input, but its NICH1
+        digest and editorial-slot identity cannot authorize a later PUBLISH
+        slot.  The strict preflight service reloads the persisted evidence and
+        rechecks the new slot without manufacturing scores or copying a stale
+        slot reference.
+        """
+
+        source_evidence = (
+            source_preflight.evidence_blob
+            if isinstance(source_preflight.evidence_blob, dict)
+            else {}
+        )
+        claim_evidence_refs = list(
+            source_evidence.get("claim_evidence_refs") or candidate.evidence_refs or []
+        )
+        market_demand_evidence_refs = list(
+            source_evidence.get("market_demand_evidence_refs") or []
+        )
+        if not claim_evidence_refs:
+            raise ValidationFailureError("CADENCE_PUBLISH_PREFLIGHT_CLAIM_EVIDENCE_MISSING")
+        preflight = IdeaMarketPreflightService(self.session).create_preflight(
+            data=IdeaMarketPreflightCreate(
+                company_id=editorial_slot.company_id,
+                channel_workspace_id=editorial_slot.channel_workspace_id,
+                editorial_calendar_slot_id=editorial_slot.id,
+                editorial_research_run_id=candidate.editorial_research_run_id,
+                editorial_idea_candidate_id=candidate.id,
+                search_intent_map_id=source_preflight.search_intent_map_id,
+                audience_target_pack_id=source_preflight.audience_target_pack_id,
+                claim_evidence_refs=claim_evidence_refs,
+                market_demand_evidence_refs=market_demand_evidence_refs,
+            ),
+            correlation_id=(
+                f"cadence-publish-preflight:{editorial_slot.id}:{candidate.id}"
+            ),
+        )
+        if preflight.decision != "PASS" or preflight.policy_fit_state != "PASS":
+            raise ValidationFailureError("CADENCE_PUBLISH_PREFLIGHT_NOT_PASS")
+        return preflight
 
     def _bind_niche_governance(
         self,

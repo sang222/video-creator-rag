@@ -2348,10 +2348,12 @@ def _preflight_source(
             else None
         ),
         "demand_score": (
-            str(preflight.demand_score) if preflight.demand_score is not None else None
+            _decimal_string(preflight.demand_score)
+            if preflight.demand_score is not None
+            else None
         ),
         "channel_fit_score": (
-            str(preflight.channel_fit_score)
+            _decimal_string(preflight.channel_fit_score)
             if preflight.channel_fit_score is not None
             else None
         ),
@@ -2373,12 +2375,12 @@ def _preflight_source(
             f"Policy fit state: {preflight.policy_fit_state}",
             f"Preflight confidence: {preflight.confidence_state}",
             (
-                f"Demand score: {preflight.demand_score}"
+                f"Demand score: {_decimal_string(preflight.demand_score)}"
                 if preflight.demand_score is not None
                 else None
             ),
             (
-                f"Channel fit score: {preflight.channel_fit_score}"
+                f"Channel fit score: {_decimal_string(preflight.channel_fit_score)}"
                 if preflight.channel_fit_score is not None
                 else None
             ),

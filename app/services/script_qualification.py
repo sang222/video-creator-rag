@@ -248,6 +248,21 @@ class TopicDefinitionService:
                         definition,
                         receipt,
                     )
+                if qualification.state == "QUALIFIED":
+                    try:
+                        ScriptQualificationService(self.session).require_pass(
+                            qualification.id,
+                            candidate_id=candidate.id,
+                        )
+                    except ValidationFailureError:
+                        return TopicEligibility(
+                            False,
+                            "BLOCK",
+                            "SCRIPT_QUALIFICATION_CURRENT_AUTHORITY_REQUIRED",
+                            ("SCRIPT_QUALIFICATION_CURRENT_AUTHORITY_REQUIRED",),
+                            definition,
+                            receipt,
+                        )
                 if qualification.state in {
                     "BLOCKED_NON_REPAIRABLE",
                     "BLOCKED_REPAIR_BUDGET_EXHAUSTED",
@@ -477,6 +492,29 @@ class ScriptQualificationService:
     def reserve(
         self, *, candidate: EditorialIdeaCandidate, publish_slot_id: uuid.UUID, launch_run_id: uuid.UUID,
     ) -> ScriptQualificationRun:
+        # A cadence retry may arrive after the topic service correctly reports
+        # the candidate as pending.  The slot-owned run is still the durable
+        # idempotency authority and must be returned before reevaluating topic
+        # eligibility.
+        existing_slot = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.publish_slot_id == publish_slot_id)
+            .with_for_update()
+        )
+        if existing_slot is not None:
+            if (
+                existing_slot.editorial_idea_candidate_id != candidate.id
+                or existing_slot.launch_run_id != launch_run_id
+            ):
+                raise ValidationFailureError("SCRIPT_QUALIFICATION_SLOT_RESERVATION_CONFLICT")
+            from app.services.series_episode_reservation import (
+                EpisodeReservationAuthorityService,
+            )
+
+            EpisodeReservationAuthorityService(self.session).reserve_for_qualification(
+                existing_slot
+            )
+            return existing_slot
         topic = TopicDefinitionService(self.session).current_eligibility(candidate)
         if not topic.eligible or topic.definition is None:
             raise ValidationFailureError(topic.primary_reason_code)
@@ -500,6 +538,13 @@ class ScriptQualificationService:
         identity = canonical_hash(identity_body)
         existing = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.logical_identity_hash == identity))
         if existing is not None:
+            from app.services.series_episode_reservation import (
+                EpisodeReservationAuthorityService,
+            )
+
+            EpisodeReservationAuthorityService(self.session).reserve_for_qualification(
+                existing
+            )
             return existing
         run = ScriptQualificationRun(
             editorial_idea_candidate_id=candidate.id, publish_slot_id=publish_slot_id, launch_run_id=launch_run_id,
@@ -515,6 +560,13 @@ class ScriptQualificationService:
         )
         self.session.add(run)
         self.session.flush()
+        # SERIES_EPISODE owns its exact SeriesRun identity before either LLM
+        # boundary.  STANDALONE explicitly owns no such reservation.
+        from app.services.series_episode_reservation import (
+            EpisodeReservationAuthorityService,
+        )
+
+        EpisodeReservationAuthorityService(self.session).reserve_for_qualification(run)
         payload = {"script_qualification_run_id": str(run.id), "logical_identity_hash": identity}
         command_id = f"script-qualification:{identity}"
         self.session.add(DomainEvent(
@@ -549,6 +601,11 @@ class ScriptQualificationService:
             )
             self._validate_assignment_resolution(run)
             validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+            from app.services.series_episode_reservation import (
+                EpisodeReservationAuthorityService,
+            )
+
+            EpisodeReservationAuthorityService(self.session).require_current(run)
         except (ValidationFailureError, ValueError) as exc:
             return self._block(run, str(exc) or "SCRIPT_QUALIFICATION_CURRENT_AUTHORITY_INVALID")
         run.state = "WRITER_DISPATCHED"
@@ -626,6 +683,11 @@ class ScriptQualificationService:
             )
             resolution = self._validate_assignment_resolution(run)
             validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+            from app.services.series_episode_reservation import (
+                EpisodeReservationAuthorityService,
+            )
+
+            EpisodeReservationAuthorityService(self.session).require_current(run)
         except (ValidationFailureError, ValueError) as exc:
             raise ValidationFailureError(str(exc) or "SCRIPT_QUALIFICATION_RECEIPT_STALE") from exc
         content = receipt.content if isinstance(receipt.content, dict) else {}
@@ -657,7 +719,31 @@ class ScriptQualificationService:
         provenance = content.get("producer_provenance")
         if not all(isinstance(item, dict) for item in (script, evidence, memory, provenance)):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_OUTPUT_MISSING")
-        if canonical_hash(evidence) != receipt.factual_evidence_pack_hash:
+        # Current packs carry a self-describing hash of their body.  Retain
+        # read compatibility for the initial immutable receipt shape, whose
+        # stored receipt hash covered the whole evidence mapping and therefore
+        # did not repeat an ``evidence_pack_hash`` field.  Both variants bind
+        # every evidence value to the receipt hash; an embedded hash, when
+        # present, is never optional or advisory.
+        embedded_evidence_hash = evidence.get("evidence_pack_hash")
+        evidence_body = {
+            key: value
+            for key, value in evidence.items()
+            if key != "evidence_pack_hash"
+        }
+        evidence_hash_matches = (
+            (
+                isinstance(embedded_evidence_hash, str)
+                and embedded_evidence_hash == receipt.factual_evidence_pack_hash
+                and canonical_hash(evidence_body)
+                == receipt.factual_evidence_pack_hash
+            )
+            or (
+                embedded_evidence_hash is None
+                and canonical_hash(evidence) == receipt.factual_evidence_pack_hash
+            )
+        )
+        if not evidence_hash_matches:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_EVIDENCE_PACK_MISMATCH")
         try:
             validate_memory_digest(memory)
@@ -1104,11 +1190,28 @@ class ScriptQualificationService:
         run.result_receipts = receipts
         run.failure_receipt = {"reason_codes": [code for receipt in receipts.values() for code in receipt.get("reason_codes", [])]}
         self._create_receipt(run, draft, "BLOCK", receipts)
+        from app.services.series_episode_reservation import (
+            EpisodeReservationAuthorityService,
+        )
+
+        EpisodeReservationAuthorityService(self.session).release_for_terminal_qualification(
+            run,
+            reason_code="SCRIPT_QUALIFICATION_BLOCKED",
+        )
         self.session.flush()
         return run
 
     def _block_unknown_provider_outcome(self, run: ScriptQualificationRun) -> ScriptQualificationRun:
-        return self._block(run, "SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY")
+        # A provider may have accepted the call before the worker crashed.
+        # Preserve the episode identity until an explicit supersession/manual
+        # remediation decision; never silently hand it to another script.
+        run.state = "BLOCKED_NON_REPAIRABLE"
+        run.failure_receipt = {
+            "reason_codes": ["SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY"],
+            "logical_identity_hash": run.logical_identity_hash,
+        }
+        self.session.flush()
+        return run
 
     def _block_after_dispatch(self, run_id: uuid.UUID, code: str, exc: Exception) -> ScriptQualificationRun:
         run = self._locked(run_id)
@@ -1117,5 +1220,35 @@ class ScriptQualificationService:
     def _block(self, run: ScriptQualificationRun, code: str, detail: str | None = None) -> ScriptQualificationRun:
         run.state = "BLOCKED_NON_REPAIRABLE"
         run.failure_receipt = {"reason_codes": [code], "detail": detail[:512] if detail else None, "logical_identity_hash": run.logical_identity_hash}
+        from app.services.series_episode_reservation import (
+            EpisodeReservationAuthorityService,
+        )
+
+        EpisodeReservationAuthorityService(self.session).release_for_terminal_qualification(
+            run,
+            reason_code=code,
+        )
+        self.session.flush()
+        return run
+
+    def supersede(self, run_id: uuid.UUID) -> ScriptQualificationRun:
+        """Cancel an unadmitted qualification and release its episode once."""
+
+        run = self._locked(run_id)
+        if run.admitted_video_project_id is not None:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_SUPERSEDE_AFTER_ADMISSION")
+        if run.state == "SUPERSEDED":
+            return run
+        if run.state == "QUALIFIED":
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_SUPERSEDE_QUALIFIED")
+        run.state = "SUPERSEDED"
+        from app.services.series_episode_reservation import (
+            EpisodeReservationAuthorityService,
+        )
+
+        EpisodeReservationAuthorityService(self.session).release_for_terminal_qualification(
+            run,
+            reason_code="SCRIPT_QUALIFICATION_SUPERSEDED",
+        )
         self.session.flush()
         return run

@@ -8,7 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.orm import sessionmaker
 
+from app.contracts.geo_market import DestinationBinding
 from app.contracts.launch_cadence import (
     CadenceDecision,
     CadenceEvaluationCommand,
@@ -30,6 +32,10 @@ from app.contracts.m5 import (
 )
 from app.contracts.r3d1 import ContentCategoryCreate
 from app.contracts.production_workflow import ProductionWorkflowProjectStart
+from app.contracts.production_package import (
+    ProductionPackageContentV2,
+    ProductionReadinessReceiptContentV2,
+)
 from app.contracts.vcos_v2 import (
     AssignmentResolverInput,
     AssignmentMode,
@@ -52,6 +58,7 @@ from app.db.models import (
 )
 from app.db.models.foundation import DomainEvent
 from app.db.models.script_qualification import (
+    SeriesEpisodeReservation,
     ScriptQualificationReceipt,
     ScriptQualificationRun,
 )
@@ -71,6 +78,7 @@ from app.db.models.m5 import (
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.production_workflow import WorkflowRecoveryReceipt
 from app.db.models.ops import DeadLetterJob, OpsIncident, ProviderAttempt
+from app.db.models.workflow import Artifact, ArtifactVersion
 from app.services.editorial_research import EditorialResearchService
 from app.services.editorial_runway_replenishment import (
     EditorialRunwayReplenishmentService,
@@ -102,6 +110,10 @@ from app.services.script_qualification import (
     ScriptQualificationService,
     TopicDefinitionService,
     span_hash,
+)
+from app.services.v2_support_authority import (
+    V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
+    V2FrozenSupportEnvelope,
 )
 from app.services.vcos_v2 import (
     AssignmentResolutionError,
@@ -151,6 +163,220 @@ def _ready_provider_snapshot():
 
 def _test_support_authority_preparer(*_args) -> None:
     """Keep cadence unit tests network-free; support sealing has its own suite."""
+
+
+class _DeterministicPassingQualificationProducer:
+    """Two-call writer/verifier double for the real qualification service."""
+
+    def __init__(self) -> None:
+        self.writer_calls = 0
+        self.verifier_calls = 0
+        self.sentences: list[str] = []
+        self.section_ids: list[str] = []
+        self.writer_assignment_resolution: dict | None = None
+        self.verifier_assignment_resolution: dict | None = None
+
+    @staticmethod
+    def _receipt(idempotency_key: str, lane_name: str) -> dict[str, str]:
+        return {
+            "status": "SUCCESS",
+            "idempotency_key": idempotency_key,
+            "lane_name": lane_name,
+            "selected_model": "gpt-5.6-luna",
+            "fallback_level": "PRIMARY",
+            "route_attempt_id": str(uuid.uuid4()),
+            "provider_attempt_id": str(uuid.uuid4()),
+            "llm_run_snapshot_id": str(uuid.uuid4()),
+        }
+
+    def write(self, context, *, idempotency_key):
+        self.writer_calls += 1
+        self.writer_assignment_resolution = dict(context["assignment_resolution"])
+        evidence_id = context["factual_evidence_pack"]["spans"][0]["evidence_span_id"]
+        requirements = [
+            item["requirement_id"]
+            for item in context["script_assignment"]["required_requirement_units"]
+        ]
+        self.sentences = [
+            f"The documented workflow fulfills {requirement} with exact source-bound evidence "
+            + " ".join(f"detail{index}_{word}" for word in range(1, 151))
+            + "."
+            for index, requirement in enumerate(requirements, start=1)
+        ]
+        self.section_ids = [
+            "hook" if index < 3 else "body" if index < 6 else "close"
+            for index in range(len(self.sentences))
+        ]
+        return {
+            "canonical_script": " ".join(self.sentences),
+            "language": "en",
+            "sections": [
+                {"section_id": "hook", "heading": "Hook", "narration": " ".join(self.sentences[:3])},
+                {"section_id": "body", "heading": "Body", "narration": " ".join(self.sentences[3:6])},
+                {"section_id": "close", "heading": "Close", "narration": " ".join(self.sentences[6:])},
+            ],
+            "claims": [
+                {"claim_id": f"writer-{index}", "claim_text": text, "evidence_span_ids": [evidence_id]}
+                for index, text in enumerate(self.sentences, start=1)
+            ],
+        }, self._receipt(idempotency_key, "long_context_text")
+
+    def verify(self, context, *, idempotency_key):
+        self.verifier_calls += 1
+        self.verifier_assignment_resolution = dict(context["assignment_resolution"])
+        script = context["canonical_script"]
+        spans = [
+            {
+                "text": text,
+                "start_byte": script.encode("utf-8").find(text.encode("utf-8")),
+                "end_byte": script.encode("utf-8").find(text.encode("utf-8")) + len(text.encode("utf-8")),
+                "span_hash": span_hash(text),
+                "section_id": section_id,
+            }
+            for text, section_id in zip(self.sentences, self.section_ids, strict=True)
+        ]
+        evidence_id = context["factual_evidence_pack"]["spans"][0]["evidence_span_id"]
+        requirements = [item["requirement_id"] for item in context["script_assignment"]["required_requirement_units"]]
+        return {
+            "material_claim_inventory": [
+                {"observed_claim_id": f"observed-{index}", "span": span, "claim_type": "FACTUAL_ASSERTION", "materiality_state": "MATERIAL", "writer_declared_claim_id": f"writer-{index}", "factual_evidence_span_ids": [evidence_id], "semantic_relation": "ENTAILED", "assignment_requirement_ids": [requirements[index - 1]]}
+                for index, span in enumerate(spans, start=1)
+            ],
+            "assignment_fulfillment_observations": [
+                {"requirement_id": requirement, "status": "SUFFICIENT", "spans": [spans[index]], "evidence_span_ids": [evidence_id]}
+                for index, requirement in enumerate(requirements)
+            ],
+            "section_purpose_observations": [
+                {"section_id": "hook", "observed_primary_role": "HOOK", "fulfilled_requirement_ids": requirements[:3], "editorial_delta": "Defines the bounded documented subject.", "genericity_state": "SPECIFIC"},
+                {"section_id": "body", "observed_primary_role": "MECHANISM", "fulfilled_requirement_ids": requirements[3:6], "editorial_delta": "Connects evidence to the operational choice.", "genericity_state": "SPECIFIC"},
+                {"section_id": "close", "observed_primary_role": "CLOSING_INSIGHT", "fulfilled_requirement_ids": requirements[6:], "editorial_delta": "Converts the scope into a next verification step.", "genericity_state": "SPECIFIC"},
+            ],
+            "forbidden_scope_observations": [
+                {"forbidden_scope_id": item["forbidden_scope_id"], "state": "ABSENT"}
+                for item in context["script_assignment"]["forbidden_scope_units"]
+            ],
+        }, self._receipt(idempotency_key, "gatekeeper_soft_review")
+
+
+def _configure_verified_destination(session, scope) -> None:
+    """Install the immutable destination authority required by real support sealing."""
+
+    binding = DestinationBinding(
+        binding_version=1,
+        channel_id=scope.channel.id,
+        channel_key=scope.channel.key,
+        platform="YOUTUBE",
+        platform_account_ref="youtube-account://qualification-closeout",
+        platform_channel_id="UC_QUALIFICATION_CLOSEOUT",
+        channel_handle="@qualification-closeout",
+        target_market_profile_ref="target-market-profile://qualification/v1",
+        target_market_profile_hash="d" * 64,
+        target_market="US",
+        primary_market="US",
+        primary_locale="en-US",
+        original_language="en",
+        default_visibility="PRIVATE",
+        manual_publish_required=True,
+        destination_status="VERIFIED",
+        credential_ref="credential://qualification-closeout/destination",
+        verification_state="VERIFIED",
+        verification_timestamp="2026-08-03T00:00:00+00:00",
+        approval_ref="operator-approval://qualification-closeout/destination",
+    ).model_dump(mode="json")
+    scope.channel.metadata_ = {
+        **(scope.channel.metadata_ or {}),
+        "destination_governance": {
+            "active_binding_ref": (
+                f"destination-binding://{scope.channel.key}/v1"
+            ),
+            "bindings": [binding],
+        },
+    }
+    session.flush()
+
+
+def _support_envelope_for_project(session, project_id: uuid.UUID):
+    artifact = session.scalar(
+        select(Artifact).where(
+            Artifact.video_project_id == project_id,
+            Artifact.artifact_type == V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
+        )
+    )
+    assert artifact is not None
+    version = session.get(ArtifactVersion, artifact.current_version_id)
+    assert version is not None
+    return artifact, version, V2FrozenSupportEnvelope.model_validate(version.content)
+
+
+def _qualification_gate(envelope: V2FrozenSupportEnvelope) -> dict:
+    gate = next(
+        (
+            item
+            for item in envelope.gate_receipts
+            if item.get("gate_key") == "script_qualification"
+        ),
+        None,
+    )
+    assert gate is not None
+    return gate
+
+
+def _assert_no_pre_readiness_provider_effects(
+    session, *, workflow_id: uuid.UUID, project_id: uuid.UUID
+) -> None:
+    """Routes and reservations are allowed; provider/render effects are not."""
+
+    assert (
+        session.scalar(
+            select(func.count(ProviderAttempt.id)).where(
+                ProviderAttempt.target_id.in_([workflow_id, project_id])
+            )
+        )
+        == 0
+    )
+    assert (
+        session.scalar(
+            select(func.count(MediaRenderJob.id)).where(
+                MediaRenderJob.video_project_id == project_id
+            )
+        )
+        == 0
+    )
+
+
+def _run_real_worker_to_readiness(engine, workflow_id: uuid.UUID) -> None:
+    """Run only the normal worker composition through the readiness boundary."""
+
+    factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    worker = ProductionWorkflowWorker(
+        session_factory=factory,
+        worker_id=f"script-qualification-closeout-{workflow_id}",
+    )
+    for index in range(10):
+        result = worker.run_once()
+        if result.status != "DELIVERED":
+            with factory() as failed:
+                event = failed.get(DomainEvent, result.event_id)
+                workflow = failed.get(ProductionWorkflowRun, workflow_id)
+                diagnostic = (
+                    event.last_error_code if event is not None else None,
+                    event.last_error_summary if event is not None else None,
+                    workflow.current_stage if workflow is not None else None,
+                    workflow.state_reason_codes if workflow is not None else None,
+                )
+            raise AssertionError((index, result, diagnostic))
+        with factory() as check:
+            workflow = check.get(ProductionWorkflowRun, workflow_id)
+            assert workflow is not None
+            if workflow.state == "READY_FOR_PRODUCTION":
+                assert workflow.current_stage == "MEDIA"
+                return
+    raise AssertionError("workflow did not reach READY_FOR_PRODUCTION")
 
 
 def _approved_series_plan(session, scope, index: int | str):
@@ -776,6 +1002,52 @@ def _bind_current_topic_authority(session, candidate) -> None:
     assert receipt.current_production_eligibility is True
 
 
+def _bind_series_topic_authority(session, candidate, *, plan, run) -> None:
+    """Create the exact series topic authority used by reservation tests."""
+
+    evidence_id = uuid.UUID(str(candidate.evidence_refs[0]["id"]))
+    evidence = session.get(SearchDemandEvidence, evidence_id)
+    assert evidence is not None
+    snapshot = (evidence.metadata_ or {})["editorial_fresh_evidence"]["source_snapshot"]
+    excerpt = str(snapshot["content_excerpt"])
+    subject = candidate.proposed_title
+    topic = TopicDefinitionService(session).create(
+        candidate=candidate,
+        fields={
+            "subject_type": "OFFICIAL_DOCUMENTED_PRODUCT_OR_FEATURE",
+            "subject_name": subject,
+            "subject_canonical_id": f"official-document:{evidence.id}",
+            "subject_evidence_refs": [{"id": str(evidence.id)}],
+            "subject_evidence_spans": [
+                {"evidence_id": str(evidence.id), "text": excerpt, "span_hash": span_hash(excerpt)}
+            ],
+            "target_audience": "small professional teams",
+            "audience_problem": "need a bounded evidence-first workflow",
+            "content_pillar": candidate.proposed_pillar,
+            "production_goal": candidate.proposed_title,
+            "scope_inclusions": ["Documented workflow only"],
+            "exclusions": ["Unsupported claims"],
+            "central_question_or_thesis": f"What does {subject} establish for a small team?",
+            "learning_outcome": "Viewers can identify the documented workflow boundary.",
+            "viewer_value": "A concrete next step grounded in the source.",
+            "content_mode": "SERIES_EPISODE",
+            "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+            "source_classification_refs": [{"source_classification": "TOPIC_CAPABLE"}],
+            "series_binding": {
+                "series_ref": str(plan.id),
+                "run_ref": str(run.id),
+                "episode_number": run.next_episode_number,
+                "episode_role": "WORKFLOW_DEEP_DIVE",
+                "episode_delta": "Advances the series with the next exact documented workflow.",
+                "learning_outcome": "Viewers can identify the documented workflow boundary.",
+            },
+            "standalone_self_containment_required": False,
+        },
+    )
+    receipt = TopicDefinitionService(session).evaluate(topic)
+    assert receipt.current_production_eligibility is True
+
+
 def _fixture_qualification_pass(session, run_id: uuid.UUID) -> ScriptQualificationRun:
     """Seed a previously verified PASS when a test needs a later-stage fixture."""
 
@@ -972,6 +1244,513 @@ def test_buffer_below_target_reserves_exactly_one_script_qualification_before_ad
         == 0
     )
     assert db_session.scalar(select(func.count()).select_from(HumanUploadTask)) == 0
+
+
+def test_series_episode_reservation_is_pre_writer_idempotent_and_released_on_supersession(
+    db_session, qualification_factory
+) -> None:
+    scope = qualification_factory.channel_scope(
+        name="Series Qualification Reservation", strict_long_form=True
+    )
+    policy, admin_actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_series_topic_authority(
+        db_session, candidate, plan=plans[0], run=series_run
+    )
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    cadence = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    )
+    receipt = cadence.evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="series-reservation"),
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    assert receipt.script_qualification_run_id is not None
+    qualification = db_session.get(
+        ScriptQualificationRun, receipt.script_qualification_run_id
+    )
+    assert qualification is not None
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    assert reservation is not None
+    assert reservation.state == "RESERVED"
+    assert reservation.series_plan_id == plans[0].id
+    assert reservation.series_run_id == series_run.id
+    assert reservation.episode_number == 1
+    assert qualification.episode_reservation_active is True
+    assert series_run.next_episode_number == 2
+    assert series_run.reserved_episode_count == 1
+
+    same = ScriptQualificationService(db_session).reserve(
+        candidate=candidate,
+        publish_slot_id=qualification.publish_slot_id,
+        launch_run_id=launch.id,
+    )
+    assert same.id == qualification.id
+    assert db_session.scalar(select(func.count()).select_from(SeriesEpisodeReservation)) == 1
+
+    ScriptQualificationService(db_session).supersede(qualification.id)
+    assert reservation.state == "RELEASED"
+    assert qualification.episode_reservation_active is False
+    assert series_run.reserved_episode_count == 0
+    assert series_run.next_episode_number == 2
+    assert db_session.scalar(select(func.count()).select_from(VideoProject)) == 0
+
+
+def test_unknown_series_writer_outcome_keeps_episode_reserved(
+    db_session, qualification_factory
+) -> None:
+    scope = qualification_factory.channel_scope(
+        name="Unknown Series Qualification Outcome", strict_long_form=True
+    )
+    policy, admin_actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_series_topic_authority(
+        db_session, candidate, plan=plans[0], run=series_run
+    )
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    receipt = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    ).evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="unknown-series-writer"),
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    assert receipt.script_qualification_run_id is not None
+    qualification = db_session.get(
+        ScriptQualificationRun, receipt.script_qualification_run_id
+    )
+    assert qualification is not None
+    qualification.state = "WRITER_DISPATCHED"
+
+    class _NeverRetryProducer:
+        def write(self, *_args, **_kwargs):
+            raise AssertionError("unknown outcome must not call writer again")
+
+        def verify(self, *_args, **_kwargs):
+            raise AssertionError("unknown outcome must not call verifier")
+
+    result = ScriptQualificationService(
+        db_session, producer=_NeverRetryProducer()
+    ).execute(qualification.id)
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    assert result.state == "BLOCKED_NON_REPAIRABLE"
+    assert reservation is not None and reservation.state == "RESERVED"
+    assert qualification.episode_reservation_active is True
+    assert series_run.reserved_episode_count == 1
+
+
+def test_series_qualification_pass_consumes_the_exact_reserved_episode_once(
+    db_session, qualification_factory
+) -> None:
+    scope = qualification_factory.channel_scope(
+        name="Series Qualification Finalization", strict_long_form=True
+    )
+    policy, admin_actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_series_topic_authority(
+        db_session, candidate, plan=plans[0], run=series_run
+    )
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    cadence = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+        support_authority_preparer=_test_support_authority_preparer,
+    )
+    start = cadence.evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="series-finalization"),
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    assert start.script_qualification_run_id is not None
+    producer = _DeterministicPassingQualificationProducer()
+    qualification = ScriptQualificationService(
+        db_session, producer=producer, now=lambda: now
+    ).execute(start.script_qualification_run_id)
+    assert qualification.state == "QUALIFIED"
+    assert producer.writer_calls == 1
+    assert producer.verifier_calls == 1
+
+    admission, workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    replay_admission, replay_workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor("vcos-durable-worker", permissions={"production.start"}),
+    )
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    project = db_session.get(VideoProject, admission.admitted_video_project_id)
+    assert reservation is not None
+    assert reservation.state == "CONSUMED"
+    assert reservation.consumed_admission_decision_id == admission.id
+    assert project is not None
+    assert project.series_plan_id == reservation.series_plan_id
+    assert project.series_run_id == reservation.series_run_id
+    assert project.episode_number == reservation.episode_number
+    assert admission.series_plan_id == reservation.series_plan_id
+    assert admission.series_run_id == reservation.series_run_id
+    assert admission.episode_number == reservation.episode_number
+    assert replay_admission.id == admission.id
+    assert replay_workflow.id == workflow.id
+    assert series_run.reserved_episode_count == 1
+
+
+def test_standalone_qualification_to_production_readiness_uses_only_two_llm_calls(
+    db_session, engine, qualification_factory
+) -> None:
+    """Exercise the active cadence and worker composition through readiness."""
+
+    scope = qualification_factory.channel_scope(
+        name="Standalone qualification production closeout", strict_long_form=True
+    )
+    _configure_verified_destination(db_session, scope)
+    policy, admin_actor, _ = _approved_launch_policy(
+        db_session,
+        scope,
+        timezone_name="UTC",
+        weekdays=["TUESDAY"],
+        include_initial_series=False,
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_current_topic_authority(db_session, candidate)
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    cadence = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+    )
+
+    reservation = cadence.evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="standalone-production-ready"),
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    assert reservation.script_qualification_run_id is not None
+    qualification = db_session.get(
+        ScriptQualificationRun, reservation.script_qualification_run_id
+    )
+    assert qualification is not None
+    assert qualification.state == "RESERVED"
+    assert candidate.stage == "GREENLIT"
+    assert qualification.assignment_resolution["content_mode"] == "STANDALONE"
+    assert qualification.runtime_contract_hash
+    assert (
+        db_session.scalar(
+            select(func.count(VideoProject.id)).where(
+                VideoProject.channel_workspace_id == scope.channel.id
+            )
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(
+            select(func.count(SeriesEpisodeReservation.id)).where(
+                SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+            )
+        )
+        == 0
+    )
+
+    producer = _DeterministicPassingQualificationProducer()
+    qualification = ScriptQualificationService(
+        db_session, producer=producer, now=lambda: now
+    ).execute(qualification.id)
+    receipt = ScriptQualificationService(db_session).require_pass(
+        qualification.id, candidate_id=candidate.id
+    )
+    assert qualification.state == "QUALIFIED"
+    assert producer.writer_calls == producer.verifier_calls == 1
+    assert producer.writer_assignment_resolution == qualification.assignment_resolution
+    assert producer.verifier_assignment_resolution == qualification.assignment_resolution
+    assert receipt.result == "PASS"
+    assert receipt.content["memory_digest"]["status"] == "EMPTY_SAFE_DIGEST"
+    assert receipt.content["runtime_contract_hash"] == qualification.runtime_contract_hash
+    assert (
+        receipt.content["assignment_resolution_hash"]
+        == qualification.assignment_resolution_hash
+    )
+
+    admission, workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    project = db_session.get(VideoProject, admission.admitted_video_project_id)
+    assert project is not None
+    assert project.content_mode == "STANDALONE"
+    assert project.series_plan_id is None
+    assert project.series_run_id is None
+    assert project.episode_number is None
+    assert admission.content_mode == "STANDALONE"
+    assert producer.writer_calls == producer.verifier_calls == 1
+    effective = db_session.get(
+        EffectiveChannelRuntimeContextSnapshot, project.effective_context_snapshot_id
+    )
+    assert effective is not None and effective.compile_status == "PASS"
+
+    _support_artifact, support_version, envelope = _support_envelope_for_project(
+        db_session, project.id
+    )
+    qualification_gate = _qualification_gate(envelope)
+    assert envelope.execution_mode == "REAL_LONG_FORM_PRODUCTION"
+    assert envelope.project_ref.id == project.id
+    assert envelope.admission_ref.id == admission.id
+    assert qualification_gate["runtime_contract_hash"] == qualification.runtime_contract_hash
+    assert (
+        qualification_gate["assignment_resolution_hash"]
+        == qualification.assignment_resolution_hash
+    )
+    assert qualification_gate["receipt_hash"] == receipt.content_hash
+    _assert_no_pre_readiness_provider_effects(
+        db_session, workflow_id=workflow.id, project_id=project.id
+    )
+
+    db_session.commit()
+    _run_real_worker_to_readiness(engine, workflow.id)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with factory() as check:
+        ready_workflow = check.get(ProductionWorkflowRun, workflow.id)
+        assert ready_workflow is not None
+        assert ready_workflow.state == "READY_FOR_PRODUCTION"
+        package_version = check.get(
+            ArtifactVersion, ready_workflow.production_package_artifact_version_id
+        )
+        readiness_version = check.get(
+            ArtifactVersion,
+            ready_workflow.production_readiness_receipt_artifact_version_id,
+        )
+        assert package_version is not None and readiness_version is not None
+        package = ProductionPackageContentV2.model_validate(package_version.content)
+        readiness = ProductionReadinessReceiptContentV2.model_validate(
+            readiness_version.content
+        )
+        assert package.content_mode == "STANDALONE"
+        assert package.series_plan_id is None and package.series_run_id is None
+        assert package.support_envelope_ref is not None
+        assert package.support_envelope_ref.artifact_version_id == support_version.id
+        assert package.support_envelope_ref.content_hash == support_version.content_hash
+        assert package.readiness_evidence.editorial_depth_sufficient is True
+        assert package.readiness_evidence.research_coverage_ratio == receipt.content[
+            "receipts"
+        ]["fulfillment"]["research_coverage_ratio"]
+        assert readiness.readiness_state == "READY_FOR_PRODUCTION"
+        assert readiness.production_package_artifact_version_id == package_version.id
+        assert readiness.production_package_hash == package_version.content_hash
+        assert readiness_version.content_hash == ready_workflow.production_readiness_receipt_hash
+        _assert_no_pre_readiness_provider_effects(
+            check, workflow_id=workflow.id, project_id=project.id
+        )
+
+
+def test_series_qualification_to_production_readiness_preserves_reserved_lineage(
+    db_session, engine, qualification_factory
+) -> None:
+    """The one reserved series episode remains exact through package/readiness."""
+
+    scope = qualification_factory.channel_scope(
+        name="Series qualification production closeout", strict_long_form=True
+    )
+    _configure_verified_destination(db_session, scope)
+    policy, admin_actor, plans = _approved_launch_policy(
+        db_session, scope, timezone_name="UTC", weekdays=["TUESDAY"]
+    )
+    series_run = _approved_series_run(
+        db_session, plan=plans[0], actor_user_id=scope.admin.id
+    )
+    launch = _active_launch_run(
+        db_session, policy, admin_actor, started_on=date(2026, 7, 20)
+    )
+    _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
+    _bind_series_topic_authority(
+        db_session, candidate, plan=plans[0], run=series_run
+    )
+    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    cadence = LongFormCadenceService(
+        db_session,
+        now=lambda: now,
+        provider_readiness_snapshot=_ready_provider_snapshot,
+    )
+
+    start = cadence.evaluate(
+        launch_run_id=launch.id,
+        data=CadenceEvaluationCommand(evaluation_key="series-production-ready"),
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    assert start.script_qualification_run_id is not None
+    qualification = db_session.get(ScriptQualificationRun, start.script_qualification_run_id)
+    assert qualification is not None and qualification.state == "RESERVED"
+    reservation = db_session.scalar(
+        select(SeriesEpisodeReservation).where(
+            SeriesEpisodeReservation.script_qualification_run_id == qualification.id
+        )
+    )
+    assert reservation is not None and reservation.state == "RESERVED"
+    frozen = qualification.assignment_resolution
+    assert candidate.stage == "GREENLIT"
+    assert frozen["content_mode"] == "SERIES_EPISODE"
+    assert frozen["series_plan_id"] == str(plans[0].id)
+    assert frozen["series_run_id"] == str(series_run.id)
+    assert frozen["episode_number"] == reservation.episode_number == 1
+    assert frozen["episode_role"] == reservation.episode_role
+    assert frozen["episode_delta"] == reservation.episode_delta
+    assert series_run.next_episode_number == 2
+    assert (
+        db_session.scalar(
+            select(func.count(VideoProject.id)).where(
+                VideoProject.channel_workspace_id == scope.channel.id
+            )
+        )
+        == 0
+    )
+
+    producer = _DeterministicPassingQualificationProducer()
+    qualification = ScriptQualificationService(
+        db_session, producer=producer, now=lambda: now
+    ).execute(qualification.id)
+    receipt = ScriptQualificationService(db_session).require_pass(
+        qualification.id, candidate_id=candidate.id
+    )
+    assert qualification.state == "QUALIFIED"
+    assert producer.writer_calls == producer.verifier_calls == 1
+    assert producer.writer_assignment_resolution == frozen
+    assert producer.verifier_assignment_resolution == frozen
+    assert producer.verifier_assignment_resolution["episode_delta"] == reservation.episode_delta
+    assert receipt.content["memory_digest"]["status"] == "EMPTY_SAFE_DIGEST"
+    assert reservation.state == "RESERVED"
+
+    admission, workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    replay_admission, replay_workflow = cadence.finalize_qualified_script_run(
+        script_qualification_run_id=qualification.id,
+        actor=_system_worker_actor(
+            "vcos-durable-worker", permissions={"production.start"}
+        ),
+    )
+    project = db_session.get(VideoProject, admission.admitted_video_project_id)
+    assert project is not None
+    assert replay_admission.id == admission.id
+    assert replay_workflow.id == workflow.id
+    assert producer.writer_calls == producer.verifier_calls == 1
+    assert reservation.state == "CONSUMED"
+    assert reservation.consumed_admission_decision_id == admission.id
+    assert qualification.episode_reservation_active is False
+    for record in (admission, project):
+        assert record.content_mode == "SERIES_EPISODE"
+        assert record.series_plan_id == reservation.series_plan_id
+        assert record.series_run_id == reservation.series_run_id
+        assert record.episode_number == reservation.episode_number
+        assert record.episode_role == reservation.episode_role
+
+    _support_artifact, support_version, envelope = _support_envelope_for_project(
+        db_session, project.id
+    )
+    qualification_gate = _qualification_gate(envelope)
+    assert envelope.project_ref.id == project.id
+    assert envelope.admission_ref.id == admission.id
+    assert envelope.admission_ref.content_hash == admission.decision_hash
+    assert qualification_gate["runtime_contract_hash"] == qualification.runtime_contract_hash
+    assert (
+        qualification_gate["assignment_resolution_hash"]
+        == qualification.assignment_resolution_hash
+    )
+    assert qualification_gate["receipt_hash"] == receipt.content_hash
+    _assert_no_pre_readiness_provider_effects(
+        db_session, workflow_id=workflow.id, project_id=project.id
+    )
+
+    db_session.commit()
+    _run_real_worker_to_readiness(engine, workflow.id)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with factory() as check:
+        ready_workflow = check.get(ProductionWorkflowRun, workflow.id)
+        assert ready_workflow is not None
+        assert ready_workflow.state == "READY_FOR_PRODUCTION"
+        package_version = check.get(
+            ArtifactVersion, ready_workflow.production_package_artifact_version_id
+        )
+        readiness_version = check.get(
+            ArtifactVersion,
+            ready_workflow.production_readiness_receipt_artifact_version_id,
+        )
+        assert package_version is not None and readiness_version is not None
+        package = ProductionPackageContentV2.model_validate(package_version.content)
+        readiness = ProductionReadinessReceiptContentV2.model_validate(
+            readiness_version.content
+        )
+        assert package.content_mode == "SERIES_EPISODE"
+        assert package.series_plan_id == reservation.series_plan_id
+        assert package.series_run_id == reservation.series_run_id
+        assert package.episode_number == reservation.episode_number
+        assert package.episode_role == reservation.episode_role
+        assert package.support_envelope_ref is not None
+        assert package.support_envelope_ref.artifact_version_id == support_version.id
+        assert package.support_envelope_ref.content_hash == support_version.content_hash
+        assert package.readiness_evidence.editorial_depth_sufficient is True
+        assert package.readiness_evidence.research_coverage_ratio == receipt.content[
+            "receipts"
+        ]["fulfillment"]["research_coverage_ratio"]
+        assert readiness.readiness_state == "READY_FOR_PRODUCTION"
+        assert readiness.production_package_hash == package_version.content_hash
+        assert readiness_version.content_hash == ready_workflow.production_readiness_receipt_hash
+        _assert_no_pre_readiness_provider_effects(
+            check, workflow_id=workflow.id, project_id=project.id
+        )
 
 
 def test_qualification_pass_is_the_only_path_to_cadence_admission(

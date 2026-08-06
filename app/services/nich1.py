@@ -397,27 +397,51 @@ class EditorialSlotValidator:
             reasons.append(NicheReasonCode.CATEGORY_PILLAR_MISMATCH)
 
         series_key = _clean(_get(editorial_slot, "series_key"))
+        # A typed v2 binding is projected through a read-only wrapper so the
+        # digest can retain the plan's stable key.  That projection is not a
+        # deprecated caller-supplied ``series_key`` and must not be checked
+        # against the legacy profile series-plan list.
+        persisted_slot = _get(editorial_slot, "persisted_slot")
+        persisted_series_key = _clean(
+            _get(persisted_slot, "series_key")
+            if persisted_slot is not None
+            else series_key
+        )
         assignment_mode = str(
             _get(editorial_slot, "assignment_mode") or ""
         ).upper()
         requires_series = assignment_mode == "SERIES_REQUIRED"
-        checks["series_present"] = bool(series_key) or not requires_series
-        if requires_series and not series_key:
+        typed_series_binding = bool(
+            _get(editorial_slot, "preferred_series_plan_id")
+            and _get(editorial_slot, "preferred_series_run_id")
+        )
+        # v2 slots must not carry the deprecated raw ``series_key``.  Their
+        # typed plan/run pair has already been validated by admission, and is
+        # the only accepted way to satisfy a required series binding here.
+        checks["series_present"] = (
+            bool(series_key) or typed_series_binding or not requires_series
+        )
+        if requires_series and not (series_key or typed_series_binding):
             reasons.append(NicheReasonCode.SERIES_BINDING_MISSING)
         series_plan = _series_plan(channel_contract, profile_version)
         series_item = next(
             (
                 item
                 for item in series_plan
-                if series_key and _same(_series_key(item), series_key)
+                if persisted_series_key
+                and _same(_series_key(item), persisted_series_key)
             ),
             None,
         )
         checks["series_allowed"] = bool(
-            (not series_key and not requires_series)
-            or (series_key and (not series_plan or series_item is not None))
+            typed_series_binding
+            or (not persisted_series_key and not requires_series)
+            or (
+                persisted_series_key
+                and (not series_plan or series_item is not None)
+            )
         )
-        if series_key and series_plan and series_item is None:
+        if persisted_series_key and series_plan and series_item is None:
             reasons.append(NicheReasonCode.SERIES_NOT_ALLOWED)
         if series_item is not None:
             series_pillar = _clean(

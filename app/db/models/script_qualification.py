@@ -13,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -164,6 +164,88 @@ class ScriptQualificationRun(Base):
         CheckConstraint("assignment_resolution_hash is null or assignment_resolution_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_assignment_resolution_hash"),
         Index("ix_script_qualification_candidate", "editorial_idea_candidate_id"),
         Index("ix_script_qualification_state", "state"),
+    )
+
+
+class SeriesEpisodeReservation(Base):
+    """Durable, pre-admission ownership of one exact SeriesRun episode.
+
+    A ``SeriesRun`` continues to own its capacity and episode sequence.  This
+    authority merely records which pre-admission qualification owns the exact
+    episode that has already been allocated from that sequence.  It is the
+    bridge between a frozen qualification assignment and final admission.
+    """
+
+    __tablename__ = "series_episode_reservations"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    script_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+    )
+    series_plan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_plans.id"), nullable=False
+    )
+    series_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_runs.id"), nullable=False
+    )
+    episode_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    episode_role: Mapped[str] = mapped_column(String(120), nullable=False)
+    episode_delta: Mapped[str] = mapped_column(Text, nullable=False)
+    assignment_resolution_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    reservation_authority_version: Mapped[str] = mapped_column(
+        String(120), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="RESERVED")
+    released_reason_code: Mapped[str | None] = mapped_column(String(160))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_admission_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_admission_decisions.id")
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = utc_created_at()
+    updated_at: Mapped[datetime] = utc_updated_at()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "script_qualification_run_id",
+            name="uq_series_episode_reservations_qualification",
+        ),
+        # Episode numbers are never silently recycled.  A released authority
+        # frees capacity, but preserves its audit identity and prevents a
+        # different qualification from inheriting a possibly dispatched one.
+        UniqueConstraint(
+            "series_run_id",
+            "episode_number",
+            name="uq_series_episode_reservations_run_episode",
+        ),
+        CheckConstraint(
+            "state in ('RESERVED','RELEASED','CONSUMED')",
+            name="ck_series_episode_reservations_state",
+        ),
+        CheckConstraint(
+            "episode_number > 0",
+            name="ck_series_episode_reservations_episode_number",
+        ),
+        CheckConstraint(
+            "assignment_resolution_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_series_episode_reservations_resolution_hash",
+        ),
+        CheckConstraint(
+            "(state = 'RESERVED' and released_at is null and consumed_at is null "
+            "and consumed_admission_decision_id is null) or "
+            "(state = 'RELEASED' and released_at is not null and consumed_at is null "
+            "and consumed_admission_decision_id is null) or "
+            "(state = 'CONSUMED' and consumed_at is not null "
+            "and consumed_admission_decision_id is not null)",
+            name="ck_series_episode_reservations_lifecycle",
+        ),
+        Index("ix_series_episode_reservations_series_run", "series_run_id"),
+        Index(
+            "ix_series_episode_reservations_qualification",
+            "script_qualification_run_id",
+        ),
     )
 
 
