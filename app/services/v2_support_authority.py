@@ -904,9 +904,14 @@ class V2SupportAuthorityService:
         qualified_run = None
         qualification_receipt = None
         qualification_memory: dict[str, Any] | None = None
+        qualification_runtime_contract: dict[str, Any] | None = None
         if command.execution_mode == "REAL_LONG_FORM_PRODUCTION":
             from app.db.models.script_qualification import ScriptQualificationRun
-            from app.services.script_qualification import ScriptQualificationService
+            from app.services.script_qualification import (
+                ScriptQualificationService,
+                ScriptRuntimeContractResolver,
+            )
+            from app.services.script_qualification_authority import validate_memory_digest
 
             admission = self.session.get(ProjectAdmissionDecision, project.project_admission_decision_id)
             if admission is None or admission.editorial_idea_candidate_id is None:
@@ -921,12 +926,27 @@ class V2SupportAuthorityService:
             _script, _evidence, qualification_memory, _provenance = (
                 ScriptQualificationService.qualification_output(qualification_receipt)
             )
-            if (
-                qualification_memory.get("status") != "EMPTY_SAFE_DIGEST"
-                or qualification_memory.get("digest_hash")
-                != semantic_hash({key: value for key, value in qualification_memory.items() if key != "digest_hash"})
-            ):
+            try:
+                validate_memory_digest(
+                    qualification_memory, expected_hash=qualified_run.memory_digest_hash
+                )
+            except ValueError as exc:
+                raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_MEMORY_AUTHORITY_INVALID") from exc
+            if qualification_memory.get("status") != "EMPTY_SAFE_DIGEST":
                 raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_MEMORY_AUTHORITY_INVALID")
+            qualification_runtime_contract = ScriptRuntimeContractResolver.validate(
+                qualified_run.runtime_contract,
+                expected_hash=qualified_run.runtime_contract_hash,
+            )
+            if (
+                qualification_runtime_contract["expected_language"].casefold()
+                != resolved.expected_language.casefold()
+                or qualification_runtime_contract["duration_contract"]
+                != resolved.duration_contract.model_dump(mode="json")
+                or qualification_runtime_contract["forbidden_claims"] != resolved.forbidden_claims
+                or qualification_runtime_contract["forbidden_style_terms"] != resolved.forbidden_style_terms
+            ):
+                raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_RUNTIME_CONTRACT_MISMATCH")
             resolved = resolved.model_copy(
                 update={
                     "frozen_sources": [
@@ -980,11 +1000,14 @@ class V2SupportAuthorityService:
             video_project_id=project.id,
             production_lane=resolved.production_lane,
             title=resolved.title,
-            expected_language=resolved.expected_language,
-            duration_contract=resolved.duration_contract,
+            expected_language=(qualification_runtime_contract or {}).get("expected_language", resolved.expected_language),
+            duration_contract=(
+                resolved.duration_contract.__class__.model_validate(qualification_runtime_contract["duration_contract"])
+                if qualification_runtime_contract is not None else resolved.duration_contract
+            ),
             frozen_sources=resolved.frozen_sources,
-            forbidden_claims=resolved.forbidden_claims,
-            forbidden_style_terms=resolved.forbidden_style_terms,
+            forbidden_claims=(qualification_runtime_contract or {}).get("forbidden_claims", resolved.forbidden_claims),
+            forbidden_style_terms=(qualification_runtime_contract or {}).get("forbidden_style_terms", resolved.forbidden_style_terms),
             memory_guidance_digest=memory_digest,
         )
         if qualified_run is not None:
@@ -2048,7 +2071,9 @@ class V2SupportAuthorityService:
                 "script_hash": receipt.script_hash,
                 "assignment_hash": receipt.script_assignment_hash,
                 "evidence_pack_hash": receipt.factual_evidence_pack_hash,
-                "memory_digest_hash": semantic_hash(qualification_memory or {}),
+                "memory_digest_hash": str((qualification_memory or {}).get("digest_hash") or ""),
+                "runtime_contract_hash": str(((receipt.content or {}).get("runtime_contract_hash") or "")),
+                "assignment_resolution_hash": str(((receipt.content or {}).get("assignment_resolution_hash") or "")),
                 "research_coverage_ratio": float(
                     ((receipt.content or {}).get("receipts") or {})
                     .get("fulfillment", {})

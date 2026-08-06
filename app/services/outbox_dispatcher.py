@@ -939,7 +939,11 @@ class DurableOutboxDispatcher:
                 qualification = self.session.scalar(
                     select(ScriptQualificationRun)
                     .where(ScriptQualificationRun.id == event.aggregate_id)
-                    .with_for_update(skip_locked=True)
+                    # A skipped row is a temporarily owned authority, not a
+                    # missing authority.  Waiting here is safe: this path is
+                    # deterministic reconciliation only and never performs a
+                    # provider retry.
+                    .with_for_update()
                 )
                 if qualification is None:
                     self._dead_letter_qualification_event(

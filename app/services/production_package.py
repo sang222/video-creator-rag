@@ -656,6 +656,10 @@ class ProductionPackageService:
             receipt.content_hash != qualification.get("receipt_hash")
             or receipt.script_assignment_hash != qualification.get("assignment_hash")
             or receipt.factual_evidence_pack_hash != qualification.get("evidence_pack_hash")
+            or (receipt.content or {}).get("runtime_contract_hash")
+            != qualification.get("runtime_contract_hash")
+            or (receipt.content or {}).get("assignment_resolution_hash")
+            != qualification.get("assignment_resolution_hash")
         ):
             raise ValidationFailureError("PRODUCTION_PACKAGE_SCRIPT_QUALIFICATION_RECEIPT_STALE")
         script = script_version.content if isinstance(script_version.content, dict) else {}

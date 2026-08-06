@@ -124,6 +124,13 @@ class ScriptQualificationRun(Base):
     factual_evidence_pack_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     memory_digest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     memory_digest_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Nullable only for immutable historical rows.  Current production
+    # eligibility is enforced by ScriptQualificationService.require_pass.
+    runtime_contract: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    runtime_contract_hash: Mapped[str | None] = mapped_column(String(64))
+    assignment_resolution: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    assignment_resolution_hash: Mapped[str | None] = mapped_column(String(64))
+    episode_reservation_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     writer_prompt_version: Mapped[str] = mapped_column(String(120), nullable=False)
     verifier_prompt_version: Mapped[str] = mapped_column(String(120), nullable=False)
     gate_policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -153,6 +160,8 @@ class ScriptQualificationRun(Base):
         CheckConstraint("logical_attempt_number > 0 and repair_attempts between 0 and 1", name="ck_script_qualification_attempts"),
         CheckConstraint("state in ('RESERVED','WRITER_DISPATCHED','SCRIPT_GENERATED','STRUCTURAL_CHECKED','CLAIM_INVENTORY_CHECKED','GROUNDING_CHECKED','VERIFIER_DISPATCHED','EDITORIAL_CHECKED','MEMORY_CHECKED','REPAIRABLE_BLOCK','REPAIR_DISPATCHED','REVERIFYING','QUALIFIED','BLOCKED_NON_REPAIRABLE','BLOCKED_REPAIR_BUDGET_EXHAUSTED','COOLDOWN','SUPERSEDED')", name="ck_script_qualification_state"),
         CheckConstraint("topic_definition_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and memory_digest_hash ~ '^[0-9a-f]{64}$' and logical_identity_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_hashes"),
+        CheckConstraint("runtime_contract_hash is null or runtime_contract_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_runtime_contract_hash"),
+        CheckConstraint("assignment_resolution_hash is null or assignment_resolution_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_assignment_resolution_hash"),
         Index("ix_script_qualification_candidate", "editorial_idea_candidate_id"),
         Index("ix_script_qualification_state", "state"),
     )

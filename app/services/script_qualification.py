@@ -20,7 +20,6 @@ import re
 import unicodedata
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
@@ -29,12 +28,15 @@ from sqlalchemy.orm import Session
 
 from app.contracts.script_qualification import (
     QualifiedScriptOutput,
+    ScriptAssignmentResolution,
+    ScriptRuntimeContract,
     SemanticVerificationOutput,
 )
 from app.core.errors import NotFoundError, ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
-from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight, SearchDemandEvidence
+from app.db.models.m5 import EditorialIdeaCandidate, SearchDemandEvidence
+from app.db.models.channel import ChannelProfileVersion, CompiledChannelPolicySnapshot
 from app.db.models.script_qualification import (
     EditorialTopicDefinition,
     EditorialTopicDefinitionGateReceipt,
@@ -42,12 +44,17 @@ from app.db.models.script_qualification import (
     ScriptQualificationRun,
 )
 from app.services.config_registry import content_hash
+from app.services.production_package import ChannelDurationContractResolver
+from app.services.script_qualification_authority import (
+    hashed_payload,
+    validate_memory_digest,
+)
 
 
 TOPIC_GATE_VERSION = "editorial-topic-definition-gate.v1"
-QUALIFICATION_POLICY_VERSION = "script-qualification-policy.v1"
-WRITER_PROMPT_VERSION = "script-writer-assignment.v1"
-VERIFIER_PROMPT_VERSION = "script-semantic-verifier.v1"
+QUALIFICATION_POLICY_VERSION = "script-qualification-policy.v2"
+WRITER_PROMPT_VERSION = "script-writer-assignment.v2"
+VERIFIER_PROMPT_VERSION = "script-semantic-verifier.v2"
 SCRIPT_QUALIFICATION_EVENT_TYPE = "script_qualification.execute.v1"
 SCRIPT_QUALIFICATION_AGGREGATE_TYPE = "script_qualification_run"
 LUNA_MODEL = "gpt-5.6-luna"
@@ -77,6 +84,69 @@ def span_hash(text: str) -> str:
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _string_list(value: Any) -> list[str]:
+    return sorted({_clean(item) for item in value if _clean(item)}) if isinstance(value, list) else []
+
+
+class ScriptRuntimeContractResolver:
+    """Resolve the exact channel authority consumed later by support preparation."""
+
+    VERSION = "script-runtime-contract.v1"
+    DURATION_ESTIMATION_WPM = 150
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def resolve(self, *, policy_snapshot_id: uuid.UUID) -> dict[str, Any]:
+        policy = self.session.get(CompiledChannelPolicySnapshot, policy_snapshot_id)
+        if policy is None:
+            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_POLICY_MISSING")
+        profile = self.session.get(ChannelProfileVersion, policy.channel_profile_version_id)
+        if profile is None or profile.channel_workspace_id != policy.channel_workspace_id:
+            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_PROFILE_MISSING")
+        duration = ChannelDurationContractResolver(self.session).resolve(
+            profile_version_id=profile.id,
+            policy_snapshot_id=policy.id,
+        )
+        compiled = policy.compiled_payload if isinstance(policy.compiled_payload, dict) else {}
+        channel_contract = compiled.get("channel_contract_json") if isinstance(compiled.get("channel_contract_json"), dict) else {}
+        market = channel_contract.get("market_locale") if isinstance(channel_contract.get("market_locale"), dict) else {}
+        editorial = channel_contract.get("editorial_strategy") if isinstance(channel_contract.get("editorial_strategy"), dict) else {}
+        voice = channel_contract.get("voice_style") if isinstance(channel_contract.get("voice_style"), dict) else {}
+        expected_language = _clean(market.get("content_language"))
+        if not expected_language:
+            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_EXPECTED_LANGUAGE_MISSING")
+        body = {
+            "schema_version": self.VERSION,
+            "expected_language": expected_language,
+            "duration_contract": duration.model_dump(mode="json"),
+            "duration_estimation_method": "WORD_COUNT_WPM",
+            "duration_estimation_wpm": self.DURATION_ESTIMATION_WPM,
+            "minimum_major_sections": 3,
+            "minimum_material_claims": 3,
+            "forbidden_claims": _string_list(editorial.get("forbidden_claims")),
+            "forbidden_style_terms": _string_list(voice.get("forbidden_style")),
+            "channel_profile_version_id": str(profile.id),
+            "channel_profile_hash": str(profile.profile_input_hash),
+            "compiled_policy_snapshot_id": str(policy.id),
+            "compiled_policy_snapshot_hash": str(policy.content_hash),
+        }
+        return hashed_payload(body, "contract_hash")
+
+    @staticmethod
+    def validate(contract: Any, *, expected_hash: str | None = None) -> dict[str, Any]:
+        if not isinstance(contract, dict):
+            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_MISSING")
+        try:
+            typed = ScriptRuntimeContract.model_validate(contract)
+        except ValueError as exc:
+            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_INVALID") from exc
+        expected = canonical_hash({key: value for key, value in typed.model_dump(mode="json").items() if key != "contract_hash"})
+        if typed.contract_hash != expected or (expected_hash is not None and typed.contract_hash != expected_hash):
+            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_HASH_MISMATCH")
+        return typed.model_dump(mode="json")
 
 
 def _source_snapshot(evidence: SearchDemandEvidence) -> dict[str, Any]:
@@ -329,6 +399,11 @@ class TopicDefinitionService:
         evidence = self.topic_capable_evidence(candidate)
         if evidence is None:
             raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
+        # A candidate already carrying approved-series intent may not be
+        # silently converted into a standalone topic merely because this
+        # convenience constructor lacks a durable episode reservation.
+        if getattr(candidate, "suggested_series_plan_id", None) is not None:
+            raise ValidationFailureError("EDITORIAL_SERIES_BINDING_REQUIRED")
         snapshot = _source_snapshot(evidence)
         title = _clean(snapshot.get("title"))
         subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", title, flags=re.I).strip()
@@ -408,12 +483,18 @@ class ScriptQualificationService:
         assignment = self._assignment(candidate, topic.definition)
         evidence_pack = self._factual_evidence_pack(candidate, assignment)
         memory = self._assignment_memory_digest(topic.definition, assignment)
+        runtime_contract = ScriptRuntimeContractResolver(self.session).resolve(
+            policy_snapshot_id=topic.definition.policy_snapshot_id
+        )
+        assignment_resolution = self._assignment_resolution(topic.definition)
         identity_body = {
             "candidate_id": str(candidate.id), "candidate_hash": candidate.canonical_hash,
             "topic_definition_hash": topic.definition.topic_definition_hash,
             "assignment_hash": assignment["assignment_hash"], "evidence_pack_hash": evidence_pack["evidence_pack_hash"],
             "memory_digest_hash": memory["digest_hash"], "writer_prompt_version": WRITER_PROMPT_VERSION,
             "verifier_prompt_version": VERIFIER_PROMPT_VERSION, "gate_policy_version": QUALIFICATION_POLICY_VERSION,
+            "runtime_contract_hash": runtime_contract["contract_hash"],
+            "assignment_resolution_hash": assignment_resolution["resolution_hash"],
             "model": LUNA_MODEL, "launch_run_id": str(launch_run_id), "publish_slot_id": str(publish_slot_id),
         }
         identity = canonical_hash(identity_body)
@@ -426,6 +507,8 @@ class ScriptQualificationService:
             script_assignment=assignment, script_assignment_hash=assignment["assignment_hash"],
             factual_evidence_pack=evidence_pack, factual_evidence_pack_hash=evidence_pack["evidence_pack_hash"],
             memory_digest=memory, memory_digest_hash=memory["digest_hash"], writer_prompt_version=WRITER_PROMPT_VERSION,
+            runtime_contract=runtime_contract, runtime_contract_hash=runtime_contract["contract_hash"],
+            assignment_resolution=assignment_resolution, assignment_resolution_hash=assignment_resolution["resolution_hash"],
             verifier_prompt_version=VERIFIER_PROMPT_VERSION, gate_policy_version=QUALIFICATION_POLICY_VERSION,
             model=LUNA_MODEL, logical_attempt_number=1, logical_identity_hash=identity, state="RESERVED",
             writer_attempt_key=f"{identity}:writer", verifier_attempt_key=f"{identity}:verifier",
@@ -460,6 +543,14 @@ class ScriptQualificationService:
             return self._block_unknown_provider_outcome(run)
         if run.state != "RESERVED":
             return self._block(run, "SCRIPT_QUALIFICATION_STATE_INVALID")
+        try:
+            ScriptRuntimeContractResolver.validate(
+                run.runtime_contract, expected_hash=run.runtime_contract_hash
+            )
+            self._validate_assignment_resolution(run)
+            validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+        except (ValidationFailureError, ValueError) as exc:
+            return self._block(run, str(exc) or "SCRIPT_QUALIFICATION_CURRENT_AUTHORITY_INVALID")
         run.state = "WRITER_DISPATCHED"
         self.session.flush()
         self.session.commit()
@@ -529,14 +620,30 @@ class ScriptQualificationService:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_CANDIDATE_MISMATCH")
         if receipt.script_assignment_hash != run.script_assignment_hash or receipt.factual_evidence_pack_hash != run.factual_evidence_pack_hash:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_STALE")
+        try:
+            runtime_contract = ScriptRuntimeContractResolver.validate(
+                run.runtime_contract, expected_hash=run.runtime_contract_hash
+            )
+            resolution = self._validate_assignment_resolution(run)
+            validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+        except (ValidationFailureError, ValueError) as exc:
+            raise ValidationFailureError(str(exc) or "SCRIPT_QUALIFICATION_RECEIPT_STALE") from exc
         content = receipt.content if isinstance(receipt.content, dict) else {}
+        if content.get("schema_version") != "script-qualification-receipt.v3":
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_VERSION_STALE")
         if "qualified_script" in content and (
             canonical_hash(content) != receipt.content_hash
             or content.get("script_hash") != receipt.script_hash
             or content.get("assignment_hash") != receipt.script_assignment_hash
             or content.get("evidence_pack_hash") != receipt.factual_evidence_pack_hash
+            or content.get("runtime_contract_hash") != runtime_contract["contract_hash"]
+            or content.get("assignment_resolution_hash") != resolution["resolution_hash"]
         ):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_CONTENT_HASH_MISMATCH")
+        try:
+            validate_memory_digest(content.get("memory_digest"), expected_hash=run.memory_digest_hash)
+        except ValueError as exc:
+            raise ValidationFailureError(str(exc)) from exc
         return receipt
 
     @staticmethod
@@ -552,6 +659,10 @@ class ScriptQualificationService:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_OUTPUT_MISSING")
         if canonical_hash(evidence) != receipt.factual_evidence_pack_hash:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_EVIDENCE_PACK_MISMATCH")
+        try:
+            validate_memory_digest(memory)
+        except ValueError as exc:
+            raise ValidationFailureError(str(exc)) from exc
         return dict(script), dict(evidence), dict(memory), dict(provenance)
 
     def _locked(self, run_id: uuid.UUID) -> ScriptQualificationRun:
@@ -591,7 +702,11 @@ class ScriptQualificationService:
             "scope_inclusions": topic.scope_inclusions, "exclusions": topic.exclusions, "learning_outcome": topic.learning_outcome,
             "viewer_value": topic.viewer_value, "content_mode": topic.content_mode,
             "section_role_constraints": ["HOOK", "PROBLEM", "MECHANISM", "EVIDENCE", "APPLICATION", "CLOSING_INSIGHT"],
-            "required_requirement_units": units, "forbidden_scope_units": topic.exclusions,
+            "required_requirement_units": units,
+            "forbidden_scope_units": [
+                {"forbidden_scope_id": f"forbidden-scope:{index}", "scope": exclusion}
+                for index, exclusion in enumerate(topic.exclusions, start=1)
+            ],
             "completion_policy_version": QUALIFICATION_POLICY_VERSION,
         }
         body["assignment_hash"] = canonical_hash(body)
@@ -647,14 +762,64 @@ class ScriptQualificationService:
         # The explicit safe empty digest is a controlled non-factual authority,
         # never a surrogate factual source or assignment completion signal.
         body = {"digest_type": "EMPTY_SAFE_DIGEST", "status": "EMPTY_SAFE_DIGEST", "lessons": [], "assignment_query": {"subject": topic.subject_canonical_id, "audience_problem": topic.audience_problem, "requirement_types": [item["requirement_type"] for item in assignment["required_requirement_units"]], "content_mode": topic.content_mode}, "non_factual_guidance_only": True, "no_raw_analytics": True, "no_raw_memory": True}
-        body["digest_hash"] = canonical_hash(body)
-        return body
+        return hashed_payload(body, "digest_hash")
+
+    @staticmethod
+    def _assignment_resolution(topic: EditorialTopicDefinition) -> dict[str, Any]:
+        """Freeze mode before writer execution; never let admission reinterpret it."""
+
+        if topic.content_mode == "STANDALONE":
+            body = {
+                "schema_version": "script-assignment-resolution.v1",
+                "assignment_mode": "STANDALONE_REQUIRED",
+                "content_mode": "STANDALONE",
+                "standalone_reason_code": "EXPLICIT_STANDALONE_REQUIRED",
+                "standalone_self_containment_required": bool(topic.standalone_self_containment_required),
+                "series_plan_id": None, "series_run_id": None, "episode_number": None,
+                "episode_role": None, "episode_delta": None, "series_learning_outcome": None,
+                "authority_refs": {"topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash},
+            }
+        else:
+            binding = topic.series_binding if isinstance(topic.series_binding, dict) else {}
+            plan_id = _clean(binding.get("series_plan_id") or binding.get("series_ref"))
+            run_id = _clean(binding.get("series_run_id") or binding.get("run_ref"))
+            try:
+                episode_number = int(binding.get("episode_number"))
+            except (TypeError, ValueError):
+                episode_number = None
+            body = {
+                "schema_version": "script-assignment-resolution.v1",
+                "assignment_mode": "SERIES_REQUIRED",
+                "content_mode": "SERIES_EPISODE",
+                "standalone_reason_code": None,
+                "standalone_self_containment_required": False,
+                "series_plan_id": plan_id or None, "series_run_id": run_id or None,
+                "episode_number": episode_number, "episode_role": _clean(binding.get("episode_role")) or None,
+                "episode_delta": _clean(binding.get("episode_delta")) or None,
+                "series_learning_outcome": _clean(binding.get("learning_outcome")) or None,
+                "authority_refs": {"topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash},
+            }
+        return hashed_payload(body, "resolution_hash")
+
+    @staticmethod
+    def _validate_assignment_resolution(run: ScriptQualificationRun) -> dict[str, Any]:
+        if not isinstance(run.assignment_resolution, dict):
+            raise ValidationFailureError("SCRIPT_ASSIGNMENT_RESOLUTION_MISSING")
+        try:
+            typed = ScriptAssignmentResolution.model_validate(run.assignment_resolution)
+        except ValueError as exc:
+            raise ValidationFailureError("SCRIPT_ASSIGNMENT_RESOLUTION_INVALID") from exc
+        payload = typed.model_dump(mode="json")
+        expected = canonical_hash({key: value for key, value in payload.items() if key != "resolution_hash"})
+        if typed.resolution_hash != expected or typed.resolution_hash != run.assignment_resolution_hash:
+            raise ValidationFailureError("SCRIPT_ASSIGNMENT_RESOLUTION_HASH_MISMATCH")
+        return payload
 
     def _writer_context(self, run: ScriptQualificationRun) -> dict[str, Any]:
-        return {"script_assignment": run.script_assignment, "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "writer_output_contract": "canonical_script, language, sections, claims with factual evidence span ids; writer claims are hints only", "forbidden": ["Do not use planning authority or memory as factual evidence.", "Do not assert facts outside exact factual evidence spans."]}
+        return {"script_assignment": run.script_assignment, "assignment_resolution": run.assignment_resolution, "script_runtime_contract": run.runtime_contract, "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "writer_output_contract": "canonical_script, language, sections, claims with factual evidence span ids; writer claims are hints only", "forbidden": ["Do not use planning authority or memory as factual evidence.", "Do not assert facts outside exact factual evidence spans."]}
 
     def _verifier_context(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
-        return {"script_assignment": run.script_assignment, "factual_evidence_pack": run.factual_evidence_pack, "canonical_script": draft.canonical_script, "sections": [item.model_dump(mode="json") for item in draft.sections], "writer_claims": [item.model_dump(mode="json") for item in draft.claims], "verifier_output_contract": "complete material claim inventory, entailment observations, assignment fulfillment observations, section purposes, and memory application observations. Emit OUT_OF_SCOPE for any forbidden-scope violation. Never return a final PASS."}
+        return {"script_assignment": run.script_assignment, "assignment_resolution": run.assignment_resolution, "script_runtime_contract": run.runtime_contract, "factual_evidence_pack": run.factual_evidence_pack, "canonical_script": draft.canonical_script, "sections": [item.model_dump(mode="json") for item in draft.sections], "writer_claims": [item.model_dump(mode="json") for item in draft.claims], "verifier_output_contract": "complete material claim inventory, entailment observations, assignment fulfillment observations, exactly one forbidden-scope observation per frozen exclusion, section purposes, and memory application observations. Emit no final PASS."}
 
     def _structural_receipt(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
         script = unicodedata.normalize("NFC", draft.canonical_script).replace("\r\n", "\n").replace("\r", "\n")
@@ -668,10 +833,35 @@ class ScriptQualificationService:
             reasons.append("SCRIPT_STRUCTURE_INSUFFICIENT_MAJOR_SECTIONS")
         if len(section_ids) != len(set(section_ids)) or any(not item for item in section_ids):
             reasons.append("SCRIPT_STRUCTURE_SECTION_IDS_INVALID")
+        runtime = run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
+        expected_language = _clean(runtime.get("expected_language"))
+        if expected_language and draft.language.casefold() != expected_language.casefold():
+            reasons.append("SCRIPT_LANGUAGE_CONTRACT_MISMATCH")
+        minimum_sections = runtime.get("minimum_major_sections")
+        if isinstance(minimum_sections, int) and len(sections) < minimum_sections:
+            reasons.append("SCRIPT_MINIMUM_SECTION_COUNT_UNMET")
+        minimum_claims = runtime.get("minimum_material_claims")
+        if isinstance(minimum_claims, int) and len(draft.claims) < minimum_claims:
+            reasons.append("SCRIPT_MINIMUM_MATERIAL_CLAIM_COUNT_UNMET")
+        duration = runtime.get("duration_contract") if isinstance(runtime.get("duration_contract"), dict) else {}
+        wpm = runtime.get("duration_estimation_wpm")
+        if isinstance(wpm, int) and wpm > 0 and duration:
+            words = re.findall(r"\b[\w'-]+\b", script, flags=re.UNICODE)
+            estimated_duration_ms = round(len(words) / wpm * 60_000)
+            if not (
+                isinstance(duration.get("minimum_duration_ms"), int)
+                and isinstance(duration.get("maximum_duration_ms"), int)
+            ) or not duration["minimum_duration_ms"] <= estimated_duration_ms <= duration["maximum_duration_ms"]:
+                reasons.append("SCRIPT_DURATION_CONTRACT_MISMATCH")
+        text_folded = script.casefold()
+        if any(term.casefold() in text_folded for term in _string_list(runtime.get("forbidden_claims"))):
+            reasons.append("SCRIPT_FORBIDDEN_CLAIM_VIOLATION")
+        if any(term.casefold() in text_folded for term in _string_list(runtime.get("forbidden_style_terms"))):
+            reasons.append("SCRIPT_FORBIDDEN_STYLE_VIOLATION")
         normalized = [re.sub(r"\s+", " ", item).casefold() for item in re.split(r"(?<=[.!?])\s+", script) if item.strip()]
         if len(normalized) != len(set(normalized)):
             reasons.append("SCRIPT_STRUCTURE_REPETITION_BLOCK")
-        return {"gate": "A", "status": "PASS" if not reasons else "BLOCK", "script_hash": script_hash(script), "reason_codes": reasons or ["SCRIPT_STRUCTURAL_INTEGRITY_PASS"]}
+        return {"gate": "A", "status": "PASS" if not reasons else "BLOCK", "script_hash": script_hash(script), "runtime_contract_hash": runtime.get("contract_hash"), "reason_codes": sorted(set(reasons)) or ["SCRIPT_STRUCTURAL_INTEGRITY_PASS"]}
 
     def _semantic_receipts(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput, verifier: SemanticVerificationOutput, structural: dict[str, Any]) -> dict[str, dict[str, Any]]:
         script = draft.canonical_script
@@ -734,7 +924,12 @@ class ScriptQualificationService:
         fulfillment_reasons, coverage = self._fulfillment_reasons(run, verifier, script_bytes, section_bounds)
         fulfillment = {"gate": "C", "status": "PASS" if not fulfillment_reasons else "BLOCK", "script_hash": script_hash(script), "assignment_hash": run.script_assignment_hash, "reason_codes": sorted(set(fulfillment_reasons)) or ["SCRIPT_EDITORIAL_ASSIGNMENT_FULFILLMENT_PASS"], **coverage}
         memory_reasons = self._memory_reasons(run, verifier)
-        memory = {"gate": "D", "status": "PASS_EMPTY" if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST" and not memory_reasons else ("PASS" if not memory_reasons else "BLOCK"), "script_hash": script_hash(script), "reason_codes": sorted(set(memory_reasons)) or (["SCRIPT_MEMORY_GUIDANCE_PASS_EMPTY"] if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST" else ["SCRIPT_MEMORY_GUIDANCE_PASS"])}
+        try:
+            memory_hash = validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+        except ValueError as exc:
+            memory_reasons.append(str(exc))
+            memory_hash = None
+        memory = {"gate": "D", "status": "PASS_EMPTY" if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST" and not memory_reasons else ("PASS" if not memory_reasons else "BLOCK"), "script_hash": script_hash(script), "memory_digest_hash": memory_hash, "reason_codes": sorted(set(memory_reasons)) or (["SCRIPT_MEMORY_GUIDANCE_PASS_EMPTY"] if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST" else ["SCRIPT_MEMORY_GUIDANCE_PASS"])}
         return {"structural": structural, "inventory": inventory, "grounding": grounding, "fulfillment": fulfillment, "memory": memory}
 
     @staticmethod
@@ -798,28 +993,57 @@ class ScriptQualificationService:
                 owner = coverage_owners.setdefault(key, requirement_id)
                 if owner != requirement_id:
                     reasons.append("SCRIPT_ASSIGNMENT_COVERAGE_SPAN_REUSED")
-        observed_roles: dict[str, tuple[frozenset[str], str]] = {}
+        observed_roles: dict[str, list[tuple[frozenset[str], str]]] = {}
         observed_sections: set[str] = set()
         for section in verifier.section_purpose_observations:
             if section.section_id not in bounds or section.section_id in observed_sections:
-                reasons.append("SCRIPT_SECTION_PURPOSE_INVALID")
+                reasons.append("SCRIPT_SECTION_PURPOSE_DUPLICATE_OBSERVATION")
             observed_sections.add(section.section_id)
             if section.genericity_state != "SPECIFIC" or not section.editorial_delta:
                 reasons.append("SCRIPT_SECTION_EDITORIAL_DELTA_MISSING")
             purpose = frozenset(section.fulfilled_requirement_ids)
+            if set(section.fulfilled_requirement_ids) - requirements:
+                reasons.append("SCRIPT_SECTION_PURPOSE_UNKNOWN_REQUIREMENT_ID")
             delta = re.sub(r"\s+", " ", section.editorial_delta).strip().casefold()
-            previous = observed_roles.get(section.observed_primary_role)
-            if previous is not None:
-                previous_purpose, previous_delta = previous
+            prior = observed_roles.setdefault(section.observed_primary_role, [])
+            if prior:
                 if (
                     not section.role_reuse_justification
-                    or purpose == previous_purpose
-                    or delta == previous_delta
+                    or any(purpose == previous_purpose for previous_purpose, _ in prior)
+                    or any(delta == previous_delta for _, previous_delta in prior)
                 ):
-                    reasons.append("SCRIPT_SECTION_PURPOSE_DUPLICATE")
-            observed_roles[section.observed_primary_role] = (purpose, delta)
+                    reasons.append("SCRIPT_SECTION_ROLE_REUSE_INVALID")
+            prior.append((purpose, delta))
         if observed_sections != set(bounds):
-            reasons.append("SCRIPT_SECTION_PURPOSE_INCOMPLETE")
+            reasons.append("SCRIPT_SECTION_PURPOSE_COVERAGE_INCOMPLETE")
+        forbidden = {
+            str(item.get("forbidden_scope_id")): item
+            for item in (run.script_assignment or {}).get("forbidden_scope_units", [])
+            if isinstance(item, dict) and item.get("forbidden_scope_id")
+        }
+        observations: dict[str, Any] = {}
+        for observation in verifier.forbidden_scope_observations:
+            scope_id = observation.forbidden_scope_id
+            if scope_id in observations:
+                reasons.append("SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_DUPLICATE")
+                continue
+            observations[scope_id] = observation
+            if scope_id not in forbidden:
+                reasons.append("SCRIPT_FORBIDDEN_SCOPE_UNKNOWN_ID")
+                continue
+            if observation.state in {"VIOLATED", "AMBIGUOUS"}:
+                reasons.append(f"SCRIPT_FORBIDDEN_SCOPE_{observation.state}:{scope_id}")
+            for span in observation.script_spans:
+                if (
+                    span.end_byte > len(script_bytes)
+                    or script_bytes[span.start_byte:span.end_byte] != span.text.encode("utf-8")
+                    or span_hash(span.text) != span.span_hash
+                    or not self._span_in_section(span, bounds)
+                ):
+                    reasons.append("SCRIPT_FORBIDDEN_SCOPE_SPAN_INVALID")
+        for scope_id in forbidden:
+            if scope_id not in observations:
+                reasons.append(f"SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:{scope_id}")
         total = len(requirements)
         return reasons, {
             "required_requirement_count": total,
@@ -870,7 +1094,7 @@ class ScriptQualificationService:
         existing = self.session.scalar(select(ScriptQualificationReceipt).where(ScriptQualificationReceipt.script_qualification_run_id == run.id))
         if existing is not None:
             return existing
-        body = {"schema_version": "script-qualification-receipt.v2", "run_id": str(run.id), "result": result, "script_hash": script_hash(draft.canonical_script), "assignment_hash": run.script_assignment_hash, "evidence_pack_hash": run.factual_evidence_pack_hash, "topic_definition_hash": run.topic_definition_hash, "receipts": receipts, "qualified_script": draft.model_dump(mode="json"), "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "producer_provenance": {"writer": run.writer_receipt, "verifier": run.verifier_receipt}, "repair_attempts": run.repair_attempts}
+        body = {"schema_version": "script-qualification-receipt.v3", "run_id": str(run.id), "result": result, "script_hash": script_hash(draft.canonical_script), "assignment_hash": run.script_assignment_hash, "evidence_pack_hash": run.factual_evidence_pack_hash, "topic_definition_hash": run.topic_definition_hash, "runtime_contract": run.runtime_contract, "runtime_contract_hash": run.runtime_contract_hash, "assignment_resolution": run.assignment_resolution, "assignment_resolution_hash": run.assignment_resolution_hash, "memory_digest_hash": run.memory_digest_hash, "receipts": receipts, "qualified_script": draft.model_dump(mode="json"), "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "producer_provenance": {"writer": run.writer_receipt, "verifier": run.verifier_receipt}, "repair_attempts": run.repair_attempts}
         receipt = ScriptQualificationReceipt(script_qualification_run_id=run.id, result=result, script_hash=body["script_hash"], script_assignment_hash=run.script_assignment_hash, factual_evidence_pack_hash=run.factual_evidence_pack_hash, content=body, content_hash=canonical_hash(body))
         self.session.add(receipt)
         return receipt

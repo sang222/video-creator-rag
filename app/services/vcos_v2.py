@@ -696,12 +696,18 @@ class ProjectAdmissionV2Service:
                 resolver_input=resolver_input,
                 reason_codes=exc.reason_codes,
             )
+        self._require_qualification_assignment_match(
+            frozen=data.qualification_assignment_resolution,
+            resolution=resolution,
+            assignment_mode=data.assignment_mode,
+        )
         if resolution.content_mode == ContentMode.SERIES_EPISODE:
             return self._admit_series(
                 data=data,
                 context=context,
                 resolver_input=resolver_input,
                 resolution=resolution,
+                frozen_assignment_resolution=data.qualification_assignment_resolution,
             )
         return self._admit_standalone(
             data=data,
@@ -709,6 +715,39 @@ class ProjectAdmissionV2Service:
             resolver_input=resolver_input,
             resolution=resolution,
         )
+
+    @staticmethod
+    def _require_qualification_assignment_match(
+        *,
+        frozen: dict[str, Any] | None,
+        resolution: AssignmentResolution,
+        assignment_mode: AssignmentMode,
+    ) -> None:
+        """Admission may project qualification authority, never reinterpret it."""
+
+        if frozen is None:
+            return
+        if not isinstance(frozen, dict):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        body = {key: value for key, value in frozen.items() if key != "resolution_hash"}
+        if frozen.get("resolution_hash") != content_hash(body):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        if (
+            frozen.get("assignment_mode") != assignment_mode.value
+            or frozen.get("content_mode") != resolution.content_mode.value
+        ):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+        if resolution.content_mode == ContentMode.STANDALONE:
+            if not frozen.get("standalone_self_containment_required"):
+                raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
+            return
+        if (
+            str(resolution.series_plan_id) != str(frozen.get("series_plan_id"))
+            or str(resolution.series_run_id) != str(frozen.get("series_run_id"))
+            or resolution.episode_role != frozen.get("episode_role")
+            or not frozen.get("episode_delta")
+        ):
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
 
     def _active_launch_authority(
         self,
@@ -1335,6 +1374,7 @@ class ProjectAdmissionV2Service:
         context: _AdmissionContext,
         resolver_input: AssignmentResolverInput,
         resolution: AssignmentResolution,
+        frozen_assignment_resolution: dict[str, Any] | None = None,
     ) -> ProjectAdmissionDecision:
         with self.session.begin_nested():
             run = self.session.scalar(
@@ -1382,6 +1422,11 @@ class ProjectAdmissionV2Service:
                 )
             assert run is not None
             episode_number = run.next_episode_number
+            if (
+                frozen_assignment_resolution is not None
+                and episode_number != frozen_assignment_resolution.get("episode_number")
+            ):
+                raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
             run.next_episode_number += 1
             run.reserved_episode_count += 1
             self.session.flush()
@@ -1754,6 +1799,7 @@ class LongFormPlanningService:
                 bridge_or_special=data.bridge_or_special,
                 evidence_refs=data.evidence_refs,
                 budget_gate_result=data.budget_gate_result,
+                qualification_assignment_resolution=data.qualification_assignment_resolution,
                 duration_contract=data.duration_contract,
                 audience_promise=data.audience_promise,
                 audience_promise_version=data.audience_promise_version,

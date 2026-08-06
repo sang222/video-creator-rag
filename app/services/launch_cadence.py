@@ -1225,6 +1225,31 @@ class LongFormCadenceService:
         budget_gate_result: dict[str, Any],
         script_qualification_run_id: uuid.UUID,
     ) -> tuple[ProjectAdmissionDecision, ProductionWorkflowRun]:
+        # Qualification freezes content mode before the writer call.  Do not
+        # re-run OPEN_MIX selection here and accidentally rewrite the script's
+        # assignment at the project boundary.
+        from app.db.models.script_qualification import ScriptQualificationRun
+        from app.services.script_qualification import ScriptQualificationService
+
+        qualification = self.session.get(ScriptQualificationRun, script_qualification_run_id)
+        if qualification is None:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_RUN_NOT_FOUND")
+        ScriptQualificationService(self.session).require_pass(
+            qualification.id, candidate_id=candidate.id
+        )
+        frozen_assignment = ScriptQualificationService._validate_assignment_resolution(qualification)
+        try:
+            assignment_mode = AssignmentMode(frozen_assignment["assignment_mode"])
+        except (KeyError, ValueError) as exc:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH") from exc
+        preferred_plan_id = (
+            uuid.UUID(str(frozen_assignment["series_plan_id"]))
+            if frozen_assignment.get("series_plan_id") else None
+        )
+        preferred_run_id = (
+            uuid.UUID(str(frozen_assignment["series_run_id"]))
+            if frozen_assignment.get("series_run_id") else None
+        )
         preflight = next(
             (
                 item
@@ -1268,26 +1293,15 @@ class LongFormCadenceService:
                     "CADENCE_CHARACTER_AUTHORITY_BLOCKED:"
                     + ",".join(character.reason_codes)
                 )
-            preferred_plan_id = candidate.suggested_series_plan_id
             if preferred_plan_id is not None and str(preferred_plan_id) not in set(
                 policy.approved_initial_series_plan_ids or []
             ):
                 raise ValidationFailureError("CADENCE_SERIES_OUTSIDE_LAUNCH_POLICY")
-            assignment_mode = (
-                AssignmentMode.SERIES_PREFERRED
-                if preferred_plan_id is not None
-                else AssignmentMode.OPEN_MIX
-            )
-            preferred_run_id = None
-            if preferred_plan_id is not None:
-                preferred_run_id = self.session.scalar(
-                    select(SeriesRun.id)
-                    .where(
-                        SeriesRun.series_plan_id == preferred_plan_id,
-                        SeriesRun.state == "ACTIVE",
-                    )
-                    .order_by(SeriesRun.run_number)
-                )
+            if (
+                frozen_assignment["content_mode"] == "SERIES_EPISODE"
+                and (preferred_plan_id is None or preferred_run_id is None)
+            ):
+                raise ValidationFailureError("SCRIPT_QUALIFICATION_ADMISSION_ASSIGNMENT_MISMATCH")
             editorial_slot = EditorialCalendarSlot(
                 company_id=run.company_id,
                 channel_workspace_id=run.channel_workspace_id,
@@ -1344,6 +1358,7 @@ class LongFormCadenceService:
                     market_gate_passed=True,
                     evidence_refs=list(candidate.evidence_refs or []),
                     budget_gate_result=budget_gate_result,
+                    qualification_assignment_resolution=frozen_assignment,
                     duration_contract=duration,
                     created_by_user_id=run.updated_by_user_id,
                 )

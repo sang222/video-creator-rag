@@ -4,10 +4,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
 from app.contracts.script_qualification import (
     AssignmentObservation,
+    ForbiddenScopeObservation,
     MaterialClaimObservation,
     QualifiedScriptOutput,
     ScriptSpan,
@@ -25,6 +27,10 @@ from app.services.script_qualification import (
     canonical_hash,
     script_hash,
     span_hash,
+)
+from app.services.script_qualification_authority import (
+    canonical_memory_digest_hash,
+    validate_memory_digest,
 )
 from app.contracts.production_package import ProductionDurationContractV2
 from app.services.v2_support_authority import (
@@ -151,6 +157,26 @@ def _qualified_inputs():
     return run, draft, verifier
 
 
+def _runtime_contract(*, forbidden_claims=None, forbidden_style_terms=None):
+    body = {
+        "schema_version": "script-runtime-contract.v1",
+        "expected_language": "en",
+        "duration_contract": {"minimum_duration_ms": 1, "target_duration_ms": 5_000, "maximum_duration_ms": 60_000},
+        "duration_estimation_method": "WORD_COUNT_WPM",
+        "duration_estimation_wpm": 150,
+        "minimum_major_sections": 3,
+        "minimum_material_claims": 3,
+        "forbidden_claims": forbidden_claims or [],
+        "forbidden_style_terms": forbidden_style_terms or [],
+        "channel_profile_version_id": str(uuid.uuid4()),
+        "channel_profile_hash": "b" * 64,
+        "compiled_policy_snapshot_id": str(uuid.uuid4()),
+        "compiled_policy_snapshot_hash": "c" * 64,
+    }
+    body["contract_hash"] = canonical_hash(body)
+    return body
+
+
 def test_independent_inventory_and_entailment_control_all_script_gates(db_session):
     run, draft, verifier = _qualified_inputs()
     service = ScriptQualificationService(db_session)
@@ -164,6 +190,65 @@ def test_independent_inventory_and_entailment_control_all_script_gates(db_sessio
     assert receipts["memory"]["status"] == "PASS_EMPTY"
     assert receipts["fulfillment"]["research_coverage_ratio"] == 1.0
     assert receipts["grounding"]["script_hash"] == script_hash(draft.canonical_script)
+
+
+def test_memory_digest_hash_is_detached_canonical_and_rejects_full_digest_hash():
+    digest = {"status": "EMPTY_SAFE_DIGEST", "lessons": [], "non_factual_guidance_only": True}
+    digest["digest_hash"] = canonical_hash(digest)
+    assert digest["digest_hash"] == canonical_memory_digest_hash(digest)
+    assert validate_memory_digest(digest) == digest["digest_hash"]
+
+    digest["digest_hash"] = canonical_hash(digest)
+    with pytest.raises(ValueError, match="SCRIPT_MEMORY_DIGEST_HASH_MISMATCH"):
+        validate_memory_digest(digest)
+
+
+def test_runtime_contract_blocks_language_duration_counts_and_forbidden_terms(db_session):
+    run, draft, _verifier = _qualified_inputs()
+    run.runtime_contract = _runtime_contract(
+        forbidden_claims=["invented roi"], forbidden_style_terms=["hype"]
+    )
+    run.runtime_contract_hash = run.runtime_contract["contract_hash"]
+    service = ScriptQualificationService(db_session)
+
+    assert service._structural_receipt(run, draft)["status"] == "PASS"
+    wrong_language = draft.model_copy(update={"language": "vi"})
+    assert "SCRIPT_LANGUAGE_CONTRACT_MISMATCH" in service._structural_receipt(run, wrong_language)["reason_codes"]
+
+    run.runtime_contract = _runtime_contract()
+    run.runtime_contract["duration_contract"]["minimum_duration_ms"] = 100_000
+    run.runtime_contract["contract_hash"] = canonical_hash({key: value for key, value in run.runtime_contract.items() if key != "contract_hash"})
+    assert "SCRIPT_DURATION_CONTRACT_MISMATCH" in service._structural_receipt(run, draft)["reason_codes"]
+
+    run.runtime_contract = _runtime_contract(forbidden_claims=["official page"])
+    run.runtime_contract_hash = run.runtime_contract["contract_hash"]
+    assert "SCRIPT_FORBIDDEN_CLAIM_VIOLATION" in service._structural_receipt(run, draft)["reason_codes"]
+
+
+def test_section_role_reuse_compares_every_prior_and_forbidden_scope_is_complete(db_session):
+    run, draft, verifier = _qualified_inputs()
+    service = ScriptQualificationService(db_session)
+    verifier.section_purpose_observations[1] = SectionPurposeObservation(
+        section_id="body", observed_primary_role="HOOK", fulfilled_requirement_ids=["question"],
+        editorial_delta="Introduces a distinct decision tension.", genericity_state="SPECIFIC",
+        role_reuse_justification="A different editorial function.",
+    )
+    verifier.section_purpose_observations[2] = SectionPurposeObservation(
+        section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["subject"],
+        editorial_delta="Establishes the bounded subject.", genericity_state="SPECIFIC",
+        role_reuse_justification="A claimed closing distinction.",
+    )
+    receipts = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    assert "SCRIPT_SECTION_ROLE_REUSE_INVALID" in receipts["fulfillment"]["reason_codes"]
+
+    run.script_assignment["forbidden_scope_units"] = [{"forbidden_scope_id": "forbidden-scope:1", "scope": "unsupported ROI"}]
+    missing = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    assert "SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:forbidden-scope:1" in missing["fulfillment"]["reason_codes"]
+    verifier.forbidden_scope_observations = [
+        ForbiddenScopeObservation(forbidden_scope_id="forbidden-scope:1", state="ABSENT")
+    ]
+    present = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    assert "SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:forbidden-scope:1" not in present["fulfillment"]["reason_codes"]
 
 
 def test_undeclared_or_partially_supported_material_claim_blocks(db_session):
@@ -225,7 +310,7 @@ def test_duplicate_section_purpose_blocks_but_justified_role_reuse_passes(db_ses
         editorial_delta="Establishes the bounded subject.", genericity_state="SPECIFIC",
     )
     blocked = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
-    assert "SCRIPT_SECTION_PURPOSE_DUPLICATE" in blocked["fulfillment"]["reason_codes"]
+    assert "SCRIPT_SECTION_ROLE_REUSE_INVALID" in blocked["fulfillment"]["reason_codes"]
 
     verifier.section_purpose_observations[2] = SectionPurposeObservation(
         section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["outcome", "viewer-value", "self-containment"],
@@ -273,7 +358,9 @@ def test_qualification_frozen_sources_preserve_multi_source_long_exact_spans():
     # Keep offsets faithful to the exact source text in the fixture.
     spans[1]["end_byte"] = len(spans[1]["text"].encode("utf-8"))
     evidence = {"spans": spans}
-    content = {"qualified_script": {"canonical_script": "placeholder", "language": "en", "sections": [{"section_id": "one", "heading": "One", "narration": "placeholder"}], "claims": []}, "factual_evidence_pack": evidence, "memory_digest": {"status": "EMPTY_SAFE_DIGEST"}, "producer_provenance": {}}
+    memory = {"status": "EMPTY_SAFE_DIGEST"}
+    memory["digest_hash"] = canonical_hash(memory)
+    content = {"qualified_script": {"canonical_script": "placeholder", "language": "en", "sections": [{"section_id": "one", "heading": "One", "narration": "placeholder"}], "claims": []}, "factual_evidence_pack": evidence, "memory_digest": memory, "producer_provenance": {}}
     receipt = SimpleNamespace(content=content, factual_evidence_pack_hash=canonical_hash(evidence))
     sources = V2SupportAuthorityService._qualification_frozen_sources(receipt)
 

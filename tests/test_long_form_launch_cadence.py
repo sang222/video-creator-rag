@@ -783,11 +783,19 @@ def _fixture_qualification_pass(session, run_id: uuid.UUID) -> ScriptQualificati
     assert qualification is not None
     qualification.state = "QUALIFIED"
     content = {
-        "schema_version": "fixture-script-qualification-receipt.v1",
+        "schema_version": "script-qualification-receipt.v3",
         "run_id": str(qualification.id),
         "result": "PASS",
+        "script_hash": "a" * 64,
+        "assignment_hash": qualification.script_assignment_hash,
+        "evidence_pack_hash": qualification.factual_evidence_pack_hash,
+        "runtime_contract": qualification.runtime_contract,
+        "runtime_contract_hash": qualification.runtime_contract_hash,
+        "assignment_resolution": qualification.assignment_resolution,
+        "assignment_resolution_hash": qualification.assignment_resolution_hash,
+        "memory_digest_hash": qualification.memory_digest_hash,
         "receipts": {
-            "structural": {"status": "PASS", "script_hash": "a" * 64},
+            "structural": {"status": "PASS", "script_hash": "a" * 64, "runtime_contract_hash": qualification.runtime_contract_hash},
             "inventory": {"status": "PASS"},
             "grounding": {
                 "status": "PASS",
@@ -795,8 +803,12 @@ def _fixture_qualification_pass(session, run_id: uuid.UUID) -> ScriptQualificati
                 "evidence_pack_hash": qualification.factual_evidence_pack_hash,
             },
             "fulfillment": {"status": "PASS", "research_coverage_ratio": 1.0},
-            "memory": {"status": "PASS_EMPTY"},
+            "memory": {"status": "PASS_EMPTY", "memory_digest_hash": qualification.memory_digest_hash},
         },
+        "qualified_script": {"canonical_script": "placeholder", "language": "en", "sections": [{"section_id": "one", "heading": "One", "narration": "placeholder"}], "claims": []},
+        "factual_evidence_pack": qualification.factual_evidence_pack,
+        "memory_digest": qualification.memory_digest,
+        "producer_provenance": {},
     }
     session.add(
         ScriptQualificationReceipt(
@@ -1014,8 +1026,12 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
                 for item in context["script_assignment"]["required_requirement_units"]
             ]
             self.sentences = [
-                f"The documented audit workflow fulfills the {requirement} obligation with its exact evidence boundary."
-                for requirement in requirements
+                (
+                    f"The documented audit workflow fulfills the {requirement} obligation with its exact evidence boundary "
+                    + " ".join(f"detail{index}_{word}" for word in range(1, 151))
+                    + "."
+                )
+                for index, requirement in enumerate(requirements, start=1)
             ]
             self.section_ids = [
                 "hook" if index < 3 else "body" if index < 6 else "close"
@@ -1074,11 +1090,15 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
                         {"requirement_id": requirement, "status": "SUFFICIENT", "spans": [spans[index]], "evidence_span_ids": [evidence_id]}
                         for index, requirement in enumerate(requirements)
                     ],
-                    "section_purpose_observations": [
+                        "section_purpose_observations": [
                         {"section_id": "hook", "observed_primary_role": "HOOK", "fulfilled_requirement_ids": requirements[:3], "editorial_delta": "Establishes the bounded subject, angle, and question.", "genericity_state": "SPECIFIC"},
                         {"section_id": "body", "observed_primary_role": "MECHANISM", "fulfilled_requirement_ids": requirements[3:6], "editorial_delta": "Connects scope to the audience decision.", "genericity_state": "SPECIFIC"},
-                        {"section_id": "close", "observed_primary_role": "CLOSING_INSIGHT", "fulfilled_requirement_ids": requirements[6:], "editorial_delta": "Turns the evidence boundary into a standalone next step.", "genericity_state": "SPECIFIC"},
-                    ],
+                            {"section_id": "close", "observed_primary_role": "CLOSING_INSIGHT", "fulfilled_requirement_ids": requirements[6:], "editorial_delta": "Turns the evidence boundary into a standalone next step.", "genericity_state": "SPECIFIC"},
+                        ],
+                        "forbidden_scope_observations": [
+                            {"forbidden_scope_id": item["forbidden_scope_id"], "state": "ABSENT"}
+                            for item in context["script_assignment"]["forbidden_scope_units"]
+                        ],
                 },
                     self._receipt(idempotency_key=idempotency_key, lane_name="gatekeeper_soft_review"),
             )
@@ -1486,11 +1506,12 @@ def test_open_mix_admission_filters_series_outside_launch_policy(
     project = db_session.get(VideoProject, admission.admitted_video_project_id)
     assert project is not None
     assert workflow.video_project_id == project.id
-    assert project.content_mode == "SERIES_EPISODE"
-    assert project.series_plan_id == plans[0].id
-    assert project.series_run_id == allowed_run.id
-    assert project.series_plan_id != outsider_plan.id
-    assert allowed_run.reserved_episode_count == 1
+    # The standalone TopicDefinition is frozen before writer dispatch, so a
+    # later OPEN_MIX decision cannot convert it into either series run.
+    assert project.content_mode == "STANDALONE"
+    assert project.series_plan_id is None
+    assert project.series_run_id is None
+    assert allowed_run.reserved_episode_count == 0
     assert outsider_run.reserved_episode_count == 0
 
 
