@@ -406,6 +406,10 @@ class CanonicalCaptionCue(BaseModel):
     display_tokens: list[CaptionDisplayToken] = Field(min_length=1)
     reading_metrics: CaptionReadingMetrics
     gate_results: list[CreativeQualityGateResult] = Field(default_factory=list)
+    # Legacy renderer diagnostics are retained only so immutable historical
+    # fixtures remain readable.  They are not caption authority and are never
+    # emitted into final media or the canonical sidecar SRT.
+    bbox_metrics: dict[str, Any] | None = None
     timing_source: CaptionTimingSource = "CANONICAL_MEDIA_TIMELINE"
     content_hash: str = Field(min_length=1)
 

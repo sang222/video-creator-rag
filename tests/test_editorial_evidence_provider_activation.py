@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 import app.services.editorial_fresh_evidence as evidence_module
 from app.contracts.ops import BudgetPolicyCreate, CredentialReferenceCreate
+from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
 from app.providers.openai import OpenAIResponsesProvider, OpenAIWebSearchRequest
 from app.services.editorial_fresh_evidence import (
@@ -160,7 +161,14 @@ def test_first_launch_claim_scan_excludes_evidence_provenance_directives() -> No
     assert "roi" not in claim_text
 
 
-def test_existing_openai_registry_activation_is_idempotent(db_session) -> None:
+def test_existing_openai_registry_activation_is_idempotent(
+    db_session, monkeypatch
+) -> None:
+    # Provider activation requires an explicit real-execution lane authority;
+    # an environment credential alone is intentionally insufficient.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("VCOS_LLM_REAL_EXECUTION_ENABLED", "true")
+    get_settings.cache_clear()
     scope = QualificationFactory(db_session).channel_scope(
         name="Editorial evidence activation", strict_long_form=True
     )

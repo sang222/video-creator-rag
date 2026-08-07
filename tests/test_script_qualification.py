@@ -13,6 +13,7 @@ from app.contracts.script_qualification import (
     ForbiddenScopeObservation,
     MaterialClaimObservation,
     QualifiedScriptOutput,
+    QualifiedScriptOutputV2,
     SectionPurposeObservation,
     SemanticVerificationOutput,
     VerifierScriptSpan,
@@ -445,6 +446,126 @@ def test_support_projects_qualification_provenance_and_memory_without_new_retrie
     assert producer.qualification_receipt_hash == receipt.content_hash
     assert context.memory_guidance_digest == memory_without_retrieval
     assert validated["claim_bindings"][0].evidence_span_refs[0].text == evidence_text
+
+
+def test_support_projects_v2_single_source_qualification_without_legacy_script_field(
+    db_session,
+):
+    """The support envelope must consume local canonical V2 narration.
+
+    This exercises the real post-qualification projection boundary: a V2
+    writer never provides ``canonical_script``, yet the immutable support
+    envelope still receives exact, ordered narration and evidence bindings.
+    """
+
+    evidence_id = uuid.uuid4()
+    evidence_span_id = f"search_demand_evidence:{evidence_id}:0"
+    evidence_text = "The official document establishes a bounded verification sequence."
+    narrations = [
+        "The documented workflow starts by defining the evidence boundary before a decision.",
+        "The next step compares the proposed change with the exact proof the document provides.",
+        "The viewer can record the smallest test that would disprove the present assumption.",
+    ]
+    script_payload = QualifiedScriptOutputV2(
+        language="en",
+        sections=[
+            {
+                "section_id": f"section-{index:03d}",
+                "ordinal": index,
+                "purpose": f"Advance requirement {index}.",
+                "narration": narration,
+                "required_assignment_unit_refs": [f"requirement-{index}"],
+            }
+            for index, narration in enumerate(narrations, start=1)
+        ],
+        claims=[
+            {
+                "claim_id": f"claim-{index}",
+                "claim_text": narration,
+                "evidence_span_ids": [evidence_span_id],
+            }
+            for index, narration in enumerate(narrations, start=1)
+        ],
+    ).model_dump(mode="json")
+    evidence_pack = {"spans": [{
+        "evidence_span_id": evidence_span_id,
+        "evidence_type": "search_demand_evidence",
+        "evidence_id": str(evidence_id),
+        "canonical_url": "https://docs.example.test/v2-workflow",
+        "authority_purpose": "CLAIM_SOURCE",
+        "evidence_source_type": "OFFICIAL_DOCUMENT",
+        "source_class": "OFFICIAL_DOCUMENTATION",
+        "source_classification": "TOPIC_CAPABLE",
+        "source_snapshot_hash": "c" * 64,
+        "text": evidence_text,
+        "start_byte": 0,
+        "end_byte": len(evidence_text.encode("utf-8")),
+        "span_hash": span_hash(evidence_text),
+        "freshness_state": "FRESH",
+        "source_quality_state": "PASS",
+    }]}
+    memory = {"status": "EMPTY_SAFE_DIGEST", "digest_type": "EMPTY_SAFE_DIGEST"}
+    memory["digest_hash"] = canonical_hash(memory)
+    provenance = {"writer": {
+        "producer_input_hash": "2" * 64,
+        "producer_output_hash": canonical_hash(script_payload),
+        "prompt_version": "script-writer-assignment.v2",
+        "lane_name": "long_context_text",
+        "selected_model": "gpt-5.6-luna",
+        "fallback_level": "PRIMARY",
+        "route_attempt_id": str(uuid.uuid4()),
+        "provider_attempt_id": str(uuid.uuid4()),
+        "llm_run_snapshot_id": str(uuid.uuid4()),
+    }}
+    receipt_content = {
+        "qualified_script": script_payload,
+        "factual_evidence_pack": evidence_pack,
+        "memory_digest": memory,
+        "producer_provenance": provenance,
+    }
+    receipt = SimpleNamespace(
+        content=receipt_content,
+        content_hash=canonical_hash(receipt_content),
+        factual_evidence_pack_hash=canonical_hash(evidence_pack),
+    )
+    profile_id, policy_id = uuid.uuid4(), uuid.uuid4()
+    duration = ProductionDurationContractV2(
+        minimum_duration_ms=1_000,
+        target_duration_ms=10_000,
+        maximum_duration_ms=20_000,
+        duration_contract_version="test",
+        source_profile_version_id=profile_id,
+        source_policy_snapshot_id=policy_id,
+        duration_contract_hash=ProductionDurationContractV2.calculate_hash(
+            minimum_duration_ms=1_000,
+            target_duration_ms=10_000,
+            maximum_duration_ms=20_000,
+            duration_contract_version="test",
+            source_profile_version_id=profile_id,
+            source_policy_snapshot_id=policy_id,
+        ),
+    )
+    context = V2SupportProductionContext(
+        video_project_id=uuid.uuid4(),
+        production_lane="LONG_FORM",
+        title="V2 support projection",
+        expected_language="en",
+        duration_contract=duration,
+        frozen_sources=V2SupportAuthorityService._qualification_frozen_sources(receipt),
+        memory_guidance_digest=memory,
+    )
+
+    validated = V2SupportAuthorityService(db_session)._qualified_validated(
+        qualification_receipt=receipt, context=context
+    )
+
+    assert "canonical_script" not in script_payload
+    assert validated["script"].approved_script_text == "\n\n".join(narrations)
+    assert [section.heading for section in validated["script"].sections] == [
+        "Advance requirement 1.",
+        "Advance requirement 2.",
+        "Advance requirement 3.",
+    ]
 
 
 def _qualified_outbox_authority(db_session):

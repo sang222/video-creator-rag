@@ -80,6 +80,7 @@ ALL_SCENES = ALL_MR1_SCENES
 OUTPUT_PROFILE = "YT_LONG_1080P30_SDR_H264_VT"
 HUMAN_DETERMINISTIC_REPAIR_CLASSES = frozenset(
     {
+        "caption",
         "crop",
         "overlay",
         "motion",

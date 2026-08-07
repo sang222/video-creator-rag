@@ -131,6 +131,7 @@ class ProductionWorkflowWorker:
         self._actor = _trusted_system_worker_actor()
         self._next_cadence_scan_at: datetime | None = None
         self._next_editorial_replenishment_scan_at: datetime | None = None
+        self._schema_block_count = 0
 
     def run_once(self) -> WorkerRunResult:
         if not self._runtime_schema_ready():
@@ -284,8 +285,22 @@ class ProductionWorkflowWorker:
         try:
             while not self._stop.is_set():
                 result = self.run_once()
-                if result.status == "IDLE":
+                if result.status == "SCHEMA_BLOCKED":
+                    # A pending migration is not useful work.  Back off while
+                    # still periodically observing a deployment that upgrades
+                    # the database underneath a long-lived worker process.
+                    self._schema_block_count = min(self._schema_block_count + 1, 6)
+                    self._stop.wait(
+                        max(
+                            self.poll_interval_seconds,
+                            min(60.0, float(2 ** self._schema_block_count)),
+                        )
+                    )
+                elif result.status == "IDLE":
+                    self._schema_block_count = 0
                     self._stop.wait(self.poll_interval_seconds)
+                else:
+                    self._schema_block_count = 0
         finally:
             self.release_leases()
 

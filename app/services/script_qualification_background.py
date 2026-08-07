@@ -370,10 +370,11 @@ class ScriptQualificationBackgroundService:
                     ScriptContentRepairService,
                 )
 
-                if not service._uses_v2_contract(run):
-                    ScriptContentRepairService(
-                        self.session, now=self.now
-                    ).validate_output_scope(run, QualifiedScriptOutput.model_validate(parsed))
+                ScriptContentRepairService(
+                    self.session, now=self.now
+                ).validate_output_scope(
+                    run, service.writer_output_model(run).model_validate(parsed)
+                )
                 draft = service.accept_writer_output(run, parsed)
                 run.writer_receipt = self._receipt(attempt, result.output)
                 structural = service._structural_receipt(run, draft)

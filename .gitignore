@@ -19,6 +19,7 @@ tests/*
 !tests/test_editorial_evidence_provider_activation.py
 !tests/test_openai_responses_provider.py
 !tests/test_script_qualification.py
+!tests/test_cross_modal_lineage.py
 var/generated/
 var/credentials/
 var/logs/

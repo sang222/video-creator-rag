@@ -2334,6 +2334,16 @@ class PKG1MarketRevisionService:
         idea_text = f"{idea.proposed_title} {idea.proposed_angle}".lower()
         script_text = "\n".join(item["text"] for item in script["segments"])
         script_text_lower = script_text.lower()
+        # EditorialIdeaCandidate stores its durable lifecycle in ``stage``;
+        # there is no separate decision-status column.  A revision may only
+        # reuse a candidate that has crossed the greenlight boundary.
+        idea_is_admitted = idea.stage in {
+            "GREENLIT",
+            "SELECTED_FOR_SLOT",
+            "IN_PRODUCTION",
+            "FINAL_REVIEW_READY",
+            "PUBLISHED",
+        }
         topic_checks = {
             NicheCriterion.NICHE_RELEVANCE: (
                 "workflow" in idea_text or "automation" in idea_text,
@@ -2348,11 +2358,11 @@ class PKG1MarketRevisionService:
                 "Compiled niche positioning is non-empty and exact-bound.",
             ),
             NicheCriterion.BRAND_PROMISE_FIT: (
-                bool(niche_digest.brand_promise) and idea.decision_status == "ADMITTED",
+                bool(niche_digest.brand_promise) and idea_is_admitted,
                 "Compiled brand promise is present and the admitted topic remains its approved evidence.",
             ),
             NicheCriterion.ALLOWED_TOPIC_COMPLIANCE: (
-                idea.decision_status == "ADMITTED",
+                idea_is_admitted,
                 "Historical idea remains ADMITTED and is reused only as topic evidence.",
             ),
             NicheCriterion.SERIES_FIT: (

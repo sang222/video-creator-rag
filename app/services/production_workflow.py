@@ -204,6 +204,8 @@ _STAGE_OUTPUT_AUTHORITY_FIELDS: Mapping[
             "technical_qc_receipt_hash",
             "creative_qc_receipt_ref",
             "creative_qc_receipt_hash",
+            "cross_modal_qc_receipt_ref",
+            "cross_modal_qc_receipt_hash",
         }
     ),
     ProductionWorkflowStage.ARCHIVE: frozenset(

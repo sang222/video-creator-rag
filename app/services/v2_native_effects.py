@@ -27,6 +27,16 @@ from app.contracts.asset_acquisition import (
     FormatIdentitySnapshot,
     ProviderUsagePolicy,
 )
+from app.contracts.cross_modal import (
+    CrossModalObservation,
+    NarrationUnitCompilation,
+    SectionCoveragePlan,
+    TimedNarrationBindingSet,
+    VisualFunction,
+    VisualRealizationPlan,
+    VisualRealizationScene,
+    cross_modal_hash,
+)
 from app.contracts.native_renderer import (
     CanvasSpec,
     CompiledNativeRenderManifest,
@@ -43,6 +53,7 @@ from app.contracts.production_workflow import (
     WorkflowEffectState,
     WorkflowStageResult,
 )
+from app.contracts.script_qualification import QualifiedScriptOutputV2
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.db import get_session_factory
 from app.core.errors import ValidationFailureError
@@ -55,6 +66,13 @@ from app.db.models.channel import CompiledChannelPolicySnapshot
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.asset_request_compiler import AssetRequestCompiler, CompilationEvidence
 from app.services.config_registry import content_hash
+from app.services.cross_modal import (
+    CrossModalContractError,
+    NarrationUnitCompiler,
+    bind_timed_narration_units,
+    cross_modal_qc_report,
+    validate_visual_realization_plan,
+)
 from app.services.m10_2 import FinalMediaRefService
 from app.services.native_ffmpeg_renderer import (
     FFmpegCommandBuilder,
@@ -101,6 +119,7 @@ _CREATIVE_GATES = (
     "AudioStrategyTruthfulnessGate",
     "StreamIntegrityGate",
     "SubtitleSidecarGate",
+    "CrossModalLineageGate",
 )
 
 
@@ -1255,6 +1274,11 @@ class V2LocalNativeProductionAdapter:
         timeline = _load_json(
             self._from_relative(_required_text(media_journal, "timeline_relative_path"))
         )
+        timeline_hash = content_hash(timeline)
+        cross_modal_report = _cross_modal_qc_for_timeline(
+            timeline=timeline,
+            timeline_hash=timeline_hash,
+        )
         work = self._directory_from_relative(
             _required_text(render_journal, "renderer_working_directory")
         )
@@ -1297,13 +1321,28 @@ class V2LocalNativeProductionAdapter:
                 or _script_fragments(script.content)
             )
         ]
+        approved_scene_bodies = (
+            {
+                str(item.get("text") or "")[:520]
+                for item in (
+                    (timeline.get("narration_unit_compilation") or {}).get(
+                        "narration_units", []
+                    )
+                    if isinstance(timeline.get("narration_unit_compilation"), dict)
+                    else []
+                )
+                if str(item.get("text") or "").strip()
+            }
+            if cross_modal_report is not None
+            else set(approved_fragments)
+        )
         scenes = list(timeline.get("scenes") or [])
         checks = {
             "PackageScriptCoverageGate": bool(scenes)
             and all(
                 scene.get("script_artifact_version_id") == str(script.id)
                 and scene.get("script_content_hash") == script.content_hash
-                and scene.get("body") in approved_fragments
+                and scene.get("body") in approved_scene_bodies
                 for scene in scenes
             ),
             "VisualPlanBindingGate": bool(scenes)
@@ -1347,6 +1386,10 @@ class V2LocalNativeProductionAdapter:
                 and native_qc.checks.get("subtitle_stream_count") == 0
             ),
             "SubtitleSidecarGate": caption_sidecar_valid,
+            "CrossModalLineageGate": (
+                cross_modal_report is None
+                or cross_modal_report["deterministic_disposition"] == "PASS"
+            ),
         }
         failed_checks = sorted(name for name, passed in checks.items() if not passed)
         if failed_checks:
@@ -1355,6 +1398,7 @@ class V2LocalNativeProductionAdapter:
             )
         technical_ref = f"v2-effect://{ledger_id}/technical-qc"
         creative_ref = f"v2-effect://{ledger_id}/creative-qc"
+        cross_modal_ref = f"v2-effect://{ledger_id}/cross-modal-qc"
         technical = {
             "schema_version": V2_TECHNICAL_QC_SCHEMA,
             "workflow_run_id": str(run.id),
@@ -1371,6 +1415,10 @@ class V2LocalNativeProductionAdapter:
             "caption_checksum": timeline["caption_checksum"],
             "subtitle_qc_ref": timeline["subtitle_qc_ref"],
             "subtitle_qc_hash": timeline["subtitle_qc_hash"],
+            "cross_modal_qc_ref": cross_modal_ref if cross_modal_report else None,
+            "cross_modal_qc_hash": (
+                cross_modal_report["content_hash"] if cross_modal_report else None
+            ),
             "production_eligible": True,
             "human_final_review_required": True,
         }
@@ -1407,6 +1455,7 @@ class V2LocalNativeProductionAdapter:
             "caption_checksum": timeline["caption_checksum"],
             "subtitle_qc_ref": timeline["subtitle_qc_ref"],
             "subtitle_qc_state": timeline["subtitle_qc_state"],
+            "cross_modal_qc": cross_modal_report,
             "technical_pass_does_not_imply_human_watchability": True,
             "human_final_review_required": True,
             "production_eligible": True,
@@ -1417,6 +1466,9 @@ class V2LocalNativeProductionAdapter:
         creative_path = effect_dir / "creative-qc.json"
         _persist_exact_json(technical_path, technical)
         _persist_exact_json(creative_path, creative)
+        cross_modal_path = effect_dir / "cross-modal-qc.json"
+        if cross_modal_report is not None:
+            _persist_exact_json(cross_modal_path, cross_modal_report)
         journal = {
             "schema_version": "vcos.production-effect-journal.v1",
             "command_id": context.command_id,
@@ -1428,6 +1480,12 @@ class V2LocalNativeProductionAdapter:
             "technical_qc_hash": technical_hash,
             "creative_qc_relative_path": self._relative(creative_path),
             "creative_qc_hash": creative_hash,
+            "cross_modal_qc_relative_path": (
+                self._relative(cross_modal_path) if cross_modal_report else None
+            ),
+            "cross_modal_qc_hash": (
+                cross_modal_report["content_hash"] if cross_modal_report else None
+            ),
             "audio_strategy": audio_strategy,
             "audio_asset_ref": timeline["audio_asset_ref"],
             "audio_checksum": timeline.get("audio_checksum"),
@@ -1456,6 +1514,11 @@ class V2LocalNativeProductionAdapter:
                 "audio_checksum": timeline.get("audio_checksum"),
                 "narration_present": narration_present,
                 "alignment_method": timeline["alignment_method"],
+                "cross_modal_result": (
+                    cross_modal_report["deterministic_disposition"]
+                    if cross_modal_report is not None
+                    else "NOT_APPLICABLE_HISTORICAL"
+                ),
             },
             authority_refs=WorkflowAuthorityRefs(
                 video_project_id=project.id,
@@ -1463,6 +1526,16 @@ class V2LocalNativeProductionAdapter:
                 technical_qc_receipt_hash=technical_hash,
                 creative_qc_receipt_ref=creative_ref,
                 creative_qc_receipt_hash=creative_hash,
+                **(
+                    {
+                        "cross_modal_qc_receipt_ref": cross_modal_ref,
+                        "cross_modal_qc_receipt_hash": cross_modal_report[
+                            "content_hash"
+                        ],
+                    }
+                    if cross_modal_report is not None
+                    else {}
+                ),
             ),
         )
         return result, journal
@@ -2200,21 +2273,6 @@ def _build_timeline(
     audio: dict[str, Any],
 ) -> dict[str, Any]:
     narration_text = str((script.content or {}).get("narration_text") or "").strip()
-    fragments = [
-        value.strip()
-        for value in re.split(r"(?<=[.!?])\s+|\n+", narration_text)
-        if value.strip()
-    ] or _script_fragments(script.content)
-    if not fragments:
-        raise ValidationFailureError("V2_NATIVE_SCRIPT_TEXT_REQUIRED")
-    while len(fragments) < 2:
-        words = fragments[0].split()
-        split_at = max(1, len(words) // 2)
-        fragments = [
-            " ".join(words[:split_at]),
-            " ".join(words[split_at:]) or fragments[0],
-        ]
-    fragments = fragments[:6]
     duration_ms = int(audio["duration_ms"])
     if not (
         package.duration_contract.minimum_duration_ms
@@ -2222,43 +2280,73 @@ def _build_timeline(
         <= package.duration_contract.maximum_duration_ms
     ):
         raise ValidationFailureError("V2_NATIVE_TIMELINE_DURATION_INVALID")
-    weights = [max(1, len(fragment.split())) for fragment in fragments]
-    total_weight = sum(weights)
-    scenes: list[dict[str, Any]] = []
-    cursor = 0
-    cumulative_weight = 0
-    for index, fragment in enumerate(fragments):
-        cumulative_weight += weights[index]
-        end = (
-            duration_ms
-            if index == len(fragments) - 1
-            else max(
-                cursor + 1,
-                round(duration_ms * cumulative_weight / total_weight),
+    cross_modal = _cross_modal_timeline_projection(
+        project=project,
+        script=script,
+        visual=visual,
+        narration_text=narration_text,
+        duration_ms=duration_ms,
+        audio=audio,
+    )
+    if cross_modal is None:
+        # Historical / qualification-only artifacts predate the typed
+        # narration-unit lineage.  They remain readable, but new real V2
+        # production always enters the branch above and never proportionally
+        # assigns one scene per sentence.
+        fragments = [
+            value.strip()
+            for value in re.split(r"(?<=[.!?])\s+|\n+", narration_text)
+            if value.strip()
+        ] or _script_fragments(script.content)
+        if not fragments:
+            raise ValidationFailureError("V2_NATIVE_SCRIPT_TEXT_REQUIRED")
+        while len(fragments) < 2:
+            words = fragments[0].split()
+            split_at = max(1, len(words) // 2)
+            fragments = [
+                " ".join(words[:split_at]),
+                " ".join(words[split_at:]) or fragments[0],
+            ]
+        fragments = fragments[:6]
+        weights = [max(1, len(fragment.split())) for fragment in fragments]
+        total_weight = sum(weights)
+        scenes: list[dict[str, Any]] = []
+        cursor = 0
+        cumulative_weight = 0
+        for index, fragment in enumerate(fragments):
+            cumulative_weight += weights[index]
+            end = (
+                duration_ms
+                if index == len(fragments) - 1
+                else max(
+                    cursor + 1,
+                    round(duration_ms * cumulative_weight / total_weight),
+                )
             )
-        )
-        scene_duration = end - cursor
-        scenes.append(
-            {
-                "scene_id": f"scene-{index + 1:03d}",
-                "start_ms": cursor,
-                "end_ms": end,
-                "duration_ms": scene_duration,
-                "headline": (
-                    f"{project.title.strip()[:72]} · {index + 1}/{len(fragments)}"
-                ),
-                "body": fragment[:520],
-                "visual_treatment": "NATIVE_TEXT_CARD",
-                "script_artifact_version_id": str(script.id),
-                "script_content_hash": script.content_hash,
-                "visual_plan_artifact_version_id": str(visual.id),
-                "visual_plan_content_hash": visual.content_hash,
-                "audio_start_ms": cursor,
-                "audio_end_ms": end,
-                "alignment_method": audio["alignment_method"],
-            }
-        )
-        cursor = end
+            scene_duration = end - cursor
+            scenes.append(
+                {
+                    "scene_id": f"scene-{index + 1:03d}",
+                    "start_ms": cursor,
+                    "end_ms": end,
+                    "duration_ms": scene_duration,
+                    "headline": (
+                        f"{project.title.strip()[:72]} · {index + 1}/{len(fragments)}"
+                    ),
+                    "body": fragment[:520],
+                    "visual_treatment": "NATIVE_TEXT_CARD",
+                    "script_artifact_version_id": str(script.id),
+                    "script_content_hash": script.content_hash,
+                    "visual_plan_artifact_version_id": str(visual.id),
+                    "visual_plan_content_hash": visual.content_hash,
+                    "audio_start_ms": cursor,
+                    "audio_end_ms": end,
+                    "alignment_method": audio["alignment_method"],
+                }
+            )
+            cursor = end
+    else:
+        scenes = cross_modal.pop("scenes")
     return {
         "schema_version": V2_TIMELINE_SCHEMA,
         "timeline_ref": timeline_ref,
@@ -2297,7 +2385,323 @@ def _build_timeline(
             )
         ),
         "scenes": scenes,
+        **cross_modal,
     }
+
+
+def _cross_modal_timeline_projection(
+    *,
+    project: VideoProject,
+    script: ArtifactVersion,
+    visual: ArtifactVersion,
+    narration_text: str,
+    duration_ms: int,
+    audio: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Derive the single canonical timeline from qualified narration units.
+
+    The lineage is optional only so sealed historical/qualification artifacts
+    can still be inspected.  Once a script carries the V2 lineage, missing or
+    malformed timestamp evidence is a hard failure rather than a reason to
+    silently return to proportional sentence timing.
+    """
+
+    content = dict(script.content or {})
+    raw_lineage = content.get("cross_modal_script_lineage")
+    if raw_lineage is None:
+        return None
+    if not isinstance(raw_lineage, dict) or not narration_text:
+        raise ValidationFailureError("V2_CROSS_MODAL_SCRIPT_LINEAGE_INVALID")
+    raw_plan = raw_lineage.get("section_coverage_plan")
+    raw_sections = raw_lineage.get("writer_sections")
+    if not isinstance(raw_plan, dict) or not isinstance(raw_sections, list):
+        raise ValidationFailureError("V2_CROSS_MODAL_SCRIPT_LINEAGE_INVALID")
+    try:
+        coverage = SectionCoveragePlan.model_validate(raw_plan)
+    except ValueError as exc:
+        raise ValidationFailureError("V2_CROSS_MODAL_SECTION_COVERAGE_INVALID") from exc
+    expected_coverage_hash = cross_modal_hash(
+        coverage.model_dump(mode="json", exclude={"content_hash"})
+    )
+    if coverage.content_hash != expected_coverage_hash:
+        raise ValidationFailureError("V2_CROSS_MODAL_SECTION_COVERAGE_HASH_MISMATCH")
+    lineage_body = {
+        "qualified_script_hash": raw_lineage.get("qualified_script_hash"),
+        "section_coverage_plan": coverage.model_dump(mode="json"),
+        "writer_sections": raw_sections,
+        "capability_projection_receipts": raw_lineage.get(
+            "capability_projection_receipts"
+        ),
+    }
+    if (
+        raw_lineage.get("content_hash") != cross_modal_hash(lineage_body)
+        or content.get("section_coverage_plan") != coverage.model_dump(mode="json")
+        or content.get("single_source_sections") != raw_sections
+    ):
+        raise ValidationFailureError("V2_CROSS_MODAL_SCRIPT_LINEAGE_HASH_MISMATCH")
+    canonical_script_hash = hashlib.sha256(narration_text.encode("utf-8")).hexdigest()
+    if raw_lineage.get("qualified_script_hash") != canonical_script_hash:
+        raise ValidationFailureError("V2_CROSS_MODAL_QUALIFIED_SCRIPT_HASH_MISMATCH")
+    try:
+        output = QualifiedScriptOutputV2(
+            language=str(
+                (content.get("approved_script_provenance") or {}).get("language")
+                or "und"
+            ),
+            sections=raw_sections,
+        )
+        compilation = NarrationUnitCompiler.compile(
+            output=output,
+            canonical_script=narration_text,
+            canonical_script_hash=canonical_script_hash,
+            coverage_plan=coverage,
+            estimated_duration_ms=duration_ms,
+        )
+        timing_seed = audio.get("timing_seed")
+        timed_words = audio.get("timed_words")
+        spoken_text_hash = (
+            timing_seed.get("spoken_text_hash")
+            if isinstance(timing_seed, dict)
+            else None
+        )
+        if not isinstance(timed_words, list) or not isinstance(spoken_text_hash, str):
+            raise CrossModalContractError("NARRATION_UNIT_TIMED_WORDS_REQUIRED")
+        bindings = bind_timed_narration_units(
+            compilation=compilation,
+            spoken_text_hash=spoken_text_hash,
+            timed_words=timed_words,
+            alignment_evidence_ref=str(audio.get("timed_words_ref") or ""),
+        )
+    except (CrossModalContractError, ValueError) as exc:
+        raise ValidationFailureError(
+            getattr(exc, "reason_code", "V2_CROSS_MODAL_NARRATION_UNIT_INVALID")
+        ) from exc
+
+    binding_by_unit = {
+        binding.narration_unit_id: binding for binding in bindings.bindings
+    }
+    visual_scenes: list[VisualRealizationScene] = []
+    rendered_scenes: list[dict[str, Any]] = []
+    for ordinal, unit in enumerate(compilation.narration_units, start=1):
+        binding = binding_by_unit[unit.narration_unit_id]
+        visual_body = {
+            "scene_id": f"scene-{ordinal:03d}",
+            "ordinal": ordinal,
+            "narration_unit_ids": [unit.narration_unit_id],
+            "information_unit_ids": unit.information_unit_ids,
+            "actual_start_ms": binding.actual_start_ms,
+            "actual_end_ms": binding.actual_end_ms,
+            "visual_function": VisualFunction.CONCEPT_MODEL,
+            "scene_meaning": unit.semantic_intent,
+            "information_ownership_statement": (
+                f"Owns {', '.join(unit.information_unit_ids)} from "
+                f"{unit.section_id}."
+            ),
+            "visual_intent": (
+                "Native explanatory model that reveals the narration's "
+                "meaning without representing unverified factual footage."
+            ),
+            "stable_visual_concept_key": f"concept:{unit.section_id}",
+            "factual_risk": unit.factual_risk,
+            "importance": unit.importance,
+            "evidence_truth_requirement": "NOT_REQUIRED",
+            "subject_requirements": [unit.semantic_intent],
+            "action_requirements": ["Explain the causal or decision relationship."],
+            "context_requirements": ["Use the qualified narration unit only."],
+            "prohibited_misreadings": [
+                "Do not imply factual footage, an actual interface, or a sourced visual record."
+            ],
+            "preferred_source_class": "NATIVE_GRAPHIC",
+            "route_constraints": ["NATIVE_ONLY", "NO_PROVIDER_FALLBACK"],
+            "source_semantic_specs": {
+                "narration_unit_hash": unit.content_hash,
+                "binding_hash": binding.content_hash,
+            },
+        }
+        visual_scene = VisualRealizationScene(
+            **visual_body, content_hash=cross_modal_hash(visual_body)
+        )
+        visual_scenes.append(visual_scene)
+        rendered_scenes.append(
+            {
+                "scene_id": visual_scene.scene_id,
+                "start_ms": binding.actual_start_ms,
+                "end_ms": binding.actual_end_ms,
+                "duration_ms": binding.actual_end_ms - binding.actual_start_ms,
+                "headline": f"{project.title.strip()[:72]} · {ordinal}/{len(compilation.narration_units)}",
+                "body": unit.text[:520],
+                "visual_treatment": "NATIVE_TEXT_CARD",
+                "script_artifact_version_id": str(script.id),
+                "script_content_hash": script.content_hash,
+                "visual_plan_artifact_version_id": str(visual.id),
+                "visual_plan_content_hash": visual.content_hash,
+                "audio_start_ms": binding.actual_start_ms,
+                "audio_end_ms": binding.actual_end_ms,
+                "alignment_method": audio["alignment_method"],
+                "narration_unit_ids": visual_scene.narration_unit_ids,
+                "information_unit_ids": visual_scene.information_unit_ids,
+                "visual_function": visual_scene.visual_function.value,
+                "visual_intent_hash": visual_scene.content_hash,
+            }
+        )
+    plan_body = {
+        "schema_version": "vcos.visual-realization-plan.v1",
+        "narration_binding_hash": bindings.content_hash,
+        "coverage_plan_hash": coverage.content_hash,
+        "scenes": [item.model_dump(mode="json") for item in visual_scenes],
+    }
+    visual_plan = VisualRealizationPlan(
+        **plan_body, content_hash=cross_modal_hash(plan_body)
+    )
+    try:
+        validate_visual_realization_plan(plan=visual_plan, bindings=bindings)
+    except CrossModalContractError as exc:
+        raise ValidationFailureError(exc.reason_code) from exc
+    return {
+        "scenes": rendered_scenes,
+        "narration_unit_compilation": compilation.model_dump(mode="json"),
+        "narration_unit_compilation_hash": compilation.content_hash,
+        "timed_narration_unit_bindings": bindings.model_dump(mode="json"),
+        "timed_narration_unit_bindings_hash": bindings.content_hash,
+        "visual_realization_plan": visual_plan.model_dump(mode="json"),
+        "visual_realization_plan_hash": visual_plan.content_hash,
+    }
+
+
+def _cross_modal_qc_for_timeline(
+    *, timeline: dict[str, Any], timeline_hash: str
+) -> dict[str, Any] | None:
+    """Validate the final lineage against the single canonical timeline.
+
+    This verification is intentionally independent of FFmpeg's technical
+    probe.  It blocks a valid MP4 that would nevertheless show the wrong
+    visual unit at a verified narration interval.
+    """
+
+    required = {
+        "narration_unit_compilation",
+        "narration_unit_compilation_hash",
+        "timed_narration_unit_bindings",
+        "timed_narration_unit_bindings_hash",
+        "visual_realization_plan",
+        "visual_realization_plan_hash",
+    }
+    present = {key for key in required if timeline.get(key) is not None}
+    if not present:
+        return None
+    if present != required:
+        raise ValidationFailureError("V2_CROSS_MODAL_TIMELINE_LINEAGE_INCOMPLETE")
+    try:
+        compilation = NarrationUnitCompilation.model_validate(
+            timeline["narration_unit_compilation"]
+        )
+        bindings = TimedNarrationBindingSet.model_validate(
+            timeline["timed_narration_unit_bindings"]
+        )
+        visual_plan = VisualRealizationPlan.model_validate(
+            timeline["visual_realization_plan"]
+        )
+    except ValueError as exc:
+        raise ValidationFailureError("V2_CROSS_MODAL_TIMELINE_LINEAGE_INVALID") from exc
+    expected_compilation_hash = cross_modal_hash(
+        compilation.model_dump(mode="json", exclude={"content_hash"})
+    )
+    expected_binding_hash = cross_modal_hash(
+        bindings.model_dump(mode="json", exclude={"content_hash"})
+    )
+    expected_plan_hash = cross_modal_hash(
+        visual_plan.model_dump(mode="json", exclude={"content_hash"})
+    )
+    if (
+        compilation.content_hash != expected_compilation_hash
+        or bindings.content_hash != expected_binding_hash
+        or visual_plan.content_hash != expected_plan_hash
+        or timeline["narration_unit_compilation_hash"] != compilation.content_hash
+        or timeline["timed_narration_unit_bindings_hash"] != bindings.content_hash
+        or timeline["visual_realization_plan_hash"] != visual_plan.content_hash
+        or bindings.narration_unit_compilation_hash != compilation.content_hash
+        or visual_plan.narration_binding_hash != bindings.content_hash
+    ):
+        raise ValidationFailureError("V2_CROSS_MODAL_TIMELINE_LINEAGE_HASH_MISMATCH")
+    try:
+        validate_visual_realization_plan(plan=visual_plan, bindings=bindings)
+    except CrossModalContractError as exc:
+        raise ValidationFailureError(exc.reason_code) from exc
+
+    observations: list[CrossModalObservation] = []
+
+    def observe(
+        code: str,
+        *,
+        scene_id: str | None,
+        unit_ids: list[str],
+        detail: str,
+    ) -> None:
+        body = {
+            "reason_code": code,
+            "severity": "BLOCK",
+            "scene_id": scene_id,
+            "narration_unit_ids": unit_ids,
+            "evidence_refs": [str(timeline.get("timeline_ref") or "")],
+            "owner_stage": "QC",
+            "detail": detail,
+        }
+        observations.append(
+            CrossModalObservation(
+                **body, content_hash=cross_modal_hash(body)
+            )
+        )
+
+    units_by_id = {
+        item.narration_unit_id: item for item in compilation.narration_units
+    }
+    expected_scenes = {item.scene_id: item for item in visual_plan.scenes}
+    canonical_scenes = {str(item.get("scene_id")): item for item in timeline["scenes"]}
+    if set(canonical_scenes) != set(expected_scenes):
+        observe(
+            "MISSING_NARRATION_UNIT_COVERAGE",
+            scene_id=None,
+            unit_ids=[],
+            detail="Canonical timeline scene identities differ from the visual realization plan.",
+        )
+    for scene_id, expected in expected_scenes.items():
+        actual = canonical_scenes.get(scene_id)
+        if actual is None:
+            continue
+        unit_ids = list(expected.narration_unit_ids)
+        expected_text = " ".join(units_by_id[item].text for item in unit_ids)
+        if (
+            int(actual.get("start_ms") or -1) != expected.actual_start_ms
+            or int(actual.get("end_ms") or -1) != expected.actual_end_ms
+        ):
+            observe(
+                "MATERIAL_TIMING_MISMATCH",
+                scene_id=scene_id,
+                unit_ids=unit_ids,
+                detail="Scene boundaries do not equal the verified narration-unit binding.",
+            )
+        if (
+            actual.get("narration_unit_ids") != unit_ids
+            or actual.get("information_unit_ids") != expected.information_unit_ids
+            or actual.get("body") != expected_text[:520]
+        ):
+            observe(
+                "NARRATION_VISUAL_DIRECT_MISMATCH",
+                scene_id=scene_id,
+                unit_ids=unit_ids,
+                detail="Canonical scene does not represent its owned narration and information units.",
+            )
+    report = cross_modal_qc_report(
+        canonical_timeline_hash=timeline_hash,
+        visual_realization_plan_hash=visual_plan.content_hash,
+        observations=observations,
+    )
+    if report.deterministic_disposition == "BLOCK":
+        raise ValidationFailureError(
+            "V2_CROSS_MODAL_QC_BLOCKED:"
+            + ",".join(item.reason_code for item in report.observations)
+        )
+    return report.model_dump(mode="json")
 
 
 def _compile_post_readiness_asset_request_plan(

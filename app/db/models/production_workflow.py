@@ -136,6 +136,8 @@ class ProductionWorkflowRun(Base):
     technical_qc_receipt_hash: Mapped[str | None] = mapped_column(String(64))
     creative_qc_receipt_ref: Mapped[str | None] = mapped_column(Text)
     creative_qc_receipt_hash: Mapped[str | None] = mapped_column(String(64))
+    cross_modal_qc_receipt_ref: Mapped[str | None] = mapped_column(Text)
+    cross_modal_qc_receipt_hash: Mapped[str | None] = mapped_column(String(64))
     archive_receipt_ref: Mapped[str | None] = mapped_column(Text)
     archive_receipt_hash: Mapped[str | None] = mapped_column(String(64))
     archive_object_ref: Mapped[str | None] = mapped_column(Text)

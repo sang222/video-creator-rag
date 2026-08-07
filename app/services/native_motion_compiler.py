@@ -115,5 +115,35 @@ class NativeMotionCompiler:
             caption_inputs = []
             normalized_caption = {"mode": "SIDECAR_SRT_ONLY"}
         base = {"source_plan_ref": plan.plan_id, "source_plan_hash": plan_hash, "compiler_version": COMPILER_VERSION, "motion_pack_version": MOTION_PACK_VERSION, "renderer_profile_refs": plan.output_profiles, "ffmpeg_capability_digest": self.ffmpeg_capability_digest, "normalized_canvas": plan.canvas_spec.model_dump(), "normalized_audio": plan.audio_policy, "normalized_caption": normalized_caption, "compiled_scenes": compiled_scenes, "transition_schedule": transitions, "overlay_schedule": overlays, "audio_mix_schedule": plan.audio_policy, "caption_schedule": caption_schedule, "output_specs": [OUTPUT_PROFILES[p] | {"profile": p} for p in plan.output_profiles], "expected_input_refs": sorted(set(inputs + caption_inputs)), "unresolved_inputs": [], "compilation_warnings": [], "compilation_reason_codes": [], "production_eligible": plan.production_eligible, "temporal_authority_mode": plan.temporal_authority_mode, "canonical_media_timeline_ref": plan.canonical_media_timeline_ref, "canonical_media_timeline_hash": plan.canonical_media_timeline_hash, "canonical_audio_asset_ref": plan.canonical_audio_asset_ref, "canonical_duration_ms": canonical_timeline.audio_duration_ms if canonical_timeline is not None and plan.temporal_authority_mode == "CANONICAL_STRICT" else None, "canonical_caption_compilation_ref": plan.canonical_caption_compilation_ref, "canonical_caption_compilation_hash": plan.canonical_caption_compilation_hash, "visual_direction_contract_ref": plan.visual_direction_contract_ref, "visual_direction_contract_hash": plan.visual_direction_contract_hash, "creative_gate_results": plan.creative_gate_results, "render_purpose": plan.purpose}
-        manifest_hash = stable_hash(base)
-        return CompiledNativeRenderManifest(compiled_manifest_id=str(uuid.uuid5(uuid.NAMESPACE_URL, manifest_hash)), ffmpeg_binary_requirement="ffmpeg-full>=8", manifest_hash=manifest_hash, created_at=datetime.now(UTC), **base)
+        # Hash the typed manifest projection, not the construction dictionary.
+        # Pydantic materializes optional/default fields (for example
+        # ``asset_request_plan``) when a manifest is read back.  Hashing only
+        # ``base`` therefore produced a manifest that immediately failed the
+        # renderer's integrity check.  The identifier and hash are excluded
+        # from the hash payload, so a draft instance cleanly breaks that cycle.
+        draft = CompiledNativeRenderManifest(
+            compiled_manifest_id="pending",
+            ffmpeg_binary_requirement="ffmpeg-full>=8",
+            manifest_hash="0" * 64,
+            created_at=datetime.now(UTC),
+            **base,
+        )
+        manifest_hash = stable_hash(
+            draft.model_dump(
+                mode="json",
+                exclude={
+                    "compiled_manifest_id",
+                    "ffmpeg_binary_requirement",
+                    "manifest_hash",
+                    "created_at",
+                },
+            )
+        )
+        return draft.model_copy(
+            update={
+                "compiled_manifest_id": str(
+                    uuid.uuid5(uuid.NAMESPACE_URL, manifest_hash)
+                ),
+                "manifest_hash": manifest_hash,
+            }
+        )

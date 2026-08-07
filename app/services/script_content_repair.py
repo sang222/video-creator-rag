@@ -9,7 +9,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.contracts.script_qualification import QualifiedScriptOutput
+from app.contracts.script_qualification import (
+    QualifiedScriptOutput,
+    QualifiedScriptOutputV2,
+)
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
@@ -23,8 +26,8 @@ from app.db.models.script_qualification import (
     ScriptQualificationRun,
 )
 from app.services.config_registry import content_hash
+from app.services.canonical_script_compiler import CanonicalScriptCompiler
 from app.services.production_start_readiness import resolve_budget_authority
-from app.services.script_qualification import script_hash
 
 
 CONTENT_REPAIR_PREFIX = "script-qualification-content-repair"
@@ -32,6 +35,8 @@ CONTENT_REPAIR_POLICY_VERSION = "script-content-repair.v1"
 CONTENT_REPAIR_PROMPT_VERSION = "script-writer-content-repair.v1"
 CONTENT_REPAIR_TYPE = "SCRIPT_CONTENT_REPAIR"
 BACKGROUND_EVENT_TYPE = "script_qualification.background.execute.v1"
+_V2_SINGLE_SOURCE = "V2_SINGLE_SOURCE"
+_ScriptOutput = QualifiedScriptOutput | QualifiedScriptOutputV2
 
 
 class ScriptContentRepairService:
@@ -80,6 +85,9 @@ class ScriptContentRepairService:
 
         draft, terminal = self._validate_source(source)
         affected_sections, reason_codes = self._affected_sections(source, draft)
+        affected_information_units = self._affected_information_units(
+            source, affected_sections
+        )
         self._validate_current_authority(source)
 
         slot = self.session.scalar(
@@ -111,11 +119,12 @@ class ScriptContentRepairService:
             "restored_slot_state": "QUALIFICATION_RESERVED",
             "restored_candidate_stage": "GREENLIT",
             "restored_at": self.now().isoformat(),
+            "affected_information_unit_ids": affected_information_units,
         }
         body = {
             "schema_version": "script-content-repair-authorization.v1",
             "source_qualification_run_id": str(source.id),
-            "source_script_hash": script_hash(draft.canonical_script),
+            "source_script_hash": _canonical_script_hash(draft),
             "source_result_receipts_hash": content_hash(source.result_receipts),
             "source_terminal_settlement_hash": terminal["content_hash"],
             "script_assignment_hash": source.script_assignment_hash,
@@ -185,6 +194,7 @@ class ScriptContentRepairService:
             writer_attempt_key=f"{recovery_key}:writer-content-repair",
             verifier_attempt_key=f"{recovery_key}:verifier",
             repair_attempts=1,
+            script_contract_version=source.script_contract_version,
         )
         self.session.add(child)
         source.repair_attempts = 1
@@ -215,9 +225,9 @@ class ScriptContentRepairService:
         )
         if source is None or authorization is None or source.script_payload is None:
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_AUTHORITY_MISSING")
-        original = QualifiedScriptOutput.model_validate(source.script_payload)
+        original = _script_output(source)
         if (
-            authorization.source_script_hash != script_hash(original.canonical_script)
+            authorization.source_script_hash != _canonical_script_hash(original)
             or authorization.script_assignment_hash != run.script_assignment_hash
             or authorization.factual_evidence_pack_hash != run.factual_evidence_pack_hash
             or authorization.memory_digest_hash != run.memory_digest_hash
@@ -232,9 +242,18 @@ class ScriptContentRepairService:
             "prior_qualified_script": original.model_dump(mode="json"),
             "prior_script_hash": authorization.source_script_hash,
             "affected_section_ids": list(authorization.affected_section_ids),
+            "affected_information_unit_ids": list(
+                (authorization.compensation or {}).get(
+                    "affected_information_unit_ids", []
+                )
+            ),
             "gate_reason_codes": list(authorization.reason_codes),
             "requirements": [
-                "Return the complete strict QualifiedScriptOutput.",
+                (
+                    "Return the complete strict QualifiedScriptOutputV2."
+                    if isinstance(original, QualifiedScriptOutputV2)
+                    else "Return the complete strict QualifiedScriptOutput."
+                ),
                 "Preserve every section outside affected_section_ids byte-for-byte.",
                 "Change only affected section narration and the claim inventory needed to bind it.",
                 "Use only the frozen factual evidence pack; do not introduce external facts.",
@@ -242,9 +261,7 @@ class ScriptContentRepairService:
             ],
         }
 
-    def validate_output_scope(
-        self, run: ScriptQualificationRun, repaired: QualifiedScriptOutput
-    ) -> None:
+    def validate_output_scope(self, run: ScriptQualificationRun, repaired: _ScriptOutput) -> None:
         """Reject a paid repair that changes an untouched source section."""
 
         directive = self.writer_context(run)
@@ -254,7 +271,9 @@ class ScriptContentRepairService:
             ScriptQualificationRun, run.supersedes_qualification_run_id
         )
         assert source is not None and source.script_payload is not None
-        original = QualifiedScriptOutput.model_validate(source.script_payload)
+        original = _script_output(source)
+        if type(repaired) is not type(original):
+            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_CONTRACT_CHANGED")
         if repaired.language != original.language:
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_LANGUAGE_CHANGED")
         old_sections = original.sections
@@ -263,7 +282,18 @@ class ScriptContentRepairService:
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_COUNT_CHANGED")
         allowed = set(directive["affected_section_ids"])
         for old, new in zip(old_sections, new_sections, strict=True):
-            if old.section_id != new.section_id or old.heading != new.heading:
+            if old.section_id != new.section_id:
+                raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED")
+            if isinstance(original, QualifiedScriptOutput):
+                if old.heading != new.heading:
+                    raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED")
+            elif (
+                old.ordinal != new.ordinal
+                or old.purpose != new.purpose
+                or old.required_assignment_unit_refs
+                != new.required_assignment_unit_refs
+                or old.expected_claim_refs != new.expected_claim_refs
+            ):
                 raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED")
             if old.section_id not in allowed and old.narration != new.narration:
                 raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_OUT_OF_SCOPE_SECTION_CHANGED")
@@ -357,7 +387,7 @@ class ScriptContentRepairService:
 
     def _validate_source(
         self, source: ScriptQualificationRun
-    ) -> tuple[QualifiedScriptOutput, dict[str, Any]]:
+    ) -> tuple[_ScriptOutput, dict[str, Any]]:
         if (
             source.state != "BLOCKED_NON_REPAIRABLE"
             or source.repair_attempts != 0
@@ -366,7 +396,7 @@ class ScriptContentRepairService:
             or not isinstance(source.terminal_settlement_receipt, dict)
         ):
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SOURCE_NOT_ELIGIBLE")
-        draft = QualifiedScriptOutput.model_validate(source.script_payload)
+        draft = _script_output(source)
         terminal = dict(source.terminal_settlement_receipt)
         terminal_body = {key: value for key, value in terminal.items() if key != "content_hash"}
         if (
@@ -390,7 +420,7 @@ class ScriptContentRepairService:
         return draft, terminal
 
     def _affected_sections(
-        self, source: ScriptQualificationRun, draft: QualifiedScriptOutput
+        self, source: ScriptQualificationRun, draft: _ScriptOutput
     ) -> tuple[list[str], list[str]]:
         snapshot = self.session.scalar(
             select(ScriptQualificationProviderResponseSnapshot)
@@ -437,6 +467,27 @@ class ScriptContentRepairService:
             }
         )
         return sorted(affected), reason_codes
+
+    @staticmethod
+    def _affected_information_units(
+        source: ScriptQualificationRun, affected_sections: list[str]
+    ) -> list[str]:
+        """Project repair scope to frozen information-unit ownership when present."""
+
+        assignment = source.script_assignment or {}
+        raw_plan = assignment.get("section_coverage_plan")
+        if not isinstance(raw_plan, dict):
+            return []
+        units: list[str] = []
+        for section in raw_plan.get("sections") or []:
+            if not isinstance(section, dict) or section.get("section_id") not in affected_sections:
+                continue
+            units.extend(
+                str(item)
+                for item in section.get("owned_information_unit_ids") or []
+                if str(item).strip()
+            )
+        return sorted(set(units))
 
     def _validate_current_authority(self, source: ScriptQualificationRun) -> None:
         now = self.now()
@@ -522,3 +573,25 @@ class ScriptContentRepairService:
                 occurred_at=self.now(),
             )
         )
+
+
+def _script_output(source: ScriptQualificationRun) -> _ScriptOutput:
+    """Read the source contract without coercing V2 into legacy prose."""
+
+    if not isinstance(source.script_payload, dict):
+        raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SOURCE_PAYLOAD_INVALID")
+    if source.script_contract_version == _V2_SINGLE_SOURCE:
+        return QualifiedScriptOutputV2.model_validate(source.script_payload)
+    return QualifiedScriptOutput.model_validate(source.script_payload)
+
+
+def _canonical_script_hash(output: _ScriptOutput) -> str:
+    if isinstance(output, QualifiedScriptOutputV2):
+        return CanonicalScriptCompiler.compile(output).canonical_script_hash
+    import hashlib
+    import unicodedata
+
+    canonical = unicodedata.normalize("NFC", output.canonical_script).replace(
+        "\r\n", "\n"
+    ).replace("\r", "\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -84,7 +84,7 @@ items:
     policy_fit_blob:
       production_enabled_when_configured: true
     cost_model_blob:
-      catalog_ref: config://google_veo_model_price_catalog/2026-07-12
+      catalog_ref: config://google_veo_model_price_catalog/2026-07-30
       actual_cost_nullable_until_execution: true
     quota_model_blob: {}
     retry_policy_blob: {}

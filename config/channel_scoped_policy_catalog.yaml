@@ -98,7 +98,7 @@ items:
         optional: true
         role: AI_HERO_ONLY
         allowed_hero_reasons: [HOOK, METAPHOR, EMOTIONAL_PAYOFF, VISUAL_SIGNATURE, NATIVE_MOTION_INSUFFICIENT]
-        approved_model_catalog_ref: config://google_veo_model_price_catalog/2026-07-12
+        approved_model_catalog_ref: config://google_veo_model_price_catalog/2026-07-30
         max_hero_clips_per_video: 1
         max_hero_seconds_per_video: 8
         max_hero_cost_usd_per_video: 1.0

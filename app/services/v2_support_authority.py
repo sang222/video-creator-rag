@@ -57,6 +57,7 @@ from app.services.mr1_monthly_budget import MR1MonthlyBudgetAuthority
 from app.services.production_package import semantic_hash
 from app.services.r3d7 import AgentMemoryDigestInjectionService
 from app.services.workflow import ArtifactService
+from app.contracts.cross_modal import SectionCoveragePlan, cross_modal_hash
 
 
 V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE = "v2_frozen_support_envelope"
@@ -503,6 +504,23 @@ class V2ApprovedScriptProvenance(_StrictFrozenModel):
         return self
 
 
+class V2CrossModalScriptLineage(_StrictFrozenModel):
+    """Compact bridge from immutable qualification to post-voice planning."""
+
+    qualified_script_hash: str = Field(pattern=_SHA256_PATTERN)
+    section_coverage_plan: SectionCoveragePlan
+    writer_sections: list[dict[str, Any]] = Field(min_length=3)
+    capability_projection_receipts: dict[str, dict[str, Any]]
+    content_hash: str = Field(pattern=_SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_hash(self) -> Self:
+        expected = cross_modal_hash(self.model_dump(mode="json", exclude={"content_hash"}))
+        if self.content_hash != expected:
+            raise ValueError("V2_CROSS_MODAL_SCRIPT_LINEAGE_HASH_MISMATCH")
+        return self
+
+
 class V2ClaimSourceBinding(_StrictFrozenModel):
     claim_id: str = Field(min_length=1)
     claim_text: str = Field(min_length=3)
@@ -743,6 +761,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     duration_contract: ProductionDurationContractV2
     frozen_sources: list[V2FrozenSourceRef] = Field(min_length=2)
     approved_script: V2ApprovedScriptProvenance
+    cross_modal_script_lineage: V2CrossModalScriptLineage | None = None
     claim_source_bindings: list[V2ClaimSourceBinding] = Field(min_length=3)
     local_generated_card_rights: V2LocalGeneratedCardRights
     memory_guidance_authority: V2MemoryGuidanceAuthority | None = None
@@ -1018,6 +1037,14 @@ class V2SupportAuthorityService:
         else:
             draft = (producer or self.producer).produce(production_context)
             validated = self._validate_draft(draft=draft, context=production_context)
+        cross_modal_lineage = (
+            self._cross_modal_script_lineage(qualified_run)
+            if (
+                qualified_run is not None
+                and qualified_run.script_contract_version == "V2_SINGLE_SOURCE"
+            )
+            else None
+        )
         rights = _build_visual_rights(
             policy_snapshot=self.session.get(
                 CompiledChannelPolicySnapshot, project.policy_snapshot_id
@@ -1047,6 +1074,7 @@ class V2SupportAuthorityService:
             duration_contract=resolved.duration_contract,
             frozen_sources=resolved.frozen_sources,
             approved_script=validated["script"],
+            cross_modal_script_lineage=cross_modal_lineage,
             claim_source_bindings=validated["claim_bindings"],
             local_generated_card_rights=rights,
             memory_guidance_authority=memory_guidance,
@@ -1130,18 +1158,41 @@ class V2SupportAuthorityService:
     ) -> dict[str, Any]:
         """Project the already-qualified writer result without a third LLM call."""
 
-        from app.contracts.script_qualification import QualifiedScriptOutput
+        from app.contracts.script_qualification import (
+            QualifiedScriptOutput,
+            QualifiedScriptOutputV2,
+        )
+        from app.services.canonical_script_compiler import CanonicalScriptCompiler
         from app.services.script_qualification import ScriptQualificationService
 
         try:
             script_payload, evidence_pack, _memory, provenance = (
                 ScriptQualificationService.qualification_output(qualification_receipt)
             )
-            qualified = QualifiedScriptOutput.model_validate(script_payload)
-            sections = [
-                V2GeneratedSection.model_validate(item.model_dump(mode="json"))
-                for item in qualified.sections
-            ]
+            # New production qualifications are V2 single-source outputs: only
+            # section narration is provider-authored and canonical narration is
+            # compiled locally.  Preserve the legacy reader solely for sealed
+            # historical receipts; never coerce a V2 payload into that old
+            # representation or ask the provider to supply a parallel script.
+            if isinstance(script_payload, dict) and "canonical_script" not in script_payload:
+                qualified = QualifiedScriptOutputV2.model_validate(script_payload)
+                canonical = CanonicalScriptCompiler.compile(qualified)
+                sections = [
+                    V2GeneratedSection(
+                        section_id=item.section_id,
+                        heading=item.purpose,
+                        narration=item.narration,
+                    )
+                    for item in sorted(qualified.sections, key=lambda item: item.ordinal)
+                ]
+                approved_script_text = canonical.canonical_script
+            else:
+                qualified = QualifiedScriptOutput.model_validate(script_payload)
+                sections = [
+                    V2GeneratedSection.model_validate(item.model_dump(mode="json"))
+                    for item in qualified.sections
+                ]
+                approved_script_text = qualified.canonical_script
         except (ValidationError, ValueError) as exc:
             raise ValidationFailureError("V2_SUPPORT_QUALIFIED_SCRIPT_INVALID") from exc
         evidence_by_span = {
@@ -1171,7 +1222,7 @@ class V2SupportAuthorityService:
                 ))
             claims.append(V2GeneratedClaim(claim_id=claim.claim_id, claim_text=claim.claim_text, citations=citations))
         output_payload = {
-            "approved_script_text": qualified.canonical_script,
+            "approved_script_text": approved_script_text,
             "language": qualified.language,
             "sections": [item.model_dump(mode="json") for item in sections],
             "claims": [item.model_dump(mode="json") for item in claims],
@@ -2152,6 +2203,50 @@ class V2SupportAuthorityService:
             trusted_authority_write=True,
         )
         return artifact, version
+
+    @staticmethod
+    def _cross_modal_script_lineage(
+        qualification_run: Any,
+    ) -> V2CrossModalScriptLineage:
+        """Carry identities and section source, never full skill procedures."""
+
+        assignment = (
+            qualification_run.script_assignment
+            if isinstance(qualification_run.script_assignment, dict)
+            else {}
+        )
+        payload = (
+            qualification_run.script_payload
+            if isinstance(qualification_run.script_payload, dict)
+            else {}
+        )
+        raw_plan = assignment.get("section_coverage_plan")
+        receipts = assignment.get("capability_projection_receipts")
+        sections = payload.get("sections")
+        if (
+            qualification_run.script_contract_version != "V2_SINGLE_SOURCE"
+            or not isinstance(raw_plan, dict)
+            or not isinstance(receipts, dict)
+            or not isinstance(sections, list)
+        ):
+            raise ValidationFailureError("V2_CROSS_MODAL_SCRIPT_LINEAGE_REQUIRED")
+        try:
+            plan = SectionCoveragePlan.model_validate(raw_plan)
+        except ValueError as exc:
+            raise ValidationFailureError("V2_CROSS_MODAL_SECTION_COVERAGE_INVALID") from exc
+        if plan.content_hash != assignment.get("section_coverage_plan_hash"):
+            raise ValidationFailureError("V2_CROSS_MODAL_SECTION_COVERAGE_HASH_MISMATCH")
+        body = {
+            "qualified_script_hash": str(qualification_run.derived_canonical_script_hash or ""),
+            "section_coverage_plan": plan.model_dump(mode="json"),
+            "writer_sections": sections,
+            "capability_projection_receipts": receipts,
+        }
+        if not re.fullmatch(_SHA256_PATTERN, body["qualified_script_hash"]):
+            raise ValidationFailureError("V2_CROSS_MODAL_QUALIFIED_SCRIPT_HASH_INVALID")
+        return V2CrossModalScriptLineage(
+            **body, content_hash=cross_modal_hash(body)
+        )
 
     def _existing_artifact(self, video_project_id: uuid.UUID) -> Artifact | None:
         artifacts = list(

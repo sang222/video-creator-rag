@@ -147,6 +147,26 @@ def _manifest_hash_payload(manifest: CompiledNativeRenderManifest) -> dict:
     )
 
 
+def _manifest_hash_matches(manifest: CompiledNativeRenderManifest) -> bool:
+    """Accept the current canonical hash and the one historic reader shape.
+
+    ``asset_request_plan`` was later added as an optional typed field.  Older
+    sealed manifests were hashed before that field existed, so Pydantic reads
+    them back as ``None`` even though their immutable hash intentionally lacks
+    the key.  This permits retrieval/reconciliation of that historical shape;
+    newly compiled manifests always use the complete typed payload.
+    """
+
+    payload = _manifest_hash_payload(manifest)
+    if stable_hash(payload) == manifest.manifest_hash:
+        return True
+    if payload.get("asset_request_plan") is None:
+        legacy_payload = dict(payload)
+        legacy_payload.pop("asset_request_plan", None)
+        return stable_hash(legacy_payload) == manifest.manifest_hash
+    return False
+
+
 def _write_text_atomic(path: Path, value: str, *, executable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     part = path.with_name(path.name + ".part")
@@ -1399,7 +1419,7 @@ class NativeFFmpegRenderer:
             raise PermissionError("V2_PRODUCTION_RENDER_COMMAND_ID_MISMATCH")
         if command.compiled_manifest_hash != manifest.manifest_hash:
             raise ValueError("MANIFEST_HASH_MISMATCH")
-        if stable_hash(_manifest_hash_payload(manifest)) != manifest.manifest_hash:
+        if not _manifest_hash_matches(manifest):
             raise ValueError("MANIFEST_CONTENT_HASH_MISMATCH")
         if stable_hash(_command_hash_payload(command)) != command.command_hash:
             raise ValueError("COMMAND_MANIFEST_HASH_MISMATCH")

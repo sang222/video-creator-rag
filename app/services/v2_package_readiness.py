@@ -154,6 +154,22 @@ class CanonicalV2SupportCompiler:
         authority = _support_authority(context)
         versions = _ensure_support_versions(context, authority)
         qualification = _qualification_projection(context, authority)
+        if not qualification["script_gates_pass"]:
+            # A trusted support envelope may describe a local/offline
+            # qualification fixture, but it cannot become a production
+            # package.  The package boundary requires the sealed current
+            # script-qualification receipt that `_qualification_projection`
+            # verifies for real long-form execution.
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.FAIL_PERMANENT_INTEGRITY,
+                error_code="V2_SCRIPT_QUALIFICATION_REQUIRED",
+                summary=(
+                    "ProductionPackage v2 requires a sealed current script "
+                    "qualification authority."
+                ),
+                incident_type="INTEGRITY_MISMATCH",
+                retry_eligible=False,
+            )
         admission = authority.admission
         project_lineage = strategic_lineage_from_record(
             authority.project,
@@ -1683,6 +1699,11 @@ def _script_payload(
             for index, sentence in enumerate(sentences[: max(3, len(sections))])
         ]
     )
+    cross_modal = (
+        authority.support_envelope.cross_modal_script_lineage
+        if authority.support_envelope is not None
+        else None
+    )
     return {
         "schema_version": "vcos.approved-script.v2",
         "readiness_result": "PASS",
@@ -1696,6 +1717,16 @@ def _script_payload(
             authority, "research_coverage_ratio", default=0.0
         ),
         "repeated_sentence_ratio": repeated_ratio,
+        **(
+            {
+                "cross_modal_script_lineage": cross_modal.model_dump(mode="json"),
+                "section_coverage_plan": cross_modal.section_coverage_plan.model_dump(mode="json"),
+                "capability_projection_receipts": cross_modal.capability_projection_receipts,
+                "single_source_sections": cross_modal.writer_sections,
+            }
+            if cross_modal is not None
+            else {}
+        ),
         **(
             {
                 "approved_script_provenance": (

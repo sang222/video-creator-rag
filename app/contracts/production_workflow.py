@@ -148,6 +148,10 @@ class WorkflowAuthorityRefs(BaseModel):
     technical_qc_receipt_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     creative_qc_receipt_ref: str | None = None
     creative_qc_receipt_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    cross_modal_qc_receipt_ref: str | None = None
+    cross_modal_qc_receipt_hash: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
     archive_receipt_ref: str | None = None
     archive_receipt_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     archive_object_ref: str | None = None
@@ -209,6 +213,11 @@ class WorkflowAuthorityRefs(BaseModel):
                 self.creative_qc_receipt_ref,
                 self.creative_qc_receipt_hash,
                 "creative QC",
+            ),
+            (
+                self.cross_modal_qc_receipt_ref,
+                self.cross_modal_qc_receipt_hash,
+                "cross-modal QC",
             ),
             (
                 self.archive_receipt_ref,

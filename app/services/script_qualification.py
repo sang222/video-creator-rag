@@ -56,6 +56,9 @@ from app.services.canonical_script_compiler import (
     CanonicalScriptCompiler,
     normalize_section_narration,
 )
+from app.capabilities import CapabilityCompilationError, default_capability_compiler
+from app.contracts.cross_modal import SectionCoveragePlan
+from app.services.cross_modal import CrossModalContractError, SectionCoverageCompiler
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.services.config_registry import content_hash
 from app.services.production_package import ChannelDurationContractResolver
@@ -705,6 +708,37 @@ class ScriptQualificationService:
         runtime_contract = ScriptRuntimeContractResolver(self.session).resolve(
             policy_snapshot_id=topic.definition.policy_snapshot_id
         )
+        if script_contract_version == SCRIPT_CONTRACT_V2:
+            coverage_plan = SectionCoverageCompiler.compile(
+                assignment=assignment,
+                evidence_pack=evidence_pack,
+                runtime_contract=runtime_contract,
+            )
+            projections = self._capability_projection_receipts(
+                content_mode=topic.definition.content_mode,
+                coverage_plan=coverage_plan,
+                runtime_contract=runtime_contract,
+            )
+            assignment = {
+                **assignment,
+                "section_coverage_plan": coverage_plan.model_dump(mode="json"),
+                "section_coverage_plan_hash": coverage_plan.content_hash,
+                "capability_projection_receipts": projections,
+            }
+            assignment["assignment_hash"] = canonical_hash(
+                {key: value for key, value in assignment.items() if key != "assignment_hash"}
+            )
+            evidence_pack = {
+                **evidence_pack,
+                "assignment_hash": assignment["assignment_hash"],
+            }
+            evidence_pack["evidence_pack_hash"] = canonical_hash(
+                {
+                    key: value
+                    for key, value in evidence_pack.items()
+                    if key != "evidence_pack_hash"
+                }
+            )
         assignment_resolution = self._assignment_resolution(topic.definition)
         identity_body = {
             "candidate_id": str(candidate.id),
@@ -1227,6 +1261,12 @@ class ScriptQualificationService:
             run.script_payload = draft.model_dump(mode="json")
             return draft
         output = QualifiedScriptOutputV2.model_validate(payload)
+        coverage = self._coverage_plan_from_run(run)
+        if coverage is not None:
+            try:
+                SectionCoverageCompiler.validate_writer_output(output, coverage)
+            except CrossModalContractError as exc:
+                raise ValidationFailureError(str(exc)) from exc
         run.script_payload = output.model_dump(mode="json")
         runtime = run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
         compiled = CanonicalScriptCompiler.compile(
@@ -1312,6 +1352,12 @@ class ScriptQualificationService:
         if artifact is None or artifact.script_qualification_run_id != run.id:
             raise ValidationFailureError("CANONICAL_SCRIPT_ARTIFACT_MISMATCH")
         output = QualifiedScriptOutputV2.model_validate(run.script_payload)
+        coverage = self._coverage_plan_from_run(run)
+        if coverage is not None:
+            try:
+                SectionCoverageCompiler.validate_writer_output(output, coverage)
+            except CrossModalContractError as exc:
+                raise ValidationFailureError(str(exc)) from exc
         runtime = run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
         expected = CanonicalScriptCompiler.compile(
             output,
@@ -1330,14 +1376,117 @@ class ScriptQualificationService:
             raise ValidationFailureError("SCRIPT_STRUCTURE_CANONICALIZATION_MISMATCH")
         return self._materialize_v2_draft(output, artifact)
 
+    @staticmethod
+    def _coverage_plan_from_run(
+        run: ScriptQualificationRun,
+    ) -> SectionCoveragePlan | None:
+        assignment = run.script_assignment if isinstance(run.script_assignment, dict) else {}
+        raw = assignment.get("section_coverage_plan")
+        recorded_hash = assignment.get("section_coverage_plan_hash")
+        if raw is None and recorded_hash is None:
+            # V2 rows created before the capability architecture are immutable
+            # historical evidence.  They remain readable but cannot become a
+            # new post-qualification production authority.
+            return None
+        if not isinstance(raw, dict) or not isinstance(recorded_hash, str):
+            raise ValidationFailureError("SCRIPT_SECTION_COVERAGE_PLAN_INVALID")
+        try:
+            plan = SectionCoveragePlan.model_validate(raw)
+        except ValueError as exc:
+            raise ValidationFailureError("SCRIPT_SECTION_COVERAGE_PLAN_INVALID") from exc
+        expected = canonical_hash(
+            {key: value for key, value in plan.model_dump(mode="json").items() if key != "content_hash"}
+        )
+        if plan.content_hash != expected or plan.content_hash != recorded_hash:
+            raise ValidationFailureError("SCRIPT_SECTION_COVERAGE_PLAN_HASH_MISMATCH")
+        return plan
+
+    @staticmethod
+    def _capability_projection_receipts(
+        *,
+        content_mode: str,
+        coverage_plan: SectionCoveragePlan,
+        runtime_contract: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        context = {
+            "coverage_plan_hash": coverage_plan.content_hash,
+            "runtime_contract_hash": runtime_contract.get("contract_hash"),
+            "features": [],
+        }
+        compiler = default_capability_compiler()
+        try:
+            writer = compiler.compile(
+                role="script_writer",
+                task="long_form_script",
+                content_mode=content_mode,
+                stage_context=context,
+            )
+            verifier = compiler.compile(
+                role="script_verifier",
+                task="factuality_review",
+                content_mode=content_mode,
+                stage_context=context,
+            )
+        except CapabilityCompilationError as exc:
+            raise ValidationFailureError(exc.reason_code) from exc
+        return {
+            "writer": writer.receipt_identity(),
+            "verifier": verifier.receipt_identity(),
+        }
+
+    def _capability_projections_from_run(
+        self, run: ScriptQualificationRun
+    ) -> dict[str, Any] | None:
+        coverage = self._coverage_plan_from_run(run)
+        assignment = run.script_assignment if isinstance(run.script_assignment, dict) else {}
+        recorded = assignment.get("capability_projection_receipts")
+        if coverage is None and recorded is None:
+            return None
+        if coverage is None or not isinstance(recorded, dict):
+            raise ValidationFailureError("SCRIPT_CAPABILITY_PROJECTION_INVALID")
+        compiled = self._capability_projection_receipts(
+            content_mode=coverage.content_mode,
+            coverage_plan=coverage,
+            runtime_contract=(run.runtime_contract or {}),
+        )
+        if recorded != compiled:
+            raise ValidationFailureError("SCRIPT_CAPABILITY_PROJECTION_HASH_MISMATCH")
+        compiler = default_capability_compiler()
+        context = {
+            "coverage_plan_hash": coverage.content_hash,
+            "runtime_contract_hash": (run.runtime_contract or {}).get("contract_hash"),
+            "features": [],
+        }
+        try:
+            return {
+                "writer": compiler.compile(
+                    role="script_writer", task="long_form_script", content_mode=coverage.content_mode, stage_context=context
+                ),
+                "verifier": compiler.compile(
+                    role="script_verifier", task="factuality_review", content_mode=coverage.content_mode, stage_context=context
+                ),
+            }
+        except CapabilityCompilationError as exc:
+            raise ValidationFailureError(exc.reason_code) from exc
+
     def _writer_context(self, run: ScriptQualificationRun) -> dict[str, Any]:
         if self._uses_v2_contract(run):
+            coverage = self._coverage_plan_from_run(run)
+            projections = self._capability_projections_from_run(run)
+            if coverage is None or projections is None:
+                raise ValidationFailureError("SCRIPT_CAPABILITY_PROJECTION_MISSING")
             return {
-                "script_assignment": run.script_assignment,
+                "script_assignment": {
+                    key: value
+                    for key, value in (run.script_assignment or {}).items()
+                    if key not in {"capability_projection_receipts"}
+                },
                 "assignment_resolution": run.assignment_resolution,
                 "script_runtime_contract": run.runtime_contract,
                 "factual_evidence_pack": run.factual_evidence_pack,
                 "memory_digest": run.memory_digest,
+                "section_coverage_plan": coverage.model_dump(mode="json"),
+                "capability_projection": projections["writer"].provider_payload(),
                 "writer_output_contract": {
                     "schema_version": "qualified-script-output.v2-single-source",
                     "required_top_level_fields": ["language", "sections", "claims"],
@@ -1386,7 +1535,7 @@ class ScriptQualificationService:
         }
 
     def _verifier_context(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
-        return {
+        context = {
             "script_assignment": run.script_assignment,
             "assignment_resolution": run.assignment_resolution,
             "script_runtime_contract": run.runtime_contract,
@@ -1407,6 +1556,14 @@ class ScriptQualificationService:
                 "instruction": "Emit no final PASS; deterministic aggregation owns final PASS.",
             },
         }
+        if self._uses_v2_contract(run):
+            coverage = self._coverage_plan_from_run(run)
+            projections = self._capability_projections_from_run(run)
+            if coverage is None or projections is None:
+                raise ValidationFailureError("SCRIPT_CAPABILITY_PROJECTION_MISSING")
+            context["section_coverage_plan"] = coverage.model_dump(mode="json")
+            context["capability_projection"] = projections["verifier"].provider_payload()
+        return context
 
     def _structural_receipt(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
         script = unicodedata.normalize("NFC", draft.canonical_script).replace("\r\n", "\n").replace("\r", "\n")
@@ -1426,6 +1583,13 @@ class ScriptQualificationService:
                 or run.canonical_script_artifact_id is None
             ):
                 reasons.append("SCRIPT_STRUCTURE_CANONICALIZATION_MISMATCH")
+            try:
+                raw_output = QualifiedScriptOutputV2.model_validate(run.script_payload)
+                coverage = self._coverage_plan_from_run(run)
+                if coverage is not None:
+                    SectionCoverageCompiler.validate_writer_output(raw_output, coverage)
+            except (ValueError, CrossModalContractError, ValidationFailureError):
+                reasons.append("SCRIPT_INFORMATION_UNIT_OWNERSHIP_VIOLATION")
         elif (
             draft.canonical_script != script
             or not script
@@ -1489,6 +1653,24 @@ class ScriptQualificationService:
         ]
         if len(paragraphs) != len(set(paragraphs)):
             reasons.append("SCRIPT_STRUCTURE_REPETITION_BLOCK")
+        generic_patterns = (
+            "ai is changing everything",
+            "every business is different",
+            "this can improve productivity",
+            "the right tool makes a difference",
+        )
+        generic_hits = sum(pattern in text_folded for pattern in generic_patterns)
+        if generic_hits >= 2:
+            reasons.append("SCRIPT_GENERIC_ASSERTION_CLUSTER")
+        lexical_sections = [
+            set(re.findall(r"\b[\w'-]+\b", narration.casefold(), flags=re.UNICODE))
+            for narration in narrations
+        ]
+        for left, right in zip(lexical_sections, lexical_sections[1:], strict=False):
+            union = left | right
+            if union and len(left & right) / len(union) >= 0.92:
+                reasons.append("SCRIPT_HIGH_LEXICAL_OVERLAP")
+                reasons.append("SCRIPT_SECTION_PROGRESS_STALLED")
         return {"gate": "A", "status": "PASS" if not reasons else "BLOCK", "script_hash": script_hash(script), "runtime_contract_hash": runtime.get("contract_hash"), "reason_codes": sorted(set(reasons)) or ["SCRIPT_STRUCTURAL_INTEGRITY_PASS"]}
 
     def _semantic_receipts(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput, verifier: SemanticVerificationOutput, structural: dict[str, Any]) -> dict[str, dict[str, Any]]:

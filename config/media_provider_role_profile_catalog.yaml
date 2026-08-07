@@ -73,7 +73,7 @@ items:
       default_resolution: 720p
       default_aspect_ratio: "16:9"
       default_output_count: 1
-      price_catalog_ref: config://google_veo_model_price_catalog/2026-07-12
+      price_catalog_ref: config://google_veo_model_price_catalog/2026-07-30
       usage:
         opening_hook: google_veo
         key_metaphor: google_veo

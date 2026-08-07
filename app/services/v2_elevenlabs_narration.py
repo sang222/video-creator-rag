@@ -49,6 +49,9 @@ V2_TIMED_WORDS_ARTIFACT_TYPE = "v2_timed_words"
 V2_CAPTION_SRT_ARTIFACT_TYPE = "v2_caption_srt"
 V2_SUBTITLE_QC_ARTIFACT_TYPE = "v2_subtitle_qc"
 V2_SIDECAR_SCHEMA = "vcos.v2-sidecar-srt.v1"
+V2_ELEVENLABS_PROVIDER_RESPONSE_JOURNAL_SCHEMA = (
+    "vcos.v2-elevenlabs-provider-response.v1"
+)
 
 
 class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
@@ -227,6 +230,7 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             raise ValidationFailureError("V2_ELEVENLABS_APPROVED_SCRIPT_REQUIRED")
         output = effect_dir / "elevenlabs-final-narration.mp3"
         request_path = effect_dir / "elevenlabs-request-journal.json"
+        provider_response_path = effect_dir / "elevenlabs-provider-response-journal.json"
         receipt_path = effect_dir / "elevenlabs-narration-receipt.json"
         identity = {
             "schema_version": "vcos.v2-elevenlabs-request.v1",
@@ -255,6 +259,14 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             prior = _load_json(request_path)
             if any(prior.get(key) != value for key, value in identity.items()):
                 raise ValidationFailureError("V2_ELEVENLABS_REQUEST_JOURNAL_MISMATCH")
+            if output.is_file() and not output.is_symlink():
+                return self._reconcile_sealed_output(
+                    identity=identity,
+                    output=output,
+                    provider_response_path=provider_response_path,
+                    receipt_path=receipt_path,
+                    package=package,
+                )
             raise WorkflowStageError(
                 classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
                 error_code="V2_ELEVENLABS_OUTCOME_UNCERTAIN",
@@ -301,15 +313,13 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             <= package.duration_contract.maximum_duration_ms
         ):
             raise ValidationFailureError("V2_ELEVENLABS_DURATION_OUTSIDE_CONTRACT")
-        receipt = {
-            **identity,
-            "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+        provider_response = {
+            "schema_version": V2_ELEVENLABS_PROVIDER_RESPONSE_JOURNAL_SCHEMA,
+            "request_identity_hash": content_hash(identity),
             "audio_asset_ref": execution.audio_asset_ref,
             "audio_checksum": execution.audio_sha256,
             "audio_relative_path": self._relative(output),
             "duration_ms": execution.audio_duration_ms,
-            "narration_present": True,
-            "alignment_method": "ELEVENLABS_TIMESTAMPS",
             "provider_request_hash": execution.request_hash,
             "provider_request_id": execution.timing_seed.provider_request_id,
             "timing_seed": execution.timing_seed.model_dump(mode="json"),
@@ -318,8 +328,113 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             "actual_cost_usd": None,
             "secret_values_exposed": False,
         }
+        # The provider has accepted the one allowed effect at this point.  This
+        # proof is deliberately sealed before the derived receipt, so a later
+        # local crash can reconcile the exact output without spending again.
+        _write_json_atomic(provider_response_path, provider_response)
+        receipt = self._receipt_from_provider_response(
+            identity=identity,
+            output=output,
+            provider_response=provider_response,
+            package=package,
+        )
         _write_json_atomic(receipt_path, receipt)
         return receipt
+
+    def _reconcile_sealed_output(
+        self,
+        *,
+        identity: dict[str, Any],
+        output: Path,
+        provider_response_path: Path,
+        receipt_path: Path,
+        package: Any,
+    ) -> dict[str, Any]:
+        """Recover only a locally interrupted post-provider receipt write.
+
+        Audio bytes alone do not prove timing/alignment provenance.  The
+        response journal is therefore mandatory: without it the provider
+        outcome is retained as uncertain and never retried.
+        """
+
+        if not provider_response_path.exists():
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_ELEVENLABS_OUTCOME_UNCERTAIN",
+                summary=(
+                    "A sealed ElevenLabs audio file lacks a persisted timing "
+                    "response proof; no duplicate request was attempted."
+                ),
+                incident_type="PROVIDER_OUTCOME_UNCERTAIN",
+                retry_eligible=False,
+            )
+        provider_response = _load_json(provider_response_path)
+        receipt = self._receipt_from_provider_response(
+            identity=identity,
+            output=output,
+            provider_response=provider_response,
+            package=package,
+        )
+        _write_json_atomic(receipt_path, receipt)
+        return receipt
+
+    @staticmethod
+    def _receipt_from_provider_response(
+        *,
+        identity: dict[str, Any],
+        output: Path,
+        provider_response: dict[str, Any],
+        package: Any,
+    ) -> dict[str, Any]:
+        if (
+            provider_response.get("schema_version")
+            != V2_ELEVENLABS_PROVIDER_RESPONSE_JOURNAL_SCHEMA
+            or provider_response.get("request_identity_hash") != content_hash(identity)
+            or provider_response.get("audio_relative_path")
+            != identity["output_relative_path"]
+            or provider_response.get("audio_checksum") != _sha256_file(output)
+            or provider_response.get("audio_asset_ref") in {None, ""}
+        ):
+            raise ValidationFailureError("V2_ELEVENLABS_PROVIDER_RESPONSE_MISMATCH")
+        try:
+            duration_ms = int(provider_response["duration_ms"])
+            timing_seed = NarrationTimingSeed.model_validate(
+                provider_response["timing_seed"]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "V2_ELEVENLABS_PROVIDER_RESPONSE_MISMATCH"
+            ) from exc
+        if (
+            duration_ms <= 0
+            or not (
+                package.duration_contract.minimum_duration_ms
+                <= duration_ms
+                <= package.duration_contract.maximum_duration_ms
+            )
+            or timing_seed.content_hash != provider_response.get("timing_seed_hash")
+            or timing_seed.audio_asset_ref != provider_response.get("audio_asset_ref")
+            or timing_seed.audio_duration_ms != duration_ms
+            or not timing_seed.timing_available
+        ):
+            raise ValidationFailureError("V2_ELEVENLABS_PROVIDER_RESPONSE_MISMATCH")
+        return {
+            **identity,
+            "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+            "audio_asset_ref": provider_response["audio_asset_ref"],
+            "audio_checksum": provider_response["audio_checksum"],
+            "audio_relative_path": provider_response["audio_relative_path"],
+            "duration_ms": duration_ms,
+            "narration_present": True,
+            "alignment_method": "ELEVENLABS_TIMESTAMPS",
+            "provider_request_hash": provider_response.get("provider_request_hash"),
+            "provider_request_id": provider_response.get("provider_request_id"),
+            "timing_seed": timing_seed.model_dump(mode="json"),
+            "timing_seed_hash": timing_seed.content_hash,
+            "usage_metadata": provider_response.get("usage_metadata") or {},
+            "actual_cost_usd": provider_response.get("actual_cost_usd"),
+            "secret_values_exposed": False,
+        }
 
 
 def _persist_sidecar_artifacts(
@@ -483,6 +598,9 @@ def _persist_sidecar_artifacts(
         "timed_words_ref": f"artifact-version://{timed_words_version.id}",
         "timed_words_artifact_version_id": str(timed_words_version.id),
         "timed_words_hash": timed_words_version.content_hash,
+        # This exact sidecar-derived list is consumed once by the canonical
+        # narration-unit binder.  It is not a second caption timeline.
+        "timed_words": timed_words,
         "subtitle_qc_ref": f"artifact-version://{qc_version.id}",
         "subtitle_qc_artifact_version_id": str(qc_version.id),
         "subtitle_qc_hash": qc_version.content_hash,

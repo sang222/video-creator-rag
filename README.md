@@ -8,6 +8,14 @@ ProductionPackage lineage, durable orchestration, native media rendering/QC,
 controlled launch cadence, final-video decision, manual publish verification,
 analytics evidence, and the operator dashboard.
 
+V2 single-source scripts carry typed requirement ownership into production.
+For real ElevenLabs narration, VCOS derives narration units from the approved
+script, binds them to verified timed words, and compiles the only canonical
+media timeline from that lineage. SRT stays a sidecar (never burned in or
+embedded); a cross-modal QC receipt blocks material narration/visual or timing
+mismatch before the human final-review boundary. Migration
+`0068_cross_modal_qc_projection` projects that receipt on the workflow run.
+
 ## Stack
 
 - Python 3.13+
