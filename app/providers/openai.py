@@ -35,6 +35,9 @@ class OpenAIResponsesRequest:
     messages: list[dict[str, str]] | None = None
     image_inputs: list[dict[str, str]] | None = None
     response_format: str = "text"
+    json_schema: dict[str, Any] | None = None
+    json_schema_name: str | None = None
+    json_schema_strict: bool = True
     idempotency_key: str | None = None
     background: bool = False
 
@@ -326,15 +329,27 @@ class OpenAIResponsesProvider:
             "store": False,
         }
         if request.response_format == "json":
+            schema = request.json_schema
+            schema_name = request.json_schema_name
+            if schema is None and schema_name is None:
+                # Compatibility for non-qualification router clients. The
+                # qualification producer always supplies the exact strict
+                # contract below; no production writer or verifier uses this.
+                schema = {"type": "object", "additionalProperties": True}
+                schema_name = "vcos_router_output"
+                strict = False
+            elif not isinstance(schema, dict) or not schema:
+                raise ValueError("OPENAI_STRUCTURED_OUTPUT_SCHEMA_REQUIRED")
+            elif not isinstance(schema_name, str) or not schema_name.strip():
+                raise ValueError("OPENAI_STRUCTURED_OUTPUT_SCHEMA_NAME_REQUIRED")
+            else:
+                strict = request.json_schema_strict
             payload["text"] = {
                 "format": {
                     "type": "json_schema",
-                    "name": "vcos_router_output",
-                    "schema": {
-                        "type": "object",
-                        "additionalProperties": True,
-                    },
-                    "strict": False,
+                    "name": schema_name,
+                    "schema": schema,
+                    "strict": strict,
                 }
             }
         return payload
@@ -498,10 +513,18 @@ def _response_output_text(payload: dict[str, Any]) -> str:
         return direct
     text_parts: list[str] = []
     for item in payload.get("output") or []:
-        if not isinstance(item, dict):
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != "message"
+            or item.get("role") != "assistant"
+        ):
             continue
         for content in item.get("content") or []:
-            if isinstance(content, dict) and isinstance(content.get("text"), str):
+            if (
+                isinstance(content, dict)
+                and content.get("type") == "output_text"
+                and isinstance(content.get("text"), str)
+            ):
                 text_parts.append(content["text"])
     return "\n".join(text_parts)
 

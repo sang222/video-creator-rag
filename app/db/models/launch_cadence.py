@@ -286,22 +286,39 @@ class LongFormPublishSlot(Base):
     admitted_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_projects.id")
     )
+    replaces_slot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("long_form_publish_slots.id")
+    )
+    replacement_authority_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("script_contract_replacement_authorities.id")
+    )
+    replacement_reason: Mapped[str | None] = mapped_column(String(160))
+    replacement_lineage_key: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
         UniqueConstraint(
+            "replacement_lineage_key",
+            name="uq_long_form_slots_replacement_lineage_key",
+        ),
+        Index(
+            "uq_long_form_publish_slots_channel_time_primary",
             "channel_workspace_id",
             "intended_publish_at",
-            name="uq_long_form_publish_slots_channel_time",
+            unique=True,
+            postgresql_where=text("replaces_slot_id is null"),
         ),
-        UniqueConstraint(
+        Index(
+            "uq_long_form_publish_slots_run_date_primary",
             "launch_run_id",
             "local_publish_date",
-            name="uq_long_form_publish_slots_run_date",
+            unique=True,
+            postgresql_where=text("replaces_slot_id is null"),
         ),
         Index("ix_long_form_publish_slots_run", "launch_run_id"),
         Index("ix_long_form_publish_slots_intended", "intended_publish_at"),
+        Index("ix_long_form_publish_slots_replaces", "replaces_slot_id"),
         CheckConstraint(
             "state in ('OPEN','QUALIFICATION_RESERVED','QUALIFICATION_RECONCILIATION_REQUIRED',"
             "'RESERVED','FULFILLED','SKIPPED','CANCELED')",

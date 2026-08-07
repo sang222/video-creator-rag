@@ -73,11 +73,14 @@ from app.db.models.launch_cadence import (
     LongFormPublishSlot,
 )
 from app.db.models.script_qualification import (
+    CanonicalScriptArtifact,
     EditorialTopicDefinition,
     EditorialTopicDefinitionGateReceipt,
     SeriesEpisodeReservation,  # noqa: F401
+    ScriptContentRepairAuthorizationReceipt,
     ScriptQualificationReceipt,
     ScriptQualificationRun,
+    ScriptContractReplacementAuthority,
 )
 from app.db.models.m6 import (
     AccessibilityQCReport,
@@ -265,6 +268,7 @@ from app.db.models.ofv0 import (
 from app.db.models.production_workflow import (
     ProductionWorkflowRun,
     WorkflowCommandReceipt,
+    WorkflowHold,
     WorkflowRecoveryReceipt,
 )
 from app.db.models.production_publish import (
@@ -344,8 +348,11 @@ __all__ = [
     "CadenceEvaluationReceipt",
     "EditorialTopicDefinition",
     "EditorialTopicDefinitionGateReceipt",
+    "CanonicalScriptArtifact",
+    "ScriptContractReplacementAuthority",
     "ScriptQualificationRun",
     "ScriptQualificationReceipt",
+    "ScriptContentRepairAuthorizationReceipt",
     "AccessibilityQCReport",
     "AssetManifestSnapshot",
     "CaptionTrackSnapshot",
@@ -485,6 +492,7 @@ __all__ = [
     "PackageRuntimeDisposition",
     "ProductionWorkflowRun",
     "WorkflowCommandReceipt",
+    "WorkflowHold",
     "WorkflowRecoveryReceipt",
     "LongFormAnalyticsWindow",
     "FinalReviewCandidate",

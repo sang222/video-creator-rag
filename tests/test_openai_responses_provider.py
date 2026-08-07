@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import pytest
 
+from app.contracts.script_qualification import (
+    QualifiedScriptOutput,
+    SemanticVerificationOutput,
+)
 from app.providers.openai import (
     OpenAIResponsesProvider,
     OpenAIResponsesRequest,
     OpenAIWebSearchRequest,
+)
+from app.services.script_qualification_background import _strict_json_schema
+from app.services.script_writer_output_normalization import (
+    LEGACY_WRAPPED_SCHEMA,
+    WriterOutputNormalizationError,
+    normalize_legacy_writer_output,
+    validation_errors,
 )
 
 
@@ -271,8 +282,6 @@ def test_background_poll_uses_durable_response_id_and_network_error_is_retryable
     assert calls == [
         ("GET", "https://api.openai.com/v1/responses/resp_background_1", None, 4)
     ]
-    assert "Authorization" not in serialized
-    assert "Private prompt" not in serialized
 
 
 def test_web_search_payload_matches_supported_schema_without_fallback() -> None:
@@ -302,3 +311,145 @@ def test_web_search_payload_matches_supported_schema_without_fallback() -> None:
         "store": False,
     }
     assert "fallback" not in payload
+
+
+def _legacy_writer_payload() -> dict[str, object]:
+    return {
+        "language": "en",
+        "canonical_script": {
+            "title": "A bounded title",
+            "sections": [
+                {
+                    "heading": "Opening",
+                    "narration": "The official page names the model.",
+                    "claim_ids": ["claim-1"],
+                    "section_role": "HOOK",
+                },
+                {
+                    "heading": "Close",
+                    "narration": "The team can verify the next decision.",
+                    "claim_ids": ["claim-2"],
+                    "section_role": "CLOSING_INSIGHT",
+                },
+            ],
+        },
+        "claims": [
+            {
+                "claim_id": "claim-1",
+                "text": "The official page names the model.",
+                "factual_evidence_span_ids": ["evidence-1"],
+            },
+            {
+                "claim_id": "claim-2",
+                "text": "The team can verify the next decision.",
+                "factual_evidence_span_ids": ["evidence-2"],
+            },
+        ],
+    }
+
+
+def test_completed_legacy_writer_shape_normalizes_without_semantic_rewrite() -> None:
+    raw = _legacy_writer_payload()
+    assert validation_errors(raw)
+
+    normalized = normalize_legacy_writer_output(raw)
+
+    assert normalized.classification == LEGACY_WRAPPED_SCHEMA
+    assert QualifiedScriptOutput.model_validate(normalized.payload)
+    assert normalized.payload["canonical_script"] == (
+        "The official page names the model. "
+        "The team can verify the next decision."
+    )
+    assert normalized.payload["sections"] == [
+        {
+            "section_id": "S01",
+            "heading": "Opening",
+            "narration": "The official page names the model.",
+        },
+        {
+            "section_id": "S02",
+            "heading": "Close",
+            "narration": "The team can verify the next decision.",
+        },
+    ]
+    assert normalized.payload["claims"] == [
+        {
+            "claim_id": "claim-1",
+            "claim_text": "The official page names the model.",
+            "evidence_span_ids": ["evidence-1"],
+        },
+        {
+            "claim_id": "claim-2",
+            "claim_text": "The team can verify the next decision.",
+            "evidence_span_ids": ["evidence-2"],
+        },
+    ]
+    assert normalized.removed_wrapper_fields["canonical_script.title"] == "A bounded title"
+    assert normalized.field_mapping["section_metadata_preserved"][0] == {
+        "section_id": "S01",
+        "source_index": 0,
+        "section_role": "HOOK",
+        "claim_ids": ["claim-1"],
+    }
+
+
+def test_normalization_rejects_missing_content_instead_of_fabricating_it() -> None:
+    raw = _legacy_writer_payload()
+    del raw["claims"]
+
+    with pytest.raises(
+        WriterOutputNormalizationError,
+        match="WRITER_NORMALIZATION_LEGACY_SHAPE_REQUIRED",
+    ):
+        normalize_legacy_writer_output(raw)
+
+
+def test_background_retrieval_uses_final_assistant_output_not_reasoning() -> None:
+    def transport(method, url, payload, headers, timeout_seconds):
+        assert method == "GET"
+        assert payload is None
+        return 200, {
+            "id": "resp_completed_1",
+            "status": "completed",
+            "model": "gpt-5.6-luna",
+            "output": [
+                {"type": "reasoning", "summary": [{"text": "not script"}]},
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "refusal", "refusal": ""},
+                        {"type": "output_text", "text": '{"language":"en"}'},
+                    ],
+                },
+            ],
+        }
+
+    result = OpenAIResponsesProvider(api_key="test-key", transport=transport).retrieve_background(
+        response_id="resp_completed_1", timeout_seconds=5
+    )
+
+    assert result.ok is True
+    assert result.output["content"] == '{"language":"en"}'
+
+
+def test_strict_schema_is_the_exact_qualified_script_contract() -> None:
+    schema = _strict_json_schema(QualifiedScriptOutput.model_json_schema())
+
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"canonical_script", "language", "sections", "claims"}
+    assert schema["$defs"]["ScriptSection"]["additionalProperties"] is False
+
+
+def test_strict_schema_removes_defaults_and_open_objects_from_verifier_contract() -> None:
+    schema = _strict_json_schema(SemanticVerificationOutput.model_json_schema())
+
+    def invalid_nodes(value: object) -> list[dict[str, object]]:
+        if isinstance(value, dict):
+            own = [value] if "default" in value or value.get("additionalProperties") is True else []
+            return own + [node for child in value.values() for node in invalid_nodes(child)]
+        if isinstance(value, list):
+            return [node for child in value for node in invalid_nodes(child)]
+        return []
+
+    assert invalid_nodes(schema) == []

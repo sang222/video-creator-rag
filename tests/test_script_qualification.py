@@ -13,9 +13,9 @@ from app.contracts.script_qualification import (
     ForbiddenScopeObservation,
     MaterialClaimObservation,
     QualifiedScriptOutput,
-    ScriptSpan,
     SectionPurposeObservation,
     SemanticVerificationOutput,
+    VerifierScriptSpan,
 )
 from app.db.models.script_qualification import (
     ScriptQualificationReceipt,
@@ -48,14 +48,10 @@ from app.services.v2_support_authority import (
 from tests.qualification.conftest import QualificationFactory
 
 
-def _span(script: str, section_id: str, text: str) -> ScriptSpan:
-    start = script.encode("utf-8").find(text.encode("utf-8"))
-    assert start >= 0
-    return ScriptSpan(
+def _span(script: str, section_id: str, text: str) -> VerifierScriptSpan:
+    assert text in script
+    return VerifierScriptSpan(
         text=text,
-        start_byte=start,
-        end_byte=start + len(text.encode("utf-8")),
-        span_hash=span_hash(text),
         section_id=section_id,
     )
 

@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     event,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -51,6 +52,7 @@ WORKFLOW_STATES = (
     "QC_RUNNING",
     "ARCHIVE_PENDING",
     "ARCHIVE_RUNNING",
+    "PAUSED_AFTER_NATIVE_RENDER",
     "FINAL_REVIEW_READY",
     "BLOCKED",
     "RETRY_SCHEDULED",
@@ -259,6 +261,8 @@ class WorkflowCommandReceipt(Base):
         ForeignKey("production_workflow_runs.id"),
         nullable=False,
     )
+
+
     domain_event_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("domain_events.id"),
@@ -323,6 +327,41 @@ class WorkflowCommandReceipt(Base):
             "handler_version",
         ),
         Index("ix_workflow_command_receipts_created_at", "created_at"),
+    )
+
+
+class WorkflowHold(Base):
+    """Workflow-scoped durable stop before archive/final-review effects."""
+
+    __tablename__ = "workflow_holds"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    workflow_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("production_workflow_runs.id"),
+        nullable=False,
+    )
+    requested_reason: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(String(160))
+    created_at: Mapped[datetime] = utc_created_at()
+    updated_at: Mapped[datetime] = utc_updated_at()
+
+    __table_args__ = (
+        UniqueConstraint("workflow_run_id", name="uq_workflow_hold_run"),
+        CheckConstraint(
+            "state in ('PENDING','ACTIVE','RELEASED')",
+            name="ck_workflow_hold_state",
+        ),
+        CheckConstraint(
+            "(state = 'PENDING' and activated_at is null and released_at is null) or "
+            "(state = 'ACTIVE' and activated_at is not null and released_at is null) or "
+            "(state = 'RELEASED' and activated_at is not null and released_at is not null and release_reason is not null)",
+            name="ck_workflow_hold_lifecycle",
+        ),
+        Index("ix_workflow_holds_state", "state", "updated_at"),
     )
 
 

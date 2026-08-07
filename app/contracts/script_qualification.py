@@ -12,6 +12,8 @@ class _Strict(BaseModel):
 
 
 class ScriptSpan(_Strict):
+    """A locally resolved, byte-exact span in the canonical narration."""
+
     text: str = Field(min_length=1)
     start_byte: int = Field(ge=0)
     end_byte: int = Field(gt=0)
@@ -23,6 +25,18 @@ class ScriptSpan(_Strict):
         if self.end_byte <= self.start_byte:
             raise ValueError("SCRIPT_SPAN_EMPTY")
         return self
+
+
+class VerifierScriptSpan(_Strict):
+    """Verifier-selected text that the local authority resolves exactly.
+
+    The verifier selects an exact occurrence in a named section.  VCOS, not
+    the language model, derives the UTF-8 offsets and content hash that the
+    deterministic gates consume.
+    """
+
+    text: str = Field(min_length=1)
+    section_id: str = Field(min_length=1)
 
 
 class WriterClaim(_Strict):
@@ -38,15 +52,41 @@ class ScriptSection(_Strict):
 
 
 class QualifiedScriptOutput(_Strict):
+    """Legacy V1 writer contract retained only for immutable history."""
+
     canonical_script: str = Field(min_length=1)
     language: str = Field(min_length=2)
     sections: list[ScriptSection] = Field(min_length=1)
     claims: list[WriterClaim] = Field(default_factory=list)
 
 
+class ScriptSectionV2(_Strict):
+    """The only provider-authored narration unit in V2.
+
+    ``narration`` is deliberately the sole long-form text field.  The
+    canonical narration is compiled locally from ordered section rows and is
+    never accepted from the provider response.
+    """
+
+    section_id: str = Field(min_length=1)
+    ordinal: int = Field(ge=1)
+    purpose: str = Field(min_length=1)
+    narration: str = Field(min_length=1)
+    required_assignment_unit_refs: list[str] = Field(default_factory=list)
+    expected_claim_refs: list[str] = Field(default_factory=list)
+
+
+class QualifiedScriptOutputV2(_Strict):
+    """V2 single-source writer response used for all new production runs."""
+
+    language: str = Field(min_length=2)
+    sections: list[ScriptSectionV2] = Field(min_length=1)
+    claims: list[WriterClaim] = Field(default_factory=list)
+
+
 class MaterialClaimObservation(_Strict):
     observed_claim_id: str = Field(min_length=1)
-    span: ScriptSpan
+    span: VerifierScriptSpan
     claim_type: Literal[
         "FACTUAL_ASSERTION", "NUMERIC_QUANTITATIVE_CLAIM", "DATE_TIME_CLAIM",
         "CAPABILITY_CLAIM", "LIMITATION_CLAIM", "COMPARISON", "CAUSAL_CLAIM",
@@ -68,7 +108,7 @@ class MaterialClaimObservation(_Strict):
 class AssignmentObservation(_Strict):
     requirement_id: str = Field(min_length=1)
     status: Literal["SUFFICIENT", "PARTIAL", "MISSING", "CONTRADICTED", "OUT_OF_SCOPE", "AMBIGUOUS"]
-    spans: list[ScriptSpan] = Field(default_factory=list)
+    spans: list[VerifierScriptSpan] = Field(default_factory=list)
     evidence_span_ids: list[str] = Field(default_factory=list)
     missing_reasoning_step: str | None = None
     reason_codes: list[str] = Field(default_factory=list)
@@ -91,8 +131,22 @@ class ForbiddenScopeObservation(_Strict):
 
     forbidden_scope_id: str = Field(min_length=1)
     state: Literal["ABSENT", "VIOLATED", "AMBIGUOUS"]
-    script_spans: list[ScriptSpan] = Field(default_factory=list)
+    script_spans: list[VerifierScriptSpan] = Field(default_factory=list)
     observed_relation: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class MemoryApplicationObservation(_Strict):
+    """Typed verifier evidence for one memory-guidance item.
+
+    Memory remains non-factual guidance. This contract only records whether a
+    mandatory avoid-pattern was followed; it never permits memory to ground a
+    factual claim.
+    """
+
+    memory_item_id: str = Field(min_length=1)
+    mandatory: bool
+    application_state: Literal["APPLIED", "NOT_APPLICABLE", "NOTED", "VIOLATED"]
     reason_codes: list[str] = Field(default_factory=list)
 
 
@@ -163,4 +217,6 @@ class SemanticVerificationOutput(_Strict):
     assignment_fulfillment_observations: list[AssignmentObservation] = Field(default_factory=list)
     section_purpose_observations: list[SectionPurposeObservation] = Field(default_factory=list)
     forbidden_scope_observations: list[ForbiddenScopeObservation] = Field(default_factory=list)
-    memory_application_observations: list[dict[str, Any]] = Field(default_factory=list)
+    memory_application_observations: list[MemoryApplicationObservation] = Field(
+        default_factory=list
+    )

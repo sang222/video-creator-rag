@@ -53,6 +53,7 @@ from app.db.models.m5 import ProjectAdmissionDecision
 from app.db.models.production_workflow import (
     ProductionWorkflowRun,
     WorkflowCommandReceipt,
+    WorkflowHold,
 )
 from app.db.models.production_publish import FinalReviewCandidate
 from app.db.models.r3d2 import EffectiveChannelRuntimeContextSnapshot
@@ -2058,6 +2059,30 @@ class ProductionWorkflowCoordinator:
             ProductionWorkflowState.DEAD_LETTERED.value,
         }:
             raise ConflictError("WORKFLOW_NOT_RESUMABLE")
+        if run.state == ProductionWorkflowState.PAUSED_AFTER_NATIVE_RENDER.value:
+            hold = self.session.scalar(
+                select(WorkflowHold)
+                .where(WorkflowHold.workflow_run_id == run.id)
+                .with_for_update()
+            )
+            if hold is None or hold.state != "ACTIVE":
+                raise ConflictError("WORKFLOW_RENDER_HOLD_AUTHORITY_MISSING")
+            now = self.now()
+            hold.state = "RELEASED"
+            hold.released_at = now
+            hold.release_reason = data.reason_code
+            run.current_stage = ProductionWorkflowStage.QC.value
+            run.state = ProductionWorkflowState.QC_PENDING.value
+            run.state_reason_codes = [data.reason_code]
+            run.last_progress_at = now
+            run.projection_version += 1
+            self._schedule_stage(
+                run,
+                ProductionWorkflowStage.QC,
+                max_attempts=int((run.metadata_ or {}).get("max_attempts", 5)),
+            )
+            self.session.flush()
+            return self._read(run)
         self._reconcile_locked(run)
         if run.state == ProductionWorkflowState.FINAL_REVIEW_READY.value:
             return self._read(run)
@@ -2346,6 +2371,16 @@ class ProductionWorkflowCoordinator:
         )
 
     def _reconcile_locked(self, run: ProductionWorkflowRun) -> None:
+        if run.state == ProductionWorkflowState.PAUSED_AFTER_NATIVE_RENDER.value:
+            hold = self.session.scalar(
+                select(WorkflowHold).where(
+                    WorkflowHold.workflow_run_id == run.id,
+                    WorkflowHold.state == "ACTIVE",
+                )
+            )
+            if hold is None:
+                raise self._integrity_error("WORKFLOW_RENDER_HOLD_AUTHORITY_MISSING")
+            return
         receipts = self.session.scalars(
             select(WorkflowCommandReceipt)
             .where(WorkflowCommandReceipt.workflow_run_id == run.id)
@@ -2652,6 +2687,41 @@ class ProductionWorkflowCoordinator:
         reason_codes: list[str] | None = None,
     ) -> None:
         stage = ProductionWorkflowStage(receipt.stage)
+        if (
+            stage == ProductionWorkflowStage.RENDER
+            and bool((run.metadata_ or {}).get("post_render_hold_requested"))
+        ):
+            hold = self.session.scalar(
+                select(WorkflowHold)
+                .where(WorkflowHold.workflow_run_id == run.id)
+                .with_for_update()
+            )
+            now = self.now()
+            if hold is None:
+                hold = WorkflowHold(
+                    workflow_run_id=run.id,
+                    requested_reason=str(
+                        (run.metadata_ or {}).get("post_render_hold_reason")
+                        or "FIRST_VIDEO_OPERATOR_RENDER_INSPECTION"
+                    ),
+                    state="ACTIVE",
+                    activated_at=now,
+                )
+                self.session.add(hold)
+            elif hold.state == "PENDING":
+                hold.state = "ACTIVE"
+                hold.activated_at = now
+            elif hold.state != "ACTIVE":
+                raise self._integrity_error("WORKFLOW_RENDER_HOLD_ALREADY_RELEASED")
+            metadata = dict(run.metadata_ or {})
+            metadata["post_render_hold_id"] = str(hold.id)
+            run.metadata_ = metadata
+            run.state = ProductionWorkflowState.PAUSED_AFTER_NATIVE_RENDER.value
+            run.current_stage = ProductionWorkflowStage.RENDER.value
+            run.state_reason_codes = [hold.requested_reason]
+            run.last_progress_at = now
+            run.projection_version += 1
+            return
         next_stage = _next_stage(stage)
         now = self.now()
         if next_stage is None:

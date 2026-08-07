@@ -16,7 +16,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.contracts.script_qualification import QualifiedScriptOutput, SemanticVerificationOutput
+from app.contracts.script_qualification import (
+    QualifiedScriptOutput,
+    QualifiedScriptOutputV2,
+    SemanticVerificationOutput,
+)
 from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
@@ -27,6 +31,7 @@ from app.db.models.m10_1 import LLMRouteAttempt
 from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight
 from app.db.models.script_qualification import (
     ScriptQualificationBackgroundAttempt,
+    ScriptQualificationProviderResponseSnapshot,
     ScriptQualificationProviderReclassificationReceipt,
     ScriptQualificationRun,
 )
@@ -267,8 +272,16 @@ class ScriptQualificationBackgroundService:
     def _submit(self, run: ScriptQualificationRun, *, phase: str) -> ScriptQualificationRun:
         context = self._writer_context(run) if phase == "WRITER" else self._verifier_context(run)
         lane, task = (("long_context_text", "long_form_script") if phase == "WRITER" else ("gatekeeper_soft_review", "factuality_review"))
-        prompt = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        fingerprint = content_hash({"phase": phase, "prompt": prompt, "model": run.model, "lane": lane})
+        schema_identifier, schema = self._response_schema(run, phase=phase)
+        prompt_version = run.writer_prompt_version if phase == "WRITER" else run.verifier_prompt_version
+        prompt = self._schema_bound_prompt(
+            context=context,
+            phase=phase,
+            schema_identifier=schema_identifier,
+            prompt_version=prompt_version,
+        )
+        schema_hash = content_hash(schema)
+        fingerprint = content_hash({"phase": phase, "prompt": prompt, "model": run.model, "lane": lane, "schema_identifier": schema_identifier, "schema_hash": schema_hash, "prompt_version": prompt_version})
         attempt = self.session.scalar(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.script_qualification_run_id == run.id, ScriptQualificationBackgroundAttempt.phase == phase).with_for_update())
         if attempt is None:
             attempt = ScriptQualificationBackgroundAttempt(
@@ -279,6 +292,9 @@ class ScriptQualificationBackgroundService:
                 background_status="SUBMIT_PENDING",
                 poll_count=0,
                 submission_attempt_count=0,
+                response_schema_identifier=schema_identifier,
+                response_schema_hash=schema_hash,
+                prompt_version=prompt_version,
             )
             self.session.add(attempt)
         if attempt.provider_response_id:
@@ -290,15 +306,24 @@ class ScriptQualificationBackgroundService:
         self.session.flush()
         # Explicitly release the database transaction before network I/O.
         self.session.commit()
-        result = self.provider.submit_background(request=OpenAIResponsesRequest(model=run.model, reasoning_effort="medium", prompt=prompt, response_format="json", idempotency_key=attempt.client_correlation_id, background=True), timeout_seconds=self.settings.openai_background_submit_timeout_seconds)
+        result = self.provider.submit_background(request=OpenAIResponsesRequest(model=run.model, reasoning_effort="medium", prompt=prompt, response_format="json", json_schema=schema, json_schema_name=schema_identifier, json_schema_strict=True, idempotency_key=attempt.client_correlation_id, background=True), timeout_seconds=self.settings.openai_background_submit_timeout_seconds)
         run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run.id).with_for_update())
         attempt = self.session.scalar(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.id == attempt.id).with_for_update())
         assert run is not None and attempt is not None
         attempt.submission_attempt_count = 1
         if not result.ok:
             attempt.last_network_error = result.error_code
+            if result.error_code == "OPENAI_INVALID_REQUEST":
+                attempt.provider_outcome = "PROVIDER_REQUEST_REJECTED_NO_RESPONSE"
             attempt.background_status = "SUBMISSION_OUTCOME_UNKNOWN"
-            return self._provider_block(run, attempt, "SCRIPT_PROVIDER_SUBMISSION_OUTCOME_UNKNOWN")
+            return self._provider_block(
+                run,
+                attempt,
+                "SCRIPT_PROVIDER_REQUEST_REJECTED_NO_RESPONSE"
+                if result.error_code == "OPENAI_INVALID_REQUEST"
+                else "SCRIPT_PROVIDER_SUBMISSION_OUTCOME_UNKNOWN",
+                detail=result.error_message or result.error_code,
+            )
         attempt.provider_response_id = result.output["provider_response_id"]
         attempt.provider_request_id = result.output.get("provider_request_id")
         attempt.submitted_at = self.now(); attempt.next_poll_at = self.now()
@@ -333,20 +358,38 @@ class ScriptQualificationBackgroundService:
         try:
             parsed = json.loads(result.output.get("content") or "")
             if attempt.phase == "WRITER":
-                draft = QualifiedScriptOutput.model_validate(parsed)
-                run.script_payload = draft.model_dump(mode="json")
-                run.writer_receipt = self._receipt(attempt, result.output)
                 from app.services.script_qualification import ScriptQualificationService
-                structural = ScriptQualificationService(self.session)._structural_receipt(run, draft)
+
+                service = ScriptQualificationService(self.session)
+                service.writer_output_model(run).model_validate(parsed)
+                self._persist_response_snapshot(
+                    run=run, attempt=attempt, output=result.output,
+                    accepted_typed_output_hash=content_hash(parsed),
+                )
+                from app.services.script_content_repair import (
+                    ScriptContentRepairService,
+                )
+
+                if not service._uses_v2_contract(run):
+                    ScriptContentRepairService(
+                        self.session, now=self.now
+                    ).validate_output_scope(run, QualifiedScriptOutput.model_validate(parsed))
+                draft = service.accept_writer_output(run, parsed)
+                run.writer_receipt = self._receipt(attempt, result.output)
+                structural = service._structural_receipt(run, draft)
                 if structural["status"] != "PASS":
-                    return ScriptQualificationService(self.session)._seal_block(run, draft, {"structural": structural})
+                    return service._seal_block(run, draft, {"structural": structural})
                 run.state = "SCRIPT_GENERATED"
                 return run
-            draft = QualifiedScriptOutput.model_validate(run.script_payload)
-            verifier = SemanticVerificationOutput.model_validate(parsed)
-            run.verifier_receipt = self._receipt(attempt, result.output)
             from app.services.script_qualification import ScriptQualificationService
             service = ScriptQualificationService(self.session)
+            draft = service.draft_from_run(run)
+            verifier = SemanticVerificationOutput.model_validate(parsed)
+            self._persist_response_snapshot(
+                run=run, attempt=attempt, output=result.output,
+                accepted_typed_output_hash=content_hash(verifier.model_dump(mode="json")),
+            )
+            run.verifier_receipt = self._receipt(attempt, result.output)
             structural = service._structural_receipt(run, draft)
             receipts = service._semantic_receipts(run, draft, verifier, structural)
             if all(item["status"] in {"PASS", "PASS_EMPTY"} for item in receipts.values()):
@@ -354,6 +397,12 @@ class ScriptQualificationBackgroundService:
                 return run
             return service._seal_block(run, draft, receipts)
         except Exception as exc:
+            self._persist_response_snapshot(
+                run=run,
+                attempt=attempt,
+                output=result.output,
+                validation_errors=_validation_errors(exc),
+            )
             return self._provider_block(run, attempt, "SCRIPT_WRITER_OUTPUT_INVALID" if attempt.phase == "WRITER" else "SCRIPT_VERIFIER_OUTPUT_INVALID", detail=str(exc))
 
     def _provider_block(self, run: ScriptQualificationRun, attempt: ScriptQualificationBackgroundAttempt, code: str, detail: str | None = None) -> ScriptQualificationRun:
@@ -445,7 +494,7 @@ class ScriptQualificationBackgroundService:
 
     @staticmethod
     def _hashes(run: ScriptQualificationRun) -> dict[str, Any]:
-        return {"topic_definition_hash": run.topic_definition_hash, "script_assignment_hash": run.script_assignment_hash, "factual_evidence_pack_hash": run.factual_evidence_pack_hash, "memory_digest_hash": run.memory_digest_hash, "runtime_contract_hash": run.runtime_contract_hash, "assignment_resolution_hash": run.assignment_resolution_hash}
+        return {"topic_definition_hash": run.topic_definition_hash, "script_assignment_hash": run.script_assignment_hash, "factual_evidence_pack_hash": run.factual_evidence_pack_hash, "memory_digest_hash": run.memory_digest_hash, "runtime_contract_hash": run.runtime_contract_hash, "assignment_resolution_hash": run.assignment_resolution_hash, "script_contract_version": run.script_contract_version, "replacement_authority_id": str(run.replacement_authority_id) if run.replacement_authority_id else None}
 
     def _deadline_for(self, run: ScriptQualificationRun, *, requested_at: datetime) -> datetime:
         slot = self.session.get(LongFormPublishSlot, run.publish_slot_id)
@@ -458,12 +507,169 @@ class ScriptQualificationBackgroundService:
 
     def _writer_context(self, run: ScriptQualificationRun) -> dict[str, Any]:
         from app.services.script_qualification import ScriptQualificationService
-        return ScriptQualificationService(self.session)._writer_context(run)
+        context = ScriptQualificationService(self.session)._writer_context(run)
+        from app.services.script_content_repair import ScriptContentRepairService
+
+        repair = ScriptContentRepairService(self.session, now=self.now).writer_context(run)
+        if repair is not None:
+            context["content_repair"] = repair
+        return context
 
     def _verifier_context(self, run: ScriptQualificationRun) -> dict[str, Any]:
         from app.services.script_qualification import ScriptQualificationService
-        return ScriptQualificationService(self.session)._verifier_context(run, QualifiedScriptOutput.model_validate(run.script_payload))
+        service = ScriptQualificationService(self.session)
+        return service._verifier_context(run, service.draft_from_run(run))
+
+    def _response_schema(
+        self, run: ScriptQualificationRun, *, phase: str
+    ) -> tuple[str, dict[str, Any]]:
+        model = (
+            (QualifiedScriptOutputV2 if run.script_contract_version == "V2_SINGLE_SOURCE" else QualifiedScriptOutput)
+            if phase == "WRITER"
+            else SemanticVerificationOutput
+        )
+        schema = _strict_json_schema(model.model_json_schema())
+        if phase == "WRITER":
+            runtime = run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
+            schema["properties"]["sections"]["minItems"] = max(
+                1, int(runtime.get("minimum_major_sections") or 1)
+            )
+            schema["properties"]["claims"]["minItems"] = max(
+                1, int(runtime.get("minimum_material_claims") or 1)
+            )
+            return (
+                "vcos_qualified_script_output_v2_single_source"
+                if run.script_contract_version == "V2_SINGLE_SOURCE"
+                else "vcos_qualified_script_output_v1",
+                schema,
+            )
+        return "vcos_semantic_verification_output_v2", schema
+
+    @staticmethod
+    def _schema_bound_prompt(
+        *, context: dict[str, Any], phase: str, schema_identifier: str, prompt_version: str
+    ) -> str:
+        if phase == "WRITER":
+            if schema_identifier == "vcos_qualified_script_output_v2_single_source":
+                instruction = (
+                    "Return only the strict schema-bound QualifiedScriptOutputV2. "
+                    "Author narration only in sections[].narration. Do not return canonical_script and do not mirror the full script in any field. "
+                    "Every narration sentence belongs to exactly one section; ordinals are contiguous and section IDs are unique. "
+                    "Use claim_text and evidence_span_ids exactly. Do not add undocumented fields."
+                )
+            else:
+                instruction = (
+                    "Return only the strict schema-bound QualifiedScriptOutput. "
+                    "canonical_script is a string, never an object; sections and claims are top-level arrays. "
+                    "Do not put a title or sections inside canonical_script. Use claim_text and evidence_span_ids exactly. "
+                    "Do not add undocumented fields."
+                )
+            if context.get("content_repair"):
+                instruction += (
+                    " This is the one authorized SCRIPT_CONTENT_REPAIR. Follow content_repair exactly: "
+                    "preserve all untouched sections verbatim and repair only the listed sections and their claim bindings."
+                )
+        else:
+            instruction = (
+                "Return only the strict schema-bound SemanticVerificationOutput. "
+                "For each span, emit its exact text and section_id only; VCOS derives UTF-8 offsets and hashes locally. "
+                "The selected text must occur exactly once in that section. Include every top-level field and emit no final PASS; "
+                "deterministic aggregation owns the final decision."
+            )
+        return json.dumps(
+            {
+                "prompt_version": prompt_version,
+                "response_schema_identifier": schema_identifier,
+                "instruction": instruction,
+                "frozen_context": context,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def _persist_response_snapshot(
+        self,
+        *,
+        run: ScriptQualificationRun,
+        attempt: ScriptQualificationBackgroundAttempt,
+        output: dict[str, Any],
+        accepted_typed_output_hash: str | None = None,
+        validation_errors: list[dict[str, Any]] | None = None,
+    ) -> ScriptQualificationProviderResponseSnapshot:
+        existing = self.session.scalar(
+            select(ScriptQualificationProviderResponseSnapshot).where(
+                ScriptQualificationProviderResponseSnapshot.background_attempt_id == attempt.id
+            )
+        )
+        if existing is not None:
+            return existing
+        raw = output.get("raw")
+        if not isinstance(raw, dict) or not attempt.provider_response_id:
+            raise ValidationFailureError("SCRIPT_QUALIFICATION_RESPONSE_SNAPSHOT_INPUT_INVALID")
+        content = str(output.get("content") or "")
+        snapshot = ScriptQualificationProviderResponseSnapshot(
+            script_qualification_run_id=run.id,
+            background_attempt_id=attempt.id,
+            phase=attempt.phase,
+            provider_response_id=attempt.provider_response_id,
+            provider_request_id=attempt.provider_request_id,
+            raw_provider_response=raw,
+            raw_provider_response_hash=content_hash(raw),
+            raw_output_content=content,
+            raw_output_hash=content_hash({"content": content}),
+            usage=output.get("usage") if isinstance(output.get("usage"), dict) else None,
+            response_schema_identifier=attempt.response_schema_identifier or "legacy-unbound-json-schema",
+            response_schema_hash=attempt.response_schema_hash,
+            prompt_version=(
+                attempt.prompt_version
+                or (
+                    run.writer_prompt_version
+                    if attempt.phase == "WRITER"
+                    else run.verifier_prompt_version
+                )
+            ),
+            producer_input_hash=attempt.input_fingerprint,
+            accepted_typed_output_hash=accepted_typed_output_hash,
+            validation_errors=validation_errors or [],
+        )
+        self.session.add(snapshot)
+        self.session.flush()
+        return snapshot
 
     @staticmethod
     def _receipt(attempt: ScriptQualificationBackgroundAttempt, output: dict[str, Any]) -> dict[str, Any]:
-        return {"provider": attempt.provider, "model": attempt.model, "lane_name": attempt.lane, "task": attempt.task, "provider_response_id": attempt.provider_response_id, "provider_request_id": attempt.provider_request_id, "input_fingerprint": attempt.input_fingerprint, "output_hash": attempt.output_hash, "usage": output.get("usage"), "background": True}
+        return {"provider": attempt.provider, "model": attempt.model, "lane_name": attempt.lane, "task": attempt.task, "provider_response_id": attempt.provider_response_id, "provider_request_id": attempt.provider_request_id, "input_fingerprint": attempt.input_fingerprint, "output_hash": attempt.output_hash, "usage": output.get("usage"), "background": True, "response_schema_identifier": attempt.response_schema_identifier, "response_schema_hash": attempt.response_schema_hash, "prompt_version": attempt.prompt_version}
+
+
+def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Make a Pydantic JSON Schema compatible with Responses strict output."""
+
+    copied = json.loads(json.dumps(schema))
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            # Defaults are rejected by OpenAI strict Structured Outputs. The
+            # field is still required and nullable fields retain their explicit
+            # null branch, so removing a default does not weaken validation.
+            node.pop("default", None)
+            if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+                node["required"] = list(node["properties"])
+                node["additionalProperties"] = False
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(copied)
+    return copied
+
+
+def _validation_errors(exc: Exception) -> list[dict[str, Any]]:
+    if hasattr(exc, "errors"):
+        try:
+            return [dict(item) for item in exc.errors(include_url=False)]
+        except TypeError:  # pragma: no cover - old Pydantic compatibility
+            return [dict(item) for item in exc.errors()]
+    return [{"type": type(exc).__name__, "msg": str(exc), "loc": []}]

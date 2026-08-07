@@ -145,7 +145,19 @@ class ProductionWorkflowWorker:
         claim = self._claim()
         if claim is None:
             return WorkerRunResult(status="IDLE")
+        return self._execute_claim(claim)
 
+    def run_exact_event(self, *, event_id: uuid.UUID) -> WorkerRunResult:
+        """Execute one known outbox command without any scheduler or queue scan."""
+
+        if not self._runtime_schema_ready():
+            return WorkerRunResult(status="SCHEMA_BLOCKED", event_id=event_id)
+        claim = self._claim_exact(event_id)
+        if claim is None:
+            return WorkerRunResult(status="IDLE", event_id=event_id)
+        return self._execute_claim(claim)
+
+    def _execute_claim(self, claim: ClaimedWorkflowEvent) -> WorkerRunResult:
         pump = _HeartbeatPump(
             session_factory=self.session_factory,
             event_id=claim.event_id,
@@ -298,6 +310,20 @@ class ProductionWorkflowWorker:
         session = self.session_factory()
         try:
             claim = self._dispatcher(session).claim_next(worker_id=self.worker_id)
+            session.commit()
+            return claim
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _claim_exact(self, event_id: uuid.UUID) -> ClaimedWorkflowEvent | None:
+        session = self.session_factory()
+        try:
+            claim = self._dispatcher(session).claim_exact(
+                event_id=event_id, worker_id=self.worker_id
+            )
             session.commit()
             return claim
         except Exception:

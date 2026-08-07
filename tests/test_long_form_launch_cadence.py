@@ -232,9 +232,6 @@ class _DeterministicPassingQualificationProducer:
         spans = [
             {
                 "text": text,
-                "start_byte": script.encode("utf-8").find(text.encode("utf-8")),
-                "end_byte": script.encode("utf-8").find(text.encode("utf-8")) + len(text.encode("utf-8")),
-                "span_hash": span_hash(text),
                 "section_id": section_id,
             }
             for text, section_id in zip(self.sentences, self.section_ids, strict=True)
@@ -2045,12 +2042,8 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
             script = context["canonical_script"]
             spans = []
             for index, (text, section_id) in enumerate(zip(self.sentences, self.section_ids, strict=True), start=1):
-                start = script.encode("utf-8").find(text.encode("utf-8"))
                 spans.append({
                     "text": text,
-                    "start_byte": start,
-                    "end_byte": start + len(text.encode("utf-8")),
-                    "span_hash": span_hash(text),
                     "section_id": section_id,
                 })
             evidence_id = context["factual_evidence_pack"]["spans"][0]["evidence_span_id"]

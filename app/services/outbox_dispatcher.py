@@ -354,6 +354,90 @@ class DurableOutboxDispatcher:
             )
         raise RuntimeError("OUTBOX_CLAIM_SETTLEMENT_LIMIT_EXCEEDED")
 
+    def claim_exact(
+        self, *, event_id: uuid.UUID, worker_id: str
+    ) -> ClaimedWorkflowEvent | None:
+        """Claim one named event without inspecting any other outbox row.
+
+        This is deliberately separate from ``claim_next`` for tightly scoped
+        operator-authorized continuations.  It preserves the normal lease,
+        attempt, and acknowledgement mechanics while never behaving as a
+        queue sweep.
+        """
+
+        _validate_worker_id(worker_id)
+        now = self.now()
+        event = self.session.scalar(
+            select(DomainEvent)
+            .where(DomainEvent.id == event_id)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        if event is None:
+            return None
+        if (
+            event.delivered_at is not None
+            or event.published_at is not None
+            or event.dead_lettered_at is not None
+            or (
+                event.next_attempt_at is not None
+                and event.next_attempt_at > now
+            )
+            or (
+                event.lease_owner is not None
+                and event.lease_expires_at is not None
+                and event.lease_expires_at > now
+            )
+        ):
+            return None
+        if event.command_id is None or not isinstance(event.payload, dict):
+            raise ConflictError("SCOPED_EVENT_IDENTITY_INVALID")
+        if event.attempt_count >= event.max_attempts:
+            raise ConflictError("SCOPED_EVENT_RETRY_BUDGET_EXHAUSTED")
+
+        run = (
+            self._lock_run(event.workflow_run_id)
+            if event.workflow_run_id is not None
+            else None
+        )
+        if event.workflow_run_id is not None and run is None:
+            raise ConflictError("SCOPED_EVENT_WORKFLOW_MISSING")
+        if run is not None and run.state == ProductionWorkflowState.CANCELED.value:
+            raise ConflictError("SCOPED_EVENT_WORKFLOW_CANCELED")
+
+        max_execution_seconds = _bounded_execution_seconds(
+            event.metadata_, self.max_execution_seconds
+        )
+        execution_deadline = now + timedelta(seconds=max_execution_seconds)
+        lease_expires_at = min(
+            now + timedelta(seconds=self.lease_seconds), execution_deadline
+        )
+        metadata = dict(event.metadata_ or {})
+        metadata.update(
+            {
+                "lease_acquired_at": now.isoformat(),
+                "execution_deadline": execution_deadline.isoformat(),
+                "lease_generation": int(metadata.get("lease_generation", 0)) + 1,
+            }
+        )
+        event.metadata_ = metadata
+        event.attempt_count += 1
+        event.lease_owner = worker_id
+        event.lease_expires_at = lease_expires_at
+        event.heartbeat_at = now
+        event.last_error_code = None
+        event.last_error_summary = None
+        self.session.flush()
+        return ClaimedWorkflowEvent(
+            event_id=event.id,
+            workflow_run_id=event.workflow_run_id,
+            command_id=event.command_id,
+            worker_id=worker_id,
+            attempt_number=event.attempt_count,
+            lease_expires_at=lease_expires_at,
+            execution_deadline=execution_deadline,
+        )
+
     def require_claimed_event(
         self, *, event_id: uuid.UUID, worker_id: str
     ) -> DomainEvent:

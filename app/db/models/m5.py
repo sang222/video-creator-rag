@@ -609,6 +609,17 @@ class EditorialIdeaCandidate(Base):
     parent_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("editorial_idea_candidates.id")
     )
+    replaces_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("editorial_idea_candidates.id")
+    )
+    replacement_authority_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("script_contract_replacement_authorities.id")
+    )
+    replacement_reason: Mapped[str | None] = mapped_column(String(160))
+    replacement_lineage_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    script_contract_version: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="V1_LEGACY"
+    )
     topic_repair_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
     proposed_angle: Mapped[str | None] = mapped_column(Text)
@@ -706,6 +717,7 @@ class EditorialIdeaCandidate(Base):
         ),
         Index("ix_editorial_idea_candidates_stage", "stage"),
         Index("ix_editorial_candidate_parent", "parent_candidate_id"),
+        Index("ix_editorial_candidate_replaces", "replaces_candidate_id"),
         Index(
             "ix_editorial_idea_candidates_active_launch_policy",
             "active_launch_policy_version_id",
@@ -715,6 +727,10 @@ class EditorialIdeaCandidate(Base):
             "active_launch_run_id",
         ),
         Index("ix_editorial_idea_candidates_created_at", "created_at"),
+        CheckConstraint(
+            "script_contract_version in ('V1_LEGACY','V2_SINGLE_SOURCE')",
+            name="ck_editorial_candidate_script_contract_version",
+        ),
     )
 
 
