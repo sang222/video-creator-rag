@@ -521,6 +521,9 @@ class TopicDefinitionService:
         title = _clean(snapshot.get("title"))
         subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", title, flags=re.I).strip()
         subject = subject or title
+        canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
+        if not canonical_url:
+            raise ValidationFailureError("EDITORIAL_TOPIC_CANONICAL_SOURCE_MISSING")
         audience = (candidate.target_audience_definition or {}).get("primary_persona") or "small professional teams"
         pains = (candidate.target_audience_definition or {}).get("pain_points") or []
         problem = _clean(pains[0] if pains else "need a bounded way to evaluate an official technical document before acting")
@@ -534,7 +537,10 @@ class TopicDefinitionService:
             fields={
                 "subject_type": "OFFICIAL_DOCUMENTED_PRODUCT_OR_FEATURE",
                 "subject_name": subject,
-                "subject_canonical_id": f"official-document:{evidence.id}",
+                # Evidence row IDs are lineage, not a subject identity. A
+                # stable canonical URL keeps repeated fresh fetches of the
+                # same official document in one editorial territory.
+                "subject_canonical_id": f"official-document:{canonical_hash({'canonical_url': canonical_url})}",
                 "subject_evidence_refs": [evidence_ref],
                 "subject_evidence_spans": [{"evidence_id": str(evidence.id), "text": subject_span, "span_hash": span_hash(subject_span)}],
                 "target_audience": audience, "audience_problem": problem,
@@ -581,6 +587,9 @@ class TopicDefinitionService:
         snapshot = _source_snapshot(evidence)
         title = _clean(snapshot.get("title"))
         subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", title, flags=re.I).strip() or title
+        canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
+        if not canonical_url:
+            raise ValidationFailureError("EDITORIAL_TOPIC_CANONICAL_SOURCE_MISSING")
         excerpt = _clean(snapshot.get("content_excerpt"))
         subject_span = subject if subject and subject in excerpt else excerpt[:400]
         evidence_ref = _evidence_ref(evidence)
@@ -593,7 +602,7 @@ class TopicDefinitionService:
             fields={
                 "subject_type": "OFFICIAL_DOCUMENTED_PRODUCT_OR_FEATURE",
                 "subject_name": subject,
-                "subject_canonical_id": f"official-document:{evidence.id}",
+                "subject_canonical_id": f"official-document:{canonical_hash({'canonical_url': canonical_url})}",
                 "subject_evidence_refs": [evidence_ref],
                 "subject_evidence_spans": [{"evidence_id": str(evidence.id), "text": subject_span, "span_hash": span_hash(subject_span)}],
                 "target_audience": audience,

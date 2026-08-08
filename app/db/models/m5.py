@@ -620,6 +620,11 @@ class EditorialIdeaCandidate(Base):
     script_contract_version: Mapped[str] = mapped_column(
         String(80), nullable=False, default="V1_LEGACY"
     )
+    # New candidates carry a source-run-independent novelty authority. The
+    # fields remain nullable so historical lineage is never rewritten by a
+    # schema deployment alone.
+    editorial_territory_key: Mapped[str | None] = mapped_column(String(64))
+    editorial_novelty_receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     topic_repair_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
     proposed_angle: Mapped[str | None] = mapped_column(Text)
@@ -725,6 +730,12 @@ class EditorialIdeaCandidate(Base):
         Index(
             "ix_editorial_idea_candidates_active_launch_run",
             "active_launch_run_id",
+        ),
+        Index(
+            "ix_editorial_idea_candidates_territory",
+            "channel_workspace_id",
+            "policy_snapshot_id",
+            "editorial_territory_key",
         ),
         Index("ix_editorial_idea_candidates_created_at", "created_at"),
         CheckConstraint(

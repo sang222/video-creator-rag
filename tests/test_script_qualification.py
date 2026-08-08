@@ -58,8 +58,11 @@ def _span(script: str, section_id: str, text: str) -> VerifierScriptSpan:
 
 
 def test_historical_greenlit_without_current_topic_receipt_is_ineligible(db_session):
-    flow = QualificationFactory(db_session).m5_admitted_project()
+    flow = QualificationFactory(db_session).m5_admitted_project(mock_mode="blocked")
     candidate = flow.candidate
+    # Simulate a pre-topic-gate historical GREENLIT row. New greenlights must
+    # have a receipt, but legacy lineage remains read-only and ineligible.
+    candidate.stage = "GREENLIT"
     original = (candidate.stage, candidate.proposed_title, candidate.proposed_angle)
 
     eligibility = TopicDefinitionService(db_session).current_eligibility(candidate)
@@ -70,7 +73,7 @@ def test_historical_greenlit_without_current_topic_receipt_is_ineligible(db_sess
 
 
 def test_topic_gate_blocks_boilerplate_and_passes_bound_specific_definition(db_session):
-    flow = QualificationFactory(db_session).m5_admitted_project()
+    flow = QualificationFactory(db_session).m5_admitted_project(mock_mode="blocked")
     candidate = flow.candidate
     candidate.proposed_title = "GPT-5.4 Pro Model | OpenAI API"
     candidate.proposed_angle = "A source-grounded standalone explanation constrained to the fetched official documentation."

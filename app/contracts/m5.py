@@ -472,6 +472,8 @@ class EditorialIdeaCandidateRead(BaseModel):
     stage: EditorialIdeaCandidateStage
     parent_candidate_id: uuid.UUID | None
     topic_repair_depth: int
+    editorial_territory_key: str | None = None
+    editorial_novelty_receipt: dict[str, Any] | None = None
     proposed_title: str
     proposed_angle: str | None
     proposed_format: str | None

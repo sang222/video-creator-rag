@@ -10,6 +10,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts.m5 import EditorialIdeaCandidateTransition
+from app.core.actor import _system_worker_actor
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.launch_cadence import LongFormPublishSlot
@@ -22,6 +24,7 @@ from app.db.models.script_qualification import (
 )
 from app.services.canonical_script_compiler import SCRIPT_CONTRACT_V2
 from app.services.config_registry import content_hash
+from app.services.editorial_research import EditorialResearchService
 from app.services.launch_cadence import _preflight_demand_authority_valid
 from app.services.production_start_readiness import resolve_budget_authority
 from app.services.script_qualification import (
@@ -204,6 +207,18 @@ class ScriptContractReplacementAuthorityService:
             source=source_preflight, candidate=candidate, authority=authority
         )
         self.session.add(preflight)
+        self.session.flush()
+        candidate = EditorialResearchService(self.session).transition_candidate(
+            candidate_id=candidate.id,
+            data=EditorialIdeaCandidateTransition(
+                target_stage="GREENLIT",
+                idea_market_preflight_id=preflight.id,
+                reason_codes=[REPLACEMENT_REASON],
+            ),
+            actor=_system_worker_actor(
+                "vcos-durable-worker", permissions={"editorial.manage"}
+            ),
+        )
         replacement_slot = self._clone_slot(slot=slot, candidate=candidate, authority=authority)
         self.session.add(replacement_slot)
         self.session.flush()
@@ -270,7 +285,7 @@ class ScriptContractReplacementAuthorityService:
         )
         return EditorialIdeaCandidate(
             **values,
-            stage="GREENLIT",
+            stage="PREFLIGHT_PASS",
             replaces_candidate_id=parent.id,
             replacement_authority_id=authority.id,
             replacement_reason=REPLACEMENT_REASON,

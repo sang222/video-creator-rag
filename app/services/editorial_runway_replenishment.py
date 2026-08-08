@@ -60,6 +60,7 @@ from app.db.models.m5 import (
 )
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.services.config_registry import content_hash
+from app.services.editorial_novelty import EditorialNoveltyService, normalize_editorial_text
 from app.db.models.r3d1 import ContentCategory
 from app.services.editorial_fresh_evidence import (
     EditorialEvidenceProviderActivationService,
@@ -83,7 +84,7 @@ from app.services.vcos_v2 import AssignmentResolutionError, DeterministicAssignm
 # v8 makes the current Topic Definition gate part of the durable scheduled
 # attempt identity. A same-day historical run that only produced generic,
 # discovery-derived candidates cannot suppress one bounded repair attempt.
-RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v8"
+RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v9"
 _METADATA_KEY = "runway_replenishment"
 _ACTIVE_STATUSES = {"PENDING", "RUNNING"}
 
@@ -168,31 +169,20 @@ class EditorialRunwayReplenishmentService:
                 status="SKIPPED",
                 reason_codes=("RUNWAY_REPLENISHMENT_LAUNCH_AUTHORITY_MISMATCH",),
             )
-        # Historical GREENLIT is not current production eligibility.  A
-        # candidate with no current Topic Definition receipt cannot satisfy the
-        # runway target or suppress bounded editorial repair.
-        from app.services.script_qualification import (
-            TOPIC_GATE_VERSION,
-            TopicDefinitionService,
-        )
+        # Row count is not runway diversity.  Only a current topic/preflight/
+        # novelty authority may occupy one distinct editorial territory.
+        from app.services.script_qualification import TOPIC_GATE_VERSION
 
-        topic_service = TopicDefinitionService(self.session)
-        current_greenlit = [
-            candidate
-            for candidate in self.session.scalars(
-                select(EditorialIdeaCandidate).where(
-                    EditorialIdeaCandidate.channel_workspace_id == run.channel_workspace_id,
-                    EditorialIdeaCandidate.policy_snapshot_id == policy.policy_snapshot_id,
-                    EditorialIdeaCandidate.stage == "GREENLIT",
-                )
-            ).all()
-            if topic_service.current_eligibility(candidate).eligible
-        ]
-        if len(current_greenlit) >= policy.greenlight_target:
+        novelty = EditorialNoveltyService(self.session)
+        runway_counts = novelty.runway_counts(
+            channel_workspace_id=run.channel_workspace_id,
+            policy_snapshot_id=policy.policy_snapshot_id,
+        )
+        if runway_counts.distinct_eligible_territory_count >= policy.greenlight_target:
             return RunwayReplenishmentResult(
                 launch_run_id=run.id,
                 status="SATISFIED",
-                reason_codes=("RUNWAY_REPLENISHMENT_GREENLIGHT_TARGET_MET",),
+                reason_codes=("RUNWAY_REPLENISHMENT_DISTINCT_TERRITORY_TARGET_MET",),
             )
 
         policy_snapshot = self.session.get(
@@ -241,6 +231,10 @@ class EditorialRunwayReplenishmentService:
                 reason_codes=tuple(existing.reason_codes or []),
             )
 
+        exclusion_authority = novelty.occupied_exclusion_authority(
+            channel_workspace_id=run.channel_workspace_id,
+            policy_snapshot_id=policy.policy_snapshot_id,
+        )
         research_slot, slot_blocker = self._create_research_slot(
             run=run,
             policy=policy,
@@ -291,10 +285,17 @@ class EditorialRunwayReplenishmentService:
                         "policy_hash": policy.canonical_hash,
                         "scope_key": scope_key,
                         "attempt_key": attempt_key,
-                        "greenlit_count_before": len(current_greenlit),
+                        "raw_greenlit_row_count_before": runway_counts.raw_greenlit_rows,
+                        "current_eligible_greenlit_row_count_before": (
+                            runway_counts.current_eligible_greenlit_rows
+                        ),
+                        "distinct_eligible_territory_count_before": (
+                            runway_counts.distinct_eligible_territory_count
+                        ),
                         "greenlight_target": policy.greenlight_target,
                         "provider_calls_allowed": False,
                         "mode_decision": diagnostics["mode_decision"],
+                        "exclusion_authority": exclusion_authority,
                     }
                 },
             ),
@@ -349,6 +350,7 @@ class EditorialRunwayReplenishmentService:
             research_question = self._research_question(
                 research_slot=research_slot,
                 mode_decision=mode_decision,
+                exclusion_authority=exclusion_authority,
             )
             settings = get_settings()
             provider = OpenAIWebEvidenceProvider(
@@ -392,6 +394,7 @@ class EditorialRunwayReplenishmentService:
                         mode_decision=mode_decision,
                         collection_receipt=collection.receipt or {},
                         evidence_refs=list(collection.evidence_refs),
+                        exclusion_authority=exclusion_authority,
                         actor=actor,
                     )
                 except ValidationFailureError as exc:
@@ -445,6 +448,7 @@ class EditorialRunwayReplenishmentService:
         *,
         research_slot: EditorialCalendarSlot,
         mode_decision: EditorialModeDecision,
+        exclusion_authority: dict[str, list[str]],
     ) -> str:
         """Derive one bounded discovery question from frozen editorial facts."""
 
@@ -456,20 +460,37 @@ class EditorialRunwayReplenishmentService:
             binding = mode_decision.series_binding or {}
             series_title = str(binding.get("series_display_name") or "the active series")
             episode_delta = str(binding.get("episode_delta") or "the next bounded episode")
-            return (
+            prompt = (
                 "Find current first-party OpenAI documentation that can ground "
                 f"a US English long-form episode for {series_title}. The episode "
                 f"must {episode_delta}. Return only official documentation URLs; "
                 "do not make market, ROI, or performance claims."
             )
+            return f"{prompt} {EditorialRunwayReplenishmentService._exclusion_prompt(exclusion_authority)}"
         if mode_decision.content_mode != ContentMode.STANDALONE.value:
             raise ValidationFailureError("EDITORIAL_RESEARCH_QUESTION_AUTHORITY_MISSING")
-        return (
+        prompt = (
             "Find current first-party OpenAI documentation that can ground a "
             "US English long-form standalone editorial idea for the approved "
             f"pillar '{pillar}' and frozen production goal '{goal}'. Return "
             "only official documentation URLs; do not make market, ROI, "
             "time-saving, or earnings claims."
+        )
+        return f"{prompt} {EditorialRunwayReplenishmentService._exclusion_prompt(exclusion_authority)}"
+
+    @staticmethod
+    def _exclusion_prompt(exclusion_authority: dict[str, list[str]]) -> str:
+        items = [
+            *exclusion_authority.get("excluded_canonical_source_urls", []),
+            *exclusion_authority.get("excluded_editorial_questions", []),
+        ]
+        if not items:
+            return "Return a materially different documented question and learning outcome."
+        compact = "; ".join(str(item) for item in items[:12])
+        return (
+            "Do not return documentation already represented by these current "
+            f"territories: {compact}. The source must support a materially different "
+            "editorial question and learning outcome."
         )
 
     def _create_candidate_and_preflight(
@@ -483,6 +504,7 @@ class EditorialRunwayReplenishmentService:
         mode_decision: EditorialModeDecision,
         collection_receipt: dict[str, Any],
         evidence_refs: list[dict[str, Any]],
+        exclusion_authority: dict[str, list[str]],
         actor: ActorContext,
     ):
         if mode_decision.content_mode not in {
@@ -495,17 +517,40 @@ class EditorialRunwayReplenishmentService:
         from app.services.script_qualification import TopicDefinitionService, classify_source
 
         topic_evidence = None
+        excluded_urls = {
+            normalize_editorial_text(item)
+            for item in exclusion_authority.get("excluded_canonical_source_urls", [])
+        }
+        topic_capable_found = False
         for ref in evidence_refs:
             try:
                 evidence_id = uuid.UUID(str(ref["id"]))
             except (KeyError, TypeError, ValueError):
                 continue
             candidate_evidence = self.session.get(SearchDemandEvidence, evidence_id)
-            if candidate_evidence is not None and classify_source(candidate_evidence) == "TOPIC_CAPABLE":
+            if candidate_evidence is None or classify_source(candidate_evidence) != "TOPIC_CAPABLE":
+                continue
+            topic_capable_found = True
+            snapshot = (
+                ((candidate_evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get(
+                    "source_snapshot"
+                )
+                or {}
+            )
+            canonical_url = normalize_editorial_text(
+                snapshot.get("canonical_url") or candidate_evidence.source_ref
+            )
+            if canonical_url and canonical_url in excluded_urls:
+                continue
+            if candidate_evidence is not None:
                 topic_evidence = candidate_evidence
                 break
         if topic_evidence is None:
-            raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
+            raise ValidationFailureError(
+                "RUNWAY_REPLENISHMENT_NOVEL_SOURCE_EXHAUSTED"
+                if topic_capable_found
+                else "EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED"
+            )
         first_evidence = topic_evidence
         source_snapshot = (
             ((first_evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get(

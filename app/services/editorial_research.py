@@ -696,6 +696,51 @@ class EditorialResearchService:
                 raise ValidationFailureError(
                     "GREENLIGHT_DETERMINISTIC_ELIGIBILITY_NOT_MET"
                 )
+            # Novelty is a deterministic authority, not an editorial score.
+            # It locks the active launch and occupied candidates before either
+            # concurrent worker can promote an equivalent territory.
+            from app.services.editorial_novelty import EditorialNoveltyService
+            from app.services.script_qualification import TopicDefinitionService
+
+            topic_eligibility = TopicDefinitionService(
+                self.session
+            ).current_eligibility(candidate)
+            if not topic_eligibility.eligible or topic_eligibility.definition is None:
+                raise ValidationFailureError("EDITORIAL_NOVELTY_AUTHORITY_MISSING")
+            novelty = EditorialNoveltyService(self.session)
+            evaluation = novelty.evaluate(
+                candidate=candidate,
+                topic=topic_eligibility.definition,
+            )
+            novelty.persist(candidate, evaluation)
+            if evaluation.state == "BLOCK":
+                # The candidate has passed strict preflight but is not an
+                # additional editorial option.  Preserve its research lineage
+                # while removing it from the active runway through a legal
+                # terminal transition.
+                target = "REJECTED"
+                data = data.model_copy(
+                    update={
+                        "reason_codes": list(
+                            dict.fromkeys(
+                                [
+                                    "EDITORIAL_TERRITORY_DUPLICATE",
+                                    *evaluation.reason_codes,
+                                ]
+                            )
+                        )
+                    }
+                )
+            else:
+                data = data.model_copy(
+                    update={
+                        "reason_codes": list(
+                            dict.fromkeys(
+                                [*data.reason_codes, "EDITORIAL_NOVELTY_PASS"]
+                            )
+                        )
+                    }
+                )
         if target == "PREFLIGHT_PASS":
             candidate.evidence_refs = list(canonical_evidence_refs)
             candidate.rights_policy_state = "PASS"

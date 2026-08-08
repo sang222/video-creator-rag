@@ -861,7 +861,11 @@ def test_fresh_evidence_collector_rejects_non_https_snapshot(
     assert "SOURCE_SNAPSHOT_INVALID" in result.authority.reason_codes
 
 
-def _greenlit_candidate(session, scope, actor):
+def _greenlit_candidate(session, scope, actor, *, topic_variant: str | None = None):
+    suffix = f" {topic_variant}" if topic_variant else ""
+    source_slug = f"audit-{topic_variant.lower().replace(' ', '-')}" if topic_variant else "audit"
+    source_url = f"https://docs.example.test/automation/{source_slug}"
+    source_title = f"How a Small Team Audits One Automation{suffix}"
     category = R3D1AdminService(session).create_content_category(
         ContentCategoryCreate(
             company_id=scope.company.id,
@@ -913,7 +917,7 @@ def _greenlit_candidate(session, scope, actor):
             channel_workspace_id=scope.channel.id,
             evidence_source_type="OFFICIAL_DOCUMENT",
             authority_purpose="CLAIM_SOURCE",
-            source_ref="https://docs.example.test/automation/audit",
+            source_ref=source_url,
             query="small team automation audit",
             platform="YOUTUBE",
             geo="US",
@@ -921,9 +925,9 @@ def _greenlit_candidate(session, scope, actor):
             metadata={
                 "editorial_fresh_evidence": {
                     "source_snapshot": {
-                        "canonical_url": "https://docs.example.test/automation/audit",
+                        "canonical_url": source_url,
                         "content_hash": "c" * 64,
-                        "title": "How a Small Team Audits One Automation",
+                        "title": source_title,
                         "content_excerpt": (
                             "The official automation-audit document defines a bounded "
                             "audit workflow for a small team."
@@ -934,7 +938,7 @@ def _greenlit_candidate(session, scope, actor):
                     },
                     "fetch_receipt": {
                         "status": "PASS",
-                        "source_ref": "https://docs.example.test/automation/audit",
+                        "source_ref": source_url,
                     },
                 }
             },
@@ -958,7 +962,7 @@ def _greenlit_candidate(session, scope, actor):
     candidate = research.add_candidate(
         data=EditorialIdeaCandidateCreate(
             editorial_research_run_id=run.id,
-            proposed_title="How a Small Team Audits One Automation",
+            proposed_title=source_title,
             proposed_angle="A bounded evidence-led operating walkthrough.",
             proposed_format="long-form explainer",
             proposed_pillar="AI automation workflows",
@@ -1026,6 +1030,9 @@ def _greenlit_candidate(session, scope, actor):
             "captured_at": claim_evidence.captured_at.isoformat(),
         }
     ]
+    # The production transition now requires a current topic gate before it
+    # can derive and persist novelty authority at GREENLIT.
+    _bind_current_topic_authority(session, candidate)
     research.transition_candidate(
         candidate_id=candidate.id,
         data=EditorialIdeaCandidateTransition(
@@ -1042,6 +1049,9 @@ def _greenlit_candidate(session, scope, actor):
 def _bind_current_topic_authority(session, candidate) -> None:
     """Give a test candidate one current, topic-capable factual snapshot."""
 
+    existing = TopicDefinitionService(session).current_eligibility(candidate)
+    if existing.eligible:
+        return
     evidence_id = uuid.UUID(str(candidate.evidence_refs[0]["id"]))
     evidence = session.get(SearchDemandEvidence, evidence_id)
     assert evidence is not None
@@ -1454,7 +1464,9 @@ def test_series_reservation_allocates_sequential_episodes_from_stale_topic_inten
     )
     actor = _actor(db_session, scope)
     _, first_candidate, _ = _greenlit_candidate(db_session, scope, actor)
-    _, second_candidate, _ = _greenlit_candidate(db_session, scope, actor)
+    _, second_candidate, _ = _greenlit_candidate(
+        db_session, scope, actor, topic_variant="Second Workflow"
+    )
     # Both TopicDefinitions are intentionally created while next_episode is 1.
     _bind_series_topic_authority(
         db_session, first_candidate, plan=plans[0], run=series_run

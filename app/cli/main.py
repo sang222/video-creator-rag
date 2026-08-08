@@ -12,7 +12,11 @@ from alembic.config import Config
 from app.core.config import get_settings
 from app.core.db import check_database
 from app.core.errors import ValidationFailureError
+from app.core.actor import _system_worker_actor
 from app.db.session import session_scope
+from app.services.editorial_novelty import (
+    EditorialDuplicateCleanupService,
+)
 from app.contracts import (
     ApprovalDecisionCreate,
     AnalyticsSyncRunCreate,
@@ -151,6 +155,7 @@ from app.services import (
 app = typer.Typer(no_args_is_help=True)
 db_app = typer.Typer(no_args_is_help=True)
 data_app = typer.Typer(no_args_is_help=True)
+editorial_app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(no_args_is_help=True)
 audit_app = typer.Typer(no_args_is_help=True)
 company_app = typer.Typer(no_args_is_help=True)
@@ -198,6 +203,7 @@ memory_influence_app = typer.Typer(no_args_is_help=True)
 cost_firewall_app = typer.Typer(no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(data_app, name="data")
+app.add_typer(editorial_app, name="editorial")
 app.add_typer(config_app, name="config")
 app.add_typer(audit_app, name="audit")
 app.add_typer(company_app, name="company")
@@ -274,6 +280,44 @@ def data_purge_mock_runtime(
             typer.echo(json.dumps(result))
     except Exception as exc:
         _fail(f"data purge-mock-runtime failed: {exc}")
+
+
+@editorial_app.command("dedupe")
+def editorial_dedupe(
+    apply: bool = typer.Option(False, "--apply"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    report_path: Path = typer.Option(
+        Path("var/diagnostics/editorial-novelty-dedupe.json"), "--report-path"
+    ),
+) -> None:
+    """Plan or apply legal cleanup of duplicate active editorial territories."""
+
+    if apply and dry_run:
+        _fail("choose either --dry-run or --apply")
+    try:
+        with session_scope() as session:
+            service = EditorialDuplicateCleanupService(session)
+            planned = service.plan()
+            output: dict[str, Any] = {
+                "schema_version": "editorial-novelty-dedupe.v1",
+                "mode": "apply" if apply else "dry-run",
+                "dedupe_plan_valid": not any(item.conflict for item in planned),
+                "clusters": service.report(planned),
+            }
+            if apply:
+                actor = _system_worker_actor(
+                    "vcos-durable-worker",
+                    permissions={"editorial.manage"},
+                )
+                applied = service.apply(clusters=planned, actor=actor)
+                output["applied_clusters"] = service.report(applied)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(output, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            typer.echo(json.dumps(output, sort_keys=True))
+    except Exception as exc:
+        _fail(f"editorial dedupe failed: {exc}")
 
 
 @learning_loop_app.command("promote")
