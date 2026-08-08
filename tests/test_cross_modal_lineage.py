@@ -345,3 +345,4 @@ def test_real_timeline_projection_requires_timed_words_and_preserves_lineage() -
         "narration_unit_compilation"
     ]["content_hash"]
     assert all(scene["narration_unit_ids"] for scene in projection["scenes"])
+    assert all("body" not in scene and "headline" not in scene for scene in projection["scenes"])

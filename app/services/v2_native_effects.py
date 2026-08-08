@@ -121,6 +121,15 @@ _CREATIVE_GATES = (
     "SubtitleSidecarGate",
     "CrossModalLineageGate",
 )
+_SEMANTIC_OVERLAY_TYPES = frozenset(
+    {
+        "SEMANTIC_CALLOUT",
+        "DIAGRAM_LABEL",
+        "DATA_LABEL",
+        "UI_ANNOTATION",
+        "TITLE_CARD",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,6 +448,14 @@ class V2LocalNativeProductionAdapter:
         }:
             if audio_strategy not in V2_AUDIO_STRATEGIES:
                 raise ValidationFailureError("V2_LOCAL_NATIVE_AUDIO_STRATEGY_REQUIRED")
+            if (
+                execution_mode == "REAL_LONG_FORM_PRODUCTION"
+                and operation.stage == ProductionWorkflowStage.RENDER
+                and audio_strategy != V2_ELEVENLABS_NARRATION_STRATEGY
+            ):
+                raise ValidationFailureError(
+                    "V2_REAL_RENDER_ELEVENLABS_NARRATION_REQUIRED"
+                )
             if context.run.production_lane == "LONG_FORM" and audio_strategy not in {
                 V2_LOCAL_NARRATION_STRATEGY,
                 V2_ELEVENLABS_NARRATION_STRATEGY,
@@ -1092,6 +1109,17 @@ class V2LocalNativeProductionAdapter:
             V2_LOCAL_NARRATION_STRATEGY,
             V2_ELEVENLABS_NARRATION_STRATEGY,
         }
+        if narration_audio_strategy and (
+            not isinstance(timeline.get("audio_asset_ref"), str)
+            or not timeline["audio_asset_ref"].strip()
+            or timeline.get("audio_asset_ref") != media_journal.get("audio_asset_ref")
+            or not isinstance(timeline.get("audio_checksum"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", timeline["audio_checksum"])
+            or timeline.get("audio_checksum") != media_journal.get("audio_checksum")
+            or timeline.get("narration_present") is not True
+            or media_journal.get("narration_present") is not True
+        ):
+            raise ValidationFailureError("V2_NATIVE_RENDER_AUDIO_AUTHORITY_MISMATCH")
         audio_path = (
             self._from_relative(_required_text(media_journal, "audio_relative_path"))
             if narration_audio_strategy
@@ -1307,8 +1335,8 @@ class V2LocalNativeProductionAdapter:
             native_qc.checks.get("checksum_sha256") != run.render_output_checksum
         ):
             raise ValidationFailureError("V2_NATIVE_QC_EVIDENCE_MISMATCH")
-        approved_fragments = [
-            value[:520]
+        approved_fragment_hashes = {
+            hashlib.sha256(value.encode("utf-8")).hexdigest()
             for value in (
                 [
                     item.strip()
@@ -1320,10 +1348,10 @@ class V2LocalNativeProductionAdapter:
                 ]
                 or _script_fragments(script.content)
             )
-        ]
-        approved_scene_bodies = (
+        }
+        approved_narration_unit_ids = (
             {
-                str(item.get("text") or "")[:520]
+                str(item.get("narration_unit_id") or "")
                 for item in (
                     (timeline.get("narration_unit_compilation") or {}).get(
                         "narration_units", []
@@ -1331,10 +1359,10 @@ class V2LocalNativeProductionAdapter:
                     if isinstance(timeline.get("narration_unit_compilation"), dict)
                     else []
                 )
-                if str(item.get("text") or "").strip()
+                if str(item.get("narration_unit_id") or "").strip()
             }
             if cross_modal_report is not None
-            else set(approved_fragments)
+            else set()
         )
         scenes = list(timeline.get("scenes") or [])
         checks = {
@@ -1342,7 +1370,19 @@ class V2LocalNativeProductionAdapter:
             and all(
                 scene.get("script_artifact_version_id") == str(script.id)
                 and scene.get("script_content_hash") == script.content_hash
-                and scene.get("body") in approved_scene_bodies
+                and "body" not in scene
+                and (
+                    (
+                        bool(approved_narration_unit_ids)
+                        and set(scene.get("narration_unit_ids") or [])
+                        .issubset(approved_narration_unit_ids)
+                        and bool(scene.get("narration_unit_ids"))
+                    )
+                    or (
+                        not approved_narration_unit_ids
+                        and scene.get("script_text_hash") in approved_fragment_hashes
+                    )
+                )
                 for scene in scenes
             ),
             "VisualPlanBindingGate": bool(scenes)
@@ -2330,10 +2370,9 @@ def _build_timeline(
                     "start_ms": cursor,
                     "end_ms": end,
                     "duration_ms": scene_duration,
-                    "headline": (
-                        f"{project.title.strip()[:72]} · {index + 1}/{len(fragments)}"
-                    ),
-                    "body": fragment[:520],
+                    "script_text_hash": hashlib.sha256(
+                        fragment.encode("utf-8")
+                    ).hexdigest(),
                     "visual_treatment": "NATIVE_TEXT_CARD",
                     "script_artifact_version_id": str(script.id),
                     "script_content_hash": script.content_hash,
@@ -2376,15 +2415,15 @@ def _build_timeline(
         "subtitle_qc_hash": audio.get("subtitle_qc_hash"),
         "subtitle_qc_state": audio.get("subtitle_qc_state"),
         "audio_description": (
-            "Approved script rendered by the local operating-system speech "
-            "engine; measured audio endpoint and proportional script alignment."
+            "Authorized narration audio with verified timing evidence."
             if audio["narration_present"]
-            else (
-                "Authorized silent stereo bed; approved script is represented "
-                "as native on-screen text. No narration or TTS is claimed."
-            )
+            else "Authorized silent stereo bed; no narration is claimed."
         ),
         "scenes": scenes,
+        "semantic_overlays": _semantic_overlays_from_visual_plan(
+            visual=visual,
+            scenes=scenes,
+        ),
         **cross_modal,
     }
 
@@ -2528,8 +2567,9 @@ def _cross_modal_timeline_projection(
                 "start_ms": binding.actual_start_ms,
                 "end_ms": binding.actual_end_ms,
                 "duration_ms": binding.actual_end_ms - binding.actual_start_ms,
-                "headline": f"{project.title.strip()[:72]} · {ordinal}/{len(compilation.narration_units)}",
-                "body": unit.text[:520],
+                "narration_text_hash": hashlib.sha256(
+                    unit.text.encode("utf-8")
+                ).hexdigest(),
                 "visual_treatment": "NATIVE_TEXT_CARD",
                 "script_artifact_version_id": str(script.id),
                 "script_content_hash": script.content_hash,
@@ -2669,7 +2709,6 @@ def _cross_modal_qc_for_timeline(
         if actual is None:
             continue
         unit_ids = list(expected.narration_unit_ids)
-        expected_text = " ".join(units_by_id[item].text for item in unit_ids)
         if (
             int(actual.get("start_ms") or -1) != expected.actual_start_ms
             or int(actual.get("end_ms") or -1) != expected.actual_end_ms
@@ -2683,7 +2722,8 @@ def _cross_modal_qc_for_timeline(
         if (
             actual.get("narration_unit_ids") != unit_ids
             or actual.get("information_unit_ids") != expected.information_unit_ids
-            or actual.get("body") != expected_text[:520]
+            or "body" in actual
+            or "headline" in actual
         ):
             observe(
                 "NARRATION_VISUAL_DIRECT_MISMATCH",
@@ -2916,7 +2956,52 @@ def _build_render_plan(
         "paid_provider_calls": False,
         "asset_request_plan": timeline.get("asset_request_plan"),
         "scenes": timeline["scenes"],
+        "semantic_overlays": timeline.get("semantic_overlays") or [],
     }
+
+
+def _semantic_overlays_from_visual_plan(
+    *, visual: ArtifactVersion, scenes: list[dict[str, Any]]
+) -> list[dict[str, str]]:
+    """Project only explicit visual-text authority into renderer overlays.
+
+    Narration, caption, and transcript content deliberately have no route into
+    this structure.  A visual plan must name both the overlay type and the
+    immutable source that authorizes exact text before FFmpeg can draw it.
+    """
+
+    content = visual.content if isinstance(visual.content, dict) else {}
+    raw = content.get("semantic_overlays")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValidationFailureError("V2_SEMANTIC_OVERLAYS_INVALID")
+    scene_ids = {str(item.get("scene_id") or "") for item in scenes}
+    overlays: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    required = {
+        "overlay_id",
+        "scene_id",
+        "overlay_type",
+        "text",
+        "source_ref",
+        "source_hash",
+    }
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != required:
+            raise ValidationFailureError("V2_SEMANTIC_OVERLAY_CONTRACT_INVALID")
+        overlay = {key: str(item.get(key) or "").strip() for key in required}
+        if (
+            not all(overlay.values())
+            or overlay["overlay_id"] in seen_ids
+            or overlay["scene_id"] not in scene_ids
+            or overlay["overlay_type"] not in _SEMANTIC_OVERLAY_TYPES
+            or not re.fullmatch(r"[0-9a-f]{64}", overlay["source_hash"])
+        ):
+            raise ValidationFailureError("V2_SEMANTIC_OVERLAY_CONTRACT_INVALID")
+        seen_ids.add(overlay["overlay_id"])
+        overlays.append(overlay)
+    return sorted(overlays, key=lambda item: (item["scene_id"], item["overlay_id"]))
 
 
 def _build_manifest(
@@ -2970,10 +3055,11 @@ def _build_manifest(
         "compiled_scenes": timeline["scenes"],
         "asset_request_plan": timeline.get("asset_request_plan"),
         "transition_schedule": [],
-        "overlay_schedule": [],
+        "overlay_schedule": timeline.get("semantic_overlays") or [],
         "audio_mix_schedule": {
             "strategy": timeline["audio_strategy"],
             "audio_asset_ref": timeline["audio_asset_ref"],
+            "audio_checksum": timeline.get("audio_checksum"),
             "narration_present": timeline["narration_present"],
             "alignment_method": timeline["alignment_method"],
         },
@@ -3007,9 +3093,9 @@ def _build_manifest(
         "unresolved_inputs": [],
         "compilation_warnings": [],
         "compilation_reason_codes": [
-            "V2_PACKAGE_NATIVE_TEXT_LED_RENDER",
+            "V2_PACKAGE_NATIVE_RENDER",
             (
-                "V2_LOCAL_NARRATION_SCRIPT_BOUND"
+                "V2_NARRATION_AUDIO_SCRIPT_BOUND"
                 if timeline["narration_present"]
                 else "V2_SILENT_STEREO_EXPLICITLY_AUTHORIZED"
             ),

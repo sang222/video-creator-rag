@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -32,6 +33,15 @@ COMMAND_BUILDER_VERSION = "native-ffmpeg-command-builder/1.1.0"
 _RENDER_LOCK = threading.Lock()
 IMG_CANARY_OVERLAY_PANEL_RGB = "08111f"
 IMG_CANARY_OVERLAY_PANEL_OPACITY = 1.0
+_V2_SEMANTIC_OVERLAY_TYPES = frozenset(
+    {
+        "SEMANTIC_CALLOUT",
+        "DIAGRAM_LABEL",
+        "DATA_LABEL",
+        "UI_ANNOTATION",
+        "TITLE_CARD",
+    }
+)
 
 
 def srgb_hex_relative_luminance(value: str) -> float:
@@ -129,6 +139,39 @@ def _available_filters(ffmpeg: str) -> set[str]:
         if len(parts) >= 2 and len(parts[0]) in {2, 3}:
             names.add(parts[1])
     return names
+
+
+def _v2_semantic_overlays(
+    manifest: CompiledNativeRenderManifest,
+) -> list[dict[str, str]]:
+    """Validate explicit visual-text authority before it reaches drawtext."""
+
+    required = {
+        "overlay_id",
+        "scene_id",
+        "overlay_type",
+        "text",
+        "source_ref",
+        "source_hash",
+    }
+    scene_ids = {str(item.get("scene_id") or "") for item in manifest.compiled_scenes}
+    overlays: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in manifest.overlay_schedule:
+        if not isinstance(item, dict) or set(item) != required:
+            raise ValueError("V2_SEMANTIC_OVERLAY_CONTRACT_INVALID")
+        overlay = {key: str(item.get(key) or "").strip() for key in required}
+        if (
+            not all(overlay.values())
+            or overlay["overlay_id"] in seen
+            or overlay["scene_id"] not in scene_ids
+            or overlay["overlay_type"] not in _V2_SEMANTIC_OVERLAY_TYPES
+            or not re.fullmatch(r"[0-9a-f]{64}", overlay["source_hash"])
+        ):
+            raise ValueError("V2_SEMANTIC_OVERLAY_CONTRACT_INVALID")
+        seen.add(overlay["overlay_id"])
+        overlays.append(overlay)
+    return sorted(overlays, key=lambda item: (item["scene_id"], item["overlay_id"]))
 
 
 def _command_hash_payload(command: FFmpegCommandManifest) -> dict:
@@ -698,7 +741,6 @@ class FFmpegCommandBuilder:
             or not manifest.canonical_duration_ms
             or not manifest.canonical_media_timeline_ref
             or not manifest.canonical_media_timeline_hash
-            or not manifest.canonical_audio_asset_ref
         ):
             raise ValueError("V2_NATIVE_PRODUCTION_MANIFEST_REQUIRED")
         scenes = list(manifest.compiled_scenes)
@@ -717,35 +759,39 @@ class FFmpegCommandBuilder:
         height = int(manifest.normalized_canvas["height"])
         fps = int(manifest.normalized_canvas.get("fps", 30))
         duration_seconds = manifest.canonical_duration_ms / 1000.0
-        available_filters = _available_filters(self.ffmpeg)
-        if "drawtext" not in available_filters:
-            raise ValueError("V2_NATIVE_DRAWTEXT_FILTER_REQUIRED")
-        font_path = _v2_native_font_path()
-        font_ref = _filter_path(font_path)
+        semantic_overlays = _v2_semantic_overlays(manifest)
+        if (
+            manifest.normalized_caption.get("mode") != "SIDECAR_SRT_ONLY"
+            or manifest.normalized_caption.get("render_consumes_caption_cues")
+            is not False
+            or manifest.caption_schedule.get("authority") != "SIDECAR_SRT_ONLY"
+            or manifest.caption_schedule.get("render_consumes_caption_cues")
+            is not False
+        ):
+            raise ValueError("V2_NATIVE_CAPTION_COMPOSITION_FORBIDDEN")
+        if semantic_overlays:
+            available_filters = _available_filters(self.ffmpeg)
+            if "drawtext" not in available_filters:
+                raise ValueError("V2_NATIVE_DRAWTEXT_FILTER_REQUIRED")
+            font_ref = _filter_path(_v2_native_font_path())
+        else:
+            font_ref = ""
 
-        title_size = max(34, round(min(width, height) * 0.060))
-        body_size = max(22, round(min(width, height) * 0.033))
-        label_size = max(16, round(min(width, height) * 0.020))
+        overlay_size = max(22, round(min(width, height) * 0.033))
         generated_text_files: list[str] = []
         graph = "[0:v]format=yuv420p"
         palette = ("17324d", "31435f", "304d46", "4b3b5f", "563f35", "29465b")
         probe_seconds: list[float] = []
+        scene_windows: dict[str, tuple[float, float]] = {}
         for index, scene in enumerate(scenes):
             start = int(scene["start_ms"]) / 1000.0
             end = int(scene["end_ms"]) / 1000.0
             if start < 0 or end <= start or end > duration_seconds + 0.001:
                 raise ValueError("V2_NATIVE_SCENE_TIMING_INVALID")
-            headline_path = _inside(self.root, work / f"scene-{index:03d}-headline.txt")
-            body_path = _inside(self.root, work / f"scene-{index:03d}-body.txt")
-            headline = str(scene.get("headline") or "").strip()
-            body = str(scene.get("body") or "").strip()
-            if not headline or not body:
-                raise ValueError("V2_NATIVE_SCENE_CONTENT_REQUIRED")
-            _write_text_atomic(headline_path, headline + "\n")
-            _write_text_atomic(body_path, body + "\n")
-            generated_text_files.extend((str(headline_path), str(body_path)))
-            headline_ref = _filter_path(headline_path)
-            body_ref = _filter_path(body_path)
+            scene_id = str(scene.get("scene_id") or "")
+            if not scene_id or scene_id in scene_windows:
+                raise ValueError("V2_NATIVE_SCENE_IDENTITY_INVALID")
+            scene_windows[scene_id] = (start, end)
             enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
             color = str(scene.get("background_rgb") or palette[index % len(palette)])
             if len(color) != 6 or any(
@@ -758,32 +804,55 @@ class FFmpegCommandBuilder:
                 f",drawbox=x={round(width * 0.06)}:y={round(height * 0.10)}:"
                 f"w={round(width * 0.88)}:h={round(height * 0.78)}:"
                 f"color=0x08111f@0.82:t=fill:enable='{enable}'"
-                f",drawtext=fontfile='{font_ref}':"
-                f"textfile='{headline_ref}':expansion=none:"
-                f"fontcolor=white:fontsize={title_size}:"
-                f"x={round(width * 0.10)}:y={round(height * 0.20)}:"
-                f"enable='{enable}'"
-                f",drawtext=fontfile='{font_ref}':"
-                f"textfile='{body_ref}':expansion=none:"
-                f"fontcolor=0xcde7ff:fontsize={body_size}:line_spacing=12:"
-                f"x={round(width * 0.10)}:y={round(height * 0.39)}:"
-                f"enable='{enable}'"
-                f",drawtext=fontfile='{font_ref}':"
-                f"text='VCOS · package-native':expansion=none:"
-                f"fontcolor=0x9fb8d0:fontsize={label_size}:"
-                f"x={round(width * 0.10)}:y={round(height * 0.80)}:"
-                f"enable='{enable}'"
             )
             if len(probe_seconds) < 4:
                 probe_seconds.append(round(start + (end - start) / 2, 3))
+        for index, overlay in enumerate(semantic_overlays, start=1):
+            start, end = scene_windows[overlay["scene_id"]]
+            text_path = _inside(
+                self.root, work / f"semantic-overlay-{index:03d}.txt"
+            )
+            _write_text_atomic(text_path, overlay["text"] + "\n")
+            generated_text_files.append(str(text_path))
+            text_ref = _filter_path(text_path)
+            enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
+            graph += (
+                f",drawtext=fontfile='{font_ref}':"
+                f"textfile='{text_ref}':expansion=none:"
+                f"fontcolor=white:fontsize={overlay_size}:line_spacing=10:"
+                f"x={round(width * 0.10)}:y={round(height * 0.20)}:"
+                f"enable='{enable}'"
+            )
         graph += "[v]"
         _write_text_atomic(filtergraph, graph + "\n")
 
         part = str(output) + ".part.mp4"
-        audio_strategy = str(manifest.normalized_audio.get("strategy") or "")
-        canonical_audio_checksum = manifest.normalized_audio.get("audio_checksum")
-        if audio_strategy == "LOCAL_OS_TTS_SCRIPT_BOUND":
-            if audio_path is None or not canonical_audio_checksum:
+        normalized_audio = dict(manifest.normalized_audio)
+        audio_strategy = str(normalized_audio.get("strategy") or "")
+        audio_asset_ref = str(normalized_audio.get("audio_asset_ref") or "")
+        canonical_audio_checksum = normalized_audio.get("audio_checksum")
+        audio_mix = dict(manifest.audio_mix_schedule)
+        if (
+            not audio_asset_ref
+            or manifest.canonical_audio_asset_ref != audio_asset_ref
+            or audio_mix.get("strategy") != audio_strategy
+            or audio_mix.get("audio_asset_ref") != audio_asset_ref
+            or audio_mix.get("audio_checksum") != canonical_audio_checksum
+            or audio_mix.get("narration_present") is not normalized_audio.get(
+                "narration_present"
+            )
+        ):
+            raise ValueError("V2_NATIVE_AUDIO_AUTHORITY_MISMATCH")
+        if audio_strategy in {
+            "LOCAL_OS_TTS_SCRIPT_BOUND",
+            "ELEVENLABS_FINAL_NARRATION",
+        }:
+            if (
+                audio_path is None
+                or not isinstance(canonical_audio_checksum, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", canonical_audio_checksum)
+                or normalized_audio.get("narration_present") is not True
+            ):
                 raise ValueError("V2_NATIVE_NARRATION_AUDIO_REQUIRED")
             audio = _inside(self.root, audio_path, must_exist=True)
             if _sha256_file(audio) != canonical_audio_checksum:
@@ -860,6 +929,8 @@ class FFmpegCommandBuilder:
             "scene_coverage_required": len(probe_seconds) > 1,
             "scene_probe_seconds": probe_seconds,
             "subtitle_stream_count": 0,
+            "narration_drawtext_count": 0,
+            "semantic_overlay_drawtext_count": len(semantic_overlays),
             "faststart": True,
         }
         generated_file_checksums = {
