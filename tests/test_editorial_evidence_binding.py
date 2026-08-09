@@ -10,6 +10,7 @@ from app.services.editorial_specificity import (
     EditorialIdeaSynthesisService,
     EditorialSpecificityService,
     FrozenEvidenceSource,
+    derive_frozen_evidence_spans,
     frozen_quote_is_valid,
     normalize_frozen_evidence_text,
 )
@@ -60,6 +61,7 @@ def test_normalization_only_quote_is_accepted_by_synthesis_and_specificity() -> 
         proposal=proposal,
         source_class_by_id=_SOURCE_CLASS_BY_ID,
         frozen_source_by_id=_frozen_sources(excerpt),
+        frozen_span_by_id={},
         expected_mode="STANDALONE",
         expected_series_binding=None,
     )
@@ -93,6 +95,7 @@ def test_paraphrased_mechanism_quote_is_rejected_at_synthesis_boundary() -> None
             proposal=proposal,
             source_class_by_id=_SOURCE_CLASS_BY_ID,
             frozen_source_by_id=_frozen_sources(excerpt),
+            frozen_span_by_id={},
             expected_mode="STANDALONE",
             expected_series_binding=None,
         )
@@ -125,6 +128,46 @@ def test_unknown_binding_field_is_rejected_before_coverage_is_counted() -> None:
             frozen_source_by_id=_frozen_sources(
                 proposal.evidence_bindings[0]["quoted_text"]
             ),
+            frozen_span_by_id={},
             expected_mode="STANDALONE",
             expected_series_binding=None,
+        )
+
+
+def test_provider_selects_server_owned_span_ids_without_authoring_quotes() -> None:
+    excerpt = "Function calling lets models connect to external tools."
+    span = derive_frozen_evidence_spans(
+        evidence_id=_EVIDENCE_ID,
+        canonical_url="https://docs.example.test/function-calling",
+        source_content_hash="source-hash",
+        content_excerpt=excerpt,
+    )[0]
+    provider_bindings = [
+        {"field": field, "supporting_span_ids": [span.span_id]}
+        for field in sorted(REQUIRED_EVIDENCE_BINDING_FIELDS)
+    ]
+
+    resolved = EditorialIdeaSynthesisService._resolve_provider_span_bindings(
+        bindings=provider_bindings,
+        frozen_span_by_id={span.span_id: span},
+    )
+
+    assert {binding["field"] for binding in resolved} == REQUIRED_EVIDENCE_BINDING_FIELDS
+    assert {binding["quoted_text"] for binding in resolved} == {span.exact_text}
+    assert {binding["evidence_id"] for binding in resolved} == {_EVIDENCE_ID}
+
+
+def test_unknown_provider_span_id_is_rejected_before_candidate_creation() -> None:
+    with pytest.raises(
+        ValidationFailureError,
+        match="EDITORIAL_IDEA_SYNTHESIS_BINDING_SPAN_NOT_IN_FROZEN_EVIDENCE",
+    ):
+        EditorialIdeaSynthesisService._resolve_provider_span_bindings(
+            bindings=[
+                {
+                    "field": "specific_mechanism_or_use_case",
+                    "supporting_span_ids": ["unknown-span-id"],
+                }
+            ],
+            frozen_span_by_id={},
         )

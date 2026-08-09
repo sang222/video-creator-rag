@@ -78,6 +78,7 @@ def test_synthesis_rejects_incomplete_required_binding_coverage() -> None:
             proposal=proposal,
             source_class_by_id=_SOURCE_CLASS_BY_ID,
             frozen_source_by_id=_FROZEN_SOURCE_BY_ID,
+            frozen_span_by_id={},
             expected_mode="STANDALONE",
             expected_series_binding=None,
         )
@@ -90,6 +91,7 @@ def test_generated_title_is_traceable_without_being_a_verbatim_source_title() ->
         proposal=proposal,
         source_class_by_id=_SOURCE_CLASS_BY_ID,
         frozen_source_by_id=_FROZEN_SOURCE_BY_ID,
+        frozen_span_by_id={},
         expected_mode="STANDALONE",
         expected_series_binding=None,
     )
@@ -107,6 +109,7 @@ def test_synthesis_rejects_a_binding_outside_the_frozen_source_pack() -> None:
             proposal=proposal,
             source_class_by_id=_SOURCE_CLASS_BY_ID,
             frozen_source_by_id=_FROZEN_SOURCE_BY_ID,
+            frozen_span_by_id={},
             expected_mode="STANDALONE",
             expected_series_binding=None,
         )

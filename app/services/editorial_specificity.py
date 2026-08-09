@@ -25,13 +25,15 @@ from app.services.config_registry import content_hash
 
 
 EDITORIAL_IDEA_PROPOSAL_SCHEMA = "vcos.editorial-idea-proposal.v1"
-EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v3"
+EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v4"
 EDITORIAL_EVIDENCE_TEXT_NORMALIZATION_VERSION = (
     "editorial-evidence-text-normalization.v1"
 )
+EDITORIAL_FROZEN_EVIDENCE_SPAN_VERSION = "editorial-frozen-evidence-span.v1"
 EDITORIAL_SPECIFICITY_GATE_VERSION = "editorial-specificity-gate.v1"
 MAX_EDITORIAL_IDEA_PROPOSALS_PER_RESEARCH = 3
 MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT = 1
+MAX_FROZEN_EVIDENCE_SPANS_PER_SOURCE = 12
 
 # These fields are viewer-facing material statements.  A source quote need not
 # repeat generated editorial framing verbatim (for example, a video title),
@@ -119,6 +121,82 @@ class FrozenEvidenceSource:
     canonical_url: str
     content_hash: str
     content_excerpt: str
+    spans: tuple["FrozenEvidenceSpan", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenEvidenceSpan:
+    """A server-owned, immutable span from one frozen evidence excerpt."""
+
+    span_id: str
+    evidence_id: str
+    canonical_url: str
+    source_content_hash: str
+    start_offset: int
+    end_offset: int
+    exact_text: str
+    normalized_text_hash: str
+
+
+def _bounded_text_segments(text: str) -> list[tuple[int, int]]:
+    """Split one frozen excerpt into deterministic, prompt-safe text spans."""
+
+    segments: list[tuple[int, int]] = []
+    for match in re.finditer(r"[^.!?]+[.!?]+|[^.!?]+$", text, flags=re.DOTALL):
+        start, end = match.span()
+        while start < end and text[start].isspace():
+            start += 1
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        while end - start > 520:
+            boundary = text.rfind(" ", start + 160, start + 520)
+            if boundary <= start:
+                boundary = start + 520
+            segments.append((start, boundary))
+            start = boundary
+            while start < end and text[start].isspace():
+                start += 1
+        if end - start >= 24:
+            segments.append((start, end))
+    return segments
+
+
+def derive_frozen_evidence_spans(
+    *,
+    evidence_id: str,
+    canonical_url: str,
+    source_content_hash: str,
+    content_excerpt: str,
+) -> tuple[FrozenEvidenceSpan, ...]:
+    """Construct bounded, stable spans without fetching or interpreting text."""
+
+    spans: list[FrozenEvidenceSpan] = []
+    for start, end in _bounded_text_segments(content_excerpt)[:MAX_FROZEN_EVIDENCE_SPANS_PER_SOURCE]:
+        exact_text = content_excerpt[start:end]
+        normalized_text_hash = content_hash(normalize_frozen_evidence_text(exact_text))
+        span_id = content_hash(
+            {
+                "span_version": EDITORIAL_FROZEN_EVIDENCE_SPAN_VERSION,
+                "evidence_id": evidence_id,
+                "source_content_hash": source_content_hash,
+                "start_offset": start,
+                "end_offset": end,
+                "normalized_text_hash": normalized_text_hash,
+            }
+        )
+        spans.append(
+            FrozenEvidenceSpan(
+                span_id=span_id,
+                evidence_id=evidence_id,
+                canonical_url=canonical_url,
+                source_content_hash=source_content_hash,
+                start_offset=start,
+                end_offset=end,
+                exact_text=exact_text,
+                normalized_text_hash=normalized_text_hash,
+            )
+        )
+    return tuple(spans)
 
 
 def _normalized(value: Any) -> str:
@@ -244,6 +322,7 @@ class EditorialIdeaSynthesisService:
         source_pack = []
         source_class_by_id: dict[str, str] = {}
         frozen_source_by_id: dict[str, FrozenEvidenceSource] = {}
+        frozen_span_by_id: dict[str, FrozenEvidenceSpan] = {}
         for item in evidence:
             from app.services.script_qualification import classify_source_specificity
 
@@ -252,12 +331,21 @@ class EditorialIdeaSynthesisService:
             evidence_id = str(item.id)
             canonical_url = str(snapshot.get("canonical_url") or item.source_ref or "")
             frozen_excerpt = str(snapshot.get("content_excerpt") or "")[:4_000]
+            source_content_hash = str(snapshot.get("content_hash") or "")
+            spans = derive_frozen_evidence_spans(
+                evidence_id=evidence_id,
+                canonical_url=canonical_url,
+                source_content_hash=source_content_hash,
+                content_excerpt=frozen_excerpt,
+            )
             source_class_by_id[evidence_id] = source_class
             frozen_source_by_id[evidence_id] = FrozenEvidenceSource(
                 canonical_url=canonical_url,
-                content_hash=str(snapshot.get("content_hash") or ""),
+                content_hash=source_content_hash,
                 content_excerpt=frozen_excerpt,
+                spans=spans,
             )
+            frozen_span_by_id.update({span.span_id: span for span in spans})
             source_pack.append(
                 {
                     "evidence_id": evidence_id,
@@ -266,7 +354,10 @@ class EditorialIdeaSynthesisService:
                     "source_family": snapshot.get("source_family"),
                     "organization": snapshot.get("organization"),
                     "source_specificity_class": source_class,
-                    "content_excerpt": normalize_frozen_evidence_text(frozen_excerpt),
+                    "spans": [
+                        {"span_id": span.span_id, "exact_text": span.exact_text}
+                        for span in spans
+                    ],
                 }
             )
         from app.services.m10_1 import LLMRouterService
@@ -323,6 +414,10 @@ class EditorialIdeaSynthesisService:
                 # proposition grounded in the frozen source pack.
                 normalized = {
                     **raw,
+                    "evidence_bindings": self._resolve_provider_span_bindings(
+                        bindings=raw.get("evidence_bindings"),
+                        frozen_span_by_id=frozen_span_by_id,
+                    ),
                     "proposal_schema_version": EDITORIAL_IDEA_PROPOSAL_SCHEMA,
                     "source_specificity_class": strongest_class,
                     "content_mode": content_mode,
@@ -334,6 +429,7 @@ class EditorialIdeaSynthesisService:
                     proposal=proposal,
                     source_class_by_id=source_class_by_id,
                     frozen_source_by_id=frozen_source_by_id,
+                    frozen_span_by_id=frozen_span_by_id,
                     expected_mode=content_mode,
                     expected_series_binding=series_binding,
                 )
@@ -354,6 +450,7 @@ class EditorialIdeaSynthesisService:
             "evidence_text_normalization_version": (
                 EDITORIAL_EVIDENCE_TEXT_NORMALIZATION_VERSION
             ),
+            "frozen_evidence_span_version": EDITORIAL_FROZEN_EVIDENCE_SPAN_VERSION,
             "execution_mode": "ONE_BOUNDED_ADDITIONAL_LLM_CALL",
             "max_calls": MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT,
             "provider_route_attempt_id": str(response.route_attempt_id),
@@ -406,14 +503,13 @@ class EditorialIdeaSynthesisService:
             "decision_value, scope_inclusions, scope_exclusions, primary_evidence_refs, "
             "supporting_evidence_refs, evidence_bindings, source_specificity_class, content_mode, "
             "series_binding. Do not include proposal_hash; the server computes it. Evidence refs use {id, ref}; evidence_bindings use "
-            "{field, evidence_id, quoted_text}, where quoted_text is an exact short quote from "
-            "the supplied content_excerpt. Every proposal must include at least one "
+            "{field, supporting_span_ids}, where supporting_span_ids contains one or more "
+            "span_id values supplied in the source pack. Never invent span IDs or quote text. "
+            "Every proposal must include at least one "
             "binding for each of: proposed_title, proposed_angle, "
             "central_question_or_thesis, learning_outcome, viewer_value, "
             "editorial_delta, specific_mechanism_or_use_case, and decision_value. "
-            "Copy quoted_text exactly from the supplied content_excerpt, apart from "
-            "representational whitespace or Unicode normalization performed by the "
-            "server. Never paraphrase a quote. If no exact supporting span exists "
+            "If no supporting span ID exists "
             "for a required field, do not emit that proposal. "
             "A generated editorial framing field need not literally occur in a source, "
             "but its binding must quote an exact source span that supports its "
@@ -424,11 +520,51 @@ class EditorialIdeaSynthesisService:
         )
 
     @staticmethod
+    def _resolve_provider_span_bindings(
+        *,
+        bindings: Any,
+        frozen_span_by_id: dict[str, FrozenEvidenceSpan],
+    ) -> list[dict[str, str]]:
+        if not isinstance(bindings, list):
+            raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID")
+        resolved: list[dict[str, str]] = []
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID")
+            field = str(binding.get("field") or "")
+            if field not in REQUIRED_EVIDENCE_BINDING_FIELDS:
+                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_FIELD_INVALID")
+            span_ids = binding.get("supporting_span_ids")
+            if not isinstance(span_ids, list) or not span_ids:
+                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_SPAN_IDS_REQUIRED")
+            seen: set[str] = set()
+            for raw_span_id in span_ids:
+                span_id = str(raw_span_id or "")
+                if not span_id or span_id in seen:
+                    continue
+                span = frozen_span_by_id.get(span_id)
+                if span is None:
+                    raise ValidationFailureError(
+                        "EDITORIAL_IDEA_SYNTHESIS_BINDING_SPAN_NOT_IN_FROZEN_EVIDENCE"
+                    )
+                resolved.append(
+                    {
+                        "field": field,
+                        "span_id": span.span_id,
+                        "evidence_id": span.evidence_id,
+                        "quoted_text": span.exact_text,
+                    }
+                )
+                seen.add(span_id)
+        return resolved
+
+    @staticmethod
     def _validate_provider_proposal(
         *,
         proposal: EditorialIdeaProposal,
         source_class_by_id: dict[str, str],
         frozen_source_by_id: dict[str, FrozenEvidenceSource],
+        frozen_span_by_id: dict[str, FrozenEvidenceSpan],
         expected_mode: str,
         expected_series_binding: dict[str, Any] | None,
     ) -> None:
@@ -465,6 +601,17 @@ class EditorialIdeaSynthesisService:
                 raise ValidationFailureError(
                     "EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID"
                 )
+            span_id = str(binding.get("span_id") or "")
+            if span_id:
+                span = frozen_span_by_id.get(span_id)
+                if (
+                    span is None
+                    or span.evidence_id != evidence_id
+                    or span.exact_text != quote
+                ):
+                    raise ValidationFailureError(
+                        "EDITORIAL_IDEA_SYNTHESIS_BINDING_SPAN_NOT_IN_FROZEN_EVIDENCE"
+                    )
             if not frozen_quote_is_valid(
                 quoted_text=quote,
                 frozen_excerpt=frozen_source_by_id[evidence_id].content_excerpt,
