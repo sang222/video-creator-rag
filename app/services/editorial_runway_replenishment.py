@@ -105,6 +105,45 @@ def _canonical_hash(value: Any) -> str:
     ).hexdigest()
 
 
+def _scheduled_scope_key(
+    *,
+    launch_run_id: str,
+    launch_policy_version_id: str,
+    policy_snapshot_id: str,
+    policy_hash: str,
+    topic_gate_version: str,
+    editorial_idea_synthesis_version: str,
+    editorial_specificity_gate_version: str,
+    editorial_territory_version: str,
+    editorial_evidence_provider_key: str,
+    editorial_evidence_provider_config_hash: str,
+    editorial_evidence_provider_state: str,
+) -> str:
+    """Build the durable semantic identity of a scheduled replenishment.
+
+    ``topic_gate_version`` is deliberately part of this identity: a changed
+    proposal-to-topic authority is a new semantic decision, not a retry of a
+    historical same-day attempt.
+    """
+
+    return _canonical_hash(
+        {
+            "schema": RUNWAY_REPLENISHMENT_SCHEMA,
+            "launch_run_id": launch_run_id,
+            "launch_policy_version_id": launch_policy_version_id,
+            "policy_snapshot_id": policy_snapshot_id,
+            "policy_hash": policy_hash,
+            "topic_gate_version": topic_gate_version,
+            "editorial_idea_synthesis_version": editorial_idea_synthesis_version,
+            "editorial_specificity_gate_version": editorial_specificity_gate_version,
+            "editorial_territory_version": editorial_territory_version,
+            "editorial_evidence_provider_key": editorial_evidence_provider_key,
+            "editorial_evidence_provider_config_hash": editorial_evidence_provider_config_hash,
+            "editorial_evidence_provider_state": editorial_evidence_provider_state,
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RunwayReplenishmentResult:
     launch_run_id: uuid.UUID
@@ -206,24 +245,18 @@ class EditorialRunwayReplenishmentService:
             company_id=str(run.company_id),
         )
         run_date = self._run_date(policy=policy)
-        scope_key = _canonical_hash(
-            {
-                "schema": RUNWAY_REPLENISHMENT_SCHEMA,
-                "launch_run_id": str(run.id),
-                "launch_policy_version_id": str(policy.id),
-                "policy_snapshot_id": str(policy.policy_snapshot_id),
-                "policy_hash": policy.canonical_hash,
-                "topic_gate_version": TOPIC_GATE_VERSION,
-                "editorial_idea_synthesis_version": EDITORIAL_IDEA_SYNTHESIS_VERSION,
-                "editorial_specificity_gate_version": EDITORIAL_SPECIFICITY_GATE_VERSION,
-                "editorial_territory_version": EDITORIAL_TERRITORY_SCHEMA,
-                # A new source-provider authority is a new, deterministic
-                # research generation.  Historical blocked runs remain
-                # immutable and cannot suppress the newly authorized flow.
-                "editorial_evidence_provider_key": activation.authority.provider_key,
-                "editorial_evidence_provider_config_hash": activation.authority.config_hash,
-                "editorial_evidence_provider_state": activation.authority.state,
-            }
+        scope_key = _scheduled_scope_key(
+            launch_run_id=str(run.id),
+            launch_policy_version_id=str(policy.id),
+            policy_snapshot_id=str(policy.policy_snapshot_id),
+            policy_hash=policy.canonical_hash,
+            topic_gate_version=TOPIC_GATE_VERSION,
+            editorial_idea_synthesis_version=EDITORIAL_IDEA_SYNTHESIS_VERSION,
+            editorial_specificity_gate_version=EDITORIAL_SPECIFICITY_GATE_VERSION,
+            editorial_territory_version=EDITORIAL_TERRITORY_SCHEMA,
+            editorial_evidence_provider_key=activation.authority.provider_key,
+            editorial_evidence_provider_config_hash=activation.authority.config_hash,
+            editorial_evidence_provider_state=activation.authority.state,
         )
         attempt_key = _canonical_hash({"scope_key": scope_key, "run_date": run_date})
         existing = self._existing_equivalent(

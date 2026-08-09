@@ -68,7 +68,9 @@ from app.services.script_qualification_authority import (
 )
 
 
-TOPIC_GATE_VERSION = "editorial-topic-definition-gate.v1"
+# v2 makes proposal-to-topic alignment authoritative. It deliberately no
+# longer requires a documentation title/subject to occur in a video title.
+TOPIC_GATE_VERSION = "editorial-topic-definition-gate.v2"
 QUALIFICATION_POLICY_VERSION = "script-qualification-policy.v2"
 WRITER_PROMPT_VERSION = "script-writer-assignment.v3"
 WRITER_PROMPT_VERSION_V2 = "script-writer-single-source.v4"

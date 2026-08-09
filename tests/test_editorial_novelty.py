@@ -27,9 +27,12 @@ from app.services.editorial_specificity import (
 from app.services.editorial_runway_replenishment import (
     EditorialModeDecision,
     EditorialRunwayReplenishmentService,
+    _canonical_hash,
+    _scheduled_scope_key,
 )
 from app.services.m5 import SearchDemandEvidenceService
 from app.services.script_qualification import (
+    TOPIC_GATE_VERSION,
     TopicDefinitionService,
     classify_source_specificity,
     span_hash,
@@ -597,3 +600,33 @@ def test_discovery_prompt_carries_compact_exclusion_authority():
     )
     assert "https://platform.openai.com/docs/gpt-5-4" in question
     assert "materially different editorial question" in question
+
+
+def test_corrected_topic_authority_changes_same_day_scheduled_scope_only_by_version():
+    common = {
+        "launch_run_id": "launch-1",
+        "launch_policy_version_id": "policy-version-1",
+        "policy_snapshot_id": "snapshot-1",
+        "policy_hash": "policy-hash-1",
+        "editorial_idea_synthesis_version": "editorial-idea-synthesis.v1",
+        "editorial_specificity_gate_version": "editorial-specificity-gate.v1",
+        "editorial_territory_version": "vcos.editorial-territory.v2",
+        "editorial_evidence_provider_key": "openai",
+        "editorial_evidence_provider_config_hash": "provider-config-1",
+        "editorial_evidence_provider_state": "EXISTING_SOURCE_PROVIDER_READY",
+    }
+    legacy_scope = _scheduled_scope_key(
+        **common,
+        topic_gate_version="editorial-topic-definition-gate.v1",
+    )
+    corrected_scope = _scheduled_scope_key(
+        **common,
+        topic_gate_version=TOPIC_GATE_VERSION,
+    )
+    run_date = "2026-08-09"
+
+    assert TOPIC_GATE_VERSION == "editorial-topic-definition-gate.v2"
+    assert legacy_scope != corrected_scope
+    assert _canonical_hash({"scope_key": legacy_scope, "run_date": run_date}) != _canonical_hash(
+        {"scope_key": corrected_scope, "run_date": run_date}
+    )
