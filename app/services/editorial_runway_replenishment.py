@@ -61,6 +61,11 @@ from app.db.models.m5 import (
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.services.config_registry import content_hash
 from app.services.editorial_novelty import EditorialNoveltyService, normalize_editorial_text
+from app.services.editorial_specificity import (
+    EDITORIAL_IDEA_SYNTHESIS_VERSION,
+    EDITORIAL_SPECIFICITY_GATE_VERSION,
+    EditorialIdeaSynthesisService,
+)
 from app.db.models.r3d1 import ContentCategory
 from app.services.editorial_fresh_evidence import (
     EditorialEvidenceProviderActivationService,
@@ -84,7 +89,7 @@ from app.services.vcos_v2 import AssignmentResolutionError, DeterministicAssignm
 # v8 makes the current Topic Definition gate part of the durable scheduled
 # attempt identity. A same-day historical run that only produced generic,
 # discovery-derived candidates cannot suppress one bounded repair attempt.
-RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v9"
+RUNWAY_REPLENISHMENT_SCHEMA = "vcos.editorial-runway-replenishment.v10"
 _METADATA_KEY = "runway_replenishment"
 _ACTIVE_STATUSES = {"PENDING", "RUNNING"}
 
@@ -172,6 +177,7 @@ class EditorialRunwayReplenishmentService:
         # Row count is not runway diversity.  Only a current topic/preflight/
         # novelty authority may occupy one distinct editorial territory.
         from app.services.script_qualification import TOPIC_GATE_VERSION
+        from app.services.editorial_novelty import EDITORIAL_TERRITORY_SCHEMA
 
         novelty = EditorialNoveltyService(self.session)
         runway_counts = novelty.runway_counts(
@@ -208,6 +214,9 @@ class EditorialRunwayReplenishmentService:
                 "policy_snapshot_id": str(policy.policy_snapshot_id),
                 "policy_hash": policy.canonical_hash,
                 "topic_gate_version": TOPIC_GATE_VERSION,
+                "editorial_idea_synthesis_version": EDITORIAL_IDEA_SYNTHESIS_VERSION,
+                "editorial_specificity_gate_version": EDITORIAL_SPECIFICITY_GATE_VERSION,
+                "editorial_territory_version": EDITORIAL_TERRITORY_SCHEMA,
                 # A new source-provider authority is a new, deterministic
                 # research generation.  Historical blocked runs remain
                 # immutable and cannot suppress the newly authorized flow.
@@ -293,7 +302,9 @@ class EditorialRunwayReplenishmentService:
                             runway_counts.distinct_eligible_territory_count
                         ),
                         "greenlight_target": policy.greenlight_target,
-                        "provider_calls_allowed": False,
+                        "provider_calls_allowed": True,
+                        "max_editorial_research_provider_calls": 1,
+                        "max_editorial_idea_synthesis_calls": 1,
                         "mode_decision": diagnostics["mode_decision"],
                         "exclusion_authority": exclusion_authority,
                     }
@@ -395,11 +406,17 @@ class EditorialRunwayReplenishmentService:
                         collection_receipt=collection.receipt or {},
                         evidence_refs=list(collection.evidence_refs),
                         exclusion_authority=exclusion_authority,
+                        research_question=research_question,
                         actor=actor,
                     )
                 except ValidationFailureError as exc:
-                    blockers.append("RUNWAY_REPLENISHMENT_STRICT_PREFLIGHT_BLOCKED")
-                    diagnostics["editorial_processing_error"] = str(exc)
+                    error_code = str(exc)
+                    blockers.append(
+                        error_code
+                        if error_code.startswith("EDITORIAL_")
+                        else "RUNWAY_REPLENISHMENT_STRICT_PREFLIGHT_BLOCKED"
+                    )
+                    diagnostics["editorial_processing_error"] = error_code
                 else:
                     diagnostics["editorial_outcome"] = {
                         "candidate_id": str(candidate.id),
@@ -505,6 +522,7 @@ class EditorialRunwayReplenishmentService:
         collection_receipt: dict[str, Any],
         evidence_refs: list[dict[str, Any]],
         exclusion_authority: dict[str, list[str]],
+        research_question: str,
         actor: ActorContext,
     ):
         if mode_decision.content_mode not in {
@@ -551,18 +569,24 @@ class EditorialRunwayReplenishmentService:
                 if topic_capable_found
                 else "EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED"
             )
-        first_evidence = topic_evidence
-        source_snapshot = (
-            ((first_evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get(
-                "source_snapshot"
-            )
-            if first_evidence is not None
-            else None
+        # The current evidence provider produces URLs and bounded fetched
+        # snapshots, not a structured editorial proposition in the same
+        # response.  Use exactly one bounded synthesis call; it is the only
+        # permitted additional LLM effect and never retries until a proposal
+        # passes.
+        synthesis = EditorialIdeaSynthesisService(self.session).synthesize(
+            research_run=research_run,
+            evidence_refs=evidence_refs,
+            content_mode=str(mode_decision.content_mode),
+            series_binding=mode_decision.series_binding,
+            research_question=research_question,
         )
-        source_snapshot = source_snapshot if isinstance(source_snapshot, dict) else {}
-        source_title = str(source_snapshot.get("title") or "").strip()
-        if not source_title:
-            raise ValidationFailureError("EDITORIAL_SOURCE_TITLE_REQUIRED")
+        research_pack = dict(collection_receipt.get("research_pack") or {})
+        research_pack["editorial_idea_synthesis"] = synthesis.receipt
+        research_pack["content_hash"] = _canonical_hash(
+            {key: value for key, value in research_pack.items() if key != "content_hash"}
+        )
+        collection_receipt["research_pack"] = research_pack
         parent = self.session.scalar(
             select(EditorialIdeaCandidate)
             .where(
@@ -585,110 +609,106 @@ class EditorialRunwayReplenishmentService:
             and parent.topic_repair_depth < 2
             else None
         )
-        candidate = editorial.add_candidate(
-            data=EditorialIdeaCandidateCreate(
-                editorial_research_run_id=research_run.id,
-                context_pack_snapshot_id=context_pack_snapshot_id,
-                channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
-                stage="RESEARCHED",
-                # The title and assignment are source-derived.  A homepage or
-                # documentation index cannot be selected as a production topic.
-                proposed_title=source_title,
-                proposed_angle=(
-                    (
-                        f"The next bounded series episode uses {source_title} to "
-                        "advance one documented workflow without extending beyond the source."
-                    )
-                    if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value
-                    else (
-                        f"A bounded standalone walkthrough of what {source_title} "
-                        "documents, what remains outside the source scope, and how "
-                        "small teams can use that evidence to decide what to verify next."
-                    )
-                ),
-                parent_candidate_id=repair_parent.id if repair_parent is not None else None,
-                topic_repair_depth=(repair_parent.topic_repair_depth + 1 if repair_parent is not None else 0),
-                proposed_format="LONG_FORM",
-                proposed_pillar=research_slot.content_pillar,
-                suggested_series_plan_id=(
-                    uuid.UUID(str((mode_decision.series_binding or {})["series_plan_id"]))
-                    if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value
-                    else None
-                ),
-                rationale={
-                    "schema_version": "vcos.editorial-evidence-candidate.v1",
-                    "source_pack": collection_receipt.get("source_pack"),
-                    "research_pack": collection_receipt.get("research_pack"),
-                    "claim_evidence_map": [
-                        {
-                            "claim_scope": "source-grounded editorial explanation",
-                            "evidence_refs": evidence_refs,
-                            "coverage_state": "PRESENT",
-                        }
-                    ],
-                },
-                evidence_refs=evidence_refs,
-                reason_codes=["FRESH_EVIDENCE_COLLECTED", "STRICT_PREFLIGHT_PENDING"],
-                confidence_level="HIGH",
-                experiment_phase="AUDIENCE_PROMISE",
-            ),
-            actor=actor,
-        )
         parent_topic_definition_id = (
             parent_eligibility.definition.id
             if parent_eligibility and parent_eligibility.definition
             else None
         )
-        if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value:
-            binding = mode_decision.series_binding or {}
-            plan = self.session.get(SeriesPlan, uuid.UUID(str(binding["series_plan_id"])))
-            series_run = self.session.get(SeriesRun, uuid.UUID(str(binding["series_run_id"])))
-            if plan is None or series_run is None:
-                raise ValidationFailureError("EDITORIAL_SERIES_TOPIC_AUTHORITY_INVALID")
-            topic_definition = TopicDefinitionService(
-                self.session
-            ).create_series_from_topic_capable_evidence(
-                candidate=candidate,
-                series_plan=plan,
-                series_run=series_run,
-                episode_role=str(binding["episode_role"]),
-                episode_delta=str(binding["episode_delta"]),
-                series_learning_outcome=str(binding["learning_outcome"]),
-                parent_topic_definition_id=parent_topic_definition_id,
-            )
-        else:
-            topic_definition = TopicDefinitionService(
-                self.session
-            ).create_from_topic_capable_evidence(
-                candidate=candidate,
-                parent_topic_definition_id=parent_topic_definition_id,
-            )
-        topic_receipt = TopicDefinitionService(self.session).evaluate(topic_definition)
-        if topic_receipt.state != "PASS":
-            raise ValidationFailureError(topic_receipt.primary_reason_code or "EDITORIAL_TOPIC_GATE_BLOCK")
-        preflight = IdeaMarketPreflightService(self.session).create_preflight(
-            data=IdeaMarketPreflightCreate(
-                company_id=research_run.company_id,
-                channel_workspace_id=research_run.channel_workspace_id,
-                editorial_calendar_slot_id=research_slot.id,
-                editorial_research_run_id=research_run.id,
-                editorial_idea_candidate_id=candidate.id,
-                evidence_blob={
-                    "claim_evidence_refs": [
-                        str(item["id"]) for item in evidence_refs
+        last_candidate = None
+        last_preflight = None
+        for proposal in synthesis.proposals:
+            proposal_body = proposal.model_dump(mode="json")
+            candidate = editorial.add_candidate(
+                data=EditorialIdeaCandidateCreate(
+                    editorial_research_run_id=research_run.id,
+                    context_pack_snapshot_id=context_pack_snapshot_id,
+                    channel_state_pack_snapshot_id=channel_state_pack_snapshot_id,
+                    stage="RESEARCHED",
+                    proposed_title=proposal.proposed_title,
+                    proposed_angle=proposal.proposed_angle,
+                    parent_candidate_id=repair_parent.id if repair_parent is not None else None,
+                    topic_repair_depth=(repair_parent.topic_repair_depth + 1 if repair_parent is not None else 0),
+                    proposed_format="LONG_FORM",
+                    proposed_pillar=research_slot.content_pillar,
+                    suggested_series_plan_id=(
+                        uuid.UUID(str((mode_decision.series_binding or {})["series_plan_id"]))
+                        if mode_decision.content_mode == ContentMode.SERIES_EPISODE.value
+                        else None
+                    ),
+                    editorial_idea_proposal=proposal_body,
+                    rationale={
+                        "schema_version": "vcos.editorial-evidence-candidate.v2",
+                        "source_pack": collection_receipt.get("source_pack"),
+                        "research_pack": collection_receipt.get("research_pack"),
+                        "editorial_idea_proposal": proposal_body,
+                        "claim_evidence_map": [
+                            {
+                                "claim_scope": "approved editorial proposition",
+                                "evidence_refs": [
+                                    *proposal.primary_evidence_refs,
+                                    *proposal.supporting_evidence_refs,
+                                ],
+                                "coverage_state": "PRESENT",
+                            }
+                        ],
+                    },
+                    evidence_refs=evidence_refs,
+                    reason_codes=[
+                        "FRESH_EVIDENCE_COLLECTED",
+                        "EDITORIAL_IDEA_SYNTHESIZED",
+                        "STRICT_PREFLIGHT_PENDING",
                     ],
-                    "market_demand_evidence_refs": [],
-                    "source_pack_hash": (
-                        (collection_receipt.get("source_pack") or {}).get("content_hash")
+                    confidence_level="HIGH",
+                    experiment_phase="AUDIENCE_PROMISE",
+                ),
+                actor=actor,
+            )
+            topic_definition = TopicDefinitionService(self.session).create_from_editorial_idea_proposal(
+                candidate=candidate,
+                proposal=proposal_body,
+                parent_topic_definition_id=parent_topic_definition_id,
+            )
+            topic_receipt = TopicDefinitionService(self.session).evaluate(topic_definition)
+            if topic_receipt.state != "PASS":
+                editorial.transition_candidate(
+                    candidate_id=candidate.id,
+                    data=EditorialIdeaCandidateTransition(
+                        target_stage="REJECTED",
+                        reason_codes=list(topic_receipt.reason_codes),
                     ),
-                    "research_pack_hash": (
-                        (collection_receipt.get("research_pack") or {}).get("content_hash")
-                    ),
-                },
-            ),
-            correlation_id=f"runway-replenishment:{research_run.id}",
-        )
-        if preflight.decision == "PASS":
+                    actor=actor,
+                )
+                last_candidate = candidate
+                continue
+            preflight = IdeaMarketPreflightService(self.session).create_preflight(
+                data=IdeaMarketPreflightCreate(
+                    company_id=research_run.company_id,
+                    channel_workspace_id=research_run.channel_workspace_id,
+                    editorial_calendar_slot_id=research_slot.id,
+                    editorial_research_run_id=research_run.id,
+                    editorial_idea_candidate_id=candidate.id,
+                    evidence_blob={
+                        "claim_evidence_refs": [str(item["id"]) for item in evidence_refs],
+                        "market_demand_evidence_refs": [],
+                        "source_pack_hash": (collection_receipt.get("source_pack") or {}).get("content_hash"),
+                        "research_pack_hash": (collection_receipt.get("research_pack") or {}).get("content_hash"),
+                    },
+                ),
+                correlation_id=f"runway-replenishment:{research_run.id}",
+            )
+            last_candidate, last_preflight = candidate, preflight
+            if preflight.decision != "PASS":
+                if preflight.decision == "BLOCK":
+                    editorial.transition_candidate(
+                        candidate_id=candidate.id,
+                        data=EditorialIdeaCandidateTransition(
+                            target_stage="PREFLIGHT_BLOCK",
+                            idea_market_preflight_id=preflight.id,
+                            reason_codes=list(preflight.reason_codes),
+                        ),
+                        actor=actor,
+                    )
+                continue
             candidate = editorial.transition_candidate(
                 candidate_id=candidate.id,
                 data=EditorialIdeaCandidateTransition(
@@ -707,17 +727,14 @@ class EditorialRunwayReplenishmentService:
                 ),
                 actor=actor,
             )
-        elif preflight.decision == "BLOCK":
-            candidate = editorial.transition_candidate(
-                candidate_id=candidate.id,
-                data=EditorialIdeaCandidateTransition(
-                    target_stage="PREFLIGHT_BLOCK",
-                    idea_market_preflight_id=preflight.id,
-                    reason_codes=list(preflight.reason_codes),
-                ),
-                actor=actor,
-            )
-        return candidate, preflight
+            if candidate.stage == "GREENLIT":
+                return candidate, preflight
+            last_candidate = candidate
+        if not synthesis.proposals:
+            raise ValidationFailureError("EDITORIAL_SPECIFIC_NOVEL_IDEA_EXHAUSTED")
+        if last_candidate is not None and last_preflight is not None:
+            raise ValidationFailureError("EDITORIAL_SPECIFIC_NOVEL_IDEA_EXHAUSTED")
+        raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_NO_USABLE_PROPOSAL")
 
     def _first_launch_candidate_lineage(
         self,

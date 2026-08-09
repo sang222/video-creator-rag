@@ -1164,7 +1164,10 @@ class LongFormCadenceService:
             ).all()
         )
         approved_initial_series = set(policy.approved_initial_series_plan_ids or [])
+        from app.services.editorial_specificity import EditorialSpecificityService
         from app.services.script_qualification import TopicDefinitionService
+
+        specificity = EditorialSpecificityService(self.session)
 
         return [
             candidate
@@ -1178,6 +1181,7 @@ class LongFormCadenceService:
                 candidate_id=candidate.id,
             )
             and TopicDefinitionService(self.session).current_eligibility(candidate).eligible
+            and specificity.current_pass(candidate)
         ]
 
     def _active_qualification_count(self, launch_run_id: uuid.UUID) -> int:

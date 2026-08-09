@@ -376,6 +376,7 @@ class EditorialIdeaCandidateCreate(BaseModel):
     proposed_format: str | None = None
     proposed_pillar: str | None = None
     suggested_series_plan_id: uuid.UUID | None = None
+    editorial_idea_proposal: dict[str, Any] | None = None
     rationale: dict[str, Any] = Field(default_factory=dict)
     evidence_refs: list[dict[str, Any]] = Field(min_length=1)
     reason_codes: list[str] = Field(default_factory=list)
@@ -474,6 +475,8 @@ class EditorialIdeaCandidateRead(BaseModel):
     topic_repair_depth: int
     editorial_territory_key: str | None = None
     editorial_novelty_receipt: dict[str, Any] | None = None
+    editorial_idea_proposal: dict[str, Any] | None = None
+    editorial_specificity_receipt: dict[str, Any] | None = None
     proposed_title: str
     proposed_angle: str | None
     proposed_format: str | None

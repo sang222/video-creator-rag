@@ -79,6 +79,7 @@ LUNA_MODEL = "gpt-5.6-luna"
 SCRIPT_CONTRACT_V1 = "V1_LEGACY"
 
 _DISCOVERY_PATHS = {"", "/", "/docs", "/docs/", "/index", "/index/"}
+_BROAD_TOPIC_PATH_TERMS = {"api", "apis", "models", "model", "guides", "guide", "reference", "overview", "docs", "documentation"}
 _BOILERPLATE_ANGLES = (
     "source-grounded standalone explanation constrained to the fetched official documentation",
     "source grounded standalone explanation",
@@ -175,7 +176,22 @@ def _source_snapshot(evidence: SearchDemandEvidence) -> dict[str, Any]:
 
 
 def classify_source(evidence: SearchDemandEvidence) -> str:
-    """Classify discovery-only sources without trusting their page title."""
+    """Preserve the topic-gate compatibility classification."""
+
+    return (
+        "DISCOVERY_ONLY"
+        if classify_source_specificity(evidence) == "DISCOVERY_ONLY"
+        else "TOPIC_CAPABLE"
+    )
+
+
+def classify_source_specificity(evidence: SearchDemandEvidence) -> str:
+    """Classify source semantic capacity without treating its title as an idea.
+
+    A broad source may still support one narrow, evidence-bound proposal.  A
+    discovery page can never become a production topic.  This classifier uses
+    path depth and page semantics, rather than special casing a vendor page.
+    """
 
     snapshot = _source_snapshot(evidence)
     source_ref = _clean(snapshot.get("canonical_url") or evidence.source_ref)
@@ -183,7 +199,15 @@ def classify_source(evidence: SearchDemandEvidence) -> str:
     title = _clean(snapshot.get("title")).casefold()
     if path in _DISCOVERY_PATHS or "documentation index" in title or title.endswith(" developers"):
         return "DISCOVERY_ONLY"
-    return "TOPIC_CAPABLE"
+    segments = [item.casefold() for item in path.split("/") if item]
+    excerpt = _clean(snapshot.get("content_excerpt")).casefold()
+    generic_path = bool(segments) and segments[-1] in _BROAD_TOPIC_PATH_TERMS
+    generic_title = title in _BROAD_TOPIC_PATH_TERMS or title.endswith(" overview")
+    # A very short navigation-like page is broad even when its URL has a
+    # non-root path.  Richer pages can be narrow topic sources.
+    if generic_path or generic_title or (len(excerpt.split()) < 40 and len(segments) <= 2):
+        return "BROAD_TOPIC_CAPABLE"
+    return "NARROW_TOPIC_CAPABLE"
 
 
 def _evidence_ref(evidence: SearchDemandEvidence) -> dict[str, Any]:
@@ -195,6 +219,7 @@ def _evidence_ref(evidence: SearchDemandEvidence) -> dict[str, Any]:
         "content_hash": _clean(snapshot.get("content_hash")) or canonical_hash(snapshot),
         "source_class": snapshot.get("source_class"),
         "source_classification": classify_source(evidence),
+        "source_specificity_class": classify_source_specificity(evidence),
     }
 
 
@@ -556,6 +581,111 @@ class TopicDefinitionService:
             },
         )
 
+    def create_from_editorial_idea_proposal(
+        self,
+        *,
+        candidate: EditorialIdeaCandidate,
+        proposal: dict[str, Any],
+        parent_topic_definition_id: uuid.UUID | None = None,
+    ) -> EditorialTopicDefinition:
+        """Freeze a TopicDefinition from the approved idea proposal.
+
+        This is intentionally separate from the legacy source-derived helpers:
+        no title, question, outcome, or viewer value is manufactured from a
+        documentation title at this boundary.
+        """
+
+        from app.services.editorial_specificity import EditorialIdeaProposal
+
+        typed = EditorialIdeaProposal.model_validate(proposal)
+        evidence_by_id: dict[str, SearchDemandEvidence] = {}
+        for ref in candidate.evidence_refs or []:
+            if not isinstance(ref, dict) or not ref.get("id"):
+                continue
+            try:
+                evidence_id = uuid.UUID(str(ref["id"]))
+            except ValueError:
+                continue
+            evidence = self.session.get(SearchDemandEvidence, evidence_id)
+            if evidence is not None:
+                evidence_by_id[str(evidence.id)] = evidence
+        evidence = next(
+            (
+                evidence_by_id.get(str(ref.get("id") or ""))
+                for ref in typed.primary_evidence_refs
+                if isinstance(ref, dict)
+                and evidence_by_id.get(str(ref.get("id") or "")) is not None
+                and classify_source(evidence_by_id[str(ref.get("id") or "")])
+                == "TOPIC_CAPABLE"
+            ),
+            None,
+        )
+        if evidence is None:
+            raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
+        if typed.content_mode == "SERIES_EPISODE" and not typed.series_binding:
+            raise ValidationFailureError("EDITORIAL_SERIES_BINDING_REQUIRED")
+        if typed.content_mode == "STANDALONE" and candidate.suggested_series_plan_id is not None:
+            raise ValidationFailureError("EDITORIAL_SERIES_BINDING_REQUIRED")
+        snapshot = _source_snapshot(evidence)
+        source_title = _clean(snapshot.get("title"))
+        subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", source_title, flags=re.I).strip() or source_title
+        canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
+        if not subject or not canonical_url:
+            raise ValidationFailureError("EDITORIAL_TOPIC_CANONICAL_SOURCE_MISSING")
+        evidence_refs = [
+            _evidence_ref(item)
+            for item in evidence_by_id.values()
+            if str(item.id)
+            in {
+                str(ref.get("id") or "")
+                for ref in [*typed.primary_evidence_refs, *typed.supporting_evidence_refs]
+                if isinstance(ref, dict)
+            }
+        ]
+        evidence_spans: list[dict[str, Any]] = []
+        for binding in typed.evidence_bindings:
+            if not isinstance(binding, dict):
+                continue
+            evidence_id = str(binding.get("evidence_id") or "")
+            quote = _clean(binding.get("quoted_text"))
+            if evidence_id in evidence_by_id and quote:
+                evidence_spans.append(
+                    {"evidence_id": evidence_id, "text": quote, "span_hash": span_hash(quote)}
+                )
+        if not evidence_refs or not evidence_spans:
+            raise ValidationFailureError("EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT")
+        audience = (candidate.target_audience_definition or {}).get("primary_persona") or "small professional teams"
+        source_ref = {
+            **_evidence_ref(evidence),
+            "source_classification": "TOPIC_CAPABLE",
+            "source_specificity_class": typed.source_specificity_class,
+        }
+        return self.create(
+            candidate=candidate,
+            parent_topic_definition_id=parent_topic_definition_id,
+            fields={
+                "subject_type": "OFFICIAL_DOCUMENTED_PRODUCT_OR_FEATURE",
+                "subject_name": subject,
+                "subject_canonical_id": f"official-document:{canonical_hash({'canonical_url': canonical_url})}",
+                "subject_evidence_refs": evidence_refs,
+                "subject_evidence_spans": evidence_spans,
+                "target_audience": audience,
+                "audience_problem": typed.specific_audience_problem,
+                "content_pillar": candidate.proposed_pillar or "AI workflows",
+                "production_goal": typed.proposed_title,
+                "scope_inclusions": typed.scope_inclusions,
+                "exclusions": typed.scope_exclusions,
+                "central_question_or_thesis": typed.central_question_or_thesis,
+                "learning_outcome": typed.learning_outcome,
+                "viewer_value": typed.viewer_value,
+                "content_mode": typed.content_mode,
+                "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+                "source_classification_refs": [source_ref],
+                "series_binding": typed.series_binding,
+                "standalone_self_containment_required": typed.content_mode == "STANDALONE",
+            },
+        )
+
     def create_series_from_topic_capable_evidence(
         self,
         *,
@@ -711,6 +841,10 @@ class ScriptQualificationService:
         topic = TopicDefinitionService(self.session).current_eligibility(candidate)
         if not topic.eligible or topic.definition is None:
             raise ValidationFailureError(topic.primary_reason_code)
+        from app.services.editorial_specificity import EditorialSpecificityService
+
+        if not EditorialSpecificityService(self.session).current_pass(candidate):
+            raise ValidationFailureError("EDITORIAL_SPECIFICITY_AUTHORITY_MISSING")
         assignment = self._assignment(candidate, topic.definition)
         evidence_pack = self._factual_evidence_pack(candidate, assignment)
         memory = self._assignment_memory_digest(topic.definition, assignment)

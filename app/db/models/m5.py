@@ -625,6 +625,15 @@ class EditorialIdeaCandidate(Base):
     # schema deployment alone.
     editorial_territory_key: Mapped[str | None] = mapped_column(String(64))
     editorial_novelty_receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # A source is evidence, never an implicit video idea.  These immutable
+    # receipts capture the proposal selected from that evidence and the
+    # deterministic specificity authority that evaluated it.  They remain
+    # nullable so historical rows are evaluated explicitly by maintenance
+    # rather than being fabricated into eligibility at migration time.
+    editorial_idea_proposal: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    editorial_specificity_receipt: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB
+    )
     topic_repair_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposed_title: Mapped[str] = mapped_column(Text, nullable=False)
     proposed_angle: Mapped[str | None] = mapped_column(Text)

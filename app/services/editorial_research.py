@@ -696,9 +696,9 @@ class EditorialResearchService:
                 raise ValidationFailureError(
                     "GREENLIGHT_DETERMINISTIC_ELIGIBILITY_NOT_MET"
                 )
-            # Novelty is a deterministic authority, not an editorial score.
-            # It locks the active launch and occupied candidates before either
-            # concurrent worker can promote an equivalent territory.
+            # Specificity is the first current editorial authority after
+            # preflight.  A novel source title may never bypass this gate.
+            from app.services.editorial_specificity import EditorialSpecificityService
             from app.services.editorial_novelty import EditorialNoveltyService
             from app.services.script_qualification import TopicDefinitionService
 
@@ -707,6 +707,35 @@ class EditorialResearchService:
             ).current_eligibility(candidate)
             if not topic_eligibility.eligible or topic_eligibility.definition is None:
                 raise ValidationFailureError("EDITORIAL_NOVELTY_AUTHORITY_MISSING")
+            specificity = EditorialSpecificityService(self.session)
+            specificity_evaluation = specificity.evaluate(
+                candidate=candidate,
+                topic=topic_eligibility.definition,
+            )
+            specificity.persist(candidate=candidate, evaluation=specificity_evaluation)
+            if specificity_evaluation.state == "BLOCK":
+                target = "REJECTED"
+                data = data.model_copy(
+                    update={
+                        "reason_codes": list(
+                            dict.fromkeys(
+                                [
+                                    "EDITORIAL_SPECIFICITY_BLOCK",
+                                    *specificity_evaluation.reason_codes,
+                                ]
+                            )
+                        )
+                    }
+                )
+            # Novelty is a deterministic authority, not an editorial score.
+            # It only runs after a specific proposal has passed.  It locks the
+            # active launch and occupied candidates before either concurrent
+            # worker can promote an equivalent territory.
+            if target != "GREENLIT":
+                candidate.stage = target
+                candidate.reason_codes = data.reason_codes
+                self.session.flush()
+                return candidate
             novelty = EditorialNoveltyService(self.session)
             evaluation = novelty.evaluate(
                 candidate=candidate,

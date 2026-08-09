@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from app.contracts.m5 import EditorialIdeaCandidateTransition
+from app.contracts.m5 import EditorialIdeaCandidateTransition, SearchDemandEvidenceCreate
 from app.core.actor import _system_worker_actor
-from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight
+from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight, SearchDemandEvidence
 from app.services.config_registry import content_hash
 from app.services.editorial_novelty import (
     EDITORIAL_NOVELTY_GATE_VERSION,
@@ -19,11 +19,21 @@ from app.services.editorial_novelty import (
     NoveltyEvaluation,
 )
 from app.services.editorial_research import EditorialResearchService
+from app.services.editorial_specificity import (
+    EditorialIdeaProposal,
+    EditorialSpecificityMaintenanceService,
+    EditorialSpecificityService,
+)
 from app.services.editorial_runway_replenishment import (
     EditorialModeDecision,
     EditorialRunwayReplenishmentService,
 )
-from app.services.script_qualification import TopicDefinitionService, span_hash
+from app.services.m5 import SearchDemandEvidenceService
+from app.services.script_qualification import (
+    TopicDefinitionService,
+    classify_source_specificity,
+    span_hash,
+)
 from tests.qualification.conftest import QualificationFactory
 
 
@@ -108,7 +118,10 @@ def _candidate_copy(source: EditorialIdeaCandidate, *, suffix: str) -> Editorial
         script_contract_version=source.script_contract_version,
         topic_repair_depth=0,
         proposed_title=f"{source.proposed_title} {suffix}",
-        proposed_angle=f"A bounded evidence-led operating walkthrough for {suffix}.",
+        proposed_angle=(
+            "Show where a human approval checkpoint belongs before an "
+            f"automation commits a change ({suffix})."
+        ),
         proposed_format=source.proposed_format,
         proposed_pillar=source.proposed_pillar,
         rationale=copy.deepcopy(source.rationale),
@@ -166,7 +179,100 @@ def _flow_with_current_topic(session):
         },
     )
     assert TopicDefinitionService(session).evaluate(topic).state == "PASS"
+    _attach_specific_proposal(session, candidate)
     return flow
+
+
+def _attach_specific_proposal(session, candidate: EditorialIdeaCandidate) -> None:
+    """Give legacy novelty fixtures the new, current proposal authority."""
+
+    topic = TopicDefinitionService(session).current_eligibility(candidate).definition
+    assert topic is not None
+    quote = "Use an approval checkpoint before automation commits a change."
+    evidence = SearchDemandEvidenceService(session).create_evidence(
+        data=SearchDemandEvidenceCreate(
+            company_id=candidate.company_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+            evidence_source_type="OFFICIAL_DOCUMENT",
+            authority_purpose="CLAIM_SOURCE",
+            source_ref="https://docs.example.test/automation/approval-workflows",
+            query="approval checkpoint automation workflow",
+            platform="GOOGLE",
+            geo="US",
+            language="en-US",
+            evidence_confidence="HIGH",
+            metadata={
+                "editorial_fresh_evidence": {
+                    "source_snapshot": {
+                        "canonical_url": "https://docs.example.test/automation/approval-workflows",
+                        "title": "Approval workflow implementation reference",
+                        "content_excerpt": (
+                            f"{quote} The documented workflow keeps accountable human review "
+                            "before an external side effect."
+                        ),
+                        "content_hash": content_hash({"fixture": "approval-workflow"}),
+                    }
+                }
+            },
+        ),
+        correlation_id="test-editorial-specificity",
+    )
+    evidence_id = str(evidence.id)
+    candidate.evidence_refs = [
+        {
+            "type": "search_demand_evidence",
+            "id": evidence_id,
+            "ref": evidence.source_ref,
+        }
+    ]
+    candidate.proposed_angle = (
+        "Show where a human approval checkpoint belongs before an automation "
+        "commits a documented external change."
+    )
+    proposal = EditorialIdeaProposal.model_validate(
+        {
+            "proposed_title": candidate.proposed_title,
+            "proposed_angle": candidate.proposed_angle,
+            "specific_audience_problem": topic.audience_problem,
+            "central_question_or_thesis": topic.central_question_or_thesis,
+            "learning_outcome": topic.learning_outcome,
+            "viewer_value": topic.viewer_value,
+            "editorial_delta": (
+                "Explains the documented approval checkpoint that separates a "
+                "reviewable automation from an unreviewed external change."
+            ),
+            "specific_mechanism_or_use_case": (
+                "Place a human approval checkpoint before an automation commits "
+                "an external change."
+            ),
+            "decision_value": (
+                "Teams can decide which workflow action must retain human approval."
+            ),
+            "scope_inclusions": list(topic.scope_inclusions),
+            "scope_exclusions": list(topic.exclusions),
+            "primary_evidence_refs": [{"id": evidence_id, "ref": evidence.source_ref}],
+            "supporting_evidence_refs": [],
+            "evidence_bindings": [
+                {"field": field, "evidence_id": evidence_id, "quoted_text": quote}
+                for field in (
+                    "proposed_title", "proposed_angle", "central_question_or_thesis",
+                    "learning_outcome", "viewer_value", "editorial_delta",
+                    "specific_mechanism_or_use_case", "decision_value",
+                )
+            ],
+            "source_specificity_class": classify_source_specificity(evidence),
+            "content_mode": topic.content_mode,
+            "series_binding": topic.series_binding,
+        }
+    )
+    candidate.editorial_idea_proposal = proposal.model_dump(mode="json")
+    evaluation = EditorialSpecificityService(session).evaluate(
+        candidate=candidate, topic=topic
+    )
+    assert evaluation.state == "PASS", evaluation.reason_codes
+    EditorialSpecificityService(session).persist(
+        candidate=candidate, evaluation=evaluation
+    )
 
 
 def _copy_topic(
@@ -178,6 +284,9 @@ def _copy_topic(
 ) -> None:
     source_topic = TopicDefinitionService(session).current_eligibility(source).definition
     assert source_topic is not None
+    candidate.proposed_title = (
+        f"{source_topic.subject_name} Approval Checkpoint {candidate.canonical_hash[:8]}"
+    )
     fields = {
         name: copy.deepcopy(getattr(source_topic, name))
         for name in (
@@ -207,6 +316,7 @@ def _copy_topic(
         fields["learning_outcome"] = "Viewers can make a different documented decision."
     topic = TopicDefinitionService(session).create(candidate=candidate, fields=fields)
     assert TopicDefinitionService(session).evaluate(topic).state == "PASS"
+    _attach_specific_proposal(session, candidate)
 
 
 def _copy_preflight(session, source: IdeaMarketPreflight, candidate: EditorialIdeaCandidate):
@@ -215,6 +325,9 @@ def _copy_preflight(session, source: IdeaMarketPreflight, candidate: EditorialId
         for column in source.__table__.columns
         if column.name not in {"id", "created_at", "editorial_idea_candidate_id"}
     }
+    evidence_blob = dict(values.get("evidence_blob") or {})
+    evidence_blob["claim_evidence_refs"] = copy.deepcopy(candidate.evidence_refs)
+    values["evidence_blob"] = evidence_blob
     preflight = IdeaMarketPreflight(
         **values, editorial_idea_candidate_id=candidate.id
     )
@@ -227,6 +340,10 @@ def _persist_pass(session, candidate: EditorialIdeaCandidate) -> str:
     novelty = EditorialNoveltyService(session)
     topic = TopicDefinitionService(session).current_eligibility(candidate).definition
     assert topic is not None
+    specificity = EditorialSpecificityService(session)
+    evaluation = specificity.evaluate(candidate=candidate, topic=topic)
+    assert evaluation.state == "PASS", evaluation.reason_codes
+    specificity.persist(candidate=candidate, evaluation=evaluation)
     territory = novelty.compiler.compile(candidate=candidate, topic=topic)
     novelty.persist(
         candidate,
@@ -392,6 +509,74 @@ def test_cleanup_hard_deletes_only_a_disposable_missing_authority_candidate(db_s
         actor=_system_worker_actor("vcos-durable-worker", permissions={"editorial.manage"}),
     )
     assert db_session.get(EditorialIdeaCandidate, disposable.id) is None
+
+
+def test_specificity_gate_blocks_source_label_and_reusable_documentation_review(db_session):
+    flow = _flow_with_current_topic(db_session)
+    candidate = flow.candidate
+    topic = TopicDefinitionService(db_session).current_eligibility(candidate).definition
+    assert topic is not None
+    proposal = copy.deepcopy(candidate.editorial_idea_proposal)
+    proposal.update(
+        {
+            "proposed_title": "Models | OpenAI API",
+            "proposed_angle": (
+                "A bounded standalone walkthrough of what Models | OpenAI API "
+                "documents, what remains outside the source scope, and what to verify next."
+            ),
+            "central_question_or_thesis": (
+                "What does the official documentation establish and what should users verify?"
+            ),
+            "learning_outcome": "Viewers can distinguish documented scope from unsupported assumptions.",
+            "viewer_value": "A bounded evidence-first decision frame instead of a broad product overview.",
+            "editorial_delta": "documentation review",
+            "specific_mechanism_or_use_case": "documentation review",
+            "decision_value": "what to verify",
+        }
+    )
+    proposal.pop("proposal_hash", None)
+    candidate.proposed_title = proposal["proposed_title"]
+    candidate.proposed_angle = proposal["proposed_angle"]
+    candidate.editorial_idea_proposal = EditorialIdeaProposal.model_validate(
+        proposal
+    ).model_dump(mode="json")
+
+    evaluation = EditorialSpecificityService(db_session).evaluate(
+        candidate=candidate, topic=topic
+    )
+
+    assert evaluation.state == "BLOCK"
+    assert "EDITORIAL_ANGLE_GENERIC_WALKTHROUGH" in evaluation.reason_codes
+    assert "EDITORIAL_QUESTION_GENERIC_DOCUMENTATION_REVIEW" in evaluation.reason_codes
+    assert "EDITORIAL_LEARNING_OUTCOME_GENERIC" in evaluation.reason_codes
+    assert "EDITORIAL_MECHANISM_OR_USE_CASE_MISSING" in evaluation.reason_codes
+
+
+def test_retroactive_specificity_cleanup_rejects_generic_greenlit_without_deleting_lineage(db_session):
+    flow = _flow_with_current_topic(db_session)
+    candidate = flow.candidate
+    candidate.stage = "GREENLIT"
+    proposal = copy.deepcopy(candidate.editorial_idea_proposal)
+    proposal["proposed_angle"] = "A bounded standalone walkthrough of what the source documents."
+    proposal.pop("proposal_hash", None)
+    candidate.proposed_angle = proposal["proposed_angle"]
+    candidate.editorial_idea_proposal = EditorialIdeaProposal.model_validate(
+        proposal
+    ).model_dump(mode="json")
+    service = EditorialSpecificityMaintenanceService(db_session)
+    plan = service.plan(
+        channel_workspace_id=flow.channel.id,
+        policy_snapshot_id=flow.snapshot.id,
+    )
+    action = next(item for item in plan if item.candidate_id == candidate.id)
+    assert action.action == "REJECT"
+    assert action.specificity is not None and action.specificity.state == "BLOCK"
+
+    service.apply(actions=plan, actor=flow.actor)
+
+    assert candidate.stage == "REJECTED"
+    assert "EDITORIAL_SPECIFICITY_RETROACTIVE_BLOCK" in candidate.reason_codes
+    assert TopicDefinitionService(db_session).current_eligibility(candidate).definition is not None
 
 
 def test_discovery_prompt_carries_compact_exclusion_authority():

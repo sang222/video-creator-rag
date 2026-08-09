@@ -42,7 +42,7 @@ from app.services.audit import AuditService
 from app.services.config_registry import content_hash
 
 
-EDITORIAL_TERRITORY_SCHEMA = "vcos.editorial-territory.v1"
+EDITORIAL_TERRITORY_SCHEMA = "vcos.editorial-territory.v2"
 EDITORIAL_NOVELTY_GATE_VERSION = "editorial-novelty-gate.v1"
 ACTIVE_TERRITORY_STAGES = {
     "GREENLIT",
@@ -135,6 +135,11 @@ class EditorialTerritoryCompiler:
         mode = str(topic.content_mode or "").strip()
         if mode not in {"STANDALONE", "SERIES_EPISODE"}:
             raise ValidationFailureError("EDITORIAL_TERRITORY_CONTENT_MODE_MISSING")
+        proposal = (
+            getattr(candidate, "editorial_idea_proposal", None)
+            if isinstance(getattr(candidate, "editorial_idea_proposal", None), dict)
+            else {}
+        )
         payload: dict[str, Any] = {
             "schema_version": EDITORIAL_TERRITORY_SCHEMA,
             "channel_workspace_id": str(candidate.channel_workspace_id),
@@ -146,6 +151,14 @@ class EditorialTerritoryCompiler:
                 topic.central_question_or_thesis
             ),
             "learning_outcome": normalize_editorial_text(topic.learning_outcome),
+            # Legacy territory compilation remains available for historical
+            # reporting/duplicate maintenance, but legacy rows cannot count
+            # as runway because they lack a current specificity receipt.
+            "editorial_delta": normalize_editorial_text(
+                proposal.get("editorial_delta")
+                or getattr(topic, "viewer_value", "")
+                or topic.central_question_or_thesis
+            ),
             "production_goal": normalize_editorial_text(topic.production_goal),
             "content_pillar": normalize_editorial_text(topic.content_pillar),
             "target_audience": normalize_editorial_text(topic.target_audience),
@@ -158,6 +171,7 @@ class EditorialTerritoryCompiler:
                 "subject_canonical_id",
                 "central_question_or_thesis",
                 "learning_outcome",
+                "editorial_delta",
             )
         ):
             raise ValidationFailureError("EDITORIAL_TERRITORY_AUTHORITY_MISSING")
@@ -245,13 +259,18 @@ class EditorialNoveltyService:
         matched: list[EditorialIdeaCandidate] = []
         published_refs: list[str] = []
         reasons: list[str] = []
+        from app.services.editorial_specificity import EditorialSpecificityService
         from app.services.script_qualification import TopicDefinitionService
+
+        specificity = EditorialSpecificityService(self.session)
 
         for occupied in self._locked_occupied_candidates(candidate):
             occupied_topic = self._current_topic(occupied)
             if occupied_topic is None:
                 continue
             if not TopicDefinitionService(self.session).current_eligibility(occupied).eligible:
+                continue
+            if not specificity.current_pass(occupied):
                 continue
             try:
                 occupied_territory = self.compiler.compile(
@@ -328,11 +347,15 @@ class EditorialNoveltyService:
         )
         keys: set[str] = set()
         eligible_rows = 0
+        from app.services.editorial_specificity import EditorialSpecificityService
         from app.services.script_qualification import TopicDefinitionService
 
         topic_service = TopicDefinitionService(self.session)
+        specificity = EditorialSpecificityService(self.session)
         for candidate in candidates:
             if not topic_service.current_eligibility(candidate).eligible:
+                continue
+            if not specificity.current_pass(candidate):
                 continue
             if not self._current_strict_preflight_pass(candidate):
                 continue
@@ -365,6 +388,9 @@ class EditorialNoveltyService:
         urls: set[str] = set()
         titles: set[str] = set()
         questions: set[str] = set()
+        from app.services.editorial_specificity import EditorialSpecificityService
+
+        specificity = EditorialSpecificityService(self.session)
         for candidate in self.session.scalars(
             select(EditorialIdeaCandidate).where(
                 EditorialIdeaCandidate.channel_workspace_id == channel_workspace_id,
@@ -374,6 +400,8 @@ class EditorialNoveltyService:
         ).all():
             topic = self._current_topic(candidate)
             if topic is None:
+                continue
+            if not specificity.current_pass(candidate):
                 continue
             subjects.add(str(topic.subject_name))
             titles.add(str(candidate.proposed_title))
@@ -845,10 +873,12 @@ class EditorialDuplicateCleanupService:
         )
 
     def _currently_eligible(self, candidate: EditorialIdeaCandidate) -> bool:
+        from app.services.editorial_specificity import EditorialSpecificityService
         from app.services.script_qualification import TopicDefinitionService
 
         return bool(
             TopicDefinitionService(self.session).current_eligibility(candidate).eligible
+            and EditorialSpecificityService(self.session).current_pass(candidate)
             and self.novelty._current_strict_preflight_pass(candidate)
         )
 

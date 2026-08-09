@@ -81,6 +81,10 @@ from app.db.models.vcos_v2 import SeriesRun
 from app.db.models.ops import DeadLetterJob, OpsIncident, ProviderAttempt
 from app.db.models.workflow import Artifact, ArtifactVersion
 from app.services.editorial_research import EditorialResearchService
+from app.services.editorial_specificity import (
+    EditorialIdeaProposal,
+    EditorialSpecificityService,
+)
 from app.services.editorial_runway_replenishment import (
     EditorialRunwayReplenishmentService,
 )
@@ -110,6 +114,7 @@ from app.services.rbac import RBACService
 from app.services.script_qualification import (
     ScriptQualificationService,
     TopicDefinitionService,
+    classify_source_specificity,
     span_hash,
 )
 from app.services.script_qualification_recovery import (
@@ -1047,7 +1052,7 @@ def _greenlit_candidate(session, scope, actor, *, topic_variant: str | None = No
 
 
 def _bind_current_topic_authority(session, candidate) -> None:
-    """Give a test candidate one current, topic-capable factual snapshot."""
+    """Give a test candidate a current, proposal-backed topic authority."""
 
     existing = TopicDefinitionService(session).current_eligibility(candidate)
     if existing.eligible:
@@ -1055,8 +1060,67 @@ def _bind_current_topic_authority(session, candidate) -> None:
     evidence_id = uuid.UUID(str(candidate.evidence_refs[0]["id"]))
     evidence = session.get(SearchDemandEvidence, evidence_id)
     assert evidence is not None
-    topic = TopicDefinitionService(session).create_from_topic_capable_evidence(
-        candidate=candidate
+    snapshot = (evidence.metadata_ or {})["editorial_fresh_evidence"]["source_snapshot"]
+    quote = "The official automation-audit document defines a bounded audit workflow for a small team."
+    assert quote in str(snapshot["content_excerpt"])
+    subject = str(snapshot["title"])
+    candidate.proposed_title = (
+        f"Where Small Teams Keep Human Review in {subject}'s Automation Audit"
+    )
+    candidate.proposed_angle = (
+        "Use the documented audit workflow to decide which external automation "
+        "step must retain human review."
+    )
+    proposal = EditorialIdeaProposal.model_validate(
+        {
+            "proposed_title": candidate.proposed_title,
+            "proposed_angle": candidate.proposed_angle,
+            "specific_audience_problem": (
+                "Small teams need to keep accountable human review before an "
+                "automation changes an external system."
+            ),
+            "central_question_or_thesis": (
+                "Which documented automation-audit step should retain human review "
+                "before a small team commits an external change?"
+            ),
+            "learning_outcome": (
+                "Viewers can identify the documented review checkpoint before an "
+                "automation commits an external change."
+            ),
+            "viewer_value": (
+                "A concrete decision for placing a human approval checkpoint in one "
+                "automation workflow."
+            ),
+            "editorial_delta": (
+                "Turns the documented audit workflow into a specific approval-point "
+                "decision instead of a product overview."
+            ),
+            "specific_mechanism_or_use_case": (
+                "Keep human review at the documented checkpoint before an automation "
+                "commits an external change."
+            ),
+            "decision_value": (
+                "Teams can decide which automation action requires human approval."
+            ),
+            "scope_inclusions": ["The documented automation-audit workflow and its review checkpoint"],
+            "scope_exclusions": ["Undocumented performance, ROI, and product-family claims"],
+            "primary_evidence_refs": [{"id": str(evidence.id), "ref": evidence.source_ref}],
+            "supporting_evidence_refs": [],
+            "evidence_bindings": [
+                {"field": field, "evidence_id": str(evidence.id), "quoted_text": quote}
+                for field in (
+                    "proposed_title", "proposed_angle", "central_question_or_thesis",
+                    "learning_outcome", "viewer_value", "editorial_delta",
+                    "specific_mechanism_or_use_case", "decision_value",
+                )
+            ],
+            "source_specificity_class": classify_source_specificity(evidence),
+            "content_mode": "STANDALONE",
+        }
+    )
+    candidate.editorial_idea_proposal = proposal.model_dump(mode="json")
+    topic = TopicDefinitionService(session).create_from_editorial_idea_proposal(
+        candidate=candidate, proposal=candidate.editorial_idea_proposal
     )
     receipt = TopicDefinitionService(session).evaluate(topic)
     assert receipt.current_production_eligibility is True
@@ -1087,9 +1151,17 @@ def _bind_series_topic_authority(session, candidate, *, plan, run) -> None:
             "production_goal": candidate.proposed_title,
             "scope_inclusions": ["Documented workflow only"],
             "exclusions": ["Unsupported claims"],
-            "central_question_or_thesis": f"What does {subject} establish for a small team?",
-            "learning_outcome": "Viewers can identify the documented workflow boundary.",
-            "viewer_value": "A concrete next step grounded in the source.",
+            "central_question_or_thesis": (
+                "Which documented automation step should retain human review before "
+                "the series workflow commits an external action?"
+            ),
+            "learning_outcome": (
+                "Viewers can identify the documented human-review checkpoint in this "
+                "series workflow."
+            ),
+            "viewer_value": (
+                "A concrete approval-point decision for the next automation workflow."
+            ),
             "content_mode": "SERIES_EPISODE",
             "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
             "source_classification_refs": [{"source_classification": "TOPIC_CAPABLE"}],
@@ -1099,13 +1171,60 @@ def _bind_series_topic_authority(session, candidate, *, plan, run) -> None:
                 "episode_number": run.next_episode_number,
                 "episode_role": "WORKFLOW_DEEP_DIVE",
                 "episode_delta": "Advances the series with the next exact documented workflow.",
-                "learning_outcome": "Viewers can identify the documented workflow boundary.",
+                "learning_outcome": (
+                    "Viewers can identify the documented human-review checkpoint in "
+                    "this series workflow."
+                ),
             },
             "standalone_self_containment_required": False,
         },
     )
     receipt = TopicDefinitionService(session).evaluate(topic)
     assert receipt.current_production_eligibility is True
+    proposal = EditorialIdeaProposal.model_validate(
+        {
+            "proposed_title": candidate.proposed_title,
+            "proposed_angle": candidate.proposed_angle,
+            "specific_audience_problem": topic.audience_problem,
+            "central_question_or_thesis": topic.central_question_or_thesis,
+            "learning_outcome": topic.learning_outcome,
+            "viewer_value": topic.viewer_value,
+            "editorial_delta": (
+                "Advances the series by applying the documented approval checkpoint "
+                "to the next workflow boundary."
+            ),
+            "specific_mechanism_or_use_case": (
+                "Use the documented approval checkpoint before an automation commits "
+                "an external action."
+            ),
+            "decision_value": (
+                "Teams can decide whether this series workflow needs human review."
+            ),
+            "scope_inclusions": list(topic.scope_inclusions),
+            "scope_exclusions": list(topic.exclusions),
+            "primary_evidence_refs": [{"id": str(evidence.id), "ref": evidence.source_ref}],
+            "supporting_evidence_refs": [],
+            "evidence_bindings": [
+                {"field": field, "evidence_id": str(evidence.id), "quoted_text": excerpt}
+                for field in (
+                    "proposed_title", "proposed_angle", "central_question_or_thesis",
+                    "learning_outcome", "viewer_value", "editorial_delta",
+                    "specific_mechanism_or_use_case", "decision_value",
+                )
+            ],
+            "source_specificity_class": classify_source_specificity(evidence),
+            "content_mode": "SERIES_EPISODE",
+            "series_binding": topic.series_binding,
+        }
+    )
+    candidate.editorial_idea_proposal = proposal.model_dump(mode="json")
+    evaluation = EditorialSpecificityService(session).evaluate(
+        candidate=candidate, topic=topic
+    )
+    assert evaluation.state == "PASS", evaluation.reason_codes
+    EditorialSpecificityService(session).persist(
+        candidate=candidate, evaluation=evaluation
+    )
 
 
 def _fixture_qualification_pass(session, run_id: uuid.UUID) -> ScriptQualificationRun:
