@@ -244,7 +244,14 @@ def classify_source_specificity(evidence: SearchDemandEvidence) -> str:
     source_ref = _clean(snapshot.get("canonical_url") or evidence.source_ref)
     path = urlparse(source_ref).path.rstrip("/")
     title = _clean(snapshot.get("title")).casefold()
-    if path in _DISCOVERY_PATHS or "documentation index" in title or title.endswith(" developers"):
+    # A publisher suffix (for example, ``| Google AI for Developers``) is
+    # navigation-like only at the documentation root.  A concrete API path
+    # with that suffix remains a potentially narrow technical source.
+    if (
+        path in _DISCOVERY_PATHS
+        or "documentation index" in title
+        or (not path and title.endswith(" developers"))
+    ):
         return "DISCOVERY_ONLY"
     segments = [item.casefold() for item in path.split("/") if item]
     excerpt = _clean(snapshot.get("content_excerpt")).casefold()

@@ -25,7 +25,7 @@ from app.services.config_registry import content_hash
 
 
 EDITORIAL_RESEARCH_TERRITORY_SCHEMA = "editorial-research-territory.v1"
-EDITORIAL_EVIDENCE_DISCOVERY_VERSION = "editorial-evidence-discovery.v2"
+EDITORIAL_EVIDENCE_DISCOVERY_VERSION = "editorial-evidence-discovery.v3"
 SOURCE_FAMILY_REGISTRY_PATH = Path("config/editorial_first_party_source_families.yaml")
 
 

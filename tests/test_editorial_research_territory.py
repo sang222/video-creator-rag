@@ -170,6 +170,13 @@ def test_generic_homepages_are_discovery_only_across_source_families():
     assert classify_source_specificity(
         evidence("https://ai.google.dev/gemini-api/docs/structured-output", "Structured output", "Detailed technical content " * 20)
     ) == "NARROW_TOPIC_CAPABLE"
+    assert classify_source_specificity(
+        evidence(
+            "https://ai.google.dev/gemini-api/docs/generate-content/structured-output?hl=en",
+            "Structured outputs | Gemini Generate Content API (Legacy) | Google AI for Developers",
+            "Detailed technical content " * 20,
+        )
+    ) == "NARROW_TOPIC_CAPABLE"
 
 
 def test_tool_discovery_retains_multiple_first_party_families_and_rejects_third_party():
