@@ -20,6 +20,7 @@ from app.services.editorial_novelty import (
 )
 from app.services.editorial_research import EditorialResearchService
 from app.services.editorial_specificity import (
+    EDITORIAL_IDEA_SYNTHESIS_VERSION,
     EditorialIdeaProposal,
     EditorialSpecificityMaintenanceService,
     EditorialSpecificityService,
@@ -630,12 +631,21 @@ def test_corrected_topic_authority_changes_same_day_scheduled_scope_only_by_vers
         **{**common, "idea_market_preflight_version": IDEA_MARKET_PREFLIGHT_VERSION},
         topic_gate_version="editorial-topic-definition-gate.v1",
     )
+    corrected_synthesis_scope = _scheduled_scope_key(
+        **{
+            **common,
+            "editorial_idea_synthesis_version": EDITORIAL_IDEA_SYNTHESIS_VERSION,
+        },
+        topic_gate_version="editorial-topic-definition-gate.v1",
+    )
     run_date = "2026-08-09"
 
     assert TOPIC_GATE_VERSION == "editorial-topic-definition-gate.v2"
     assert legacy_scope != corrected_scope
     assert IDEA_MARKET_PREFLIGHT_VERSION == "vcos.idea-market-preflight.v4"
     assert legacy_scope != corrected_preflight_scope
+    assert EDITORIAL_IDEA_SYNTHESIS_VERSION == "editorial-idea-synthesis.v2"
+    assert legacy_scope != corrected_synthesis_scope
     assert _canonical_hash({"scope_key": legacy_scope, "run_date": run_date}) != _canonical_hash(
         {"scope_key": corrected_scope, "run_date": run_date}
     )

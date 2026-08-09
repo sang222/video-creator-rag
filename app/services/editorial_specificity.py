@@ -22,10 +22,26 @@ from app.services.config_registry import content_hash
 
 
 EDITORIAL_IDEA_PROPOSAL_SCHEMA = "vcos.editorial-idea-proposal.v1"
-EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v1"
+EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v2"
 EDITORIAL_SPECIFICITY_GATE_VERSION = "editorial-specificity-gate.v1"
 MAX_EDITORIAL_IDEA_PROPOSALS_PER_RESEARCH = 3
 MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT = 1
+
+# These fields are viewer-facing material statements.  A source quote need not
+# repeat generated editorial framing verbatim (for example, a video title),
+# but every such field must trace to a frozen source fact through a binding.
+REQUIRED_EVIDENCE_BINDING_FIELDS = frozenset(
+    {
+        "proposed_title",
+        "proposed_angle",
+        "central_question_or_thesis",
+        "learning_outcome",
+        "viewer_value",
+        "editorial_delta",
+        "specific_mechanism_or_use_case",
+        "decision_value",
+    }
+)
 
 _SOURCE_CLASSES = {
     "DISCOVERY_ONLY": 0,
@@ -327,7 +343,13 @@ class EditorialIdeaSynthesisService:
             "supporting_evidence_refs, evidence_bindings, source_specificity_class, content_mode, "
             "series_binding. Do not include proposal_hash; the server computes it. Evidence refs use {id, ref}; evidence_bindings use "
             "{field, evidence_id, quoted_text}, where quoted_text is an exact short quote from "
-            "the supplied content_excerpt. Bind every viewer-facing material field. "
+            "the supplied content_excerpt. Every proposal must include at least one "
+            "binding for each of: proposed_title, proposed_angle, "
+            "central_question_or_thesis, learning_outcome, viewer_value, "
+            "editorial_delta, specific_mechanism_or_use_case, and decision_value. "
+            "A generated editorial framing field need not literally occur in a source, "
+            "but its binding must quote an exact source span that supports its "
+            "underlying factual mechanism or decision input. "
             f"The authoritative content_mode is {content_mode}; the authoritative series binding "
             f"is {series_binding or None}. The frozen discovery question is: {research_question}. "
             f"The only usable sources are: {source_pack}."
@@ -357,6 +379,24 @@ class EditorialIdeaSynthesisService:
         )
         if proposal.source_specificity_class != strongest_class:
             raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_SOURCE_CLASS_MISMATCH")
+        binding_fields: set[str] = set()
+        for binding in proposal.evidence_bindings:
+            if not isinstance(binding, dict):
+                continue
+            field = str(binding.get("field") or "")
+            if field not in REQUIRED_EVIDENCE_BINDING_FIELDS:
+                continue
+            evidence_id = str(binding.get("evidence_id") or "")
+            quote = str(binding.get("quoted_text") or "").strip()
+            if evidence_id not in ref_ids or not quote:
+                raise ValidationFailureError(
+                    "EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID"
+                )
+            binding_fields.add(field)
+        if not REQUIRED_EVIDENCE_BINDING_FIELDS.issubset(binding_fields):
+            raise ValidationFailureError(
+                "EDITORIAL_IDEA_SYNTHESIS_BINDING_COVERAGE_INCOMPLETE"
+            )
 
 
 class EditorialSpecificityService:
@@ -556,16 +596,7 @@ class EditorialSpecificityService:
         if not proposal_ids or not proposal_ids.issubset(by_id):
             reasons.append("EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT")
             return
-        required_fields = {
-            "proposed_title",
-            "proposed_angle",
-            "central_question_or_thesis",
-            "learning_outcome",
-            "viewer_value",
-            "editorial_delta",
-            "specific_mechanism_or_use_case",
-            "decision_value",
-        }
+        required_fields = REQUIRED_EVIDENCE_BINDING_FIELDS
         bound_fields: set[str] = set()
         for binding in proposal.evidence_bindings:
             if not isinstance(binding, dict):
