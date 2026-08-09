@@ -32,6 +32,7 @@ from app.core.config import get_settings
 from app.core.time import utc_now
 from app.db.models.m5 import SearchDemandEvidence
 from app.db.models.m10_1 import LLMRouterLane, LLMRouterProfile
+from app.db.models.channel import CompiledChannelPolicySnapshot
 from app.db.models.ops import (
     BudgetPolicy,
     CredentialReference,
@@ -42,13 +43,14 @@ from app.providers.openai import OpenAIResponsesProvider, OpenAIWebSearchRequest
 from app.services.config_registry import content_hash
 from app.services.m5 import SearchDemandEvidenceService
 from app.services.ops import ProviderHealthService, ProviderRegistryService
+from app.services.editorial_research_territory import FirstPartySourceFamilyRegistry
 
 
 EDITORIAL_EVIDENCE_PROVIDER_CAPABILITY = "editorial_evidence_collection"
 EDITORIAL_EVIDENCE_AUTHORITY_KEY = "editorial_evidence_authority"
 EDITORIAL_EVIDENCE_SCHEMA = "vcos.editorial-fresh-evidence.v1"
 EDITORIAL_EVIDENCE_PROVIDER_KEY = "openai"
-EDITORIAL_EVIDENCE_PROVIDER_CONFIG_VERSION = "openai-web-search-https-fetch.v4"
+EDITORIAL_EVIDENCE_PROVIDER_CONFIG_VERSION = "openai-web-search-https-fetch.v5"
 MAX_SOURCE_SNAPSHOT_CHARS = 4_000
 _ALLOWED_CONTENT_TYPES = {"text/html", "text/plain"}
 _PRIVATE_HOST_SUFFIXES = (".local", ".internal", ".localhost")
@@ -67,6 +69,61 @@ class FreshEvidenceAuthority:
     @property
     def ready(self) -> bool:
         return self.state == "EXISTING_SOURCE_PROVIDER_READY"
+
+
+def scope_authority_to_research_territory(
+    *,
+    authority: FreshEvidenceAuthority,
+    research_territory: dict[str, Any],
+) -> FreshEvidenceAuthority:
+    """Narrow a channel-approved source envelope to one planned territory.
+
+    The provider registry establishes the channel's complete first-party
+    universe.  A scheduled attempt may use only the source families selected
+    by its deterministic territory planner; it can never expand that envelope
+    from web-search output.
+    """
+
+    policy = dict(authority.policy or {})
+    allowed = policy.get("source_families")
+    selected = research_territory.get("allowed_source_families")
+    if not authority.ready or not isinstance(allowed, list) or not isinstance(selected, list):
+        raise ValidationFailureError("EDITORIAL_RESEARCH_SOURCE_FAMILY_AUTHORITY_INVALID")
+    allowed_by_id = {
+        str(item.get("family_id")): item
+        for item in allowed
+        if isinstance(item, dict) and item.get("first_party") is True
+    }
+    selected_ids = [
+        str(item.get("family_id"))
+        for item in selected
+        if isinstance(item, dict) and item.get("first_party") is True
+    ]
+    if not selected_ids or any(item not in allowed_by_id for item in selected_ids):
+        raise ValidationFailureError("EDITORIAL_RESEARCH_SOURCE_FAMILY_AUTHORITY_INVALID")
+    scoped_families = [allowed_by_id[item] for item in dict.fromkeys(selected_ids)]
+    scoped_policy = {
+        **policy,
+        "source_families": scoped_families,
+        "allowed_domains": sorted(
+            {
+                str(domain)
+                for family in scoped_families
+                for domain in family.get("approved_domains") or []
+            }
+        ),
+        "research_territory_hash": research_territory.get("territory_hash"),
+    }
+    scoped_policy["config_hash"] = content_hash(
+        {key: value for key, value in scoped_policy.items() if key != "config_hash"}
+    )
+    return FreshEvidenceAuthority(
+        state=authority.state,
+        provider_key=authority.provider_key,
+        reason_codes=authority.reason_codes,
+        policy=scoped_policy,
+        config_hash=scoped_policy["config_hash"],
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +145,9 @@ class FreshEvidenceSource:
     relative_interest_index: str | None = None
     competition_index: str | None = None
     rights_usage_note: str = "Source retained only as a bounded research extract."
+    source_family: str | None = None
+    organization: str | None = None
+    relevance_to_territory: str | None = None
     search_receipt: dict[str, Any] = field(default_factory=dict)
     fetch_receipt: dict[str, Any] = field(default_factory=dict)
 
@@ -213,6 +273,38 @@ class EditorialEvidenceProviderActivationService:
                 ),
                 changed=False,
             )
+        snapshot = self.session.get(
+            CompiledChannelPolicySnapshot, uuid.UUID(str(policy_snapshot_id))
+        )
+        payload = snapshot.compiled_payload if snapshot is not None and isinstance(snapshot.compiled_payload, dict) else {}
+        contract = payload.get("channel_contract_json") if isinstance(payload.get("channel_contract_json"), dict) else {}
+        editorial = contract.get("editorial_strategy") if isinstance(contract.get("editorial_strategy"), dict) else {}
+        identity = contract.get("channel_identity") if isinstance(contract.get("channel_identity"), dict) else {}
+        channel_terms = [
+            *(editorial.get("content_pillars") or []),
+            *(editorial.get("allowed_topics") or []),
+            *(editorial.get("allowed_angles") or []),
+            identity.get("niche"),
+            identity.get("brand_promise"),
+        ]
+        registry = FirstPartySourceFamilyRegistry()
+        source_families = registry.families_for(capability_tags=tuple(channel_terms))
+        if not source_families:
+            return EditorialEvidenceActivationResult(
+                authority=FreshEvidenceAuthority(
+                    state="SOURCE_PROVIDER_CONFIGURED_BUT_NOT_READY",
+                    provider_key=entry.provider_key,
+                    reason_codes=("EDITORIAL_SOURCE_FAMILY_AUTHORITY_UNAVAILABLE",),
+                ),
+                changed=False,
+            )
+        allowed_domains = sorted(
+            {
+                domain
+                for family in source_families
+                for domain in family.approved_domains
+            }
+        )
         authority_policy = {
             "schema_version": EDITORIAL_EVIDENCE_PROVIDER_CONFIG_VERSION,
             "policy_snapshot_id": str(policy_snapshot_id),
@@ -221,15 +313,14 @@ class EditorialEvidenceProviderActivationService:
             "executor_key": "openai_responses_web_search_https_fetch",
             "search_model": lane.primary_model,
             "search_reasoning_effort": lane.reasoning_effort,
-            # The guarded transport is intentionally restricted to the
-            # first-party API Docs host.  ``help.openai.com`` is not a usable
-            # evidence origin for this flow because it returns upstream 403
-            # responses to the bounded server-side fetcher.
-            "allowed_domains": ["developers.openai.com"],
+            # The OpenAI provider executes web search; this config-derived
+            # envelope defines the independent first-party source universe.
+            "allowed_domains": allowed_domains,
+            "source_families": [item.receipt() for item in source_families],
             "allowed_source_classes": ["OFFICIAL_DOCUMENT"],
             "maximum_search_calls": 1,
-            "maximum_search_results": 5,
-            "maximum_sources_per_run": 2,
+            "maximum_search_results": 8,
+            "maximum_sources_per_run": 3,
             # Discovery can rank a temporarily inaccessible first-party page
             # ahead of a reachable official document.  Fetch the bounded
             # discovery set, but still stop as soon as enough snapshots pass.
@@ -530,6 +621,14 @@ class OpenAIWebEvidenceProvider:
                             "raw_response_hash": content_hash({"bytes": raw_bytes.hex()}),
                             "extractor_version": "vcos.html-text.v1",
                         }
+                        family = _configured_source_family(
+                            hostname=urlparse(current_url).hostname,
+                            policy=self.policy,
+                        )
+                        if self.policy.get("source_families") and family is None:
+                            raise FreshEvidenceProviderError(
+                                "SOURCE_FAMILY_UNAPPROVED", retryable=False
+                            )
                         return FreshEvidenceSource(
                             source_ref=current_url,
                             title=extracted_title or candidate["title"] or current_url,
@@ -538,6 +637,17 @@ class OpenAIWebEvidenceProvider:
                             retrieved_content=extracted_text,
                             retrieved_at=retrieved_at,
                             query=research_question,
+                            source_family=(
+                                str(family.get("family_id")) if family else None
+                            ),
+                            organization=(
+                                str(family.get("organization")) if family else None
+                            ),
+                            relevance_to_territory=(
+                                "FIRST_PARTY_SOURCE_FAMILY_MATCHED_TERRITORY_QUERY"
+                                if family
+                                else None
+                            ),
                             search_receipt=dict(self.last_search_receipt or {}),
                             fetch_receipt=fetch_receipt,
                         )
@@ -647,6 +757,7 @@ class FreshEvidenceCollector:
         editorial_research_run_id: str,
         context_pack_snapshot_id: str,
         research_question: str,
+        research_territory: dict[str, Any] | None = None,
     ) -> FreshEvidenceCollectionResult:
         """Collect only through an already authorized provider.
 
@@ -721,16 +832,18 @@ class FreshEvidenceCollector:
             if reason is not None:
                 rejected.append(reason)
                 continue
-            source_hash = content_hash(
-                {
-                    "source_ref": source.source_ref,
-                    "title": source.title,
-                    "publisher": source.publisher,
-                    "source_class": source.source_class,
-                    "retrieved_content": source.retrieved_content,
-                    "retrieved_at": source.retrieved_at.isoformat(),
-                }
-            )
+            source_body = {
+                "source_ref": source.source_ref,
+                "title": source.title,
+                "publisher": source.publisher,
+                "source_class": source.source_class,
+                "retrieved_content": source.retrieved_content,
+                "retrieved_at": source.retrieved_at.isoformat(),
+            }
+            if source.source_family:
+                source_body["source_family"] = source.source_family
+                source_body["organization"] = source.organization
+            source_hash = content_hash(source_body)
             existing = self._existing_source(
                 editorial_research_run_id=editorial_research_run_id,
                 source_hash=source_hash,
@@ -745,6 +858,7 @@ class FreshEvidenceCollector:
                     "editorial_research_run_id": editorial_research_run_id,
                     "context_pack_snapshot_id": context_pack_snapshot_id,
                     "research_question": research_question,
+                    "research_territory": dict(research_territory or {}),
                     "search_receipt": source.search_receipt,
                     "fetch_receipt": source.fetch_receipt,
                     "source_snapshot": {
@@ -754,6 +868,13 @@ class FreshEvidenceCollector:
                         "title": source.title,
                         "publisher": source.publisher,
                         "source_class": source.source_class,
+                        "source_family": source.source_family,
+                        "organization": source.organization,
+                        "first_party_validated": bool(source.source_family),
+                        "relevance_to_territory": source.relevance_to_territory,
+                        "research_territory_hash": (research_territory or {}).get(
+                            "territory_hash"
+                        ),
                         "retrieved_at": source.retrieved_at.isoformat(),
                         "published_or_updated_at": (
                             source.published_or_updated_at.isoformat()
@@ -818,6 +939,7 @@ class FreshEvidenceCollector:
             "provider_key": authority.provider_key,
             "provider_config_hash": authority.config_hash,
             "sources": list(refs),
+            "research_territory": dict(research_territory or {}),
         }
         source_pack_hash = content_hash(source_pack)
         receipt = {
@@ -832,6 +954,7 @@ class FreshEvidenceCollector:
                 "editorial_research_run_id": editorial_research_run_id,
                 "context_pack_snapshot_id": context_pack_snapshot_id,
                 "research_question": research_question,
+                "research_territory": dict(research_territory or {}),
                 "source_pack_hash": source_pack_hash,
                 "evidence_refs": list(refs),
             },
@@ -1001,6 +1124,20 @@ def _valid_policy(policy: dict[str, Any]) -> bool:
             and bool(allowed_classes)
             and isinstance(allowed_domains, list)
             and bool(allowed_domains)
+            and (
+                policy.get("source_families") is None
+                or (
+                    isinstance(policy.get("source_families"), list)
+                    and bool(policy.get("source_families"))
+                    and all(
+                        isinstance(item, dict)
+                        and item.get("first_party") is True
+                        and isinstance(item.get("approved_domains"), list)
+                        and bool(item.get("approved_domains"))
+                        for item in policy.get("source_families") or []
+                    )
+                )
+            )
             and 1 <= int(policy.get("maximum_sources_per_run")) <= 5
             and (
                 policy.get("maximum_search_calls") is None
@@ -1051,6 +1188,14 @@ def _source_validation_reason(
         return "SOURCE_QUALITY_INSUFFICIENT"
     if not _hostname_allowed(parsed.hostname, list(policy["allowed_domains"])):
         return "SOURCE_QUALITY_INSUFFICIENT"
+    if policy.get("source_families"):
+        family = _configured_source_family(hostname=parsed.hostname, policy=policy)
+        if (
+            family is None
+            or source.source_family != family.get("family_id")
+            or source.organization != family.get("organization")
+        ):
+            return "SOURCE_FAMILY_UNAPPROVED"
     retrieved_at = source.retrieved_at.astimezone(timezone.utc)
     cutoff = now.astimezone(timezone.utc) - timedelta(
         days=int(policy["freshness_days"])
@@ -1078,6 +1223,8 @@ def _evidence_ref(evidence: SearchDemandEvidence) -> dict[str, Any]:
         "confidence": evidence.evidence_confidence,
         "captured_at": evidence.captured_at.isoformat(),
         "source_snapshot_hash": snapshot.get("content_hash"),
+        "source_family": snapshot.get("source_family"),
+        "organization": snapshot.get("organization"),
     }
 
 
@@ -1117,6 +1264,20 @@ def _hostname_allowed(hostname: str | None, allowed_domains: list[str]) -> bool:
         for domain in allowed_domains
         if isinstance(domain, str) and domain.strip()
     )
+
+
+def _configured_source_family(
+    *, hostname: str | None, policy: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Return only an explicitly configured first-party family for a host."""
+
+    for family in policy.get("source_families") or []:
+        if not isinstance(family, dict) or family.get("first_party") is not True:
+            continue
+        domains = family.get("approved_domains")
+        if isinstance(domains, list) and _hostname_allowed(hostname, domains):
+            return family
+    return None
 
 
 def _assert_safe_fetch_url(url: str, *, allowed_domains: list[str]) -> None:

@@ -200,6 +200,8 @@ class EditorialIdeaSynthesisService:
                     "evidence_id": str(item.id),
                     "canonical_url": snapshot.get("canonical_url") or item.source_ref,
                     "title": snapshot.get("title"),
+                    "source_family": snapshot.get("source_family"),
+                    "organization": snapshot.get("organization"),
                     "source_specificity_class": source_class,
                     "content_excerpt": str(snapshot.get("content_excerpt") or "")[:4_000],
                 }

@@ -611,6 +611,8 @@ def test_corrected_topic_authority_changes_same_day_scheduled_scope_only_by_vers
         "editorial_idea_synthesis_version": "editorial-idea-synthesis.v1",
         "editorial_specificity_gate_version": "editorial-specificity-gate.v1",
         "editorial_territory_version": "vcos.editorial-territory.v2",
+        "editorial_research_territory_version": "editorial-research-territory.v1",
+        "editorial_evidence_discovery_version": "editorial-evidence-discovery.v2",
         "editorial_evidence_provider_key": "openai",
         "editorial_evidence_provider_config_hash": "provider-config-1",
         "editorial_evidence_provider_state": "EXISTING_SOURCE_PROVIDER_READY",

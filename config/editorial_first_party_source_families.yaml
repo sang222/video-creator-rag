@@ -1,0 +1,95 @@
+catalog_key: editorial_first_party_source_families
+catalog_version: "1.0.0"
+schema_version: catalog.v1
+status: active
+items:
+  - key: default
+    registry_schema_version: editorial-first-party-source-families.v1
+    territory_types:
+      - territory_type: WORKFLOW_MECHANISM
+        priority: 10
+        profile_tags: [workflow, automation, process, operations, system]
+        capability_tags: [workflow, automation, implementation, integration, agent]
+        desired_editorial_function: Explain one documented workflow mechanism and its operating boundary.
+        allowed_claim_scope: [documented workflow behavior, configuration boundary, implementation pattern]
+      - territory_type: TOOL_SELECTION
+        priority: 20
+        profile_tags: [tool, model, agent, ai, workflow]
+        capability_tags: [tool, model, agent, evaluation, constraint]
+        desired_editorial_function: Compare documented selection constraints without naming a universal winner.
+        allowed_claim_scope: [documented capability boundary, selection constraint, evaluation requirement]
+      - territory_type: RELIABILITY_EVALUATION
+        priority: 30
+        profile_tags: [reliable, reliability, approval, quality, evaluation, governance]
+        capability_tags: [evaluation, reliability, testing, guardrail, structured-output]
+        desired_editorial_function: Explain how a team validates one documented reliability or evaluation boundary.
+        allowed_claim_scope: [documented validation pattern, reliability constraint, failure boundary]
+      - territory_type: INTEGRATION_PATTERN
+        priority: 40
+        profile_tags: [integration, dashboard, system, workflow, automation]
+        capability_tags: [integration, automation, workflow, api, implementation]
+        desired_editorial_function: Explain a documented integration pattern and the decision it supports.
+        allowed_claim_scope: [documented integration behavior, implementation pattern, operating constraint]
+      - territory_type: SECURITY_OR_GOVERNANCE
+        priority: 50
+        profile_tags: [approval, governance, security, control, risk]
+        capability_tags: [security, governance, approval, permission, audit]
+        desired_editorial_function: Explain one documented control, approval, or governance decision.
+        allowed_claim_scope: [documented control boundary, approval pattern, security constraint]
+    source_families:
+      - family_id: openai
+        organization: OpenAI
+        approved_domains: [developers.openai.com, platform.openai.com]
+        first_party: true
+        capability_tags: [model, agent, tool, workflow, api, evaluation, structured-output]
+        source_surface_types: [developer_docs, api_docs, technical_guides]
+        status: active
+        version: v1
+      - family_id: anthropic
+        organization: Anthropic
+        approved_domains: [docs.anthropic.com]
+        first_party: true
+        capability_tags: [model, agent, tool, workflow, api, evaluation, structured-output]
+        source_surface_types: [developer_docs, api_docs, technical_guides]
+        status: active
+        version: v1
+      - family_id: google_ai
+        organization: Google
+        approved_domains: [ai.google.dev, cloud.google.com]
+        first_party: true
+        capability_tags: [model, agent, workflow, api, evaluation, structured-output, integration]
+        source_surface_types: [developer_docs, api_docs, technical_guides]
+        status: active
+        version: v1
+      - family_id: github
+        organization: GitHub
+        approved_domains: [docs.github.com]
+        first_party: true
+        capability_tags: [workflow, automation, integration, implementation, agent]
+        source_surface_types: [developer_docs, product_docs, technical_guides]
+        status: active
+        version: v1
+      - family_id: microsoft_azure
+        organization: Microsoft
+        approved_domains: [learn.microsoft.com]
+        first_party: true
+        capability_tags: [workflow, integration, governance, security, evaluation, api]
+        source_surface_types: [developer_docs, product_docs, technical_guides]
+        status: active
+        version: v1
+      - family_id: aws
+        organization: AWS
+        approved_domains: [docs.aws.amazon.com]
+        first_party: true
+        capability_tags: [workflow, integration, security, governance, model, agent]
+        source_surface_types: [developer_docs, api_docs, technical_guides]
+        status: active
+        version: v1
+      - family_id: n8n
+        organization: n8n
+        approved_domains: [docs.n8n.io]
+        first_party: true
+        capability_tags: [workflow, automation, integration, implementation]
+        source_surface_types: [developer_docs, product_docs, technical_guides]
+        status: active
+        version: v1

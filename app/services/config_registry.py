@@ -316,6 +316,15 @@ class DecisionRightsPolicyItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EditorialFirstPartySourceFamiliesCatalogItem(BaseModel):
+    key: str = Field(min_length=1)
+    registry_schema_version: str = Field(min_length=1)
+    territory_types: list[dict[str, Any]] = Field(min_length=1)
+    source_families: list[dict[str, Any]] = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 @dataclass(frozen=True)
 class LoadedCatalog:
     path: Path
@@ -442,6 +451,7 @@ class ConfigRegistryService:
             "artifact_type_registry": ArtifactTypeRegistryItem,
             "review_type_registry": ReviewTypeRegistryItem,
             "decision_rights_policy": DecisionRightsPolicyItem,
+            "editorial_first_party_source_families": EditorialFirstPartySourceFamiliesCatalogItem,
             "reason_code_catalog": ReasonCodeItem,
             "evidence_type_catalog": SimpleKeyCatalogItem,
             "freshness_state_catalog": SimpleKeyCatalogItem,

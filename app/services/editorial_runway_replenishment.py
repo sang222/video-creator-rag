@@ -66,11 +66,17 @@ from app.services.editorial_specificity import (
     EDITORIAL_SPECIFICITY_GATE_VERSION,
     EditorialIdeaSynthesisService,
 )
+from app.services.editorial_research_territory import (
+    EDITORIAL_EVIDENCE_DISCOVERY_VERSION,
+    EDITORIAL_RESEARCH_TERRITORY_SCHEMA,
+    EditorialResearchTerritoryPlanner,
+)
 from app.db.models.r3d1 import ContentCategory
 from app.services.editorial_fresh_evidence import (
     EditorialEvidenceProviderActivationService,
     FreshEvidenceCollector,
     OpenAIWebEvidenceProvider,
+    scope_authority_to_research_territory,
 )
 from app.services.editorial_research import EditorialResearchService
 from app.services.m5 import (
@@ -115,6 +121,8 @@ def _scheduled_scope_key(
     editorial_idea_synthesis_version: str,
     editorial_specificity_gate_version: str,
     editorial_territory_version: str,
+    editorial_research_territory_version: str,
+    editorial_evidence_discovery_version: str,
     editorial_evidence_provider_key: str,
     editorial_evidence_provider_config_hash: str,
     editorial_evidence_provider_state: str,
@@ -137,6 +145,8 @@ def _scheduled_scope_key(
             "editorial_idea_synthesis_version": editorial_idea_synthesis_version,
             "editorial_specificity_gate_version": editorial_specificity_gate_version,
             "editorial_territory_version": editorial_territory_version,
+            "editorial_research_territory_version": editorial_research_territory_version,
+            "editorial_evidence_discovery_version": editorial_evidence_discovery_version,
             "editorial_evidence_provider_key": editorial_evidence_provider_key,
             "editorial_evidence_provider_config_hash": editorial_evidence_provider_config_hash,
             "editorial_evidence_provider_state": editorial_evidence_provider_state,
@@ -254,6 +264,8 @@ class EditorialRunwayReplenishmentService:
             editorial_idea_synthesis_version=EDITORIAL_IDEA_SYNTHESIS_VERSION,
             editorial_specificity_gate_version=EDITORIAL_SPECIFICITY_GATE_VERSION,
             editorial_territory_version=EDITORIAL_TERRITORY_SCHEMA,
+            editorial_research_territory_version=EDITORIAL_RESEARCH_TERRITORY_SCHEMA,
+            editorial_evidence_discovery_version=EDITORIAL_EVIDENCE_DISCOVERY_VERSION,
             editorial_evidence_provider_key=activation.authority.provider_key,
             editorial_evidence_provider_config_hash=activation.authority.config_hash,
             editorial_evidence_provider_state=activation.authority.state,
@@ -391,81 +403,99 @@ class EditorialRunwayReplenishmentService:
         elif context_id is None or research_slot is None:
             blockers.append("RUNWAY_REPLENISHMENT_CONTEXT_FREEZE_BLOCKED")
         elif not blockers:
-            research_question = self._research_question(
-                research_slot=research_slot,
-                mode_decision=mode_decision,
-                exclusion_authority=exclusion_authority,
-            )
-            settings = get_settings()
-            provider = OpenAIWebEvidenceProvider(
-                api_key=(
-                    settings.openai_api_key.get_secret_value()
-                    if settings.openai_api_key is not None
-                    else None
-                ),
-                policy=fresh_evidence.policy or {},
-            )
-            collection = FreshEvidenceCollector(self.session).collect(
-                authority=fresh_evidence,
-                provider=provider,
-                company_id=str(run.company_id),
-                channel_workspace_id=str(run.channel_workspace_id),
-                editorial_research_run_id=str(research_run.id),
-                context_pack_snapshot_id=str(context_id),
-                research_question=research_question,
-            )
-            diagnostics["fresh_evidence"] = {
-                "provider_state": collection.authority.state,
-                "provider_key": collection.authority.provider_key,
-                "provider_config_hash": collection.authority.config_hash,
-                "reason_codes": list(collection.authority.reason_codes),
-                "network_call_made": bool(
-                    (collection.receipt or {}).get("network_call_made")
-                ),
-                "collector_receipt": collection.receipt,
-                "research_question_hash": _canonical_hash(
-                    {"research_question": research_question}
-                ),
-            }
-            if collection.ok:
-                try:
-                    candidate, preflight = self._create_candidate_and_preflight(
-                        editorial=editorial,
-                        research_run=research_run,
-                        research_slot=research_slot,
-                        context_pack_snapshot_id=context_id,
-                        channel_state_pack_snapshot_id=state_id,
-                        mode_decision=mode_decision,
-                        collection_receipt=collection.receipt or {},
-                        evidence_refs=list(collection.evidence_refs),
-                        exclusion_authority=exclusion_authority,
-                        research_question=research_question,
-                        actor=actor,
-                    )
-                except ValidationFailureError as exc:
-                    error_code = str(exc)
-                    blockers.append(
-                        error_code
-                        if error_code.startswith("EDITORIAL_")
-                        else "RUNWAY_REPLENISHMENT_STRICT_PREFLIGHT_BLOCKED"
-                    )
-                    diagnostics["editorial_processing_error"] = error_code
-                else:
-                    diagnostics["editorial_outcome"] = {
-                        "candidate_id": str(candidate.id),
-                        "candidate_stage": candidate.stage,
-                        "strict_preflight_id": str(preflight.id),
-                        "strict_preflight_decision": preflight.decision,
-                        "strict_preflight_reason_codes": list(preflight.reason_codes),
-                    }
+            try:
+                research_territory = EditorialResearchTerritoryPlanner(
+                    self.session
+                ).plan(
+                    channel_workspace_id=run.channel_workspace_id,
+                    policy_snapshot=policy_snapshot,
+                    research_slot=research_slot,
+                    content_mode=str(mode_decision.content_mode),
+                    series_binding=mode_decision.series_binding,
+                    exclusion_authority=exclusion_authority,
+                )
+            except ValidationFailureError as exc:
+                blockers.append(str(exc))
+                diagnostics["editorial_processing_error"] = str(exc)
             else:
-                blockers.extend(collection.authority.reason_codes)
+                diagnostics["research_territory"] = research_territory.receipt()
+                research_question = research_territory.research_question
+                fresh_evidence = scope_authority_to_research_territory(
+                    authority=fresh_evidence,
+                    research_territory=research_territory.receipt(),
+                )
+                settings = get_settings()
+                provider = OpenAIWebEvidenceProvider(
+                    api_key=(
+                        settings.openai_api_key.get_secret_value()
+                        if settings.openai_api_key is not None
+                        else None
+                    ),
+                    policy=fresh_evidence.policy or {},
+                )
+                collection = FreshEvidenceCollector(self.session).collect(
+                    authority=fresh_evidence,
+                    provider=provider,
+                    company_id=str(run.company_id),
+                    channel_workspace_id=str(run.channel_workspace_id),
+                    editorial_research_run_id=str(research_run.id),
+                    context_pack_snapshot_id=str(context_id),
+                    research_question=research_question,
+                    research_territory=research_territory.receipt(),
+                )
+                diagnostics["fresh_evidence"] = {
+                    "provider_state": collection.authority.state,
+                    "provider_key": collection.authority.provider_key,
+                    "provider_config_hash": collection.authority.config_hash,
+                    "reason_codes": list(collection.authority.reason_codes),
+                    "network_call_made": bool(
+                        (collection.receipt or {}).get("network_call_made")
+                    ),
+                    "collector_receipt": collection.receipt,
+                    "research_question_hash": _canonical_hash(
+                        {"research_question": research_question}
+                    ),
+                }
+                if collection.ok:
+                    try:
+                        candidate, preflight = self._create_candidate_and_preflight(
+                            editorial=editorial,
+                            research_run=research_run,
+                            research_slot=research_slot,
+                            context_pack_snapshot_id=context_id,
+                            channel_state_pack_snapshot_id=state_id,
+                            mode_decision=mode_decision,
+                            collection_receipt=collection.receipt or {},
+                            evidence_refs=list(collection.evidence_refs),
+                            exclusion_authority=exclusion_authority,
+                            research_question=research_question,
+                            actor=actor,
+                        )
+                    except ValidationFailureError as exc:
+                        error_code = str(exc)
+                        blockers.append(
+                            error_code
+                            if error_code.startswith("EDITORIAL_")
+                            else "RUNWAY_REPLENISHMENT_STRICT_PREFLIGHT_BLOCKED"
+                        )
+                        diagnostics["editorial_processing_error"] = error_code
+                    else:
+                        diagnostics["editorial_outcome"] = {
+                            "candidate_id": str(candidate.id),
+                            "candidate_stage": candidate.stage,
+                            "strict_preflight_id": str(preflight.id),
+                            "strict_preflight_decision": preflight.decision,
+                            "strict_preflight_reason_codes": list(preflight.reason_codes),
+                        }
+                else:
+                    blockers.extend(collection.authority.reason_codes)
         research_run.metadata_ = {
             **(research_run.metadata_ or {}),
             _METADATA_KEY: {
                 **((research_run.metadata_ or {}).get(_METADATA_KEY) or {}),
                 "context_pack_snapshot_id": str(context_id) if context_id else None,
                 "channel_state_pack_snapshot_id": str(state_id) if state_id else None,
+                "research_territory": diagnostics.get("research_territory"),
                 "capability_diagnostics": diagnostics,
             },
         }
@@ -511,19 +541,19 @@ class EditorialRunwayReplenishmentService:
             series_title = str(binding.get("series_display_name") or "the active series")
             episode_delta = str(binding.get("episode_delta") or "the next bounded episode")
             prompt = (
-                "Find current first-party OpenAI documentation that can ground "
+                "Find current first-party technical evidence that can ground "
                 f"a US English long-form episode for {series_title}. The episode "
-                f"must {episode_delta}. Return only official documentation URLs; "
-                "do not make market, ROI, or performance claims."
+                f"must {episode_delta}. Prefer specific technical pages and do "
+                "not make market, ROI, or performance claims."
             )
             return f"{prompt} {EditorialRunwayReplenishmentService._exclusion_prompt(exclusion_authority)}"
         if mode_decision.content_mode != ContentMode.STANDALONE.value:
             raise ValidationFailureError("EDITORIAL_RESEARCH_QUESTION_AUTHORITY_MISSING")
         prompt = (
-            "Find current first-party OpenAI documentation that can ground a "
+            "Find current first-party technical evidence that can ground a "
             "US English long-form standalone editorial idea for the approved "
-            f"pillar '{pillar}' and frozen production goal '{goal}'. Return "
-            "only official documentation URLs; do not make market, ROI, "
+            f"pillar '{pillar}' and frozen production goal '{goal}'. Prefer "
+            "specific technical pages; do not make market, ROI, "
             "time-saving, or earnings claims."
         )
         return f"{prompt} {EditorialRunwayReplenishmentService._exclusion_prompt(exclusion_authority)}"

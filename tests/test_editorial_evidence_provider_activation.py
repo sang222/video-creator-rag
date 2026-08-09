@@ -213,9 +213,11 @@ def test_existing_openai_registry_activation_is_idempotent(
         "search",
         "fetch",
     ]
-    assert entry.policy_fit_blob["editorial_evidence_authority"]["allowed_domains"] == [
-        "developers.openai.com"
-    ]
+    authority_policy = entry.policy_fit_blob["editorial_evidence_authority"]
+    assert "developers.openai.com" in authority_policy["allowed_domains"]
+    assert "docs.anthropic.com" in authority_policy["allowed_domains"]
+    assert len(authority_policy["source_families"]) >= 2
+    assert all(item["first_party"] is True for item in authority_policy["source_families"])
     assert entry.policy_fit_blob["editorial_evidence_authority"]["max_response_bytes"] == 524_288
     assert entry.policy_fit_blob["editorial_evidence_authority"]["automatic_fallback"] is False
 
