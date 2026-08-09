@@ -61,6 +61,7 @@ from app.db.models.script_qualification import (
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
 from app.db.models.workflow import VideoProject
 from app.services.config_registry import content_hash
+from app.services.first_launch_authority import launch_run_authority_hash
 from app.services.production_start_readiness import (
     resolve_budget_authority,
 )
@@ -884,31 +885,6 @@ class ProjectAdmissionV2Service:
         return launch_policy, launch_run
 
     @staticmethod
-    def _launch_run_authority_hash(
-        *,
-        launch_policy: FirstChannelLaunchPolicyVersion,
-        launch_run: LaunchRun,
-    ) -> str:
-        """Hash the active-run snapshot that an immutable admission binds."""
-
-        return content_hash(
-            {
-                "launch_key": launch_run.launch_key,
-                "launch_policy_hash": launch_policy.canonical_hash,
-                "launch_policy_version_id": str(launch_policy.id),
-                "launch_run_id": str(launch_run.id),
-                "launch_started_at": (
-                    launch_run.launch_started_at.isoformat()
-                    if launch_run.launch_started_at is not None
-                    else None
-                ),
-                "preparation_started_on": launch_run.preparation_started_on.isoformat(),
-                "reason_codes": list(launch_run.reason_codes or []),
-                "state": launch_run.state,
-            }
-        )
-
-    @staticmethod
     def _audience_authority(
         *,
         context: _AdmissionContext,
@@ -993,7 +969,7 @@ class ProjectAdmissionV2Service:
         """
 
         lineage = self._audience_authority(context=context)
-        launch_run_hash = self._launch_run_authority_hash(
+        launch_run_hash = launch_run_authority_hash(
             launch_policy=context.launch_policy,
             launch_run=context.launch_run,
         )

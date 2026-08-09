@@ -36,7 +36,7 @@ from app.db.models.m5 import (
 from app.db.models.m7 import UploadedVideo
 from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion, LaunchRun
 from app.services.company_access import require_company_permission
-from app.services.config_registry import content_hash
+from app.services.first_launch_authority import launch_run_authority_hash
 
 
 _CANDIDATE_TRANSITIONS = {
@@ -322,29 +322,6 @@ class EditorialResearchService:
         return launch_policy, launch_run
 
     @staticmethod
-    def _launch_run_authority_hash(
-        *,
-        launch_policy: FirstChannelLaunchPolicyVersion,
-        launch_run: LaunchRun,
-    ) -> str:
-        return content_hash(
-            {
-                "launch_key": launch_run.launch_key,
-                "launch_policy_hash": launch_policy.canonical_hash,
-                "launch_policy_version_id": str(launch_policy.id),
-                "launch_run_id": str(launch_run.id),
-                "launch_started_at": (
-                    launch_run.launch_started_at.isoformat()
-                    if launch_run.launch_started_at is not None
-                    else None
-                ),
-                "preparation_started_on": launch_run.preparation_started_on.isoformat(),
-                "reason_codes": list(launch_run.reason_codes or []),
-                "state": launch_run.state,
-            }
-        )
-
-    @staticmethod
     def _audience_authority(
         *,
         policy: CompiledChannelPolicySnapshot,
@@ -503,7 +480,7 @@ class EditorialResearchService:
             "active_launch_policy_version_id": launch_policy.id,
             "active_launch_policy_hash": launch_policy.canonical_hash,
             "active_launch_run_id": launch_run.id,
-            "active_launch_run_hash": self._launch_run_authority_hash(
+            "active_launch_run_hash": launch_run_authority_hash(
                 launch_policy=launch_policy,
                 launch_run=launch_run,
             ),

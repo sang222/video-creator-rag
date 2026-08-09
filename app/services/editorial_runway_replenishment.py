@@ -35,9 +35,6 @@ from app.contracts.vcos_v2 import (
     ProductionLane,
     SeriesPlanState,
     SeriesRunState,
-    DecisionReversibility,
-    StrategicIntent,
-    StrategicLineageV2,
 )
 from app.core.actor import ActorContext
 from app.core.config import get_settings
@@ -59,7 +56,6 @@ from app.db.models.m5 import (
     SearchDemandEvidence,
 )
 from app.db.models.vcos_v2 import SeriesPlan, SeriesRun
-from app.services.config_registry import content_hash
 from app.services.editorial_novelty import EditorialNoveltyService, normalize_editorial_text
 from app.services.editorial_specificity import (
     EDITORIAL_IDEA_SYNTHESIS_VERSION,
@@ -82,6 +78,7 @@ from app.services.editorial_research import EditorialResearchService
 from app.services.m5 import (
     ChannelStatePackService,
     EditorialCalendarService,
+    IDEA_MARKET_PREFLIGHT_VERSION,
     IdeaMarketPreflightService,
     ResourceResolverService,
 )
@@ -126,6 +123,7 @@ def _scheduled_scope_key(
     editorial_evidence_provider_key: str,
     editorial_evidence_provider_config_hash: str,
     editorial_evidence_provider_state: str,
+    idea_market_preflight_version: str,
 ) -> str:
     """Build the durable semantic identity of a scheduled replenishment.
 
@@ -150,6 +148,7 @@ def _scheduled_scope_key(
             "editorial_evidence_provider_key": editorial_evidence_provider_key,
             "editorial_evidence_provider_config_hash": editorial_evidence_provider_config_hash,
             "editorial_evidence_provider_state": editorial_evidence_provider_state,
+            "idea_market_preflight_version": idea_market_preflight_version,
         }
     )
 
@@ -269,6 +268,7 @@ class EditorialRunwayReplenishmentService:
             editorial_evidence_provider_key=activation.authority.provider_key,
             editorial_evidence_provider_config_hash=activation.authority.config_hash,
             editorial_evidence_provider_state=activation.authority.state,
+            idea_market_preflight_version=IDEA_MARKET_PREFLIGHT_VERSION,
         )
         attempt_key = _canonical_hash({"scope_key": scope_key, "run_date": run_date})
         existing = self._existing_equivalent(
@@ -798,90 +798,6 @@ class EditorialRunwayReplenishmentService:
         if last_candidate is not None and last_preflight is not None:
             raise ValidationFailureError("EDITORIAL_SPECIFIC_NOVEL_IDEA_EXHAUSTED")
         raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_NO_USABLE_PROPOSAL")
-
-    def _first_launch_candidate_lineage(
-        self,
-        *,
-        research_run: EditorialResearchRun,
-    ) -> dict[str, Any]:
-        """Freeze the approved first-launch experiment authority on its candidate.
-
-        This is editorial authority, not an invented market score.  The strict
-        preflight later validates its current policy/run and first-N position.
-        """
-        run = self.session.scalar(
-            select(LaunchRun).where(
-                LaunchRun.company_id == research_run.company_id,
-                LaunchRun.channel_workspace_id == research_run.channel_workspace_id,
-                LaunchRun.state == "ACTIVE",
-            )
-        )
-        if run is None:
-            raise ValidationFailureError("FIRST_LAUNCH_EXPERIMENT_ACTIVE_RUN_REQUIRED")
-        policy = self.session.get(FirstChannelLaunchPolicyVersion, run.launch_policy_version_id)
-        snapshot = self.session.get(CompiledChannelPolicySnapshot, research_run.policy_snapshot_id)
-        payload = snapshot.compiled_payload if snapshot is not None else {}
-        contract = payload.get("channel_contract_json") if isinstance(payload, dict) else None
-        identity = contract.get("channel_identity") if isinstance(contract, dict) else None
-        target = contract.get("target_audience") if isinstance(contract, dict) else None
-        market = contract.get("market_locale") if isinstance(contract, dict) else None
-        promise = identity.get("brand_promise") if isinstance(identity, dict) else None
-        persona = target.get("primary_persona") if isinstance(target, dict) else None
-        if policy is None or policy.state != "APPROVED" or not isinstance(promise, str) or not promise.strip() or not isinstance(persona, str) or not persona.strip():
-            raise ValidationFailureError("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
-        target_definition = {
-            "audience_level": target.get("audience_level"),
-            "audience_notes": target.get("audience_notes"),
-            "desired_outcome": target.get("desired_outcome"),
-            "market_locale": dict(market) if isinstance(market, dict) else {},
-            "pain_points": list(target.get("pain_points") or []),
-            "primary_persona": persona,
-        }
-        promise_version = f"channel-contract-snapshot-{snapshot.snapshot_version}"
-        drift_version = f"channel-contract-drift-guard-{snapshot.snapshot_version}"
-        criteria = {
-            "criterion": "AUDIENCE_PROMISE_VALIDATION",
-            "launch_policy_hash": policy.canonical_hash,
-            "measurement_scope": "FIRST_N_PUBLIC_VIDEOS",
-            "required_candidate_phase": "AUDIENCE_PROMISE",
-        }
-        criteria_version = "launch-audience-promise-v1"
-        hypothesis = (
-            "The frozen channel promise is relevant to the approved target audience "
-            "when demonstrated through one bounded long-form video."
-        )
-        decision = DecisionReversibility.TWO_WAY_DOOR
-        return StrategicLineageV2(
-            audience_promise=promise.strip(),
-            audience_promise_version=promise_version,
-            audience_promise_hash=StrategicLineageV2.calculate_audience_promise_hash(
-                audience_promise=promise.strip(), audience_promise_version=promise_version,
-                target_audience_definition=target_definition, audience_drift_guard_version=drift_version,
-            ),
-            target_audience_definition=target_definition,
-            audience_drift_guard_version=drift_version,
-            strategic_intent=StrategicIntent.ACQUISITION,
-            intent_success_criteria=criteria,
-            intent_success_criteria_version=criteria_version,
-            intent_success_criteria_hash=StrategicLineageV2.calculate_intent_success_criteria_hash(
-                strategic_intent=StrategicIntent.ACQUISITION, intent_success_criteria=criteria,
-                intent_success_criteria_version=criteria_version, experiment_hypothesis=hypothesis,
-                primary_variable_under_test="audience_promise_validation", decision_reversibility=decision,
-            ),
-            experiment_hypothesis=hypothesis,
-            primary_variable_under_test="audience_promise_validation",
-            decision_reversibility=decision,
-            active_launch_policy_version_id=policy.id,
-            active_launch_policy_hash=policy.canonical_hash,
-            active_launch_run_id=run.id,
-            active_launch_run_hash=content_hash({
-                "launch_key": run.launch_key, "launch_policy_hash": policy.canonical_hash,
-                "launch_policy_version_id": str(policy.id), "launch_run_id": str(run.id),
-                "launch_started_at": run.launch_started_at.isoformat() if run.launch_started_at else None,
-                "preparation_started_on": run.preparation_started_on.isoformat(),
-                "reason_codes": list(run.reason_codes or []), "state": run.state,
-            }),
-        ).model_dump(mode="python")
 
     def _freeze_context(
         self,

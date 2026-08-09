@@ -58,6 +58,7 @@ from app.db.models.m7 import UploadedVideo
 from app.db.models.launch_cadence import FirstChannelLaunchPolicyVersion, LaunchRun
 from app.services.audit import AuditService
 from app.services.config_registry import content_hash
+from app.services.first_launch_authority import launch_run_authority_hash
 from app.services.domain_events import DomainEventBus
 from app.services.geo_market import (
     TargetMarketDigestCompiler,
@@ -130,6 +131,9 @@ QUANTITATIVE_DEMAND_SOURCES = {
     "YOUTUBE_ANALYTICS",
     "INTERNAL_ANALYTICS",
 }
+# A first-launch preflight is a semantic authority decision.  Scheduled runway
+# identity binds this version so a corrected decision is not a retry.
+IDEA_MARKET_PREFLIGHT_VERSION = "vcos.idea-market-preflight.v4"
 CLAIM_SOURCE_TYPES = {"OFFICIAL_DOCUMENT", "OFFICIAL_MANUAL"}
 RAW_SECRET_MARKERS = (
     "sk-",
@@ -1839,7 +1843,7 @@ def _evaluate_v2_long_form_preflight(
     niche_ref = niche_digest.editorial_slot_ref + "#niche_contract_digest"
     target_ref = target_market_digest_ref_from_digest(target_digest)
     evidence_blob = {
-        "schema_version": "vcos.idea-market-preflight.v3",
+        "schema_version": IDEA_MARKET_PREFLIGHT_VERSION,
         "authority_source": "PERSISTED_LONG_FORM_SLOT",
         "canonical_authority_verified": True,
         "editorial_calendar_slot_id": str(slot.id),
@@ -2016,26 +2020,6 @@ def _resolve_authority_evidence_refs(
     return refs, ids, list(dict.fromkeys(issues))
 
 
-def _launch_run_authority_hash(
-    policy: FirstChannelLaunchPolicyVersion,
-    run: LaunchRun,
-) -> str:
-    return content_hash(
-        {
-            "launch_key": run.launch_key,
-            "launch_policy_hash": policy.canonical_hash,
-            "launch_policy_version_id": str(policy.id),
-            "launch_run_id": str(run.id),
-            "launch_started_at": (
-                run.launch_started_at.isoformat() if run.launch_started_at else None
-            ),
-            "preparation_started_on": run.preparation_started_on.isoformat(),
-            "reason_codes": list(run.reason_codes or []),
-            "state": run.state,
-        }
-    )
-
-
 def _first_launch_experiment_authority(
     session: Session,
     *,
@@ -2047,7 +2031,8 @@ def _first_launch_experiment_authority(
 ) -> dict[str, Any]:
     """Validate the only scoreless exception to steady-state demand proof."""
 
-    failure = lambda *codes: {"authorized": False, "reason_codes": list(codes)}
+    def failure(*codes: str) -> dict[str, Any]:
+        return {"authorized": False, "reason_codes": list(codes)}
     if candidate is None or not claim_evidence_refs:
         return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
     if candidate.experiment_phase != "AUDIENCE_PROMISE" or str(candidate.strategic_intent) != "ACQUISITION":
@@ -2068,7 +2053,8 @@ def _first_launch_experiment_authority(
         or policy.channel_workspace_id != slot.channel_workspace_id
         or policy.policy_snapshot_id != snapshot.id
         or candidate.active_launch_policy_hash != policy.canonical_hash
-        or candidate.active_launch_run_hash != _launch_run_authority_hash(policy, run)
+        or candidate.active_launch_run_hash
+        != launch_run_authority_hash(launch_policy=policy, launch_run=run)
     ):
         return failure("FIRST_LAUNCH_EXPERIMENT_AUTHORITY_INVALID")
     published_count = int(
@@ -2128,11 +2114,34 @@ def _candidate_declared_claim_text(candidate: Any) -> str:
     else:
         values.append(rationale)
 
+    non_claim_keys = {
+        # Evidence and its provenance may quote constraints that the candidate
+        # itself does not claim.
+        "source_pack",
+        "research_pack",
+        "claim_evidence_map",
+        "evidence_bindings",
+        "primary_evidence_refs",
+        "supporting_evidence_refs",
+        # This names claims the proposal explicitly refuses to make.
+        "scope_exclusions",
+        "proposal_hash",
+        "proposal_schema_version",
+        "source_specificity_class",
+        "content_mode",
+        "series_binding",
+    }
+
     def _text(value: Any) -> list[str]:
         if isinstance(value, str):
             return [value]
         if isinstance(value, dict):
-            return [part for item in value.values() for part in _text(item)]
+            return [
+                part
+                for key, item in value.items()
+                if key not in non_claim_keys
+                for part in _text(item)
+            ]
         if isinstance(value, (list, tuple, set)):
             return [part for item in value for part in _text(item)]
         return []

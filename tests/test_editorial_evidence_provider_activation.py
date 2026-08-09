@@ -152,6 +152,13 @@ def test_first_launch_claim_scan_excludes_evidence_provenance_directives() -> No
                 },
                 "research_pack": {"query": "No ROI claims."},
                 "claim_evidence_map": [{"claim_scope": "source-grounded"}],
+                "editorial_idea_proposal": {
+                    "scope_exclusions": ["performance, ROI, or market claims"],
+                    "evidence_bindings": [
+                        {"quoted_text": "Do not make a time-saving claim."}
+                    ],
+                    "viewer_value": "Explain one bounded workflow.",
+                },
             },
         )
     )

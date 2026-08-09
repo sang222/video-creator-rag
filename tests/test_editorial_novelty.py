@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.contracts.m5 import EditorialIdeaCandidateTransition, SearchDemandEvidenceCreate
 from app.core.actor import _system_worker_actor
-from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight, SearchDemandEvidence
+from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight
 from app.services.config_registry import content_hash
 from app.services.editorial_novelty import (
     EDITORIAL_NOVELTY_GATE_VERSION,
@@ -30,7 +30,7 @@ from app.services.editorial_runway_replenishment import (
     _canonical_hash,
     _scheduled_scope_key,
 )
-from app.services.m5 import SearchDemandEvidenceService
+from app.services.m5 import IDEA_MARKET_PREFLIGHT_VERSION, SearchDemandEvidenceService
 from app.services.script_qualification import (
     TOPIC_GATE_VERSION,
     TopicDefinitionService,
@@ -616,6 +616,7 @@ def test_corrected_topic_authority_changes_same_day_scheduled_scope_only_by_vers
         "editorial_evidence_provider_key": "openai",
         "editorial_evidence_provider_config_hash": "provider-config-1",
         "editorial_evidence_provider_state": "EXISTING_SOURCE_PROVIDER_READY",
+        "idea_market_preflight_version": "vcos.idea-market-preflight.v3",
     }
     legacy_scope = _scheduled_scope_key(
         **common,
@@ -625,10 +626,16 @@ def test_corrected_topic_authority_changes_same_day_scheduled_scope_only_by_vers
         **common,
         topic_gate_version=TOPIC_GATE_VERSION,
     )
+    corrected_preflight_scope = _scheduled_scope_key(
+        **{**common, "idea_market_preflight_version": IDEA_MARKET_PREFLIGHT_VERSION},
+        topic_gate_version="editorial-topic-definition-gate.v1",
+    )
     run_date = "2026-08-09"
 
     assert TOPIC_GATE_VERSION == "editorial-topic-definition-gate.v2"
     assert legacy_scope != corrected_scope
+    assert IDEA_MARKET_PREFLIGHT_VERSION == "vcos.idea-market-preflight.v4"
+    assert legacy_scope != corrected_preflight_scope
     assert _canonical_hash({"scope_key": legacy_scope, "run_date": run_date}) != _canonical_hash(
         {"scope_key": corrected_scope, "run_date": run_date}
     )
