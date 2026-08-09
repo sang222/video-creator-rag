@@ -644,7 +644,7 @@ def test_corrected_topic_authority_changes_same_day_scheduled_scope_only_by_vers
     assert legacy_scope != corrected_scope
     assert IDEA_MARKET_PREFLIGHT_VERSION == "vcos.idea-market-preflight.v4"
     assert legacy_scope != corrected_preflight_scope
-    assert EDITORIAL_IDEA_SYNTHESIS_VERSION == "editorial-idea-synthesis.v2"
+    assert EDITORIAL_IDEA_SYNTHESIS_VERSION == "editorial-idea-synthesis.v3"
     assert legacy_scope != corrected_synthesis_scope
     assert _canonical_hash({"scope_key": legacy_scope, "run_date": run_date}) != _canonical_hash(
         {"scope_key": corrected_scope, "run_date": run_date}

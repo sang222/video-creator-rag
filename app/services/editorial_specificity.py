@@ -8,7 +8,10 @@ contains no retry loop and no score-based authority.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import html
+import re
 from typing import Any, Literal
+import unicodedata
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -22,7 +25,10 @@ from app.services.config_registry import content_hash
 
 
 EDITORIAL_IDEA_PROPOSAL_SCHEMA = "vcos.editorial-idea-proposal.v1"
-EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v2"
+EDITORIAL_IDEA_SYNTHESIS_VERSION = "editorial-idea-synthesis.v3"
+EDITORIAL_EVIDENCE_TEXT_NORMALIZATION_VERSION = (
+    "editorial-evidence-text-normalization.v1"
+)
 EDITORIAL_SPECIFICITY_GATE_VERSION = "editorial-specificity-gate.v1"
 MAX_EDITORIAL_IDEA_PROPOSALS_PER_RESEARCH = 3
 MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT = 1
@@ -81,6 +87,38 @@ _GENERIC_FUNCTION_WORDS = {
     "understand", "review", "verify", "scope", "assumptions", "information",
     "video", "viewer", "users", "teams", "small", "use", "using", "learn",
 }
+_EVIDENCE_WHITESPACE = re.compile(r"\s+")
+
+
+def normalize_frozen_evidence_text(value: Any) -> str:
+    """Canonicalize only representational variation in frozen source text.
+
+    Raw quotes and excerpts remain persisted unchanged for auditability.  This
+    authority normalizes Unicode, entities, line endings, whitespace, and case
+    presentation so a source span is not rejected merely for sentence-boundary
+    capitalization.  It never removes or substitutes words.
+    """
+
+    text = unicodedata.normalize("NFKC", html.unescape(str(value or "")))
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return _EVIDENCE_WHITESPACE.sub(" ", text).strip().casefold()
+
+
+def frozen_quote_is_valid(*, quoted_text: Any, frozen_excerpt: Any) -> bool:
+    """Return whether a non-empty quote is a canonical frozen-source span."""
+
+    quote = normalize_frozen_evidence_text(quoted_text)
+    excerpt = normalize_frozen_evidence_text(frozen_excerpt)
+    return bool(quote and excerpt and quote in excerpt)
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenEvidenceSource:
+    """The immutable evidence artifact supplied to one synthesis call."""
+
+    canonical_url: str
+    content_hash: str
+    content_excerpt: str
 
 
 def _normalized(value: Any) -> str:
@@ -205,21 +243,30 @@ class EditorialIdeaSynthesisService:
             raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_EVIDENCE_REQUIRED")
         source_pack = []
         source_class_by_id: dict[str, str] = {}
+        frozen_source_by_id: dict[str, FrozenEvidenceSource] = {}
         for item in evidence:
             from app.services.script_qualification import classify_source_specificity
 
             snapshot = _snapshot(item)
             source_class = classify_source_specificity(item)
-            source_class_by_id[str(item.id)] = source_class
+            evidence_id = str(item.id)
+            canonical_url = str(snapshot.get("canonical_url") or item.source_ref or "")
+            frozen_excerpt = str(snapshot.get("content_excerpt") or "")[:4_000]
+            source_class_by_id[evidence_id] = source_class
+            frozen_source_by_id[evidence_id] = FrozenEvidenceSource(
+                canonical_url=canonical_url,
+                content_hash=str(snapshot.get("content_hash") or ""),
+                content_excerpt=frozen_excerpt,
+            )
             source_pack.append(
                 {
-                    "evidence_id": str(item.id),
-                    "canonical_url": snapshot.get("canonical_url") or item.source_ref,
+                    "evidence_id": evidence_id,
+                    "canonical_url": canonical_url,
                     "title": snapshot.get("title"),
                     "source_family": snapshot.get("source_family"),
                     "organization": snapshot.get("organization"),
                     "source_specificity_class": source_class,
-                    "content_excerpt": str(snapshot.get("content_excerpt") or "")[:4_000],
+                    "content_excerpt": normalize_frozen_evidence_text(frozen_excerpt),
                 }
             )
         from app.services.m10_1 import LLMRouterService
@@ -247,9 +294,14 @@ class EditorialIdeaSynthesisService:
             raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID")
         proposals: list[EditorialIdeaProposal] = []
         invalid_count = 0
+        invalid_reason_counts: dict[str, int] = {}
         for raw in raw_proposals:
             if not isinstance(raw, dict):
                 invalid_count += 1
+                invalid_reason_counts["EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID"] = (
+                    invalid_reason_counts.get("EDITORIAL_IDEA_SYNTHESIS_OUTPUT_INVALID", 0)
+                    + 1
+                )
                 continue
             try:
                 ref_ids = {
@@ -281,16 +333,27 @@ class EditorialIdeaSynthesisService:
                 self._validate_provider_proposal(
                     proposal=proposal,
                     source_class_by_id=source_class_by_id,
+                    frozen_source_by_id=frozen_source_by_id,
                     expected_mode=content_mode,
                     expected_series_binding=series_binding,
                 )
-            except (ValueError, ValidationFailureError):
+            except ValidationFailureError as exc:
                 invalid_count += 1
+                code = str(exc) or "EDITORIAL_IDEA_SYNTHESIS_PROPOSAL_INVALID"
+                invalid_reason_counts[code] = invalid_reason_counts.get(code, 0) + 1
+                continue
+            except ValueError:
+                invalid_count += 1
+                code = "EDITORIAL_IDEA_SYNTHESIS_PROPOSAL_SCHEMA_INVALID"
+                invalid_reason_counts[code] = invalid_reason_counts.get(code, 0) + 1
                 continue
             proposals.append(proposal)
         receipt = {
             "schema_version": "vcos.editorial-idea-synthesis-receipt.v1",
             "synthesis_version": EDITORIAL_IDEA_SYNTHESIS_VERSION,
+            "evidence_text_normalization_version": (
+                EDITORIAL_EVIDENCE_TEXT_NORMALIZATION_VERSION
+            ),
             "execution_mode": "ONE_BOUNDED_ADDITIONAL_LLM_CALL",
             "max_calls": MAX_EDITORIAL_IDEA_SYNTHESIS_CALLS_PER_REPLENISHMENT,
             "provider_route_attempt_id": str(response.route_attempt_id),
@@ -299,6 +362,7 @@ class EditorialIdeaSynthesisService:
             "source_pack_hash": content_hash(source_pack),
             "proposal_count": len(proposals),
             "invalid_proposal_count": invalid_count,
+            "invalid_proposal_reason_counts": dict(sorted(invalid_reason_counts.items())),
             "proposals": [item.model_dump(mode="json") for item in proposals],
         }
         receipt["receipt_hash"] = content_hash(receipt)
@@ -347,6 +411,10 @@ class EditorialIdeaSynthesisService:
             "binding for each of: proposed_title, proposed_angle, "
             "central_question_or_thesis, learning_outcome, viewer_value, "
             "editorial_delta, specific_mechanism_or_use_case, and decision_value. "
+            "Copy quoted_text exactly from the supplied content_excerpt, apart from "
+            "representational whitespace or Unicode normalization performed by the "
+            "server. Never paraphrase a quote. If no exact supporting span exists "
+            "for a required field, do not emit that proposal. "
             "A generated editorial framing field need not literally occur in a source, "
             "but its binding must quote an exact source span that supports its "
             "underlying factual mechanism or decision input. "
@@ -360,6 +428,7 @@ class EditorialIdeaSynthesisService:
         *,
         proposal: EditorialIdeaProposal,
         source_class_by_id: dict[str, str],
+        frozen_source_by_id: dict[str, FrozenEvidenceSource],
         expected_mode: str,
         expected_series_binding: dict[str, Any] | None,
     ) -> None:
@@ -382,15 +451,26 @@ class EditorialIdeaSynthesisService:
         binding_fields: set[str] = set()
         for binding in proposal.evidence_bindings:
             if not isinstance(binding, dict):
-                continue
+                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID")
             field = str(binding.get("field") or "")
             if field not in REQUIRED_EVIDENCE_BINDING_FIELDS:
-                continue
+                raise ValidationFailureError("EDITORIAL_IDEA_SYNTHESIS_BINDING_FIELD_INVALID")
             evidence_id = str(binding.get("evidence_id") or "")
             quote = str(binding.get("quoted_text") or "").strip()
-            if evidence_id not in ref_ids or not quote:
+            if (
+                evidence_id not in ref_ids
+                or evidence_id not in frozen_source_by_id
+                or not quote
+            ):
                 raise ValidationFailureError(
                     "EDITORIAL_IDEA_SYNTHESIS_BINDING_INVALID"
+                )
+            if not frozen_quote_is_valid(
+                quoted_text=quote,
+                frozen_excerpt=frozen_source_by_id[evidence_id].content_excerpt,
+            ):
+                raise ValidationFailureError(
+                    "EDITORIAL_IDEA_SYNTHESIS_BINDING_QUOTE_NOT_IN_FROZEN_EVIDENCE"
                 )
             binding_fields.add(field)
         if not REQUIRED_EVIDENCE_BINDING_FIELDS.issubset(binding_fields):
@@ -605,7 +685,10 @@ class EditorialSpecificityService:
             evidence_id = str(binding.get("evidence_id") or "")
             quote = str(binding.get("quoted_text") or "").strip()
             excerpt = str((by_id.get(evidence_id) or {}).get("content_excerpt") or "")
-            if field in required_fields and quote and quote in excerpt:
+            if field in required_fields and frozen_quote_is_valid(
+                quoted_text=quote,
+                frozen_excerpt=excerpt,
+            ):
                 bound_fields.add(field)
         if not required_fields.issubset(bound_fields):
             reasons.append("EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT")
