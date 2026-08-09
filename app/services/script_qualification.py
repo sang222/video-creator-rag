@@ -106,6 +106,51 @@ def _clean(value: Any) -> str:
     return str(value or "").strip()
 
 
+_TITLE_ALIGNMENT_STOP_WORDS = {
+    "about", "after", "around", "because", "before", "between", "choosing",
+    "documented", "from", "into", "not", "single", "that", "the", "their",
+    "this", "through", "using", "with",
+}
+
+
+def _editorial_terms(value: Any) -> set[str]:
+    """Return stable, proposal-level terms for a minimal title alignment check."""
+
+    terms: set[str] = set()
+    for term in re.findall(r"[a-z0-9]{4,}", _clean(value).casefold()):
+        normalized = term[:-1] if term.endswith("s") and len(term) > 4 else term
+        if normalized not in _TITLE_ALIGNMENT_STOP_WORDS:
+            terms.add(normalized)
+    return terms
+
+
+def _proposal_title_is_aligned(candidate: EditorialIdeaCandidate) -> bool:
+    """Check title alignment against the synthesized idea, never a source title.
+
+    The legacy gate required an exact documentation-subject substring in the
+    proposed title.  That made a fetched page title an implicit title template.
+    Proposal-backed candidates instead need two meaningful shared editorial
+    terms with their angle, question, mechanism, or delta.
+    """
+
+    proposal = candidate.editorial_idea_proposal
+    if not isinstance(proposal, dict):
+        return False
+    title_terms = _editorial_terms(candidate.proposed_title)
+    proposal_terms = _editorial_terms(
+        " ".join(
+            _clean(proposal.get(key))
+            for key in (
+                "proposed_angle",
+                "central_question_or_thesis",
+                "specific_mechanism_or_use_case",
+                "editorial_delta",
+            )
+        )
+    )
+    return len(title_terms.intersection(proposal_terms)) >= 2
+
+
 def _string_list(value: Any) -> list[str]:
     return sorted({_clean(item) for item in value if _clean(item)}) if isinstance(value, list) else []
 
@@ -410,7 +455,13 @@ class TopicDefinitionService:
             reasons.append("EDITORIAL_SOURCE_DISCOVERY_ONLY")
         title = _clean(candidate.proposed_title)
         subject = _clean(definition.subject_name)
-        if not title or not subject or subject.casefold() not in title.casefold():
+        if isinstance(candidate.editorial_idea_proposal, dict):
+            if not _proposal_title_is_aligned(candidate):
+                reasons.append("EDITORIAL_TITLE_PROPOSAL_MISMATCH")
+        elif not title or not subject or subject.casefold() not in title.casefold():
+            # Preserve the historical guard for candidates that predate the
+            # proposal contract.  New candidates never derive their title
+            # authority from a documentation subject.
             reasons.append("EDITORIAL_TITLE_SUBJECT_MISMATCH")
         if title.casefold() in {"openai developers", "developers", "documentation"}:
             reasons.append("EDITORIAL_TITLE_BRAND_OR_SECTION_ONLY")
@@ -627,9 +678,8 @@ class TopicDefinitionService:
         if typed.content_mode == "STANDALONE" and candidate.suggested_series_plan_id is not None:
             raise ValidationFailureError("EDITORIAL_SERIES_BINDING_REQUIRED")
         snapshot = _source_snapshot(evidence)
-        source_title = _clean(snapshot.get("title"))
-        subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", source_title, flags=re.I).strip() or source_title
         canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
+        subject = typed.specific_mechanism_or_use_case
         if not subject or not canonical_url:
             raise ValidationFailureError("EDITORIAL_TOPIC_CANONICAL_SOURCE_MISSING")
         evidence_refs = [
@@ -664,9 +714,9 @@ class TopicDefinitionService:
             candidate=candidate,
             parent_topic_definition_id=parent_topic_definition_id,
             fields={
-                "subject_type": "OFFICIAL_DOCUMENTED_PRODUCT_OR_FEATURE",
+                "subject_type": "EDITORIAL_DECISION_FRAME",
                 "subject_name": subject,
-                "subject_canonical_id": f"official-document:{canonical_hash({'canonical_url': canonical_url})}",
+                "subject_canonical_id": f"editorial-proposal:{typed.proposal_hash}",
                 "subject_evidence_refs": evidence_refs,
                 "subject_evidence_spans": evidence_spans,
                 "target_audience": audience,

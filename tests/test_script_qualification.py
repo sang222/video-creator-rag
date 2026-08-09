@@ -109,6 +109,51 @@ def test_topic_gate_blocks_boilerplate_and_passes_bound_specific_definition(db_s
     assert passed.current_production_eligibility is True
 
 
+def test_proposal_backed_topic_does_not_require_documentation_title_in_video_title(db_session):
+    flow = QualificationFactory(db_session).m5_admitted_project(mock_mode="blocked")
+    candidate = flow.candidate
+    candidate.proposed_title = "Choosing Models by Workflow Constraint"
+    candidate.proposed_angle = "Use a workflow-constraint decision table before selecting an API model."
+    candidate.editorial_idea_proposal = {
+        "proposed_angle": candidate.proposed_angle,
+        "central_question_or_thesis": "How should a team map workflow constraints to model-selection decisions?",
+        "specific_mechanism_or_use_case": "Build a workflow decision table for model selection and validation.",
+        "editorial_delta": "Separates documented capabilities from local validation work.",
+    }
+    service = TopicDefinitionService(db_session)
+    topic = service.create(
+        candidate=candidate,
+        fields={
+            "subject_type": "EDITORIAL_DECISION_FRAME",
+            # This comes from a source record and intentionally is not the
+            # authority for the video title.
+            "subject_name": "Model guidance",
+            "subject_canonical_id": "editorial-proposal:model-constraints",
+            "subject_evidence_refs": [{"id": "evidence-1", "content_hash": "a" * 64}],
+            "subject_evidence_spans": [{"text": "Model selection", "span_hash": span_hash("Model selection")}],
+            "target_audience": "small professional teams",
+            "audience_problem": "need to select a model for a constrained workflow",
+            "content_pillar": "AI automation workflows",
+            "production_goal": candidate.proposed_title,
+            "scope_inclusions": ["workflow constraints and documented model categories"],
+            "exclusions": ["universal model rankings and ROI claims"],
+            "central_question_or_thesis": candidate.editorial_idea_proposal["central_question_or_thesis"],
+            "learning_outcome": "Viewers can turn workflow constraints into a documented evaluation plan.",
+            "viewer_value": "A concrete model-selection decision frame.",
+            "content_mode": "STANDALONE",
+            "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+            "source_classification_refs": [{"source_classification": "TOPIC_CAPABLE"}],
+            "standalone_self_containment_required": True,
+        },
+    )
+
+    receipt = service.evaluate(topic)
+
+    assert receipt.state == "PASS", receipt.reason_codes
+    assert "EDITORIAL_TITLE_SUBJECT_MISMATCH" not in receipt.reason_codes
+    assert "EDITORIAL_TITLE_PROPOSAL_MISMATCH" not in receipt.reason_codes
+
+
 def _qualified_inputs():
     sections = [
         {"section_id": "hook", "heading": "Hook", "narration": "The official page names the model. It defines the evidence boundary."},
