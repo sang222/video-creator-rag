@@ -94,6 +94,14 @@ class ScopedReplacementContinuationRunner:
             ).create_v2_ownership_normalized_recovery(
                 source_qualification_run_id=qualification.id
             )
+        elif qualification.state == "BLOCKED_NON_REPAIRABLE" and "HTTP 401" in str(
+            (qualification.failure_receipt or {}).get("detail") or ""
+        ):
+            qualification = ScriptWriterOutputRecoveryService(
+                self.session, now=self.now
+            ).continue_after_confirmed_verifier_auth_rejection(
+                source_qualification_run_id=qualification.id
+            )
 
         initial_event = self.session.scalar(
             select(DomainEvent)

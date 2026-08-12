@@ -1014,11 +1014,11 @@ class ScriptContractReplacementAuthorityService:
             EditorialIdeaCandidate, authority.replacement_candidate_id
         )
         slot = self.session.get(LongFormPublishSlot, authority.replacement_slot_id)
-        qualification = self.session.get(
-            ScriptQualificationRun, authority.replacement_qualification_run_id
-        )
-        if candidate is None or slot is None or qualification is None:
+        if candidate is None or slot is None:
             raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_AUTHORITY_DRIFT")
+        qualification = resolve_replacement_qualification_leaf(
+            self.session, authority=authority, lock=True
+        )
         return ScriptContractReplacementLineage(
             authority, candidate, slot, qualification
         )

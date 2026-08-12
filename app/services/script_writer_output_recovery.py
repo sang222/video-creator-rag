@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -60,6 +60,7 @@ V2_OWNERSHIP_FAILURE = "SCRIPT_SECTION_COVERAGE_REQUIREMENT_OWNERSHIP_VIOLATION"
 V2_OWNERSHIP_RECEIPT_SCHEMA = "script-writer-v2-ownership-normalization-receipt.v1"
 V2_OWNERSHIP_COMPENSATION_SCHEMA = "script-writer-v2-ownership-compensation.v1"
 V2_OWNERSHIP_ACTOR = "system:script-writer-v2-ownership-normalization"
+VERIFIER_AUTH_REJECTION_PREFIX = "script-qualification-verifier-auth-rejection"
 
 
 class ScriptWriterOutputRecoveryService:
@@ -771,6 +772,222 @@ class ScriptWriterOutputRecoveryService:
             },
         )
         self.session.add(child)
+        self.session.flush()
+        self._enqueue_verifier(child)
+        return child
+
+    def continue_after_confirmed_verifier_auth_rejection(
+        self, *, source_qualification_run_id: uuid.UUID
+    ) -> ScriptQualificationRun:
+        """Continue after an HTTP 401 that created no provider response."""
+
+        source = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == source_qualification_run_id)
+            .with_for_update()
+        )
+        failure = source.failure_receipt if source is not None else {}
+        if (
+            source is None
+            or source.state != "BLOCKED_NON_REPAIRABLE"
+            or source.script_contract_version != "V2_SINGLE_SOURCE"
+            or source.script_payload is None
+            or source.logical_deadline_at is None
+            or "SCRIPT_PROVIDER_SUBMISSION_OUTCOME_UNKNOWN"
+            not in ((failure or {}).get("reason_codes") or [])
+            or "HTTP 401" not in str((failure or {}).get("detail") or "")
+        ):
+            raise ValidationFailureError("VERIFIER_AUTH_REJECTION_SOURCE_INVALID")
+        attempts = list(
+            self.session.scalars(
+                select(ScriptQualificationBackgroundAttempt)
+                .where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == source.id
+                )
+                .with_for_update()
+            ).all()
+        )
+        if len(attempts) != 1:
+            raise ValidationFailureError("VERIFIER_AUTH_REJECTION_ATTEMPT_DRIFT")
+        failed = attempts[0]
+        if (
+            failed.phase != "VERIFIER"
+            or failed.background_status != "SUBMISSION_OUTCOME_UNKNOWN"
+            or failed.submission_attempt_count != 1
+            or failed.provider_response_id is not None
+            or failed.provider_request_id is not None
+            or failed.last_network_error != "OPENAI_AUTHENTICATION_FAILED"
+        ):
+            raise ValidationFailureError("VERIFIER_AUTH_REJECTION_NOT_PROVEN")
+        recovery_key = f"{VERIFIER_AUTH_REJECTION_PREFIX}:{source.id}:{failed.id}"
+        existing = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.recovery_key == recovery_key)
+            .with_for_update()
+        )
+        if existing is not None:
+            return existing
+
+        authority = self.session.get(
+            ScriptContractReplacementAuthority, source.replacement_authority_id
+        )
+        root = self.session.get(
+            ScriptQualificationRun,
+            authority.replacement_qualification_run_id if authority else None,
+        )
+        slot = self.session.scalar(
+            select(LongFormPublishSlot)
+            .where(LongFormPublishSlot.id == source.publish_slot_id)
+            .with_for_update()
+        )
+        candidate = self.session.scalar(
+            select(EditorialIdeaCandidate)
+            .where(EditorialIdeaCandidate.id == source.editorial_idea_candidate_id)
+            .with_for_update()
+        )
+        terminal = dict(source.terminal_settlement_receipt or {})
+        terminal_body = {
+            key: value for key, value in terminal.items() if key != "content_hash"
+        }
+        original = [
+            item
+            for item in (root.provider_outcome_reconciliation_receipts if root else [])
+            if isinstance(item, dict)
+            and item.get("schema_version") == V2_OWNERSHIP_COMPENSATION_SCHEMA
+            and item.get("child_qualification_run_id") == str(source.id)
+        ]
+        try:
+            authorized_at = datetime.fromisoformat(str(original[0]["compensated_at"]))
+        except (IndexError, KeyError, ValueError) as exc:
+            raise ValidationFailureError(
+                "VERIFIER_AUTH_REJECTION_ORIGINAL_AUTHORITY_MISSING"
+            ) from exc
+        policy = build_script_qualification_deadline_policy(self.settings)
+        current = self.now()
+        accepted_response = self.session.scalar(
+            select(ScriptQualificationBackgroundAttempt.id)
+            .join(
+                ScriptQualificationRun,
+                ScriptQualificationRun.id
+                == ScriptQualificationBackgroundAttempt.script_qualification_run_id,
+            )
+            .where(
+                ScriptQualificationRun.replacement_authority_id
+                == source.replacement_authority_id,
+                ScriptQualificationBackgroundAttempt.phase == "VERIFIER",
+                ScriptQualificationBackgroundAttempt.provider_response_id.is_not(None),
+            )
+            .limit(1)
+        )
+        if (
+            authority is None
+            or root is None
+            or slot is None
+            or candidate is None
+            or authority.replacement_reason != OPERATOR_RECOVERY_REASON
+            or authority.operator_recovery_schema_version != OPERATOR_RECOVERY_SCHEMA
+            or authority.qualification_deadline != source.logical_deadline_at
+            or source.supersedes_qualification_run_id != root.id
+            or slot.state != "QUALIFICATION_RECONCILIATION_REQUIRED"
+            or candidate.stage != "REJECTED"
+            or terminal.get("kind") != "UNKNOWN_PROVIDER_OUTCOME"
+            or terminal.get("qualification_run_id") != str(source.id)
+            or terminal.get("content_hash") != content_hash(terminal_body)
+            or accepted_response is not None
+            or authorized_at
+            + timedelta(
+                seconds=(
+                    policy.provider_stage_budget_seconds + policy.safety_buffer_seconds
+                )
+            )
+            >= source.logical_deadline_at
+            or current >= source.logical_deadline_at
+        ):
+            raise ValidationFailureError("VERIFIER_AUTH_REJECTION_AUTHORITY_DRIFT")
+
+        child = ScriptQualificationRun(
+            editorial_idea_candidate_id=source.editorial_idea_candidate_id,
+            publish_slot_id=source.publish_slot_id,
+            launch_run_id=source.launch_run_id,
+            topic_definition_id=source.topic_definition_id,
+            topic_definition_hash=source.topic_definition_hash,
+            script_assignment=source.script_assignment,
+            script_assignment_hash=source.script_assignment_hash,
+            factual_evidence_pack=source.factual_evidence_pack,
+            factual_evidence_pack_hash=source.factual_evidence_pack_hash,
+            memory_digest=source.memory_digest,
+            memory_digest_hash=source.memory_digest_hash,
+            runtime_contract=source.runtime_contract,
+            runtime_contract_hash=source.runtime_contract_hash,
+            assignment_resolution=source.assignment_resolution,
+            assignment_resolution_hash=source.assignment_resolution_hash,
+            episode_reservation_active=False,
+            writer_prompt_version=source.writer_prompt_version,
+            verifier_prompt_version=source.verifier_prompt_version,
+            gate_policy_version=source.gate_policy_version,
+            model=source.model,
+            logical_attempt_number=source.logical_attempt_number + 1,
+            logical_identity_hash=content_hash(
+                {
+                    "source": source.logical_identity_hash,
+                    "failed_attempt_id": str(failed.id),
+                    "recovery_key": recovery_key,
+                }
+            ),
+            supersedes_qualification_run_id=source.id,
+            recovery_key=recovery_key,
+            recovery_requested_at=current,
+            logical_deadline_at=source.logical_deadline_at,
+            state="RESERVED",
+            writer_attempt_key=f"{recovery_key}:reused-normalized-output",
+            verifier_attempt_key=f"{recovery_key}:verifier",
+            script_contract_version=source.script_contract_version,
+            replacement_authority_id=source.replacement_authority_id,
+        )
+        self.session.add(child)
+        self.session.flush()
+        from app.services.script_qualification import ScriptQualificationService
+
+        service = ScriptQualificationService(self.session)
+        draft = service.accept_writer_output(child, source.script_payload)
+        structural = service._structural_receipt(child, draft)
+        if structural.get("status") != "PASS":
+            raise ValidationFailureError("VERIFIER_AUTH_REJECTION_SCRIPT_DRIFT")
+        body = {
+            "schema_version": "script-verifier-auth-rejection-compensation.v1",
+            "source_qualification_run_id": str(source.id),
+            "failed_background_attempt_id": str(failed.id),
+            "child_qualification_run_id": str(child.id),
+            "provider_effect": "NONE_CONFIRMED_BY_HTTP_401",
+            "provider_response_id": None,
+            "provider_request_id": None,
+            "prior_terminal_settlement_hash": terminal["content_hash"],
+            "original_verifier_authorized_at": authorized_at.isoformat(),
+            "deadline_policy": policy.receipt(),
+            "restored_slot_state": "QUALIFICATION_RESERVED",
+            "restored_candidate_stage": "GREENLIT",
+            "compensated_at": current.isoformat(),
+        }
+        compensation = {**body, "content_hash": content_hash(body)}
+        source.provider_outcome_reconciliation_receipts = [
+            *(source.provider_outcome_reconciliation_receipts or []),
+            compensation,
+        ]
+        child.state = "SCRIPT_GENERATED"
+        child.writer_receipt = {
+            **(source.writer_receipt or {}),
+            "source_auth_rejected_qualification_run_id": str(source.id),
+            "auth_rejection_compensation_hash": compensation["content_hash"],
+            "writer_submission_count_for_new_recovery": 0,
+        }
+        slot.state = "QUALIFICATION_RESERVED"
+        candidate.stage = "GREENLIT"
+        candidate.reason_codes = [
+            item
+            for item in (candidate.reason_codes or [])
+            if item != "SCRIPT_QUALIFICATION_RECONCILIATION_REQUIRED"
+        ]
         self.session.flush()
         self._enqueue_verifier(child)
         return child
