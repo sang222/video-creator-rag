@@ -4477,9 +4477,16 @@ def _sentences(value: str) -> list[str]:
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [
-        str(item).strip() for item in value if isinstance(item, str) and item.strip()
-    ]
+    # These policy values are semantic sets.  Script qualification seals them
+    # in canonical sorted order, while the effective-context projection may
+    # preserve authoring order; both consumers must compare the same form.
+    return sorted(
+        {
+            str(item).strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        }
+    )
 
 
 def _decimal_string(value: Decimal) -> str:

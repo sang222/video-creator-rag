@@ -8,6 +8,8 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
+import app.services.script_qualification as script_qualification_service
+import app.services.v2_support_authority as v2_support_authority_service
 from app.contracts.script_qualification import (
     AssignmentObservation,
     ForbiddenScopeObservation,
@@ -603,6 +605,28 @@ def _runtime_contract(*, forbidden_claims=None, forbidden_style_terms=None):
     }
     body["contract_hash"] = canonical_hash(body)
     return body
+
+
+def test_support_runtime_semantic_lists_use_qualification_canonical_order():
+    """Equivalent frozen policy lists cannot drift only by order or duplicates."""
+
+    raw_policy_terms = [
+        "hype",
+        " fearmongering ",
+        "aggressive_sales",
+        "hype",
+        "fake_urgency",
+        " aggressive_sales ",
+    ]
+    expected = [
+        "aggressive_sales",
+        "fake_urgency",
+        "fearmongering",
+        "hype",
+    ]
+
+    assert script_qualification_service._string_list(raw_policy_terms) == expected
+    assert v2_support_authority_service._string_list(raw_policy_terms) == expected
 
 
 def test_independent_inventory_and_entailment_control_all_script_gates(db_session):
