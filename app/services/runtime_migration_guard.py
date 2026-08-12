@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
-REQUIRED_RUNTIME_DB_REVISION = "0072_controlled_recovery"
+REQUIRED_RUNTIME_DB_REVISION = "0073_controlled_continuation"
 RUNTIME_DB_REVISION_BLOCKED = "RUNTIME_DB_REVISION_BELOW_CONTROLLED_RECOVERY_AUTHORITY"
 
 
@@ -62,9 +62,7 @@ class RuntimeMigrationGuard:
         )
 
 
-def is_revision_at_or_after(
-    current: str | None, *, minimum_revision: str
-) -> bool:
+def is_revision_at_or_after(current: str | None, *, minimum_revision: str) -> bool:
     """Return whether ``current`` is a known Alembic descendant of a minimum.
 
     This is intentionally graph based: Alembic revision labels are opaque

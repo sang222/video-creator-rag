@@ -35,6 +35,7 @@ from app.db.models.m5 import (
 from app.db.models.ops import ProviderAttempt
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.script_qualification import (
+    ControlledProductionContinuationAuthority,
     EditorialTopicDefinition,
     EditorialTopicDefinitionGateReceipt,
     ScriptContractReplacementAuthority,
@@ -74,6 +75,130 @@ OPERATOR_RECOVERY_REASON = "OPERATOR_REQUESTED_FIRST_VIDEO_RECOVERY"
 OPERATOR_RECOVERY_SCHEMA = "vcos.controlled-production-recovery.v1"
 OPERATOR_RECOVERY_STRATEGY = "CANDIDATE_REPLACEMENT"
 REPAIR_POLICY_REF = "script-content-repair.v1:max-1"
+CONTROLLED_CONTINUATION_SCHEMA = "vcos.controlled-production-continuation.v1"
+CONTROLLED_CONTINUATION_REASON = "BOUNDED_CONTENT_REPAIR_VERIFIER_CONTINUATION"
+
+
+def controlled_continuation_slot_projection(
+    slot: LongFormPublishSlot,
+) -> dict[str, Any]:
+    """Seal every identity/timing field of the fresh continuation slot."""
+
+    return {
+        "slot_id": str(slot.id),
+        "source_slot_id": str(slot.replaces_slot_id),
+        "launch_run_id": str(slot.launch_run_id),
+        "launch_policy_version_id": str(slot.launch_policy_version_id),
+        "company_id": str(slot.company_id),
+        "channel_workspace_id": str(slot.channel_workspace_id),
+        "local_publish_date": slot.local_publish_date.isoformat(),
+        "intended_publish_at": slot.intended_publish_at.isoformat(),
+        "target_start_window_open_at": slot.target_start_window_open_at.isoformat(),
+        "target_start_window_close_at": slot.target_start_window_close_at.isoformat(),
+        "reserved_candidate_id": str(slot.reserved_candidate_id),
+        "replacement_authority_id": str(slot.replacement_authority_id),
+        "replacement_reason": slot.replacement_reason,
+        "replacement_lineage_key": slot.replacement_lineage_key,
+    }
+
+
+def controlled_continuation_authority_body(
+    authority: ControlledProductionContinuationAuthority,
+) -> dict[str, Any]:
+    """Return the complete immutable body covered by ``authority_hash``."""
+
+    return {
+        "schema_version": authority.schema_version,
+        "continuation_authority_id": str(authority.id),
+        "root_replacement_authority_id": str(authority.root_replacement_authority_id),
+        "source_qualification_run_id": str(authority.source_qualification_run_id),
+        "source_slot_id": str(authority.source_slot_id),
+        "continuation_candidate_id": str(authority.continuation_candidate_id),
+        "continuation_slot_id": str(authority.continuation_slot_id),
+        "continuation_qualification_run_id": str(
+            authority.continuation_qualification_run_id
+        ),
+        "source_provider_response_snapshot_id": str(
+            authority.source_provider_response_snapshot_id
+        ),
+        "repair_authorization_id": str(authority.repair_authorization_id),
+        "continuation_reason": authority.continuation_reason,
+        "root_authority_hash": authority.root_authority_hash,
+        "operator_recovery_schema_version": (
+            authority.operator_recovery_schema_version
+        ),
+        "operator_actor_context": authority.operator_actor_context,
+        "bounded_content_repair_policy_ref": (
+            authority.bounded_content_repair_policy_ref
+        ),
+        "source_logical_identity_hash": authority.source_logical_identity_hash,
+        "continuation_logical_identity_hash": (
+            authority.continuation_logical_identity_hash
+        ),
+        "source_terminal_settlement_hash": (authority.source_terminal_settlement_hash),
+        "source_slot_state": authority.source_slot_state,
+        "source_candidate_stage": authority.source_candidate_stage,
+        "repair_authorization_hash": authority.repair_authorization_hash,
+        "affected_section_ids": authority.affected_section_ids,
+        "editable_claim_ids": authority.editable_claim_ids,
+        "removable_claim_ids": authority.removable_claim_ids,
+        "source_background_attempt_id": str(authority.source_background_attempt_id),
+        "source_provider_response_id": authority.source_provider_response_id,
+        "source_provider_request_id": authority.source_provider_request_id,
+        "source_raw_provider_response_hash": (
+            authority.source_raw_provider_response_hash
+        ),
+        "source_raw_output_hash": authority.source_raw_output_hash,
+        "source_typed_output_hash": authority.source_typed_output_hash,
+        "reclassification_receipt_hash": (authority.reclassification_receipt_hash),
+        "deadline_policy": authority.deadline_policy,
+        "slot_projection": authority.slot_projection,
+        "current_authority_snapshot": authority.current_authority_snapshot,
+        "provider_authority_hash": authority.provider_authority_hash,
+        "budget_authority_hash": authority.budget_authority_hash,
+        "max_writer_submissions": authority.max_writer_submissions,
+        "max_verifier_submissions": authority.max_verifier_submissions,
+        "production_window_end": authority.production_window_end.isoformat(),
+        "qualification_deadline": authority.qualification_deadline.isoformat(),
+        "created_at": authority.created_at.isoformat(),
+    }
+
+
+def operator_recovery_authority_body(
+    authority: ScriptContractReplacementAuthority,
+) -> dict[str, Any]:
+    """Rebuild the sealed operator recovery body without mutable link fields."""
+
+    freshness = authority.freshness_snapshot or {}
+    receipt_body = {
+        "schema_version": authority.operator_recovery_schema_version,
+        "operator_recovery_id": str(authority.operator_recovery_id),
+        "replacement_candidate_id": str(authority.replacement_candidate_id),
+        "historical_candidate_id": str(authority.replaces_candidate_id),
+        "historical_qualification_id": str(authority.historical_qualification_id),
+        "historical_slot_id": str(authority.replaces_slot_id),
+        "reason": authority.replacement_reason,
+        "recovery_strategy": authority.recovery_strategy,
+        "authority_versions": authority.authority_versions,
+        "freshness_snapshot": freshness,
+        "actor_context": authority.operator_actor_context,
+        "created_at": authority.operator_authorized_at.isoformat(),
+    }
+    return {
+        **receipt_body,
+        "replacement_slot_id": str(authority.replacement_slot_id),
+        "source_topic_definition_id": str(authority.source_topic_definition_id),
+        "source_preflight_id": str(authority.source_preflight_id),
+        "source_evidence_pack_hash": authority.source_evidence_pack_id.removeprefix(
+            "evidence-pack-hash:"
+        ),
+        "source_memory_digest_hash": authority.source_memory_digest_id.removeprefix(
+            "memory-digest-hash:"
+        ),
+        "production_window_end": authority.production_window_end.isoformat(),
+        "qualification_deadline": authority.qualification_deadline.isoformat(),
+        "recovery_receipt_hash": authority.recovery_receipt_hash,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +222,15 @@ def resolve_replacement_qualification_leaf(
     introduce a fork/unreachable sibling.
     """
 
+    if authority.replacement_reason == OPERATOR_RECOVERY_REASON and (
+        authority.operator_recovery_schema_version != OPERATOR_RECOVERY_SCHEMA
+        or authority.operator_recovery_id != authority.id
+        or authority.recovery_receipt_hash is None
+        or authority.authority_hash
+        != content_hash(operator_recovery_authority_body(authority))
+    ):
+        raise ValidationFailureError("SCOPED_REPLACEMENT_AUTHORITY_DRIFT")
+
     statement = (
         select(ScriptQualificationRun)
         .where(ScriptQualificationRun.replacement_authority_id == authority.id)
@@ -109,6 +243,18 @@ def resolve_replacement_qualification_leaf(
     if lock:
         statement = statement.with_for_update()
     runs = list(session.scalars(statement).all())
+    continuation_statement = select(ControlledProductionContinuationAuthority).where(
+        ControlledProductionContinuationAuthority.root_replacement_authority_id
+        == authority.id
+    )
+    if lock:
+        continuation_statement = continuation_statement.with_for_update()
+    continuations = list(session.scalars(continuation_statement).all())
+    continuation_by_qualification_id = {
+        item.continuation_qualification_run_id: item for item in continuations
+    }
+    if len(continuations) > 1:
+        raise ValidationFailureError("SCOPED_REPLACEMENT_CONTINUATION_FORK")
     by_id = {run.id: run for run in runs}
     root = by_id.get(authority.replacement_qualification_run_id)
     if (
@@ -118,9 +264,44 @@ def resolve_replacement_qualification_leaf(
     ):
         raise ValidationFailureError("SCOPED_REPLACEMENT_QUALIFICATION_ROOT_DRIFT")
     for run in runs:
+        continuation = continuation_by_qualification_id.get(run.id)
+        expected_slot_id = (
+            continuation.continuation_slot_id
+            if continuation is not None
+            else authority.replacement_slot_id
+        )
+        continuation_slot = (
+            session.get(LongFormPublishSlot, continuation.continuation_slot_id)
+            if continuation is not None
+            else None
+        )
         if (
             run.editorial_idea_candidate_id != authority.replacement_candidate_id
-            or run.publish_slot_id != authority.replacement_slot_id
+            or run.publish_slot_id != expected_slot_id
+            or (
+                continuation is not None
+                and (
+                    continuation.schema_version != CONTROLLED_CONTINUATION_SCHEMA
+                    or continuation.continuation_reason
+                    != CONTROLLED_CONTINUATION_REASON
+                    or continuation.continuation_candidate_id
+                    != authority.replacement_candidate_id
+                    or continuation.source_qualification_run_id
+                    != run.supersedes_qualification_run_id
+                    or continuation.max_writer_submissions != 0
+                    or continuation.max_verifier_submissions != 1
+                    or continuation.authority_hash
+                    != content_hash(
+                        controlled_continuation_authority_body(continuation)
+                    )
+                    or continuation.slot_projection
+                    != (
+                        controlled_continuation_slot_projection(continuation_slot)
+                        if continuation_slot is not None
+                        else None
+                    )
+                )
+            )
         ):
             raise ValidationFailureError(
                 "SCOPED_REPLACEMENT_QUALIFICATION_LINEAGE_DRIFT"
@@ -147,12 +328,18 @@ def resolve_replacement_qualification_leaf(
         if not next_runs:
             break
         child = next_runs[0]
+        continuation = continuation_by_qualification_id.get(child.id)
         expected_attempt += 1
         if (
             child.logical_attempt_number != expected_attempt
             or child.replacement_authority_id != authority.id
             or child.editorial_idea_candidate_id != root.editorial_idea_candidate_id
-            or child.publish_slot_id != root.publish_slot_id
+            or child.publish_slot_id
+            != (
+                continuation.continuation_slot_id
+                if continuation is not None
+                else leaf.publish_slot_id
+            )
             or child.launch_run_id != root.launch_run_id
             or child.topic_definition_hash != root.topic_definition_hash
             or child.script_assignment_hash != root.script_assignment_hash
@@ -171,6 +358,8 @@ def resolve_replacement_qualification_leaf(
         raise ValidationFailureError(
             "SCOPED_REPLACEMENT_QUALIFICATION_UNREACHABLE_NODE"
         )
+    if set(continuation_by_qualification_id) - seen:
+        raise ValidationFailureError("SCOPED_REPLACEMENT_CONTINUATION_UNREACHABLE")
     return leaf
 
 
@@ -1013,12 +1202,14 @@ class ScriptContractReplacementAuthorityService:
         candidate = self.session.get(
             EditorialIdeaCandidate, authority.replacement_candidate_id
         )
-        slot = self.session.get(LongFormPublishSlot, authority.replacement_slot_id)
-        if candidate is None or slot is None:
+        if candidate is None:
             raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_AUTHORITY_DRIFT")
         qualification = resolve_replacement_qualification_leaf(
             self.session, authority=authority, lock=True
         )
+        slot = self.session.get(LongFormPublishSlot, qualification.publish_slot_id)
+        if slot is None:
+            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_AUTHORITY_DRIFT")
         return ScriptContractReplacementLineage(
             authority, candidate, slot, qualification
         )

@@ -31,6 +31,7 @@ from app.db.models.foundation import LLMRunSnapshot
 from app.db.models.m10_1 import LLMRouteAttempt
 from app.db.models.m5 import EditorialIdeaCandidate, IdeaMarketPreflight
 from app.db.models.script_qualification import (
+    ControlledProductionContinuationAuthority,
     ScriptQualificationBackgroundAttempt,
     ScriptQualificationProviderResponseSnapshot,
     ScriptQualificationProviderReclassificationReceipt,
@@ -65,21 +66,33 @@ class ScriptQualificationDeadlinePolicy:
     downstream_lead_seconds: int = QUALIFICATION_DOWNSTREAM_LEAD_SECONDS
 
     def __post_init__(self) -> None:
-        if any(value <= 0 for value in (
-            self.submit_timeout_seconds,
-            self.poll_request_timeout_seconds,
-            self.poll_interval_seconds,
-            self.poll_cycles_per_stage,
-        )):
-            raise ValueError("script qualification deadline policy values must be positive")
+        if any(
+            value <= 0
+            for value in (
+                self.submit_timeout_seconds,
+                self.poll_request_timeout_seconds,
+                self.poll_interval_seconds,
+                self.poll_cycles_per_stage,
+            )
+        ):
+            raise ValueError(
+                "script qualification deadline policy values must be positive"
+            )
         if self.provider_stage_count != QUALIFICATION_PROVIDER_STAGE_COUNT:
-            raise ValueError("script qualification requires exactly two provider stages")
-        if any(value < 0 for value in (
-            self.queue_latency_seconds_per_stage,
-            self.safety_buffer_seconds,
-            self.downstream_lead_seconds,
-        )):
-            raise ValueError("script qualification deadline policy buffers must be non-negative")
+            raise ValueError(
+                "script qualification requires exactly two provider stages"
+            )
+        if any(
+            value < 0
+            for value in (
+                self.queue_latency_seconds_per_stage,
+                self.safety_buffer_seconds,
+                self.downstream_lead_seconds,
+            )
+        ):
+            raise ValueError(
+                "script qualification deadline policy buffers must be non-negative"
+            )
 
     @property
     def provider_stage_budget_seconds(self) -> int:
@@ -92,7 +105,10 @@ class ScriptQualificationDeadlinePolicy:
 
     @property
     def total_qualification_budget_seconds(self) -> int:
-        return self.provider_stage_count * self.provider_stage_budget_seconds + self.safety_buffer_seconds
+        return (
+            self.provider_stage_count * self.provider_stage_budget_seconds
+            + self.safety_buffer_seconds
+        )
 
     def receipt(self) -> dict[str, Any]:
         body = {
@@ -181,7 +197,8 @@ def minimum_script_qualification_window_close_at(
 
     resolved = policy or build_script_qualification_deadline_policy()
     return requested_at + timedelta(
-        seconds=resolved.total_qualification_budget_seconds + resolved.downstream_lead_seconds
+        seconds=resolved.total_qualification_budget_seconds
+        + resolved.downstream_lead_seconds
     )
 
 
@@ -192,41 +209,77 @@ def script_qualification_slot_is_viable(
 ) -> bool:
     resolved = policy or build_script_qualification_deadline_policy()
     deadline = derive_script_qualification_deadline(slot_window_close_at, resolved)
-    return deadline > now and now + timedelta(seconds=resolved.total_qualification_budget_seconds) < deadline
+    return (
+        deadline > now
+        and now + timedelta(seconds=resolved.total_qualification_budget_seconds)
+        < deadline
+    )
 
 
 class ScriptQualificationBackgroundService:
-    def __init__(self, session: Session, *, now=utc_now, provider: OpenAIResponsesProvider | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        now=utc_now,
+        provider: OpenAIResponsesProvider | None = None,
+    ) -> None:
         self.session = session
         self.now = now
         self.settings = get_settings()
         self.deadline_policy = build_script_qualification_deadline_policy(self.settings)
         self.provider = provider or OpenAIResponsesProvider(
-            api_key=(self.settings.openai_api_key.get_secret_value() if self.settings.openai_api_key else None),
+            api_key=(
+                self.settings.openai_api_key.get_secret_value()
+                if self.settings.openai_api_key
+                else None
+            ),
             base_url=self.settings.openai_base_url,
             timeout_seconds=self.settings.openai_timeout_seconds,
             runtime_origin="script-qualification-background",
         )
 
-    def authorize_recovery(self, *, original_run_id: uuid.UUID, requested_at: datetime | None = None) -> ScriptQualificationRun:
+    def authorize_recovery(
+        self, *, original_run_id: uuid.UUID, requested_at: datetime | None = None
+    ) -> ScriptQualificationRun:
         """Create the one allowed T+1 child run without modifying its parent."""
         requested_at = requested_at or self.now()
-        original = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == original_run_id).with_for_update())
+        original = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == original_run_id)
+            .with_for_update()
+        )
         if original is None:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_ORIGINAL_RUN_NOT_FOUND")
         if original.state != "BLOCKED_NON_REPAIRABLE":
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECOVERY_ORIGINAL_NOT_TERMINAL")
-        route = self.session.scalar(select(LLMRouteAttempt).join(
-            LLMRunSnapshot, LLMRunSnapshot.id == LLMRouteAttempt.llm_run_snapshot_id
-        ).where(LLMRunSnapshot.correlation_id == original.writer_attempt_key).order_by(LLMRouteAttempt.created_at.desc()))
-        receipt = self.session.scalar(select(ScriptQualificationProviderReclassificationReceipt).where(ScriptQualificationProviderReclassificationReceipt.original_qualification_run_id == original.id))
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_RECOVERY_ORIGINAL_NOT_TERMINAL"
+            )
+        route = self.session.scalar(
+            select(LLMRouteAttempt)
+            .join(
+                LLMRunSnapshot, LLMRunSnapshot.id == LLMRouteAttempt.llm_run_snapshot_id
+            )
+            .where(LLMRunSnapshot.correlation_id == original.writer_attempt_key)
+            .order_by(LLMRouteAttempt.created_at.desc())
+        )
+        receipt = self.session.scalar(
+            select(ScriptQualificationProviderReclassificationReceipt).where(
+                ScriptQualificationProviderReclassificationReceipt.original_qualification_run_id
+                == original.id
+            )
+        )
         if receipt is None:
             body = {
                 "schema_version": "script-qualification-provider-reclassification.v1",
                 "original_qualification_run_id": str(original.id),
                 "original_route_attempt_id": str(route.id) if route else None,
-                "original_classification": (original.failure_receipt or {}).get("reason_codes", []),
-                "observed_error": route.error_message if route else (original.failure_receipt or {}).get("detail"),
+                "original_classification": (original.failure_receipt or {}).get(
+                    "reason_codes", []
+                ),
+                "observed_error": route.error_message
+                if route
+                else (original.failure_receipt or {}).get("detail"),
                 "correct_failure_domain": "PROVIDER_INFRASTRUCTURE",
                 "content_failure": False,
                 "candidate_editorial_eligibility_unchanged": True,
@@ -235,14 +288,19 @@ class ScriptQualificationBackgroundService:
                 "authorized_recovery_count": 1,
                 "requested_recovery_at": requested_at.isoformat(),
             }
-            self.session.add(ScriptQualificationProviderReclassificationReceipt(
-                original_qualification_run_id=original.id,
-                original_route_attempt_id=route.id if route else None,
-                receipt=body, receipt_hash=content_hash(body),
-            ))
+            self.session.add(
+                ScriptQualificationProviderReclassificationReceipt(
+                    original_qualification_run_id=original.id,
+                    original_route_attempt_id=route.id if route else None,
+                    receipt=body,
+                    receipt_hash=content_hash(body),
+                )
+            )
         existing = self.session.scalar(
             select(ScriptQualificationRun)
-            .where(ScriptQualificationRun.supersedes_qualification_run_id == original.id)
+            .where(
+                ScriptQualificationRun.supersedes_qualification_run_id == original.id
+            )
             .order_by(
                 ScriptQualificationRun.logical_attempt_number.desc(),
                 ScriptQualificationRun.created_at.desc(),
@@ -258,31 +316,55 @@ class ScriptQualificationBackgroundService:
         if not script_qualification_slot_is_viable(
             requested_at, slot.target_start_window_close_at, self.deadline_policy
         ):
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECOVERY_DEADLINE_NOT_VIABLE")
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_RECOVERY_DEADLINE_NOT_VIABLE"
+            )
         recovery_key = f"{RECOVERY_PREFIX}:{original.id}:attempt-{original.logical_attempt_number + 1}"
         deadline = self._deadline_for(original, requested_at=requested_at)
         child = ScriptQualificationRun(
             editorial_idea_candidate_id=original.editorial_idea_candidate_id,
-            publish_slot_id=original.publish_slot_id, launch_run_id=original.launch_run_id,
-            topic_definition_id=original.topic_definition_id, topic_definition_hash=original.topic_definition_hash,
-            script_assignment=original.script_assignment, script_assignment_hash=original.script_assignment_hash,
-            factual_evidence_pack=original.factual_evidence_pack, factual_evidence_pack_hash=original.factual_evidence_pack_hash,
-            memory_digest=original.memory_digest, memory_digest_hash=original.memory_digest_hash,
-            runtime_contract=original.runtime_contract, runtime_contract_hash=original.runtime_contract_hash,
-            assignment_resolution=original.assignment_resolution, assignment_resolution_hash=original.assignment_resolution_hash,
+            publish_slot_id=original.publish_slot_id,
+            launch_run_id=original.launch_run_id,
+            topic_definition_id=original.topic_definition_id,
+            topic_definition_hash=original.topic_definition_hash,
+            script_assignment=original.script_assignment,
+            script_assignment_hash=original.script_assignment_hash,
+            factual_evidence_pack=original.factual_evidence_pack,
+            factual_evidence_pack_hash=original.factual_evidence_pack_hash,
+            memory_digest=original.memory_digest,
+            memory_digest_hash=original.memory_digest_hash,
+            runtime_contract=original.runtime_contract,
+            runtime_contract_hash=original.runtime_contract_hash,
+            assignment_resolution=original.assignment_resolution,
+            assignment_resolution_hash=original.assignment_resolution_hash,
             episode_reservation_active=original.episode_reservation_active,
-            writer_prompt_version=original.writer_prompt_version, verifier_prompt_version=original.verifier_prompt_version,
-            gate_policy_version=original.gate_policy_version, model=original.model,
+            writer_prompt_version=original.writer_prompt_version,
+            verifier_prompt_version=original.verifier_prompt_version,
+            gate_policy_version=original.gate_policy_version,
+            model=original.model,
             logical_attempt_number=original.logical_attempt_number + 1,
-            logical_identity_hash=content_hash({"original": original.logical_identity_hash, "recovery_key": recovery_key}),
-            supersedes_qualification_run_id=original.id, recovery_key=recovery_key,
-            recovery_requested_at=requested_at, logical_deadline_at=deadline,
+            logical_identity_hash=content_hash(
+                {
+                    "original": original.logical_identity_hash,
+                    "recovery_key": recovery_key,
+                }
+            ),
+            supersedes_qualification_run_id=original.id,
+            recovery_key=recovery_key,
+            recovery_requested_at=requested_at,
+            logical_deadline_at=deadline,
             state="RECOVERY_AUTHORIZED",
-            writer_attempt_key=f"{recovery_key}:writer", verifier_attempt_key=f"{recovery_key}:verifier",
+            writer_attempt_key=f"{recovery_key}:writer",
+            verifier_attempt_key=f"{recovery_key}:verifier",
         )
         self.session.add(child)
         self.session.flush()
-        self._enqueue(child, due_at=requested_at, event_type=BACKGROUND_EVENT_TYPE, command_id=recovery_key)
+        self._enqueue(
+            child,
+            due_at=requested_at,
+            event_type=BACKGROUND_EVENT_TYPE,
+            command_id=recovery_key,
+        )
         return child
 
     def resume_local_pre_submission_failure(
@@ -324,7 +406,9 @@ class ScriptQualificationBackgroundService:
             or "NoneType" not in detail
             or attempts
         ):
-            raise ValidationFailureError("RECOVERY_LOCAL_RESUME_NOT_PROVEN_PRE_SUBMISSION")
+            raise ValidationFailureError(
+                "RECOVERY_LOCAL_RESUME_NOT_PROVEN_PRE_SUBMISSION"
+            )
 
         slot = self.session.scalar(
             select(LongFormPublishSlot)
@@ -354,7 +438,9 @@ class ScriptQualificationBackgroundService:
             "failed_event_execution_detail": detail[:512],
             "provider_submission_count": 0,
             "provider_response_id": None,
-            "previous_terminal_settlement_receipt_hash": previous_settlement.get("content_hash"),
+            "previous_terminal_settlement_receipt_hash": previous_settlement.get(
+                "content_hash"
+            ),
             "compensated_at": self.now().isoformat(),
             "scheduled_at": scheduled_at.isoformat(),
             "fired_at": fired_at.isoformat(),
@@ -403,18 +489,49 @@ class ScriptQualificationBackgroundService:
         return run
 
     def execute(self, run_id: uuid.UUID) -> ScriptQualificationRun:
-        run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run_id).with_for_update())
+        run = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == run_id)
+            .with_for_update()
+        )
         if run is None:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RUN_NOT_FOUND")
-        if run.state in {"QUALIFIED", "BLOCKED_NON_REPAIRABLE", "BLOCKED_REPAIR_BUDGET_EXHAUSTED", "COOLDOWN", "SUPERSEDED"}:
+        if run.state in {
+            "QUALIFIED",
+            "BLOCKED_NON_REPAIRABLE",
+            "BLOCKED_REPAIR_BUDGET_EXHAUSTED",
+            "COOLDOWN",
+            "SUPERSEDED",
+        }:
             return run
         if run.logical_deadline_at is None:
             run.logical_deadline_at = self._deadline_for(run, requested_at=self.now())
         if self.now() >= run.logical_deadline_at:
             return self._deadline(run)
-        attempt = self.session.scalar(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.script_qualification_run_id == run.id, ScriptQualificationBackgroundAttempt.background_status.not_in(("COMPLETED", "FAILED", "CANCELLED", "INCOMPLETE", "DEADLINE_EXCEEDED", "SUBMISSION_OUTCOME_UNKNOWN"))).order_by(ScriptQualificationBackgroundAttempt.created_at.desc()))
+        attempt = self.session.scalar(
+            select(ScriptQualificationBackgroundAttempt)
+            .where(
+                ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                == run.id,
+                ScriptQualificationBackgroundAttempt.background_status.not_in(
+                    (
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "INCOMPLETE",
+                        "DEADLINE_EXCEEDED",
+                        "SUBMISSION_OUTCOME_UNKNOWN",
+                    )
+                ),
+            )
+            .order_by(ScriptQualificationBackgroundAttempt.created_at.desc())
+        )
         if attempt is not None:
-            if attempt.provider_response_id and attempt.next_poll_at and attempt.next_poll_at <= self.now():
+            if (
+                attempt.provider_response_id
+                and attempt.next_poll_at
+                and attempt.next_poll_at <= self.now()
+            ):
                 return self._poll(run, attempt)
             return run
         if run.script_payload is None:
@@ -427,20 +544,47 @@ class ScriptQualificationBackgroundService:
 
     def enqueue_due_polls(self) -> int:
         now = self.now()
-        attempts = self.session.scalars(select(ScriptQualificationBackgroundAttempt).where(
-            ScriptQualificationBackgroundAttempt.background_status.in_(("SUBMITTED", "QUEUED", "IN_PROGRESS")),
-            ScriptQualificationBackgroundAttempt.next_poll_at <= now,
-        ).with_for_update(skip_locked=True)).all()
+        attempts = self.session.scalars(
+            select(ScriptQualificationBackgroundAttempt)
+            .where(
+                ScriptQualificationBackgroundAttempt.background_status.in_(
+                    ("SUBMITTED", "QUEUED", "IN_PROGRESS")
+                ),
+                ScriptQualificationBackgroundAttempt.next_poll_at <= now,
+            )
+            .with_for_update(skip_locked=True)
+        ).all()
         for attempt in attempts:
-            self._enqueue(self.session.get(ScriptQualificationRun, attempt.script_qualification_run_id), due_at=now,
-                event_type=BACKGROUND_POLL_EVENT_TYPE, command_id=f"script-qualification-background-poll:{attempt.id}:{attempt.poll_count + 1}", background_attempt_id=attempt.id)
+            self._enqueue(
+                self.session.get(
+                    ScriptQualificationRun, attempt.script_qualification_run_id
+                ),
+                due_at=now,
+                event_type=BACKGROUND_POLL_EVENT_TYPE,
+                command_id=f"script-qualification-background-poll:{attempt.id}:{attempt.poll_count + 1}",
+                background_attempt_id=attempt.id,
+            )
         return len(attempts)
 
-    def _submit(self, run: ScriptQualificationRun, *, phase: str) -> ScriptQualificationRun:
-        context = self._writer_context(run) if phase == "WRITER" else self._verifier_context(run)
-        lane, task = (("long_context_text", "long_form_script") if phase == "WRITER" else ("gatekeeper_soft_review", "factuality_review"))
+    def _submit(
+        self, run: ScriptQualificationRun, *, phase: str
+    ) -> ScriptQualificationRun:
+        context = (
+            self._writer_context(run)
+            if phase == "WRITER"
+            else self._verifier_context(run)
+        )
+        lane, task = (
+            ("long_context_text", "long_form_script")
+            if phase == "WRITER"
+            else ("gatekeeper_soft_review", "factuality_review")
+        )
         schema_identifier, schema = self._response_schema(run, phase=phase)
-        prompt_version = run.writer_prompt_version if phase == "WRITER" else run.verifier_prompt_version
+        prompt_version = (
+            run.writer_prompt_version
+            if phase == "WRITER"
+            else run.verifier_prompt_version
+        )
         prompt = self._schema_bound_prompt(
             context=context,
             phase=phase,
@@ -448,14 +592,43 @@ class ScriptQualificationBackgroundService:
             prompt_version=prompt_version,
         )
         schema_hash = content_hash(schema)
-        fingerprint = content_hash({"phase": phase, "prompt": prompt, "model": run.model, "lane": lane, "schema_identifier": schema_identifier, "schema_hash": schema_hash, "prompt_version": prompt_version})
-        attempt = self.session.scalar(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.script_qualification_run_id == run.id, ScriptQualificationBackgroundAttempt.phase == phase).with_for_update())
+        fingerprint = content_hash(
+            {
+                "phase": phase,
+                "prompt": prompt,
+                "model": run.model,
+                "lane": lane,
+                "schema_identifier": schema_identifier,
+                "schema_hash": schema_hash,
+                "prompt_version": prompt_version,
+            }
+        )
+        attempt = self.session.scalar(
+            select(ScriptQualificationBackgroundAttempt)
+            .where(
+                ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                == run.id,
+                ScriptQualificationBackgroundAttempt.phase == phase,
+            )
+            .with_for_update()
+        )
         if attempt is None:
             attempt = ScriptQualificationBackgroundAttempt(
-                script_qualification_run_id=run.id, phase=phase, provider="OPENAI", model=run.model, lane=lane, task=task,
-                input_fingerprint=fingerprint, immutable_input_hashes=self._hashes(run),
-                client_correlation_id=(run.writer_attempt_key if phase == "WRITER" else run.verifier_attempt_key),
-                logical_deadline_at=run.logical_deadline_at or self._deadline_for(run, requested_at=self.now()),
+                script_qualification_run_id=run.id,
+                phase=phase,
+                provider="OPENAI",
+                model=run.model,
+                lane=lane,
+                task=task,
+                input_fingerprint=fingerprint,
+                immutable_input_hashes=self._hashes(run),
+                client_correlation_id=(
+                    run.writer_attempt_key
+                    if phase == "WRITER"
+                    else run.verifier_attempt_key
+                ),
+                logical_deadline_at=run.logical_deadline_at
+                or self._deadline_for(run, requested_at=self.now()),
                 background_status="SUBMIT_PENDING",
                 poll_count=0,
                 submission_attempt_count=0,
@@ -468,14 +641,37 @@ class ScriptQualificationBackgroundService:
             return run
         if attempt.submission_attempt_count >= 1:
             attempt.background_status = "SUBMISSION_OUTCOME_UNKNOWN"
-            return self._provider_block(run, attempt, "SCRIPT_PROVIDER_SUBMISSION_OUTCOME_UNKNOWN")
+            return self._provider_block(
+                run, attempt, "SCRIPT_PROVIDER_SUBMISSION_OUTCOME_UNKNOWN"
+            )
         run.state = f"{phase}_SUBMIT_PENDING"
         self.session.flush()
         # Explicitly release the database transaction before network I/O.
         self.session.commit()
-        result = self.provider.submit_background(request=OpenAIResponsesRequest(model=run.model, reasoning_effort="medium", prompt=prompt, response_format="json", json_schema=schema, json_schema_name=schema_identifier, json_schema_strict=True, idempotency_key=attempt.client_correlation_id, background=True), timeout_seconds=self.settings.openai_background_submit_timeout_seconds)
-        run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run.id).with_for_update())
-        attempt = self.session.scalar(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.id == attempt.id).with_for_update())
+        result = self.provider.submit_background(
+            request=OpenAIResponsesRequest(
+                model=run.model,
+                reasoning_effort="medium",
+                prompt=prompt,
+                response_format="json",
+                json_schema=schema,
+                json_schema_name=schema_identifier,
+                json_schema_strict=True,
+                idempotency_key=attempt.client_correlation_id,
+                background=True,
+            ),
+            timeout_seconds=self.settings.openai_background_submit_timeout_seconds,
+        )
+        run = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == run.id)
+            .with_for_update()
+        )
+        attempt = self.session.scalar(
+            select(ScriptQualificationBackgroundAttempt)
+            .where(ScriptQualificationBackgroundAttempt.id == attempt.id)
+            .with_for_update()
+        )
         assert run is not None and attempt is not None
         attempt.submission_attempt_count = 1
         if not result.ok:
@@ -500,32 +696,59 @@ class ScriptQualificationBackgroundService:
         self.session.flush()
         return run
 
-    def _poll(self, run: ScriptQualificationRun, attempt: ScriptQualificationBackgroundAttempt) -> ScriptQualificationRun:
+    def _poll(
+        self, run: ScriptQualificationRun, attempt: ScriptQualificationBackgroundAttempt
+    ) -> ScriptQualificationRun:
         assert attempt.provider_response_id
         attempt.last_polled_at = self.now()
         attempt.poll_count += 1
         self.session.flush()
         self.session.commit()
-        result = self.provider.retrieve_background(response_id=attempt.provider_response_id, timeout_seconds=self.settings.openai_background_poll_request_timeout_seconds)
-        run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run.id).with_for_update())
-        attempt = self.session.scalar(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.id == attempt.id).with_for_update())
+        result = self.provider.retrieve_background(
+            response_id=attempt.provider_response_id,
+            timeout_seconds=self.settings.openai_background_poll_request_timeout_seconds,
+        )
+        run = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == run.id)
+            .with_for_update()
+        )
+        attempt = self.session.scalar(
+            select(ScriptQualificationBackgroundAttempt)
+            .where(ScriptQualificationBackgroundAttempt.id == attempt.id)
+            .with_for_update()
+        )
         assert run is not None and attempt is not None
         if not result.ok:
             attempt.last_network_error = result.error_code
-            attempt.next_poll_at = self.now() + timedelta(seconds=self.settings.script_qualification_background_poll_seconds)
+            attempt.next_poll_at = self.now() + timedelta(
+                seconds=self.settings.script_qualification_background_poll_seconds
+            )
             return run
-        attempt.provider_request_id = result.output.get("provider_request_id") or attempt.provider_request_id
+        attempt.provider_request_id = (
+            result.output.get("provider_request_id") or attempt.provider_request_id
+        )
         attempt.usage = result.output.get("usage")
         status = self._status(result.output.get("background_status"))
         attempt.background_status = status
         if status in {"SUBMITTED", "QUEUED", "IN_PROGRESS"}:
-            attempt.next_poll_at = self.now() + timedelta(seconds=self.settings.script_qualification_background_poll_seconds)
-            run.state = f"{attempt.phase}_{status}" if status != "SUBMITTED" else f"{attempt.phase}_BACKGROUND_SUBMITTED"
+            attempt.next_poll_at = self.now() + timedelta(
+                seconds=self.settings.script_qualification_background_poll_seconds
+            )
+            run.state = (
+                f"{attempt.phase}_{status}"
+                if status != "SUBMITTED"
+                else f"{attempt.phase}_BACKGROUND_SUBMITTED"
+            )
             return run
         if status in {"FAILED", "CANCELLED", "INCOMPLETE"}:
-            return self._provider_block(run, attempt, f"SCRIPT_PROVIDER_BACKGROUND_{status}")
+            return self._provider_block(
+                run, attempt, f"SCRIPT_PROVIDER_BACKGROUND_{status}"
+            )
         if status != "COMPLETED":
-            return self._provider_block(run, attempt, "SCRIPT_PROVIDER_BACKGROUND_INCOMPLETE")
+            return self._provider_block(
+                run, attempt, "SCRIPT_PROVIDER_BACKGROUND_INCOMPLETE"
+            )
         attempt.completed_at = self.now()
         attempt.provider_outcome = "COMPLETED"
         attempt.output_hash = content_hash(result.output.get("raw") or {})
@@ -537,7 +760,9 @@ class ScriptQualificationBackgroundService:
                 service = ScriptQualificationService(self.session)
                 service.writer_output_model(run).model_validate(parsed)
                 self._persist_response_snapshot(
-                    run=run, attempt=attempt, output=result.output,
+                    run=run,
+                    attempt=attempt,
+                    output=result.output,
                     accepted_typed_output_hash=content_hash(parsed),
                 )
                 from app.services.script_content_repair import (
@@ -557,17 +782,24 @@ class ScriptQualificationBackgroundService:
                 run.state = "SCRIPT_GENERATED"
                 return run
             from app.services.script_qualification import ScriptQualificationService
+
             service = ScriptQualificationService(self.session)
             draft = service.draft_from_run(run)
             verifier = SemanticVerificationOutput.model_validate(parsed)
             self._persist_response_snapshot(
-                run=run, attempt=attempt, output=result.output,
-                accepted_typed_output_hash=content_hash(verifier.model_dump(mode="json")),
+                run=run,
+                attempt=attempt,
+                output=result.output,
+                accepted_typed_output_hash=content_hash(
+                    verifier.model_dump(mode="json")
+                ),
             )
             run.verifier_receipt = self._receipt(attempt, result.output)
             structural = service._structural_receipt(run, draft)
             receipts = service._semantic_receipts(run, draft, verifier, structural)
-            if all(item["status"] in {"PASS", "PASS_EMPTY"} for item in receipts.values()):
+            if all(
+                item["status"] in {"PASS", "PASS_EMPTY"} for item in receipts.values()
+            ):
                 run.state = "QUALIFIED"
                 run.result_receipts = receipts
                 service._create_receipt(run, draft, "PASS", receipts)
@@ -580,9 +812,22 @@ class ScriptQualificationBackgroundService:
                 output=result.output,
                 validation_errors=_validation_errors(exc),
             )
-            return self._provider_block(run, attempt, "SCRIPT_WRITER_OUTPUT_INVALID" if attempt.phase == "WRITER" else "SCRIPT_VERIFIER_OUTPUT_INVALID", detail=str(exc))
+            return self._provider_block(
+                run,
+                attempt,
+                "SCRIPT_WRITER_OUTPUT_INVALID"
+                if attempt.phase == "WRITER"
+                else "SCRIPT_VERIFIER_OUTPUT_INVALID",
+                detail=str(exc),
+            )
 
-    def _provider_block(self, run: ScriptQualificationRun, attempt: ScriptQualificationBackgroundAttempt, code: str, detail: str | None = None) -> ScriptQualificationRun:
+    def _provider_block(
+        self,
+        run: ScriptQualificationRun,
+        attempt: ScriptQualificationBackgroundAttempt,
+        code: str,
+        detail: str | None = None,
+    ) -> ScriptQualificationRun:
         unknown_provider_outcome = (
             code != "SCRIPT_PROVIDER_REQUEST_REJECTED_NO_RESPONSE"
             and (
@@ -596,25 +841,47 @@ class ScriptQualificationBackgroundService:
         run.state = "BLOCKED_NON_REPAIRABLE"
         attempt.provider_outcome = code
         attempt.next_poll_at = None
-        run.failure_receipt = {"reason_codes": reason_codes, "detail": (detail or attempt.last_network_error or "")[:512], "logical_identity_hash": run.logical_identity_hash}
-        self._settle_terminal_if_current(run, reason_code=code, unknown_provider_outcome=unknown_provider_outcome)
+        run.failure_receipt = {
+            "reason_codes": reason_codes,
+            "detail": (detail or attempt.last_network_error or "")[:512],
+            "logical_identity_hash": run.logical_identity_hash,
+        }
+        self._settle_terminal_if_current(
+            run, reason_code=code, unknown_provider_outcome=unknown_provider_outcome
+        )
         return run
 
     def _deadline(self, run: ScriptQualificationRun) -> ScriptQualificationRun:
-        attempts = list(self.session.scalars(select(ScriptQualificationBackgroundAttempt).where(ScriptQualificationBackgroundAttempt.script_qualification_run_id == run.id)).all())
-        unknown_provider_outcome = any(self._attempt_provider_outcome_is_unknown(attempt) for attempt in attempts)
-        for attempt in attempts:
-            if attempt.background_status not in {"COMPLETED", "FAILED", "CANCELLED", "INCOMPLETE", "SUBMISSION_OUTCOME_UNKNOWN"}:
-                attempt.background_status = "DEADLINE_EXCEEDED"
-                attempt.provider_outcome = (
-                    "SCRIPT_PROVIDER_LOGICAL_DEADLINE_EXCEEDED"
+        attempts = list(
+            self.session.scalars(
+                select(ScriptQualificationBackgroundAttempt).where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == run.id
                 )
+            ).all()
+        )
+        unknown_provider_outcome = any(
+            self._attempt_provider_outcome_is_unknown(attempt) for attempt in attempts
+        )
+        for attempt in attempts:
+            if attempt.background_status not in {
+                "COMPLETED",
+                "FAILED",
+                "CANCELLED",
+                "INCOMPLETE",
+                "SUBMISSION_OUTCOME_UNKNOWN",
+            }:
+                attempt.background_status = "DEADLINE_EXCEEDED"
+                attempt.provider_outcome = "SCRIPT_PROVIDER_LOGICAL_DEADLINE_EXCEEDED"
                 attempt.next_poll_at = None
         reason_codes = ["SCRIPT_PROVIDER_LOGICAL_DEADLINE_EXCEEDED"]
         if unknown_provider_outcome:
             reason_codes.append("SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY")
         run.state = "BLOCKED_NON_REPAIRABLE"
-        run.failure_receipt = {"reason_codes": reason_codes, "deadline_policy": self.deadline_policy.receipt()}
+        run.failure_receipt = {
+            "reason_codes": reason_codes,
+            "deadline_policy": self.deadline_policy.receipt(),
+        }
         self._settle_terminal_if_current(
             run,
             reason_code="SCRIPT_PROVIDER_LOGICAL_DEADLINE_EXCEEDED",
@@ -622,31 +889,89 @@ class ScriptQualificationBackgroundService:
         )
         return run
 
-    def _enqueue(self, run: ScriptQualificationRun | None, *, due_at: datetime, event_type: str, command_id: str, background_attempt_id: uuid.UUID | None = None, metadata: dict[str, Any] | None = None) -> None:
+    def _enqueue(
+        self,
+        run: ScriptQualificationRun | None,
+        *,
+        due_at: datetime,
+        event_type: str,
+        command_id: str,
+        background_attempt_id: uuid.UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         if run is None:
             return
-        if self.session.scalar(select(DomainEvent).where(DomainEvent.command_id == command_id)) is not None:
+        if (
+            self.session.scalar(
+                select(DomainEvent).where(DomainEvent.command_id == command_id)
+            )
+            is not None
+        ):
             return
-        payload = {"script_qualification_run_id": str(run.id), "background_attempt_id": str(background_attempt_id) if background_attempt_id else None}
-        self.session.add(DomainEvent(id=uuid.uuid5(uuid.NAMESPACE_URL, command_id), event_type=event_type, event_version=1, aggregate_type="script_qualification_run", aggregate_id=run.id, company_id=None, channel_workspace_id=None, workflow_run_id=None, correlation_id=command_id[:160], command_id=command_id, payload_hash=content_hash(payload), payload=payload, metadata_={"queue_name": "production-workflow", "retry_policy": {"automatic_retry_allowed": True}, **(metadata or {})}, attempt_count=0, max_attempts=3, next_attempt_at=due_at, occurred_at=self.now()))
+        payload = {
+            "script_qualification_run_id": str(run.id),
+            "background_attempt_id": str(background_attempt_id)
+            if background_attempt_id
+            else None,
+        }
+        self.session.add(
+            DomainEvent(
+                id=uuid.uuid5(uuid.NAMESPACE_URL, command_id),
+                event_type=event_type,
+                event_version=1,
+                aggregate_type="script_qualification_run",
+                aggregate_id=run.id,
+                company_id=None,
+                channel_workspace_id=None,
+                workflow_run_id=None,
+                correlation_id=command_id[:160],
+                command_id=command_id,
+                payload_hash=content_hash(payload),
+                payload=payload,
+                metadata_={
+                    "queue_name": "production-workflow",
+                    "retry_policy": {"automatic_retry_allowed": True},
+                    **(metadata or {}),
+                },
+                attempt_count=0,
+                max_attempts=3,
+                next_attempt_at=due_at,
+                occurred_at=self.now(),
+            )
+        )
 
     def _recovery_guards_pass(self, run: ScriptQualificationRun, *, phase: str) -> bool:
         """Apply the current readiness gates before the one permitted submit."""
 
         if run.supersedes_qualification_run_id is None:
             return True
-        candidate = self.session.get(EditorialIdeaCandidate, run.editorial_idea_candidate_id)
+        candidate = self.session.get(
+            EditorialIdeaCandidate, run.editorial_idea_candidate_id
+        )
         slot = self.session.get(LongFormPublishSlot, run.publish_slot_id)
         # The explicit current topic receipt is intentionally queried by the
         # frozen Topic Definition id; TopicDefinitionService would treat this
         # in-flight child as a recursive pending qualification.
-        from app.db.models.script_qualification import EditorialTopicDefinitionGateReceipt
-        topic = self.session.scalar(select(EditorialTopicDefinitionGateReceipt).where(
-            EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id == run.topic_definition_id
-        ).order_by(EditorialTopicDefinitionGateReceipt.created_at.desc()))
-        preflight = self.session.scalar(select(IdeaMarketPreflight).where(
-            IdeaMarketPreflight.editorial_idea_candidate_id == run.editorial_idea_candidate_id
-        ).order_by(IdeaMarketPreflight.created_at.desc()))
+        from app.db.models.script_qualification import (
+            EditorialTopicDefinitionGateReceipt,
+        )
+
+        topic = self.session.scalar(
+            select(EditorialTopicDefinitionGateReceipt)
+            .where(
+                EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id
+                == run.topic_definition_id
+            )
+            .order_by(EditorialTopicDefinitionGateReceipt.created_at.desc())
+        )
+        preflight = self.session.scalar(
+            select(IdeaMarketPreflight)
+            .where(
+                IdeaMarketPreflight.editorial_idea_candidate_id
+                == run.editorial_idea_candidate_id
+            )
+            .order_by(IdeaMarketPreflight.created_at.desc())
+        )
         from app.services.production_start_readiness import resolve_budget_authority
 
         budget = (
@@ -660,33 +985,178 @@ class ScriptQualificationBackgroundService:
         )
         now = self.now()
         reasons: list[str] = []
+        continuation = self.session.scalar(
+            select(ControlledProductionContinuationAuthority)
+            .where(
+                ControlledProductionContinuationAuthority.continuation_qualification_run_id
+                == run.id
+            )
+            .with_for_update()
+        )
+        if continuation is None and (run.recovery_key or "").startswith(
+            "script-qualification-content-repair-scope-reclassification:"
+        ):
+            reasons.append("CONTROLLED_CONTINUATION_AUTHORITY_MISSING")
+        if continuation is not None:
+            from app.services.production_start_readiness import (
+                resolve_provider_authority,
+            )
+            from app.services.script_contract_replacement import (
+                CONTROLLED_CONTINUATION_REASON,
+                CONTROLLED_CONTINUATION_SCHEMA,
+                ScriptContractReplacementAuthorityService,
+                controlled_continuation_authority_body,
+                controlled_continuation_slot_projection,
+                operator_recovery_authority_body,
+            )
+            from app.services.editorial_novelty import (
+                EDITORIAL_NOVELTY_GATE_VERSION,
+                EditorialNoveltyService,
+            )
+            from app.services.editorial_specificity import EditorialSpecificityService
+            from app.db.models.script_qualification import EditorialTopicDefinition
+            from app.db.models.script_qualification import (
+                ScriptContractReplacementAuthority,
+            )
+
+            provider = (
+                resolve_provider_authority(
+                    self.session,
+                    policy_snapshot_id=candidate.policy_snapshot_id,
+                    channel_workspace_id=candidate.channel_workspace_id,
+                )
+                if candidate is not None
+                else {"state": "BLOCKED"}
+            )
+            child_writer_attempt = self.session.scalar(
+                select(ScriptQualificationBackgroundAttempt.id).where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == run.id,
+                    ScriptQualificationBackgroundAttempt.phase == "WRITER",
+                )
+            )
+            root_authority = self.session.get(
+                ScriptContractReplacementAuthority,
+                continuation.root_replacement_authority_id,
+            )
+            topic_definition = self.session.get(
+                EditorialTopicDefinition, run.topic_definition_id
+            )
+            novelty = (
+                EditorialNoveltyService(self.session).evaluate(
+                    candidate=candidate,
+                    topic=topic_definition,
+                )
+                if candidate is not None and topic_definition is not None
+                else None
+            )
+            freshness = (
+                ScriptContractReplacementAuthorityService(
+                    self.session, now=self.now
+                )._current_freshness_snapshot(
+                    candidate=candidate,
+                    evaluated_at=now,
+                )
+                if candidate is not None
+                else {"state": "BLOCKED"}
+            )
+            if phase != "VERIFIER" or child_writer_attempt is not None:
+                reasons.append("CONTROLLED_CONTINUATION_WRITER_FORBIDDEN")
+            if (
+                continuation.schema_version != CONTROLLED_CONTINUATION_SCHEMA
+                or continuation.continuation_reason != CONTROLLED_CONTINUATION_REASON
+                or continuation.continuation_candidate_id
+                != run.editorial_idea_candidate_id
+                or continuation.continuation_slot_id != run.publish_slot_id
+                or continuation.continuation_logical_identity_hash
+                != run.logical_identity_hash
+                or continuation.qualification_deadline != run.logical_deadline_at
+                or continuation.max_writer_submissions != 0
+                or continuation.max_verifier_submissions != 1
+                or continuation.authority_hash
+                != content_hash(controlled_continuation_authority_body(continuation))
+                or continuation.deadline_policy != self.deadline_policy.receipt()
+                or slot is None
+                or continuation.slot_projection
+                != controlled_continuation_slot_projection(slot)
+                or root_authority is None
+                or root_authority.authority_hash != continuation.root_authority_hash
+                or root_authority.authority_hash
+                != content_hash(operator_recovery_authority_body(root_authority))
+            ):
+                reasons.append("CONTROLLED_CONTINUATION_AUTHORITY_DRIFT")
+            if (
+                run.logical_deadline_at is None
+                or now
+                + timedelta(
+                    seconds=(
+                        self.deadline_policy.provider_stage_budget_seconds
+                        + self.deadline_policy.safety_buffer_seconds
+                    )
+                )
+                >= run.logical_deadline_at
+            ):
+                reasons.append("CONTROLLED_CONTINUATION_DEADLINE_NOT_VIABLE")
+            if (
+                provider.get("state") != "READY"
+                or content_hash(provider) != continuation.provider_authority_hash
+            ):
+                reasons.append("CONTROLLED_CONTINUATION_PROVIDER_AUTHORITY_DRIFT")
+            if content_hash(budget) != continuation.budget_authority_hash:
+                reasons.append("CONTROLLED_CONTINUATION_BUDGET_AUTHORITY_DRIFT")
+            if (
+                candidate is None
+                or not EditorialSpecificityService(self.session).current_pass(candidate)
+                or novelty is None
+                or novelty.state != "PASS"
+                or (candidate.editorial_novelty_receipt or {}).get("gate_version")
+                != EDITORIAL_NOVELTY_GATE_VERSION
+                or (candidate.editorial_novelty_receipt or {}).get("evaluation_hash")
+                != novelty.evaluation_hash
+                or freshness.get("state") != "FRESH"
+            ):
+                reasons.append("CONTROLLED_CONTINUATION_EDITORIAL_AUTHORITY_DRIFT")
         if candidate is None or candidate.stage != "GREENLIT":
             reasons.append("RECOVERY_CANDIDATE_NOT_CURRENT_ELIGIBLE")
-        if topic is None or not topic.current_production_eligibility or topic.state != "PASS":
+        if (
+            topic is None
+            or not topic.current_production_eligibility
+            or topic.state != "PASS"
+        ):
             reasons.append("RECOVERY_TOPIC_DEFINITION_NOT_PASS")
-        if preflight is None or preflight.decision != "PASS" or preflight.policy_fit_state != "PASS":
+        if (
+            preflight is None
+            or preflight.decision != "PASS"
+            or preflight.policy_fit_state != "PASS"
+        ):
             reasons.append("RECOVERY_PREFLIGHT_NOT_PASS")
         if (
             slot is None
             or slot.reserved_candidate_id != run.editorial_idea_candidate_id
             or slot.state != "QUALIFICATION_RESERVED"
-            or not (slot.target_start_window_open_at <= now <= slot.target_start_window_close_at)
+            or not (
+                slot.target_start_window_open_at
+                <= now
+                <= slot.target_start_window_close_at
+            )
         ):
             reasons.append("RECOVERY_PRODUCTION_WINDOW_NOT_OPEN")
         if budget.get("state") != "READY":
             reasons.append("RECOVERY_BUDGET_AUTHORITY_BLOCKED")
-        attempts = self.session.scalars(select(ScriptQualificationBackgroundAttempt).where(
-            ScriptQualificationBackgroundAttempt.script_qualification_run_id == run.id,
-            ScriptQualificationBackgroundAttempt.phase == phase,
-            ScriptQualificationBackgroundAttempt.provider_response_id.is_not(None),
-        )).all()
+        attempts = self.session.scalars(
+            select(ScriptQualificationBackgroundAttempt).where(
+                ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                == run.id,
+                ScriptQualificationBackgroundAttempt.phase == phase,
+                ScriptQualificationBackgroundAttempt.provider_response_id.is_not(None),
+            )
+        ).all()
         if attempts:
             reasons.append("RECOVERY_BACKGROUND_RESPONSE_ALREADY_EXISTS")
         if not reasons:
             return True
         unknown_provider_outcome = any(
-            self._attempt_provider_outcome_is_unknown(attempt)
-            for attempt in attempts
+            self._attempt_provider_outcome_is_unknown(attempt) for attempt in attempts
         )
         if unknown_provider_outcome:
             reasons.append("SCRIPT_PROVIDER_OUTCOME_UNKNOWN_NO_RETRY")
@@ -706,29 +1176,58 @@ class ScriptQualificationBackgroundService:
     @staticmethod
     def _status(value: Any) -> str:
         raw = str(value or "queued").upper()
-        return {"QUEUED": "QUEUED", "IN_PROGRESS": "IN_PROGRESS", "COMPLETED": "COMPLETED", "FAILED": "FAILED", "CANCELLED": "CANCELLED", "INCOMPLETE": "INCOMPLETE"}.get(raw, "SUBMITTED")
+        return {
+            "QUEUED": "QUEUED",
+            "IN_PROGRESS": "IN_PROGRESS",
+            "COMPLETED": "COMPLETED",
+            "FAILED": "FAILED",
+            "CANCELLED": "CANCELLED",
+            "INCOMPLETE": "INCOMPLETE",
+        }.get(raw, "SUBMITTED")
 
     @staticmethod
     def _hashes(run: ScriptQualificationRun) -> dict[str, Any]:
-        return {"topic_definition_hash": run.topic_definition_hash, "script_assignment_hash": run.script_assignment_hash, "factual_evidence_pack_hash": run.factual_evidence_pack_hash, "memory_digest_hash": run.memory_digest_hash, "runtime_contract_hash": run.runtime_contract_hash, "assignment_resolution_hash": run.assignment_resolution_hash, "script_contract_version": run.script_contract_version, "replacement_authority_id": str(run.replacement_authority_id) if run.replacement_authority_id else None}
+        return {
+            "topic_definition_hash": run.topic_definition_hash,
+            "script_assignment_hash": run.script_assignment_hash,
+            "factual_evidence_pack_hash": run.factual_evidence_pack_hash,
+            "memory_digest_hash": run.memory_digest_hash,
+            "runtime_contract_hash": run.runtime_contract_hash,
+            "assignment_resolution_hash": run.assignment_resolution_hash,
+            "script_contract_version": run.script_contract_version,
+            "replacement_authority_id": str(run.replacement_authority_id)
+            if run.replacement_authority_id
+            else None,
+        }
 
-    def _deadline_for(self, run: ScriptQualificationRun, *, requested_at: datetime) -> datetime:
+    def _deadline_for(
+        self, run: ScriptQualificationRun, *, requested_at: datetime
+    ) -> datetime:
         slot = self.session.get(LongFormPublishSlot, run.publish_slot_id)
         if slot is None:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_SLOT_NOT_FOUND")
         # The requested time remains explicit for recovery identity. Deadline
         # authority comes from the slot close after preserving downstream lead.
         _ = requested_at
-        return derive_script_qualification_deadline(slot.target_start_window_close_at, self.deadline_policy)
+        return derive_script_qualification_deadline(
+            slot.target_start_window_close_at, self.deadline_policy
+        )
 
     @staticmethod
-    def _attempt_provider_outcome_is_unknown(attempt: ScriptQualificationBackgroundAttempt) -> bool:
+    def _attempt_provider_outcome_is_unknown(
+        attempt: ScriptQualificationBackgroundAttempt,
+    ) -> bool:
         if attempt.provider_outcome in {
             "PROVIDER_REQUEST_REJECTED_NO_RESPONSE",
             "SCRIPT_PROVIDER_REQUEST_REJECTED_NO_RESPONSE",
         }:
             return False
-        if attempt.background_status in {"COMPLETED", "FAILED", "CANCELLED", "INCOMPLETE"}:
+        if attempt.background_status in {
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+            "INCOMPLETE",
+        }:
             return False
         return bool(
             attempt.provider_response_id
@@ -746,13 +1245,22 @@ class ScriptQualificationBackgroundService:
         """Settle only the run that still owns the current reserved lineage."""
 
         if run.terminal_settlement_receipt is None:
-            slot = self.session.scalar(select(LongFormPublishSlot).where(LongFormPublishSlot.id == run.publish_slot_id).with_for_update())
-            candidate = self.session.scalar(select(EditorialIdeaCandidate).where(EditorialIdeaCandidate.id == run.editorial_idea_candidate_id).with_for_update())
+            slot = self.session.scalar(
+                select(LongFormPublishSlot)
+                .where(LongFormPublishSlot.id == run.publish_slot_id)
+                .with_for_update()
+            )
+            candidate = self.session.scalar(
+                select(EditorialIdeaCandidate)
+                .where(EditorialIdeaCandidate.id == run.editorial_idea_candidate_id)
+                .with_for_update()
+            )
             latest = self.session.scalar(
                 select(ScriptQualificationRun)
                 .where(
                     ScriptQualificationRun.publish_slot_id == run.publish_slot_id,
-                    ScriptQualificationRun.editorial_idea_candidate_id == run.editorial_idea_candidate_id,
+                    ScriptQualificationRun.editorial_idea_candidate_id
+                    == run.editorial_idea_candidate_id,
                 )
                 .order_by(
                     ScriptQualificationRun.logical_attempt_number.desc(),
@@ -769,11 +1277,14 @@ class ScriptQualificationBackgroundService:
                 or slot.reserved_candidate_id != candidate.id
                 or slot.admitted_video_project_id is not None
                 or run.admitted_video_project_id is not None
-                or candidate.stage in {"IN_PRODUCTION", "FINAL_REVIEW_READY", "PUBLISHED"}
+                or candidate.stage
+                in {"IN_PRODUCTION", "FINAL_REVIEW_READY", "PUBLISHED"}
             ):
                 return
 
-        from app.services.script_qualification_recovery import ScriptQualificationRecoveryService
+        from app.services.script_qualification_recovery import (
+            ScriptQualificationRecoveryService,
+        )
 
         recovery = ScriptQualificationRecoveryService(self.session, now=self.now)
         if unknown_provider_outcome:
@@ -783,30 +1294,57 @@ class ScriptQualificationBackgroundService:
 
     def _writer_context(self, run: ScriptQualificationRun) -> dict[str, Any]:
         from app.services.script_qualification import ScriptQualificationService
+
         context = ScriptQualificationService(self.session)._writer_context(run)
         from app.services.script_content_repair import ScriptContentRepairService
 
-        repair = ScriptContentRepairService(self.session, now=self.now).writer_context(run)
+        repair = ScriptContentRepairService(self.session, now=self.now).writer_context(
+            run
+        )
         if repair is not None:
             context["content_repair"] = repair
         return context
 
     def _verifier_context(self, run: ScriptQualificationRun) -> dict[str, Any]:
         from app.services.script_qualification import ScriptQualificationService
+
         service = ScriptQualificationService(self.session)
-        return service._verifier_context(run, service.draft_from_run(run))
+        context = service._verifier_context(run, service.draft_from_run(run))
+        continuation = self.session.scalar(
+            select(ControlledProductionContinuationAuthority).where(
+                ControlledProductionContinuationAuthority.continuation_qualification_run_id
+                == run.id
+            )
+        )
+        if continuation is not None:
+            context["controlled_continuation_authority"] = {
+                "schema_version": continuation.schema_version,
+                "continuation_authority_id": str(continuation.id),
+                "authority_hash": continuation.authority_hash,
+                "continuation_reason": continuation.continuation_reason,
+                "max_writer_submissions": continuation.max_writer_submissions,
+                "max_verifier_submissions": continuation.max_verifier_submissions,
+                "qualification_deadline": continuation.qualification_deadline.isoformat(),
+            }
+        return context
 
     def _response_schema(
         self, run: ScriptQualificationRun, *, phase: str
     ) -> tuple[str, dict[str, Any]]:
         model = (
-            (QualifiedScriptOutputV2 if run.script_contract_version == "V2_SINGLE_SOURCE" else QualifiedScriptOutput)
+            (
+                QualifiedScriptOutputV2
+                if run.script_contract_version == "V2_SINGLE_SOURCE"
+                else QualifiedScriptOutput
+            )
             if phase == "WRITER"
             else SemanticVerificationOutput
         )
         schema = _strict_json_schema(model.model_json_schema())
         if phase == "WRITER":
-            runtime = run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
+            runtime = (
+                run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
+            )
             schema["properties"]["sections"]["minItems"] = max(
                 1, int(runtime.get("minimum_major_sections") or 1)
             )
@@ -823,7 +1361,11 @@ class ScriptQualificationBackgroundService:
 
     @staticmethod
     def _schema_bound_prompt(
-        *, context: dict[str, Any], phase: str, schema_identifier: str, prompt_version: str
+        *,
+        context: dict[str, Any],
+        phase: str,
+        schema_identifier: str,
+        prompt_version: str,
     ) -> str:
         if phase == "WRITER":
             if schema_identifier == "vcos_qualified_script_output_v2_single_source":
@@ -875,14 +1417,17 @@ class ScriptQualificationBackgroundService:
     ) -> ScriptQualificationProviderResponseSnapshot:
         existing = self.session.scalar(
             select(ScriptQualificationProviderResponseSnapshot).where(
-                ScriptQualificationProviderResponseSnapshot.background_attempt_id == attempt.id
+                ScriptQualificationProviderResponseSnapshot.background_attempt_id
+                == attempt.id
             )
         )
         if existing is not None:
             return existing
         raw = output.get("raw")
         if not isinstance(raw, dict) or not attempt.provider_response_id:
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_RESPONSE_SNAPSHOT_INPUT_INVALID")
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_RESPONSE_SNAPSHOT_INPUT_INVALID"
+            )
         content = str(output.get("content") or "")
         snapshot = ScriptQualificationProviderResponseSnapshot(
             script_qualification_run_id=run.id,
@@ -894,8 +1439,11 @@ class ScriptQualificationBackgroundService:
             raw_provider_response_hash=content_hash(raw),
             raw_output_content=content,
             raw_output_hash=content_hash({"content": content}),
-            usage=output.get("usage") if isinstance(output.get("usage"), dict) else None,
-            response_schema_identifier=attempt.response_schema_identifier or "legacy-unbound-json-schema",
+            usage=output.get("usage")
+            if isinstance(output.get("usage"), dict)
+            else None,
+            response_schema_identifier=attempt.response_schema_identifier
+            or "legacy-unbound-json-schema",
             response_schema_hash=attempt.response_schema_hash,
             prompt_version=(
                 attempt.prompt_version
@@ -914,8 +1462,24 @@ class ScriptQualificationBackgroundService:
         return snapshot
 
     @staticmethod
-    def _receipt(attempt: ScriptQualificationBackgroundAttempt, output: dict[str, Any]) -> dict[str, Any]:
-        return {"provider": attempt.provider, "model": attempt.model, "lane_name": attempt.lane, "task": attempt.task, "provider_response_id": attempt.provider_response_id, "provider_request_id": attempt.provider_request_id, "input_fingerprint": attempt.input_fingerprint, "output_hash": attempt.output_hash, "usage": output.get("usage"), "background": True, "response_schema_identifier": attempt.response_schema_identifier, "response_schema_hash": attempt.response_schema_hash, "prompt_version": attempt.prompt_version}
+    def _receipt(
+        attempt: ScriptQualificationBackgroundAttempt, output: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "provider": attempt.provider,
+            "model": attempt.model,
+            "lane_name": attempt.lane,
+            "task": attempt.task,
+            "provider_response_id": attempt.provider_response_id,
+            "provider_request_id": attempt.provider_request_id,
+            "input_fingerprint": attempt.input_fingerprint,
+            "output_hash": attempt.output_hash,
+            "usage": output.get("usage"),
+            "background": True,
+            "response_schema_identifier": attempt.response_schema_identifier,
+            "response_schema_hash": attempt.response_schema_hash,
+            "prompt_version": attempt.prompt_version,
+        }
 
 
 def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -929,7 +1493,9 @@ def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
             # field is still required and nullable fields retain their explicit
             # null branch, so removing a default does not weaken validation.
             node.pop("default", None)
-            if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+            if node.get("type") == "object" and isinstance(
+                node.get("properties"), dict
+            ):
                 node["required"] = list(node["properties"])
                 node["additionalProperties"] = False
             for value in node.values():

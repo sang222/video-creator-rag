@@ -13,7 +13,18 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,15 +46,21 @@ class EditorialTopicDefinition(Base):
         UUID(as_uuid=True), ForeignKey("channel_workspaces.id"), nullable=False
     )
     policy_snapshot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("compiled_channel_policy_snapshots.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("compiled_channel_policy_snapshots.id"),
+        nullable=False,
     )
     topic_definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
     topic_definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     subject_type: Mapped[str] = mapped_column(String(80), nullable=False)
     subject_name: Mapped[str] = mapped_column(Text, nullable=False)
     subject_canonical_id: Mapped[str] = mapped_column(String(300), nullable=False)
-    subject_evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    subject_evidence_spans: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    subject_evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    subject_evidence_spans: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
     target_audience: Mapped[str] = mapped_column(Text, nullable=False)
     audience_problem: Mapped[str] = mapped_column(Text, nullable=False)
     content_pillar: Mapped[str] = mapped_column(Text, nullable=False)
@@ -55,20 +72,35 @@ class EditorialTopicDefinition(Base):
     viewer_value: Mapped[str] = mapped_column(Text, nullable=False)
     content_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     channel_contract_ref: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    source_classification_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    source_classification_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
     series_binding: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    standalone_self_containment_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    standalone_self_containment_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     parent_topic_definition_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("editorial_topic_definitions.id")
     )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        UniqueConstraint("editorial_idea_candidate_id", "topic_definition_version", name="uq_topic_definition_candidate_version"),
+        UniqueConstraint(
+            "editorial_idea_candidate_id",
+            "topic_definition_version",
+            name="uq_topic_definition_candidate_version",
+        ),
         UniqueConstraint("topic_definition_hash", name="uq_topic_definition_hash"),
-        CheckConstraint("topic_definition_version > 0", name="ck_topic_definition_version"),
-        CheckConstraint("content_mode in ('STANDALONE','SERIES_EPISODE')", name="ck_topic_definition_content_mode"),
-        CheckConstraint("topic_definition_hash ~ '^[0-9a-f]{64}$'", name="ck_topic_definition_hash"),
+        CheckConstraint(
+            "topic_definition_version > 0", name="ck_topic_definition_version"
+        ),
+        CheckConstraint(
+            "content_mode in ('STANDALONE','SERIES_EPISODE')",
+            name="ck_topic_definition_content_mode",
+        ),
+        CheckConstraint(
+            "topic_definition_hash ~ '^[0-9a-f]{64}$'", name="ck_topic_definition_hash"
+        ),
         Index("ix_topic_definition_candidate", "editorial_idea_candidate_id"),
         Index("ix_topic_definition_channel", "channel_workspace_id"),
     )
@@ -86,7 +118,9 @@ class EditorialTopicDefinitionGateReceipt(Base):
     )
     gate_version: Mapped[str] = mapped_column(String(120), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
-    current_production_eligibility: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    current_production_eligibility: Mapped[bool] = mapped_column(
+        Boolean, nullable=False
+    )
     primary_reason_code: Mapped[str | None] = mapped_column(String(160))
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -94,9 +128,16 @@ class EditorialTopicDefinitionGateReceipt(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        UniqueConstraint("editorial_topic_definition_id", "gate_version", name="uq_topic_gate_definition_version"),
+        UniqueConstraint(
+            "editorial_topic_definition_id",
+            "gate_version",
+            name="uq_topic_gate_definition_version",
+        ),
         CheckConstraint("state in ('PASS','BLOCK')", name="ck_topic_gate_state"),
-        CheckConstraint("input_hash ~ '^[0-9a-f]{64}$' and receipt_hash ~ '^[0-9a-f]{64}$'", name="ck_topic_gate_hashes"),
+        CheckConstraint(
+            "input_hash ~ '^[0-9a-f]{64}$' and receipt_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_topic_gate_hashes",
+        ),
         Index("ix_topic_gate_candidate", "editorial_idea_candidate_id"),
     )
 
@@ -142,19 +183,27 @@ class ScriptQualificationRun(Base):
     replacement_authority_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("script_contract_replacement_authorities.id")
     )
-    episode_reservation_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    episode_reservation_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     writer_prompt_version: Mapped[str] = mapped_column(String(120), nullable=False)
     verifier_prompt_version: Mapped[str] = mapped_column(String(120), nullable=False)
     gate_policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
     model: Mapped[str] = mapped_column(String(160), nullable=False)
-    logical_attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    logical_attempt_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
     logical_identity_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     supersedes_qualification_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("script_qualification_runs.id")
     )
     recovery_key: Mapped[str | None] = mapped_column(String(300), unique=True)
-    recovery_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    logical_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recovery_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    logical_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     state: Mapped[str] = mapped_column(String(48), nullable=False, default="RESERVED")
     writer_attempt_key: Mapped[str] = mapped_column(String(200), nullable=False)
     verifier_attempt_key: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -170,26 +219,55 @@ class ScriptQualificationRun(Base):
     terminal_settlement_receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Provider-outcome recovery may be revisited as new evidence arrives.
     # Entries are appended only and each carries its own content hash.
-    provider_outcome_reconciliation_receipts: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+    provider_outcome_reconciliation_receipts: Mapped[list[dict[str, Any]]] = (
+        mapped_column(JSONB, nullable=False, default=list)
     )
     repair_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    reserved_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0"))
-    consumed_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0"))
-    admitted_video_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("video_projects.id"))
-    production_workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_workflow_runs.id"))
+    reserved_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False, default=Decimal("0")
+    )
+    consumed_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False, default=Decimal("0")
+    )
+    admitted_video_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("video_projects.id")
+    )
+    production_workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("production_workflow_runs.id")
+    )
     cooldown_until: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = utc_created_at()
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
-        UniqueConstraint("logical_identity_hash", name="uq_script_qualification_logical_identity"),
-        UniqueConstraint("publish_slot_id", "logical_attempt_number", name="uq_script_qualification_slot_attempt"),
-        CheckConstraint("logical_attempt_number > 0 and repair_attempts between 0 and 1", name="ck_script_qualification_attempts"),
-        CheckConstraint("state in ('RESERVED','RECOVERY_AUTHORIZED','WRITER_SUBMIT_PENDING','WRITER_BACKGROUND_SUBMITTED','WRITER_QUEUED','WRITER_IN_PROGRESS','WRITER_DISPATCHED','SCRIPT_GENERATED','STRUCTURAL_CHECKED','CLAIM_INVENTORY_CHECKED','GROUNDING_CHECKED','VERIFIER_SUBMIT_PENDING','VERIFIER_BACKGROUND_SUBMITTED','VERIFIER_QUEUED','VERIFIER_IN_PROGRESS','VERIFIER_DISPATCHED','EDITORIAL_CHECKED','MEMORY_CHECKED','REPAIRABLE_BLOCK','REPAIR_DISPATCHED','REVERIFYING','QUALIFIED','BLOCKED_NON_REPAIRABLE','BLOCKED_REPAIR_BUDGET_EXHAUSTED','COOLDOWN','SUPERSEDED')", name="ck_script_qualification_state"),
-        CheckConstraint("topic_definition_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and memory_digest_hash ~ '^[0-9a-f]{64}$' and logical_identity_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_hashes"),
-        CheckConstraint("runtime_contract_hash is null or runtime_contract_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_runtime_contract_hash"),
-        CheckConstraint("assignment_resolution_hash is null or assignment_resolution_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_assignment_resolution_hash"),
+        UniqueConstraint(
+            "logical_identity_hash", name="uq_script_qualification_logical_identity"
+        ),
+        UniqueConstraint(
+            "publish_slot_id",
+            "logical_attempt_number",
+            name="uq_script_qualification_slot_attempt",
+        ),
+        CheckConstraint(
+            "logical_attempt_number > 0 and repair_attempts between 0 and 1",
+            name="ck_script_qualification_attempts",
+        ),
+        CheckConstraint(
+            "state in ('RESERVED','RECOVERY_AUTHORIZED','WRITER_SUBMIT_PENDING','WRITER_BACKGROUND_SUBMITTED','WRITER_QUEUED','WRITER_IN_PROGRESS','WRITER_DISPATCHED','SCRIPT_GENERATED','STRUCTURAL_CHECKED','CLAIM_INVENTORY_CHECKED','GROUNDING_CHECKED','VERIFIER_SUBMIT_PENDING','VERIFIER_BACKGROUND_SUBMITTED','VERIFIER_QUEUED','VERIFIER_IN_PROGRESS','VERIFIER_DISPATCHED','EDITORIAL_CHECKED','MEMORY_CHECKED','REPAIRABLE_BLOCK','REPAIR_DISPATCHED','REVERIFYING','QUALIFIED','BLOCKED_NON_REPAIRABLE','BLOCKED_REPAIR_BUDGET_EXHAUSTED','COOLDOWN','SUPERSEDED')",
+            name="ck_script_qualification_state",
+        ),
+        CheckConstraint(
+            "topic_definition_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and memory_digest_hash ~ '^[0-9a-f]{64}$' and logical_identity_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_script_qualification_hashes",
+        ),
+        CheckConstraint(
+            "runtime_contract_hash is null or runtime_contract_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_script_qualification_runtime_contract_hash",
+        ),
+        CheckConstraint(
+            "assignment_resolution_hash is null or assignment_resolution_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_script_qualification_assignment_resolution_hash",
+        ),
         CheckConstraint(
             "script_contract_version in ('V1_LEGACY','V2_SINGLE_SOURCE')",
             name="ck_script_qualification_contract_version",
@@ -225,7 +303,9 @@ class CanonicalScriptArtifact(Base):
     canonical_script_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     total_word_count: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
-    compiled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    compiled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
@@ -275,15 +355,9 @@ class ScriptContractReplacementAuthority(Base):
     # replacement authority instead of introducing a parallel lineage.  The
     # nullable fields preserve every pre-0072 migration authority exactly as
     # written; they are mandatory only for the controlled-recovery reason.
-    operator_recovery_schema_version: Mapped[str | None] = mapped_column(
-        String(80)
-    )
-    operator_recovery_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True)
-    )
-    operator_recovery_scope_key: Mapped[str | None] = mapped_column(
-        String(200)
-    )
+    operator_recovery_schema_version: Mapped[str | None] = mapped_column(String(80))
+    operator_recovery_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    operator_recovery_scope_key: Mapped[str | None] = mapped_column(String(200))
     historical_qualification_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
@@ -309,9 +383,15 @@ class ScriptContractReplacementAuthority(Base):
     max_replacement_lineages: Mapped[int] = mapped_column(Integer, nullable=False)
     max_initial_writer_submissions: Mapped[int] = mapped_column(Integer, nullable=False)
     max_verifier_submissions: Mapped[int] = mapped_column(Integer, nullable=False)
-    bounded_content_repair_policy_ref: Mapped[str] = mapped_column(String(160), nullable=False)
-    production_window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    qualification_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    bounded_content_repair_policy_ref: Mapped[str] = mapped_column(
+        String(160), nullable=False
+    )
+    production_window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    qualification_deadline: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     replacement_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("editorial_idea_candidates.id")
@@ -378,6 +458,156 @@ class ScriptContractReplacementAuthority(Base):
             name="ck_script_contract_replacement_authority_hash",
         ),
         Index("ix_script_contract_replacement_parent", "replaces_candidate_id"),
+    )
+
+
+class ControlledProductionContinuationAuthority(Base):
+    """One immutable continuation of a bounded repair under operator recovery."""
+
+    __tablename__ = "controlled_production_continuation_authorities"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    root_replacement_authority_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_contract_replacement_authorities.id"),
+        nullable=False,
+    )
+    source_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+        unique=True,
+    )
+    source_slot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("long_form_publish_slots.id"), nullable=False
+    )
+    continuation_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("editorial_idea_candidates.id"),
+        nullable=False,
+    )
+    continuation_slot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("long_form_publish_slots.id"),
+        nullable=False,
+        unique=True,
+    )
+    continuation_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+        unique=True,
+    )
+    source_provider_response_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_provider_response_snapshots.id"),
+        nullable=False,
+        unique=True,
+    )
+    repair_authorization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_content_repair_authorization_receipts.id"),
+        nullable=False,
+        unique=True,
+    )
+    schema_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    continuation_reason: Mapped[str] = mapped_column(String(160), nullable=False)
+    root_authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    operator_recovery_schema_version: Mapped[str] = mapped_column(
+        String(80), nullable=False
+    )
+    operator_actor_context: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
+    bounded_content_repair_policy_ref: Mapped[str] = mapped_column(
+        String(160), nullable=False
+    )
+    source_logical_identity_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    continuation_logical_identity_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_terminal_settlement_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_slot_state: Mapped[str] = mapped_column(String(48), nullable=False)
+    source_candidate_stage: Mapped[str] = mapped_column(String(48), nullable=False)
+    repair_authorization_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    affected_section_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    editable_claim_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    removable_claim_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    source_background_attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_background_attempts.id"),
+        nullable=False,
+        unique=True,
+    )
+    source_provider_response_id: Mapped[str] = mapped_column(
+        String(200), nullable=False
+    )
+    source_provider_request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_raw_provider_response_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_raw_output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_typed_output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    reclassification_receipt_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    deadline_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    slot_projection: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    current_authority_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
+    provider_authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    budget_authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    max_writer_submissions: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_verifier_submissions: Mapped[int] = mapped_column(Integer, nullable=False)
+    production_window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    qualification_deadline: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        CheckConstraint(
+            "schema_version = 'vcos.controlled-production-continuation.v1' and "
+            "continuation_reason = 'BOUNDED_CONTENT_REPAIR_VERIFIER_CONTINUATION' and "
+            "bounded_content_repair_policy_ref = 'script-content-repair.v1:max-1'",
+            name="ck_controlled_continuation_identity",
+        ),
+        CheckConstraint(
+            "max_writer_submissions = 0 and max_verifier_submissions = 1",
+            name="ck_controlled_continuation_bounds",
+        ),
+        CheckConstraint(
+            "qualification_deadline < production_window_end and "
+            "root_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "source_logical_identity_hash ~ '^[0-9a-f]{64}$' and "
+            "continuation_logical_identity_hash ~ '^[0-9a-f]{64}$' and "
+            "source_terminal_settlement_hash ~ '^[0-9a-f]{64}$' and "
+            "repair_authorization_hash ~ '^[0-9a-f]{64}$' and "
+            "source_raw_provider_response_hash ~ '^[0-9a-f]{64}$' and "
+            "source_raw_output_hash ~ '^[0-9a-f]{64}$' and "
+            "source_typed_output_hash ~ '^[0-9a-f]{64}$' and "
+            "reclassification_receipt_hash ~ '^[0-9a-f]{64}$' and "
+            "provider_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "budget_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "authority_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_controlled_continuation_hashes",
+        ),
+        Index(
+            "ix_controlled_continuation_root",
+            "root_replacement_authority_id",
+        ),
+        UniqueConstraint(
+            "root_replacement_authority_id",
+            name="uq_controlled_continuation_root",
+        ),
     )
 
 
@@ -483,9 +713,16 @@ class ScriptQualificationReceipt(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        UniqueConstraint("script_qualification_run_id", name="uq_script_qualification_receipt_run"),
-        CheckConstraint("result in ('PASS','BLOCK')", name="ck_script_qualification_receipt_result"),
-        CheckConstraint("script_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and content_hash ~ '^[0-9a-f]{64}$'", name="ck_script_qualification_receipt_hashes"),
+        UniqueConstraint(
+            "script_qualification_run_id", name="uq_script_qualification_receipt_run"
+        ),
+        CheckConstraint(
+            "result in ('PASS','BLOCK')", name="ck_script_qualification_receipt_result"
+        ),
+        CheckConstraint(
+            "script_hash ~ '^[0-9a-f]{64}$' and script_assignment_hash ~ '^[0-9a-f]{64}$' and factual_evidence_pack_hash ~ '^[0-9a-f]{64}$' and content_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_script_qualification_receipt_hashes",
+        ),
     )
 
 
@@ -504,19 +741,29 @@ class ScriptQualificationBackgroundAttempt(Base):
     lane: Mapped[str] = mapped_column(String(160), nullable=False)
     task: Mapped[str] = mapped_column(String(160), nullable=False)
     input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    immutable_input_hashes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    client_correlation_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    immutable_input_hashes: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
+    client_correlation_id: Mapped[str] = mapped_column(
+        String(300), nullable=False, unique=True
+    )
     provider_response_id: Mapped[str | None] = mapped_column(String(200), unique=True)
     provider_request_id: Mapped[str | None] = mapped_column(String(200))
-    background_status: Mapped[str] = mapped_column(String(48), nullable=False, default="SUBMIT_PENDING")
+    background_status: Mapped[str] = mapped_column(
+        String(48), nullable=False, default="SUBMIT_PENDING"
+    )
     provider_outcome: Mapped[str | None] = mapped_column(String(80))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    logical_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    logical_deadline_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     poll_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    submission_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    submission_attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     last_network_error: Mapped[str | None] = mapped_column(Text)
     output_hash: Mapped[str | None] = mapped_column(String(64))
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -531,11 +778,26 @@ class ScriptQualificationBackgroundAttempt(Base):
     updated_at: Mapped[datetime] = utc_updated_at()
 
     __table_args__ = (
-        UniqueConstraint("script_qualification_run_id", "phase", name="uq_qualification_background_phase"),
-        CheckConstraint("phase in ('WRITER','VERIFIER')", name="ck_qualification_background_phase"),
-        CheckConstraint("background_status in ('SUBMIT_PENDING','SUBMITTED','QUEUED','IN_PROGRESS','COMPLETED','FAILED','CANCELLED','INCOMPLETE','DEADLINE_EXCEEDED','SUBMISSION_OUTCOME_UNKNOWN')", name="ck_qualification_background_status"),
-        CheckConstraint("poll_count >= 0 and submission_attempt_count between 0 and 1", name="ck_qualification_background_counts"),
-        CheckConstraint("input_fingerprint ~ '^[0-9a-f]{64}$'", name="ck_qualification_background_input_fingerprint"),
+        UniqueConstraint(
+            "script_qualification_run_id",
+            "phase",
+            name="uq_qualification_background_phase",
+        ),
+        CheckConstraint(
+            "phase in ('WRITER','VERIFIER')", name="ck_qualification_background_phase"
+        ),
+        CheckConstraint(
+            "background_status in ('SUBMIT_PENDING','SUBMITTED','QUEUED','IN_PROGRESS','COMPLETED','FAILED','CANCELLED','INCOMPLETE','DEADLINE_EXCEEDED','SUBMISSION_OUTCOME_UNKNOWN')",
+            name="ck_qualification_background_status",
+        ),
+        CheckConstraint(
+            "poll_count >= 0 and submission_attempt_count between 0 and 1",
+            name="ck_qualification_background_counts",
+        ),
+        CheckConstraint(
+            "input_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_qualification_background_input_fingerprint",
+        ),
         Index("ix_qualification_background_due", "background_status", "next_poll_at"),
     )
 
@@ -574,7 +836,10 @@ class ScriptQualificationProviderResponseSnapshot(Base):
     created_at: Mapped[datetime] = utc_created_at()
 
     __table_args__ = (
-        CheckConstraint("phase in ('WRITER','VERIFIER')", name="ck_qualification_response_snapshot_phase"),
+        CheckConstraint(
+            "phase in ('WRITER','VERIFIER')",
+            name="ck_qualification_response_snapshot_phase",
+        ),
         CheckConstraint(
             "raw_provider_response_hash ~ '^[0-9a-f]{64}$' and raw_output_hash ~ '^[0-9a-f]{64}$' and producer_input_hash ~ '^[0-9a-f]{64}$'",
             name="ck_qualification_response_snapshot_hashes",
@@ -587,7 +852,10 @@ class ScriptQualificationProviderResponseSnapshot(Base):
             "accepted_typed_output_hash is null or accepted_typed_output_hash ~ '^[0-9a-f]{64}$'",
             name="ck_qualification_response_snapshot_accepted_hash",
         ),
-        UniqueConstraint("provider_response_id", name="uq_qualification_response_snapshot_provider_response"),
+        UniqueConstraint(
+            "provider_response_id",
+            name="uq_qualification_response_snapshot_provider_response",
+        ),
         Index("ix_qualification_response_snapshot_run", "script_qualification_run_id"),
     )
 
@@ -599,21 +867,36 @@ class ScriptWriterOutputNormalizationReceipt(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     source_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("script_qualification_runs.id"), nullable=False, unique=True
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+        unique=True,
     )
     source_background_attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("script_qualification_background_attempts.id"), nullable=False, unique=True
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_background_attempts.id"),
+        nullable=False,
+        unique=True,
     )
     source_provider_response_snapshot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("script_qualification_provider_response_snapshots.id"), nullable=False, unique=True
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_provider_response_snapshots.id"),
+        nullable=False,
+        unique=True,
     )
-    source_provider_response_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_provider_response_id: Mapped[str] = mapped_column(
+        String(200), nullable=False
+    )
     source_provider_request_id: Mapped[str | None] = mapped_column(String(200))
     source_raw_output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_schema_classification: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_schema_classification: Mapped[str] = mapped_column(
+        String(160), nullable=False
+    )
     normalization_version: Mapped[str] = mapped_column(String(120), nullable=False)
     field_mapping: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    removed_wrapper_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    removed_wrapper_fields: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
     normalized_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     normalized_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     contract_schema_version: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -645,16 +928,12 @@ class ScriptContentRepairAuthorizationReceipt(Base):
         unique=True,
     )
     source_script_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_result_receipts_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False
-    )
+    source_result_receipts_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     source_terminal_settlement_hash: Mapped[str] = mapped_column(
         String(64), nullable=False
     )
     script_assignment_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    factual_evidence_pack_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False
-    )
+    factual_evidence_pack_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     memory_digest_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     runtime_contract_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     affected_section_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
@@ -682,7 +961,10 @@ class ScriptQualificationProviderReclassificationReceipt(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     original_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("script_qualification_runs.id"), nullable=False, unique=True
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+        unique=True,
     )
     original_route_attempt_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("llm_route_attempts.id")

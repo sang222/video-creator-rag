@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,10 +19,23 @@ from app.core.config import get_settings
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.foundation import DomainEvent
-from app.db.models.launch_cadence import LongFormPublishSlot
-from app.db.models.m5 import EditorialIdeaCandidate
+from app.db.models.launch_cadence import (
+    FirstChannelLaunchPolicyVersion,
+    LaunchRun,
+    LongFormPublishSlot,
+)
+from app.db.models.m5 import (
+    EditorialIdeaCandidate,
+    IdeaMarketPreflight,
+    ProjectAdmissionDecision,
+)
+from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.script_qualification import (
+    ControlledProductionContinuationAuthority,
+    EditorialTopicDefinition,
+    EditorialTopicDefinitionGateReceipt,
     SeriesEpisodeReservation,
+    ScriptContentRepairAuthorizationReceipt,
     ScriptQualificationBackgroundAttempt,
     ScriptQualificationProviderResponseSnapshot,
     ScriptQualificationRun,
@@ -30,15 +44,35 @@ from app.db.models.script_qualification import (
 )
 from app.providers.openai import OpenAIResponsesProvider
 from app.services.config_registry import content_hash
+from app.services.editorial_novelty import (
+    EDITORIAL_NOVELTY_GATE_VERSION,
+    EditorialNoveltyService,
+)
+from app.services.editorial_specificity import EditorialSpecificityService
+from app.services.launch_cadence import _preflight_demand_authority_valid
 from app.services.script_qualification_background import (
     BACKGROUND_EVENT_TYPE,
     build_script_qualification_deadline_policy,
+    derive_script_qualification_deadline,
+    minimum_script_qualification_window_close_at,
+    script_qualification_slot_is_viable,
 )
 from app.services.script_contract_replacement import (
+    CONTROLLED_CONTINUATION_REASON,
+    CONTROLLED_CONTINUATION_SCHEMA,
     OPERATOR_RECOVERY_REASON,
     OPERATOR_RECOVERY_SCHEMA,
+    REPAIR_POLICY_REF,
+    ScriptContractReplacementAuthorityService,
+    controlled_continuation_authority_body,
+    controlled_continuation_slot_projection,
+    operator_recovery_authority_body,
+    resolve_replacement_qualification_leaf,
 )
-from app.services.production_start_readiness import resolve_provider_authority
+from app.services.production_start_readiness import (
+    resolve_budget_authority,
+    resolve_provider_authority,
+)
 from app.services.script_qualification_authority import validate_memory_digest
 from app.services.script_writer_output_normalization import (
     CONTRACT_SCHEMA_VERSION,
@@ -61,6 +95,9 @@ V2_OWNERSHIP_RECEIPT_SCHEMA = "script-writer-v2-ownership-normalization-receipt.
 V2_OWNERSHIP_COMPENSATION_SCHEMA = "script-writer-v2-ownership-compensation.v1"
 V2_OWNERSHIP_ACTOR = "system:script-writer-v2-ownership-normalization"
 VERIFIER_AUTH_REJECTION_PREFIX = "script-qualification-verifier-auth-rejection"
+CONTENT_REPAIR_SCOPE_RECOVERY_PREFIX = (
+    "script-qualification-content-repair-scope-reclassification"
+)
 
 
 class ScriptWriterOutputRecoveryService:
@@ -443,7 +480,9 @@ class ScriptWriterOutputRecoveryService:
             if authority is not None
             else None
         )
-        from app.services.script_content_repair import ScriptContentRepairService
+        from app.services.script_content_repair import (
+            ScriptContentRepairService,
+        )
 
         ScriptContentRepairService(
             self.session, now=self.now
@@ -992,6 +1031,584 @@ class ScriptWriterOutputRecoveryService:
         self._enqueue_verifier(child)
         return child
 
+    def continue_after_content_repair_scope_reclassification(
+        self, *, source_qualification_run_id: uuid.UUID
+    ) -> ScriptQualificationRun:
+        """Reuse one completed repair response under fresh additive authority."""
+
+        source = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == source_qualification_run_id)
+            .with_for_update()
+        )
+        if (
+            source is None
+            or source.state != "BLOCKED_NON_REPAIRABLE"
+            or source.repair_attempts != 1
+            or source.script_contract_version != "V2_SINGLE_SOURCE"
+            or (source.failure_receipt or {}).get("detail")
+            != "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
+            or source.script_payload is not None
+            or source.logical_deadline_at is None
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_SCOPE_SOURCE_INVALID")
+        attempts = list(
+            self.session.scalars(
+                select(ScriptQualificationBackgroundAttempt)
+                .where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == source.id
+                )
+                .with_for_update()
+            ).all()
+        )
+        if len(attempts) != 1:
+            raise ValidationFailureError("CONTENT_REPAIR_SCOPE_ATTEMPT_DRIFT")
+        attempt = attempts[0]
+        snapshot = self.session.scalar(
+            select(ScriptQualificationProviderResponseSnapshot)
+            .where(
+                ScriptQualificationProviderResponseSnapshot.background_attempt_id
+                == attempt.id
+            )
+            .with_for_update()
+        )
+        if (
+            snapshot is None
+            or attempt.phase != "WRITER"
+            or attempt.background_status != "COMPLETED"
+            or attempt.provider_outcome != "SCRIPT_WRITER_OUTPUT_INVALID"
+            or attempt.submission_attempt_count != 1
+            or not attempt.provider_response_id
+            or not attempt.provider_request_id
+            or snapshot.validation_errors
+            or snapshot.accepted_typed_output_hash is None
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_SCOPE_RESPONSE_INVALID")
+        try:
+            payload = QualifiedScriptOutputV2.model_validate(
+                json.loads(snapshot.raw_output_content)
+            ).model_dump(mode="json")
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "CONTENT_REPAIR_SCOPE_RESPONSE_INVALID"
+            ) from exc
+        if (
+            snapshot.script_qualification_run_id != source.id
+            or snapshot.background_attempt_id != attempt.id
+            or snapshot.phase != "WRITER"
+            or snapshot.provider_response_id != attempt.provider_response_id
+            or snapshot.provider_request_id != attempt.provider_request_id
+            or snapshot.prompt_version != attempt.prompt_version
+            or attempt.prompt_version != source.writer_prompt_version
+            or attempt.model != source.model
+            or snapshot.response_schema_identifier != attempt.response_schema_identifier
+            or snapshot.response_schema_hash != attempt.response_schema_hash
+            or snapshot.producer_input_hash != attempt.input_fingerprint
+            or snapshot.raw_provider_response_hash
+            != content_hash(snapshot.raw_provider_response)
+            or snapshot.raw_provider_response_hash != attempt.output_hash
+            or snapshot.raw_output_hash
+            != content_hash({"content": snapshot.raw_output_content})
+            or snapshot.accepted_typed_output_hash != content_hash(payload)
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_SCOPE_RESPONSE_DRIFT")
+        from app.services.script_content_repair import (
+            ScriptContentRepairService,
+            content_repair_authorization_body,
+        )
+
+        repair_service = ScriptContentRepairService(self.session, now=self.now)
+        repair_service.validate_output_scope(
+            source, QualifiedScriptOutputV2.model_validate(payload)
+        )
+        editable_claim_ids, removable_claim_ids = repair_service.claim_repair_scope(
+            source
+        )
+        recovery_key = (
+            f"{CONTENT_REPAIR_SCOPE_RECOVERY_PREFIX}:{source.id}:{snapshot.id}"
+        )
+        existing = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.recovery_key == recovery_key)
+            .with_for_update()
+        )
+        if existing is not None:
+            self._validate_content_repair_continuation(
+                source=source, child=existing, snapshot=snapshot
+            )
+            return existing
+        source_slot = self.session.scalar(
+            select(LongFormPublishSlot)
+            .where(LongFormPublishSlot.id == source.publish_slot_id)
+            .with_for_update()
+        )
+        candidate = self.session.scalar(
+            select(EditorialIdeaCandidate)
+            .where(EditorialIdeaCandidate.id == source.editorial_idea_candidate_id)
+            .with_for_update()
+        )
+        terminal = dict(source.terminal_settlement_receipt or {})
+        terminal_body = {
+            key: value for key, value in terminal.items() if key != "content_hash"
+        }
+        authority = self.session.scalar(
+            select(ScriptContractReplacementAuthority)
+            .where(
+                ScriptContractReplacementAuthority.id == source.replacement_authority_id
+            )
+            .with_for_update()
+        )
+        repair_authorization = self.session.scalar(
+            select(ScriptContentRepairAuthorizationReceipt)
+            .where(
+                ScriptContentRepairAuthorizationReceipt.id
+                == (
+                    (source.writer_receipt or {}).get("content_repair_authorization_id")
+                    if isinstance(source.writer_receipt, dict)
+                    else None
+                )
+            )
+            .with_for_update()
+        )
+        if repair_authorization is None:
+            repair_authorization = self.session.scalar(
+                select(ScriptContentRepairAuthorizationReceipt)
+                .where(
+                    ScriptContentRepairAuthorizationReceipt.source_qualification_run_id
+                    == source.supersedes_qualification_run_id
+                )
+                .with_for_update()
+            )
+        current = self.now()
+        launch = self.session.get(LaunchRun, source.launch_run_id)
+        current_leaf = (
+            resolve_replacement_qualification_leaf(
+                self.session, authority=authority, lock=True
+            )
+            if authority is not None
+            else None
+        )
+        existing_admission = self.session.scalar(
+            select(ProjectAdmissionDecision.id).where(
+                ProjectAdmissionDecision.editorial_idea_candidate_id
+                == source.editorial_idea_candidate_id,
+                ProjectAdmissionDecision.decision == "ADMIT",
+            )
+        )
+        active_workflow = (
+            self.session.scalar(
+                select(ProductionWorkflowRun.id).where(
+                    ProductionWorkflowRun.channel_workspace_id
+                    == candidate.channel_workspace_id,
+                    ProductionWorkflowRun.state.not_in(
+                        {
+                            "CANCELED",
+                            "FAILED_TERMINAL",
+                            "DEAD_LETTERED",
+                            "SUPERSEDED",
+                        }
+                    ),
+                )
+            )
+            if candidate is not None
+            else None
+        )
+        if (
+            source_slot is None
+            or candidate is None
+            or authority is None
+            or repair_authorization is None
+            or source_slot.state != "CANCELED"
+            or source_slot.reserved_candidate_id != candidate.id
+            or source_slot.admitted_video_project_id is not None
+            or candidate.stage != "REJECTED"
+            or terminal.get("kind") != "DETERMINISTIC_BLOCK"
+            or terminal.get("reason_code") != "SCRIPT_WRITER_OUTPUT_INVALID"
+            or terminal.get("qualification_run_id") != str(source.id)
+            or terminal.get("publish_slot_id") != str(source_slot.id)
+            or terminal.get("candidate_id") != str(candidate.id)
+            or terminal.get("reserved_candidate_id") != str(candidate.id)
+            or terminal.get("publish_slot_state") != "CANCELED"
+            or terminal.get("candidate_stage") != "REJECTED"
+            or terminal.get("capacity_released") is not True
+            or terminal.get("reservation_id") is not None
+            or terminal.get("reservation_state") is not None
+            or terminal.get("content_hash") != content_hash(terminal_body)
+            or (source.failure_receipt or {}).get("terminal_settlement_receipt_hash")
+            != terminal.get("content_hash")
+            or source.admitted_video_project_id is not None
+            or source.production_workflow_run_id is not None
+            or source.episode_reservation_active
+            or authority.replacement_reason != OPERATOR_RECOVERY_REASON
+            or authority.operator_recovery_schema_version != OPERATOR_RECOVERY_SCHEMA
+            or authority.bounded_content_repair_policy_ref != REPAIR_POLICY_REF
+            or authority.authority_hash
+            != content_hash(operator_recovery_authority_body(authority))
+            or authority.operator_recovery_id != authority.id
+            or authority.replacement_candidate_id != candidate.id
+            or current_leaf is None
+            or current_leaf.id != source.id
+            or authority.qualification_deadline != source.logical_deadline_at
+            or current < source.logical_deadline_at
+            or launch is None
+            or launch.state != "ACTIVE"
+            or launch.id != source_slot.launch_run_id
+            or launch.launch_policy_version_id != source_slot.launch_policy_version_id
+            or launch.company_id != candidate.company_id
+            or launch.channel_workspace_id != candidate.channel_workspace_id
+            or source_slot.company_id != candidate.company_id
+            or source_slot.channel_workspace_id != candidate.channel_workspace_id
+            or existing_admission is not None
+            or active_workflow is not None
+            or repair_authorization.source_qualification_run_id
+            != source.supersedes_qualification_run_id
+            or repair_authorization.repair_policy_version != "script-content-repair.v1"
+            or repair_authorization.repair_type != "SCRIPT_CONTENT_REPAIR"
+            or repair_authorization.authorization_hash
+            != content_hash(content_repair_authorization_body(repair_authorization))
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_SCOPE_SETTLEMENT_DRIFT")
+        policy = build_script_qualification_deadline_policy(self.settings)
+        slot_close = minimum_script_qualification_window_close_at(
+            requested_at=current, policy=policy
+        ) + timedelta(seconds=1)
+        deadline = derive_script_qualification_deadline(slot_close, policy)
+        if not script_qualification_slot_is_viable(
+            now=current, slot_window_close_at=slot_close, policy=policy
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_CONTINUATION_WINDOW_INVALID")
+        launch_policy = self.session.get(
+            FirstChannelLaunchPolicyVersion, source_slot.launch_policy_version_id
+        )
+        if launch_policy is None or launch_policy.state != "APPROVED":
+            raise ValidationFailureError("CONTENT_REPAIR_LAUNCH_POLICY_STALE")
+        from app.services.script_qualification import TOPIC_GATE_VERSION
+
+        topic_receipt = self.session.scalar(
+            select(EditorialTopicDefinitionGateReceipt)
+            .where(
+                EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id
+                == source.topic_definition_id,
+                EditorialTopicDefinitionGateReceipt.gate_version == TOPIC_GATE_VERSION,
+            )
+            .order_by(EditorialTopicDefinitionGateReceipt.created_at.desc())
+        )
+        topic_definition = self.session.get(
+            EditorialTopicDefinition, source.topic_definition_id
+        )
+        preflight = self.session.scalar(
+            select(IdeaMarketPreflight)
+            .where(IdeaMarketPreflight.editorial_idea_candidate_id == candidate.id)
+            .order_by(IdeaMarketPreflight.created_at.desc())
+        )
+        novelty = (
+            EditorialNoveltyService(self.session).evaluate(
+                candidate=candidate,
+                topic=topic_definition,
+            )
+            if topic_definition is not None
+            else None
+        )
+        freshness = ScriptContractReplacementAuthorityService(
+            self.session, now=self.now
+        )._current_freshness_snapshot(candidate=candidate, evaluated_at=current)
+        provider_authority = resolve_provider_authority(
+            self.session,
+            policy_snapshot_id=candidate.policy_snapshot_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+        )
+        budget_authority = resolve_budget_authority(
+            self.session,
+            policy_snapshot_id=candidate.policy_snapshot_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+        )
+        if (
+            topic_receipt is None
+            or topic_receipt.state != "PASS"
+            or not topic_receipt.current_production_eligibility
+            or preflight is None
+            or preflight.decision != "PASS"
+            or preflight.policy_fit_state != "PASS"
+            or not _preflight_demand_authority_valid(preflight)
+            or not EditorialSpecificityService(self.session).current_pass(candidate)
+            or novelty is None
+            or novelty.state != "PASS"
+            or (candidate.editorial_novelty_receipt or {}).get("gate_version")
+            != EDITORIAL_NOVELTY_GATE_VERSION
+            or (candidate.editorial_novelty_receipt or {}).get("evaluation_hash")
+            != novelty.evaluation_hash
+            or freshness.get("state") != "FRESH"
+            or provider_authority.get("state") != "READY"
+            or budget_authority.get("state") != "READY"
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_CURRENT_AUTHORITY_BLOCKED")
+        continuation_id = uuid.uuid4()
+        child_id = uuid.uuid4()
+        continuation_slot_id = uuid.uuid4()
+        logical_identity_hash = content_hash(
+            {
+                "source": source.logical_identity_hash,
+                "snapshot_id": str(snapshot.id),
+                "continuation_authority_id": str(continuation_id),
+                "recovery_key": recovery_key,
+            }
+        )
+        intended_publish_at = slot_close + timedelta(
+            hours=launch_policy.render_lead_time_min_hours
+        )
+        continuation_slot = LongFormPublishSlot(
+            id=continuation_slot_id,
+            launch_run_id=source_slot.launch_run_id,
+            launch_policy_version_id=source_slot.launch_policy_version_id,
+            company_id=source_slot.company_id,
+            channel_workspace_id=source_slot.channel_workspace_id,
+            local_publish_date=intended_publish_at.astimezone(
+                ZoneInfo(launch_policy.timezone)
+            ).date(),
+            intended_publish_at=intended_publish_at,
+            target_start_window_open_at=current,
+            target_start_window_close_at=slot_close,
+            state="QUALIFICATION_RESERVED",
+            reserved_candidate_id=candidate.id,
+            replaces_slot_id=source_slot.id,
+            replacement_authority_id=authority.id,
+            replacement_reason=CONTROLLED_CONTINUATION_REASON,
+            replacement_lineage_key=content_hash(
+                {
+                    "continuation_authority_id": str(continuation_id),
+                    "source_slot_id": str(source_slot.id),
+                    "candidate_id": str(candidate.id),
+                }
+            ),
+        )
+        self.session.add(continuation_slot)
+        slot_projection = controlled_continuation_slot_projection(continuation_slot)
+        child = ScriptQualificationRun(
+            id=child_id,
+            editorial_idea_candidate_id=source.editorial_idea_candidate_id,
+            publish_slot_id=continuation_slot.id,
+            launch_run_id=source.launch_run_id,
+            topic_definition_id=source.topic_definition_id,
+            topic_definition_hash=source.topic_definition_hash,
+            script_assignment=source.script_assignment,
+            script_assignment_hash=source.script_assignment_hash,
+            factual_evidence_pack=source.factual_evidence_pack,
+            factual_evidence_pack_hash=source.factual_evidence_pack_hash,
+            memory_digest=source.memory_digest,
+            memory_digest_hash=source.memory_digest_hash,
+            runtime_contract=source.runtime_contract,
+            runtime_contract_hash=source.runtime_contract_hash,
+            assignment_resolution=source.assignment_resolution,
+            assignment_resolution_hash=source.assignment_resolution_hash,
+            episode_reservation_active=False,
+            writer_prompt_version=source.writer_prompt_version,
+            verifier_prompt_version=source.verifier_prompt_version,
+            gate_policy_version=source.gate_policy_version,
+            model=source.model,
+            logical_attempt_number=source.logical_attempt_number + 1,
+            logical_identity_hash=logical_identity_hash,
+            supersedes_qualification_run_id=source.id,
+            recovery_key=recovery_key,
+            recovery_requested_at=self.now(),
+            logical_deadline_at=deadline,
+            state="RESERVED",
+            writer_attempt_key=f"{recovery_key}:reused-repair-response",
+            verifier_attempt_key=f"{recovery_key}:verifier",
+            repair_attempts=1,
+            script_contract_version=source.script_contract_version,
+            replacement_authority_id=source.replacement_authority_id,
+        )
+        self.session.add(child)
+        self.session.flush()
+        from app.services.script_qualification import ScriptQualificationService
+
+        service = ScriptQualificationService(self.session)
+        draft = service.accept_writer_output(child, payload)
+        structural = service._structural_receipt(child, draft)
+        if structural.get("status") != "PASS":
+            raise ValidationFailureError("CONTENT_REPAIR_SCOPE_STRUCTURAL_BLOCK")
+        repair_body = {
+            "schema_version": "script-content-repair-scope-reclassification.v1",
+            "source_qualification_run_id": str(source.id),
+            "child_qualification_run_id": str(child.id),
+            "background_attempt_id": str(attempt.id),
+            "provider_response_id": attempt.provider_response_id,
+            "provider_request_id": attempt.provider_request_id,
+            "provider_output_hash": attempt.output_hash,
+            "snapshot_id": str(snapshot.id),
+            "accepted_typed_output_hash": snapshot.accepted_typed_output_hash,
+            "scope_validator_version": "script-content-repair-scope.v2",
+            "writer_submission_count_for_child": 0,
+            "prior_terminal_settlement_hash": terminal["content_hash"],
+            "compensated_at": current.isoformat(),
+        }
+        compensation = {**repair_body, "content_hash": content_hash(repair_body)}
+        deadline_policy_receipt = policy.receipt()
+        current_authority_snapshot = {
+            "topic_gate_receipt_id": str(topic_receipt.id),
+            "topic_gate_state": topic_receipt.state,
+            "preflight_id": str(preflight.id),
+            "preflight_decision": preflight.decision,
+            "specificity_pass": True,
+            "novelty_receipt_hash": novelty.evaluation_hash,
+            "freshness_snapshot": freshness,
+            "evaluated_at": current.isoformat(),
+        }
+        continuation = ControlledProductionContinuationAuthority(
+            id=continuation_id,
+            root_replacement_authority_id=authority.id,
+            source_qualification_run_id=source.id,
+            source_slot_id=source_slot.id,
+            continuation_candidate_id=candidate.id,
+            continuation_slot_id=continuation_slot.id,
+            continuation_qualification_run_id=child.id,
+            source_provider_response_snapshot_id=snapshot.id,
+            repair_authorization_id=repair_authorization.id,
+            schema_version=CONTROLLED_CONTINUATION_SCHEMA,
+            continuation_reason=CONTROLLED_CONTINUATION_REASON,
+            root_authority_hash=authority.authority_hash,
+            operator_recovery_schema_version=authority.operator_recovery_schema_version,
+            operator_actor_context=authority.operator_actor_context,
+            bounded_content_repair_policy_ref=authority.bounded_content_repair_policy_ref,
+            source_logical_identity_hash=source.logical_identity_hash,
+            continuation_logical_identity_hash=logical_identity_hash,
+            source_terminal_settlement_hash=terminal["content_hash"],
+            source_slot_state="CANCELED",
+            source_candidate_stage="REJECTED",
+            repair_authorization_hash=repair_authorization.authorization_hash,
+            affected_section_ids=list(repair_authorization.affected_section_ids),
+            editable_claim_ids=editable_claim_ids,
+            removable_claim_ids=removable_claim_ids,
+            source_background_attempt_id=attempt.id,
+            source_provider_response_id=attempt.provider_response_id,
+            source_provider_request_id=attempt.provider_request_id,
+            source_raw_provider_response_hash=snapshot.raw_provider_response_hash,
+            source_raw_output_hash=snapshot.raw_output_hash,
+            source_typed_output_hash=snapshot.accepted_typed_output_hash,
+            reclassification_receipt_hash=compensation["content_hash"],
+            deadline_policy=deadline_policy_receipt,
+            slot_projection=slot_projection,
+            current_authority_snapshot=current_authority_snapshot,
+            provider_authority_hash=content_hash(provider_authority),
+            budget_authority_hash=content_hash(budget_authority),
+            max_writer_submissions=0,
+            max_verifier_submissions=1,
+            production_window_end=slot_close,
+            qualification_deadline=deadline,
+            authority_hash="0" * 64,
+            created_at=current,
+        )
+        continuation.authority_hash = content_hash(
+            controlled_continuation_authority_body(continuation)
+        )
+        self.session.add(continuation)
+        source.provider_outcome_reconciliation_receipts = [
+            *(source.provider_outcome_reconciliation_receipts or []),
+            compensation,
+        ]
+        child.state = "SCRIPT_GENERATED"
+        child.writer_receipt = {
+            "producer": "REUSED_COMPLETED_CONTENT_REPAIR_RESPONSE",
+            "producer_type": "OPENAI_BACKGROUND_CONTENT_REPAIR",
+            "provider": attempt.provider,
+            "producer_version": attempt.prompt_version,
+            "selected_model": attempt.model,
+            "lane_name": attempt.lane,
+            "source_qualification_run_id": str(source.id),
+            "source_background_attempt_id": str(attempt.id),
+            "source_provider_response_snapshot_id": str(snapshot.id),
+            "source_provider_response_id": attempt.provider_response_id,
+            "source_provider_request_id": attempt.provider_request_id,
+            "producer_input_hash": attempt.input_fingerprint,
+            "producer_output_hash": snapshot.accepted_typed_output_hash,
+            "source_typed_provider_output_hash": snapshot.accepted_typed_output_hash,
+            "reclassification_receipt_hash": compensation["content_hash"],
+            "continuation_authority_id": str(continuation.id),
+            "continuation_authority_hash": continuation.authority_hash,
+            "writer_submission_count_for_new_recovery": 0,
+        }
+        candidate.stage = "GREENLIT"
+        candidate.reason_codes = [
+            item
+            for item in (candidate.reason_codes or [])
+            if item != "SCRIPT_QUALIFICATION_TERMINAL_BLOCKED"
+        ]
+        self.session.flush()
+        self._enqueue_verifier(
+            child, recovery_mode="BOUNDED_CONTENT_REPAIR_VERIFIER_CONTINUATION"
+        )
+        return child
+
+    def _validate_content_repair_continuation(
+        self,
+        *,
+        source: ScriptQualificationRun,
+        child: ScriptQualificationRun,
+        snapshot: ScriptQualificationProviderResponseSnapshot,
+    ) -> None:
+        continuation = self.session.scalar(
+            select(ControlledProductionContinuationAuthority)
+            .where(
+                ControlledProductionContinuationAuthority.continuation_qualification_run_id
+                == child.id
+            )
+            .with_for_update()
+        )
+        slot = self.session.get(LongFormPublishSlot, child.publish_slot_id)
+        receipt = child.writer_receipt if isinstance(child.writer_receipt, dict) else {}
+        matches = [
+            item
+            for item in (source.provider_outcome_reconciliation_receipts or [])
+            if isinstance(item, dict)
+            and item.get("content_hash")
+            == (continuation.reclassification_receipt_hash if continuation else None)
+        ]
+        if (
+            continuation is None
+            or slot is None
+            or continuation.schema_version != CONTROLLED_CONTINUATION_SCHEMA
+            or continuation.continuation_reason != CONTROLLED_CONTINUATION_REASON
+            or continuation.root_replacement_authority_id
+            != source.replacement_authority_id
+            or continuation.source_qualification_run_id != source.id
+            or continuation.source_slot_id != source.publish_slot_id
+            or continuation.continuation_candidate_id
+            != source.editorial_idea_candidate_id
+            or continuation.continuation_slot_id != child.publish_slot_id
+            or continuation.source_provider_response_snapshot_id != snapshot.id
+            or continuation.source_logical_identity_hash != source.logical_identity_hash
+            or continuation.continuation_logical_identity_hash
+            != child.logical_identity_hash
+            or continuation.qualification_deadline != child.logical_deadline_at
+            or continuation.max_writer_submissions != 0
+            or continuation.max_verifier_submissions != 1
+            or continuation.authority_hash
+            != content_hash(controlled_continuation_authority_body(continuation))
+            or continuation.slot_projection
+            != controlled_continuation_slot_projection(slot)
+            or child.supersedes_qualification_run_id != source.id
+            or child.repair_attempts != 1
+            or child.script_contract_version != "V2_SINGLE_SOURCE"
+            or child.replacement_authority_id != source.replacement_authority_id
+            or slot.replaces_slot_id != source.publish_slot_id
+            or slot.replacement_lineage_key is None
+            or receipt.get("continuation_authority_id") != str(continuation.id)
+            or receipt.get("continuation_authority_hash") != continuation.authority_hash
+            or receipt.get("reclassification_receipt_hash")
+            != continuation.reclassification_receipt_hash
+            or len(matches) != 1
+            or matches[0].get("content_hash")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in matches[0].items()
+                    if key != "content_hash"
+                }
+            )
+        ):
+            raise ValidationFailureError("CONTENT_REPAIR_CONTINUATION_DRIFT")
+
     def _v2_ownership_source(
         self, source_qualification_run_id: uuid.UUID
     ) -> tuple[
@@ -1286,7 +1903,12 @@ class ScriptWriterOutputRecoveryService:
             source, payload
         )
 
-    def _enqueue_verifier(self, run: ScriptQualificationRun) -> None:
+    def _enqueue_verifier(
+        self,
+        run: ScriptQualificationRun,
+        *,
+        recovery_mode: str = "NORMALIZED_COMPLETED_WRITER_RESPONSE",
+    ) -> None:
         command_id = f"{run.recovery_key}:verifier-post-normalization"
         existing = self.session.scalar(
             select(DomainEvent).where(DomainEvent.command_id == command_id)
@@ -1296,7 +1918,7 @@ class ScriptWriterOutputRecoveryService:
         payload = {
             "script_qualification_run_id": str(run.id),
             "background_attempt_id": None,
-            "recovery_mode": "NORMALIZED_COMPLETED_WRITER_RESPONSE",
+            "recovery_mode": recovery_mode,
         }
         self.session.add(
             DomainEvent(
@@ -1314,7 +1936,10 @@ class ScriptWriterOutputRecoveryService:
                 payload=payload,
                 metadata_={
                     "queue_name": "production-workflow",
-                    "retry_policy": {"automatic_retry_allowed": True},
+                    "retry_policy": {
+                        "automatic_retry_allowed": recovery_mode
+                        != "BOUNDED_CONTENT_REPAIR_VERIFIER_CONTINUATION"
+                    },
                     "writer_submission_count_for_new_recovery": 0,
                     "reused_completed_writer_response_count": 1,
                     "verifier_submission_limit": 1,

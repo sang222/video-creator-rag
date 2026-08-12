@@ -32,6 +32,7 @@ from app.services.script_qualification import (
     script_hash,
     span_hash,
 )
+from app.services.canonical_script_compiler import SCRIPT_CONTRACT_V2
 from app.workers.production_workflow import ProductionWorkflowWorker
 from app.services.script_qualification_authority import (
     canonical_memory_digest_hash,
@@ -43,6 +44,7 @@ from app.services.runtime_migration_guard import (
 )
 from app.contracts.production_package import ProductionDurationContractV2
 from app.services.v2_support_authority import (
+    V2ProducerReceipt,
     V2SupportAuthorityService,
     V2SupportProductionContext,
 )
@@ -69,7 +71,11 @@ def test_historical_greenlit_without_current_topic_receipt_is_ineligible(db_sess
 
     assert not eligibility.eligible
     assert eligibility.primary_reason_code == "EDITORIAL_SUBJECT_NOT_IDENTIFIED"
-    assert (candidate.stage, candidate.proposed_title, candidate.proposed_angle) == original
+    assert (
+        candidate.stage,
+        candidate.proposed_title,
+        candidate.proposed_angle,
+    ) == original
 
 
 def test_topic_gate_blocks_boilerplate_and_passes_bound_specific_definition(db_session):
@@ -83,7 +89,9 @@ def test_topic_gate_blocks_boilerplate_and_passes_bound_specific_definition(db_s
         "subject_name": "GPT-5.4 Pro Model",
         "subject_canonical_id": "official-document:gpt-5-4-pro",
         "subject_evidence_refs": [{"id": "evidence-1", "content_hash": "a" * 64}],
-        "subject_evidence_spans": [{"text": "GPT-5.4 Pro Model", "span_hash": span_hash("GPT-5.4 Pro Model")}],
+        "subject_evidence_spans": [
+            {"text": "GPT-5.4 Pro Model", "span_hash": span_hash("GPT-5.4 Pro Model")}
+        ],
         "target_audience": "small professional teams",
         "audience_problem": "need to judge documented scope before making a tool decision",
         "content_pillar": "AI automation workflows",
@@ -94,7 +102,9 @@ def test_topic_gate_blocks_boilerplate_and_passes_bound_specific_definition(db_s
         "learning_outcome": "Viewers can separate a documented capability from an unsupported inference.",
         "viewer_value": "A source-bounded way to decide what to verify next.",
         "content_mode": "STANDALONE",
-        "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+        "channel_contract_ref": {
+            "policy_snapshot_id": str(candidate.policy_snapshot_id)
+        },
         "source_classification_refs": [{"source_classification": "TOPIC_CAPABLE"}],
         "standalone_self_containment_required": True,
     }
@@ -103,17 +113,23 @@ def test_topic_gate_blocks_boilerplate_and_passes_bound_specific_definition(db_s
     assert "EDITORIAL_ANGLE_BOILERPLATE" in blocked.reason_codes
 
     candidate.proposed_angle = "A bounded walkthrough of the documented GPT-5.4 Pro model page and the decision limits it leaves intact."
-    fields["viewer_value"] = "A source-bounded decision frame for the specific documented model page."
+    fields["viewer_value"] = (
+        "A source-bounded decision frame for the specific documented model page."
+    )
     passed = service.evaluate(service.create(candidate=candidate, fields=fields))
     assert passed.state == "PASS"
     assert passed.current_production_eligibility is True
 
 
-def test_proposal_backed_topic_does_not_require_documentation_title_in_video_title(db_session):
+def test_proposal_backed_topic_does_not_require_documentation_title_in_video_title(
+    db_session,
+):
     flow = QualificationFactory(db_session).m5_admitted_project(mock_mode="blocked")
     candidate = flow.candidate
     candidate.proposed_title = "Choosing Models by Workflow Constraint"
-    candidate.proposed_angle = "Use a workflow-constraint decision table before selecting an API model."
+    candidate.proposed_angle = (
+        "Use a workflow-constraint decision table before selecting an API model."
+    )
     candidate.editorial_idea_proposal = {
         "proposed_angle": candidate.proposed_angle,
         "central_question_or_thesis": "How should a team map workflow constraints to model-selection decisions?",
@@ -130,18 +146,26 @@ def test_proposal_backed_topic_does_not_require_documentation_title_in_video_tit
             "subject_name": "Model guidance",
             "subject_canonical_id": "editorial-proposal:model-constraints",
             "subject_evidence_refs": [{"id": "evidence-1", "content_hash": "a" * 64}],
-            "subject_evidence_spans": [{"text": "Model selection", "span_hash": span_hash("Model selection")}],
+            "subject_evidence_spans": [
+                {"text": "Model selection", "span_hash": span_hash("Model selection")}
+            ],
             "target_audience": "small professional teams",
             "audience_problem": "need to select a model for a constrained workflow",
             "content_pillar": "AI automation workflows",
             "production_goal": candidate.proposed_title,
-            "scope_inclusions": ["workflow constraints and documented model categories"],
+            "scope_inclusions": [
+                "workflow constraints and documented model categories"
+            ],
             "exclusions": ["universal model rankings and ROI claims"],
-            "central_question_or_thesis": candidate.editorial_idea_proposal["central_question_or_thesis"],
+            "central_question_or_thesis": candidate.editorial_idea_proposal[
+                "central_question_or_thesis"
+            ],
             "learning_outcome": "Viewers can turn workflow constraints into a documented evaluation plan.",
             "viewer_value": "A concrete model-selection decision frame.",
             "content_mode": "STANDALONE",
-            "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+            "channel_contract_ref": {
+                "policy_snapshot_id": str(candidate.policy_snapshot_id)
+            },
             "source_classification_refs": [{"source_classification": "TOPIC_CAPABLE"}],
             "standalone_self_containment_required": True,
         },
@@ -156,65 +180,416 @@ def test_proposal_backed_topic_does_not_require_documentation_title_in_video_tit
 
 def _qualified_inputs():
     sections = [
-        {"section_id": "hook", "heading": "Hook", "narration": "The official page names the model. It defines the evidence boundary."},
-        {"section_id": "body", "heading": "Body", "narration": "Small teams need scope before a decision. The documented detail answers the central question."},
-        {"section_id": "close", "heading": "Close", "narration": "The learning outcome is evidence-first evaluation. The viewer can verify the next decision."},
+        {
+            "section_id": "hook",
+            "heading": "Hook",
+            "narration": "The official page names the model. It defines the evidence boundary.",
+        },
+        {
+            "section_id": "body",
+            "heading": "Body",
+            "narration": "Small teams need scope before a decision. The documented detail answers the central question.",
+        },
+        {
+            "section_id": "close",
+            "heading": "Close",
+            "narration": "The learning outcome is evidence-first evaluation. The viewer can verify the next decision.",
+        },
     ]
     script = " ".join(section["narration"] for section in sections)
     sentences = [
-        "The official page names the model.", "It defines the evidence boundary.",
-        "Small teams need scope before a decision.", "The documented detail answers the central question.",
-        "The learning outcome is evidence-first evaluation.", "The viewer can verify the next decision.",
+        "The official page names the model.",
+        "It defines the evidence boundary.",
+        "Small teams need scope before a decision.",
+        "The documented detail answers the central question.",
+        "The learning outcome is evidence-first evaluation.",
+        "The viewer can verify the next decision.",
     ]
     section_by_sentence = ["hook", "hook", "body", "body", "close", "close"]
-    spans = [_span(script, section_id, sentence) for sentence, section_id in zip(sentences, section_by_sentence, strict=True)]
+    spans = [
+        _span(script, section_id, sentence)
+        for sentence, section_id in zip(sentences, section_by_sentence, strict=True)
+    ]
     claims = [
-        {"claim_id": f"writer-{index}", "claim_text": sentence, "evidence_span_ids": ["evidence-1"]}
+        {
+            "claim_id": f"writer-{index}",
+            "claim_text": sentence,
+            "evidence_span_ids": ["evidence-1"],
+        }
         for index, sentence in enumerate(sentences, start=1)
     ]
-    draft = QualifiedScriptOutput(canonical_script=script, language="en", sections=sections, claims=claims)
-    requirements = ["subject", "question", "audience", "outcome", "viewer-value", "self-containment"]
+    draft = QualifiedScriptOutput(
+        canonical_script=script, language="en", sections=sections, claims=claims
+    )
+    requirements = [
+        "subject",
+        "question",
+        "audience",
+        "outcome",
+        "viewer-value",
+        "self-containment",
+    ]
     observations = [
         MaterialClaimObservation(
-            observed_claim_id=f"observed-{index}", span=span,
-            claim_type="FACTUAL_ASSERTION", materiality_state="MATERIAL",
-            writer_declared_claim_id=f"writer-{index}", factual_evidence_span_ids=["evidence-1"],
-            semantic_relation="ENTAILED", assignment_requirement_ids=[requirements[index - 1]],
+            observed_claim_id=f"observed-{index}",
+            span=span,
+            claim_type="FACTUAL_ASSERTION",
+            materiality_state="MATERIAL",
+            writer_declared_claim_id=f"writer-{index}",
+            factual_evidence_span_ids=["evidence-1"],
+            semantic_relation="ENTAILED",
+            assignment_requirement_ids=[requirements[index - 1]],
         )
         for index, span in enumerate(spans, start=1)
     ]
     fulfillment = [
-        AssignmentObservation(requirement_id=requirement, status="SUFFICIENT", spans=[span])
+        AssignmentObservation(
+            requirement_id=requirement, status="SUFFICIENT", spans=[span]
+        )
         for requirement, span in zip(requirements, spans, strict=True)
     ]
     verifier = SemanticVerificationOutput(
         material_claim_inventory=observations,
         assignment_fulfillment_observations=fulfillment,
         section_purpose_observations=[
-            SectionPurposeObservation(section_id="hook", observed_primary_role="HOOK", fulfilled_requirement_ids=["subject"], editorial_delta="Establishes the bounded subject.", genericity_state="SPECIFIC"),
-            SectionPurposeObservation(section_id="body", observed_primary_role="MECHANISM", fulfilled_requirement_ids=["question", "audience"], editorial_delta="Explains why the decision needs scope.", genericity_state="SPECIFIC"),
-            SectionPurposeObservation(section_id="close", observed_primary_role="CLOSING_INSIGHT", fulfilled_requirement_ids=["outcome", "viewer-value", "self-containment"], editorial_delta="Converts evidence into the promised action.", genericity_state="SPECIFIC"),
+            SectionPurposeObservation(
+                section_id="hook",
+                observed_primary_role="HOOK",
+                fulfilled_requirement_ids=["subject"],
+                editorial_delta="Establishes the bounded subject.",
+                genericity_state="SPECIFIC",
+            ),
+            SectionPurposeObservation(
+                section_id="body",
+                observed_primary_role="MECHANISM",
+                fulfilled_requirement_ids=["question", "audience"],
+                editorial_delta="Explains why the decision needs scope.",
+                genericity_state="SPECIFIC",
+            ),
+            SectionPurposeObservation(
+                section_id="close",
+                observed_primary_role="CLOSING_INSIGHT",
+                fulfilled_requirement_ids=[
+                    "outcome",
+                    "viewer-value",
+                    "self-containment",
+                ],
+                editorial_delta="Converts evidence into the promised action.",
+                genericity_state="SPECIFIC",
+            ),
         ],
     )
-    assignment = {"required_requirement_units": [{"requirement_id": item, "required": True} for item in requirements]}
+    assignment = {
+        "required_requirement_units": [
+            {"requirement_id": item, "required": True} for item in requirements
+        ]
+    }
     assignment["assignment_hash"] = canonical_hash(assignment)
-    evidence = {"spans": [{"evidence_span_id": "evidence-1", "evidence_id": "00000000-0000-0000-0000-000000000001", "text": "Official source evidence supports the bounded model page.", "source_snapshot_hash": "a" * 64}]}
+    evidence = {
+        "spans": [
+            {
+                "evidence_span_id": "evidence-1",
+                "evidence_id": "00000000-0000-0000-0000-000000000001",
+                "text": "Official source evidence supports the bounded model page.",
+                "source_snapshot_hash": "a" * 64,
+            }
+        ]
+    }
     evidence["evidence_pack_hash"] = canonical_hash(evidence)
     memory = {"status": "EMPTY_SAFE_DIGEST"}
     memory["digest_hash"] = canonical_hash(memory)
     run = ScriptQualificationRun(
-        script_assignment=assignment, script_assignment_hash=assignment["assignment_hash"],
-        factual_evidence_pack=evidence, factual_evidence_pack_hash=evidence["evidence_pack_hash"],
-        memory_digest=memory, memory_digest_hash=memory["digest_hash"],
+        script_assignment=assignment,
+        script_assignment_hash=assignment["assignment_hash"],
+        factual_evidence_pack=evidence,
+        factual_evidence_pack_hash=evidence["evidence_pack_hash"],
+        memory_digest=memory,
+        memory_digest_hash=memory["digest_hash"],
     )
     return run, draft, verifier
+
+
+def _v2_sentence_inventory_inputs():
+    sections = [
+        {
+            "section_id": "hook",
+            "heading": "Hook",
+            "narration": (
+                "The reviewer said, \u201cKeep this sentence exact.\u201d "
+                "Then the gate checked its boundary."
+            ),
+        },
+        {
+            "section_id": "body",
+            "heading": "Body",
+            "narration": "Does the inventory preserve order? It does!",
+        },
+        {
+            "section_id": "close",
+            "heading": "Close",
+            "narration": "The final instruction is \u201cVerify first.\u201d",
+        },
+    ]
+    sentences = [
+        "The reviewer said, \u201cKeep this sentence exact.\u201d",
+        "Then the gate checked its boundary.",
+        "Does the inventory preserve order?",
+        "It does!",
+        "The final instruction is \u201cVerify first.\u201d",
+    ]
+    section_ids = ["hook", "hook", "body", "body", "close"]
+    script = "\n\n".join(section["narration"] for section in sections)
+    requirements = [f"requirement-{index}" for index in range(1, 6)]
+    claims = [
+        {
+            "claim_id": f"writer-{index}",
+            "claim_text": sentence,
+            "evidence_span_ids": ["evidence-1"],
+        }
+        for index, sentence in enumerate(sentences, start=1)
+    ]
+    draft = QualifiedScriptOutput(
+        canonical_script=script,
+        language="en",
+        sections=sections,
+        claims=claims,
+    )
+    spans = [
+        _span(script, section_id, sentence)
+        for section_id, sentence in zip(section_ids, sentences, strict=True)
+    ]
+    verifier = SemanticVerificationOutput(
+        material_claim_inventory=[
+            MaterialClaimObservation(
+                observed_claim_id=f"sentence-{index:04d}",
+                span=span,
+                claim_type="FACTUAL_ASSERTION",
+                materiality_state="MATERIAL",
+                writer_declared_claim_id=f"writer-{index}",
+                factual_evidence_span_ids=["evidence-1"],
+                semantic_relation="ENTAILED",
+                assignment_requirement_ids=[requirements[index - 1]],
+            )
+            for index, span in enumerate(spans, start=1)
+        ],
+        assignment_fulfillment_observations=[
+            AssignmentObservation(
+                requirement_id=requirement,
+                status="SUFFICIENT",
+                spans=[span],
+            )
+            for requirement, span in zip(requirements, spans, strict=True)
+        ],
+        section_purpose_observations=[
+            SectionPurposeObservation(
+                section_id="hook",
+                observed_primary_role="HOOK",
+                fulfilled_requirement_ids=requirements[:2],
+                editorial_delta="Establishes the exact verification boundary.",
+                genericity_state="SPECIFIC",
+            ),
+            SectionPurposeObservation(
+                section_id="body",
+                observed_primary_role="MECHANISM",
+                fulfilled_requirement_ids=requirements[2:4],
+                editorial_delta="Checks ordered one-to-one classification.",
+                genericity_state="SPECIFIC",
+            ),
+            SectionPurposeObservation(
+                section_id="close",
+                observed_primary_role="CLOSING_INSIGHT",
+                fulfilled_requirement_ids=requirements[4:],
+                editorial_delta="Converts the rule into a final action.",
+                genericity_state="SPECIFIC",
+            ),
+        ],
+    )
+    assignment = {
+        "required_requirement_units": [
+            {"requirement_id": item, "required": True} for item in requirements
+        ]
+    }
+    assignment["assignment_hash"] = canonical_hash(assignment)
+    evidence = {
+        "spans": [
+            {
+                "evidence_span_id": "evidence-1",
+                "evidence_id": "00000000-0000-0000-0000-000000000001",
+                "text": "Official evidence supports the bounded verifier rule.",
+                "source_snapshot_hash": "a" * 64,
+            }
+        ]
+    }
+    evidence["evidence_pack_hash"] = canonical_hash(evidence)
+    memory = {"status": "EMPTY_SAFE_DIGEST"}
+    memory["digest_hash"] = canonical_hash(memory)
+    run = ScriptQualificationRun(
+        script_contract_version=SCRIPT_CONTRACT_V2,
+        script_assignment=assignment,
+        script_assignment_hash=assignment["assignment_hash"],
+        factual_evidence_pack=evidence,
+        factual_evidence_pack_hash=evidence["evidence_pack_hash"],
+        memory_digest=memory,
+        memory_digest_hash=memory["digest_hash"],
+    )
+    return run, draft, verifier, sentences, section_ids
+
+
+def test_v2_verifier_context_publishes_exact_canonical_sentence_inventory(
+    db_session,
+    monkeypatch,
+):
+    run, draft, _verifier, sentences, section_ids = _v2_sentence_inventory_inputs()
+    service = ScriptQualificationService(db_session)
+    coverage = SimpleNamespace(
+        model_dump=lambda mode=None: {"schema_version": "test-coverage.v1"}
+    )
+    projection = SimpleNamespace(provider_payload=lambda: {"features": []})
+    monkeypatch.setattr(service, "_coverage_plan_from_run", lambda _run: coverage)
+    monkeypatch.setattr(
+        service,
+        "_capability_projections_from_run",
+        lambda _run: {"verifier": projection},
+    )
+
+    context = service._verifier_context(run, draft)
+    inventory = context["canonical_sentence_inventory"]
+
+    assert inventory["schema_version"] == "canonical-sentence-inventory.v1"
+    assert inventory["sentence_count"] == len(sentences)
+    assert [item["ordinal"] for item in inventory["sentences"]] == list(
+        range(1, len(sentences) + 1)
+    )
+    assert [item["section_id"] for item in inventory["sentences"]] == section_ids
+    assert [item["text"] for item in inventory["sentences"]] == sentences
+    assert inventory["sentences"][0]["text"].endswith(".\u201d")
+    assert inventory["sentences"][-1]["text"].endswith(".\u201d")
+    assert inventory["inventory_hash"] == canonical_hash(
+        {key: value for key, value in inventory.items() if key != "inventory_hash"}
+    )
+    assert "closing quotation marks" in context["inventory_completion_rule"]
+    assert "sentence_id into observed_claim_id" in context["inventory_completion_rule"]
+
+
+def test_v2_exact_sentence_inventory_passes_one_to_one(db_session):
+    run, draft, verifier, sentences, _section_ids = _v2_sentence_inventory_inputs()
+    receipts = ScriptQualificationService(db_session)._semantic_receipts(
+        run,
+        draft,
+        verifier,
+        {"gate": "A", "status": "PASS", "reason_codes": []},
+    )
+
+    assert receipts["inventory"]["status"] == "PASS"
+    assert receipts["inventory"]["observed_count"] == len(sentences)
+    assert receipts["inventory"]["expected_count"] == len(sentences)
+    assert receipts["inventory"]["canonical_sentence_inventory_hash"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_reason"),
+    [
+        ("broad", "SCRIPT_CLAIM_INVENTORY_SPAN_NOT_EXACT_SENTENCE"),
+        ("reordered", "SCRIPT_CLAIM_INVENTORY_SENTENCE_ORDER_MISMATCH"),
+        ("duplicate", "SCRIPT_CLAIM_INVENTORY_SENTENCE_DUPLICATE"),
+        ("missing", "SCRIPT_CLAIM_INVENTORY_SENTENCE_COUNT_MISMATCH"),
+        ("extra", "SCRIPT_CLAIM_INVENTORY_SENTENCE_EXTRA"),
+        ("closing-quote-omitted", "SCRIPT_CLAIM_INVENTORY_SPAN_NOT_EXACT_SENTENCE"),
+    ],
+)
+def test_v2_inventory_blocks_non_exact_duplicate_extra_or_out_of_order_coverage(
+    db_session,
+    mutation,
+    expected_reason,
+):
+    run, draft, verifier, sentences, _section_ids = _v2_sentence_inventory_inputs()
+    observations = list(verifier.material_claim_inventory)
+    if mutation == "broad":
+        observations[0] = observations[0].model_copy(
+            update={
+                "span": VerifierScriptSpan(
+                    text=f"{sentences[0]} {sentences[1]}",
+                    section_id="hook",
+                )
+            }
+        )
+    elif mutation == "reordered":
+        observations[0], observations[1] = observations[1], observations[0]
+    elif mutation == "duplicate":
+        observations[1] = observations[1].model_copy(
+            update={"span": observations[0].span}
+        )
+    elif mutation == "missing":
+        observations.pop()
+    elif mutation == "extra":
+        observations.append(
+            MaterialClaimObservation(
+                observed_claim_id="observed-extra",
+                span=VerifierScriptSpan(
+                    text="Keep this sentence exact.",
+                    section_id="hook",
+                ),
+                claim_type="STRUCTURAL_TRANSITION",
+                materiality_state="NON_MATERIAL",
+            )
+        )
+    elif mutation == "closing-quote-omitted":
+        observations[-1] = observations[-1].model_copy(
+            update={
+                "span": VerifierScriptSpan(
+                    text=sentences[-1][:-1],
+                    section_id="close",
+                )
+            }
+        )
+    verifier.material_claim_inventory = observations
+
+    receipts = ScriptQualificationService(db_session)._semantic_receipts(
+        run,
+        draft,
+        verifier,
+        {"gate": "A", "status": "PASS", "reason_codes": []},
+    )
+
+    assert receipts["inventory"]["status"] == "BLOCK"
+    assert expected_reason in receipts["inventory"]["reason_codes"]
+
+
+def test_v1_inventory_preserves_legacy_broad_sentence_coverage(db_session):
+    run, draft, verifier = _qualified_inputs()
+    verifier.material_claim_inventory = [
+        MaterialClaimObservation(
+            observed_claim_id=f"legacy-section-{section.section_id}",
+            span=VerifierScriptSpan(
+                text=section.narration,
+                section_id=section.section_id,
+            ),
+            claim_type="STRUCTURAL_TRANSITION",
+            materiality_state="NON_MATERIAL",
+        )
+        for section in draft.sections
+    ]
+
+    receipts = ScriptQualificationService(db_session)._semantic_receipts(
+        run,
+        draft,
+        verifier,
+        {"gate": "A", "status": "PASS", "reason_codes": []},
+    )
+
+    assert receipts["inventory"]["status"] == "PASS"
+    assert "expected_count" not in receipts["inventory"]
 
 
 def _runtime_contract(*, forbidden_claims=None, forbidden_style_terms=None):
     body = {
         "schema_version": "script-runtime-contract.v1",
         "expected_language": "en",
-        "duration_contract": {"minimum_duration_ms": 1, "target_duration_ms": 5_000, "maximum_duration_ms": 60_000},
+        "duration_contract": {
+            "minimum_duration_ms": 1,
+            "target_duration_ms": 5_000,
+            "maximum_duration_ms": 60_000,
+        },
         "duration_estimation_method": "WORD_COUNT_WPM",
         "duration_estimation_wpm": 150,
         "minimum_major_sections": 3,
@@ -246,7 +621,11 @@ def test_independent_inventory_and_entailment_control_all_script_gates(db_sessio
 
 
 def test_memory_digest_hash_is_detached_canonical_and_rejects_full_digest_hash():
-    digest = {"status": "EMPTY_SAFE_DIGEST", "lessons": [], "non_factual_guidance_only": True}
+    digest = {
+        "status": "EMPTY_SAFE_DIGEST",
+        "lessons": [],
+        "non_factual_guidance_only": True,
+    }
     digest["digest_hash"] = canonical_hash(digest)
     assert digest["digest_hash"] == canonical_memory_digest_hash(digest)
     assert validate_memory_digest(digest) == digest["digest_hash"]
@@ -256,7 +635,9 @@ def test_memory_digest_hash_is_detached_canonical_and_rejects_full_digest_hash()
         validate_memory_digest(digest)
 
 
-def test_runtime_contract_blocks_language_duration_counts_and_forbidden_terms(db_session):
+def test_runtime_contract_blocks_language_duration_counts_and_forbidden_terms(
+    db_session,
+):
     run, draft, _verifier = _qualified_inputs()
     run.runtime_contract = _runtime_contract(
         forbidden_claims=["invented roi"], forbidden_style_terms=["hype"]
@@ -266,42 +647,83 @@ def test_runtime_contract_blocks_language_duration_counts_and_forbidden_terms(db
 
     assert service._structural_receipt(run, draft)["status"] == "PASS"
     wrong_language = draft.model_copy(update={"language": "vi"})
-    assert "SCRIPT_LANGUAGE_CONTRACT_MISMATCH" in service._structural_receipt(run, wrong_language)["reason_codes"]
+    assert (
+        "SCRIPT_LANGUAGE_CONTRACT_MISMATCH"
+        in service._structural_receipt(run, wrong_language)["reason_codes"]
+    )
 
     run.runtime_contract = _runtime_contract()
     run.runtime_contract["duration_contract"]["minimum_duration_ms"] = 100_000
-    run.runtime_contract["contract_hash"] = canonical_hash({key: value for key, value in run.runtime_contract.items() if key != "contract_hash"})
-    assert "SCRIPT_DURATION_CONTRACT_MISMATCH" in service._structural_receipt(run, draft)["reason_codes"]
+    run.runtime_contract["contract_hash"] = canonical_hash(
+        {
+            key: value
+            for key, value in run.runtime_contract.items()
+            if key != "contract_hash"
+        }
+    )
+    assert (
+        "SCRIPT_DURATION_CONTRACT_MISMATCH"
+        in service._structural_receipt(run, draft)["reason_codes"]
+    )
 
     run.runtime_contract = _runtime_contract(forbidden_claims=["official page"])
     run.runtime_contract_hash = run.runtime_contract["contract_hash"]
-    assert "SCRIPT_FORBIDDEN_CLAIM_VIOLATION" in service._structural_receipt(run, draft)["reason_codes"]
+    assert (
+        "SCRIPT_FORBIDDEN_CLAIM_VIOLATION"
+        in service._structural_receipt(run, draft)["reason_codes"]
+    )
 
 
-def test_section_role_reuse_compares_every_prior_and_forbidden_scope_is_complete(db_session):
+def test_section_role_reuse_compares_every_prior_and_forbidden_scope_is_complete(
+    db_session,
+):
     run, draft, verifier = _qualified_inputs()
     service = ScriptQualificationService(db_session)
     verifier.section_purpose_observations[1] = SectionPurposeObservation(
-        section_id="body", observed_primary_role="HOOK", fulfilled_requirement_ids=["question"],
-        editorial_delta="Introduces a distinct decision tension.", genericity_state="SPECIFIC",
+        section_id="body",
+        observed_primary_role="HOOK",
+        fulfilled_requirement_ids=["question"],
+        editorial_delta="Introduces a distinct decision tension.",
+        genericity_state="SPECIFIC",
         role_reuse_justification="A different editorial function.",
     )
     verifier.section_purpose_observations[2] = SectionPurposeObservation(
-        section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["subject"],
-        editorial_delta="Establishes the bounded subject.", genericity_state="SPECIFIC",
+        section_id="close",
+        observed_primary_role="HOOK",
+        fulfilled_requirement_ids=["subject"],
+        editorial_delta="Establishes the bounded subject.",
+        genericity_state="SPECIFIC",
         role_reuse_justification="A claimed closing distinction.",
     )
-    receipts = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
-    assert "SCRIPT_SECTION_ROLE_REUSE_INVALID" in receipts["fulfillment"]["reason_codes"]
+    receipts = service._semantic_receipts(
+        run, draft, verifier, service._structural_receipt(run, draft)
+    )
+    assert (
+        "SCRIPT_SECTION_ROLE_REUSE_INVALID" in receipts["fulfillment"]["reason_codes"]
+    )
 
-    run.script_assignment["forbidden_scope_units"] = [{"forbidden_scope_id": "forbidden-scope:1", "scope": "unsupported ROI"}]
-    missing = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
-    assert "SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:forbidden-scope:1" in missing["fulfillment"]["reason_codes"]
-    verifier.forbidden_scope_observations = [
-        ForbiddenScopeObservation(forbidden_scope_id="forbidden-scope:1", state="ABSENT")
+    run.script_assignment["forbidden_scope_units"] = [
+        {"forbidden_scope_id": "forbidden-scope:1", "scope": "unsupported ROI"}
     ]
-    present = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
-    assert "SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:forbidden-scope:1" not in present["fulfillment"]["reason_codes"]
+    missing = service._semantic_receipts(
+        run, draft, verifier, service._structural_receipt(run, draft)
+    )
+    assert (
+        "SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:forbidden-scope:1"
+        in missing["fulfillment"]["reason_codes"]
+    )
+    verifier.forbidden_scope_observations = [
+        ForbiddenScopeObservation(
+            forbidden_scope_id="forbidden-scope:1", state="ABSENT"
+        )
+    ]
+    present = service._semantic_receipts(
+        run, draft, verifier, service._structural_receipt(run, draft)
+    )
+    assert (
+        "SCRIPT_FORBIDDEN_SCOPE_OBSERVATION_MISSING:forbidden-scope:1"
+        not in present["fulfillment"]["reason_codes"]
+    )
 
 
 def test_undeclared_or_partially_supported_material_claim_blocks(db_session):
@@ -309,8 +731,13 @@ def test_undeclared_or_partially_supported_material_claim_blocks(db_session):
     service = ScriptQualificationService(db_session)
     structural = service._structural_receipt(run, draft)
 
-    verifier.material_claim_inventory[0] = verifier.material_claim_inventory[0].model_copy(
-        update={"writer_declared_claim_id": None, "semantic_relation": "PARTIALLY_SUPPORTED"}
+    verifier.material_claim_inventory[0] = verifier.material_claim_inventory[
+        0
+    ].model_copy(
+        update={
+            "writer_declared_claim_id": None,
+            "semantic_relation": "PARTIALLY_SUPPORTED",
+        }
     )
     receipts = service._semantic_receipts(run, draft, verifier, structural)
 
@@ -320,25 +747,59 @@ def test_undeclared_or_partially_supported_material_claim_blocks(db_session):
     assert "SCRIPT_CLAIM_PARTIALLY_SUPPORTED" in receipts["grounding"]["reason_codes"]
 
 
-def test_assignment_contains_angle_scope_action_and_mode_specific_obligation(db_session):
+def test_assignment_contains_angle_scope_action_and_mode_specific_obligation(
+    db_session,
+):
     service = ScriptQualificationService(db_session)
-    candidate = SimpleNamespace(proposed_title="Bounded walkthrough", proposed_angle="Compare the documented boundary before adopting it.")
+    candidate = SimpleNamespace(
+        proposed_title="Bounded walkthrough",
+        proposed_angle="Compare the documented boundary before adopting it.",
+    )
     standalone = SimpleNamespace(
-        id=uuid.uuid4(), topic_definition_hash="a" * 64,
-        subject_canonical_id="official-document:one", subject_name="One",
+        id=uuid.uuid4(),
+        topic_definition_hash="a" * 64,
+        subject_canonical_id="official-document:one",
+        subject_name="One",
         central_question_or_thesis="What is actually documented?",
-        target_audience="Small teams", audience_problem="Need a safe decision.",
-        scope_inclusions=["The documented setup boundary"], exclusions=["Undocumented ROI"],
-        learning_outcome="Separate evidence from inference.", viewer_value="A bounded decision frame.",
-        content_mode="STANDALONE", series_binding=None,
+        target_audience="Small teams",
+        audience_problem="Need a safe decision.",
+        scope_inclusions=["The documented setup boundary"],
+        exclusions=["Undocumented ROI"],
+        learning_outcome="Separate evidence from inference.",
+        viewer_value="A bounded decision frame.",
+        content_mode="STANDALONE",
+        series_binding=None,
     )
     assignment = service._assignment(candidate, standalone)
-    required = {item["requirement_id"] for item in assignment["required_requirement_units"]}
-    assert {"subject", "accepted-angle", "question", "audience", "scope-inclusion:1", "outcome", "viewer-value", "viewer-action", "self-containment"} <= required
+    required = {
+        item["requirement_id"] for item in assignment["required_requirement_units"]
+    }
+    assert {
+        "subject",
+        "accepted-angle",
+        "question",
+        "audience",
+        "scope-inclusion:1",
+        "outcome",
+        "viewer-value",
+        "viewer-action",
+        "self-containment",
+    } <= required
 
-    episode = SimpleNamespace(**{**standalone.__dict__, "content_mode": "SERIES_EPISODE", "series_binding": {"episode_delta": "Explains the operational limit not covered by episode one."}})
+    episode = SimpleNamespace(
+        **{
+            **standalone.__dict__,
+            "content_mode": "SERIES_EPISODE",
+            "series_binding": {
+                "episode_delta": "Explains the operational limit not covered by episode one."
+            },
+        }
+    )
     episode_assignment = service._assignment(candidate, episode)
-    episode_required = {item["requirement_id"] for item in episode_assignment["required_requirement_units"]}
+    episode_required = {
+        item["requirement_id"]
+        for item in episode_assignment["required_requirement_units"]
+    }
     assert "episode-delta" in episode_required
     assert "self-containment" not in episode_required
 
@@ -346,47 +807,74 @@ def test_assignment_contains_angle_scope_action_and_mode_specific_obligation(db_
 def test_out_of_scope_assignment_observation_blocks(db_session):
     run, draft, verifier = _qualified_inputs()
     verifier.assignment_fulfillment_observations[0] = AssignmentObservation(
-        requirement_id="subject", status="OUT_OF_SCOPE", reason_codes=["forbidden scope used"]
+        requirement_id="subject",
+        status="OUT_OF_SCOPE",
+        reason_codes=["forbidden scope used"],
     )
     receipts = ScriptQualificationService(db_session)._semantic_receipts(
-        run, draft, verifier, ScriptQualificationService(db_session)._structural_receipt(run, draft)
+        run,
+        draft,
+        verifier,
+        ScriptQualificationService(db_session)._structural_receipt(run, draft),
     )
     assert receipts["fulfillment"]["status"] == "BLOCK"
-    assert "SCRIPT_ASSIGNMENT_OUT_OF_SCOPE:subject" in receipts["fulfillment"]["reason_codes"]
+    assert (
+        "SCRIPT_ASSIGNMENT_OUT_OF_SCOPE:subject"
+        in receipts["fulfillment"]["reason_codes"]
+    )
 
 
 def test_duplicate_section_purpose_blocks_but_justified_role_reuse_passes(db_session):
     run, draft, verifier = _qualified_inputs()
     service = ScriptQualificationService(db_session)
     verifier.section_purpose_observations[2] = SectionPurposeObservation(
-        section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["outcome"],
-        editorial_delta="Establishes the bounded subject.", genericity_state="SPECIFIC",
+        section_id="close",
+        observed_primary_role="HOOK",
+        fulfilled_requirement_ids=["outcome"],
+        editorial_delta="Establishes the bounded subject.",
+        genericity_state="SPECIFIC",
     )
-    blocked = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    blocked = service._semantic_receipts(
+        run, draft, verifier, service._structural_receipt(run, draft)
+    )
     assert "SCRIPT_SECTION_ROLE_REUSE_INVALID" in blocked["fulfillment"]["reason_codes"]
 
     verifier.section_purpose_observations[2] = SectionPurposeObservation(
-        section_id="close", observed_primary_role="HOOK", fulfilled_requirement_ids=["outcome", "viewer-value", "self-containment"],
+        section_id="close",
+        observed_primary_role="HOOK",
+        fulfilled_requirement_ids=["outcome", "viewer-value", "self-containment"],
         editorial_delta="Returns to the opening question with a distinct viewer decision.",
-        genericity_state="SPECIFIC", role_reuse_justification="The closing hook reframes the decision after the evidence walk-through.",
+        genericity_state="SPECIFIC",
+        role_reuse_justification="The closing hook reframes the decision after the evidence walk-through.",
     )
-    passed = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    passed = service._semantic_receipts(
+        run, draft, verifier, service._structural_receipt(run, draft)
+    )
     assert passed["fulfillment"]["status"] == "PASS"
 
 
 def test_verifier_must_reference_the_writer_exact_evidence_span_ids(db_session):
     run, draft, verifier = _qualified_inputs()
-    run.factual_evidence_pack["spans"].append({
-        "evidence_span_id": "evidence-2", "evidence_id": "00000000-0000-0000-0000-000000000001",
-        "text": "Another exact evidence span with a distinct identity.", "source_snapshot_hash": "b" * 64,
-    })
-    verifier.material_claim_inventory[0] = verifier.material_claim_inventory[0].model_copy(
-        update={"factual_evidence_span_ids": ["evidence-2"]}
+    run.factual_evidence_pack["spans"].append(
+        {
+            "evidence_span_id": "evidence-2",
+            "evidence_id": "00000000-0000-0000-0000-000000000001",
+            "text": "Another exact evidence span with a distinct identity.",
+            "source_snapshot_hash": "b" * 64,
+        }
     )
+    verifier.material_claim_inventory[0] = verifier.material_claim_inventory[
+        0
+    ].model_copy(update={"factual_evidence_span_ids": ["evidence-2"]})
     service = ScriptQualificationService(db_session)
-    receipts = service._semantic_receipts(run, draft, verifier, service._structural_receipt(run, draft))
+    receipts = service._semantic_receipts(
+        run, draft, verifier, service._structural_receipt(run, draft)
+    )
     assert receipts["grounding"]["status"] == "BLOCK"
-    assert "SCRIPT_MATERIAL_CLAIM_EVIDENCE_SPAN_MISMATCH" in receipts["grounding"]["reason_codes"]
+    assert (
+        "SCRIPT_MATERIAL_CLAIM_EVIDENCE_SPAN_MISMATCH"
+        in receipts["grounding"]["reason_codes"]
+    )
 
 
 def test_qualification_frozen_sources_preserve_multi_source_long_exact_spans():
@@ -394,18 +882,40 @@ def test_qualification_frozen_sources_preserve_multi_source_long_exact_spans():
     first_id, second_id = uuid.uuid4(), uuid.uuid4()
     spans = [
         {
-            "evidence_span_id": f"search_demand_evidence:{first_id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(first_id),
-            "canonical_url": "https://docs.example.test/one", "authority_purpose": "CLAIM_SOURCE", "evidence_source_type": "OFFICIAL_DOCUMENT",
-            "source_class": "OFFICIAL_DOCUMENTATION", "source_classification": "TOPIC_CAPABLE", "source_snapshot_hash": "a" * 64,
-            "text": long_text, "start_byte": 0, "end_byte": len(long_text.encode("utf-8")), "span_hash": span_hash(long_text),
-            "freshness_state": "FRESH", "source_quality_state": "PASS",
+            "evidence_span_id": f"search_demand_evidence:{first_id}:0",
+            "evidence_type": "search_demand_evidence",
+            "evidence_id": str(first_id),
+            "canonical_url": "https://docs.example.test/one",
+            "authority_purpose": "CLAIM_SOURCE",
+            "evidence_source_type": "OFFICIAL_DOCUMENT",
+            "source_class": "OFFICIAL_DOCUMENTATION",
+            "source_classification": "TOPIC_CAPABLE",
+            "source_snapshot_hash": "a" * 64,
+            "text": long_text,
+            "start_byte": 0,
+            "end_byte": len(long_text.encode("utf-8")),
+            "span_hash": span_hash(long_text),
+            "freshness_state": "FRESH",
+            "source_quality_state": "PASS",
         },
         {
-            "evidence_span_id": f"search_demand_evidence:{second_id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(second_id),
-            "canonical_url": "https://docs.example.test/two", "authority_purpose": "CLAIM_SOURCE", "evidence_source_type": "OFFICIAL_MANUAL",
-            "source_class": "OFFICIAL_DOCUMENTATION", "source_classification": "TOPIC_CAPABLE", "source_snapshot_hash": "b" * 64,
-            "text": "A distinct source span is preserved independently.", "start_byte": 0, "end_byte": 50, "span_hash": span_hash("A distinct source span is preserved independently."),
-            "freshness_state": "FRESH", "source_quality_state": "PASS",
+            "evidence_span_id": f"search_demand_evidence:{second_id}:0",
+            "evidence_type": "search_demand_evidence",
+            "evidence_id": str(second_id),
+            "canonical_url": "https://docs.example.test/two",
+            "authority_purpose": "CLAIM_SOURCE",
+            "evidence_source_type": "OFFICIAL_MANUAL",
+            "source_class": "OFFICIAL_DOCUMENTATION",
+            "source_classification": "TOPIC_CAPABLE",
+            "source_snapshot_hash": "b" * 64,
+            "text": "A distinct source span is preserved independently.",
+            "start_byte": 0,
+            "end_byte": 50,
+            "span_hash": span_hash(
+                "A distinct source span is preserved independently."
+            ),
+            "freshness_state": "FRESH",
+            "source_quality_state": "PASS",
         },
     ]
     # Keep offsets faithful to the exact source text in the fixture.
@@ -413,17 +923,36 @@ def test_qualification_frozen_sources_preserve_multi_source_long_exact_spans():
     evidence = {"spans": spans}
     memory = {"status": "EMPTY_SAFE_DIGEST"}
     memory["digest_hash"] = canonical_hash(memory)
-    content = {"qualified_script": {"canonical_script": "placeholder", "language": "en", "sections": [{"section_id": "one", "heading": "One", "narration": "placeholder"}], "claims": []}, "factual_evidence_pack": evidence, "memory_digest": memory, "producer_provenance": {}}
-    receipt = SimpleNamespace(content=content, factual_evidence_pack_hash=canonical_hash(evidence))
+    content = {
+        "qualified_script": {
+            "canonical_script": "placeholder",
+            "language": "en",
+            "sections": [
+                {"section_id": "one", "heading": "One", "narration": "placeholder"}
+            ],
+            "claims": [],
+        },
+        "factual_evidence_pack": evidence,
+        "memory_digest": memory,
+        "producer_provenance": {},
+    }
+    receipt = SimpleNamespace(
+        content=content, factual_evidence_pack_hash=canonical_hash(evidence)
+    )
     sources = V2SupportAuthorityService._qualification_frozen_sources(receipt)
 
-    assert {(source.type, source.id) for source in sources} == {("search_demand_evidence", first_id), ("search_demand_evidence", second_id)}
+    assert {(source.type, source.id) for source in sources} == {
+        ("search_demand_evidence", first_id),
+        ("search_demand_evidence", second_id),
+    }
     first = next(source for source in sources if source.id == first_id)
     assert first.evidence_spans[0].text == long_text
     assert first.fact_statements == [long_text]
 
 
-def test_support_projects_qualification_provenance_and_memory_without_new_retrieval(db_session):
+def test_support_projects_qualification_provenance_and_memory_without_new_retrieval(
+    db_session,
+):
     evidence_id = uuid.uuid4()
     evidence_text = "The official workflow document defines a bounded verification sequence for small teams."
     script_lines = [
@@ -432,56 +961,98 @@ def test_support_projects_qualification_provenance_and_memory_without_new_retrie
         "A small team can use the documented sequence as its next verification action.",
     ]
     script_payload = QualifiedScriptOutput(
-        canonical_script=" ".join(script_lines), language="en",
+        canonical_script=" ".join(script_lines),
+        language="en",
         sections=[
             {"section_id": "hook", "heading": "Hook", "narration": script_lines[0]},
             {"section_id": "body", "heading": "Body", "narration": script_lines[1]},
             {"section_id": "close", "heading": "Close", "narration": script_lines[2]},
         ],
         claims=[
-            {"claim_id": f"claim-{index}", "claim_text": line, "evidence_span_ids": [f"search_demand_evidence:{evidence_id}:0"]}
+            {
+                "claim_id": f"claim-{index}",
+                "claim_text": line,
+                "evidence_span_ids": [f"search_demand_evidence:{evidence_id}:0"],
+            }
             for index, line in enumerate(script_lines, start=1)
         ],
     ).model_dump(mode="json")
-    evidence_pack = {"spans": [{
-        "evidence_span_id": f"search_demand_evidence:{evidence_id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(evidence_id),
-        "canonical_url": "https://docs.example.test/bounded-workflow", "authority_purpose": "CLAIM_SOURCE", "evidence_source_type": "OFFICIAL_DOCUMENT",
-        "source_class": "OFFICIAL_DOCUMENTATION", "source_classification": "TOPIC_CAPABLE", "source_snapshot_hash": "d" * 64,
-        "text": evidence_text, "start_byte": 0, "end_byte": len(evidence_text.encode("utf-8")), "span_hash": span_hash(evidence_text),
-        "freshness_state": "FRESH", "source_quality_state": "PASS",
-    }]}
-    memory_without_retrieval = {"status": "EMPTY_SAFE_DIGEST", "digest_type": "EMPTY_SAFE_DIGEST"}
+    evidence_pack = {
+        "spans": [
+            {
+                "evidence_span_id": f"search_demand_evidence:{evidence_id}:0",
+                "evidence_type": "search_demand_evidence",
+                "evidence_id": str(evidence_id),
+                "canonical_url": "https://docs.example.test/bounded-workflow",
+                "authority_purpose": "CLAIM_SOURCE",
+                "evidence_source_type": "OFFICIAL_DOCUMENT",
+                "source_class": "OFFICIAL_DOCUMENTATION",
+                "source_classification": "TOPIC_CAPABLE",
+                "source_snapshot_hash": "d" * 64,
+                "text": evidence_text,
+                "start_byte": 0,
+                "end_byte": len(evidence_text.encode("utf-8")),
+                "span_hash": span_hash(evidence_text),
+                "freshness_state": "FRESH",
+                "source_quality_state": "PASS",
+            }
+        ]
+    }
+    memory_without_retrieval = {
+        "status": "EMPTY_SAFE_DIGEST",
+        "digest_type": "EMPTY_SAFE_DIGEST",
+    }
     memory_without_retrieval["digest_hash"] = canonical_hash(memory_without_retrieval)
     writer_input_hash = "1" * 64
-    provenance = {"writer": {
-        "producer_input_hash": writer_input_hash,
-        "producer_output_hash": canonical_hash(script_payload),
-        "prompt_version": "script-writer-assignment.v1", "lane_name": "long_context_text",
-        "selected_model": "gpt-5.6-luna", "fallback_level": "PRIMARY",
-        "route_attempt_id": str(uuid.uuid4()), "provider_attempt_id": str(uuid.uuid4()),
-        "llm_run_snapshot_id": str(uuid.uuid4()),
-    }}
+    provenance = {
+        "writer": {
+            "producer_input_hash": writer_input_hash,
+            "producer_output_hash": canonical_hash(script_payload),
+            "prompt_version": "script-writer-assignment.v1",
+            "lane_name": "long_context_text",
+            "selected_model": "gpt-5.6-luna",
+            "fallback_level": "PRIMARY",
+            "route_attempt_id": str(uuid.uuid4()),
+            "provider_attempt_id": str(uuid.uuid4()),
+            "llm_run_snapshot_id": str(uuid.uuid4()),
+        }
+    }
     receipt_content = {
-        "qualified_script": script_payload, "factual_evidence_pack": evidence_pack,
-        "memory_digest": memory_without_retrieval, "producer_provenance": provenance,
+        "qualified_script": script_payload,
+        "factual_evidence_pack": evidence_pack,
+        "memory_digest": memory_without_retrieval,
+        "producer_provenance": provenance,
     }
     receipt = SimpleNamespace(
-        content=receipt_content, content_hash=canonical_hash(receipt_content),
+        content=receipt_content,
+        content_hash=canonical_hash(receipt_content),
         factual_evidence_pack_hash=canonical_hash(evidence_pack),
     )
     profile_id, policy_id = uuid.uuid4(), uuid.uuid4()
     duration = ProductionDurationContractV2(
-        minimum_duration_ms=1_000, target_duration_ms=10_000, maximum_duration_ms=20_000,
-        duration_contract_version="test", source_profile_version_id=profile_id, source_policy_snapshot_id=policy_id,
+        minimum_duration_ms=1_000,
+        target_duration_ms=10_000,
+        maximum_duration_ms=20_000,
+        duration_contract_version="test",
+        source_profile_version_id=profile_id,
+        source_policy_snapshot_id=policy_id,
         duration_contract_hash=ProductionDurationContractV2.calculate_hash(
-            minimum_duration_ms=1_000, target_duration_ms=10_000, maximum_duration_ms=20_000,
-            duration_contract_version="test", source_profile_version_id=profile_id, source_policy_snapshot_id=policy_id,
+            minimum_duration_ms=1_000,
+            target_duration_ms=10_000,
+            maximum_duration_ms=20_000,
+            duration_contract_version="test",
+            source_profile_version_id=profile_id,
+            source_policy_snapshot_id=policy_id,
         ),
     )
     sources = V2SupportAuthorityService._qualification_frozen_sources(receipt)
     context = V2SupportProductionContext(
-        video_project_id=uuid.uuid4(), production_lane="LONG_FORM", title="Bounded Workflow",
-        expected_language="en", duration_contract=duration, frozen_sources=sources,
+        video_project_id=uuid.uuid4(),
+        production_lane="LONG_FORM",
+        title="Bounded Workflow",
+        expected_language="en",
+        duration_contract=duration,
+        frozen_sources=sources,
         memory_guidance_digest=memory_without_retrieval,
     )
     validated = V2SupportAuthorityService(db_session)._qualified_validated(
@@ -535,36 +1106,42 @@ def test_support_projects_v2_single_source_qualification_without_legacy_script_f
             for index, narration in enumerate(narrations, start=1)
         ],
     ).model_dump(mode="json")
-    evidence_pack = {"spans": [{
-        "evidence_span_id": evidence_span_id,
-        "evidence_type": "search_demand_evidence",
-        "evidence_id": str(evidence_id),
-        "canonical_url": "https://docs.example.test/v2-workflow",
-        "authority_purpose": "CLAIM_SOURCE",
-        "evidence_source_type": "OFFICIAL_DOCUMENT",
-        "source_class": "OFFICIAL_DOCUMENTATION",
-        "source_classification": "TOPIC_CAPABLE",
-        "source_snapshot_hash": "c" * 64,
-        "text": evidence_text,
-        "start_byte": 0,
-        "end_byte": len(evidence_text.encode("utf-8")),
-        "span_hash": span_hash(evidence_text),
-        "freshness_state": "FRESH",
-        "source_quality_state": "PASS",
-    }]}
+    evidence_pack = {
+        "spans": [
+            {
+                "evidence_span_id": evidence_span_id,
+                "evidence_type": "search_demand_evidence",
+                "evidence_id": str(evidence_id),
+                "canonical_url": "https://docs.example.test/v2-workflow",
+                "authority_purpose": "CLAIM_SOURCE",
+                "evidence_source_type": "OFFICIAL_DOCUMENT",
+                "source_class": "OFFICIAL_DOCUMENTATION",
+                "source_classification": "TOPIC_CAPABLE",
+                "source_snapshot_hash": "c" * 64,
+                "text": evidence_text,
+                "start_byte": 0,
+                "end_byte": len(evidence_text.encode("utf-8")),
+                "span_hash": span_hash(evidence_text),
+                "freshness_state": "FRESH",
+                "source_quality_state": "PASS",
+            }
+        ]
+    }
     memory = {"status": "EMPTY_SAFE_DIGEST", "digest_type": "EMPTY_SAFE_DIGEST"}
     memory["digest_hash"] = canonical_hash(memory)
-    provenance = {"writer": {
-        "producer_input_hash": "2" * 64,
-        "producer_output_hash": canonical_hash(script_payload),
-        "prompt_version": "script-writer-assignment.v2",
-        "lane_name": "long_context_text",
-        "selected_model": "gpt-5.6-luna",
-        "fallback_level": "PRIMARY",
-        "route_attempt_id": str(uuid.uuid4()),
-        "provider_attempt_id": str(uuid.uuid4()),
-        "llm_run_snapshot_id": str(uuid.uuid4()),
-    }}
+    provenance = {
+        "writer": {
+            "producer_input_hash": "2" * 64,
+            "producer_output_hash": canonical_hash(script_payload),
+            "prompt_version": "script-writer-assignment.v2",
+            "lane_name": "long_context_text",
+            "selected_model": "gpt-5.6-luna",
+            "fallback_level": "PRIMARY",
+            "route_attempt_id": str(uuid.uuid4()),
+            "provider_attempt_id": str(uuid.uuid4()),
+            "llm_run_snapshot_id": str(uuid.uuid4()),
+        }
+    }
     receipt_content = {
         "qualified_script": script_payload,
         "factual_evidence_pack": evidence_pack,
@@ -614,6 +1191,63 @@ def test_support_projects_v2_single_source_qualification_without_legacy_script_f
         "Advance requirement 2.",
         "Advance requirement 3.",
     ]
+
+
+def _content_repair_producer_receipt(**updates):
+    values = {
+        "producer_type": "OPENAI_BACKGROUND_CONTENT_REPAIR",
+        "producer_version": "script-writer-assignment.v2",
+        "lane_name": "long_context_text",
+        "selected_model": "gpt-5.6-luna",
+        "background_attempt_id": uuid.uuid4(),
+        "provider_response_id": "resp_content_repair",
+        "provider_request_id": "req_content_repair",
+        "source_typed_provider_output_hash": "a" * 64,
+        "source_qualification_run_id": uuid.uuid4(),
+        "source_provider_response_snapshot_id": uuid.uuid4(),
+        "reclassification_receipt_hash": "b" * 64,
+        "continuation_authority_id": uuid.uuid4(),
+        "continuation_authority_hash": "f" * 64,
+        "producer_input_hash": "c" * 64,
+        "producer_output_hash": "a" * 64,
+        "projected_output_hash": "d" * 64,
+        "qualification_receipt_hash": "e" * 64,
+    }
+    values.update(updates)
+    return V2ProducerReceipt(**values)
+
+
+def test_content_repair_producer_receipt_requires_exact_source_lineage():
+    receipt = _content_repair_producer_receipt()
+
+    assert receipt.producer_type == "OPENAI_BACKGROUND_CONTENT_REPAIR"
+    assert receipt.source_qualification_run_id is not None
+    assert receipt.source_provider_response_snapshot_id is not None
+    assert receipt.normalization_receipt_id is None
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "background_attempt_id",
+        "source_qualification_run_id",
+        "source_provider_response_snapshot_id",
+        "reclassification_receipt_hash",
+        "continuation_authority_id",
+        "continuation_authority_hash",
+        "source_typed_provider_output_hash",
+    ],
+)
+def test_content_repair_producer_receipt_fails_closed_on_missing_authority(
+    missing_field,
+):
+    with pytest.raises(ValueError, match="V2_PRODUCER_CONTENT_REPAIR"):
+        _content_repair_producer_receipt(**{missing_field: None})
+
+
+def test_content_repair_producer_receipt_rejects_normalization_authority():
+    with pytest.raises(ValueError, match="V2_PRODUCER_CONTENT_REPAIR"):
+        _content_repair_producer_receipt(normalization_receipt_id=uuid.uuid4())
 
 
 def _qualified_outbox_authority(db_session):
@@ -698,9 +1332,16 @@ def test_qualified_finalization_retry_never_reinvokes_producers(db_session):
 
         def verify(self, *_args, **_kwargs):
             calls["verifier"] += 1
-            raise AssertionError("verifier must not be replayed after qualification PASS")
+            raise AssertionError(
+                "verifier must not be replayed after qualification PASS"
+            )
 
-    assert ScriptQualificationService(db_session, producer=_NeverInvokeProducer()).execute(qualification.id).state == "QUALIFIED"
+    assert (
+        ScriptQualificationService(db_session, producer=_NeverInvokeProducer())
+        .execute(qualification.id)
+        .state
+        == "QUALIFIED"
+    )
     assert calls == {"writer": 0, "verifier": 0}
 
 
@@ -830,7 +1471,9 @@ def test_runtime_migration_guard_blocks_worker_before_any_production_claim(
     db_session, engine
 ):
     db_session.execute(
-        text("update alembic_version set version_num = '0060_series_episode_reservations'")
+        text(
+            "update alembic_version set version_num = '0060_series_episode_reservations'"
+        )
     )
     db_session.commit()
     try:
@@ -849,13 +1492,17 @@ def test_runtime_migration_guard_blocks_worker_before_any_production_claim(
     assert RuntimeMigrationGuard(db_session).inspect().ready is True
 
 
-def test_qualification_shutdown_and_expired_lease_reconcile_without_orphaning(db_session):
+def test_qualification_shutdown_and_expired_lease_reconcile_without_orphaning(
+    db_session,
+):
     _scope, now, qualification, event = _qualified_outbox_authority(db_session)
     dispatcher = DurableOutboxDispatcher(db_session, now=lambda: now)
     event.lease_owner = "qualification-shutdown-worker"
     event.lease_expires_at = now + timedelta(seconds=30)
     db_session.flush()
-    assert dispatcher.release_worker_leases(worker_id="qualification-shutdown-worker") == 1
+    assert (
+        dispatcher.release_worker_leases(worker_id="qualification-shutdown-worker") == 1
+    )
     assert event.lease_owner is None
     assert event.next_attempt_at == now
 
@@ -908,7 +1555,9 @@ def test_only_qualified_finalization_dead_letters_are_replayable(db_session):
     assert disposition.retry_scheduled is False
     assert disposition.dead_letter_job_id is not None
     job = db_session.get(DeadLetterJob, disposition.dead_letter_job_id)
-    assert job is not None and job.workflow_run_id is None and job.retry_eligible is True
+    assert (
+        job is not None and job.workflow_run_id is None and job.retry_eligible is True
+    )
 
     from app.contracts.production_workflow import DeadLetterRetryRequest
     from tests.test_long_form_launch_cadence import _actor
@@ -916,7 +1565,9 @@ def test_only_qualified_finalization_dead_letters_are_replayable(db_session):
     replay = dispatcher.retry_dead_letter(
         dead_letter_job_id=job.id,
         company_id=scope.company.id,
-        data=DeadLetterRetryRequest(reason_code="RETRY_FINAL_ADMISSION", additional_attempts=1),
+        data=DeadLetterRetryRequest(
+            reason_code="RETRY_FINAL_ADMISSION", additional_attempts=1
+        ),
         actor=_actor(db_session, scope, admin=True),
     )
     assert replay.workflow_run_id is None

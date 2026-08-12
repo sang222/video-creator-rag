@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -37,6 +38,31 @@ CONTENT_REPAIR_TYPE = "SCRIPT_CONTENT_REPAIR"
 BACKGROUND_EVENT_TYPE = "script_qualification.background.execute.v1"
 _V2_SINGLE_SOURCE = "V2_SINGLE_SOURCE"
 _ScriptOutput = QualifiedScriptOutput | QualifiedScriptOutputV2
+
+
+def content_repair_authorization_body(
+    authorization: ScriptContentRepairAuthorizationReceipt,
+) -> dict[str, Any]:
+    """Return the immutable authorization fields covered by its hash."""
+
+    return {
+        "schema_version": "script-content-repair-authorization.v1",
+        "source_qualification_run_id": str(authorization.source_qualification_run_id),
+        "source_script_hash": authorization.source_script_hash,
+        "source_result_receipts_hash": authorization.source_result_receipts_hash,
+        "source_terminal_settlement_hash": (
+            authorization.source_terminal_settlement_hash
+        ),
+        "script_assignment_hash": authorization.script_assignment_hash,
+        "factual_evidence_pack_hash": authorization.factual_evidence_pack_hash,
+        "memory_digest_hash": authorization.memory_digest_hash,
+        "runtime_contract_hash": authorization.runtime_contract_hash,
+        "affected_section_ids": list(authorization.affected_section_ids),
+        "reason_codes": list(authorization.reason_codes),
+        "repair_policy_version": authorization.repair_policy_version,
+        "repair_type": authorization.repair_type,
+        "compensation": authorization.compensation,
+    }
 
 
 class ScriptContentRepairService:
@@ -283,12 +309,44 @@ class ScriptContentRepairService:
         )
         assert source is not None and source.script_payload is not None
         original = _script_output(source)
+        editable_claim_ids, removable_claim_ids = self._claim_repair_scope(
+            source, original
+        )
         if type(repaired) is not type(original):
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_CONTRACT_CHANGED")
         if repaired.language != original.language:
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_LANGUAGE_CHANGED")
         old_sections = original.sections
         new_sections = repaired.sections
+        old_claims = {claim.claim_id: claim for claim in original.claims}
+        new_claims = {claim.claim_id: claim for claim in repaired.claims}
+        if len(new_claims) != len(repaired.claims) or not set(new_claims).issubset(
+            old_claims
+        ):
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_CLAIM_INVENTORY_SCOPE_CHANGED"
+            )
+        removed_claim_ids = set(old_claims) - set(new_claims)
+        if not removed_claim_ids.issubset(removable_claim_ids):
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_CLAIM_INVENTORY_SCOPE_CHANGED"
+            )
+        for claim_id, new_claim in new_claims.items():
+            old_claim = old_claims[claim_id]
+            if claim_id not in editable_claim_ids:
+                if new_claim.model_dump(mode="json") != old_claim.model_dump(
+                    mode="json"
+                ):
+                    raise ValidationFailureError(
+                        "SCRIPT_CONTENT_REPAIR_CLAIM_INVENTORY_SCOPE_CHANGED"
+                    )
+            elif claim_id not in removable_claim_ids and (
+                new_claim.evidence_span_ids != old_claim.evidence_span_ids
+            ):
+                raise ValidationFailureError(
+                    "SCRIPT_CONTENT_REPAIR_CLAIM_EVIDENCE_SCOPE_CHANGED"
+                )
+        repaired_claim_ids = {claim.claim_id for claim in repaired.claims}
         if len(old_sections) != len(new_sections):
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_COUNT_CHANGED")
         allowed = set(directive["affected_section_ids"])
@@ -307,7 +365,6 @@ class ScriptContentRepairService:
                 or old.purpose != new.purpose
                 or old.required_assignment_unit_refs
                 != new.required_assignment_unit_refs
-                or old.expected_claim_refs != new.expected_claim_refs
             ):
                 raise ValidationFailureError(
                     "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
@@ -316,6 +373,81 @@ class ScriptContentRepairService:
                 raise ValidationFailureError(
                     "SCRIPT_CONTENT_REPAIR_OUT_OF_SCOPE_SECTION_CHANGED"
                 )
+            retained_expected = [
+                claim_id
+                for claim_id in old.expected_claim_refs
+                if claim_id in repaired_claim_ids
+            ]
+            if new.expected_claim_refs != retained_expected:
+                raise ValidationFailureError(
+                    "SCRIPT_CONTENT_REPAIR_CLAIM_INVENTORY_SCOPE_CHANGED"
+                )
+
+    def claim_repair_scope(
+        self, run: ScriptQualificationRun
+    ) -> tuple[list[str], list[str]]:
+        """Expose the receipt-derived claim boundary for reuse receipts/tests."""
+
+        source = self.session.get(
+            ScriptQualificationRun, run.supersedes_qualification_run_id
+        )
+        if source is None or source.script_payload is None:
+            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_AUTHORITY_MISSING")
+        editable, removable = self._claim_repair_scope(source, _script_output(source))
+        return sorted(editable), sorted(removable)
+
+    def _claim_repair_scope(
+        self, source: ScriptQualificationRun, original: _ScriptOutput
+    ) -> tuple[set[str], set[str]]:
+        """Derive mutable/removable claims only from sealed verifier evidence."""
+
+        attempt = self.session.scalar(
+            select(ScriptQualificationBackgroundAttempt).where(
+                ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                == source.id,
+                ScriptQualificationBackgroundAttempt.phase == "VERIFIER",
+            )
+        )
+        snapshot = (
+            self.session.scalar(
+                select(ScriptQualificationProviderResponseSnapshot).where(
+                    ScriptQualificationProviderResponseSnapshot.background_attempt_id
+                    == attempt.id
+                )
+            )
+            if attempt is not None
+            else None
+        )
+        if snapshot is None or snapshot.validation_errors:
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_VERIFIER_EVIDENCE_MISSING"
+            )
+        try:
+            verifier = json.loads(snapshot.raw_output_content)
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_VERIFIER_EVIDENCE_INVALID"
+            ) from exc
+        claim_ids = {claim.claim_id for claim in original.claims}
+        narration = "\n\n".join(section.narration for section in original.sections)
+        editable = {
+            claim.claim_id
+            for claim in original.claims
+            if narration.count(claim.claim_text) != 1
+        }
+        removable: set[str] = set()
+        for observation in verifier.get("material_claim_inventory", []):
+            if not isinstance(observation, dict):
+                continue
+            claim_id = observation.get("writer_declared_claim_id")
+            if claim_id not in claim_ids:
+                continue
+            if observation.get(
+                "semantic_relation"
+            ) != "ENTAILED" or not observation.get("factual_evidence_span_ids"):
+                editable.add(claim_id)
+                removable.add(claim_id)
+        return editable, removable
 
     def seal_exhausted(
         self, *, repair_qualification_run_id: uuid.UUID
@@ -530,6 +662,11 @@ class ScriptContentRepairService:
 
     def _validate_current_authority(self, source: ScriptQualificationRun) -> None:
         now = self.now()
+        from app.services.script_qualification_background import (
+            build_script_qualification_deadline_policy,
+        )
+
+        deadline_policy = build_script_qualification_deadline_policy()
         candidate = self.session.get(
             EditorialIdeaCandidate, source.editorial_idea_candidate_id
         )
@@ -562,6 +699,11 @@ class ScriptContentRepairService:
         reasons: list[str] = []
         if source.logical_deadline_at is None or now >= source.logical_deadline_at:
             reasons.append("SCRIPT_CONTENT_REPAIR_DEADLINE_EXCEEDED")
+        elif (
+            now + timedelta(seconds=deadline_policy.total_qualification_budget_seconds)
+            >= source.logical_deadline_at
+        ):
+            reasons.append("SCRIPT_CONTENT_REPAIR_DEADLINE_NOT_VIABLE")
         if slot is None or not (
             slot.target_start_window_open_at <= now <= slot.target_start_window_close_at
         ):

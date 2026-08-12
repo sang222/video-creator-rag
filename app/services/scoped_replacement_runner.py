@@ -105,6 +105,17 @@ class ScopedReplacementContinuationRunner:
             )
         elif (
             qualification.state == "BLOCKED_NON_REPAIRABLE"
+            and qualification.repair_attempts == 1
+            and (qualification.failure_receipt or {}).get("detail")
+            == "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
+        ):
+            qualification = ScriptWriterOutputRecoveryService(
+                self.session, now=self.now
+            ).continue_after_content_repair_scope_reclassification(
+                source_qualification_run_id=qualification.id
+            )
+        elif (
+            qualification.state == "BLOCKED_NON_REPAIRABLE"
             and qualification.repair_attempts == 0
             and isinstance(qualification.result_receipts, dict)
             and (qualification.result_receipts.get("structural") or {}).get("status")

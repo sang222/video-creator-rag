@@ -230,7 +230,11 @@ class V2GeneratedSection(_StrictFrozenModel):
 
 
 class V2ProducerReceipt(_StrictFrozenModel):
-    producer_type: Literal["LLM_ROUTER", "OPENAI_BACKGROUND_NORMALIZED"]
+    producer_type: Literal[
+        "LLM_ROUTER",
+        "OPENAI_BACKGROUND_NORMALIZED",
+        "OPENAI_BACKGROUND_CONTENT_REPAIR",
+    ]
     producer_version: str = Field(min_length=1)
     lane_name: str = Field(min_length=1)
     selected_model: str = Field(min_length=1)
@@ -246,6 +250,19 @@ class V2ProducerReceipt(_StrictFrozenModel):
         default=None, pattern=_SHA256_PATTERN
     )
     source_typed_provider_output_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+    # A content-repair recovery consumes one already-completed writer response
+    # from a terminal source qualification.  These IDs bind that reuse to the
+    # exact source lineage and immutable provider-response snapshot; the hash
+    # identifies the append-only reclassification receipt on that source run.
+    source_qualification_run_id: uuid.UUID | None = None
+    source_provider_response_snapshot_id: uuid.UUID | None = None
+    reclassification_receipt_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+    continuation_authority_id: uuid.UUID | None = None
+    continuation_authority_hash: str | None = Field(
         default=None, pattern=_SHA256_PATTERN
     )
     producer_input_hash: str = Field(pattern=_SHA256_PATTERN)
@@ -268,22 +285,49 @@ class V2ProducerReceipt(_StrictFrozenModel):
             self.background_attempt_id,
             self.provider_response_id,
             self.provider_request_id,
+            self.source_typed_provider_output_hash,
+        )
+        normalization_fields = (
             self.normalization_receipt_id,
             self.normalization_receipt_hash,
-            self.source_typed_provider_output_hash,
+        )
+        content_repair_fields = (
+            self.source_qualification_run_id,
+            self.source_provider_response_snapshot_id,
+            self.reclassification_receipt_hash,
+            self.continuation_authority_id,
+            self.continuation_authority_hash,
         )
         if self.producer_type == "LLM_ROUTER":
             if any(item is None for item in router_fields) or any(
-                item is not None for item in background_fields
+                item is not None
+                for item in (
+                    *background_fields,
+                    *normalization_fields,
+                    *content_repair_fields,
+                )
             ):
                 raise ValueError("V2_PRODUCER_ROUTER_PROVENANCE_INVALID")
+        elif self.producer_type == "OPENAI_BACKGROUND_NORMALIZED":
+            if (
+                any(
+                    item is None for item in (*background_fields, *normalization_fields)
+                )
+                or any(
+                    item is not None
+                    for item in (*router_fields, *content_repair_fields)
+                )
+                or self.provider_attempt_id is not None
+                or self.llm_run_snapshot_id is not None
+            ):
+                raise ValueError("V2_PRODUCER_BACKGROUND_PROVENANCE_INVALID")
         elif (
-            any(item is None for item in background_fields)
-            or any(item is not None for item in router_fields)
+            any(item is None for item in (*background_fields, *content_repair_fields))
+            or any(item is not None for item in (*router_fields, *normalization_fields))
             or self.provider_attempt_id is not None
             or self.llm_run_snapshot_id is not None
         ):
-            raise ValueError("V2_PRODUCER_BACKGROUND_PROVENANCE_INVALID")
+            raise ValueError("V2_PRODUCER_CONTENT_REPAIR_PROVENANCE_INVALID")
         return self
 
 
@@ -1345,7 +1389,16 @@ class V2SupportAuthorityService:
         writer = provenance.get("writer") if isinstance(provenance, dict) else {}
         expected_writer_output_hash = semantic_hash(script_payload)
         try:
-            if writer.get("producer_type") == "OPENAI_BACKGROUND_NORMALIZED":
+            if writer.get("producer_type") == "OPENAI_BACKGROUND_CONTENT_REPAIR":
+                producer_receipt, expected_writer_output_hash = (
+                    self._content_repair_producer_receipt(
+                        writer=writer,
+                        qualification_receipt=qualification_receipt,
+                        script_payload=script_payload,
+                        output_payload=output_payload,
+                    )
+                )
+            elif writer.get("producer_type") == "OPENAI_BACKGROUND_NORMALIZED":
                 from app.db.models.script_qualification import (
                     ScriptQualificationBackgroundAttempt,
                     ScriptWriterOutputNormalizationReceipt,
@@ -1460,6 +1513,292 @@ class V2SupportAuthorityService:
             expected_producer_input_hash=str(writer.get("producer_input_hash") or ""),
             expected_producer_output_hash=expected_writer_output_hash,
             qualification_receipt_hash=str(qualification_receipt.content_hash),
+        )
+
+    def _content_repair_producer_receipt(
+        self,
+        *,
+        writer: dict[str, Any],
+        qualification_receipt: Any,
+        script_payload: dict[str, Any],
+        output_payload: dict[str, Any],
+    ) -> tuple[V2ProducerReceipt, str]:
+        """Validate one zero-submission reuse of a completed repair response."""
+
+        from app.contracts.script_qualification import QualifiedScriptOutputV2
+        from app.db.models.script_qualification import (
+            ControlledProductionContinuationAuthority,
+            ScriptQualificationBackgroundAttempt,
+            ScriptQualificationProviderResponseSnapshot,
+            ScriptQualificationRun,
+        )
+        from app.services.canonical_script_compiler import CanonicalScriptCompiler
+        from app.services.script_contract_replacement import (
+            controlled_continuation_authority_body,
+            controlled_continuation_slot_projection,
+        )
+        from app.db.models.launch_cadence import LongFormPublishSlot
+
+        child_id = uuid.UUID(str(qualification_receipt.script_qualification_run_id))
+        source_id = uuid.UUID(str(writer["source_qualification_run_id"]))
+        attempt_id = uuid.UUID(str(writer["source_background_attempt_id"]))
+        snapshot_id = uuid.UUID(str(writer["source_provider_response_snapshot_id"]))
+        child = self.session.get(ScriptQualificationRun, child_id)
+        source = self.session.get(ScriptQualificationRun, source_id)
+        attempt = self.session.get(ScriptQualificationBackgroundAttempt, attempt_id)
+        snapshot = self.session.get(
+            ScriptQualificationProviderResponseSnapshot, snapshot_id
+        )
+        continuation_id = uuid.UUID(str(writer["continuation_authority_id"]))
+        continuation = self.session.get(
+            ControlledProductionContinuationAuthority, continuation_id
+        )
+        continuation_slot = self.session.get(
+            LongFormPublishSlot,
+            continuation.continuation_slot_id if continuation is not None else None,
+        )
+        receipt_content = (
+            qualification_receipt.content
+            if isinstance(qualification_receipt.content, dict)
+            else {}
+        )
+        source_failure = (
+            source.failure_receipt
+            if source is not None and isinstance(source.failure_receipt, dict)
+            else {}
+        )
+        if (
+            child is None
+            or source is None
+            or attempt is None
+            or snapshot is None
+            or continuation is None
+            or continuation_slot is None
+            or child.id != qualification_receipt.script_qualification_run_id
+            or receipt_content.get("run_id") != str(child.id)
+            or child.state != "QUALIFIED"
+            or child.script_contract_version != "V2_SINGLE_SOURCE"
+            or child.supersedes_qualification_run_id != source.id
+            or child.logical_attempt_number != source.logical_attempt_number + 1
+            or child.repair_attempts != 1
+            or child.writer_receipt != writer
+            or source.state != "BLOCKED_NON_REPAIRABLE"
+            or source.script_contract_version != "V2_SINGLE_SOURCE"
+            or source.script_payload is not None
+            or source_failure.get("detail")
+            != "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
+            or source_failure.get("reason_codes") != ["SCRIPT_WRITER_OUTPUT_INVALID"]
+        ):
+            raise ValueError("content repair qualification lineage drift")
+
+        lineage_fields = (
+            "editorial_idea_candidate_id",
+            "launch_run_id",
+            "topic_definition_id",
+            "topic_definition_hash",
+            "script_assignment_hash",
+            "factual_evidence_pack_hash",
+            "memory_digest_hash",
+            "runtime_contract_hash",
+            "assignment_resolution_hash",
+            "replacement_authority_id",
+        )
+        if any(
+            getattr(child, field) != getattr(source, field) for field in lineage_fields
+        ):
+            raise ValueError("content repair qualification authority drift")
+        if (
+            continuation.root_replacement_authority_id != child.replacement_authority_id
+            or continuation.source_qualification_run_id != source.id
+            or continuation.source_slot_id != source.publish_slot_id
+            or continuation.continuation_candidate_id
+            != child.editorial_idea_candidate_id
+            or continuation.continuation_slot_id != child.publish_slot_id
+            or continuation.continuation_qualification_run_id != child.id
+            or continuation.source_provider_response_snapshot_id != snapshot.id
+            or continuation.continuation_logical_identity_hash
+            != child.logical_identity_hash
+            or continuation.qualification_deadline != child.logical_deadline_at
+            or continuation.authority_hash != writer.get("continuation_authority_hash")
+            or continuation.authority_hash
+            != content_hash(controlled_continuation_authority_body(continuation))
+            or continuation.slot_projection
+            != controlled_continuation_slot_projection(continuation_slot)
+        ):
+            raise ValueError("content repair continuation authority drift")
+        expected_recovery_key = (
+            "script-qualification-content-repair-scope-reclassification:"
+            f"{source.id}:{snapshot.id}"
+        )
+        if child.recovery_key != expected_recovery_key:
+            raise ValueError("content repair recovery identity drift")
+
+        producer_input_hash = str(writer["producer_input_hash"])
+        producer_output_hash = str(writer["producer_output_hash"])
+        source_typed_output_hash = str(writer["source_typed_provider_output_hash"])
+        if (
+            attempt.script_qualification_run_id != source.id
+            or attempt.phase != "WRITER"
+            or attempt.background_status != "COMPLETED"
+            or attempt.provider_outcome != "SCRIPT_WRITER_OUTPUT_INVALID"
+            or attempt.submission_attempt_count != 1
+            or not attempt.provider_response_id
+            or not attempt.provider_request_id
+            or attempt.input_fingerprint != producer_input_hash
+            or attempt.provider_response_id != writer.get("source_provider_response_id")
+            or attempt.provider_request_id != writer.get("source_provider_request_id")
+            or attempt.prompt_version != writer.get("producer_version")
+            or attempt.lane != writer.get("lane_name")
+            or attempt.model != writer.get("selected_model")
+            or not attempt.output_hash
+            or writer.get("writer_submission_count_for_new_recovery") != 0
+        ):
+            raise ValueError("content repair background attempt drift")
+
+        if (
+            snapshot.script_qualification_run_id != source.id
+            or snapshot.background_attempt_id != attempt.id
+            or snapshot.phase != "WRITER"
+            or snapshot.provider_response_id != attempt.provider_response_id
+            or snapshot.provider_request_id != attempt.provider_request_id
+            or snapshot.prompt_version != attempt.prompt_version
+            or snapshot.producer_input_hash != attempt.input_fingerprint
+            or snapshot.accepted_typed_output_hash != producer_output_hash
+            or source_typed_output_hash != producer_output_hash
+            or snapshot.validation_errors
+            or snapshot.raw_provider_response_hash
+            != content_hash(snapshot.raw_provider_response)
+            or snapshot.raw_provider_response_hash != attempt.output_hash
+            or snapshot.raw_output_hash
+            != content_hash({"content": snapshot.raw_output_content})
+        ):
+            raise ValueError("content repair provider snapshot drift")
+
+        sealed_script = receipt_content.get("qualified_script")
+        raw_v2_payload = (
+            {
+                "language": sealed_script.get("language"),
+                "sections": sealed_script.get("sections"),
+                "claims": sealed_script.get("claims"),
+            }
+            if isinstance(sealed_script, dict)
+            and sealed_script.get("script_contract_version") == "V2_SINGLE_SOURCE"
+            else None
+        )
+        raw_provider_payload = QualifiedScriptOutputV2.model_validate_json(
+            snapshot.raw_output_content
+        ).model_dump(mode="json")
+        if (
+            raw_v2_payload is None
+            or raw_provider_payload != raw_v2_payload
+            or child.script_payload != raw_provider_payload
+            or semantic_hash(raw_provider_payload) != producer_output_hash
+        ):
+            raise ValueError("content repair typed provider output drift")
+        compiled = CanonicalScriptCompiler.compile(
+            QualifiedScriptOutputV2.model_validate(raw_provider_payload)
+        )
+        expected_materialized = {
+            "canonical_script": compiled.canonical_script,
+            "language": raw_provider_payload["language"],
+            "sections": [
+                {
+                    "section_id": item["section_id"],
+                    "heading": item["purpose"],
+                    "narration": item["narration"],
+                }
+                for item in sorted(
+                    raw_provider_payload["sections"],
+                    key=lambda item: item["ordinal"],
+                )
+            ],
+            "claims": raw_provider_payload["claims"],
+        }
+        if script_payload != expected_materialized:
+            raise ValueError("content repair materialized projection drift")
+
+        reclassification_hash = str(writer["reclassification_receipt_hash"])
+        matches = [
+            item
+            for item in (source.provider_outcome_reconciliation_receipts or [])
+            if isinstance(item, dict)
+            and item.get("content_hash") == reclassification_hash
+        ]
+        if len(matches) != 1:
+            raise ValueError("content repair reclassification receipt missing")
+        reclassification = matches[0]
+        reclassification_body = {
+            key: value
+            for key, value in reclassification.items()
+            if key != "content_hash"
+        }
+        terminal = (
+            source.terminal_settlement_receipt
+            if isinstance(source.terminal_settlement_receipt, dict)
+            else {}
+        )
+        terminal_body = {
+            key: value for key, value in terminal.items() if key != "content_hash"
+        }
+        if (
+            reclassification.get("content_hash") != content_hash(reclassification_body)
+            or reclassification.get("schema_version")
+            != "script-content-repair-scope-reclassification.v1"
+            or reclassification.get("source_qualification_run_id") != str(source.id)
+            or reclassification.get("child_qualification_run_id") != str(child.id)
+            or reclassification.get("background_attempt_id") != str(attempt.id)
+            or reclassification.get("provider_response_id")
+            != attempt.provider_response_id
+            or reclassification.get("provider_request_id")
+            != attempt.provider_request_id
+            or reclassification.get("provider_output_hash") != attempt.output_hash
+            or reclassification.get("snapshot_id") != str(snapshot.id)
+            or reclassification.get("accepted_typed_output_hash")
+            != snapshot.accepted_typed_output_hash
+            or reclassification.get("scope_validator_version")
+            != "script-content-repair-scope.v2"
+            or reclassification.get("writer_submission_count_for_child") != 0
+            or terminal.get("kind") != "DETERMINISTIC_BLOCK"
+            or terminal.get("reason_code") != "SCRIPT_WRITER_OUTPUT_INVALID"
+            or terminal.get("content_hash") != content_hash(terminal_body)
+            or reclassification.get("prior_terminal_settlement_hash")
+            != terminal.get("content_hash")
+        ):
+            raise ValueError("content repair reclassification receipt drift")
+
+        child_writer_attempts = list(
+            self.session.scalars(
+                select(ScriptQualificationBackgroundAttempt).where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == child.id,
+                    ScriptQualificationBackgroundAttempt.phase == "WRITER",
+                )
+            ).all()
+        )
+        if child_writer_attempts:
+            raise ValueError("content repair child writer submission detected")
+
+        return (
+            V2ProducerReceipt(
+                producer_type="OPENAI_BACKGROUND_CONTENT_REPAIR",
+                producer_version=str(writer["producer_version"]),
+                lane_name=str(writer["lane_name"]),
+                selected_model=str(writer["selected_model"]),
+                background_attempt_id=attempt.id,
+                provider_response_id=str(attempt.provider_response_id),
+                provider_request_id=str(attempt.provider_request_id),
+                source_typed_provider_output_hash=source_typed_output_hash,
+                source_qualification_run_id=source.id,
+                source_provider_response_snapshot_id=snapshot.id,
+                reclassification_receipt_hash=reclassification_hash,
+                continuation_authority_id=continuation.id,
+                continuation_authority_hash=continuation.authority_hash,
+                producer_input_hash=producer_input_hash,
+                producer_output_hash=producer_output_hash,
+                projected_output_hash=semantic_hash(output_payload),
+                qualification_receipt_hash=str(qualification_receipt.content_hash),
+            ),
+            producer_output_hash,
         )
 
     def _memory_guidance(

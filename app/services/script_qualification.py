@@ -99,6 +99,13 @@ _BOILERPLATE_ANGLES = (
     "source grounded standalone explanation",
 )
 
+# Sentence boundaries are deterministic local authority in V2. Terminal
+# punctuation belongs to the sentence together with any immediately following
+# closing quotation/bracket characters. The provider receives this exact
+# inventory and may classify it, but cannot choose broader claim spans.
+_SENTENCE_TERMINAL_CLOSERS = "\"'\u201d\u2019\u00bb)]}"
+_CANONICAL_SENTENCE_INVENTORY_VERSION = "canonical-sentence-inventory.v1"
+
 
 def canonical_hash(value: Any) -> str:
     return content_hash(value)
@@ -2343,12 +2350,18 @@ class ScriptQualificationService:
             context["capability_projection"] = projections[
                 "verifier"
             ].provider_payload()
+            context["canonical_sentence_inventory"] = (
+                self._canonical_sentence_inventory(draft)
+            )
             context["inventory_completion_rule"] = (
-                "Emit exactly one material_claim_inventory observation for every "
-                "sentence in canonical_script, in script order. Copy each span.text "
-                "as one exact contiguous sentence from its named section. Classify "
-                "framing and transitions as NON_MATERIAL; every MATERIAL observation "
-                "must bind the matching writer claim and exact frozen evidence IDs."
+                "Emit exactly one material_claim_inventory observation for each "
+                "canonical_sentence_inventory.sentences item, in the provided order. "
+                "Copy its sentence_id into observed_claim_id and copy section_id and "
+                "text exactly, including terminal punctuation and closing quotation "
+                "marks. Do not combine, split, duplicate, omit, or add spans. Classify "
+                "framing and transitions as NON_MATERIAL; every "
+                "MATERIAL observation must bind the matching writer claim and exact "
+                "frozen evidence IDs."
             )
         return context
 
@@ -2520,6 +2533,7 @@ class ScriptQualificationService:
         seen_claims: set[str] = set()
         seen_sections: set[str] = set()
         resolved_observation_spans: list[ScriptSpan] = []
+        resolved_observation_spans_by_index: list[ScriptSpan | None] = []
         for observation in verifier.material_claim_inventory:
             if observation.observed_claim_id in seen_claims:
                 inventory_reasons.append("SCRIPT_CLAIM_INVENTORY_DUPLICATE_ID")
@@ -2534,6 +2548,7 @@ class ScriptQualificationService:
                 inventory_reasons.append("SCRIPT_CLAIM_INVENTORY_SPAN_INVALID")
             else:
                 resolved_observation_spans.append(span)
+            resolved_observation_spans_by_index.append(span)
             if observation.materiality_state == "MATERIAL":
                 if (
                     not observation.writer_declared_claim_id
@@ -2593,12 +2608,36 @@ class ScriptQualificationService:
         }
         if not required_sections <= seen_sections:
             inventory_reasons.append("SCRIPT_CLAIM_INVENTORY_INCOMPLETE")
-        for start, end in self._sentence_bounds(script):
-            if not any(
-                span.start_byte <= start and span.end_byte >= end
-                for span in resolved_observation_spans
-            ):
-                inventory_reasons.append("SCRIPT_CLAIM_INVENTORY_UNCOVERED_SENTENCE")
+        expected_inventory: dict[str, Any] | None = None
+        if self._uses_v2_contract(run):
+            expected_inventory = self._canonical_sentence_inventory(draft)
+            expected_spans = self._canonical_sentence_spans(
+                draft.sections,
+                section_bounds=section_bounds,
+            )
+            self._enforce_exact_v2_sentence_inventory(
+                expected_spans=expected_spans,
+                observed_spans=resolved_observation_spans_by_index,
+                observed_claim_ids=[
+                    item.observed_claim_id for item in verifier.material_claim_inventory
+                ],
+                expected_claim_ids=[
+                    item["sentence_id"] for item in expected_inventory["sentences"]
+                ],
+                observation_count=len(verifier.material_claim_inventory),
+                reasons=inventory_reasons,
+            )
+        else:
+            # V1 is immutable legacy behavior: broad observations may cover
+            # more than one sentence as long as every sentence is covered.
+            for start, end in self._sentence_bounds(script):
+                if not any(
+                    span.start_byte <= start and span.end_byte >= end
+                    for span in resolved_observation_spans
+                ):
+                    inventory_reasons.append(
+                        "SCRIPT_CLAIM_INVENTORY_UNCOVERED_SENTENCE"
+                    )
         inventory = {
             "gate": "MATERIAL_CLAIM_INVENTORY",
             "status": "PASS" if not inventory_reasons else "BLOCK",
@@ -2607,6 +2646,15 @@ class ScriptQualificationService:
             or ["SCRIPT_MATERIAL_CLAIM_INVENTORY_PASS"],
             "observed_count": len(verifier.material_claim_inventory),
         }
+        if expected_inventory is not None:
+            inventory.update(
+                {
+                    "expected_count": expected_inventory["sentence_count"],
+                    "canonical_sentence_inventory_hash": expected_inventory[
+                        "inventory_hash"
+                    ],
+                }
+            )
         grounding = {
             "gate": "B",
             "status": "PASS"
@@ -2726,6 +2774,143 @@ class ScriptQualificationService:
             span_hash=span_hash(text),
             section_id=section_id,
         )
+
+    @classmethod
+    def _canonical_sentence_inventory(
+        cls,
+        draft: QualifiedScriptOutput,
+    ) -> dict[str, Any]:
+        """Publish the exact V2 sentence rows the verifier must classify."""
+
+        section_bounds = cls._section_bounds(
+            draft.sections,
+            separator=CANONICAL_SCRIPT_SEPARATOR,
+        )
+        spans = cls._canonical_sentence_spans(
+            draft.sections,
+            section_bounds=section_bounds,
+        )
+        sentences = [
+            {
+                "sentence_id": f"sentence-{ordinal:04d}",
+                "ordinal": ordinal,
+                "section_id": span.section_id,
+                "text": span.text,
+                "span_hash": span.span_hash,
+            }
+            for ordinal, span in enumerate(spans, start=1)
+        ]
+        body = {
+            "schema_version": _CANONICAL_SENTENCE_INVENTORY_VERSION,
+            "sentence_count": len(sentences),
+            "sentences": sentences,
+        }
+        return {**body, "inventory_hash": canonical_hash(body)}
+
+    @classmethod
+    def _canonical_sentence_spans(
+        cls,
+        sections: list[Any],
+        *,
+        section_bounds: dict[str, tuple[int, int]],
+    ) -> list[ScriptSpan]:
+        spans: list[ScriptSpan] = []
+        for section in sections:
+            section_id = _clean(getattr(section, "section_id", None))
+            narration = _clean(getattr(section, "narration", None))
+            bound = section_bounds.get(section_id)
+            if not section_id or not narration or bound is None:
+                continue
+            for local_start, local_end in cls._sentence_character_bounds(narration):
+                text = narration[local_start:local_end]
+                start_byte = bound[0] + len(narration[:local_start].encode("utf-8"))
+                spans.append(
+                    ScriptSpan(
+                        text=text,
+                        start_byte=start_byte,
+                        end_byte=start_byte + len(text.encode("utf-8")),
+                        span_hash=span_hash(text),
+                        section_id=section_id,
+                    )
+                )
+        return spans
+
+    @staticmethod
+    def _sentence_character_bounds(text: str) -> list[tuple[int, int]]:
+        """Return exact character ranges, retaining terminal closing quotes."""
+
+        closers = re.escape(_SENTENCE_TERMINAL_CLOSERS)
+        pattern = re.compile(
+            rf".+?(?:[.!?]+[{closers}]*(?=\s|$)|$)",
+            flags=re.S,
+        )
+        bounds: list[tuple[int, int]] = []
+        for match in pattern.finditer(text):
+            raw = match.group(0)
+            leading_count = len(raw) - len(raw.lstrip())
+            trailing_count = len(raw) - len(raw.rstrip())
+            start = match.start() + leading_count
+            end = match.end() - trailing_count
+            if start < end:
+                bounds.append((start, end))
+        return bounds
+
+    @staticmethod
+    def _enforce_exact_v2_sentence_inventory(
+        *,
+        expected_spans: list[ScriptSpan],
+        observed_spans: list[ScriptSpan | None],
+        observed_claim_ids: list[str],
+        expected_claim_ids: list[str],
+        observation_count: int,
+        reasons: list[str],
+    ) -> None:
+        """Require an ordered one-to-one observation for every V2 sentence."""
+
+        def identity(span: ScriptSpan) -> tuple[str, int, int, str]:
+            return (
+                span.section_id,
+                span.start_byte,
+                span.end_byte,
+                span.text,
+            )
+
+        expected_identities = [identity(span) for span in expected_spans]
+        expected_index = {
+            sentence_identity: index
+            for index, sentence_identity in enumerate(expected_identities)
+        }
+        observed_identities = [
+            identity(span) for span in observed_spans if span is not None
+        ]
+        if observation_count != len(expected_spans):
+            reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_COUNT_MISMATCH")
+        if observed_claim_ids != expected_claim_ids:
+            reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_ID_MISMATCH")
+        if len(observed_identities) != len(set(observed_identities)):
+            reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_DUPLICATE")
+
+        for index, expected in enumerate(expected_identities):
+            if index >= len(observed_spans):
+                reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_MISSING")
+                continue
+            observed_span = observed_spans[index]
+            if observed_span is None:
+                continue
+            observed = identity(observed_span)
+            if observed == expected:
+                continue
+            if observed in expected_index:
+                reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_ORDER_MISMATCH")
+            else:
+                reasons.append("SCRIPT_CLAIM_INVENTORY_SPAN_NOT_EXACT_SENTENCE")
+
+        if len(observed_spans) > len(expected_spans):
+            reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_EXTRA")
+        if set(expected_identities) - set(observed_identities):
+            reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_MISSING")
+        if set(observed_identities) - set(expected_identities):
+            reasons.append("SCRIPT_CLAIM_INVENTORY_SENTENCE_EXTRA")
 
     @staticmethod
     def _sentence_bounds(script: str) -> list[tuple[int, int]]:
