@@ -32,6 +32,9 @@ from app.services.script_writer_output_recovery import (
     V2_OWNERSHIP_FAILURE,
     ScriptWriterOutputRecoveryService,
 )
+from app.services.script_verifier_settlement import (
+    ScriptVerifierSettlementRecoveryService,
+)
 from app.workers.production_workflow import ProductionWorkflowWorker, WorkerRunResult
 
 
@@ -114,6 +117,22 @@ class ScopedReplacementContinuationRunner:
             ).continue_after_content_repair_scope_reclassification(
                 source_qualification_run_id=qualification.id
             )
+        elif (
+            qualification.state == "BLOCKED_NON_REPAIRABLE"
+            and qualification.script_contract_version == "V2_SINGLE_SOURCE"
+            and qualification.gate_policy_version == "script-qualification-policy.v2"
+            and set((qualification.failure_receipt or {}).get("reason_codes") or [])
+            == {
+                "SCRIPT_STRUCTURAL_INTEGRITY_PASS",
+                "SCRIPT_WRITER_CLAIM_SPAN_MISMATCH",
+                "SCRIPT_CLAIM_GROUNDING_PASS",
+                "SCRIPT_ASSIGNMENT_COVERAGE_SPAN_REUSED",
+                "SCRIPT_MEMORY_GUIDANCE_PASS_EMPTY",
+            }
+        ):
+            qualification = ScriptVerifierSettlementRecoveryService(
+                self.session, now=self.now
+            ).create(source_qualification_run_id=qualification.id)
         elif (
             qualification.state == "BLOCKED_NON_REPAIRABLE"
             and qualification.repair_attempts == 0

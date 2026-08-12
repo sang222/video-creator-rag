@@ -611,6 +611,182 @@ class ControlledProductionContinuationAuthority(Base):
     )
 
 
+class ControlledVerifierSettlementAuthority(Base):
+    """Immutable zero-provider settlement of one exact verifier artifact.
+
+    This authority never changes the verifier's provider output or a terminal
+    qualification.  It binds a new qualification/slot to a versioned,
+    deterministic projection of the already completed writer and verifier
+    artifacts.
+    """
+
+    __tablename__ = "controlled_verifier_settlement_authorities"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    root_replacement_authority_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_contract_replacement_authorities.id"),
+        nullable=False,
+    )
+    source_continuation_authority_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("controlled_production_continuation_authorities.id"),
+        nullable=False,
+    )
+    source_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+    )
+    source_slot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("long_form_publish_slots.id"), nullable=False
+    )
+    settlement_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("editorial_idea_candidates.id"), nullable=False
+    )
+    settlement_slot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("long_form_publish_slots.id"),
+        nullable=False,
+    )
+    settlement_qualification_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_runs.id"),
+        nullable=False,
+    )
+    source_verifier_attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_background_attempts.id"),
+        nullable=False,
+    )
+    source_verifier_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("script_qualification_provider_response_snapshots.id"),
+        nullable=False,
+    )
+    canonical_script_artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("canonical_script_artifacts.id"),
+        nullable=False,
+    )
+    schema_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    settlement_reason: Mapped[str] = mapped_column(String(160), nullable=False)
+    settlement_policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    root_authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_continuation_authority_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_logical_identity_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    settlement_logical_identity_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_terminal_settlement_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_script_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_result_receipts_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_verifier_input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_verifier_response_id: Mapped[str] = mapped_column(
+        String(200), nullable=False
+    )
+    source_verifier_request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_verifier_raw_response_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_verifier_raw_output_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_verifier_typed_output_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    source_verifier_schema_identifier: Mapped[str] = mapped_column(
+        String(160), nullable=False
+    )
+    source_verifier_schema_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_verifier_prompt_version: Mapped[str] = mapped_column(
+        String(120), nullable=False
+    )
+    derived_projection: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    derived_projection_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    deadline_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    slot_projection: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    current_authority_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )
+    provider_authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    budget_authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    max_provider_submissions: Mapped[int] = mapped_column(Integer, nullable=False)
+    production_window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    qualification_deadline: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    authority_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = utc_created_at()
+
+    __table_args__ = (
+        CheckConstraint(
+            "schema_version = 'vcos.controlled-verifier-settlement.v1' and "
+            "settlement_reason = 'EXACT_VERIFIER_ARTIFACT_POLICY_PROJECTION' and "
+            "settlement_policy_version = 'script-qualification-policy.v3'",
+            name="ck_controlled_verifier_settlement_identity",
+        ),
+        CheckConstraint(
+            "max_provider_submissions = 0 and qualification_deadline < production_window_end",
+            name="ck_controlled_verifier_settlement_bounds",
+        ),
+        CheckConstraint(
+            "root_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "source_continuation_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "source_logical_identity_hash ~ '^[0-9a-f]{64}$' and "
+            "settlement_logical_identity_hash ~ '^[0-9a-f]{64}$' and "
+            "source_terminal_settlement_hash ~ '^[0-9a-f]{64}$' and "
+            "source_script_hash ~ '^[0-9a-f]{64}$' and "
+            "source_result_receipts_hash ~ '^[0-9a-f]{64}$' and "
+            "source_verifier_input_hash ~ '^[0-9a-f]{64}$' and "
+            "source_verifier_raw_response_hash ~ '^[0-9a-f]{64}$' and "
+            "source_verifier_raw_output_hash ~ '^[0-9a-f]{64}$' and "
+            "source_verifier_typed_output_hash ~ '^[0-9a-f]{64}$' and "
+            "source_verifier_schema_hash ~ '^[0-9a-f]{64}$' and "
+            "derived_projection_hash ~ '^[0-9a-f]{64}$' and "
+            "provider_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "budget_authority_hash ~ '^[0-9a-f]{64}$' and "
+            "authority_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_controlled_verifier_settlement_hashes",
+        ),
+        Index(
+            "ix_controlled_verifier_settlement_root",
+            "root_replacement_authority_id",
+        ),
+        UniqueConstraint(
+            "root_replacement_authority_id", name="uq_verifier_settlement_root"
+        ),
+        UniqueConstraint(
+            "source_continuation_authority_id",
+            name="uq_verifier_settlement_continuation",
+        ),
+        UniqueConstraint(
+            "source_qualification_run_id", name="uq_verifier_settlement_source"
+        ),
+        UniqueConstraint("settlement_slot_id", name="uq_verifier_settlement_slot"),
+        UniqueConstraint(
+            "settlement_qualification_run_id", name="uq_verifier_settlement_run"
+        ),
+        UniqueConstraint(
+            "source_verifier_attempt_id", name="uq_verifier_settlement_attempt"
+        ),
+        UniqueConstraint(
+            "source_verifier_snapshot_id", name="uq_verifier_settlement_snapshot"
+        ),
+        UniqueConstraint(
+            "canonical_script_artifact_id", name="uq_verifier_settlement_artifact"
+        ),
+    )
+
+
 class SeriesEpisodeReservation(Base):
     """Durable, pre-admission ownership of one exact SeriesRun episode.
 

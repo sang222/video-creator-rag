@@ -75,6 +75,7 @@ from app.db.models.launch_cadence import (
 from app.db.models.script_qualification import (
     CanonicalScriptArtifact,
     ControlledProductionContinuationAuthority,  # noqa: F401
+    ControlledVerifierSettlementAuthority,  # noqa: F401
     EditorialTopicDefinition,
     EditorialTopicDefinitionGateReceipt,
     SeriesEpisodeReservation,  # noqa: F401

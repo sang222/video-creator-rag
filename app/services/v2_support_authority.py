@@ -234,6 +234,7 @@ class V2ProducerReceipt(_StrictFrozenModel):
         "LLM_ROUTER",
         "OPENAI_BACKGROUND_NORMALIZED",
         "OPENAI_BACKGROUND_CONTENT_REPAIR",
+        "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT",
     ]
     producer_version: str = Field(min_length=1)
     lane_name: str = Field(min_length=1)
@@ -263,6 +264,19 @@ class V2ProducerReceipt(_StrictFrozenModel):
     )
     continuation_authority_id: uuid.UUID | None = None
     continuation_authority_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+    # A verifier settlement adds no provider effect.  It projects the exact
+    # terminal continuation child and its completed verifier snapshot through
+    # one immutable, zero-submission authority.
+    settlement_source_qualification_run_id: uuid.UUID | None = None
+    settlement_source_verifier_attempt_id: uuid.UUID | None = None
+    settlement_source_verifier_snapshot_id: uuid.UUID | None = None
+    settlement_authority_id: uuid.UUID | None = None
+    settlement_authority_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+    settlement_projection_hash: str | None = Field(
         default=None, pattern=_SHA256_PATTERN
     )
     producer_input_hash: str = Field(pattern=_SHA256_PATTERN)
@@ -298,6 +312,14 @@ class V2ProducerReceipt(_StrictFrozenModel):
             self.continuation_authority_id,
             self.continuation_authority_hash,
         )
+        settlement_fields = (
+            self.settlement_source_qualification_run_id,
+            self.settlement_source_verifier_attempt_id,
+            self.settlement_source_verifier_snapshot_id,
+            self.settlement_authority_id,
+            self.settlement_authority_hash,
+            self.settlement_projection_hash,
+        )
         if self.producer_type == "LLM_ROUTER":
             if any(item is None for item in router_fields) or any(
                 item is not None
@@ -305,6 +327,7 @@ class V2ProducerReceipt(_StrictFrozenModel):
                     *background_fields,
                     *normalization_fields,
                     *content_repair_fields,
+                    *settlement_fields,
                 )
             ):
                 raise ValueError("V2_PRODUCER_ROUTER_PROVENANCE_INVALID")
@@ -315,19 +338,48 @@ class V2ProducerReceipt(_StrictFrozenModel):
                 )
                 or any(
                     item is not None
-                    for item in (*router_fields, *content_repair_fields)
+                    for item in (
+                        *router_fields,
+                        *content_repair_fields,
+                        *settlement_fields,
+                    )
                 )
                 or self.provider_attempt_id is not None
                 or self.llm_run_snapshot_id is not None
             ):
                 raise ValueError("V2_PRODUCER_BACKGROUND_PROVENANCE_INVALID")
+        elif self.producer_type == "OPENAI_BACKGROUND_CONTENT_REPAIR":
+            if (
+                any(
+                    item is None
+                    for item in (*background_fields, *content_repair_fields)
+                )
+                or any(
+                    item is not None
+                    for item in (
+                        *router_fields,
+                        *normalization_fields,
+                        *settlement_fields,
+                    )
+                )
+                or self.provider_attempt_id is not None
+                or self.llm_run_snapshot_id is not None
+            ):
+                raise ValueError("V2_PRODUCER_CONTENT_REPAIR_PROVENANCE_INVALID")
         elif (
-            any(item is None for item in (*background_fields, *content_repair_fields))
+            any(
+                item is None
+                for item in (
+                    *background_fields,
+                    *content_repair_fields,
+                    *settlement_fields,
+                )
+            )
             or any(item is not None for item in (*router_fields, *normalization_fields))
             or self.provider_attempt_id is not None
             or self.llm_run_snapshot_id is not None
         ):
-            raise ValueError("V2_PRODUCER_CONTENT_REPAIR_PROVENANCE_INVALID")
+            raise ValueError("V2_PRODUCER_VERIFIER_SETTLEMENT_PROVENANCE_INVALID")
         return self
 
 
@@ -1389,7 +1441,19 @@ class V2SupportAuthorityService:
         writer = provenance.get("writer") if isinstance(provenance, dict) else {}
         expected_writer_output_hash = semantic_hash(script_payload)
         try:
-            if writer.get("producer_type") == "OPENAI_BACKGROUND_CONTENT_REPAIR":
+            if (
+                writer.get("producer_type")
+                == "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT"
+            ):
+                producer_receipt, expected_writer_output_hash = (
+                    self._verifier_settlement_producer_receipt(
+                        writer=writer,
+                        qualification_receipt=qualification_receipt,
+                        script_payload=script_payload,
+                        output_payload=output_payload,
+                    )
+                )
+            elif writer.get("producer_type") == "OPENAI_BACKGROUND_CONTENT_REPAIR":
                 producer_receipt, expected_writer_output_hash = (
                     self._content_repair_producer_receipt(
                         writer=writer,
@@ -1515,6 +1579,469 @@ class V2SupportAuthorityService:
             qualification_receipt_hash=str(qualification_receipt.content_hash),
         )
 
+    def _verifier_settlement_producer_receipt(
+        self,
+        *,
+        writer: dict[str, Any],
+        qualification_receipt: Any,
+        script_payload: dict[str, Any],
+        output_payload: dict[str, Any],
+    ) -> tuple[V2ProducerReceipt, str]:
+        """Validate a zero-provider child against its exact immutable lineage."""
+
+        from app.contracts.script_qualification import SemanticVerificationOutput
+        from app.db.models.launch_cadence import LongFormPublishSlot
+        from app.db.models.script_qualification import (
+            CanonicalScriptArtifact,
+            ControlledProductionContinuationAuthority,
+            ControlledVerifierSettlementAuthority,
+            ScriptContractReplacementAuthority,
+            ScriptQualificationBackgroundAttempt,
+            ScriptQualificationProviderResponseSnapshot,
+            ScriptQualificationReceipt,
+            ScriptQualificationRun,
+        )
+        from app.services.script_contract_replacement import (
+            controlled_continuation_authority_body,
+            controlled_continuation_slot_projection,
+            controlled_verifier_settlement_authority_body,
+            operator_recovery_authority_body,
+        )
+        from app.services.script_qualification import ScriptQualificationService
+        from app.services.script_verifier_settlement import (
+            SETTLEMENT_POLICY_VERSION,
+            SETTLEMENT_REASON,
+            SETTLEMENT_SCHEMA,
+            derive_v3_semantic_receipts,
+        )
+
+        child_id = uuid.UUID(str(qualification_receipt.script_qualification_run_id))
+        source_id = uuid.UUID(str(writer["settlement_source_qualification_run_id"]))
+        verifier_attempt_id = uuid.UUID(
+            str(writer["settlement_source_verifier_attempt_id"])
+        )
+        verifier_snapshot_id = uuid.UUID(
+            str(writer["settlement_source_verifier_snapshot_id"])
+        )
+        settlement_id = uuid.UUID(str(writer["settlement_authority_id"]))
+        child = self.session.get(ScriptQualificationRun, child_id)
+        source = self.session.get(ScriptQualificationRun, source_id)
+        verifier_attempt = self.session.get(
+            ScriptQualificationBackgroundAttempt, verifier_attempt_id
+        )
+        verifier_snapshot = self.session.get(
+            ScriptQualificationProviderResponseSnapshot, verifier_snapshot_id
+        )
+        settlement = self.session.get(
+            ControlledVerifierSettlementAuthority, settlement_id
+        )
+        source_receipt = self.session.scalar(
+            select(ScriptQualificationReceipt).where(
+                ScriptQualificationReceipt.script_qualification_run_id == source_id
+            )
+        )
+        root = (
+            self.session.get(
+                ScriptContractReplacementAuthority,
+                settlement.root_replacement_authority_id,
+            )
+            if settlement is not None
+            else None
+        )
+        continuation = (
+            self.session.get(
+                ControlledProductionContinuationAuthority,
+                settlement.source_continuation_authority_id,
+            )
+            if settlement is not None
+            else None
+        )
+        settlement_slot = (
+            self.session.get(LongFormPublishSlot, settlement.settlement_slot_id)
+            if settlement is not None
+            else None
+        )
+        child_artifact = (
+            self.session.get(
+                CanonicalScriptArtifact, child.canonical_script_artifact_id
+            )
+            if child is not None and child.canonical_script_artifact_id is not None
+            else None
+        )
+        source_artifact = (
+            self.session.get(
+                CanonicalScriptArtifact, source.canonical_script_artifact_id
+            )
+            if source is not None and source.canonical_script_artifact_id is not None
+            else None
+        )
+        receipt_content = (
+            qualification_receipt.content
+            if isinstance(qualification_receipt.content, dict)
+            else {}
+        )
+        source_receipt_content = (
+            source_receipt.content
+            if source_receipt is not None
+            and isinstance(source_receipt.content, dict)
+            else {}
+        )
+        terminal = (
+            source.terminal_settlement_receipt
+            if source is not None
+            and isinstance(source.terminal_settlement_receipt, dict)
+            else {}
+        )
+        terminal_body = {
+            key: value for key, value in terminal.items() if key != "content_hash"
+        }
+        source_writer = (
+            source.writer_receipt
+            if source is not None and isinstance(source.writer_receipt, dict)
+            else {}
+        )
+        source_verifier = (
+            source.verifier_receipt
+            if source is not None and isinstance(source.verifier_receipt, dict)
+            else {}
+        )
+        expected_writer = {
+            **source_writer,
+            "producer": "DERIVED_FROM_COMPLETED_VERIFIER_SETTLEMENT",
+            "producer_type": "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT",
+            "settlement_source_qualification_run_id": str(source_id),
+            "settlement_source_verifier_attempt_id": str(verifier_attempt_id),
+            "settlement_source_verifier_snapshot_id": str(verifier_snapshot_id),
+            "settlement_authority_id": str(settlement_id),
+            "settlement_authority_hash": writer.get("settlement_authority_hash"),
+            "settlement_projection_hash": writer.get("settlement_projection_hash"),
+            "provider_submission_count_for_settlement": 0,
+        }
+        expected_verifier = {
+            **source_verifier,
+            "settlement_authority_id": str(settlement_id),
+            "settlement_authority_hash": writer.get("settlement_authority_hash"),
+            "settlement_source_qualification_run_id": str(source_id),
+            "settlement_source_verifier_snapshot_id": str(verifier_snapshot_id),
+            "settlement_policy_version": SETTLEMENT_POLICY_VERSION,
+            "derived_projection_hash": writer.get("settlement_projection_hash"),
+            "provider_submission_count_for_settlement": 0,
+        }
+        lineage_fields = (
+            "editorial_idea_candidate_id",
+            "launch_run_id",
+            "topic_definition_id",
+            "topic_definition_hash",
+            "script_assignment_hash",
+            "factual_evidence_pack_hash",
+            "memory_digest_hash",
+            "runtime_contract_hash",
+            "assignment_resolution_hash",
+            "script_contract_version",
+            "canonical_compiler_version",
+            "derived_canonical_script_hash",
+            "replacement_authority_id",
+            "writer_prompt_version",
+            "verifier_prompt_version",
+            "model",
+        )
+        if (
+            child is None
+            or source is None
+            or verifier_attempt is None
+            or verifier_snapshot is None
+            or settlement is None
+            or source_receipt is None
+            or root is None
+            or continuation is None
+            or settlement_slot is None
+            or child_artifact is None
+            or source_artifact is None
+            or child.id != qualification_receipt.script_qualification_run_id
+            or receipt_content.get("run_id") != str(child.id)
+            or qualification_receipt.result != "PASS"
+            or receipt_content.get("result") != "PASS"
+            or content_hash(receipt_content) != qualification_receipt.content_hash
+            or child.state != "QUALIFIED"
+            or child.script_contract_version != "V2_SINGLE_SOURCE"
+            or child.gate_policy_version != SETTLEMENT_POLICY_VERSION
+            or child.supersedes_qualification_run_id != source.id
+            or child.logical_attempt_number != source.logical_attempt_number + 1
+            or child.repair_attempts != source.repair_attempts
+            or child.writer_receipt != writer
+            or writer != expected_writer
+            or child.verifier_receipt != expected_verifier
+            or child.script_payload != source.script_payload
+            or child.result_receipts is None
+            or child.failure_receipt is not None
+            or child.terminal_settlement_receipt is not None
+            or any(
+                getattr(child, field) != getattr(source, field)
+                for field in lineage_fields
+            )
+            or source.state != "BLOCKED_NON_REPAIRABLE"
+            or source.script_contract_version != "V2_SINGLE_SOURCE"
+            or source.gate_policy_version != "script-qualification-policy.v2"
+            or source_receipt.result != "BLOCK"
+            or source_receipt_content.get("run_id") != str(source.id)
+            or source_receipt_content.get("result") != "BLOCK"
+            or content_hash(source_receipt_content) != source_receipt.content_hash
+            or terminal.get("kind") != "DETERMINISTIC_BLOCK"
+            or terminal.get("reason_code") != "SCRIPT_QUALIFICATION_BLOCKED"
+            or terminal.get("qualification_run_id") != str(source.id)
+            or terminal.get("content_hash") != content_hash(terminal_body)
+        ):
+            raise ValueError("verifier settlement qualification lineage drift")
+
+        if (
+            settlement.schema_version != SETTLEMENT_SCHEMA
+            or settlement.settlement_reason != SETTLEMENT_REASON
+            or settlement.settlement_policy_version != SETTLEMENT_POLICY_VERSION
+            or settlement.root_replacement_authority_id != root.id
+            or settlement.source_continuation_authority_id != continuation.id
+            or settlement.source_qualification_run_id != source.id
+            or settlement.source_slot_id != source.publish_slot_id
+            or settlement.settlement_candidate_id
+            != child.editorial_idea_candidate_id
+            or settlement.settlement_slot_id != child.publish_slot_id
+            or settlement.settlement_qualification_run_id != child.id
+            or settlement.source_verifier_attempt_id != verifier_attempt.id
+            or settlement.source_verifier_snapshot_id != verifier_snapshot.id
+            or settlement.canonical_script_artifact_id != child_artifact.id
+            or settlement.root_authority_hash != root.authority_hash
+            or root.authority_hash
+            != content_hash(operator_recovery_authority_body(root))
+            or settlement.source_continuation_authority_hash
+            != continuation.authority_hash
+            or continuation.authority_hash
+            != content_hash(controlled_continuation_authority_body(continuation))
+            or continuation.continuation_qualification_run_id != source.id
+            or continuation.continuation_slot_id != source.publish_slot_id
+            or continuation.continuation_candidate_id
+            != source.editorial_idea_candidate_id
+            or settlement.source_logical_identity_hash != source.logical_identity_hash
+            or settlement.settlement_logical_identity_hash
+            != child.logical_identity_hash
+            or settlement.source_terminal_settlement_hash
+            != terminal.get("content_hash")
+            or settlement.source_script_hash != source.derived_canonical_script_hash
+            or settlement.source_result_receipts_hash
+            != content_hash(source.result_receipts)
+            or settlement.max_provider_submissions != 0
+            or settlement.qualification_deadline != child.logical_deadline_at
+            or settlement.production_window_end
+            != settlement_slot.target_start_window_close_at
+            or settlement.slot_projection
+            != controlled_continuation_slot_projection(settlement_slot)
+            or settlement.authority_hash
+            != content_hash(controlled_verifier_settlement_authority_body(settlement))
+            or settlement.authority_hash != writer.get("settlement_authority_hash")
+            or settlement.derived_projection_hash
+            != writer.get("settlement_projection_hash")
+        ):
+            raise ValueError("verifier settlement authority drift")
+
+        artifact_fields = (
+            "script_contract_version",
+            "compiler_version",
+            "ordered_section_ids",
+            "ordered_section_hashes",
+            "separator_policy",
+            "normalization_policy",
+            "section_set_hash",
+            "canonical_script",
+            "canonical_script_hash",
+            "total_word_count",
+            "estimated_duration_ms",
+        )
+        if (
+            child_artifact.script_qualification_run_id != child.id
+            or source_artifact.script_qualification_run_id != source.id
+            or any(
+                getattr(child_artifact, field) != getattr(source_artifact, field)
+                for field in artifact_fields
+            )
+            or child_artifact.canonical_script_hash
+            != child.derived_canonical_script_hash
+            or source_artifact.canonical_script_hash
+            != source.derived_canonical_script_hash
+            or receipt_content.get("script_hash")
+            != child_artifact.canonical_script_hash
+            or script_payload.get("canonical_script")
+            != child_artifact.canonical_script
+        ):
+            raise ValueError("verifier settlement canonical artifact drift")
+
+        source_attempts = list(
+            self.session.scalars(
+                select(ScriptQualificationBackgroundAttempt).where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == source.id
+                )
+            ).all()
+        )
+        source_snapshots = list(
+            self.session.scalars(
+                select(ScriptQualificationProviderResponseSnapshot).where(
+                    ScriptQualificationProviderResponseSnapshot
+                    .script_qualification_run_id
+                    == source.id
+                )
+            ).all()
+        )
+        child_attempts = list(
+            self.session.scalars(
+                select(ScriptQualificationBackgroundAttempt).where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == child.id
+                )
+            ).all()
+        )
+        try:
+            verifier = SemanticVerificationOutput.model_validate_json(
+                verifier_snapshot.raw_output_content
+            )
+        except ValueError as exc:
+            raise ValueError("verifier settlement typed snapshot invalid") from exc
+        if (
+            source_attempts != [verifier_attempt]
+            or source_snapshots != [verifier_snapshot]
+            or child_attempts
+            or verifier_attempt.script_qualification_run_id != source.id
+            or verifier_attempt.phase != "VERIFIER"
+            or verifier_attempt.background_status != "COMPLETED"
+            or verifier_attempt.provider_outcome != "COMPLETED"
+            or verifier_attempt.submission_attempt_count != 1
+            or verifier_attempt.provider_response_id
+            != settlement.source_verifier_response_id
+            or verifier_attempt.provider_request_id
+            != settlement.source_verifier_request_id
+            or verifier_attempt.input_fingerprint
+            != settlement.source_verifier_input_hash
+            or verifier_attempt.output_hash
+            != settlement.source_verifier_raw_response_hash
+            or verifier_attempt.prompt_version
+            != settlement.source_verifier_prompt_version
+            or verifier_attempt.response_schema_identifier
+            != settlement.source_verifier_schema_identifier
+            or verifier_attempt.response_schema_hash
+            != settlement.source_verifier_schema_hash
+            or verifier_snapshot.script_qualification_run_id != source.id
+            or verifier_snapshot.background_attempt_id != verifier_attempt.id
+            or verifier_snapshot.phase != "VERIFIER"
+            or verifier_snapshot.provider_response_id
+            != verifier_attempt.provider_response_id
+            or verifier_snapshot.provider_request_id
+            != verifier_attempt.provider_request_id
+            or verifier_snapshot.prompt_version != verifier_attempt.prompt_version
+            or verifier_snapshot.producer_input_hash
+            != verifier_attempt.input_fingerprint
+            or verifier_snapshot.response_schema_identifier
+            != verifier_attempt.response_schema_identifier
+            or verifier_snapshot.response_schema_hash
+            != verifier_attempt.response_schema_hash
+            or verifier_snapshot.validation_errors
+            or verifier_snapshot.raw_provider_response_hash
+            != content_hash(verifier_snapshot.raw_provider_response)
+            or verifier_snapshot.raw_provider_response_hash
+            != verifier_attempt.output_hash
+            or verifier_snapshot.raw_output_hash
+            != content_hash({"content": verifier_snapshot.raw_output_content})
+            or verifier_snapshot.accepted_typed_output_hash
+            != content_hash(verifier.model_dump(mode="json"))
+            or verifier_snapshot.raw_provider_response_hash
+            != settlement.source_verifier_raw_response_hash
+            or verifier_snapshot.raw_output_hash
+            != settlement.source_verifier_raw_output_hash
+            or verifier_snapshot.accepted_typed_output_hash
+            != settlement.source_verifier_typed_output_hash
+            or source_verifier.get("input_fingerprint")
+            != verifier_attempt.input_fingerprint
+            or source_verifier.get("output_hash") != verifier_attempt.output_hash
+            or source_verifier.get("provider_response_id")
+            != verifier_attempt.provider_response_id
+            or source_verifier.get("provider_request_id")
+            != verifier_attempt.provider_request_id
+            or source_verifier.get("prompt_version") != verifier_attempt.prompt_version
+            or source_verifier.get("response_schema_identifier")
+            != verifier_attempt.response_schema_identifier
+            or source_verifier.get("response_schema_hash")
+            != verifier_attempt.response_schema_hash
+        ):
+            raise ValueError("verifier settlement provider snapshot drift")
+
+        settlement_service = ScriptQualificationService(self.session)
+        source_draft = settlement_service.draft_from_run(source)
+        expected_receipts, expected_projection = derive_v3_semantic_receipts(
+            service=settlement_service,
+            run=source,
+            draft=source_draft,
+            verifier=verifier,
+            source_verifier_output_hash=verifier_snapshot.accepted_typed_output_hash,
+        )
+        projection = settlement.derived_projection
+        projection_body = {
+            key: value for key, value in projection.items() if key != "content_hash"
+        }
+        if (
+            projection.get("content_hash") != content_hash(projection_body)
+            or settlement.derived_projection_hash != projection.get("content_hash")
+            or projection != expected_projection
+            or child.result_receipts != expected_receipts
+            or projection.get("resulting_receipts_hash")
+            != content_hash(child.result_receipts)
+        ):
+            raise ValueError("verifier settlement projection drift")
+
+        original_receipt, producer_output_hash = (
+            self._content_repair_producer_receipt(
+                writer=source_writer,
+                qualification_receipt=source_receipt,
+                script_payload=script_payload,
+                output_payload=output_payload,
+                expected_child_state="BLOCKED_NON_REPAIRABLE",
+                expected_receipt_result="BLOCK",
+            )
+        )
+        return (
+            V2ProducerReceipt(
+                producer_type="OPENAI_BACKGROUND_VERIFIER_SETTLEMENT",
+                producer_version=original_receipt.producer_version,
+                lane_name=original_receipt.lane_name,
+                selected_model=original_receipt.selected_model,
+                background_attempt_id=original_receipt.background_attempt_id,
+                provider_response_id=original_receipt.provider_response_id,
+                provider_request_id=original_receipt.provider_request_id,
+                source_typed_provider_output_hash=(
+                    original_receipt.source_typed_provider_output_hash
+                ),
+                source_qualification_run_id=(
+                    original_receipt.source_qualification_run_id
+                ),
+                source_provider_response_snapshot_id=(
+                    original_receipt.source_provider_response_snapshot_id
+                ),
+                reclassification_receipt_hash=(
+                    original_receipt.reclassification_receipt_hash
+                ),
+                continuation_authority_id=original_receipt.continuation_authority_id,
+                continuation_authority_hash=(
+                    original_receipt.continuation_authority_hash
+                ),
+                settlement_source_qualification_run_id=source.id,
+                settlement_source_verifier_attempt_id=verifier_attempt.id,
+                settlement_source_verifier_snapshot_id=verifier_snapshot.id,
+                settlement_authority_id=settlement.id,
+                settlement_authority_hash=settlement.authority_hash,
+                settlement_projection_hash=settlement.derived_projection_hash,
+                producer_input_hash=original_receipt.producer_input_hash,
+                producer_output_hash=original_receipt.producer_output_hash,
+                projected_output_hash=semantic_hash(output_payload),
+                qualification_receipt_hash=str(qualification_receipt.content_hash),
+            ),
+            producer_output_hash,
+        )
+
     def _content_repair_producer_receipt(
         self,
         *,
@@ -1522,6 +2049,8 @@ class V2SupportAuthorityService:
         qualification_receipt: Any,
         script_payload: dict[str, Any],
         output_payload: dict[str, Any],
+        expected_child_state: str = "QUALIFIED",
+        expected_receipt_result: str = "PASS",
     ) -> tuple[V2ProducerReceipt, str]:
         """Validate one zero-submission reuse of a completed repair response."""
 
@@ -1576,7 +2105,9 @@ class V2SupportAuthorityService:
             or continuation_slot is None
             or child.id != qualification_receipt.script_qualification_run_id
             or receipt_content.get("run_id") != str(child.id)
-            or child.state != "QUALIFIED"
+            or qualification_receipt.result != expected_receipt_result
+            or receipt_content.get("result") != expected_receipt_result
+            or child.state != expected_child_state
             or child.script_contract_version != "V2_SINGLE_SOURCE"
             or child.supersedes_qualification_run_id != source.id
             or child.logical_attempt_number != source.logical_attempt_number + 1

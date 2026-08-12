@@ -36,6 +36,7 @@ from app.db.models.ops import ProviderAttempt
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.script_qualification import (
     ControlledProductionContinuationAuthority,
+    ControlledVerifierSettlementAuthority,
     EditorialTopicDefinition,
     EditorialTopicDefinitionGateReceipt,
     ScriptContractReplacementAuthority,
@@ -77,6 +78,11 @@ OPERATOR_RECOVERY_STRATEGY = "CANDIDATE_REPLACEMENT"
 REPAIR_POLICY_REF = "script-content-repair.v1:max-1"
 CONTROLLED_CONTINUATION_SCHEMA = "vcos.controlled-production-continuation.v1"
 CONTROLLED_CONTINUATION_REASON = "BOUNDED_CONTENT_REPAIR_VERIFIER_CONTINUATION"
+CONTROLLED_VERIFIER_SETTLEMENT_SCHEMA = "vcos.controlled-verifier-settlement.v1"
+CONTROLLED_VERIFIER_SETTLEMENT_REASON = (
+    "EXACT_VERIFIER_ARTIFACT_POLICY_PROJECTION"
+)
+CONTROLLED_VERIFIER_SETTLEMENT_POLICY = "script-qualification-policy.v3"
 
 
 def controlled_continuation_slot_projection(
@@ -158,6 +164,70 @@ def controlled_continuation_authority_body(
         "budget_authority_hash": authority.budget_authority_hash,
         "max_writer_submissions": authority.max_writer_submissions,
         "max_verifier_submissions": authority.max_verifier_submissions,
+        "production_window_end": authority.production_window_end.isoformat(),
+        "qualification_deadline": authority.qualification_deadline.isoformat(),
+        "created_at": authority.created_at.isoformat(),
+    }
+
+
+def controlled_verifier_settlement_authority_body(
+    authority: ControlledVerifierSettlementAuthority,
+) -> dict[str, Any]:
+    """Return every immutable verifier-settlement field covered by its hash."""
+
+    return {
+        "schema_version": authority.schema_version,
+        "settlement_authority_id": str(authority.id),
+        "root_replacement_authority_id": str(authority.root_replacement_authority_id),
+        "source_continuation_authority_id": str(
+            authority.source_continuation_authority_id
+        ),
+        "source_qualification_run_id": str(authority.source_qualification_run_id),
+        "source_slot_id": str(authority.source_slot_id),
+        "settlement_candidate_id": str(authority.settlement_candidate_id),
+        "settlement_slot_id": str(authority.settlement_slot_id),
+        "settlement_qualification_run_id": str(
+            authority.settlement_qualification_run_id
+        ),
+        "source_verifier_attempt_id": str(authority.source_verifier_attempt_id),
+        "source_verifier_snapshot_id": str(authority.source_verifier_snapshot_id),
+        "canonical_script_artifact_id": str(authority.canonical_script_artifact_id),
+        "settlement_reason": authority.settlement_reason,
+        "settlement_policy_version": authority.settlement_policy_version,
+        "root_authority_hash": authority.root_authority_hash,
+        "source_continuation_authority_hash": (
+            authority.source_continuation_authority_hash
+        ),
+        "source_logical_identity_hash": authority.source_logical_identity_hash,
+        "settlement_logical_identity_hash": authority.settlement_logical_identity_hash,
+        "source_terminal_settlement_hash": (
+            authority.source_terminal_settlement_hash
+        ),
+        "source_script_hash": authority.source_script_hash,
+        "source_result_receipts_hash": authority.source_result_receipts_hash,
+        "source_verifier_input_hash": authority.source_verifier_input_hash,
+        "source_verifier_response_id": authority.source_verifier_response_id,
+        "source_verifier_request_id": authority.source_verifier_request_id,
+        "source_verifier_raw_response_hash": (
+            authority.source_verifier_raw_response_hash
+        ),
+        "source_verifier_raw_output_hash": authority.source_verifier_raw_output_hash,
+        "source_verifier_typed_output_hash": (
+            authority.source_verifier_typed_output_hash
+        ),
+        "source_verifier_schema_identifier": (
+            authority.source_verifier_schema_identifier
+        ),
+        "source_verifier_schema_hash": authority.source_verifier_schema_hash,
+        "source_verifier_prompt_version": authority.source_verifier_prompt_version,
+        "derived_projection": authority.derived_projection,
+        "derived_projection_hash": authority.derived_projection_hash,
+        "deadline_policy": authority.deadline_policy,
+        "slot_projection": authority.slot_projection,
+        "current_authority_snapshot": authority.current_authority_snapshot,
+        "provider_authority_hash": authority.provider_authority_hash,
+        "budget_authority_hash": authority.budget_authority_hash,
+        "max_provider_submissions": authority.max_provider_submissions,
         "production_window_end": authority.production_window_end.isoformat(),
         "qualification_deadline": authority.qualification_deadline.isoformat(),
         "created_at": authority.created_at.isoformat(),
@@ -255,6 +325,19 @@ def resolve_replacement_qualification_leaf(
     }
     if len(continuations) > 1:
         raise ValidationFailureError("SCOPED_REPLACEMENT_CONTINUATION_FORK")
+    settlement_statement = select(ControlledVerifierSettlementAuthority).where(
+        ControlledVerifierSettlementAuthority.root_replacement_authority_id
+        == authority.id
+    )
+    if lock:
+        settlement_statement = settlement_statement.with_for_update()
+    settlements = list(session.scalars(settlement_statement).all())
+    settlement_by_qualification_id = {
+        item.settlement_qualification_run_id: item for item in settlements
+    }
+    if len(settlements) > 1:
+        raise ValidationFailureError("SCOPED_REPLACEMENT_SETTLEMENT_FORK")
+    continuation_by_id = {item.id: item for item in continuations}
     by_id = {run.id: run for run in runs}
     root = by_id.get(authority.replacement_qualification_run_id)
     if (
@@ -265,14 +348,91 @@ def resolve_replacement_qualification_leaf(
         raise ValidationFailureError("SCOPED_REPLACEMENT_QUALIFICATION_ROOT_DRIFT")
     for run in runs:
         continuation = continuation_by_qualification_id.get(run.id)
+        settlement = settlement_by_qualification_id.get(run.id)
+        if continuation is not None and settlement is not None:
+            raise ValidationFailureError(
+                "SCOPED_REPLACEMENT_QUALIFICATION_LINEAGE_DRIFT"
+            )
         expected_slot_id = (
-            continuation.continuation_slot_id
+            settlement.settlement_slot_id
+            if settlement is not None
+            else continuation.continuation_slot_id
             if continuation is not None
             else authority.replacement_slot_id
         )
         continuation_slot = (
             session.get(LongFormPublishSlot, continuation.continuation_slot_id)
             if continuation is not None
+            else None
+        )
+        settlement_slot = (
+            session.get(LongFormPublishSlot, settlement.settlement_slot_id)
+            if settlement is not None
+            else None
+        )
+        settlement_source = (
+            by_id.get(settlement.source_qualification_run_id)
+            if settlement is not None
+            else None
+        )
+        source_continuation = (
+            continuation_by_id.get(settlement.source_continuation_authority_id)
+            if settlement is not None
+            else None
+        )
+        settlement_source_slot = (
+            session.get(LongFormPublishSlot, settlement.source_slot_id)
+            if settlement is not None
+            else None
+        )
+        settlement_verifier_attempt = (
+            session.get(
+                ScriptQualificationBackgroundAttempt,
+                settlement.source_verifier_attempt_id,
+            )
+            if settlement is not None
+            else None
+        )
+        settlement_verifier_snapshot = (
+            session.get(
+                ScriptQualificationProviderResponseSnapshot,
+                settlement.source_verifier_snapshot_id,
+            )
+            if settlement is not None
+            else None
+        )
+        settlement_source_terminal = (
+            settlement_source.terminal_settlement_receipt
+            if settlement_source is not None
+            and isinstance(settlement_source.terminal_settlement_receipt, dict)
+            else {}
+        )
+        settlement_source_terminal_body = {
+            key: value
+            for key, value in settlement_source_terminal.items()
+            if key != "content_hash"
+        }
+        settlement_projection = (
+            settlement.derived_projection
+            if settlement is not None
+            and isinstance(settlement.derived_projection, dict)
+            else {}
+        )
+        settlement_projection_body = {
+            key: value
+            for key, value in settlement_projection.items()
+            if key != "content_hash"
+        }
+        settlement_child_attempt_id = (
+            session.scalar(
+                select(ScriptQualificationBackgroundAttempt.id)
+                .where(
+                    ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                    == run.id
+                )
+                .limit(1)
+            )
+            if settlement is not None
             else None
         )
         if (
@@ -286,8 +446,12 @@ def resolve_replacement_qualification_leaf(
                     != CONTROLLED_CONTINUATION_REASON
                     or continuation.continuation_candidate_id
                     != authority.replacement_candidate_id
+                    or continuation.root_authority_hash != authority.authority_hash
                     or continuation.source_qualification_run_id
                     != run.supersedes_qualification_run_id
+                    or continuation.continuation_logical_identity_hash
+                    != run.logical_identity_hash
+                    or continuation.qualification_deadline != run.logical_deadline_at
                     or continuation.max_writer_submissions != 0
                     or continuation.max_verifier_submissions != 1
                     or continuation.authority_hash
@@ -298,6 +462,125 @@ def resolve_replacement_qualification_leaf(
                     != (
                         controlled_continuation_slot_projection(continuation_slot)
                         if continuation_slot is not None
+                        else None
+                    )
+                )
+            )
+            or (
+                settlement is not None
+                and (
+                    settlement.schema_version
+                    != CONTROLLED_VERIFIER_SETTLEMENT_SCHEMA
+                    or settlement.settlement_reason
+                    != CONTROLLED_VERIFIER_SETTLEMENT_REASON
+                    or settlement.settlement_policy_version
+                    != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
+                    or settlement.settlement_candidate_id
+                    != authority.replacement_candidate_id
+                    or settlement.root_authority_hash != authority.authority_hash
+                    or settlement_source is None
+                    or source_continuation is None
+                    or settlement_slot is None
+                    or settlement_source_slot is None
+                    or settlement_verifier_attempt is None
+                    or settlement_verifier_snapshot is None
+                    or settlement.source_qualification_run_id
+                    != run.supersedes_qualification_run_id
+                    or settlement.source_slot_id != settlement_source.publish_slot_id
+                    or settlement_source_slot.state != "CANCELED"
+                    or settlement_source.state != "BLOCKED_NON_REPAIRABLE"
+                    or source_continuation.continuation_qualification_run_id
+                    != settlement_source.id
+                    or settlement.source_continuation_authority_hash
+                    != source_continuation.authority_hash
+                    or settlement.settlement_logical_identity_hash
+                    != run.logical_identity_hash
+                    or settlement.source_logical_identity_hash
+                    != settlement_source.logical_identity_hash
+                    or settlement.source_terminal_settlement_hash
+                    != settlement_source_terminal.get("content_hash")
+                    or settlement_source_terminal.get("content_hash")
+                    != content_hash(settlement_source_terminal_body)
+                    or settlement.source_script_hash
+                    != settlement_source.derived_canonical_script_hash
+                    or settlement.source_result_receipts_hash
+                    != content_hash(settlement_source.result_receipts)
+                    or run.script_payload != settlement_source.script_payload
+                    or run.derived_canonical_script_hash
+                    != settlement_source.derived_canonical_script_hash
+                    or run.gate_policy_version
+                    != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
+                    or settlement.canonical_script_artifact_id
+                    != run.canonical_script_artifact_id
+                    or settlement.max_provider_submissions != 0
+                    or settlement_child_attempt_id is not None
+                    or settlement.qualification_deadline != run.logical_deadline_at
+                    or settlement.production_window_end
+                    != settlement_slot.target_start_window_close_at
+                    or settlement_verifier_attempt.script_qualification_run_id
+                    != settlement_source.id
+                    or settlement_verifier_attempt.phase != "VERIFIER"
+                    or settlement_verifier_attempt.background_status != "COMPLETED"
+                    or settlement_verifier_attempt.provider_outcome != "COMPLETED"
+                    or settlement_verifier_attempt.submission_attempt_count != 1
+                    or settlement_verifier_attempt.provider_response_id
+                    != settlement.source_verifier_response_id
+                    or settlement_verifier_attempt.provider_request_id
+                    != settlement.source_verifier_request_id
+                    or settlement_verifier_attempt.input_fingerprint
+                    != settlement.source_verifier_input_hash
+                    or settlement_verifier_attempt.output_hash
+                    != settlement.source_verifier_raw_response_hash
+                    or settlement_verifier_attempt.prompt_version
+                    != settlement.source_verifier_prompt_version
+                    or settlement_verifier_attempt.response_schema_identifier
+                    != settlement.source_verifier_schema_identifier
+                    or settlement_verifier_attempt.response_schema_hash
+                    != settlement.source_verifier_schema_hash
+                    or settlement_verifier_snapshot.script_qualification_run_id
+                    != settlement_source.id
+                    or settlement_verifier_snapshot.background_attempt_id
+                    != settlement_verifier_attempt.id
+                    or settlement_verifier_snapshot.phase != "VERIFIER"
+                    or settlement_verifier_snapshot.provider_response_id
+                    != settlement_verifier_attempt.provider_response_id
+                    or settlement_verifier_snapshot.provider_request_id
+                    != settlement_verifier_attempt.provider_request_id
+                    or settlement_verifier_snapshot.prompt_version
+                    != settlement.source_verifier_prompt_version
+                    or settlement_verifier_snapshot.response_schema_identifier
+                    != settlement.source_verifier_schema_identifier
+                    or settlement_verifier_snapshot.response_schema_hash
+                    != settlement.source_verifier_schema_hash
+                    or settlement_verifier_snapshot.raw_provider_response_hash
+                    != content_hash(
+                        settlement_verifier_snapshot.raw_provider_response
+                    )
+                    or settlement_verifier_snapshot.raw_provider_response_hash
+                    != settlement.source_verifier_raw_response_hash
+                    or settlement_verifier_snapshot.raw_output_hash
+                    != content_hash(
+                        {"content": settlement_verifier_snapshot.raw_output_content}
+                    )
+                    or settlement_verifier_snapshot.raw_output_hash
+                    != settlement.source_verifier_raw_output_hash
+                    or settlement_verifier_snapshot.accepted_typed_output_hash
+                    != settlement.source_verifier_typed_output_hash
+                    or settlement_verifier_snapshot.validation_errors
+                    or settlement_projection.get("content_hash")
+                    != content_hash(settlement_projection_body)
+                    or settlement.derived_projection_hash
+                    != settlement_projection.get("content_hash")
+                    or settlement_projection.get("resulting_receipts_hash")
+                    != content_hash(run.result_receipts)
+                    or settlement.authority_hash
+                    != content_hash(
+                        controlled_verifier_settlement_authority_body(settlement)
+                    )
+                    or settlement.slot_projection
+                    != (
+                        controlled_continuation_slot_projection(settlement_slot)
+                        if settlement_slot is not None
                         else None
                     )
                 )
@@ -329,6 +612,7 @@ def resolve_replacement_qualification_leaf(
             break
         child = next_runs[0]
         continuation = continuation_by_qualification_id.get(child.id)
+        settlement = settlement_by_qualification_id.get(child.id)
         expected_attempt += 1
         if (
             child.logical_attempt_number != expected_attempt
@@ -336,7 +620,9 @@ def resolve_replacement_qualification_leaf(
             or child.editorial_idea_candidate_id != root.editorial_idea_candidate_id
             or child.publish_slot_id
             != (
-                continuation.continuation_slot_id
+                settlement.settlement_slot_id
+                if settlement is not None
+                else continuation.continuation_slot_id
                 if continuation is not None
                 else leaf.publish_slot_id
             )
@@ -360,6 +646,8 @@ def resolve_replacement_qualification_leaf(
         )
     if set(continuation_by_qualification_id) - seen:
         raise ValidationFailureError("SCOPED_REPLACEMENT_CONTINUATION_UNREACHABLE")
+    if set(settlement_by_qualification_id) - seen:
+        raise ValidationFailureError("SCOPED_REPLACEMENT_SETTLEMENT_UNREACHABLE")
     return leaf
 
 
