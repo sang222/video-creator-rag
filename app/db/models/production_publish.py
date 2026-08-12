@@ -93,8 +93,13 @@ class FinalReviewCandidate(Base):
     destination_binding_fingerprint: Mapped[str] = mapped_column(
         String(64), nullable=False
     )
-    destination_platform_channel_id: Mapped[str] = mapped_column(Text, nullable=False)
-    destination_account_identity: Mapped[str] = mapped_column(Text, nullable=False)
+    # A controlled first-video closeout may truthfully stop at FINAL_REVIEW_READY
+    # while the manual YouTube destination is still PENDING_PLATFORM_ID.  In
+    # that narrow FINAL_REVIEW_ONLY mode these values are intentionally absent;
+    # the immutable destination artifact id/hash and target-market lineage keep
+    # the review candidate bound without inventing a platform identity.
+    destination_platform_channel_id: Mapped[str | None] = mapped_column(Text)
+    destination_account_identity: Mapped[str | None] = mapped_column(Text)
     target_platform: Mapped[str] = mapped_column(String(40), nullable=False)
     target_surface: Mapped[str] = mapped_column(String(40), nullable=False)
     target_market_lineage: Mapped[dict[str, Any]] = mapped_column(
@@ -139,6 +144,66 @@ class FinalReviewCandidate(Base):
         CheckConstraint(
             "content_mode in ('SERIES_EPISODE','STANDALONE')",
             name="ck_final_review_candidates_content_mode",
+        ),
+        CheckConstraint(
+            "((target_market_lineage->>'destination_mode' is null "
+            "and destination_platform_channel_id is not null "
+            "and destination_account_identity is not null) or ("
+            "coalesce(target_market_lineage->>'destination_binding_ref', '') "
+            "like 'destination-binding://%' "
+            "and coalesce(target_market_lineage->>'destination_model_hash', '') "
+            "~ '^[0-9a-f]{64}$' "
+            "and coalesce(target_market_lineage->>'destination_authority_hash', '') "
+            "~ '^[0-9a-f]{64}$' "
+            "and coalesce(target_market_lineage->>'destination_binding_hash', '') "
+            "~ '^[0-9a-f]{64}$' "
+            "and target_market_lineage->>'destination_binding_hash' "
+            "is not distinct from "
+            "target_market_lineage->>'destination_authority_hash' "
+            "and ((target_market_lineage->>'destination_mode' "
+            "is not distinct from "
+            "'FINAL_REVIEW_ONLY' "
+            "and target_market_lineage->>'destination_status' is not distinct from "
+            "'PENDING_PLATFORM_ID' "
+            "and target_market_lineage->>'publish_execution_allowed' "
+            "is not distinct from 'false' "
+            "and target_market_lineage->>'automatic_publish' "
+            "is not distinct from 'false' "
+            "and coalesce(target_market_lineage->>'destination_handle', '') <> '' "
+            "and coalesce("
+            "target_market_lineage->>'controlled_recovery_authority_id', '') "
+            "~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            "[0-9a-f]{12}$' "
+            "and coalesce("
+            "target_market_lineage->>'controlled_recovery_authority_hash', '') "
+            "~ '^[0-9a-f]{64}$' "
+            "and coalesce("
+            "target_market_lineage->>'settlement_authority_id', '') "
+            "~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            "[0-9a-f]{12}$' "
+            "and coalesce("
+            "target_market_lineage->>'settlement_authority_hash', '') "
+            "~ '^[0-9a-f]{64}$' "
+            "and coalesce("
+            "target_market_lineage->>'settlement_qualification_run_id', '') "
+            "~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            "[0-9a-f]{12}$' "
+            "and coalesce("
+            "target_market_lineage->>'settlement_provenance_hash', '') "
+            "~ '^[0-9a-f]{64}$' "
+            "and destination_platform_channel_id is null "
+            "and destination_account_identity is null) "
+            "or (target_market_lineage->>'destination_mode' is not distinct from "
+            "'VERIFIED_PUBLISH_DESTINATION' "
+            "and target_market_lineage->>'destination_status' "
+            "is not distinct from 'VERIFIED' "
+            "and target_market_lineage->>'publish_execution_allowed' "
+            "is not distinct from 'true' "
+            "and target_market_lineage->>'automatic_publish' "
+            "is not distinct from 'false' "
+            "and destination_platform_channel_id is not null "
+            "and destination_account_identity is not null))))",
+            name="ck_final_review_candidates_destination_mode",
         ),
         CheckConstraint(
             "(content_mode = 'SERIES_EPISODE' "

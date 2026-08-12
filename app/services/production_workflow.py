@@ -634,11 +634,7 @@ class GatewayBackedPostReadinessStageHandler:
             )
         destination = run.destination_binding or {}
         canonical_destination = _canonical_destination_binding(context.session, run)
-        exact_destination = {
-            "platform": data.target_platform,
-            "platform_channel_id": data.destination_platform_channel_id,
-            "account_identity": data.destination_account_identity,
-        }
+        exact_destination = _final_review_destination_projection(data)
         if (
             destination != exact_destination
             or canonical_destination != exact_destination
@@ -889,7 +885,7 @@ class ExistingFinalReviewAuthorityStageHandler:
                     "available for this project."
                 ),
             )
-        refs = self._refs_for_stage(candidate, run)
+        refs = self._refs_for_stage(context.session, candidate, run)
         result_ref, result_hash = self._result_identity(candidate)
         return WorkflowStageResult(
             result_type=f"final_review_{self.stage.value.lower()}_authority",
@@ -919,6 +915,7 @@ class ExistingFinalReviewAuthorityStageHandler:
 
     def _refs_for_stage(
         self,
+        session: Session,
         candidate: FinalReviewCandidate,
         run: ProductionWorkflowRun,
     ) -> WorkflowAuthorityRefs:
@@ -962,11 +959,16 @@ class ExistingFinalReviewAuthorityStageHandler:
                 destination_binding_fingerprint=(
                     candidate.destination_binding_fingerprint
                 ),
-                destination_binding={
-                    "platform": candidate.target_platform,
-                    "platform_channel_id": (candidate.destination_platform_channel_id),
-                    "account_identity": (candidate.destination_account_identity),
-                },
+                destination_binding=_canonical_destination_binding(
+                    session,
+                    run,
+                    WorkflowAuthorityRefs(
+                        destination_binding_id=candidate.destination_binding_id,
+                        destination_binding_fingerprint=(
+                            candidate.destination_binding_fingerprint
+                        ),
+                    ),
+                ),
             )
         if self.stage == ProductionWorkflowStage.FINALIZE:
             return WorkflowAuthorityRefs(
@@ -1368,7 +1370,7 @@ def _canonical_destination_binding(
     session: Session,
     run: ProductionWorkflowRun,
     refs: WorkflowAuthorityRefs | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     if run.production_package_artifact_version_id is None:
         raise ProductionWorkflowCoordinator._integrity_error(
             "WORKFLOW_DESTINATION_PACKAGE_REQUIRED"
@@ -1385,15 +1387,6 @@ def _canonical_destination_binding(
         expected_type="destination_binding",
         label="DESTINATION_BINDING",
     )
-    wrapped = content.get("destination_binding", content.get("destination"))
-    payload = wrapped if isinstance(wrapped, dict) else content
-    platform = payload.get("platform")
-    platform_channel_id = payload.get("platform_channel_id")
-    account_identity = payload.get(
-        "platform_account_ref", payload.get("account_identity")
-    )
-    status = str(payload.get("destination_status", payload.get("status", ""))).upper()
-    verification_state = payload.get("verification_state")
     destination_binding_id = (
         refs.destination_binding_id
         if refs is not None and refs.destination_binding_id is not None
@@ -1409,30 +1402,81 @@ def _canonical_destination_binding(
         or destination_binding_id != version_id
         or destination_binding_fingerprint
         != package.destination_binding_ref.content_hash
-        or status != "VERIFIED"
-        or (
-            verification_state is not None
-            and str(verification_state).upper() != "VERIFIED"
-        )
-        or content.get("publish_execution_allowed") is False
-        or payload.get("publish_execution_allowed") is False
-        or not all(
-            isinstance(item, str) and item.strip()
-            for item in (
-                platform,
-                platform_channel_id,
-                account_identity,
-            )
-        )
     ):
         raise ProductionWorkflowCoordinator._integrity_error(
             "WORKFLOW_DESTINATION_BINDING_AUTHORITY_MISMATCH"
         )
-    return {
-        "platform": str(platform).strip().upper(),
-        "platform_channel_id": str(platform_channel_id).strip(),
-        "account_identity": str(account_identity).strip(),
+    try:
+        from app.services.v2_provider_production import _normalized_destination
+
+        normalized = _normalized_destination(content)
+        if not any(
+            key in content
+            for key in (
+                "verified_destination_authority",
+                "final_review_only_destination_authority",
+            )
+        ):
+            return {
+                "platform": normalized["platform"],
+                "platform_channel_id": normalized["platform_channel_id"],
+                "account_identity": normalized["account_identity"],
+            }
+        return normalized
+    except ValidationFailureError as exc:
+        raise ProductionWorkflowCoordinator._integrity_error(
+            "WORKFLOW_DESTINATION_BINDING_AUTHORITY_MISMATCH"
+        ) from exc
+
+
+def _final_review_destination_projection(
+    data: FinalReviewCandidateCreateV2,
+) -> dict[str, Any]:
+    lineage = data.target_market_lineage
+    if lineage.get("destination_mode") is None:
+        return {
+            "platform": data.target_platform,
+            "platform_channel_id": data.destination_platform_channel_id,
+            "account_identity": data.destination_account_identity,
+        }
+    result = {
+        "destination_mode": lineage.get("destination_mode"),
+        "platform": data.target_platform,
+        "platform_channel_id": data.destination_platform_channel_id,
+        "account_identity": data.destination_account_identity,
+        "destination_status": lineage.get("destination_status"),
+        "destination_handle": lineage.get("destination_handle"),
+        "destination_binding_ref": lineage.get("destination_binding_ref"),
+        "destination_binding_hash": lineage.get("destination_binding_hash"),
+        "destination_model_hash": lineage.get("destination_model_hash"),
+        "destination_authority_hash": lineage.get("destination_authority_hash"),
+        "publish_execution_allowed": lineage.get("publish_execution_allowed"),
+        "automatic_publish": lineage.get("automatic_publish"),
     }
+    if lineage.get("destination_mode") == "FINAL_REVIEW_ONLY":
+        result.update(
+            {
+                "controlled_recovery_authority_id": lineage.get(
+                    "controlled_recovery_authority_id"
+                ),
+                "controlled_recovery_authority_hash": lineage.get(
+                    "controlled_recovery_authority_hash"
+                ),
+                "settlement_authority_id": lineage.get(
+                    "settlement_authority_id"
+                ),
+                "settlement_authority_hash": lineage.get(
+                    "settlement_authority_hash"
+                ),
+                "settlement_qualification_run_id": lineage.get(
+                    "settlement_qualification_run_id"
+                ),
+                "settlement_provenance_hash": lineage.get(
+                    "settlement_provenance_hash"
+                ),
+            }
+        )
+    return result
 
 
 def _validate_gateway_stage_result(
@@ -1537,26 +1581,7 @@ def _validate_gateway_stage_result(
                 "WORKFLOW_ARCHIVE_GATEWAY_NOT_VERIFIED"
             )
         destination = refs.destination_binding or {}
-        required_destination_fields = {
-            "platform",
-            "platform_channel_id",
-            "account_identity",
-        }
-        if (
-            set(destination) != required_destination_fields
-            or any(
-                not isinstance(destination.get(field_name), str)
-                or not destination[field_name].strip()
-                for field_name in required_destination_fields
-            )
-            or {
-                **destination,
-                "platform": destination["platform"].strip().upper(),
-                "platform_channel_id": (destination["platform_channel_id"].strip()),
-                "account_identity": destination["account_identity"].strip(),
-            }
-            != _canonical_destination_binding(session, run, refs)
-        ):
+        if destination != _canonical_destination_binding(session, run, refs):
             raise ProductionWorkflowCoordinator._integrity_error(
                 "WORKFLOW_ARCHIVE_DESTINATION_BINDING_INVALID"
             )
@@ -2689,9 +2714,8 @@ class ProductionWorkflowCoordinator:
         reason_codes: list[str] | None = None,
     ) -> None:
         stage = ProductionWorkflowStage(receipt.stage)
-        if (
-            stage == ProductionWorkflowStage.RENDER
-            and bool((run.metadata_ or {}).get("post_render_hold_requested"))
+        if stage == ProductionWorkflowStage.RENDER and bool(
+            (run.metadata_ or {}).get("post_render_hold_requested")
         ):
             hold = self.session.scalar(
                 select(WorkflowHold)

@@ -869,6 +869,82 @@ class V2VerifiedDestinationAuthority(_StrictFrozenModel):
         return self
 
 
+class V2FinalReviewOnlyDestinationAuthority(_StrictFrozenModel):
+    """Exact pending destination truth for the one controlled no-publish closeout.
+
+    This is deliberately not a publish destination.  It allows the render/QC/
+    Drive archive chain to retain the real channel handle and pending binding
+    without inventing a platform identity or credential.
+    """
+
+    schema_version: Literal["vcos.final-review-only-destination-authority.v1"] = (
+        "vcos.final-review-only-destination-authority.v1"
+    )
+    authority_mode: Literal["FINAL_REVIEW_ONLY"] = "FINAL_REVIEW_ONLY"
+    publish_policy: Literal["NO_PUBLISH"] = "NO_PUBLISH"
+    publish_execution_allowed: Literal[False] = False
+    active_binding_ref: str = Field(min_length=1)
+    binding: DestinationBinding
+    destination_hash: str = Field(pattern=_SHA256_PATTERN)
+    destination_status: Literal["PENDING_PLATFORM_ID"] = "PENDING_PLATFORM_ID"
+    verification_state: Literal["PENDING"] = "PENDING"
+    channel_handle: str = Field(min_length=1)
+    platform: Literal["YOUTUBE"]
+    platform_account_ref: None = None
+    platform_channel_id: None = None
+    credential_ref: None = None
+    verification_timestamp: None = None
+    controlled_recovery_authority_id: uuid.UUID
+    controlled_recovery_authority_hash: str = Field(pattern=_SHA256_PATTERN)
+    settlement_authority_id: uuid.UUID
+    settlement_authority_hash: str = Field(pattern=_SHA256_PATTERN)
+    settlement_qualification_run_id: uuid.UUID
+    settlement_provenance_hash: str = Field(pattern=_SHA256_PATTERN)
+    content_hash: str = Field(pattern=_SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_hash_and_no_publish_scope(self) -> Self:
+        if (
+            self.binding.content_hash != self.destination_hash
+            or self.binding.binding_version != 1
+            or self.binding.destination_status != self.destination_status
+            or self.binding.verification_state != self.verification_state
+            or self.binding.channel_handle != self.channel_handle
+            or not self.channel_handle.strip()
+            or self.binding.platform != self.platform
+            or self.binding.platform != "YOUTUBE"
+            or self.binding.platform_account_ref is not None
+            or self.binding.platform_channel_id is not None
+            or self.binding.credential_ref is not None
+            or self.binding.verification_timestamp is not None
+        ):
+            raise ValueError("FINAL_REVIEW_ONLY_DESTINATION_SCOPE_INVALID")
+        provenance = {
+            "controlled_recovery_authority_id": str(
+                self.controlled_recovery_authority_id
+            ),
+            "controlled_recovery_authority_hash": (
+                self.controlled_recovery_authority_hash
+            ),
+            "settlement_authority_id": str(self.settlement_authority_id),
+            "settlement_authority_hash": self.settlement_authority_hash,
+            "settlement_qualification_run_id": str(
+                self.settlement_qualification_run_id
+            ),
+        }
+        if self.settlement_provenance_hash != semantic_hash(provenance):
+            raise ValueError("FINAL_REVIEW_ONLY_PROVENANCE_HASH_MISMATCH")
+        expected = semantic_hash(self.model_dump(mode="json", exclude={"content_hash"}))
+        if self.content_hash != expected:
+            raise ValueError("DESTINATION_AUTHORITY_HASH_MISMATCH")
+        return self
+
+
+V2DestinationAuthority = (
+    V2VerifiedDestinationAuthority | V2FinalReviewOnlyDestinationAuthority
+)
+
+
 class V2FrozenSupportEnvelope(_StrictFrozenModel):
     schema_version: Literal["vcos.frozen-support-envelope.v2"] = (
         V2_FROZEN_SUPPORT_ENVELOPE_SCHEMA
@@ -900,7 +976,10 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     memory_guidance_authority: V2MemoryGuidanceAuthority | None = None
     native_routes: list[V2NativeRouteReceipt] = Field(min_length=4, max_length=4)
     zero_cost_budget: V2ZeroCostBudgetAuthority
-    verified_destination: V2VerifiedDestinationAuthority
+    # The historical field name remains stable for immutable v2 envelopes.
+    # Its second variant is explicitly non-publish and only resolves for the
+    # controlled first-video verifier-settlement lineage.
+    verified_destination: V2DestinationAuthority
     gate_receipts: list[dict[str, Any]] = Field(min_length=6)
 
     @model_validator(mode="after")
@@ -935,6 +1014,46 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
             route.stage: route.adapter_key for route in self.native_routes
         } != expected_adapters:
             raise ValueError("V2_EXECUTION_ROUTE_MODE_MISMATCH")
+        if isinstance(
+            self.verified_destination, V2FinalReviewOnlyDestinationAuthority
+        ):
+            if self.execution_mode != "REAL_LONG_FORM_PRODUCTION":
+                raise ValueError("FINAL_REVIEW_ONLY_EXECUTION_MODE_INVALID")
+            destination_gate = next(
+                (
+                    receipt
+                    for receipt in self.gate_receipts
+                    if isinstance(receipt, dict)
+                    and receipt.get("gate_key") == "verified_destination"
+                ),
+                None,
+            )
+            if (
+                not isinstance(destination_gate, dict)
+                or destination_gate.get("status") != "PASS"
+                or destination_gate.get("receipt_hash")
+                != self.verified_destination.content_hash
+                or destination_gate.get("authority_mode") != "FINAL_REVIEW_ONLY"
+                or destination_gate.get("publish_policy") != "NO_PUBLISH"
+                or destination_gate.get("publish_execution_allowed") is not False
+                or destination_gate.get("controlled_recovery_authority_id")
+                != str(
+                    self.verified_destination.controlled_recovery_authority_id
+                )
+                or destination_gate.get("controlled_recovery_authority_hash")
+                != self.verified_destination.controlled_recovery_authority_hash
+                or destination_gate.get("settlement_authority_id")
+                != str(self.verified_destination.settlement_authority_id)
+                or destination_gate.get("settlement_authority_hash")
+                != self.verified_destination.settlement_authority_hash
+                or destination_gate.get("settlement_qualification_run_id")
+                != str(
+                    self.verified_destination.settlement_qualification_run_id
+                )
+                or destination_gate.get("settlement_provenance_hash")
+                != self.verified_destination.settlement_provenance_hash
+            ):
+                raise ValueError("FINAL_REVIEW_ONLY_GATE_RECEIPT_INVALID")
         if (
             self.approved_script.estimated_duration_ms
             < self.duration_contract.minimum_duration_ms
@@ -1034,7 +1153,7 @@ class _ResolvedSupportAuthority(_StrictFrozenModel):
     frozen_sources: list[V2FrozenSourceRef]
     forbidden_claims: list[str]
     forbidden_style_terms: list[str]
-    verified_destination: V2VerifiedDestinationAuthority
+    verified_destination: V2DestinationAuthority
     execution_mode: Literal["QUALIFICATION_LOCAL", "REAL_LONG_FORM_PRODUCTION"]
     idempotency_hash: str
     input_fingerprint: str
@@ -2514,7 +2633,12 @@ class V2SupportAuthorityService:
             admission=admission,
             project=project,
         )
-        destination = _verified_destination(channel)
+        destination = _destination_authority(
+            self.session,
+            channel=channel,
+            execution_mode=command.execution_mode,
+            script_qualification_run_id=command.script_qualification_run_id,
+        )
         project_ref = V2ExactAuthorityRef(
             type="video_project",
             id=project.id,
@@ -2572,6 +2696,33 @@ class V2SupportAuthorityService:
                 source.model_dump(mode="json") for source in frozen_sources
             ],
             "verified_destination_hash": destination.content_hash,
+            **(
+                {
+                    "destination_authority_mode": "FINAL_REVIEW_ONLY",
+                    "controlled_recovery_authority_id": str(
+                        destination.controlled_recovery_authority_id
+                    ),
+                    "controlled_recovery_authority_hash": (
+                        destination.controlled_recovery_authority_hash
+                    ),
+                    "settlement_authority_id": str(
+                        destination.settlement_authority_id
+                    ),
+                    "settlement_authority_hash": (
+                        destination.settlement_authority_hash
+                    ),
+                    "settlement_qualification_run_id": str(
+                        destination.settlement_qualification_run_id
+                    ),
+                    "settlement_provenance_hash": (
+                        destination.settlement_provenance_hash
+                    ),
+                }
+                if isinstance(
+                    destination, V2FinalReviewOnlyDestinationAuthority
+                )
+                else {}
+            ),
             "requested_budget_ceiling_usd": _decimal_string(command.max_budget_usd),
             "execution_mode": command.execution_mode,
             "budget_reservation_run_id": (
@@ -3190,6 +3341,36 @@ class V2SupportAuthorityService:
                 "gate_key": "verified_destination",
                 "status": "PASS",
                 "receipt_hash": resolved.verified_destination.content_hash,
+                **(
+                    {
+                        "authority_mode": "FINAL_REVIEW_ONLY",
+                        "publish_policy": "NO_PUBLISH",
+                        "publish_execution_allowed": False,
+                        "controlled_recovery_authority_id": str(
+                            resolved.verified_destination.controlled_recovery_authority_id
+                        ),
+                        "controlled_recovery_authority_hash": (
+                            resolved.verified_destination.controlled_recovery_authority_hash
+                        ),
+                        "settlement_authority_id": str(
+                            resolved.verified_destination.settlement_authority_id
+                        ),
+                        "settlement_authority_hash": (
+                            resolved.verified_destination.settlement_authority_hash
+                        ),
+                        "settlement_qualification_run_id": str(
+                            resolved.verified_destination.settlement_qualification_run_id
+                        ),
+                        "settlement_provenance_hash": (
+                            resolved.verified_destination.settlement_provenance_hash
+                        ),
+                    }
+                    if isinstance(
+                        resolved.verified_destination,
+                        V2FinalReviewOnlyDestinationAuthority,
+                    )
+                    else {}
+                ),
             },
         ]
         if script_qualification_run_id is not None:
@@ -3721,6 +3902,233 @@ def _verified_destination(
         "destination_hash": binding.content_hash,
     }
     return V2VerifiedDestinationAuthority(
+        **payload,
+        content_hash=semantic_hash(payload),
+    )
+
+
+def _destination_authority(
+    session: Session,
+    *,
+    channel: ChannelWorkspace,
+    execution_mode: str,
+    script_qualification_run_id: uuid.UUID | None,
+) -> V2DestinationAuthority:
+    """Keep the controlled settlement no-publish; resolve VERIFIED otherwise."""
+
+    if (
+        execution_mode == "REAL_LONG_FORM_PRODUCTION"
+        and script_qualification_run_id is not None
+    ):
+        from app.db.models.script_qualification import ScriptQualificationRun
+
+        qualification = session.get(
+            ScriptQualificationRun, script_qualification_run_id
+        )
+        writer = (
+            qualification.writer_receipt
+            if qualification is not None
+            and isinstance(qualification.writer_receipt, dict)
+            else {}
+        )
+        if writer.get("producer_type") == "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT":
+            # The settlement lineage is a one-video FINAL_REVIEW_ONLY closeout.
+            # It must not silently acquire publish authority if destination
+            # governance later advances to VERIFIED; exact binding drift fails
+            # closed in the strict resolver below.
+            return _final_review_only_destination(
+                session,
+                channel=channel,
+                script_qualification_run_id=script_qualification_run_id,
+            )
+    return _verified_destination(channel)
+
+
+def _final_review_only_destination(
+    session: Session,
+    *,
+    channel: ChannelWorkspace,
+    script_qualification_run_id: uuid.UUID,
+) -> V2FinalReviewOnlyDestinationAuthority:
+    """Bind pending destination truth to the exact controlled 0074 child."""
+
+    from app.db.models.script_qualification import (
+        ControlledVerifierSettlementAuthority,
+        ScriptContractReplacementAuthority,
+        ScriptQualificationBackgroundAttempt,
+        ScriptQualificationRun,
+    )
+    from app.services.script_contract_replacement import (
+        CONTROLLED_VERIFIER_SETTLEMENT_POLICY,
+        CONTROLLED_VERIFIER_SETTLEMENT_REASON,
+        CONTROLLED_VERIFIER_SETTLEMENT_SCHEMA,
+        OPERATOR_RECOVERY_REASON,
+        OPERATOR_RECOVERY_SCHEMA,
+        controlled_verifier_settlement_authority_body,
+        operator_recovery_authority_body,
+        resolve_replacement_qualification_leaf,
+    )
+
+    qualification = session.get(ScriptQualificationRun, script_qualification_run_id)
+    settlement = session.scalar(
+        select(ControlledVerifierSettlementAuthority).where(
+            ControlledVerifierSettlementAuthority.settlement_qualification_run_id
+            == script_qualification_run_id
+        )
+    )
+    root = (
+        session.get(
+            ScriptContractReplacementAuthority,
+            settlement.root_replacement_authority_id,
+        )
+        if settlement is not None
+        else None
+    )
+    child_attempt_count = (
+        session.scalar(
+            select(ScriptQualificationBackgroundAttempt.id)
+            .where(
+                ScriptQualificationBackgroundAttempt.script_qualification_run_id
+                == script_qualification_run_id
+            )
+            .limit(1)
+        )
+        if qualification is not None
+        else None
+    )
+    try:
+        leaf = (
+            resolve_replacement_qualification_leaf(session, authority=root)
+            if root is not None
+            else None
+        )
+    except ValidationFailureError as exc:
+        raise ValidationFailureError(
+            "V2_SUPPORT_FINAL_REVIEW_ONLY_AUTHORITY_INVALID"
+        ) from exc
+    if (
+        qualification is None
+        or settlement is None
+        or root is None
+        or leaf is None
+        or qualification.id != leaf.id
+        or qualification.state != "QUALIFIED"
+        or qualification.gate_policy_version
+        != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
+        or qualification.writer_receipt is None
+        or qualification.writer_receipt.get("producer_type")
+        != "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT"
+        or qualification.writer_receipt.get("settlement_authority_id")
+        != str(settlement.id)
+        or qualification.writer_receipt.get("settlement_authority_hash")
+        != settlement.authority_hash
+        or settlement.settlement_qualification_run_id != qualification.id
+        or settlement.settlement_candidate_id
+        != qualification.editorial_idea_candidate_id
+        or settlement.settlement_slot_id != qualification.publish_slot_id
+        or settlement.schema_version != CONTROLLED_VERIFIER_SETTLEMENT_SCHEMA
+        or settlement.settlement_reason != CONTROLLED_VERIFIER_SETTLEMENT_REASON
+        or settlement.settlement_policy_version
+        != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
+        or settlement.max_provider_submissions != 0
+        or child_attempt_count is not None
+        or settlement.authority_hash
+        != content_hash(controlled_verifier_settlement_authority_body(settlement))
+        or root.replacement_reason != OPERATOR_RECOVERY_REASON
+        or root.operator_recovery_schema_version != OPERATOR_RECOVERY_SCHEMA
+        or root.operator_recovery_id != root.id
+        or root.operator_recovery_scope_key != f"first-video:{channel.id}"
+        or root.replacement_candidate_id
+        != qualification.editorial_idea_candidate_id
+        or root.authority_hash != settlement.root_authority_hash
+        or root.authority_hash != content_hash(operator_recovery_authority_body(root))
+    ):
+        raise ValidationFailureError(
+            "V2_SUPPORT_FINAL_REVIEW_ONLY_AUTHORITY_INVALID"
+        )
+
+    metadata = channel.metadata_ if isinstance(channel.metadata_, dict) else {}
+    governance = metadata.get("destination_governance")
+    if not isinstance(governance, dict):
+        raise ValidationFailureError("V2_SUPPORT_DESTINATION_NOT_VERIFIED")
+    active_ref = str(governance.get("active_binding_ref") or "")
+    bindings = governance.get("bindings")
+    active = (
+        next(
+            (
+                item
+                for item in bindings
+                if isinstance(item, dict)
+                and active_ref
+                == (
+                    f"destination-binding://{channel.key}/"
+                    f"v{item.get('binding_version')}"
+                )
+            ),
+            None,
+        )
+        if isinstance(bindings, list)
+        else None
+    )
+    try:
+        binding = (
+            DestinationBinding.model_validate(active)
+            if isinstance(active, dict)
+            else None
+        )
+    except ValidationError as exc:
+        raise ValidationFailureError("V2_SUPPORT_DESTINATION_NOT_VERIFIED") from exc
+    expected_ref = (
+        f"destination-binding://{channel.key}/v{binding.binding_version}"
+        if binding is not None
+        else ""
+    )
+    if (
+        binding is None
+        or binding.binding_version != 1
+        or active_ref != expected_ref
+        or binding.channel_id != channel.id
+        or binding.channel_key != channel.key
+        or binding.destination_status != "PENDING_PLATFORM_ID"
+        or binding.verification_state != "PENDING"
+        or binding.platform != "YOUTUBE"
+        or not binding.channel_handle
+        or not binding.channel_handle.strip()
+        or binding.platform_account_ref is not None
+        or binding.platform_channel_id is not None
+        or binding.credential_ref is not None
+        or binding.verification_timestamp is not None
+        or not binding.content_hash
+        or active.get("content_hash") != binding.content_hash
+    ):
+        raise ValidationFailureError("V2_SUPPORT_DESTINATION_NOT_VERIFIED")
+    provenance = {
+        "controlled_recovery_authority_id": str(root.id),
+        "controlled_recovery_authority_hash": root.authority_hash,
+        "settlement_authority_id": str(settlement.id),
+        "settlement_authority_hash": settlement.authority_hash,
+        "settlement_qualification_run_id": str(qualification.id),
+    }
+    payload = {
+        "schema_version": "vcos.final-review-only-destination-authority.v1",
+        "authority_mode": "FINAL_REVIEW_ONLY",
+        "publish_policy": "NO_PUBLISH",
+        "publish_execution_allowed": False,
+        "active_binding_ref": active_ref,
+        "binding": binding.model_dump(mode="json"),
+        "destination_hash": binding.content_hash,
+        "destination_status": binding.destination_status,
+        "verification_state": binding.verification_state,
+        "channel_handle": binding.channel_handle,
+        "platform": binding.platform,
+        "platform_account_ref": None,
+        "platform_channel_id": None,
+        "credential_ref": None,
+        "verification_timestamp": None,
+        **provenance,
+        "settlement_provenance_hash": semantic_hash(provenance),
+    }
+    return V2FinalReviewOnlyDestinationAuthority(
         **payload,
         content_hash=semantic_hash(payload),
     )

@@ -61,6 +61,7 @@ from app.services.production_workflow import (
 from app.services.v2_support_authority import (
     V2_FROZEN_SUPPORT_ENVELOPE_ARTIFACT_TYPE,
     V2ClaimSourceBinding,
+    V2FinalReviewOnlyDestinationAuthority,
     V2FrozenSupportEnvelope,
     _audience_source,
     _editorial_slot_source,
@@ -68,7 +69,7 @@ from app.services.v2_support_authority import (
     _preflight_source,
     _project_authority_hash,
     _search_intent_source,
-    _verified_destination as _verified_support_destination,
+    _destination_authority as _support_destination_authority,
 )
 from app.services.workflow import ArtifactService
 
@@ -524,11 +525,47 @@ def _support_authority(
         ],
     }
     approved_script = support_envelope.approved_script.approved_script_text
+    destination_authority = support_envelope.verified_destination
+    review_only = isinstance(
+        destination_authority, V2FinalReviewOnlyDestinationAuthority
+    )
     destination = {
-        **support_envelope.verified_destination.binding.model_dump(mode="json"),
-        "active_binding_ref": support_envelope.verified_destination.active_binding_ref,
-        "destination_authority_hash": support_envelope.verified_destination.content_hash,
-        "publish_execution_allowed": True,
+        **destination_authority.binding.model_dump(mode="json"),
+        "active_binding_ref": destination_authority.active_binding_ref,
+        "destination_binding_hash": destination_authority.content_hash,
+        "destination_model_hash": destination_authority.destination_hash,
+        "destination_authority_hash": destination_authority.content_hash,
+        "destination_mode": (
+            "FINAL_REVIEW_ONLY" if review_only else "VERIFIED_PUBLISH_DESTINATION"
+        ),
+        "destination_handle": destination_authority.binding.channel_handle,
+        "publish_execution_allowed": not review_only,
+        "automatic_publish": False,
+        **(
+            {
+                "publish_policy": "NO_PUBLISH",
+                "controlled_recovery_authority_id": str(
+                    destination_authority.controlled_recovery_authority_id
+                ),
+                "controlled_recovery_authority_hash": (
+                    destination_authority.controlled_recovery_authority_hash
+                ),
+                "settlement_authority_id": str(
+                    destination_authority.settlement_authority_id
+                ),
+                "settlement_authority_hash": (
+                    destination_authority.settlement_authority_hash
+                ),
+                "settlement_qualification_run_id": str(
+                    destination_authority.settlement_qualification_run_id
+                ),
+                "settlement_provenance_hash": (
+                    destination_authority.settlement_provenance_hash
+                ),
+            }
+            if review_only
+            else {}
+        ),
     }
     return _SupportAuthority(
         project=project,
@@ -632,7 +669,36 @@ def _require_frozen_support_envelope(
             "V2_FROZEN_SUPPORT_ENVELOPE_INTEGRITY_MISMATCH"
         )
 
-    expected_destination = _verified_support_destination(channel)
+    qualification_gate = next(
+        (
+            item
+            for item in envelope.gate_receipts
+            if isinstance(item, dict)
+            and item.get("gate_key") == "script_qualification"
+        ),
+        None,
+    )
+    try:
+        qualification_run_id = (
+            uuid.UUID(str(qualification_gate["script_qualification_run_id"]))
+            if isinstance(qualification_gate, dict)
+            else None
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _support_envelope_integrity_error(
+            "V2_FROZEN_SUPPORT_QUALIFICATION_LINEAGE_INVALID"
+        ) from exc
+    try:
+        expected_destination = _support_destination_authority(
+            context.session,
+            channel=channel,
+            execution_mode=envelope.execution_mode,
+            script_qualification_run_id=qualification_run_id,
+        )
+    except ValidationFailureError as exc:
+        raise _support_envelope_integrity_error(
+            "V2_FROZEN_SUPPORT_DESTINATION_AUTHORITY_DRIFT"
+        ) from exc
     if (
         envelope.project_ref.id != project.id
         or envelope.project_ref.type != "video_project"
@@ -1306,6 +1372,13 @@ def _support_payloads(
         }
     target_surface = "LONG_FORM"
     destination = authority.destination
+    review_only_destination = bool(
+        envelope is not None
+        and isinstance(
+            envelope.verified_destination,
+            V2FinalReviewOnlyDestinationAuthority,
+        )
+    )
     gate_receipts = {
         str(receipt["gate_key"]): receipt
         for receipt in (envelope.gate_receipts if envelope is not None else [])
@@ -1546,10 +1619,54 @@ def _support_payloads(
                     "target_market": destination.get("target_market"),
                     "primary_market": destination.get("primary_market"),
                     "primary_locale": destination.get("primary_locale"),
+                    "destination_mode": destination.get("destination_mode"),
+                    "destination_status": destination.get("destination_status"),
+                    "destination_handle": destination.get("destination_handle"),
+                    "destination_binding_ref": destination.get(
+                        "active_binding_ref"
+                    ),
                     "destination_binding_hash": (
                         envelope.verified_destination.content_hash
                         if envelope is not None
                         else semantic_hash(destination)
+                    ),
+                    "destination_model_hash": (
+                        envelope.verified_destination.destination_hash
+                        if envelope is not None
+                        else destination.get("content_hash")
+                    ),
+                    "destination_authority_hash": (
+                        envelope.verified_destination.content_hash
+                        if envelope is not None
+                        else semantic_hash(destination)
+                    ),
+                    "publish_execution_allowed": (
+                        destination.get("publish_execution_allowed") is True
+                    ),
+                    "automatic_publish": False,
+                    **(
+                        {
+                            "controlled_recovery_authority_id": destination.get(
+                                "controlled_recovery_authority_id"
+                            ),
+                            "controlled_recovery_authority_hash": destination.get(
+                                "controlled_recovery_authority_hash"
+                            ),
+                            "settlement_authority_id": destination.get(
+                                "settlement_authority_id"
+                            ),
+                            "settlement_authority_hash": destination.get(
+                                "settlement_authority_hash"
+                            ),
+                            "settlement_qualification_run_id": destination.get(
+                                "settlement_qualification_run_id"
+                            ),
+                            "settlement_provenance_hash": destination.get(
+                                "settlement_provenance_hash"
+                            ),
+                        }
+                        if review_only_destination
+                        else {}
                     ),
                 },
                 "publish_metadata_snapshot": {
@@ -1604,13 +1721,64 @@ def _support_payloads(
         },
         "destination_binding": {
             "schema_version": "vcos.destination-binding-artifact.v2",
-            "result": "PASS",
-            "publish_execution_allowed": True,
+            "result": (
+                "PASS_FOR_FINAL_REVIEW_ONLY"
+                if review_only_destination
+                else "PASS"
+            ),
+            "destination_mode": destination.get("destination_mode"),
+            "destination_status": destination.get("destination_status"),
+            "destination_handle": destination.get("destination_handle"),
+            "destination_binding_hash": destination.get(
+                "destination_binding_hash"
+            ),
+            "destination_model_hash": destination.get("destination_model_hash"),
+            "destination_authority_hash": destination.get(
+                "destination_authority_hash"
+            ),
+            "publish_execution_allowed": (
+                destination.get("publish_execution_allowed") is True
+            ),
+            "automatic_publish": False,
+            **(
+                {
+                    "controlled_recovery_authority_id": destination.get(
+                        "controlled_recovery_authority_id"
+                    ),
+                    "controlled_recovery_authority_hash": destination.get(
+                        "controlled_recovery_authority_hash"
+                    ),
+                    "settlement_authority_id": destination.get(
+                        "settlement_authority_id"
+                    ),
+                    "settlement_authority_hash": destination.get(
+                        "settlement_authority_hash"
+                    ),
+                    "settlement_qualification_run_id": destination.get(
+                        "settlement_qualification_run_id"
+                    ),
+                    "settlement_provenance_hash": destination.get(
+                        "settlement_provenance_hash"
+                    ),
+                }
+                if review_only_destination
+                else {}
+            ),
             "destination_binding": destination,
             **(
                 {
-                    "verified_destination_authority": (
-                        envelope.verified_destination.model_dump(mode="json")
+                    **(
+                        {
+                            "final_review_only_destination_authority": (
+                                envelope.verified_destination.model_dump(mode="json")
+                            )
+                        }
+                        if review_only_destination
+                        else {
+                            "verified_destination_authority": (
+                                envelope.verified_destination.model_dump(mode="json")
+                            )
+                        }
                     ),
                     "gate_receipt": gate_receipts["verified_destination"],
                 }

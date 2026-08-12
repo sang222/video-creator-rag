@@ -18,8 +18,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.contracts.geo_market import DestinationBinding
 from app.contracts.production_publish import FinalReviewCandidateCreateV2
 from app.contracts.production_workflow import (
     ProductionWorkflowStage,
@@ -31,7 +33,7 @@ from app.core.errors import ValidationFailureError
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
-from app.services.production_package import ProductionPackageService
+from app.services.production_package import ProductionPackageService, semantic_hash
 from app.services.production_workflow import (
     PostReadinessProductionGatewayDescriptor,
     WorkflowStageError,
@@ -423,10 +425,48 @@ class PackageBoundV2StageGateway:
         final_review = _provider_plan(context).get("final_review")
         if not isinstance(final_review, dict):
             raise ValidationFailureError("V2_PROVIDER_FINAL_REVIEW_AUTHORITY_REQUIRED")
-        destination = _normalized_destination(_destination_authority(context).content)
+        destination_version = _destination_authority(context)
+        destination = _normalized_destination(destination_version.content)
         if final_review.get("target_surface", "LONG_FORM") != "LONG_FORM":
             raise ValidationFailureError("V2_PROVIDER_LONG_FORM_SURFACE_REQUIRED")
         target_surface = "LONG_FORM"
+        target_market_lineage = _required_mapping(final_review, "target_market_lineage")
+        target_market_lineage.update(
+            {
+                "destination_mode": destination["destination_mode"],
+                "destination_status": destination["destination_status"],
+                "destination_handle": destination["destination_handle"],
+                "destination_binding_ref": destination["destination_binding_ref"],
+                "destination_binding_hash": destination["destination_binding_hash"],
+                "destination_model_hash": destination["destination_model_hash"],
+                "destination_authority_hash": destination["destination_authority_hash"],
+                "publish_execution_allowed": destination["publish_execution_allowed"],
+                "automatic_publish": destination["automatic_publish"],
+            }
+        )
+        if destination["destination_mode"] == "FINAL_REVIEW_ONLY":
+            target_market_lineage.update(
+                {
+                    "controlled_recovery_authority_id": destination[
+                        "controlled_recovery_authority_id"
+                    ],
+                    "controlled_recovery_authority_hash": destination[
+                        "controlled_recovery_authority_hash"
+                    ],
+                    "settlement_authority_id": destination[
+                        "settlement_authority_id"
+                    ],
+                    "settlement_authority_hash": destination[
+                        "settlement_authority_hash"
+                    ],
+                    "settlement_qualification_run_id": destination[
+                        "settlement_qualification_run_id"
+                    ],
+                    "settlement_provenance_hash": destination[
+                        "settlement_provenance_hash"
+                    ],
+                }
+            )
         return FinalReviewCandidateCreateV2(
             workflow_run_id=run.id,
             production_package_artifact_version_id=(
@@ -506,9 +546,7 @@ class PackageBoundV2StageGateway:
             destination_account_identity=destination["account_identity"],
             target_platform=destination["platform"],
             target_surface=target_surface,
-            target_market_lineage=_required_mapping(
-                final_review, "target_market_lineage"
-            ),
+            target_market_lineage=target_market_lineage,
             publish_metadata_snapshot=_required_mapping(
                 final_review, "publish_metadata_snapshot"
             ),
@@ -853,32 +891,214 @@ def _destination_authority(
         or artifact.status != "approved"
         or version.status != "approved"
         or version.content_hash != package.destination_binding_ref.content_hash
+        or not isinstance(version.content, dict)
+        or semantic_hash(version.content) != version.content_hash
     ):
         raise ValidationFailureError("V2_PROVIDER_DESTINATION_AUTHORITY_MISMATCH")
     return version
 
 
-def _normalized_destination(content: Any) -> dict[str, str]:
+def _normalized_destination(content: Any) -> dict[str, Any]:
     if not isinstance(content, dict):
         raise ValidationFailureError("V2_PROVIDER_DESTINATION_CONTENT_INVALID")
     nested = content.get("destination_binding", content.get("destination"))
     payload = nested if isinstance(nested, dict) else content
-    result = {
-        "platform": str(payload.get("platform") or "").strip().upper(),
-        "platform_channel_id": str(payload.get("platform_channel_id") or "").strip(),
-        "account_identity": str(
-            payload.get("platform_account_ref", payload.get("account_identity")) or ""
-        ).strip(),
-    }
     status = str(payload.get("destination_status", payload.get("status", ""))).upper()
-    if (
-        not all(result.values())
-        or status != "VERIFIED"
-        or content.get("publish_execution_allowed") is False
-        or payload.get("publish_execution_allowed") is False
+    authority_key = (
+        "final_review_only_destination_authority"
+        if status == "PENDING_PLATFORM_ID"
+        else "verified_destination_authority"
+    )
+    authority = content.get(authority_key)
+    authority_binding = (
+        authority.get("binding") if isinstance(authority, dict) else None
+    )
+    if not isinstance(authority, dict) or not isinstance(authority_binding, dict):
+        platform = str(payload.get("platform") or "").strip().upper()
+        platform_channel_id = str(payload.get("platform_channel_id") or "").strip()
+        account_identity = str(
+            payload.get("platform_account_ref", payload.get("account_identity")) or ""
+        ).strip()
+        verification_state = str(payload.get("verification_state") or "").upper()
+        verified_evidence = verification_state == "VERIFIED" or (
+            bool(payload.get("verified_at")) and bool(payload.get("verification_method"))
+        )
+        if (
+            status != "VERIFIED"
+            or content.get("publish_execution_allowed") is not True
+            or content.get("automatic_publish", False) is not False
+            or not verified_evidence
+            or not platform
+            or not platform_channel_id
+            or not account_identity
+        ):
+            raise ValidationFailureError("V2_PROVIDER_DESTINATION_AUTHORITY_REQUIRED")
+        authority_hash = semantic_hash(content)
+        return {
+            "destination_mode": "VERIFIED_PUBLISH_DESTINATION",
+            "platform": platform,
+            "platform_channel_id": platform_channel_id,
+            "account_identity": account_identity,
+            "destination_status": "VERIFIED",
+            "destination_handle": payload.get("channel_handle"),
+            "destination_binding_ref": (
+                f"destination-binding://legacy/{authority_hash}"
+            ),
+            "destination_binding_hash": authority_hash,
+            "destination_model_hash": semantic_hash(payload),
+            "destination_authority_hash": authority_hash,
+            "publish_execution_allowed": True,
+            "automatic_publish": False,
+        }
+    try:
+        from app.services.v2_support_authority import (
+            V2FinalReviewOnlyDestinationAuthority,
+            V2VerifiedDestinationAuthority,
+        )
+
+        typed_authority = (
+            V2FinalReviewOnlyDestinationAuthority.model_validate(authority)
+            if status == "PENDING_PLATFORM_ID"
+            else V2VerifiedDestinationAuthority.model_validate(authority)
+        )
+        typed_binding = DestinationBinding.model_validate(authority_binding)
+    except ValidationError as exc:
+        raise ValidationFailureError("V2_PROVIDER_DESTINATION_BINDING_INVALID") from exc
+    binding_payload = typed_binding.model_dump(mode="json")
+    if typed_authority.binding != typed_binding or any(
+        payload.get(key) != value for key, value in binding_payload.items()
     ):
-        raise ValidationFailureError("V2_PROVIDER_DESTINATION_NOT_VERIFIED")
-    return result
+        raise ValidationFailureError("V2_PROVIDER_DESTINATION_BINDING_MISMATCH")
+    active_binding_ref = authority.get("active_binding_ref")
+    expected_ref = (
+        f"destination-binding://{typed_binding.channel_key}/"
+        f"v{typed_binding.binding_version}"
+    )
+    if (
+        active_binding_ref != expected_ref
+        or authority.get("destination_hash") != typed_binding.content_hash
+        or authority.get("content_hash")
+        != semantic_hash(
+            {key: value for key, value in authority.items() if key != "content_hash"}
+        )
+    ):
+        raise ValidationFailureError("V2_PROVIDER_DESTINATION_AUTHORITY_MISMATCH")
+
+    platform = typed_binding.platform.strip().upper()
+    platform_channel_id = typed_binding.platform_channel_id
+    account_identity = typed_binding.platform_account_ref
+    handle = typed_binding.channel_handle
+    automatic_publish = content.get("automatic_publish", False)
+    mode = content.get("destination_mode")
+    if status == "VERIFIED":
+        mode = mode or "VERIFIED_PUBLISH_DESTINATION"
+        if (
+            mode != "VERIFIED_PUBLISH_DESTINATION"
+            or content.get("publish_execution_allowed") is not True
+            or typed_binding.verification_state != "VERIFIED"
+            or not platform_channel_id
+            or not account_identity
+            or automatic_publish is not False
+        ):
+            raise ValidationFailureError("V2_PROVIDER_DESTINATION_NOT_VERIFIED")
+    elif status == "PENDING_PLATFORM_ID":
+        recovery_authority_id = str(typed_authority.controlled_recovery_authority_id)
+        recovery_authority_hash = typed_authority.controlled_recovery_authority_hash
+        settlement_authority_id = str(typed_authority.settlement_authority_id)
+        settlement_authority_hash = typed_authority.settlement_authority_hash
+        settlement_qualification_run_id = str(
+            typed_authority.settlement_qualification_run_id
+        )
+        settlement_provenance_hash = typed_authority.settlement_provenance_hash
+        exact_review_only_duplicates = {
+            "destination_mode": "FINAL_REVIEW_ONLY",
+            "destination_status": "PENDING_PLATFORM_ID",
+            "destination_handle": handle,
+            "destination_binding_hash": typed_authority.content_hash,
+            "destination_model_hash": typed_binding.content_hash,
+            "destination_authority_hash": typed_authority.content_hash,
+            "publish_execution_allowed": False,
+            "automatic_publish": False,
+            "controlled_recovery_authority_id": recovery_authority_id,
+            "controlled_recovery_authority_hash": recovery_authority_hash,
+            "settlement_authority_id": settlement_authority_id,
+            "settlement_authority_hash": settlement_authority_hash,
+            "settlement_qualification_run_id": settlement_qualification_run_id,
+            "settlement_provenance_hash": settlement_provenance_hash,
+        }
+        duplicate_mismatch = any(
+            source.get(key) != expected
+            for source in (content, payload)
+            for key, expected in exact_review_only_duplicates.items()
+            if key in source
+        )
+        if (
+            mode != "FINAL_REVIEW_ONLY"
+            or content.get("result") != "PASS_FOR_FINAL_REVIEW_ONLY"
+            or content.get("publish_execution_allowed") is not False
+            or automatic_publish is not False
+            or authority.get("schema_version")
+            != "vcos.final-review-only-destination-authority.v1"
+            or authority.get("authority_mode") != "FINAL_REVIEW_ONLY"
+            or authority.get("publish_policy") != "NO_PUBLISH"
+            or authority.get("publish_execution_allowed") is not False
+            or typed_binding.verification_state != "PENDING"
+            or platform_channel_id is not None
+            or account_identity is not None
+            or typed_binding.credential_ref is not None
+            or typed_binding.verification_timestamp is not None
+            or not handle
+            or duplicate_mismatch
+            or content.get("controlled_recovery_authority_id", recovery_authority_id)
+            != recovery_authority_id
+            or content.get(
+                "controlled_recovery_authority_hash", recovery_authority_hash
+            )
+            != recovery_authority_hash
+        ):
+            raise ValidationFailureError("V2_PROVIDER_FINAL_REVIEW_ONLY_INVALID")
+    else:
+        raise ValidationFailureError("V2_PROVIDER_DESTINATION_STATUS_INVALID")
+    return {
+        "destination_mode": mode,
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "account_identity": account_identity,
+        "destination_status": status,
+        "destination_handle": handle,
+        "destination_binding_ref": active_binding_ref,
+        "destination_binding_hash": authority["content_hash"],
+        "destination_model_hash": typed_binding.content_hash,
+        "destination_authority_hash": authority["content_hash"],
+        "publish_execution_allowed": status == "VERIFIED",
+        "automatic_publish": False,
+        **(
+            {
+                "controlled_recovery_authority_id": content.get(
+                    "controlled_recovery_authority_id",
+                    payload.get(
+                        "controlled_recovery_authority_id",
+                        recovery_authority_id,
+                    ),
+                ),
+                "controlled_recovery_authority_hash": content.get(
+                    "controlled_recovery_authority_hash",
+                    payload.get(
+                        "controlled_recovery_authority_hash",
+                        recovery_authority_hash,
+                    ),
+                ),
+                "settlement_authority_id": settlement_authority_id,
+                "settlement_authority_hash": settlement_authority_hash,
+                "settlement_qualification_run_id": (
+                    settlement_qualification_run_id
+                ),
+                "settlement_provenance_hash": settlement_provenance_hash,
+            }
+            if status == "PENDING_PLATFORM_ID"
+            else {}
+        ),
+    }
 
 
 def _require_verified_final_media(

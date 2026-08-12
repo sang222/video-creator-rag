@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from decimal import Decimal
 from enum import StrEnum
@@ -84,8 +85,8 @@ class FinalReviewCandidateCreateV2(BaseModel):
     final_media_ref_id: uuid.UUID
     destination_binding_id: uuid.UUID
     destination_binding_fingerprint: str = Field(pattern=SHA256_PATTERN)
-    destination_platform_channel_id: str = Field(min_length=1)
-    destination_account_identity: str = Field(min_length=1)
+    destination_platform_channel_id: str | None = Field(default=None, min_length=1)
+    destination_account_identity: str | None = Field(default=None, min_length=1)
     target_platform: str = Field(min_length=1, max_length=40)
     target_surface: Literal["LONG_FORM"]
     target_market_lineage: dict[str, Any] = Field(min_length=1)
@@ -115,6 +116,113 @@ class FinalReviewCandidateCreateV2(BaseModel):
         required_metadata = {"title", "privacy_status"}
         if not required_metadata.issubset(self.publish_metadata_snapshot):
             raise ValueError("PUBLISH_METADATA_SNAPSHOT_INCOMPLETE")
+        destination = self.target_market_lineage
+        mode = destination.get("destination_mode")
+        status = destination.get("destination_status")
+        binding_ref = destination.get("destination_binding_ref")
+        binding_hash = destination.get("destination_binding_hash")
+        model_hash = destination.get("destination_model_hash")
+        authority_hash = destination.get("destination_authority_hash")
+        handle = destination.get("destination_handle")
+        publish_execution_allowed = destination.get("publish_execution_allowed")
+        automatic_publish = destination.get("automatic_publish")
+        if mode == "FINAL_REVIEW_ONLY":
+            recovery_authority_id = destination.get("controlled_recovery_authority_id")
+            settlement_authority_id = destination.get("settlement_authority_id")
+            settlement_qualification_run_id = destination.get(
+                "settlement_qualification_run_id"
+            )
+            try:
+                recovery_authority_id_valid = (
+                    isinstance(recovery_authority_id, str)
+                    and str(uuid.UUID(recovery_authority_id)) == recovery_authority_id
+                )
+                settlement_authority_id_valid = (
+                    isinstance(settlement_authority_id, str)
+                    and str(uuid.UUID(settlement_authority_id))
+                    == settlement_authority_id
+                )
+                settlement_qualification_run_id_valid = (
+                    isinstance(settlement_qualification_run_id, str)
+                    and str(uuid.UUID(settlement_qualification_run_id))
+                    == settlement_qualification_run_id
+                )
+            except (TypeError, ValueError):
+                recovery_authority_id_valid = False
+                settlement_authority_id_valid = False
+                settlement_qualification_run_id_valid = False
+            if (
+                status != "PENDING_PLATFORM_ID"
+                or not isinstance(handle, str)
+                or not handle.strip()
+                or publish_execution_allowed is not False
+                or self.destination_platform_channel_id is not None
+                or self.destination_account_identity is not None
+                or not recovery_authority_id_valid
+                or not settlement_authority_id_valid
+                or not settlement_qualification_run_id_valid
+                or not isinstance(binding_ref, str)
+                or not binding_ref.startswith("destination-binding://")
+                or not isinstance(binding_hash, str)
+                or not re.fullmatch(SHA256_PATTERN, binding_hash)
+                or not isinstance(model_hash, str)
+                or not re.fullmatch(SHA256_PATTERN, model_hash)
+                or not isinstance(authority_hash, str)
+                or not re.fullmatch(SHA256_PATTERN, authority_hash)
+                or binding_hash != authority_hash
+                or automatic_publish is not False
+                or not isinstance(
+                    destination.get("controlled_recovery_authority_hash"), str
+                )
+                or not re.fullmatch(
+                    SHA256_PATTERN,
+                    destination["controlled_recovery_authority_hash"],
+                )
+                or not isinstance(destination.get("settlement_authority_hash"), str)
+                or not re.fullmatch(
+                    SHA256_PATTERN,
+                    destination["settlement_authority_hash"],
+                )
+                or not isinstance(
+                    destination.get("settlement_provenance_hash"), str
+                )
+                or not re.fullmatch(
+                    SHA256_PATTERN,
+                    destination["settlement_provenance_hash"],
+                )
+            ):
+                raise ValueError("FINAL_REVIEW_ONLY_DESTINATION_INVALID")
+        elif mode == "VERIFIED_PUBLISH_DESTINATION":
+            if (
+                status != "VERIFIED"
+                or publish_execution_allowed is not True
+                or not isinstance(binding_ref, str)
+                or not binding_ref.startswith("destination-binding://")
+                or not isinstance(binding_hash, str)
+                or not re.fullmatch(SHA256_PATTERN, binding_hash)
+                or not isinstance(model_hash, str)
+                or not re.fullmatch(SHA256_PATTERN, model_hash)
+                or not isinstance(authority_hash, str)
+                or not re.fullmatch(SHA256_PATTERN, authority_hash)
+                or binding_hash != authority_hash
+                or automatic_publish is not False
+                or not self.destination_platform_channel_id
+                or not self.destination_account_identity
+            ):
+                raise ValueError("VERIFIED_PUBLISH_DESTINATION_INVALID")
+        elif mode is None:
+            # Pre-0075 callers supplied exact non-null destination identities
+            # and the legacy market lineage, but did not carry the normalized
+            # destination-mode projection.  The service re-resolves and seals
+            # that projection from the immutable package artifact before any
+            # candidate is persisted or any publish action is allowed.
+            if (
+                not self.destination_platform_channel_id
+                or not self.destination_account_identity
+            ):
+                raise ValueError("LEGACY_VERIFIED_DESTINATION_INVALID")
+        else:
+            raise ValueError("FINAL_REVIEW_DESTINATION_MODE_INVALID")
         return self
 
 
@@ -148,8 +256,8 @@ class FinalReviewCandidateRead(BaseModel):
     final_media_hash: str
     destination_binding_id: uuid.UUID
     destination_binding_fingerprint: str
-    destination_platform_channel_id: str
-    destination_account_identity: str
+    destination_platform_channel_id: str | None
+    destination_account_identity: str | None
     target_platform: str
     target_surface: str
     target_market_lineage: dict[str, Any]

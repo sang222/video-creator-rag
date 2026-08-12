@@ -1359,9 +1359,11 @@ def _validate_derived_readiness_evidence(
             "visual_plan_ref",
             "thumbnail_refs",
             "metadata_ref",
-            "destination_binding_ref",
         )
         for version in resolved[field_name]
+    ) and all(
+        _destination_artifact_passes(version.content)
+        for version in resolved["destination_binding_ref"]
     )
     rights_pass = all(
         _artifact_passes(version.content)
@@ -1501,6 +1503,30 @@ def _artifact_passes(payload: Any) -> bool:
             "gate_status",
             "readiness_result",
         )
+    )
+
+
+def _destination_artifact_passes(payload: Any) -> bool:
+    """Accept the exact sealed no-publish destination as readiness-complete."""
+
+    if _artifact_passes(payload):
+        return True
+    if not isinstance(payload, dict):
+        return False
+    try:
+        from app.services.v2_provider_production import _normalized_destination
+
+        destination = _normalized_destination(payload)
+    except ValidationFailureError:
+        return False
+    return bool(
+        payload.get("result") == "PASS_FOR_FINAL_REVIEW_ONLY"
+        and destination.get("destination_mode") == "FINAL_REVIEW_ONLY"
+        and destination.get("destination_status") == "PENDING_PLATFORM_ID"
+        and destination.get("publish_execution_allowed") is False
+        and destination.get("automatic_publish") is False
+        and destination.get("platform_channel_id") is None
+        and destination.get("account_identity") is None
     )
 
 

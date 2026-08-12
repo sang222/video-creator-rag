@@ -64,7 +64,10 @@ from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.v2_effect import V2ProductionEffectLedger
 from app.db.models.channel import CompiledChannelPolicySnapshot
 from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
-from app.services.asset_request_compiler import AssetRequestCompiler, CompilationEvidence
+from app.services.asset_request_compiler import (
+    AssetRequestCompiler,
+    CompilationEvidence,
+)
 from app.services.config_registry import content_hash
 from app.services.cross_modal import (
     CrossModalContractError,
@@ -84,6 +87,7 @@ from app.services.production_workflow import WorkflowStageContext
 from app.services.v2_provider_production import (
     V2AuthorizedAdapterOperation,
     V2ProductionAdapterDescriptor,
+    _normalized_destination as _normalized_provider_destination,
 )
 from app.services.workflow import ArtifactService
 
@@ -958,8 +962,10 @@ class V2LocalNativeProductionAdapter:
         cues: list[tuple[int, int, list[str]]] = []
         cursor = 0
         for index, group in enumerate(groups):
-            end = duration_ms if index == len(groups) - 1 else round(
-                duration_ms * (index + 1) / len(groups)
+            end = (
+                duration_ms
+                if index == len(groups) - 1
+                else round(duration_ms * (index + 1) / len(groups))
             )
             cue_text = " ".join(group)
             if len(cue_text) > 84:
@@ -969,11 +975,14 @@ class V2LocalNativeProductionAdapter:
                 raise ValidationFailureError("CAPTION_SIDECAR_DURATION_INVALID")
             cues.append((cursor, end, lines))
             cursor = end
-        srt = "\n\n".join(
-            f"{index}\n{_srt_timestamp_for_sidecar(start)} --> {_srt_timestamp_for_sidecar(end)}\n"
-            + "\n".join(lines)
-            for index, (start, end, lines) in enumerate(cues, start=1)
-        ) + "\n"
+        srt = (
+            "\n\n".join(
+                f"{index}\n{_srt_timestamp_for_sidecar(start)} --> {_srt_timestamp_for_sidecar(end)}\n"
+                + "\n".join(lines)
+                for index, (start, end, lines) in enumerate(cues, start=1)
+            )
+            + "\n"
+        )
         path = effect_dir / "qualification-captions.srt"
         _write_bytes_atomic(path, srt.encode("utf-8"))
         checksum = _sha256_file(path)
@@ -1374,8 +1383,9 @@ class V2LocalNativeProductionAdapter:
                 and (
                     (
                         bool(approved_narration_unit_ids)
-                        and set(scene.get("narration_unit_ids") or [])
-                        .issubset(approved_narration_unit_ids)
+                        and set(scene.get("narration_unit_ids") or []).issubset(
+                            approved_narration_unit_ids
+                        )
                         and bool(scene.get("narration_unit_ids"))
                     )
                     or (
@@ -2533,8 +2543,7 @@ def _cross_modal_timeline_projection(
             "visual_function": VisualFunction.CONCEPT_MODEL,
             "scene_meaning": unit.semantic_intent,
             "information_ownership_statement": (
-                f"Owns {', '.join(unit.information_unit_ids)} from "
-                f"{unit.section_id}."
+                f"Owns {', '.join(unit.information_unit_ids)} from {unit.section_id}."
             ),
             "visual_intent": (
                 "Native explanatory model that reveals the narration's "
@@ -2687,14 +2696,9 @@ def _cross_modal_qc_for_timeline(
             "detail": detail,
         }
         observations.append(
-            CrossModalObservation(
-                **body, content_hash=cross_modal_hash(body)
-            )
+            CrossModalObservation(**body, content_hash=cross_modal_hash(body))
         )
 
-    units_by_id = {
-        item.narration_unit_id: item for item in compilation.narration_units
-    }
     expected_scenes = {item.scene_id: item for item in visual_plan.scenes}
     canonical_scenes = {str(item.get("scene_id")): item for item in timeline["scenes"]}
     if set(canonical_scenes) != set(expected_scenes):
@@ -2830,7 +2834,9 @@ def _compile_post_readiness_asset_request_plan(
         "plan_version": 1,
         "package_id": str(run.production_package_artifact_version_id),
         "production_package_schema_version": "v2",
-        "production_package_artifact_version_id": str(run.production_package_artifact_version_id),
+        "production_package_artifact_version_id": str(
+            run.production_package_artifact_version_id
+        ),
         "production_package_hash": run.production_package_hash,
         "duration_contract": package.duration_contract.model_dump(mode="json"),
         "video_project_id": str(project.id),
@@ -3204,22 +3210,11 @@ def _result_from_ledger(
     )
 
 
-def _normalized_destination(content: Any) -> dict[str, str]:
-    if not isinstance(content, dict):
-        raise ValidationFailureError("V2_LOCAL_DESTINATION_INVALID")
-    nested = content.get("destination_binding", content.get("destination"))
-    payload = nested if isinstance(nested, dict) else content
-    status = str(payload.get("destination_status", payload.get("status", ""))).upper()
-    result = {
-        "platform": str(payload.get("platform") or "").strip().upper(),
-        "platform_channel_id": str(payload.get("platform_channel_id") or "").strip(),
-        "account_identity": str(
-            payload.get("platform_account_ref", payload.get("account_identity")) or ""
-        ).strip(),
-    }
-    if status != "VERIFIED" or not all(result.values()):
-        raise ValidationFailureError("V2_LOCAL_DESTINATION_NOT_VERIFIED")
-    return result
+def _normalized_destination(content: Any) -> dict[str, Any]:
+    try:
+        return _normalized_provider_destination(content)
+    except ValidationFailureError as exc:
+        raise ValidationFailureError("V2_LOCAL_DESTINATION_INVALID") from exc
 
 
 def _required_text(value: dict[str, Any], key: str) -> str:
@@ -3313,8 +3308,7 @@ def _split_sidecar_line(text: str) -> list[str]:
     choices = [
         (abs(len(" ".join(words[:index])) - len(" ".join(words[index:]))), index)
         for index in range(1, len(words))
-        if len(" ".join(words[:index])) <= 46
-        and len(" ".join(words[index:])) <= 46
+        if len(" ".join(words[:index])) <= 46 and len(" ".join(words[index:])) <= 46
     ]
     if not choices:
         raise ValidationFailureError("CAPTION_SIDECAR_LINE_LENGTH_INVALID")

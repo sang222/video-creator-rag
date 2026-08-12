@@ -99,6 +99,32 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _destination_lineage_projection(value: dict[str, Any]) -> dict[str, Any]:
+    keys = {
+        "destination_mode",
+        "destination_status",
+        "destination_handle",
+        "destination_binding_ref",
+        "destination_binding_hash",
+        "destination_model_hash",
+        "destination_authority_hash",
+        "publish_execution_allowed",
+        "automatic_publish",
+    }
+    if value.get("destination_mode") == "FINAL_REVIEW_ONLY":
+        keys.update(
+            {
+                "controlled_recovery_authority_id",
+                "controlled_recovery_authority_hash",
+                "settlement_authority_id",
+                "settlement_authority_hash",
+                "settlement_qualification_run_id",
+                "settlement_provenance_hash",
+            }
+        )
+    return {key: value.get(key) for key in sorted(keys)}
+
+
 def _strategic_lineage_event_payload(
     lineage: StrategicLineageV2,
 ) -> dict[str, Any]:
@@ -364,10 +390,18 @@ class ProductionPublishService:
             package_content=package_content,
             data=data,
         )
-        self._require_destination_binding_authority(
+        destination_projection = self._require_destination_binding_authority(
             project=project,
             package_content=package_content,
             data=data,
+        )
+        target_market_lineage = (
+            dict(data.target_market_lineage)
+            if data.target_market_lineage.get("destination_mode") is None
+            else {
+                **data.target_market_lineage,
+                **_destination_lineage_projection(destination_projection),
+            }
         )
 
         materiality_policy_hash = stable_hash(data.materiality_policy_snapshot)
@@ -385,7 +419,7 @@ class ProductionPublishService:
             "destination_account_identity": data.destination_account_identity,
             "target_platform": data.target_platform,
             "target_surface": data.target_surface,
-            "target_market_lineage": data.target_market_lineage,
+            "target_market_lineage": target_market_lineage,
             "production_lane": project.production_lane,
             "content_mode": project.content_mode,
             "series_plan_id": project.series_plan_id,
@@ -403,6 +437,19 @@ class ProductionPublishService:
                 FinalReviewCandidate.candidate_hash == candidate_hash
             )
         )
+        if (
+            existing is None
+            and data.target_market_lineage.get("destination_mode") is None
+        ):
+            legacy_payload = {
+                **payload,
+                "target_market_lineage": data.target_market_lineage,
+            }
+            existing = self.session.scalar(
+                select(FinalReviewCandidate).where(
+                    FinalReviewCandidate.candidate_hash == stable_hash(legacy_payload)
+                )
+            )
         if existing is not None:
             self._assert_candidate_scope(existing, project)
             return existing
@@ -467,7 +514,7 @@ class ProductionPublishService:
             destination_account_identity=data.destination_account_identity,
             target_platform=data.target_platform,
             target_surface=data.target_surface,
-            target_market_lineage=dict(data.target_market_lineage),
+            target_market_lineage=target_market_lineage,
             production_lane=project.production_lane,
             content_mode=project.content_mode,
             series_plan_id=project.series_plan_id,
@@ -530,6 +577,8 @@ class ProductionPublishService:
             company_id=candidate.company_id,
         )
         self._assert_candidate_current(candidate)
+        if data.decision == FinalVideoDecisionValue.UPLOAD:
+            self._require_candidate_publish_enabled(candidate)
 
         decision_payload = {
             "schema_version": "vcos.final-video-decision.v2",
@@ -642,6 +691,7 @@ class ProductionPublishService:
             permission="publish.prepare",
             company_id=task.company_id,
         )
+        self._require_task_publish_enabled(task)
         if task.task_state == "CANCELED":
             raise ConflictError("UPLOAD_TASK_CANCELED")
         if task.task_state == "VERIFIED":
@@ -766,6 +816,7 @@ class ProductionPublishService:
             permission="publish.confirm",
             company_id=task.company_id,
         )
+        self._require_task_publish_enabled(task)
         if task.task_state == "CANCELED":
             raise ConflictError("UPLOAD_TASK_CANCELED")
         if task.task_state == "READY_FOR_OPERATOR":
@@ -898,6 +949,7 @@ class ProductionPublishService:
 
         task = self._require_v2_task(confirmation.human_upload_task_id, for_update=True)
         candidate, _decision, final_media = self._task_lineage(task)
+        self._require_candidate_publish_enabled(candidate)
         classification = self._classify_confirmation(
             candidate=candidate,
             final_media=final_media,
@@ -1003,6 +1055,7 @@ class ProductionPublishService:
 
         task = self._require_v2_task(confirmation.human_upload_task_id, for_update=True)
         candidate, decision, final_media = self._task_lineage(task)
+        self._require_candidate_publish_enabled(candidate)
         self._assert_confirmation_lineage(
             confirmation=confirmation,
             task=task,
@@ -1346,6 +1399,7 @@ class ProductionPublishService:
     ) -> HumanUploadTask:
         if decision.decision != "UPLOAD":
             raise ValidationFailureError("UPLOAD_TASK_REQUIRES_UPLOAD_DECISION")
+        self._require_candidate_publish_enabled(candidate)
         existing = self.session.scalar(
             select(HumanUploadTask).where(
                 HumanUploadTask.final_video_decision_id == decision.id
@@ -1625,7 +1679,49 @@ class ProductionPublishService:
         project: VideoProject,
         package_content: ProductionPackageContentV2,
         data: FinalReviewCandidateCreateV2,
-    ) -> None:
+    ) -> dict[str, Any]:
+        projection = self._load_destination_projection(
+            project=project,
+            package_content=package_content,
+            destination_binding_id=data.destination_binding_id,
+            destination_binding_fingerprint=data.destination_binding_fingerprint,
+        )
+        exact_lineage = _destination_lineage_projection(data.target_market_lineage)
+        legacy_verified = data.target_market_lineage.get("destination_mode") is None
+        if (
+            (
+                not legacy_verified
+                and _destination_lineage_projection(projection) != exact_lineage
+            )
+            or (
+                legacy_verified
+                and (
+                    projection["destination_mode"] != "VERIFIED_PUBLISH_DESTINATION"
+                    or (
+                        isinstance(
+                            data.target_market_lineage.get("destination_binding_hash"),
+                            str,
+                        )
+                        and data.target_market_lineage["destination_binding_hash"]
+                        != projection["destination_binding_hash"]
+                    )
+                )
+            )
+            or projection["platform"] != data.target_platform
+            or projection["platform_channel_id"] != data.destination_platform_channel_id
+            or projection["account_identity"] != data.destination_account_identity
+        ):
+            raise ValidationFailureError("FINAL_REVIEW_DESTINATION_BINDING_MISMATCH")
+        return projection
+
+    def _load_destination_projection(
+        self,
+        *,
+        project: VideoProject,
+        package_content: ProductionPackageContentV2,
+        destination_binding_id: uuid.UUID,
+        destination_binding_fingerprint: str,
+    ) -> dict[str, Any]:
         binding_ref = package_content.destination_binding_ref
         if binding_ref.artifact_version_id is None:
             raise ValidationFailureError(
@@ -1638,45 +1734,102 @@ class ProductionPublishService:
             expected_project_id=project.id,
         )
         content = version.content or {}
-        binding = (
-            content.get("destination") or content.get("destination_binding") or content
-        )
-        if not isinstance(binding, dict):
-            raise ValidationFailureError("FINAL_REVIEW_DESTINATION_BINDING_INVALID")
-        status = binding.get("status") or binding.get("destination_status")
-        verification_state = binding.get("verification_state")
-        verification_evidence_present = verification_state == "VERIFIED" or (
-            bool(binding.get("verified_at"))
-            and bool(binding.get("verification_method"))
-        )
+        wrapped = content.get("destination_binding", content.get("destination"))
+        binding = wrapped if isinstance(wrapped, dict) else content
         binding_channel_id = binding.get("channel_workspace_id") or binding.get(
             "channel_id"
-        )
-        account_identity = (
-            binding.get("destination_account_identity")
-            or binding.get("account_identity")
-            or binding.get("platform_account_ref")
         )
         if (
             artifact.current_version_id != version.id
             or artifact.status != "approved"
             or version.status != "approved"
             or content_hash(content) != version.content_hash
-            or data.destination_binding_id != version.id
-            or data.destination_binding_fingerprint != version.content_hash
-            or status != "VERIFIED"
-            or not verification_evidence_present
-            or content.get("publish_execution_allowed") is False
+            or destination_binding_id != version.id
+            or destination_binding_fingerprint != version.content_hash
             or (
                 binding_channel_id is not None
                 and str(binding_channel_id) != str(project.channel_workspace_id)
             )
-            or str(binding.get("platform") or "").upper() != data.target_platform
-            or binding.get("platform_channel_id")
-            != data.destination_platform_channel_id
-            or account_identity != data.destination_account_identity
         ):
             raise ValidationFailureError("FINAL_REVIEW_DESTINATION_BINDING_MISMATCH")
+        try:
+            from app.services.v2_provider_production import _normalized_destination
+
+            return _normalized_destination(content)
+        except ValidationFailureError as exc:
+            raise ValidationFailureError(
+                "FINAL_REVIEW_DESTINATION_BINDING_MISMATCH"
+            ) from exc
+
+    def _require_candidate_destination_projection(
+        self, candidate: FinalReviewCandidate
+    ) -> dict[str, Any]:
+        project = self.session.get(VideoProject, candidate.video_project_id)
+        if project is None:
+            raise ValidationFailureError("FINAL_REVIEW_DESTINATION_PROJECT_MISSING")
+        package_content = ProductionPackageService(self.session).validate_for_readiness(
+            candidate.production_package_artifact_version_id
+        )
+        projection = self._load_destination_projection(
+            project=project,
+            package_content=package_content,
+            destination_binding_id=candidate.destination_binding_id,
+            destination_binding_fingerprint=candidate.destination_binding_fingerprint,
+        )
+        legacy_verified = (
+            candidate.target_market_lineage.get("destination_mode") is None
+        )
+        if (
+            (
+                not legacy_verified
+                and _destination_lineage_projection(projection)
+                != _destination_lineage_projection(candidate.target_market_lineage)
+            )
+            or (
+                legacy_verified
+                and (
+                    projection["destination_mode"] != "VERIFIED_PUBLISH_DESTINATION"
+                    or (
+                        isinstance(
+                            candidate.target_market_lineage.get(
+                                "destination_binding_hash"
+                            ),
+                            str,
+                        )
+                        and candidate.target_market_lineage["destination_binding_hash"]
+                        != projection["destination_binding_hash"]
+                    )
+                )
+            )
+            or projection["platform"] != candidate.target_platform
+            or projection["platform_channel_id"]
+            != candidate.destination_platform_channel_id
+            or projection["account_identity"] != candidate.destination_account_identity
+        ):
+            raise ValidationFailureError("FINAL_REVIEW_DESTINATION_BINDING_MISMATCH")
+        return projection
+
+    def _require_candidate_publish_enabled(
+        self, candidate: FinalReviewCandidate
+    ) -> None:
+        projection = self._require_candidate_destination_projection(candidate)
+        if (
+            projection["destination_mode"] != "VERIFIED_PUBLISH_DESTINATION"
+            or projection["destination_status"] != "VERIFIED"
+            or projection["publish_execution_allowed"] is not True
+            or projection["automatic_publish"] is not False
+            or not candidate.destination_platform_channel_id
+            or not candidate.destination_account_identity
+        ):
+            raise ValidationFailureError("FINAL_REVIEW_ONLY_UPLOAD_FORBIDDEN")
+
+    def _require_task_publish_enabled(self, task: HumanUploadTask) -> None:
+        candidate = self.session.get(
+            FinalReviewCandidate, task.final_review_candidate_id
+        )
+        if candidate is None:
+            raise ValidationFailureError("UPLOAD_TASK_LINEAGE_MISSING")
+        self._require_candidate_publish_enabled(candidate)
 
     def _require_artifact_version(
         self,
@@ -1727,6 +1880,7 @@ class ProductionPublishService:
             or final_media.checksum_sha256 != candidate.final_media_hash
         ):
             raise ValidationFailureError("FINAL_REVIEW_CANDIDATE_STALE_OR_SPLICED")
+        self._require_candidate_destination_projection(candidate)
 
     @staticmethod
     def _assert_candidate_scope(

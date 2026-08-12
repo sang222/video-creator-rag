@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
-REQUIRED_RUNTIME_DB_REVISION = "0074_verifier_settlement"
+REQUIRED_RUNTIME_DB_REVISION = "0075_review_only_destination"
 RUNTIME_DB_REVISION_BLOCKED = "RUNTIME_DB_REVISION_BELOW_CONTROLLED_RECOVERY_AUTHORITY"
 
 
