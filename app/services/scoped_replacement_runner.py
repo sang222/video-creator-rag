@@ -17,6 +17,7 @@ from app.db.models.script_qualification import (
     ScriptQualificationRun,
 )
 from app.services.launch_cadence import LongFormCadenceService
+from app.services.script_content_repair import ScriptContentRepairService
 from app.services.script_contract_replacement import (
     OPERATOR_RECOVERY_REASON,
     OPERATOR_RECOVERY_SCHEMA,
@@ -102,6 +103,16 @@ class ScopedReplacementContinuationRunner:
             ).continue_after_confirmed_verifier_auth_rejection(
                 source_qualification_run_id=qualification.id
             )
+        elif (
+            qualification.state == "BLOCKED_NON_REPAIRABLE"
+            and qualification.repair_attempts == 0
+            and isinstance(qualification.result_receipts, dict)
+            and (qualification.result_receipts.get("structural") or {}).get("status")
+            == "PASS"
+        ):
+            qualification = ScriptContentRepairService(
+                self.session, now=self.now
+            ).authorize(source_qualification_run_id=qualification.id)
 
         initial_event = self.session.scalar(
             select(DomainEvent)

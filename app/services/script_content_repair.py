@@ -32,7 +32,7 @@ from app.services.production_start_readiness import resolve_budget_authority
 
 CONTENT_REPAIR_PREFIX = "script-qualification-content-repair"
 CONTENT_REPAIR_POLICY_VERSION = "script-content-repair.v1"
-CONTENT_REPAIR_PROMPT_VERSION = "script-writer-content-repair.v1"
+CONTENT_REPAIR_PROMPT_VERSION = "script-writer-content-repair.v2"
 CONTENT_REPAIR_TYPE = "SCRIPT_CONTENT_REPAIR"
 BACKGROUND_EVENT_TYPE = "script_qualification.background.execute.v1"
 _V2_SINGLE_SOURCE = "V2_SINGLE_SOURCE"
@@ -46,7 +46,9 @@ class ScriptContentRepairService:
         self.session = session
         self.now = now
 
-    def authorize(self, *, source_qualification_run_id: uuid.UUID) -> ScriptQualificationRun:
+    def authorize(
+        self, *, source_qualification_run_id: uuid.UUID
+    ) -> ScriptQualificationRun:
         """Compensate the deterministic block and queue one exact repair child.
 
         This is deliberately available only for the source that owns the
@@ -72,7 +74,9 @@ class ScriptContentRepairService:
         if authorization is not None:
             child = self.session.scalar(
                 select(ScriptQualificationRun)
-                .where(ScriptQualificationRun.supersedes_qualification_run_id == source.id)
+                .where(
+                    ScriptQualificationRun.supersedes_qualification_run_id == source.id
+                )
                 .where(
                     ScriptQualificationRun.recovery_key
                     == f"{CONTENT_REPAIR_PREFIX}:{source.id}:{authorization.id}"
@@ -175,7 +179,7 @@ class ScriptContentRepairService:
             assignment_resolution_hash=source.assignment_resolution_hash,
             episode_reservation_active=False,
             writer_prompt_version=CONTENT_REPAIR_PROMPT_VERSION,
-            verifier_prompt_version="script-semantic-verifier.v4",
+            verifier_prompt_version="script-semantic-verifier.v5",
             gate_policy_version=source.gate_policy_version,
             model=source.model,
             logical_attempt_number=source.logical_attempt_number + 1,
@@ -195,6 +199,7 @@ class ScriptContentRepairService:
             verifier_attempt_key=f"{recovery_key}:verifier",
             repair_attempts=1,
             script_contract_version=source.script_contract_version,
+            replacement_authority_id=source.replacement_authority_id,
         )
         self.session.add(child)
         source.repair_attempts = 1
@@ -229,7 +234,8 @@ class ScriptContentRepairService:
         if (
             authorization.source_script_hash != _canonical_script_hash(original)
             or authorization.script_assignment_hash != run.script_assignment_hash
-            or authorization.factual_evidence_pack_hash != run.factual_evidence_pack_hash
+            or authorization.factual_evidence_pack_hash
+            != run.factual_evidence_pack_hash
             or authorization.memory_digest_hash != run.memory_digest_hash
             or authorization.runtime_contract_hash != run.runtime_contract_hash
             or authorization.repair_type != CONTENT_REPAIR_TYPE
@@ -257,11 +263,16 @@ class ScriptContentRepairService:
                 "Preserve every section outside affected_section_ids byte-for-byte.",
                 "Change only affected section narration and the claim inventory needed to bind it.",
                 "Use only the frozen factual evidence pack; do not introduce external facts.",
+                "Every claim_text must be one exact contiguous span copied from one section narration.",
+                "Every claim evidence_span_id must exactly match an ID in the frozen factual evidence pack.",
+                "Remove or rewrite any partially supported synthesis; do not relabel it as supported.",
                 "Keep language, duration contract, editorial assignment, scope, and evidence identities unchanged.",
             ],
         }
 
-    def validate_output_scope(self, run: ScriptQualificationRun, repaired: _ScriptOutput) -> None:
+    def validate_output_scope(
+        self, run: ScriptQualificationRun, repaired: _ScriptOutput
+    ) -> None:
         """Reject a paid repair that changes an untouched source section."""
 
         directive = self.writer_context(run)
@@ -283,10 +294,14 @@ class ScriptContentRepairService:
         allowed = set(directive["affected_section_ids"])
         for old, new in zip(old_sections, new_sections, strict=True):
             if old.section_id != new.section_id:
-                raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED")
+                raise ValidationFailureError(
+                    "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
+                )
             if isinstance(original, QualifiedScriptOutput):
                 if old.heading != new.heading:
-                    raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED")
+                    raise ValidationFailureError(
+                        "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
+                    )
             elif (
                 old.ordinal != new.ordinal
                 or old.purpose != new.purpose
@@ -294,9 +309,13 @@ class ScriptContentRepairService:
                 != new.required_assignment_unit_refs
                 or old.expected_claim_refs != new.expected_claim_refs
             ):
-                raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED")
+                raise ValidationFailureError(
+                    "SCRIPT_CONTENT_REPAIR_SECTION_IDENTITY_CHANGED"
+                )
             if old.section_id not in allowed and old.narration != new.narration:
-                raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_OUT_OF_SCOPE_SECTION_CHANGED")
+                raise ValidationFailureError(
+                    "SCRIPT_CONTENT_REPAIR_OUT_OF_SCOPE_SECTION_CHANGED"
+                )
 
     def seal_exhausted(
         self, *, repair_qualification_run_id: uuid.UUID
@@ -318,7 +337,9 @@ class ScriptContentRepairService:
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_EXHAUSTION_RUN_INVALID")
         structural = run.result_receipts.get("structural")
         if not isinstance(structural, dict) or structural.get("status") != "BLOCK":
-            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_EXHAUSTION_NOT_STRUCTURAL")
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_EXHAUSTION_NOT_STRUCTURAL"
+            )
         attempt = self.session.scalar(
             select(ScriptQualificationBackgroundAttempt)
             .where(
@@ -347,7 +368,9 @@ class ScriptContentRepairService:
             or snapshot.validation_errors
             or not snapshot.accepted_typed_output_hash
         ):
-            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_EXHAUSTION_EVIDENCE_INVALID")
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_EXHAUSTION_EVIDENCE_INVALID"
+            )
         failure = dict(run.failure_receipt or {})
         if "SCRIPT_OUTPUT_CONTRACT_REPAIR_EXHAUSTED" in (
             failure.get("reason_codes") or []
@@ -398,7 +421,9 @@ class ScriptContentRepairService:
             raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_SOURCE_NOT_ELIGIBLE")
         draft = _script_output(source)
         terminal = dict(source.terminal_settlement_receipt)
-        terminal_body = {key: value for key, value in terminal.items() if key != "content_hash"}
+        terminal_body = {
+            key: value for key, value in terminal.items() if key != "content_hash"
+        }
         if (
             terminal.get("kind") != "DETERMINISTIC_BLOCK"
             or terminal.get("reason_code") != "SCRIPT_QUALIFICATION_BLOCKED"
@@ -407,7 +432,9 @@ class ScriptContentRepairService:
             or source.admitted_video_project_id is not None
             or source.production_workflow_run_id is not None
         ):
-            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_TERMINAL_AUTHORITY_INVALID")
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_TERMINAL_AUTHORITY_INVALID"
+            )
         attempts = self.session.scalars(
             select(ScriptQualificationBackgroundAttempt).where(
                 ScriptQualificationBackgroundAttempt.script_qualification_run_id
@@ -436,15 +463,22 @@ class ScriptContentRepairService:
             )
         )
         if snapshot is None or snapshot.validation_errors:
-            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_VERIFIER_EVIDENCE_MISSING")
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_VERIFIER_EVIDENCE_MISSING"
+            )
         try:
             output = json.loads(snapshot.raw_output_content)
         except (TypeError, ValueError) as exc:
-            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_VERIFIER_EVIDENCE_INVALID") from exc
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_VERIFIER_EVIDENCE_INVALID"
+            ) from exc
         allowed = {section.section_id for section in draft.sections}
         affected: set[str] = set()
         for observation in output.get("material_claim_inventory", []):
-            if not isinstance(observation, dict) or observation.get("materiality_state") != "MATERIAL":
+            if (
+                not isinstance(observation, dict)
+                or observation.get("materiality_state") != "MATERIAL"
+            ):
                 continue
             if (
                 not observation.get("writer_declared_claim_id")
@@ -456,7 +490,9 @@ class ScriptContentRepairService:
                 if isinstance(section_id, str) and section_id in allowed:
                     affected.add(section_id)
         if not affected:
-            raise ValidationFailureError("SCRIPT_CONTENT_REPAIR_AFFECTED_SECTIONS_EMPTY")
+            raise ValidationFailureError(
+                "SCRIPT_CONTENT_REPAIR_AFFECTED_SECTIONS_EMPTY"
+            )
         reason_codes = sorted(
             {
                 str(code)
@@ -480,7 +516,10 @@ class ScriptContentRepairService:
             return []
         units: list[str] = []
         for section in raw_plan.get("sections") or []:
-            if not isinstance(section, dict) or section.get("section_id") not in affected_sections:
+            if (
+                not isinstance(section, dict)
+                or section.get("section_id") not in affected_sections
+            ):
                 continue
             units.extend(
                 str(item)
@@ -491,7 +530,9 @@ class ScriptContentRepairService:
 
     def _validate_current_authority(self, source: ScriptQualificationRun) -> None:
         now = self.now()
-        candidate = self.session.get(EditorialIdeaCandidate, source.editorial_idea_candidate_id)
+        candidate = self.session.get(
+            EditorialIdeaCandidate, source.editorial_idea_candidate_id
+        )
         slot = self.session.get(LongFormPublishSlot, source.publish_slot_id)
         topic = self.session.scalar(
             select(EditorialTopicDefinitionGateReceipt)
@@ -521,14 +562,21 @@ class ScriptContentRepairService:
         reasons: list[str] = []
         if source.logical_deadline_at is None or now >= source.logical_deadline_at:
             reasons.append("SCRIPT_CONTENT_REPAIR_DEADLINE_EXCEEDED")
-        if (
-            slot is None
-            or not (slot.target_start_window_open_at <= now <= slot.target_start_window_close_at)
+        if slot is None or not (
+            slot.target_start_window_open_at <= now <= slot.target_start_window_close_at
         ):
             reasons.append("SCRIPT_CONTENT_REPAIR_WINDOW_CLOSED")
-        if topic is None or topic.state != "PASS" or not topic.current_production_eligibility:
+        if (
+            topic is None
+            or topic.state != "PASS"
+            or not topic.current_production_eligibility
+        ):
             reasons.append("SCRIPT_CONTENT_REPAIR_TOPIC_NOT_CURRENT")
-        if preflight is None or preflight.decision != "PASS" or preflight.policy_fit_state != "PASS":
+        if (
+            preflight is None
+            or preflight.decision != "PASS"
+            or preflight.policy_fit_state != "PASS"
+        ):
             reasons.append("SCRIPT_CONTENT_REPAIR_PREFLIGHT_NOT_CURRENT")
         if budget.get("state") != "READY":
             reasons.append("SCRIPT_CONTENT_REPAIR_BUDGET_NOT_READY")
@@ -591,7 +639,9 @@ def _canonical_script_hash(output: _ScriptOutput) -> str:
     import hashlib
     import unicodedata
 
-    canonical = unicodedata.normalize("NFC", output.canonical_script).replace(
-        "\r\n", "\n"
-    ).replace("\r", "\n")
+    canonical = (
+        unicodedata.normalize("NFC", output.canonical_script)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

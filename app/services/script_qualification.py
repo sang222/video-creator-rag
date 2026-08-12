@@ -75,6 +75,7 @@ QUALIFICATION_POLICY_VERSION = "script-qualification-policy.v2"
 WRITER_PROMPT_VERSION = "script-writer-assignment.v3"
 WRITER_PROMPT_VERSION_V2 = "script-writer-single-source.v5"
 VERIFIER_PROMPT_VERSION = "script-semantic-verifier.v4"
+VERIFIER_PROMPT_VERSION_V2 = "script-semantic-verifier.v5"
 SCRIPT_QUALIFICATION_EVENT_TYPE = "script_qualification.execute.v1"
 SCRIPT_QUALIFICATION_AGGREGATE_TYPE = "script_qualification_run"
 LUNA_MODEL = "gpt-5.6-luna"
@@ -1223,7 +1224,11 @@ class ScriptQualificationService:
                 if script_contract_version == SCRIPT_CONTRACT_V2
                 else WRITER_PROMPT_VERSION
             ),
-            "verifier_prompt_version": VERIFIER_PROMPT_VERSION,
+            "verifier_prompt_version": (
+                VERIFIER_PROMPT_VERSION_V2
+                if script_contract_version == SCRIPT_CONTRACT_V2
+                else VERIFIER_PROMPT_VERSION
+            ),
             "gate_policy_version": QUALIFICATION_POLICY_VERSION,
             "runtime_contract_hash": runtime_contract["contract_hash"],
             "assignment_resolution_hash": assignment_resolution["resolution_hash"],
@@ -1271,7 +1276,11 @@ class ScriptQualificationService:
             runtime_contract_hash=runtime_contract["contract_hash"],
             assignment_resolution=assignment_resolution,
             assignment_resolution_hash=assignment_resolution["resolution_hash"],
-            verifier_prompt_version=VERIFIER_PROMPT_VERSION,
+            verifier_prompt_version=(
+                VERIFIER_PROMPT_VERSION_V2
+                if script_contract_version == SCRIPT_CONTRACT_V2
+                else VERIFIER_PROMPT_VERSION
+            ),
             gate_policy_version=QUALIFICATION_POLICY_VERSION,
             model=LUNA_MODEL,
             logical_attempt_number=1,
@@ -2334,6 +2343,13 @@ class ScriptQualificationService:
             context["capability_projection"] = projections[
                 "verifier"
             ].provider_payload()
+            context["inventory_completion_rule"] = (
+                "Emit exactly one material_claim_inventory observation for every "
+                "sentence in canonical_script, in script order. Copy each span.text "
+                "as one exact contiguous sentence from its named section. Classify "
+                "framing and transitions as NON_MATERIAL; every MATERIAL observation "
+                "must bind the matching writer claim and exact frozen evidence IDs."
+            )
         return context
 
     def _structural_receipt(
@@ -2490,7 +2506,10 @@ class ScriptQualificationService:
     ) -> dict[str, dict[str, Any]]:
         script = draft.canonical_script
         script_bytes = canonical_script_bytes(script)
-        section_bounds = self._section_bounds(draft.sections)
+        section_bounds = self._section_bounds(
+            draft.sections,
+            separator="\n\n" if self._uses_v2_contract(run) else " ",
+        )
         writer_claims = {item.claim_id: item for item in draft.claims}
         evidence = {
             item["evidence_span_id"]: item
@@ -2643,7 +2662,9 @@ class ScriptQualificationService:
         }
 
     @staticmethod
-    def _section_bounds(sections: list[Any]) -> dict[str, tuple[int, int]]:
+    def _section_bounds(
+        sections: list[Any], *, separator: str = " "
+    ) -> dict[str, tuple[int, int]]:
         cursor = 0
         bounds: dict[str, tuple[int, int]] = {}
         for section in sections:
@@ -2652,7 +2673,7 @@ class ScriptQualificationService:
             start = cursor
             cursor += len(narration.encode("utf-8"))
             bounds[section_id] = (start, cursor)
-            cursor += 1
+            cursor += len(separator.encode("utf-8"))
         return bounds
 
     @staticmethod
