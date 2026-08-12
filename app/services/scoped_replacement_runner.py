@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 from app.core.actor import _system_worker_actor
 from app.core.errors import ValidationFailureError
 from app.db.models.foundation import DomainEvent
-from app.db.models.production_workflow import ProductionWorkflowRun
+from app.db.models.production_workflow import (
+    ProductionWorkflowRun,
+    WorkflowCommandReceipt,
+)
 from app.db.models.script_qualification import (
     ScriptContractReplacementAuthority,
     ScriptQualificationRun,
@@ -34,6 +37,14 @@ from app.services.script_writer_output_recovery import (
 )
 from app.services.script_verifier_settlement import (
     ScriptVerifierSettlementRecoveryService,
+)
+from app.services.v2_narration_timing_recovery import (
+    ORIGINAL_FAILURE as V2_TIMING_RECOVERY_FAILURE,
+    V2NarrationTimingRecoveryService,
+)
+from app.db.models.v2_effect import (
+    V2NarrationTimingRecoveryAuthority,
+    V2ProductionEffectLedger,
 )
 from app.workers.production_workflow import ProductionWorkflowWorker, WorkerRunResult
 
@@ -68,6 +79,9 @@ class ScopedReplacementContinuationRunner:
         self.post_render_hold_requested = post_render_hold_requested
         self.actor = _system_worker_actor(
             "vcos-durable-worker", permissions={"production.start"}
+        )
+        self.recovery_actor = _system_worker_actor(
+            "vcos-controlled-recovery", permissions={"production.start"}
         )
 
     def run_once(self, *, authority_id: uuid.UUID) -> ScopedReplacementRunResult:
@@ -209,6 +223,15 @@ class ScopedReplacementContinuationRunner:
         self.session.commit()
 
         worker_result: WorkerRunResult | None = None
+        timing_recovered = False
+        if workflow is not None and self._is_timing_recovery_candidate(workflow.id):
+            V2NarrationTimingRecoveryService(self.session).recover(
+                workflow.id, self.recovery_actor
+            )
+            timing_recovered = True
+            self.session.expire_all()
+            refreshed = self.session.get(ProductionWorkflowRun, workflow.id)
+            workflow = refreshed or workflow
         if workflow is not None and workflow.state not in {
             "PAUSED_AFTER_NATIVE_RENDER",
             "FINAL_REVIEW_READY",
@@ -217,7 +240,7 @@ class ScopedReplacementContinuationRunner:
             "DEAD_LETTERED",
             "CANCELED",
             "SUPERSEDED",
-        }:
+        } and not timing_recovered:
             worker_result = self._run_one_scoped_event(workflow_id=workflow.id)
             self.session.expire_all()
             refreshed = self.session.get(ProductionWorkflowRun, workflow.id)
@@ -231,6 +254,76 @@ class ScopedReplacementContinuationRunner:
             workflow_id=workflow.id if workflow is not None else None,
             workflow_state=workflow.state if workflow is not None else None,
             worker_result=worker_result,
+        )
+
+    def _is_timing_recovery_candidate(self, workflow_id: uuid.UUID) -> bool:
+        workflow = self.session.get(ProductionWorkflowRun, workflow_id)
+        if (
+            workflow is None
+            or workflow.state != "BLOCKED"
+            or workflow.current_stage != "MEDIA"
+        ):
+            return False
+        ledger = self.session.scalar(
+            select(V2ProductionEffectLedger).where(
+                V2ProductionEffectLedger.workflow_run_id == workflow_id,
+                V2ProductionEffectLedger.stage == "MEDIA",
+                V2ProductionEffectLedger.state.in_(
+                    {"FAILED_UNCERTAIN", "VERIFIED"}
+                ),
+                V2ProductionEffectLedger.effect_invocation_count == 1,
+                V2ProductionEffectLedger.adapter_key == "v2-elevenlabs-narration",
+            )
+        )
+        if ledger is None:
+            return False
+        event_id = self.session.scalar(
+            select(DomainEvent.id).where(
+                DomainEvent.workflow_run_id == workflow_id,
+                DomainEvent.command_id == ledger.command_id,
+                DomainEvent.dead_lettered_at.is_not(None),
+                DomainEvent.last_error_code == V2_TIMING_RECOVERY_FAILURE,
+            )
+        )
+        if event_id is None:
+            return False
+        if ledger.state == "FAILED_UNCERTAIN":
+            return True
+
+        # A crash may occur after the adapter commits VERIFIED but before the
+        # recovery/workflow receipts commit.  Resume only when the verified
+        # ledger itself proves this exact 0076 recovery; never adopt an
+        # unrelated MEDIA result.
+        authority = self.session.scalar(
+            select(V2NarrationTimingRecoveryAuthority).where(
+                V2NarrationTimingRecoveryAuthority.workflow_run_id
+                == workflow_id,
+                V2NarrationTimingRecoveryAuthority.media_effect_ledger_id
+                == ledger.id,
+            )
+        )
+        existing_receipt = self.session.scalar(
+            select(WorkflowCommandReceipt.id).where(
+                WorkflowCommandReceipt.domain_event_id == event_id
+            )
+        )
+        journal = dict(ledger.effect_journal or {})
+        return bool(
+            authority is not None
+            and existing_receipt is None
+            and ledger.result_type
+            == "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
+            and ledger.result_hash is not None
+            and ledger.completed_at is not None
+            and journal.get("timeline_hash") == ledger.result_hash
+            and journal.get("timing_recovery_authority_id")
+            == str(authority.id)
+            and journal.get("timing_recovery_authority_hash")
+            == authority.authority_hash
+            and journal.get("provider_call_count") == 2
+            and journal.get("tts_provider_call_count") == 1
+            and journal.get("tts_retry_count") == 0
+            and journal.get("forced_alignment_provider_call_count") == 1
         )
 
     def _locked_qualification(self, authority_id: uuid.UUID) -> ScriptQualificationRun:

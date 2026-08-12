@@ -611,4 +611,4 @@ def test_runtime_migration_guard_requires_controlled_continuation_revision(
 
     assert status.ready is True
     assert status.current_revision == REQUIRED_RUNTIME_DB_REVISION
-    assert status.required_revision == "0075_review_only_destination"
+    assert status.required_revision == "0076_v2_timing_recovery"

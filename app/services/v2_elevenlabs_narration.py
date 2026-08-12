@@ -34,6 +34,7 @@ from app.services.v2_native_effects import (
     _load_json,
     _persist_exact_json,
     _production_inputs,
+    _result_from_ledger,
     _sha256_file,
     _write_json_atomic,
 )
@@ -214,6 +215,207 @@ class V2ElevenLabsNarrationAdapter(V2LocalNativeProductionAdapter):
             ),
             journal,
         )
+
+    def reconcile_recovered_media(
+        self,
+        *,
+        workflow_run_id: Any,
+        ledger_id: Any,
+        audio: dict[str, Any],
+        recovery_authority_id: Any,
+        recovery_authority_hash: str,
+    ) -> WorkflowStageResult:
+        """Finish MEDIA from already-sealed TTS bytes and recovered timing.
+
+        This entrypoint deliberately has no TTS client path.  It may only turn
+        the existing one-invocation uncertain MEDIA ledger into VERIFIED after
+        the recovery service has supplied a strict timing seed.
+        """
+
+        with self._session_factory() as session:
+            from app.db.models.v2_effect import V2ProductionEffectLedger
+
+            ledger = session.scalar(
+                select(V2ProductionEffectLedger)
+                .where(V2ProductionEffectLedger.id == ledger_id)
+                .with_for_update()
+            )
+            if (
+                ledger is None
+                or ledger.workflow_run_id != workflow_run_id
+                or ledger.stage != ProductionWorkflowStage.MEDIA.value
+                or ledger.adapter_key != V2_ELEVENLABS_NARRATION_ADAPTER_KEY
+                or ledger.state not in {"FAILED_UNCERTAIN", "VERIFIED"}
+                or ledger.effect_invocation_count != 1
+                or (
+                    ledger.state == "FAILED_UNCERTAIN"
+                    and ledger.result_hash is not None
+                )
+            ):
+                raise ValidationFailureError(
+                    "V2_NARRATION_TIMING_RECOVERY_LEDGER_INVALID"
+                )
+            command_id = ledger.command_id
+
+        with self._command_lock(command_id):
+            with self._session_factory() as session:
+                from app.db.models.v2_effect import V2ProductionEffectLedger
+
+                ledger = session.scalar(
+                    select(V2ProductionEffectLedger).where(
+                        V2ProductionEffectLedger.id == ledger_id
+                    )
+                )
+                recovery_journal = dict(
+                    ledger.effect_journal or {}
+                ) if ledger is not None else {}
+                if ledger is not None and ledger.state == "VERIFIED":
+                    if (
+                        ledger.workflow_run_id != workflow_run_id
+                        or ledger.result_type
+                        != "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
+                        or ledger.result_hash is None
+                        or recovery_journal.get("timeline_hash")
+                        != ledger.result_hash
+                        or (ledger.authority_refs or {}).get(
+                            "canonical_media_timeline_hash"
+                        )
+                        != ledger.result_hash
+                        or (ledger.result_payload or {}).get(
+                            "timing_recovery_authority_id"
+                        )
+                        != str(recovery_authority_id)
+                        or (ledger.result_payload or {}).get(
+                            "timing_recovery_authority_hash"
+                        )
+                        != recovery_authority_hash
+                        or recovery_journal.get("timing_recovery_authority_id")
+                        != str(recovery_authority_id)
+                        or recovery_journal.get("timing_recovery_authority_hash")
+                        != recovery_authority_hash
+                        or recovery_journal.get("provider_call_count") != 2
+                        or recovery_journal.get("tts_provider_call_count") != 1
+                        or recovery_journal.get("tts_retry_count") != 0
+                        or recovery_journal.get(
+                            "forced_alignment_provider_call_count"
+                        )
+                        != 1
+                    ):
+                        raise ValidationFailureError(
+                            "V2_NARRATION_TIMING_RECOVERY_VERIFIED_LEDGER_MISMATCH"
+                        )
+                    return _result_from_ledger(ledger, reconciled=True)
+                if (
+                    ledger is None
+                    or ledger.state != "FAILED_UNCERTAIN"
+                    or ledger.effect_invocation_count != 1
+                    or ledger.result_hash is not None
+                ):
+                    raise ValidationFailureError(
+                        "V2_NARRATION_TIMING_RECOVERY_LEDGER_INVALID"
+                    )
+            with self._session_factory() as session:
+                run, project, package, script, visual = _production_inputs(
+                    session, workflow_run_id
+                )
+            effect_dir = self._effect_dir(command_id)
+            with self._session_factory() as session:
+                persisted_project = session.get(VideoProject, project.id)
+                if persisted_project is None:
+                    raise ValidationFailureError(
+                        "V2_CAPTION_SIDECAR_PROJECT_REQUIRED"
+                    )
+                sidecar = _persist_sidecar_artifacts(
+                    session=session,
+                    project=persisted_project,
+                    command_id=command_id,
+                    script_content=dict(script.content or {}),
+                    script_content_hash=script.content_hash,
+                    audio=audio,
+                    effect_dir=effect_dir,
+                )
+                session.commit()
+            timeline_ref = f"v2-effect://{ledger_id}/canonical-media-timeline"
+            timeline = _build_timeline(
+                run=run,
+                project=project,
+                package=package,
+                script=script,
+                visual=visual,
+                timeline_ref=timeline_ref,
+                audio={**audio, **sidecar},
+            )
+            timeline_hash = content_hash(timeline)
+            timeline_path = effect_dir / "canonical-media-timeline.json"
+            _persist_exact_json(timeline_path, timeline)
+            journal = {
+                "schema_version": "vcos.production-effect-journal.v1",
+                "command_id": command_id,
+                "stage": "MEDIA",
+                "state": "VERIFIED",
+                "effect_invocation_count": 1,
+                "provider_call_count": 2,
+                "tts_provider_call_count": 1,
+                "tts_retry_count": 0,
+                "forced_alignment_provider_call_count": 1,
+                "timeline_relative_path": self._relative(timeline_path),
+                "timeline_file_checksum": _sha256_file(timeline_path),
+                "timeline_hash": timeline_hash,
+                "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+                "audio_asset_ref": audio["audio_asset_ref"],
+                "audio_checksum": audio["audio_checksum"],
+                "audio_relative_path": audio["audio_relative_path"],
+                "audio_effect_invocation_count": 1,
+                "narration_present": True,
+                "alignment_method": audio["alignment_method"],
+                "provider_request_hash": audio["provider_request_hash"],
+                "provider_request_id": audio.get("provider_request_id"),
+                "estimated_cost_usd": audio["estimated_cost_usd"],
+                "actual_cost_usd": audio["actual_cost_usd"],
+                "timing_recovery_authority_id": str(recovery_authority_id),
+                "timing_recovery_authority_hash": recovery_authority_hash,
+                **sidecar,
+            }
+            _persist_exact_json(
+                effect_dir / "effect-journal.json",
+                journal,
+                allow_reconciled_update=True,
+            )
+            result = WorkflowStageResult(
+                result_type="V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE",
+                result_ref=timeline_ref,
+                result_hash=timeline_hash,
+                result_payload={
+                    "schema_version": V2_TIMELINE_SCHEMA,
+                    "scene_count": len(timeline["scenes"]),
+                    "duration_ms": timeline["duration_ms"],
+                    "audio_strategy": V2_ELEVENLABS_NARRATION_STRATEGY,
+                    "audio_asset_ref": audio["audio_asset_ref"],
+                    "audio_checksum": audio["audio_checksum"],
+                    "narration_present": True,
+                    "alignment_method": audio["alignment_method"],
+                    "provider_request_id": audio.get("provider_request_id"),
+                    "actual_cost_usd": audio["actual_cost_usd"],
+                    "caption_ref": sidecar["caption_ref"],
+                    "caption_checksum": sidecar["caption_checksum"],
+                    "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+                    "subtitle_qc_state": sidecar["subtitle_qc_state"],
+                    "timing_recovery_authority_id": str(recovery_authority_id),
+                    "timing_recovery_authority_hash": recovery_authority_hash,
+                },
+                authority_refs=WorkflowAuthorityRefs(
+                    video_project_id=project.id,
+                    canonical_media_timeline_ref=timeline_ref,
+                    canonical_media_timeline_hash=timeline_hash,
+                ),
+                reason_codes=["V2_NARRATION_TIMING_RECOVERED"],
+            )
+            return self._verify_effect(
+                ledger_id,
+                result=result,
+                journal=journal,
+                reconciled=True,
+            )
 
     def _prepare_real_audio(
         self,
@@ -455,7 +657,12 @@ def _persist_sidecar_artifacts(
     """
 
     transcript = str(script_content.get("narration_text") or "").strip()
-    locale = str(script_content.get("locale") or script_content.get("language") or "").strip()
+    locale = str(
+        script_content.get("locale")
+        or script_content.get("language")
+        or audio.get("caption_locale")
+        or ""
+    ).strip()
     if not transcript:
         raise ValidationFailureError("CAPTION_SIDECAR_TRANSCRIPT_MISSING")
     if not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?", locale):
@@ -667,7 +874,11 @@ def _build_srt_cues(words: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         candidate = [*group, word]
         candidate_text = " ".join(str(item["text"]) for item in candidate)
         duration_ms = int(candidate[-1]["end_ms"]) - int(candidate[0]["start_ms"])
-        if group and (len(candidate_text) > 84 or duration_ms > 6_000):
+        if group and (
+            len(candidate_text) > 84
+            or _subtitle_lines_if_valid(candidate_text) is None
+            or duration_ms > 6_000
+        ):
             flush()
             candidate = [word]
         group = candidate
@@ -678,11 +889,17 @@ def _build_srt_cues(words: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(cues) > 1 and (cues[-1]["end_ms"] - cues[-1]["start_ms"]) < 800:
         previous, final = cues[-2], cues[-1]
         merged_text = " ".join([*previous["lines"], *final["lines"]])
-        if len(merged_text) <= 84:
+        merged_lines = _subtitle_lines_if_valid(merged_text)
+        merged_duration_ms = int(final["end_ms"]) - int(previous["start_ms"])
+        if (
+            len(merged_text) <= 84
+            and merged_lines is not None
+            and merged_duration_ms <= 6_000
+        ):
             previous.update(
                 {
                     "end_ms": final["end_ms"],
-                    "lines": _subtitle_lines(merged_text),
+                    "lines": merged_lines,
                     "word_end_index": final["word_end_index"],
                 }
             )
@@ -693,6 +910,13 @@ def _build_srt_cues(words: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _subtitle_lines(text: str) -> list[str]:
+    lines = _subtitle_lines_if_valid(text)
+    if lines is None:
+        raise ValidationFailureError("CAPTION_SIDECAR_LINE_LENGTH_INVALID")
+    return lines
+
+
+def _subtitle_lines_if_valid(text: str) -> list[str] | None:
     if len(text) <= 42:
         return [text]
     words = text.split()
@@ -703,9 +927,7 @@ def _subtitle_lines(text: str) -> list[str]:
             score = abs(len(left) - len(right))
             if best is None or score < best[0]:
                 best = (score, left, right)
-    if best is None:
-        raise ValidationFailureError("CAPTION_SIDECAR_LINE_LENGTH_INVALID")
-    return [best[1], best[2]]
+    return [best[1], best[2]] if best is not None else None
 
 
 def _render_srt(cues: Sequence[dict[str, Any]]) -> str:

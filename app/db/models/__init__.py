@@ -278,7 +278,11 @@ from app.db.models.production_publish import (
     FinalVideoDecision,
     SeriesEpisodePublication,
 )
-from app.db.models.v2_effect import V2ProductionEffectLedger
+from app.db.models.v2_effect import (
+    V2NarrationTimingRecoveryAuthority,
+    V2NarrationTimingRecoveryReceipt,
+    V2ProductionEffectLedger,
+)
 
 __all__ = [
     "ClaimEvidenceLedger",
@@ -500,5 +504,7 @@ __all__ = [
     "FinalReviewCandidate",
     "FinalVideoDecision",
     "SeriesEpisodePublication",
+    "V2NarrationTimingRecoveryAuthority",
+    "V2NarrationTimingRecoveryReceipt",
     "V2ProductionEffectLedger",
 ]
