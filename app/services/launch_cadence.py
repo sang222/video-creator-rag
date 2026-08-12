@@ -29,8 +29,10 @@ from app.contracts.launch_cadence import (
     RunwayCounts,
 )
 from app.contracts.m5 import (
+    ContextPackSnapshotCreate,
     EditorialCalendarSlotCreate,
     IdeaMarketPreflightCreate,
+    RetrievalPlanSnapshotCreate,
 )
 from app.contracts.production_workflow import ProductionWorkflowProjectStart
 from app.contracts.vcos_v2 import (
@@ -58,6 +60,7 @@ from app.db.models.launch_cadence import (
     LongFormPublishSlot,
 )
 from app.db.models.m5 import (
+    ContextPackSnapshot,
     EditorialCalendarSlot,
     EditorialIdeaCandidate,
     IdeaMarketPreflight,
@@ -88,7 +91,12 @@ from app.services.nich1 import (
     NicheContractDigestCompiler,
 )
 from app.services.production_package import ChannelDurationContractResolver
-from app.services.m5 import EditorialCalendarService, IdeaMarketPreflightService
+from app.services.m5 import (
+    EditorialCalendarService,
+    IdeaMarketPreflightService,
+    ResourceResolverService,
+    resolve_typed_slot_niche_authority,
+)
 from app.services.production_start_readiness import (
     resolve_budget_authority,
     resolve_provider_authority,
@@ -1574,6 +1582,10 @@ class LongFormCadenceService:
         )
         if not claim_evidence_refs:
             raise ValidationFailureError("CADENCE_PUBLISH_PREFLIGHT_CLAIM_EVIDENCE_MISSING")
+        publish_context = self._create_publish_context_pack(
+            candidate=candidate,
+            editorial_slot=editorial_slot,
+        )
         preflight = IdeaMarketPreflightService(self.session).create_preflight(
             data=IdeaMarketPreflightCreate(
                 company_id=editorial_slot.company_id,
@@ -1586,6 +1598,7 @@ class LongFormCadenceService:
                 claim_evidence_refs=claim_evidence_refs,
                 market_demand_evidence_refs=market_demand_evidence_refs,
             ),
+            evaluation_context_pack_snapshot_id=publish_context.id,
             correlation_id=(
                 f"cadence-publish-preflight:{editorial_slot.id}:{candidate.id}"
             ),
@@ -1593,6 +1606,66 @@ class LongFormCadenceService:
         if preflight.decision != "PASS" or preflight.policy_fit_state != "PASS":
             raise ValidationFailureError("CADENCE_PUBLISH_PREFLIGHT_NOT_PASS")
         return preflight
+
+    def _create_publish_context_pack(
+        self,
+        *,
+        candidate: EditorialIdeaCandidate,
+        editorial_slot: EditorialCalendarSlot,
+    ) -> ContextPackSnapshot:
+        """Compile an append-only context authority for the exact PUBLISH slot.
+
+        The candidate's discovery context remains bound to its RESEARCH slot.
+        Admission preflight must instead evaluate the newly-created immutable
+        PUBLISH slot, whose identity and production goal are part of NICH1.
+        """
+
+        resolver = ResourceResolverService(self.session)
+        plan = resolver.create_retrieval_plan(
+            data=RetrievalPlanSnapshotCreate(
+                purpose="AUTHORITY_REVIEW",
+                company_id=editorial_slot.company_id,
+                channel_workspace_id=editorial_slot.channel_workspace_id,
+                policy_snapshot_id=editorial_slot.policy_snapshot_id,
+                editorial_calendar_slot_id=editorial_slot.id,
+                allowed_sources=[
+                    "channel_profile",
+                    "policy_snapshot",
+                    "editorial_slot",
+                    "niche_contract_digest",
+                ],
+                excluded_sources=[],
+                source_order=[
+                    "channel_profile",
+                    "policy_snapshot",
+                    "editorial_slot",
+                    "niche_contract_digest",
+                ],
+                created_by_user_id=editorial_slot.created_by_user_id,
+            ),
+            correlation_id=(
+                f"cadence-publish-context:{editorial_slot.id}:{candidate.id}:plan"
+            ),
+        )
+        context = resolver.build_context_pack(
+            data=ContextPackSnapshotCreate(
+                retrieval_plan_snapshot_id=plan.id,
+                freshness_state="FRESH",
+                confidence_level="HIGH",
+                created_by_user_id=editorial_slot.created_by_user_id,
+            ),
+            correlation_id=(
+                f"cadence-publish-context:{editorial_slot.id}:{candidate.id}:pack"
+            ),
+        )
+        if (
+            context.editorial_calendar_slot_id != editorial_slot.id
+            or context.policy_snapshot_id != editorial_slot.policy_snapshot_id
+            or context.channel_workspace_id != editorial_slot.channel_workspace_id
+            or context.purpose != "AUTHORITY_REVIEW"
+        ):
+            raise ValidationFailureError("CADENCE_PUBLISH_CONTEXT_AUTHORITY_MISMATCH")
+        return context
 
     def _bind_niche_governance(
         self,
@@ -1640,6 +1713,14 @@ class LongFormCadenceService:
         assert channel is not None and profile is not None and policy is not None
         assert category is not None
 
+        typed_slot = resolve_typed_slot_niche_authority(
+            self.session,
+            slot=slot,
+            policy_snapshot=policy,
+            profile_version=profile,
+            error_prefix="CADENCE_NICHE_AUTHORITY",
+        )
+
         summary = dict(project.audience_delivery_summary or {})
         frozen = summary.get("niche_governance")
         if isinstance(frozen, dict) and frozen:
@@ -1650,7 +1731,7 @@ class LongFormCadenceService:
                 profile_version=profile,
                 policy_snapshot=policy,
                 category=category,
-                editorial_slot=slot,
+                editorial_slot=typed_slot,
             )
         except NicheContractCompilationError as exc:
             raise ValidationFailureError("CADENCE_NICHE_AUTHORITY_NOT_PASS") from exc

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.contracts.r3d1 import CharacterPolicyMode, RuntimeScopeErrorCode
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationFailureError
 from app.db.models import (
     ChannelProfileVersion,
     ChannelWorkspace,
@@ -26,6 +26,7 @@ from app.db.models import (
 )
 from app.services.channel_contract import CONTRACT_COMPLETE, contract_status_from_snapshot_payload
 from app.services.config_registry import content_hash
+from app.services.m5 import resolve_typed_slot_niche_authority
 from app.services.r3d1 import CharacterBindingResolver
 
 
@@ -404,7 +405,18 @@ class EffectiveChannelRuntimeContextCompiler:
         if editorial_slot is not None:
             if editorial_slot.id and str(editorial_slot.id) != str(digest.get("editorial_slot_id")):
                 reasons.append("NICHE_EDITORIAL_SLOT_MISMATCH")
-            if str(editorial_slot.series_key or "").casefold() != str(digest.get("series_key") or "").casefold():
+            try:
+                niche_slot = resolve_typed_slot_niche_authority(
+                    self.session,
+                    slot=editorial_slot,
+                    policy_snapshot=authority.policy_snapshot,
+                    profile_version=authority.profile_version,
+                    error_prefix="EFFECTIVE_CONTEXT_NICHE",
+                )
+            except ValidationFailureError:
+                niche_slot = editorial_slot
+                reasons.append("NICHE_SERIES_AUTHORITY_MISMATCH")
+            if str(niche_slot.series_key or "").casefold() != str(digest.get("series_key") or "").casefold():
                 reasons.append("NICHE_SERIES_BINDING_MISMATCH")
             if str(editorial_slot.production_goal or "") != str(digest.get("production_goal") or ""):
                 reasons.append("NICHE_PRODUCTION_GOAL_MISMATCH")

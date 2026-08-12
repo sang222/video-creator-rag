@@ -9,13 +9,25 @@ import pytest
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import ProgrammingError
 
+from app.contracts.m5 import (
+    ContextPackSnapshotCreate,
+    IdeaMarketPreflightCreate,
+    RetrievalPlanSnapshotCreate,
+)
 from app.contracts.production_package import ProductionDurationContractV2
 from app.contracts.script_qualification import (
     QualifiedScriptOutputV2,
     SemanticVerificationOutput,
 )
 from app.core.errors import ValidationFailureError
+from app.core.actor import _system_worker_actor
 from app.db.models.launch_cadence import LongFormPublishSlot
+from app.db.models.m5 import (
+    ContextPackSnapshot,
+    EditorialIdeaCandidate,
+    EditorialResearchRun,
+    IdeaMarketPreflight,
+)
 from app.db.models.script_qualification import (
     ControlledVerifierSettlementAuthority,
     ScriptQualificationBackgroundAttempt,
@@ -23,6 +35,8 @@ from app.db.models.script_qualification import (
     ScriptQualificationReceipt,
 )
 from app.services.config_registry import content_hash
+from app.services.launch_cadence import LongFormCadenceService
+from app.services.m5 import IdeaMarketPreflightService, ResourceResolverService
 from app.services.script_contract_replacement import (
     CONTROLLED_VERIFIER_SETTLEMENT_POLICY,
     CONTROLLED_VERIFIER_SETTLEMENT_REASON,
@@ -52,6 +66,7 @@ from tests.test_controlled_production_continuation import (
     _fresh_attempt,
 )
 import tests.test_controlled_production_continuation as continuation_test
+from tests.test_long_form_launch_cadence import _test_support_authority_preparer
 
 
 _PARAPHRASE_CLAIM_2 = (
@@ -82,6 +97,63 @@ _SHARED_FULFILLMENT_SPAN = (
 @pytest.fixture
 def qualification_factory(db_session):
     return QualificationFactory(db_session)
+
+
+def _install_research_context_source(monkeypatch) -> None:
+    """Give the source the real immutable RESEARCH context present in production."""
+
+    original = continuation_test._expired_zero_effect_source
+
+    def source_with_context(session, qualification_factory, **kwargs):
+        source = original(session, qualification_factory, **kwargs)
+        research = session.get(
+            EditorialResearchRun,
+            source.candidate.editorial_research_run_id,
+        )
+        assert research is not None and research.editorial_calendar_slot_id is not None
+        resolver = ResourceResolverService(session)
+        plan = resolver.create_retrieval_plan(
+            data=RetrievalPlanSnapshotCreate(
+                purpose="EDITORIAL_RESEARCH",
+                company_id=source.candidate.company_id,
+                channel_workspace_id=source.candidate.channel_workspace_id,
+                channel_profile_version_id=research.channel_profile_version_id,
+                policy_snapshot_id=source.candidate.policy_snapshot_id,
+                editorial_calendar_slot_id=research.editorial_calendar_slot_id,
+                allowed_sources=[
+                    "channel_profile",
+                    "policy_snapshot",
+                    "editorial_slot",
+                    "niche_contract_digest",
+                ],
+                source_order=[
+                    "channel_profile",
+                    "policy_snapshot",
+                    "editorial_slot",
+                    "niche_contract_digest",
+                ],
+            ),
+            correlation_id=f"settlement-test-research-context:{source.candidate.id}:plan",
+        )
+        context = resolver.build_context_pack(
+            data=ContextPackSnapshotCreate(
+                retrieval_plan_snapshot_id=plan.id,
+                freshness_state="FRESH",
+                confidence_level="HIGH",
+            ),
+            correlation_id=f"settlement-test-research-context:{source.candidate.id}:pack",
+        )
+        research.context_pack_snapshot_id = context.id
+        source.candidate.context_pack_snapshot_id = context.id
+        source.research_context = context
+        session.flush()
+        return source
+
+    monkeypatch.setattr(
+        continuation_test,
+        "_expired_zero_effect_source",
+        source_with_context,
+    )
 
 
 def _live_shaped_v2_payload(run, *, repaired: bool = False) -> dict:
@@ -789,3 +861,175 @@ def test_zero_provider_settlement_is_append_only_idempotent_and_consumable(
                 )
             )
             db_session.flush()
+
+
+def test_settlement_finalization_uses_distinct_publish_context_without_rebinding_candidate(
+    db_session,
+    qualification_factory,
+    monkeypatch,
+) -> None:
+    _install_research_context_source(monkeypatch)
+    lineage = _blocked_live_shaped_source(
+        db_session, qualification_factory, monkeypatch
+    )
+    candidate = db_session.get(
+        EditorialIdeaCandidate,
+        lineage.child.editorial_idea_candidate_id,
+    )
+    assert candidate is not None and candidate.context_pack_snapshot_id is not None
+    original_context_id = candidate.context_pack_snapshot_id
+    original_context = db_session.get(ContextPackSnapshot, original_context_id)
+    assert original_context is not None
+    original_pack_hash = original_context.pack_hash
+    original_pack_content = deepcopy(original_context.pack_content)
+    assert original_context.purpose == "EDITORIAL_RESEARCH"
+    assert original_context.id == lineage.historical.research_context.id
+
+    monkeypatch.setattr(
+        "app.services.script_verifier_settlement.resolve_provider_authority",
+        lambda *_args, **_kwargs: continuation_test._ready_snapshot(),
+    )
+    ready_budget = {
+        "state": "READY",
+        "decision": "PASS",
+        "max_estimated_cost_per_video": "10.00",
+        "authority": "focused-settlement-finalization-test",
+    }
+    for target in (
+        "app.services.script_verifier_settlement.resolve_budget_authority",
+        "app.services.launch_cadence.resolve_budget_authority",
+        "app.services.vcos_v2.resolve_budget_authority",
+    ):
+        monkeypatch.setattr(
+            target,
+            lambda *_args, **_kwargs: ready_budget,
+        )
+    child = ScriptVerifierSettlementRecoveryService(
+        db_session,
+        now=lambda: lineage.settlement_now,
+    ).create(source_qualification_run_id=lineage.child.id)
+
+    admission, workflow = LongFormCadenceService(
+        db_session,
+        now=lambda: lineage.settlement_now,
+        support_authority_preparer=_test_support_authority_preparer,
+    ).finalize_qualified_script_run(
+        script_qualification_run_id=child.id,
+        actor=_system_worker_actor(
+            "vcos-durable-worker",
+            permissions={"production.start"},
+        ),
+    )
+
+    assert admission.decision == "ADMIT"
+    assert admission.admitted_video_project_id is not None
+    assert workflow.video_project_id == admission.admitted_video_project_id
+    assert child.admitted_video_project_id == admission.admitted_video_project_id
+    assert child.production_workflow_run_id == workflow.id
+    assert candidate.stage == "IN_PRODUCTION"
+    assert candidate.context_pack_snapshot_id == original_context_id
+    assert original_context.pack_hash == original_pack_hash
+    assert original_context.pack_content == original_pack_content
+
+    publish_preflight = db_session.get(
+        IdeaMarketPreflight,
+        admission.idea_market_preflight_id,
+    )
+    assert publish_preflight is not None
+    publish_blob = publish_preflight.evidence_blob
+    publish_context_id = uuid.UUID(
+        publish_blob["evaluation_context_pack_snapshot_id"]
+    )
+    publish_context = db_session.get(ContextPackSnapshot, publish_context_id)
+    assert publish_context is not None
+    assert publish_context.id != original_context_id
+    assert publish_context.purpose == "AUTHORITY_REVIEW"
+    assert publish_context.editorial_calendar_slot_id == (
+        admission.editorial_calendar_slot_id
+    )
+    assert publish_context.company_id == candidate.company_id
+    assert publish_context.channel_workspace_id == candidate.channel_workspace_id
+    assert publish_context.policy_snapshot_id == candidate.policy_snapshot_id
+    assert publish_blob["evaluation_context_pack_hash"] == publish_context.pack_hash
+    assert publish_blob["evaluation_context_pack_purpose"] == "AUTHORITY_REVIEW"
+    assert publish_blob["source_context_pack_snapshot_id"] == str(
+        original_context_id
+    )
+    assert publish_blob["source_context_pack_hash"] == original_pack_hash
+    assert publish_context.pack_content["niche_contract_digest"][
+        "editorial_slot_id"
+    ] == str(admission.editorial_calendar_slot_id)
+    assert publish_blob["niche_contract_digest_hash"] == (
+        publish_context.pack_content["niche_contract_digest"]["content_hash"]
+    )
+    assert original_context.editorial_calendar_slot_id != (
+        publish_context.editorial_calendar_slot_id
+    )
+
+    replay_data = IdeaMarketPreflightCreate(
+        company_id=candidate.company_id,
+        channel_workspace_id=candidate.channel_workspace_id,
+        editorial_calendar_slot_id=admission.editorial_calendar_slot_id,
+        editorial_research_run_id=candidate.editorial_research_run_id,
+        editorial_idea_candidate_id=candidate.id,
+        search_intent_map_id=publish_preflight.search_intent_map_id,
+        audience_target_pack_id=publish_preflight.audience_target_pack_id,
+        claim_evidence_refs=[
+            {"id": item["id"]} for item in publish_blob["claim_evidence_refs"]
+        ],
+        market_demand_evidence_refs=[
+            {"id": item["id"]}
+            for item in publish_blob["market_demand_evidence_refs"]
+        ],
+    )
+    # An exact PUBLISH context must not mask corruption in the independently
+    # frozen source context.
+    original_context.pack_hash = "f" * 64
+    try:
+        with pytest.raises(
+            ValidationFailureError,
+            match="NICH1_EDITORIAL_CONTEXT_PACK_HASH_MISMATCH",
+        ):
+            IdeaMarketPreflightService(db_session).create_preflight(
+                data=replay_data,
+                evaluation_context_pack_snapshot_id=publish_context.id,
+                correlation_id=f"settlement-tampered-source-context:{candidate.id}",
+            )
+    finally:
+        original_context.pack_hash = original_pack_hash
+
+    # An explicit PUBLISH evaluation pack must not mask substitution of the
+    # source pointer frozen by the candidate's exact research run.
+    research = db_session.get(
+        EditorialResearchRun,
+        candidate.editorial_research_run_id,
+    )
+    assert research is not None
+    assert research.context_pack_snapshot_id == original_context_id
+    research.context_pack_snapshot_id = publish_context.id
+    try:
+        with db_session.no_autoflush:
+            with pytest.raises(
+                ValidationFailureError,
+                match="V2_LONG_FORM_PREFLIGHT_SOURCE_CONTEXT_SCOPE_MISMATCH",
+            ):
+                IdeaMarketPreflightService(db_session).create_preflight(
+                    data=replay_data,
+                    evaluation_context_pack_snapshot_id=publish_context.id,
+                    correlation_id=(
+                        f"settlement-substituted-source-context:{candidate.id}"
+                    ),
+                )
+    finally:
+        research.context_pack_snapshot_id = original_context_id
+
+    # Omitting the explicit PUBLISH evaluation context falls back to the
+    # candidate's immutable discovery pack and must fail as stale.
+    with pytest.raises(
+        ValidationFailureError,
+        match="V2_LONG_FORM_PREFLIGHT_CONTEXT_DIGEST_STALE",
+    ):
+        IdeaMarketPreflightService(db_session).create_preflight(
+            data=replay_data,
+            correlation_id=f"settlement-stale-research-context:{candidate.id}",
+        )

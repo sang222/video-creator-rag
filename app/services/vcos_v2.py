@@ -1228,11 +1228,7 @@ class ProjectAdmissionV2Service:
             preflight is None
             or preflight.company_id != data.company_id
             or preflight.channel_workspace_id != data.channel_workspace_id
-            or (
-                candidate is None
-                and preflight.editorial_calendar_slot_id is not None
-                and preflight.editorial_calendar_slot_id != slot.id
-            )
+            or preflight.editorial_calendar_slot_id != slot.id
             or (
                 candidate is not None
                 and preflight.editorial_idea_candidate_id != candidate.id

@@ -220,6 +220,67 @@ def _typed_slot_niche_authority(
     return slot
 
 
+def resolve_typed_slot_niche_authority(
+    session: Session,
+    *,
+    slot: EditorialCalendarSlot,
+    policy_snapshot: CompiledChannelPolicySnapshot | None = None,
+    profile_version: ChannelProfileVersion | None = None,
+    error_prefix: str = "NICH1_TYPED_SLOT",
+) -> EditorialCalendarSlot | _TypedSlotNicheAuthority:
+    """Resolve one canonical NICH1 view for a persisted V2 slot.
+
+    V2 persists the preferred SeriesPlan identity instead of duplicating its
+    stable key into ``EditorialCalendarSlot.series_key``.  Every digest reader
+    must therefore resolve that key through the same scoped authority view.
+    """
+
+    if slot.schema_version != "v2":
+        return slot
+    snapshot = policy_snapshot or session.get(
+        CompiledChannelPolicySnapshot,
+        slot.policy_snapshot_id,
+    )
+    profile = profile_version or (
+        session.get(ChannelProfileVersion, snapshot.channel_profile_version_id)
+        if snapshot is not None
+        else None
+    )
+    preferred_plan: SeriesPlan | None = None
+    if slot.preferred_series_plan_id is not None:
+        preferred_plan = session.get(SeriesPlan, slot.preferred_series_plan_id)
+        if (
+            snapshot is None
+            or profile is None
+            or preferred_plan is None
+            or preferred_plan.company_id != slot.company_id
+            or preferred_plan.channel_workspace_id != slot.channel_workspace_id
+            or preferred_plan.policy_snapshot_id != snapshot.id
+            or preferred_plan.channel_profile_version_id != profile.id
+            or "LONG_FORM" not in set(preferred_plan.allowed_production_lanes or [])
+        ):
+            raise ValidationFailureError(
+                f"{error_prefix}_SERIES_PLAN_SCOPE_MISMATCH"
+            )
+    if slot.preferred_series_run_id is not None:
+        preferred_run = session.get(SeriesRun, slot.preferred_series_run_id)
+        if (
+            snapshot is None
+            or profile is None
+            or preferred_plan is None
+            or preferred_run is None
+            or preferred_run.series_plan_id != preferred_plan.id
+            or preferred_run.company_id != slot.company_id
+            or preferred_run.channel_workspace_id != slot.channel_workspace_id
+            or preferred_run.policy_snapshot_id != snapshot.id
+            or preferred_run.channel_profile_version_id != profile.id
+        ):
+            raise ValidationFailureError(
+                f"{error_prefix}_SERIES_RUN_SCOPE_MISMATCH"
+            )
+    return _typed_slot_niche_authority(slot, preferred_plan=preferred_plan)
+
+
 class EditorialCalendarService:
     def __init__(self, session: Session):
         self.session = session
@@ -710,13 +771,20 @@ class ResourceResolverService:
                     raise ValidationFailureError(
                         "NICH1_EDITORIAL_CONTEXT_AUTHORITY_MISSING"
                     )
+                typed_slot = resolve_typed_slot_niche_authority(
+                    self.session,
+                    slot=slot,
+                    policy_snapshot=snapshot,
+                    profile_version=profile,
+                    error_prefix="NICH1_EDITORIAL_CONTEXT",
+                )
                 try:
                     digest = NicheContractDigestCompiler().compile(
                         channel=channel,
                         profile_version=profile,
                         policy_snapshot=snapshot,
                         category=category,
-                        editorial_slot=slot,
+                        editorial_slot=typed_slot,
                     )
                 except NicheContractCompilationError as exc:
                     raise ValidationFailureError(
@@ -1122,6 +1190,7 @@ class IdeaMarketPreflightService:
         self,
         *,
         data: IdeaMarketPreflightCreate,
+        evaluation_context_pack_snapshot_id: uuid.UUID | None = None,
         correlation_id: str = "m5-idea-market-preflight",
     ) -> IdeaMarketPreflight:
         _require_channel_for_company(
@@ -1132,6 +1201,7 @@ class IdeaMarketPreflightService:
         research_run = None
         candidate = None
         slot = None
+        evaluation_context_pack = None
         if data.editorial_research_run_id is not None:
             from app.db.models import EditorialResearchRun
 
@@ -1181,6 +1251,15 @@ class IdeaMarketPreflightService:
                 raise ValidationFailureError(
                     "LONG_FORM_PREFLIGHT_SLOT_AUTHORITY_MISMATCH"
                 )
+        if evaluation_context_pack_snapshot_id is not None:
+            evaluation_context_pack = self.session.get(
+                ContextPackSnapshot,
+                evaluation_context_pack_snapshot_id,
+            )
+            if evaluation_context_pack is None:
+                raise ValidationFailureError(
+                    "V2_LONG_FORM_PREFLIGHT_EVALUATION_CONTEXT_MISSING"
+                )
 
         result = _evaluate_v2_long_form_preflight(
             self.session,
@@ -1188,6 +1267,7 @@ class IdeaMarketPreflightService:
             candidate=candidate,
             research_run=research_run,
             slot=slot,
+            evaluation_context_pack=evaluation_context_pack,
         )
         item = IdeaMarketPreflight(
             company_id=data.company_id,
@@ -1559,6 +1639,7 @@ def _evaluate_v2_long_form_preflight(
     candidate: Any,
     research_run: Any,
     slot: EditorialCalendarSlot | None,
+    evaluation_context_pack: ContextPackSnapshot | None = None,
 ) -> dict[str, Any]:
     """Recompile every authority used by a strict long-form preflight."""
 
@@ -1607,40 +1688,13 @@ def _evaluate_v2_long_form_preflight(
             "V2_LONG_FORM_PREFLIGHT_EDITORIAL_AUTHORITY_MISMATCH"
         )
 
-    preferred_plan: SeriesPlan | None = None
-    if slot.preferred_series_plan_id is not None:
-        preferred_plan = session.get(
-            SeriesPlan,
-            slot.preferred_series_plan_id,
-        )
-        if (
-            preferred_plan is None
-            or preferred_plan.company_id != slot.company_id
-            or preferred_plan.channel_workspace_id != slot.channel_workspace_id
-            or preferred_plan.policy_snapshot_id != snapshot.id
-            or preferred_plan.channel_profile_version_id != profile.id
-            or "LONG_FORM" not in set(preferred_plan.allowed_production_lanes or [])
-        ):
-            raise ValidationFailureError(
-                "V2_LONG_FORM_PREFLIGHT_SERIES_PLAN_SCOPE_MISMATCH"
-            )
-    if slot.preferred_series_run_id is not None:
-        preferred_run = session.get(
-            SeriesRun,
-            slot.preferred_series_run_id,
-        )
-        if (
-            preferred_plan is None
-            or preferred_run is None
-            or preferred_run.series_plan_id != preferred_plan.id
-            or preferred_run.company_id != slot.company_id
-            or preferred_run.channel_workspace_id != slot.channel_workspace_id
-            or preferred_run.policy_snapshot_id != snapshot.id
-            or preferred_run.channel_profile_version_id != profile.id
-        ):
-            raise ValidationFailureError(
-                "V2_LONG_FORM_PREFLIGHT_SERIES_RUN_SCOPE_MISMATCH"
-            )
+    typed_slot = resolve_typed_slot_niche_authority(
+        session,
+        slot=slot,
+        policy_snapshot=snapshot,
+        profile_version=profile,
+        error_prefix="V2_LONG_FORM_PREFLIGHT",
+    )
 
     raw_validation = (slot.operational_envelope or {}).get("nich1_slot_validation")
     if not isinstance(raw_validation, dict):
@@ -1658,10 +1712,7 @@ def _evaluate_v2_long_form_preflight(
         channel_contract=(snapshot.compiled_payload or {}).get("channel_contract_json")
         or {},
         category=category,
-        editorial_slot=_typed_slot_niche_authority(
-            slot,
-            preferred_plan=preferred_plan,
-        ),
+        editorial_slot=typed_slot,
         strict_production=True,
     )
     if (
@@ -1679,28 +1730,73 @@ def _evaluate_v2_long_form_preflight(
             profile_version=profile,
             policy_snapshot=snapshot,
             category=category,
-            editorial_slot=_typed_slot_niche_authority(
-                slot,
-                preferred_plan=preferred_plan,
-            ),
+            editorial_slot=typed_slot,
         )
     except NicheContractCompilationError as exc:
         raise ValidationFailureError(
             f"V2_LONG_FORM_PREFLIGHT_NICHE_DIGEST_BLOCKED:{exc}"
         ) from exc
+    source_context_pack: ContextPackSnapshot | None = None
     if candidate is not None and candidate.context_pack_snapshot_id is not None:
-        context_pack = session.get(
+        source_context_pack = session.get(
             ContextPackSnapshot,
             candidate.context_pack_snapshot_id,
         )
-        if context_pack is None:
+        if source_context_pack is None:
             raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_CONTEXT_PACK_MISSING")
+        source_snapshot = session.get(
+            CompiledChannelPolicySnapshot,
+            source_context_pack.policy_snapshot_id,
+        )
+        if (
+            source_snapshot is None
+            or research_run is None
+            or research_run.id != candidate.editorial_research_run_id
+            or research_run.context_pack_snapshot_id != source_context_pack.id
+            or research_run.editorial_calendar_slot_id
+            != source_context_pack.editorial_calendar_slot_id
+            or source_context_pack.purpose != "EDITORIAL_RESEARCH"
+            or source_context_pack.company_id != data.company_id
+            or source_context_pack.channel_workspace_id != candidate.channel_workspace_id
+            or source_context_pack.policy_snapshot_id != candidate.policy_snapshot_id
+            or source_context_pack.editorial_calendar_slot_id is None
+            or source_context_pack.video_project_id is not None
+        ):
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_SOURCE_CONTEXT_SCOPE_MISMATCH"
+            )
+        _validate_nich1_editorial_context_authority(
+            session,
+            context_pack=source_context_pack,
+            snapshot=source_snapshot,
+        )
+
+    context_pack = evaluation_context_pack
+    if context_pack is not None:
+        if (
+            context_pack.purpose != "AUTHORITY_REVIEW"
+            or context_pack.company_id != data.company_id
+            or context_pack.channel_workspace_id != channel.id
+            or context_pack.channel_profile_version_id != profile.id
+            or context_pack.policy_snapshot_id != snapshot.id
+            or context_pack.editorial_calendar_slot_id != slot.id
+            or context_pack.video_project_id is not None
+        ):
+            raise ValidationFailureError(
+                "V2_LONG_FORM_PREFLIGHT_EVALUATION_CONTEXT_SCOPE_MISMATCH"
+            )
         context_digest = _validate_nich1_editorial_context_authority(
             session,
             context_pack=context_pack,
             snapshot=snapshot,
         )
         if context_digest.content_hash != niche_digest.content_hash:
+            raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_CONTEXT_DIGEST_STALE")
+    elif source_context_pack is not None:
+        source_digest, _source_digest_ref = _niche_digest_from_context(
+            source_context_pack
+        )
+        if source_digest.content_hash != niche_digest.content_hash:
             raise ValidationFailureError("V2_LONG_FORM_PREFLIGHT_CONTEXT_DIGEST_STALE")
 
     scoped_policy = (snapshot.compiled_payload or {}).get("channel_scoped_policy")
@@ -1852,12 +1948,29 @@ def _evaluate_v2_long_form_preflight(
         "category_id": str(category.id),
         "category_hash": category.content_hash,
         "preferred_series_plan_id": (
-            str(preferred_plan.id) if preferred_plan is not None else None
+            str(slot.preferred_series_plan_id)
+            if slot.preferred_series_plan_id is not None
+            else None
         ),
         "slot_validation": current_validation.model_dump(mode="json"),
         "slot_validation_hash": current_validation.content_hash,
         "niche_contract_digest_ref": niche_ref,
         "niche_contract_digest_hash": niche_digest.content_hash,
+        "evaluation_context_pack_snapshot_id": (
+            str(context_pack.id) if context_pack is not None else None
+        ),
+        "evaluation_context_pack_hash": (
+            context_pack.pack_hash if context_pack is not None else None
+        ),
+        "evaluation_context_pack_purpose": (
+            context_pack.purpose if context_pack is not None else None
+        ),
+        "source_context_pack_snapshot_id": (
+            str(source_context_pack.id) if source_context_pack is not None else None
+        ),
+        "source_context_pack_hash": (
+            source_context_pack.pack_hash if source_context_pack is not None else None
+        ),
         "target_market_digest_ref": target_ref,
         "target_market_digest_hash": target_digest.content_hash,
         # ``search_demand_evidence_ids`` stays as a read-only compatibility
@@ -2286,13 +2399,20 @@ def _validate_nich1_editorial_context_authority(
     )
     if any(item is None for item in (channel, profile, slot, category)):
         raise ValidationFailureError("NICH1_EDITORIAL_CONTEXT_AUTHORITY_MISSING")
+    typed_slot = resolve_typed_slot_niche_authority(
+        session,
+        slot=slot,
+        policy_snapshot=snapshot,
+        profile_version=profile,
+        error_prefix="NICH1_EDITORIAL_CONTEXT",
+    )
     try:
         authoritative = NicheContractDigestCompiler().compile(
             channel=channel,
             profile_version=profile,
             policy_snapshot=snapshot,
             category=category,
-            editorial_slot=slot,
+            editorial_slot=typed_slot,
         )
     except NicheContractCompilationError as exc:
         raise ValidationFailureError(
