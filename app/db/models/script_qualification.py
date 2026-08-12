@@ -271,6 +271,31 @@ class ScriptContractReplacementAuthority(Base):
         UUID(as_uuid=True), ForeignKey("long_form_publish_slots.id"), nullable=False
     )
     replacement_reason: Mapped[str] = mapped_column(String(160), nullable=False)
+    # Operator recovery deliberately extends the existing immutable
+    # replacement authority instead of introducing a parallel lineage.  The
+    # nullable fields preserve every pre-0072 migration authority exactly as
+    # written; they are mandatory only for the controlled-recovery reason.
+    operator_recovery_schema_version: Mapped[str | None] = mapped_column(
+        String(80)
+    )
+    operator_recovery_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True)
+    )
+    operator_recovery_scope_key: Mapped[str | None] = mapped_column(
+        String(200)
+    )
+    historical_qualification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "script_qualification_runs.id",
+            name="fk_recovery_historical_qualification",
+        ),
+    )
+    recovery_strategy: Mapped[str | None] = mapped_column(String(80))
+    authority_versions: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    freshness_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    operator_actor_context: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    recovery_receipt_hash: Mapped[str | None] = mapped_column(String(64))
     source_topic_definition_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("editorial_topic_definitions.id"), nullable=False
     )
@@ -313,9 +338,32 @@ class ScriptContractReplacementAuthority(Base):
             "replacement_slot_id",
             name="uq_script_contract_replacement_slot",
         ),
+        UniqueConstraint(
+            "operator_recovery_id",
+            name="uq_script_replacement_recovery_id",
+        ),
+        UniqueConstraint(
+            "operator_recovery_scope_key",
+            name="uq_script_replacement_recovery_scope",
+        ),
         CheckConstraint(
-            "replacement_reason = 'SCRIPT_CONTRACT_SINGLE_SOURCE_OF_TRUTH_MIGRATION'",
+            "replacement_reason in ("
+            "'SCRIPT_CONTRACT_SINGLE_SOURCE_OF_TRUTH_MIGRATION',"
+            "'OPERATOR_REQUESTED_FIRST_VIDEO_RECOVERY')",
             name="ck_script_contract_replacement_reason",
+        ),
+        CheckConstraint(
+            "replacement_reason <> 'OPERATOR_REQUESTED_FIRST_VIDEO_RECOVERY' or ("
+            "operator_recovery_schema_version is not null and "
+            "operator_recovery_id = id and "
+            "operator_recovery_scope_key is not null and "
+            "historical_qualification_id is not null and "
+            "recovery_strategy = 'CANDIDATE_REPLACEMENT' and "
+            "authority_versions is not null and "
+            "freshness_snapshot is not null and "
+            "operator_actor_context is not null and "
+            "recovery_receipt_hash ~ '^[0-9a-f]{64}$')",
+            name="ck_script_contract_operator_recovery_receipt",
         ),
         CheckConstraint(
             "old_script_contract_version = 'V1_LEGACY' and new_script_contract_version = 'V2_SINGLE_SOURCE'",

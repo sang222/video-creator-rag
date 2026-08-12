@@ -779,6 +779,7 @@ class FFmpegCommandBuilder:
 
         overlay_size = max(22, round(min(width, height) * 0.033))
         generated_text_files: list[str] = []
+        semantic_overlay_drawtext_filter_hashes: list[str] = []
         graph = "[0:v]format=yuv420p"
         palette = ("17324d", "31435f", "304d46", "4b3b5f", "563f35", "29465b")
         probe_seconds: list[float] = []
@@ -816,15 +817,20 @@ class FFmpegCommandBuilder:
             generated_text_files.append(str(text_path))
             text_ref = _filter_path(text_path)
             enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
-            graph += (
-                f",drawtext=fontfile='{font_ref}':"
+            drawtext_filter = (
+                f"drawtext=fontfile='{font_ref}':"
                 f"textfile='{text_ref}':expansion=none:"
                 f"fontcolor=white:fontsize={overlay_size}:line_spacing=10:"
                 f"x={round(width * 0.10)}:y={round(height * 0.20)}:"
                 f"enable='{enable}'"
             )
+            graph += f",{drawtext_filter}"
+            semantic_overlay_drawtext_filter_hashes.append(
+                hashlib.sha256(drawtext_filter.encode("utf-8")).hexdigest()
+            )
         graph += "[v]"
         _write_text_atomic(filtergraph, graph + "\n")
+        filtergraph_checksum = _sha256_file(filtergraph)
 
         part = str(output) + ".part.mp4"
         normalized_audio = dict(manifest.normalized_audio)
@@ -931,11 +937,19 @@ class FFmpegCommandBuilder:
             "subtitle_stream_count": 0,
             "narration_drawtext_count": 0,
             "semantic_overlay_drawtext_count": len(semantic_overlays),
+            "drawtext_filtergraph_path": str(filtergraph),
+            "drawtext_filtergraph_checksum_sha256": filtergraph_checksum,
+            "semantic_overlay_drawtext_filter_hashes": (
+                semantic_overlay_drawtext_filter_hashes
+            ),
             "faststart": True,
         }
         generated_file_checksums = {
-            str(filtergraph): _sha256_file(filtergraph),
-            **{path: _sha256_file(Path(path)) for path in generated_text_files},
+            str(filtergraph): filtergraph_checksum,
+            **{
+                path: _sha256_file(Path(path))
+                for path in generated_text_files
+            },
         }
         if input_files:
             generated_file_checksums[input_files[0]] = str(canonical_audio_checksum)
@@ -1120,10 +1134,7 @@ class FFmpegCommandBuilder:
             str(filtergraph): _sha256_file(filtergraph),
             str(audio): _sha256_file(audio),
             **{str(path): _sha256_file(path) for path in asset_paths},
-            **{
-                path: _sha256_file(Path(path))
-                for path in generated_text_files
-            },
+            **{path: _sha256_file(Path(path)) for path in generated_text_files},
         }
         core = {
             "run_key": run_key,

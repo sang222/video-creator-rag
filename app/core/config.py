@@ -89,6 +89,32 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="VCOS_SCRIPT_QUALIFICATION_BACKGROUND_POLL_SECONDS",
     )
+    script_qualification_background_poll_cycles_per_stage: int = Field(
+        default=60,
+        ge=1,
+        validation_alias=(
+            "VCOS_SCRIPT_QUALIFICATION_BACKGROUND_POLL_CYCLES_PER_STAGE"
+        ),
+    )
+    script_qualification_background_queue_latency_seconds_per_stage: int = Field(
+        default=60,
+        ge=0,
+        validation_alias=(
+            "VCOS_SCRIPT_QUALIFICATION_BACKGROUND_QUEUE_LATENCY_SECONDS_PER_STAGE"
+        ),
+    )
+    script_qualification_background_safety_buffer_seconds: int = Field(
+        default=300,
+        ge=0,
+        validation_alias=(
+            "VCOS_SCRIPT_QUALIFICATION_BACKGROUND_SAFETY_BUFFER_SECONDS"
+        ),
+    )
+    script_qualification_downstream_lead_seconds: int = Field(
+        default=10800,
+        ge=0,
+        validation_alias="VCOS_SCRIPT_QUALIFICATION_DOWNSTREAM_LEAD_SECONDS",
+    )
     llm_provider: str = Field(
         default="openai",
         validation_alias=AliasChoices("VCOS_LLM_PROVIDER", "LLM_PROVIDER"),

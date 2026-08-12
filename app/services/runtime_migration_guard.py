@@ -13,8 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
-REQUIRED_RUNTIME_DB_REVISION = "0068_cross_modal_qc_projection"
-RUNTIME_DB_REVISION_BLOCKED = "RUNTIME_DB_REVISION_BELOW_CROSS_MODAL_AUTHORITY"
+REQUIRED_RUNTIME_DB_REVISION = "0072_controlled_recovery"
+RUNTIME_DB_REVISION_BLOCKED = "RUNTIME_DB_REVISION_BELOW_CONTROLLED_RECOVERY_AUTHORITY"
 
 
 @dataclass(frozen=True, slots=True)

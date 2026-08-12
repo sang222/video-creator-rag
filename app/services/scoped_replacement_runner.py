@@ -17,6 +17,10 @@ from app.db.models.script_qualification import (
     ScriptQualificationRun,
 )
 from app.services.launch_cadence import LongFormCadenceService
+from app.services.script_contract_replacement import (
+    OPERATOR_RECOVERY_REASON,
+    OPERATOR_RECOVERY_SCHEMA,
+)
 from app.services.script_qualification import SCRIPT_QUALIFICATION_EVENT_TYPE
 from app.services.script_qualification_background import ScriptQualificationBackgroundService
 from app.workers.production_workflow import ProductionWorkflowWorker, WorkerRunResult
@@ -39,9 +43,16 @@ class ScopedReplacementContinuationRunner:
     it never schedules or reads any other queue work.
     """
 
-    def __init__(self, session: Session, *, now) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        now,
+        post_render_hold_requested: bool = True,
+    ) -> None:
         self.session = session
         self.now = now
+        self.post_render_hold_requested = post_render_hold_requested
         self.actor = _system_worker_actor(
             "vcos-durable-worker", permissions={"production.start"}
         )
@@ -56,6 +67,13 @@ class ScopedReplacementContinuationRunner:
         )
         if authority is None or authority.replacement_qualification_run_id is None:
             raise ValidationFailureError("SCOPED_REPLACEMENT_AUTHORITY_MISSING")
+        if not self.post_render_hold_requested and (
+            authority.replacement_reason != OPERATOR_RECOVERY_REASON
+            or authority.operator_recovery_schema_version != OPERATOR_RECOVERY_SCHEMA
+        ):
+            raise ValidationFailureError(
+                "SCOPED_REPLACEMENT_FINAL_BOUNDARY_NOT_AUTHORIZED"
+            )
         qualification = self.session.scalar(
             select(ScriptQualificationRun)
             .where(
@@ -100,13 +118,22 @@ class ScopedReplacementContinuationRunner:
             if admission.admitted_video_project_id != workflow.video_project_id:
                 raise ValidationFailureError("SCOPED_REPLACEMENT_ADMISSION_WORKFLOW_DRIFT")
             metadata = dict(workflow.metadata_ or {})
-            metadata.update(
-                {
-                    "post_render_hold_requested": True,
-                    "post_render_hold_reason": "FIRST_VIDEO_OPERATOR_RENDER_INSPECTION",
-                    "replacement_authority_id": str(authority.id),
-                }
-            )
+            metadata["replacement_authority_id"] = str(authority.id)
+            if self.post_render_hold_requested:
+                metadata.update(
+                    {
+                        "post_render_hold_requested": True,
+                        "post_render_hold_reason": "FIRST_VIDEO_OPERATOR_RENDER_INSPECTION",
+                    }
+                )
+            else:
+                metadata.update(
+                    {
+                        "post_render_hold_requested": False,
+                        "post_render_hold_reason": None,
+                        "controlled_recovery_final_boundary": "FINAL_REVIEW_READY",
+                    }
+                )
             workflow.metadata_ = metadata
         elif qualification.production_workflow_run_id is not None:
             workflow = self.session.get(
@@ -116,7 +143,15 @@ class ScopedReplacementContinuationRunner:
         self.session.commit()
 
         worker_result: WorkerRunResult | None = None
-        if workflow is not None and workflow.state != "PAUSED_AFTER_NATIVE_RENDER":
+        if workflow is not None and workflow.state not in {
+            "PAUSED_AFTER_NATIVE_RENDER",
+            "FINAL_REVIEW_READY",
+            "BLOCKED",
+            "FAILED_TERMINAL",
+            "DEAD_LETTERED",
+            "CANCELED",
+            "SUPERSEDED",
+        }:
             worker_result = self._run_one_scoped_event(workflow_id=workflow.id)
             self.session.expire_all()
             refreshed = self.session.get(ProductionWorkflowRun, workflow.id)

@@ -1,5 +1,6 @@
 import json
 import uuid
+from dataclasses import asdict
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -13,9 +14,16 @@ from app.core.config import get_settings
 from app.core.db import check_database
 from app.core.errors import ValidationFailureError
 from app.core.actor import _system_worker_actor
+from app.core.time import utc_now
 from app.db.session import session_scope
 from app.services.editorial_novelty import (
     EditorialDuplicateCleanupService,
+)
+from app.services.scoped_replacement_runner import (
+    ScopedReplacementContinuationRunner,
+)
+from app.services.script_contract_replacement import (
+    ScriptContractReplacementAuthorityService,
 )
 from app.contracts import (
     ApprovalDecisionCreate,
@@ -1948,6 +1956,78 @@ def production_inspect(
             typer.echo(json.dumps(_production_run_to_dict(run)))
     except Exception as exc:
         _fail(f"production inspect failed: {exc}")
+
+
+@production_app.command("recover-first-video")
+def production_recover_first_video(
+    candidate_id: uuid.UUID = typer.Option(..., "--candidate-id"),
+    execute_next_step: bool = typer.Option(
+        False,
+        "--execute-next-step",
+        help=(
+            "Continue only this recovery lineage by one durable event. "
+            "Repeat explicitly until FINAL_REVIEW_READY."
+        ),
+    ),
+) -> None:
+    """Authorize one candidate-specific first-video recovery; never force PASS."""
+
+    try:
+        with session_scope() as session:
+            actor = _system_worker_actor(
+                "vcos-controlled-recovery",
+                permissions={"editorial.manage", "production.start"},
+            )
+            lineage = ScriptContractReplacementAuthorityService(
+                session, now=utc_now
+            ).create_operator_first_video_recovery(
+                historical_candidate_id=candidate_id,
+                actor=actor,
+            )
+            continuation = None
+            if execute_next_step:
+                continuation = ScopedReplacementContinuationRunner(
+                    session,
+                    now=utc_now,
+                    post_render_hold_requested=False,
+                ).run_once(authority_id=lineage.authority.id)
+            payload = {
+                "schema_version": "vcos.controlled-recovery-cli.v1",
+                "operator_recovery_id": str(lineage.authority.id),
+                "recovery_receipt_hash": lineage.authority.recovery_receipt_hash,
+                "historical_candidate_id": str(
+                    lineage.authority.replaces_candidate_id
+                ),
+                "historical_qualification_id": str(
+                    lineage.authority.historical_qualification_id
+                ),
+                "replacement_candidate_id": str(lineage.candidate.id),
+                "replacement_slot_id": str(lineage.slot.id),
+                "replacement_qualification_id": str(lineage.qualification.id),
+                "qualification_state": lineage.qualification.state,
+                "logical_deadline_at": (
+                    lineage.qualification.logical_deadline_at.isoformat()
+                    if lineage.qualification.logical_deadline_at
+                    else None
+                ),
+                "workflow_id": (
+                    str(continuation.workflow_id)
+                    if continuation and continuation.workflow_id
+                    else None
+                ),
+                "workflow_state": (
+                    continuation.workflow_state if continuation else None
+                ),
+                "worker_result": (
+                    asdict(continuation.worker_result)
+                    if continuation and continuation.worker_result
+                    else None
+                ),
+                "auto_publish": False,
+            }
+            typer.echo(json.dumps(payload, default=str, sort_keys=True))
+    except Exception as exc:
+        _fail(f"production recover-first-video failed: {exc}")
 
 
 @media_app.command("qc-run")

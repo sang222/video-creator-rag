@@ -644,7 +644,7 @@ def _qualified_outbox_authority(db_session):
     )
     _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
     _bind_current_topic_authority(db_session, candidate)
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     cadence = LongFormCadenceService(
         db_session,
         now=lambda: now,
@@ -734,7 +734,7 @@ def test_worker_seals_qualification_pass_before_finalization_failure(
     )
     _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
     _bind_current_topic_authority(db_session, candidate)
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     evaluation = LongFormCadenceService(
         db_session,
         now=lambda: now,

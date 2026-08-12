@@ -233,7 +233,6 @@ class _DeterministicPassingQualificationProducer:
     def verify(self, context, *, idempotency_key):
         self.verifier_calls += 1
         self.verifier_assignment_resolution = dict(context["assignment_resolution"])
-        script = context["canonical_script"]
         spans = [
             {
                 "text": text,
@@ -1332,7 +1331,7 @@ def test_tuesday_slots_use_policy_timezone_and_minimum_interval(
         db_session, scope, timezone_name="UTC", weekdays=["TUESDAY", "SATURDAY"]
     )
     run = _active_launch_run(db_session, policy, actor, started_on=date(2026, 7, 20))
-    fixed_now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     slots = LongFormCadenceService(db_session, now=lambda: fixed_now).ensure_slots(
         run.id
     )
@@ -1365,7 +1364,7 @@ def test_buffer_below_target_reserves_exactly_one_script_qualification_before_ad
     producer_actor = _actor(db_session, scope)
     _, candidate, _ = _greenlit_candidate(db_session, scope, producer_actor)
     _bind_current_topic_authority(db_session, candidate)
-    fixed_now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     service = LongFormCadenceService(
         db_session,
         now=lambda: fixed_now,
@@ -1444,7 +1443,7 @@ def test_series_episode_reservation_is_pre_writer_idempotent_and_released_on_sup
     _bind_series_topic_authority(
         db_session, candidate, plan=plans[0], run=series_run
     )
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     cadence = LongFormCadenceService(
         db_session,
         now=lambda: now,
@@ -1514,7 +1513,7 @@ def test_structural_block_settles_series_slot_and_releases_capacity_once(
     )
     qualification_start = LongFormCadenceService(
         db_session,
-        now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+        now=lambda: datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc),
         provider_readiness_snapshot=_ready_provider_snapshot,
         support_authority_preparer=_test_support_authority_preparer,
     ).evaluate(
@@ -1632,7 +1631,7 @@ def test_unknown_series_writer_outcome_keeps_episode_reserved(
     _bind_series_topic_authority(
         db_session, candidate, plan=plans[0], run=series_run
     )
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     receipt = LongFormCadenceService(
         db_session,
         now=lambda: now,
@@ -1725,7 +1724,7 @@ def test_series_qualification_pass_consumes_the_exact_reserved_episode_once(
     _bind_series_topic_authority(
         db_session, candidate, plan=plans[0], run=series_run
     )
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     cadence = LongFormCadenceService(
         db_session,
         now=lambda: now,
@@ -1796,7 +1795,7 @@ def test_standalone_qualification_to_production_readiness_uses_only_two_llm_call
     )
     _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
     _bind_current_topic_authority(db_session, candidate)
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     cadence = LongFormCadenceService(
         db_session,
         now=lambda: now,
@@ -1950,7 +1949,7 @@ def test_series_qualification_to_production_readiness_preserves_reserved_lineage
     _bind_series_topic_authority(
         db_session, candidate, plan=plans[0], run=series_run
     )
-    now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     cadence = LongFormCadenceService(
         db_session,
         now=lambda: now,
@@ -2103,7 +2102,7 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
     )
     _, candidate, _ = _greenlit_candidate(db_session, scope, _actor(db_session, scope))
     _bind_current_topic_authority(db_session, candidate)
-    fixed_now = datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     service = LongFormCadenceService(
         db_session,
         now=lambda: fixed_now,
@@ -2170,7 +2169,6 @@ def test_qualification_pass_is_the_only_path_to_cadence_admission(
             )
 
         def verify(self, context, *, idempotency_key):
-            script = context["canonical_script"]
             spans = []
             for index, (text, section_id) in enumerate(zip(self.sentences, self.section_ids, strict=True), start=1):
                 spans.append({
@@ -2327,7 +2325,7 @@ def _stale_zero_effect_workflow(db_session, qualification_factory, *, series: bo
         _bind_current_topic_authority(db_session, candidate)
     cadence = LongFormCadenceService(
         db_session,
-        now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+        now=lambda: datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc),
         provider_readiness_snapshot=_ready_provider_snapshot,
         support_authority_preparer=_test_support_authority_preparer,
     )
@@ -2659,7 +2657,7 @@ def test_open_mix_admission_filters_series_outside_launch_policy(
     _bind_current_topic_authority(db_session, candidate)
     cadence = LongFormCadenceService(
         db_session,
-        now=lambda: datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+        now=lambda: datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc),
         provider_readiness_snapshot=_ready_provider_snapshot,
         support_authority_preparer=_test_support_authority_preparer,
     )

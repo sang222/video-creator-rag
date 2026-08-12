@@ -189,6 +189,7 @@ class NativeMediaQC:
                 bool(frames) and all(frames) and len(fingerprints) == len(frames)
             )
         checksum_sha256 = _sha256_file(output)
+        drawtext_checks = _measure_drawtext_contract(output, expected)
         checks.update(
             {
                 "container_mp4": container_mp4,
@@ -231,6 +232,7 @@ class NativeMediaQC:
                 "audio_presence": bool(audio),
                 "av_drift_ms": av_drift_ms,
                 "timeline_coverage": scene_coverage,
+                **drawtext_checks,
             }
         )
         requirements = {
@@ -258,6 +260,19 @@ class NativeMediaQC:
         if expected.get("subtitle_stream_count") is not None:
             requirements["subtitle_stream_count"] = int(
                 expected["subtitle_stream_count"]
+            )
+        if (
+            expected.get("narration_drawtext_count") is not None
+            or expected.get("semantic_overlay_drawtext_count") is not None
+        ):
+            requirements["drawtext_filtergraph_attested"] = True
+        if expected.get("narration_drawtext_count") is not None:
+            requirements["narration_drawtext_count"] = int(
+                expected["narration_drawtext_count"]
+            )
+        if expected.get("semantic_overlay_drawtext_count") is not None:
+            requirements["semantic_overlay_drawtext_count"] = int(
+                expected["semantic_overlay_drawtext_count"]
             )
         if expected.get("scene_coverage_required"):
             requirements["timeline_coverage"] = True
@@ -320,6 +335,128 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _measure_drawtext_contract(
+    output: Path, expected: dict[str, Any]
+) -> dict[str, Any]:
+    """Attest and classify every drawtext filter used by the render command.
+
+    Only command-bound semantic-overlay filter hashes are classified as semantic.
+    Every additional drawtext filter is fail-closed as narration/unapproved text.
+    """
+
+    if (
+        expected.get("narration_drawtext_count") is None
+        and expected.get("semantic_overlay_drawtext_count") is None
+    ):
+        return {}
+
+    checks: dict[str, Any] = {
+        "drawtext_filtergraph_attested": False,
+        "drawtext_filtergraph_checksum_sha256": None,
+        "drawtext_filter_count": None,
+        "semantic_overlay_drawtext_count": None,
+        "narration_drawtext_count": None,
+    }
+
+    raw_path = expected.get("drawtext_filtergraph_path")
+    expected_checksum = expected.get("drawtext_filtergraph_checksum_sha256")
+    authorized_hashes = expected.get("semantic_overlay_drawtext_filter_hashes")
+    expected_semantic_count = expected.get("semantic_overlay_drawtext_count")
+    if (
+        not isinstance(raw_path, str)
+        or not raw_path
+        or not _is_sha256(expected_checksum)
+        or not isinstance(authorized_hashes, list)
+        or any(not _is_sha256(value) for value in authorized_hashes)
+        or len(set(authorized_hashes)) != len(authorized_hashes)
+        or not isinstance(expected_semantic_count, int)
+        or isinstance(expected_semantic_count, bool)
+        or expected_semantic_count < 0
+        or len(authorized_hashes) != expected_semantic_count
+    ):
+        return checks
+
+    filtergraph = Path(raw_path)
+    try:
+        resolved_filtergraph = filtergraph.resolve(strict=True)
+        resolved_output_parent = output.parent.resolve(strict=True)
+        if (
+            filtergraph.is_symlink()
+            or not resolved_filtergraph.is_file()
+            or resolved_filtergraph.parent != resolved_output_parent
+            or resolved_filtergraph.stat().st_size > 8 * 1024 * 1024
+        ):
+            return checks
+        raw_graph = resolved_filtergraph.read_bytes()
+    except (OSError, RuntimeError):
+        return checks
+
+    actual_checksum = hashlib.sha256(raw_graph).hexdigest()
+    checks["drawtext_filtergraph_checksum_sha256"] = actual_checksum
+    if actual_checksum != expected_checksum:
+        return checks
+    try:
+        graph = raw_graph.decode("utf-8")
+    except UnicodeDecodeError:
+        return checks
+
+    actual_hashes = [
+        hashlib.sha256(item.encode("utf-8")).hexdigest()
+        for item in _drawtext_filters(graph)
+    ]
+    remaining_authorized = list(authorized_hashes)
+    semantic_count = 0
+    for actual_hash in actual_hashes:
+        if actual_hash in remaining_authorized:
+            semantic_count += 1
+            remaining_authorized.remove(actual_hash)
+
+    checks.update(
+        {
+            "drawtext_filtergraph_attested": True,
+            "drawtext_filter_count": len(actual_hashes),
+            "semantic_overlay_drawtext_count": semantic_count,
+            "narration_drawtext_count": len(actual_hashes) - semantic_count,
+        }
+    )
+    return checks
+
+
+def _drawtext_filters(graph: str) -> list[str]:
+    """Return exact drawtext filter clauses from one generated filter chain."""
+
+    filters: list[str] = []
+    start = 0
+    escaped = False
+    for index, char in enumerate(graph):
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ",":
+            filters.append(graph[start:index])
+            start = index + 1
+    filters.append(graph[start:])
+
+    drawtext: list[str] = []
+    for item in filters:
+        clause = item.strip()
+        if not clause.startswith("drawtext="):
+            continue
+        if clause.endswith("[v]"):
+            clause = clause[:-3]
+        drawtext.append(clause)
+    return drawtext
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
 
 
 def _frame_bytes(

@@ -43,6 +43,11 @@ def authenticated_actor_context(
 
 _SYSTEM_WORKER_IDENTITIES = {
     "vcos-durable-worker": uuid.UUID("95428dc2-b989-5a1c-8f49-8dd64e99f00e"),
+    # A distinct durable identity keeps explicit operator-requested recovery
+    # receipts truthful without fabricating a human User row.
+    "vcos-controlled-recovery": uuid.UUID(
+        "6d196d74-7938-5c85-bc10-f25466616258"
+    ),
 }
 
 

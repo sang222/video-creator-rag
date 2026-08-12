@@ -96,6 +96,11 @@ from app.services.production_start_readiness import (
 from app.services.production_workflow import ProductionWorkflowCoordinator
 from app.services.r3d1 import CharacterBindingResolver
 from app.services.r3d2 import EffectiveChannelRuntimeContextCompiler
+from app.services.script_qualification_background import (
+    build_script_qualification_deadline_policy,
+    derive_script_qualification_deadline,
+    script_qualification_slot_is_viable,
+)
 from app.services.v2_support_authority import (
     V2SupportAuthorityPrepareCommand,
     V2SupportAuthorityService,
@@ -852,6 +857,7 @@ class LongFormCadenceService:
         if existing is not None:
             return existing
         slots = self.ensure_slots(run.id)
+        qualification_deadline_policy = build_script_qualification_deadline_policy()
         slot = next(
             (
                 item
@@ -860,6 +866,11 @@ class LongFormCadenceService:
                 and item.target_start_window_open_at
                 <= now
                 <= item.target_start_window_close_at
+                and script_qualification_slot_is_viable(
+                    now,
+                    item.target_start_window_close_at,
+                    qualification_deadline_policy,
+                )
             ),
             None,
         )
@@ -867,7 +878,13 @@ class LongFormCadenceService:
             (
                 item
                 for item in slots
-                if item.state == "OPEN" and item.intended_publish_at > now
+                if item.state == "OPEN"
+                and item.intended_publish_at > now
+                and script_qualification_slot_is_viable(
+                    now,
+                    item.target_start_window_close_at,
+                    qualification_deadline_policy,
+                )
             ),
             None,
         )
@@ -961,6 +978,7 @@ class LongFormCadenceService:
             "quality_fallback_long_form_per_week": (
                 policy.quality_fallback_long_form_per_week
             ),
+            "script_qualification_deadline_policy": qualification_deadline_policy.receipt(),
             "budget_provider_readiness": budget_provider_readiness,
             "blocking_incident_ids": [str(item) for item in incidents],
             "rights_policy_blocked": rights_blocked,
@@ -979,6 +997,10 @@ class LongFormCadenceService:
 
             qualification = ScriptQualificationService(self.session).reserve(
                 candidate=selected, publish_slot_id=slot.id, launch_run_id=run.id,
+            )
+            qualification.logical_deadline_at = derive_script_qualification_deadline(
+                slot.target_start_window_close_at,
+                qualification_deadline_policy,
             )
             qualification_run_id = qualification.id
             slot.state = "QUALIFICATION_RESERVED"

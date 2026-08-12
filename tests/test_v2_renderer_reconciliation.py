@@ -16,6 +16,7 @@ from app.contracts.native_renderer import CompiledNativeRenderManifest
 from app.contracts.production_workflow import ProductionWorkflowStage
 from app.core.errors import ValidationFailureError
 from app.services.native_ffmpeg_renderer import FFmpegCommandBuilder
+from app.services.native_media_qc import NativeMediaQC
 from app.services.native_render_plan import stable_hash
 from app.services.v2_native_effects import (
     V2_ELEVENLABS_NARRATION_STRATEGY,
@@ -278,6 +279,13 @@ def test_narration_and_srt_fields_never_create_drawtext(tmp_path: Path) -> None:
     assert manifest.normalized_caption["mode"] == "SIDECAR_SRT_ONLY"
     assert manifest.caption_schedule["render_consumes_caption_cues"] is False
     assert command.expected_qc["subtitle_stream_count"] == 0
+    assert command.expected_qc["drawtext_filtergraph_path"] == str(
+        command.generated_filtergraph_path
+    )
+    assert command.expected_qc["drawtext_filtergraph_checksum_sha256"] == _sha256(
+        Path(command.generated_filtergraph_path)
+    )
+    assert command.expected_qc["semantic_overlay_drawtext_filter_hashes"] == []
 
 
 def test_explicit_semantic_overlay_preserves_exact_native_text(tmp_path: Path) -> None:
@@ -299,6 +307,7 @@ def test_explicit_semantic_overlay_preserves_exact_native_text(tmp_path: Path) -
     graph = Path(command.generated_filtergraph_path).read_text(encoding="utf-8")
     assert graph.count("drawtext=") == 1
     assert command.expected_qc["semantic_overlay_drawtext_count"] == 1
+    assert len(command.expected_qc["semantic_overlay_drawtext_filter_hashes"]) == 1
     assert Path(command.generated_text_files[0]).read_text(encoding="utf-8").strip() == overlay["text"]
 
 
@@ -366,12 +375,16 @@ def test_offline_render_canaries_keep_subtitles_sidecar_only(tmp_path: Path) -> 
         streams = probe_payload["streams"]
         codec_types = [stream["codec_type"] for stream in streams]
         graph = Path(command.generated_filtergraph_path).read_text(encoding="utf-8")
+        qc = NativeMediaQC(builder.ffprobe, ffmpeg=builder.ffmpeg).inspect(
+            Path(command.output_file), command.expected_qc, command.run_key
+        )
         results.append(
             (
                 codec_types,
                 float(probe_payload["format"]["duration"]),
                 graph.count("drawtext="),
                 command,
+                qc,
             )
         )
 
@@ -382,3 +395,83 @@ def test_offline_render_canaries_keep_subtitles_sidecar_only(tmp_path: Path) -> 
     assert results[0][2] == 0
     assert results[1][2] == 1
     assert results[1][3].expected_qc["semantic_overlay_drawtext_count"] == 1
+    for result in results:
+        assert result[4].result == "PASS"
+        assert result[4].checks["drawtext_filtergraph_attested"] is True
+        assert result[4].checks["narration_drawtext_count"] == 0
+        assert result[4].checks["drawtext_filter_count"] == result[2]
+    assert results[0][4].checks["semantic_overlay_drawtext_count"] == 0
+    assert results[1][4].checks["semantic_overlay_drawtext_count"] == 1
+
+
+def test_native_media_qc_rejects_attested_unapproved_drawtext(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "candidate.mp4"
+    output.write_bytes(b"\x00\x00\x00\x08ftyp\x00\x00\x00\x08moov\x00\x00\x00\x08mdat")
+    filtergraph = tmp_path / "filtergraph.txt"
+    filtergraph.write_text(
+        "[0:v]format=yuv420p,drawtext=text='Narration must remain audio-only'[v]\n",
+        encoding="utf-8",
+    )
+    probe_payload = {
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "avg_frame_rate": "30/1",
+                "pix_fmt": "yuv420p",
+                "color_space": "bt709",
+                "duration": "1.0",
+            },
+            {
+                "codec_type": "audio",
+                "codec_name": "aac",
+                "sample_rate": "48000",
+                "channels": 2,
+                "duration": "1.0",
+            },
+        ],
+        "format": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "duration": "1.0",
+        },
+    }
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if argv[0] == "ffprobe":
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=json.dumps(probe_payload), stderr=""
+            )
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("app.services.native_media_qc.subprocess.run", fake_run)
+    expected = {
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "pix_fmt": "yuv420p",
+        "audio_codec": "aac",
+        "sample_rate": 48000,
+        "channels": 2,
+        "expected_duration_seconds": 1.0,
+        "narration_drawtext_count": 0,
+        "semantic_overlay_drawtext_count": 0,
+        "drawtext_filtergraph_path": str(filtergraph),
+        "drawtext_filtergraph_checksum_sha256": _sha256(filtergraph),
+        "semantic_overlay_drawtext_filter_hashes": [],
+        "faststart": True,
+    }
+
+    report = NativeMediaQC("ffprobe", ffmpeg="ffmpeg").inspect(
+        output, expected, "unapproved-drawtext"
+    )
+
+    assert report.result == "FAIL"
+    assert report.reason_codes == ["QC_NARRATION_DRAWTEXT_COUNT"]
+    assert report.checks["drawtext_filtergraph_attested"] is True
+    assert report.checks["drawtext_filter_count"] == 1
+    assert report.checks["semantic_overlay_drawtext_count"] == 0
+    assert report.checks["narration_drawtext_count"] == 1
