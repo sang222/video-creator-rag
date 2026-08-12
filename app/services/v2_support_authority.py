@@ -136,20 +136,14 @@ class V2SupportAuthorityPrepareCommand(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def validate_execution_mode(self) -> Self:
-        if (
-            self.execution_mode == "REAL_LONG_FORM_PRODUCTION"
-            and (
-                self.budget_reservation_run_id is None
-                or self.script_qualification_run_id is None
-            )
+        if self.execution_mode == "REAL_LONG_FORM_PRODUCTION" and (
+            self.budget_reservation_run_id is None
+            or self.script_qualification_run_id is None
         ):
             raise ValueError("V2_REAL_PROVIDER_SCRIPT_QUALIFICATION_REQUIRED")
-        if (
-            self.execution_mode == "QUALIFICATION_LOCAL"
-            and (
-                self.budget_reservation_run_id is not None
-                or self.script_qualification_run_id is not None
-            )
+        if self.execution_mode == "QUALIFICATION_LOCAL" and (
+            self.budget_reservation_run_id is not None
+            or self.script_qualification_run_id is not None
         ):
             raise ValueError("V2_QUALIFICATION_BUDGET_RESERVATION_FORBIDDEN")
         return self
@@ -183,7 +177,9 @@ class V2FrozenEvidenceSpan(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def validate_exact_span(self) -> Self:
-        if self.end_byte <= self.start_byte or self.end_byte - self.start_byte != len(self.text.encode("utf-8")):
+        if self.end_byte <= self.start_byte or self.end_byte - self.start_byte != len(
+            self.text.encode("utf-8")
+        ):
             raise ValueError("V2_FROZEN_EVIDENCE_SPAN_RANGE_INVALID")
         if hashlib.sha256(self.text.encode("utf-8")).hexdigest() != self.span_hash:
             raise ValueError("V2_FROZEN_EVIDENCE_SPAN_HASH_INVALID")
@@ -198,7 +194,10 @@ class V2FrozenSourceRef(V2ExactAuthorityRef):
     @model_validator(mode="after")
     def validate_factual_span_binding(self) -> Self:
         if self.evidence_spans:
-            if any(span.source_snapshot_hash != self.content_hash for span in self.evidence_spans):
+            if any(
+                span.source_snapshot_hash != self.content_hash
+                for span in self.evidence_spans
+            ):
                 raise ValueError("V2_FROZEN_EVIDENCE_SNAPSHOT_HASH_MISMATCH")
             if self.fact_statements != [span.text for span in self.evidence_spans]:
                 raise ValueError("V2_FROZEN_EVIDENCE_STATEMENT_SPAN_MISMATCH")
@@ -231,21 +230,61 @@ class V2GeneratedSection(_StrictFrozenModel):
 
 
 class V2ProducerReceipt(_StrictFrozenModel):
-    producer_type: Literal["LLM_ROUTER"]
+    producer_type: Literal["LLM_ROUTER", "OPENAI_BACKGROUND_NORMALIZED"]
     producer_version: str = Field(min_length=1)
     lane_name: str = Field(min_length=1)
     selected_model: str = Field(min_length=1)
-    fallback_level: str = Field(min_length=1)
-    route_attempt_id: uuid.UUID
+    fallback_level: str | None = Field(default=None, min_length=1)
+    route_attempt_id: uuid.UUID | None = None
     provider_attempt_id: uuid.UUID | None = None
     llm_run_snapshot_id: uuid.UUID | None = None
+    background_attempt_id: uuid.UUID | None = None
+    provider_response_id: str | None = Field(default=None, min_length=1)
+    provider_request_id: str | None = Field(default=None, min_length=1)
+    normalization_receipt_id: uuid.UUID | None = None
+    normalization_receipt_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+    source_typed_provider_output_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
     producer_input_hash: str = Field(pattern=_SHA256_PATTERN)
     producer_output_hash: str = Field(pattern=_SHA256_PATTERN)
     # Present only when this envelope projects a script that was produced by
     # script qualification.  ``producer_*`` then remain the original writer
     # boundary hashes while this records the deterministic projection shape.
     projected_output_hash: str | None = Field(default=None, pattern=_SHA256_PATTERN)
-    qualification_receipt_hash: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    qualification_receipt_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+
+    @model_validator(mode="after")
+    def validate_producer_boundary(self) -> Self:
+        router_fields = (
+            self.fallback_level,
+            self.route_attempt_id,
+        )
+        background_fields = (
+            self.background_attempt_id,
+            self.provider_response_id,
+            self.provider_request_id,
+            self.normalization_receipt_id,
+            self.normalization_receipt_hash,
+            self.source_typed_provider_output_hash,
+        )
+        if self.producer_type == "LLM_ROUTER":
+            if any(item is None for item in router_fields) or any(
+                item is not None for item in background_fields
+            ):
+                raise ValueError("V2_PRODUCER_ROUTER_PROVENANCE_INVALID")
+        elif (
+            any(item is None for item in background_fields)
+            or any(item is not None for item in router_fields)
+            or self.provider_attempt_id is not None
+            or self.llm_run_snapshot_id is not None
+        ):
+            raise ValueError("V2_PRODUCER_BACKGROUND_PROVENANCE_INVALID")
+        return self
 
 
 class V2TrustedSupportDraft(_StrictFrozenModel):
@@ -335,14 +374,14 @@ class LLMRouterV2SupportProducer:
                 messages=[
                     {
                         "role": "system",
-                            "content": (
-                                "Return strict JSON only. Write an original production "
-                                "script using only the frozen source statements supplied. "
-                                "Every material claim must quote an exact source statement "
-                                "as source_excerpt and cite its source_ref_id. Do not add "
-                                "external assets, URLs, provider calls, or facts. Any "
-                                "memory guidance is non-factual creative guidance only; "
-                                "never cite it as evidence or turn it into a claim."
+                        "content": (
+                            "Return strict JSON only. Write an original production "
+                            "script using only the frozen source statements supplied. "
+                            "Every material claim must quote an exact source statement "
+                            "as source_excerpt and cite its source_ref_id. Do not add "
+                            "external assets, URLs, provider calls, or facts. Any "
+                            "memory guidance is non-factual creative guidance only; "
+                            "never cite it as evidence or turn it into a claim."
                         ),
                     },
                     {
@@ -515,7 +554,9 @@ class V2CrossModalScriptLineage(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def validate_hash(self) -> Self:
-        expected = cross_modal_hash(self.model_dump(mode="json", exclude={"content_hash"}))
+        expected = cross_modal_hash(
+            self.model_dump(mode="json", exclude={"content_hash"})
+        )
         if self.content_hash != expected:
             raise ValueError("V2_CROSS_MODAL_SCRIPT_LINEAGE_HASH_MISMATCH")
         return self
@@ -549,17 +590,13 @@ class V2LocalGeneratedCardRights(_StrictFrozenModel):
     schema_version: Literal[
         "vcos.local-generated-card-rights.v1",
         "vcos.visual-asset-request-authority.v2",
-    ] = (
-        "vcos.local-generated-card-rights.v1"
-    )
+    ] = "vcos.local-generated-card-rights.v1"
     rights_state: Literal["PASS"] = "PASS"
     visual_source_mode: Literal[
         "LOCAL_GENERATED_CARDS_ONLY",
         "NATIVE_BACKBONE_POLICY_ONLY",
         "POLICY_SELECTED_ASSET_REQUESTS",
-    ] = (
-        "LOCAL_GENERATED_CARDS_ONLY"
-    )
+    ] = "LOCAL_GENERATED_CARDS_ONLY"
     external_asset_refs: list[Any] = Field(default_factory=list, max_length=0)
     stock_asset_refs: list[Any] = Field(default_factory=list, max_length=0)
     license_evidence_required: Literal[False] = False
@@ -810,7 +847,9 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
         ):
             raise ValueError("APPROVED_SCRIPT_DURATION_INVALID")
         source_keys = {(source.type, source.id) for source in self.frozen_sources}
-        source_by_key = {(source.type, source.id): source for source in self.frozen_sources}
+        source_by_key = {
+            (source.type, source.id): source for source in self.frozen_sources
+        }
         if len(source_keys) != len(self.frozen_sources):
             raise ValueError("FROZEN_SOURCE_IDENTITY_COLLISION")
         claim_ids = [binding.claim_id for binding in self.claim_source_bindings]
@@ -823,7 +862,10 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
         ):
             raise ValueError("CLAIM_SOURCE_BINDING_INVALID")
         for binding in self.claim_source_bindings:
-            if not {(source.type, source.id) for source in binding.source_refs} <= source_keys:
+            if (
+                not {(source.type, source.id) for source in binding.source_refs}
+                <= source_keys
+            ):
                 raise ValueError("CLAIM_SOURCE_BINDING_INVALID")
             if binding.evidence_span_refs and binding.source_excerpts != [
                 span.text for span in binding.evidence_span_refs
@@ -833,12 +875,21 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
                 matches = [
                     source
                     for source in binding.source_refs
-                    if any(item.evidence_span_id == span.evidence_span_id for item in source_by_key[(source.type, source.id)].evidence_spans)
+                    if any(
+                        item.evidence_span_id == span.evidence_span_id
+                        for item in source_by_key[
+                            (source.type, source.id)
+                        ].evidence_spans
+                    )
                 ]
                 if len(matches) != 1:
                     raise ValueError("CLAIM_SOURCE_EVIDENCE_SPAN_INVALID")
                 source = source_by_key[(matches[0].type, matches[0].id)]
-                expected = next(item for item in source.evidence_spans if item.evidence_span_id == span.evidence_span_id)
+                expected = next(
+                    item
+                    for item in source.evidence_spans
+                    if item.evidence_span_id == span.evidence_span_id
+                )
                 if span != expected or span.text not in binding.source_excerpts:
                     raise ValueError("CLAIM_SOURCE_EVIDENCE_SPAN_INVALID")
         script_gate = {
@@ -930,16 +981,24 @@ class V2SupportAuthorityService:
                 ScriptQualificationService,
                 ScriptRuntimeContractResolver,
             )
-            from app.services.script_qualification_authority import validate_memory_digest
+            from app.services.script_qualification_authority import (
+                validate_memory_digest,
+            )
 
-            admission = self.session.get(ProjectAdmissionDecision, project.project_admission_decision_id)
+            admission = self.session.get(
+                ProjectAdmissionDecision, project.project_admission_decision_id
+            )
             if admission is None or admission.editorial_idea_candidate_id is None:
                 raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_LINEAGE_MISSING")
-            qualification_receipt = ScriptQualificationService(self.session).require_pass(
+            qualification_receipt = ScriptQualificationService(
+                self.session
+            ).require_pass(
                 command.script_qualification_run_id,
                 candidate_id=admission.editorial_idea_candidate_id,
             )
-            qualified_run = self.session.get(ScriptQualificationRun, command.script_qualification_run_id)
+            qualified_run = self.session.get(
+                ScriptQualificationRun, command.script_qualification_run_id
+            )
             if qualified_run is None or qualified_run.script_payload is None:
                 raise ValidationFailureError("V2_SUPPORT_QUALIFIED_SCRIPT_MISSING")
             _script, _evidence, qualification_memory, _provenance = (
@@ -950,9 +1009,13 @@ class V2SupportAuthorityService:
                     qualification_memory, expected_hash=qualified_run.memory_digest_hash
                 )
             except ValueError as exc:
-                raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_MEMORY_AUTHORITY_INVALID") from exc
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFICATION_MEMORY_AUTHORITY_INVALID"
+                ) from exc
             if qualification_memory.get("status") != "EMPTY_SAFE_DIGEST":
-                raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_MEMORY_AUTHORITY_INVALID")
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFICATION_MEMORY_AUTHORITY_INVALID"
+                )
             qualification_runtime_contract = ScriptRuntimeContractResolver.validate(
                 qualified_run.runtime_contract,
                 expected_hash=qualified_run.runtime_contract_hash,
@@ -962,10 +1025,14 @@ class V2SupportAuthorityService:
                 != resolved.expected_language.casefold()
                 or qualification_runtime_contract["duration_contract"]
                 != resolved.duration_contract.model_dump(mode="json")
-                or qualification_runtime_contract["forbidden_claims"] != resolved.forbidden_claims
-                or qualification_runtime_contract["forbidden_style_terms"] != resolved.forbidden_style_terms
+                or qualification_runtime_contract["forbidden_claims"]
+                != resolved.forbidden_claims
+                or qualification_runtime_contract["forbidden_style_terms"]
+                != resolved.forbidden_style_terms
             ):
-                raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_RUNTIME_CONTRACT_MISMATCH")
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFICATION_RUNTIME_CONTRACT_MISMATCH"
+                )
             resolved = resolved.model_copy(
                 update={
                     "frozen_sources": [
@@ -1019,14 +1086,23 @@ class V2SupportAuthorityService:
             video_project_id=project.id,
             production_lane=resolved.production_lane,
             title=resolved.title,
-            expected_language=(qualification_runtime_contract or {}).get("expected_language", resolved.expected_language),
+            expected_language=(qualification_runtime_contract or {}).get(
+                "expected_language", resolved.expected_language
+            ),
             duration_contract=(
-                resolved.duration_contract.__class__.model_validate(qualification_runtime_contract["duration_contract"])
-                if qualification_runtime_contract is not None else resolved.duration_contract
+                resolved.duration_contract.__class__.model_validate(
+                    qualification_runtime_contract["duration_contract"]
+                )
+                if qualification_runtime_contract is not None
+                else resolved.duration_contract
             ),
             frozen_sources=resolved.frozen_sources,
-            forbidden_claims=(qualification_runtime_contract or {}).get("forbidden_claims", resolved.forbidden_claims),
-            forbidden_style_terms=(qualification_runtime_contract or {}).get("forbidden_style_terms", resolved.forbidden_style_terms),
+            forbidden_claims=(qualification_runtime_contract or {}).get(
+                "forbidden_claims", resolved.forbidden_claims
+            ),
+            forbidden_style_terms=(qualification_runtime_contract or {}).get(
+                "forbidden_style_terms", resolved.forbidden_style_terms
+            ),
             memory_guidance_digest=memory_digest,
         )
         if qualified_run is not None:
@@ -1096,7 +1172,9 @@ class V2SupportAuthorityService:
         )
 
     @staticmethod
-    def _qualification_frozen_sources(qualification_receipt: Any) -> list[V2FrozenSourceRef]:
+    def _qualification_frozen_sources(
+        qualification_receipt: Any,
+    ) -> list[V2FrozenSourceRef]:
         from app.services.script_qualification import ScriptQualificationService
 
         sources: list[V2FrozenSourceRef] = []
@@ -1110,7 +1188,9 @@ class V2SupportAuthorityService:
             try:
                 evidence_id = uuid.UUID(str(raw_span["evidence_id"]))
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_INVALID") from exc
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFIED_EVIDENCE_INVALID"
+                ) from exc
             if (
                 raw_span.get("evidence_type") != "search_demand_evidence"
                 or raw_span.get("authority_purpose") != "CLAIM_SOURCE"
@@ -1119,7 +1199,9 @@ class V2SupportAuthorityService:
                 or raw_span.get("source_classification") != "TOPIC_CAPABLE"
                 or not raw_span.get("source_class")
             ):
-                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_AUTHORITY_INVALID")
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFIED_EVIDENCE_AUTHORITY_INVALID"
+                )
             try:
                 frozen_span = V2FrozenEvidenceSpan(
                     evidence_span_id=str(raw_span["evidence_span_id"]),
@@ -1134,18 +1216,36 @@ class V2SupportAuthorityService:
                     source_class=str(raw_span["source_class"]),
                 )
             except (KeyError, TypeError, ValueError, ValidationError) as exc:
-                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_INVALID") from exc
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFIED_EVIDENCE_INVALID"
+                ) from exc
             key = ("search_demand_evidence", evidence_id)
             by_source.setdefault(key, []).append(frozen_span)
-        for (source_type, evidence_id), spans in sorted(by_source.items(), key=lambda item: (item[0][0], str(item[0][1]))):
+        for (source_type, evidence_id), spans in sorted(
+            by_source.items(), key=lambda item: (item[0][0], str(item[0][1]))
+        ):
             if len({span.evidence_span_id for span in spans}) != len(spans):
-                raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_SPAN_DUPLICATE")
-            sources.append(V2FrozenSourceRef(
-                type=source_type, id=evidence_id,
-                ref=str(next(raw for raw in evidence_pack["spans"] if str(raw.get("evidence_id")) == str(evidence_id)).get("canonical_url") or f"evidence://{evidence_id}"),
-                content_hash=spans[0].source_snapshot_hash,
-                source_kind="FACTUAL_SOURCE_SNAPSHOT", fact_statements=[span.text for span in spans], evidence_spans=spans,
-            ))
+                raise ValidationFailureError(
+                    "V2_SUPPORT_QUALIFIED_EVIDENCE_SPAN_DUPLICATE"
+                )
+            sources.append(
+                V2FrozenSourceRef(
+                    type=source_type,
+                    id=evidence_id,
+                    ref=str(
+                        next(
+                            raw
+                            for raw in evidence_pack["spans"]
+                            if str(raw.get("evidence_id")) == str(evidence_id)
+                        ).get("canonical_url")
+                        or f"evidence://{evidence_id}"
+                    ),
+                    content_hash=spans[0].source_snapshot_hash,
+                    source_kind="FACTUAL_SOURCE_SNAPSHOT",
+                    fact_statements=[span.text for span in spans],
+                    evidence_spans=spans,
+                )
+            )
         if not sources:
             raise ValidationFailureError("V2_SUPPORT_QUALIFIED_EVIDENCE_MISSING")
         return sources
@@ -1174,7 +1274,10 @@ class V2SupportAuthorityService:
             # compiled locally.  Preserve the legacy reader solely for sealed
             # historical receipts; never coerce a V2 payload into that old
             # representation or ask the provider to supply a parallel script.
-            if isinstance(script_payload, dict) and "canonical_script" not in script_payload:
+            if (
+                isinstance(script_payload, dict)
+                and "canonical_script" not in script_payload
+            ):
                 qualified = QualifiedScriptOutputV2.model_validate(script_payload)
                 canonical = CanonicalScriptCompiler.compile(qualified)
                 sections = [
@@ -1183,7 +1286,9 @@ class V2SupportAuthorityService:
                         heading=item.purpose,
                         narration=item.narration,
                     )
-                    for item in sorted(qualified.sections, key=lambda item: item.ordinal)
+                    for item in sorted(
+                        qualified.sections, key=lambda item: item.ordinal
+                    )
                 ]
                 approved_script_text = canonical.canonical_script
             else:
@@ -1210,17 +1315,27 @@ class V2SupportAuthorityService:
                 try:
                     evidence_id = uuid.UUID(str(evidence["evidence_id"]))
                 except (KeyError, ValueError) as exc:
-                    raise ValidationFailureError("V2_SUPPORT_QUALIFIED_CLAIM_UNBOUND") from exc
+                    raise ValidationFailureError(
+                        "V2_SUPPORT_QUALIFIED_CLAIM_UNBOUND"
+                    ) from exc
                 excerpt = str(evidence.get("text") or "")
                 if len(excerpt) < 8:
                     raise ValidationFailureError("V2_SUPPORT_QUALIFIED_CLAIM_UNBOUND")
-                citations.append(V2GeneratedCitation(
-                    source_ref_id=evidence_id,
-                    source_ref_type=str(evidence.get("evidence_type") or ""),
-                    evidence_span_id=evidence_span_id,
-                    source_excerpt=excerpt,
-                ))
-            claims.append(V2GeneratedClaim(claim_id=claim.claim_id, claim_text=claim.claim_text, citations=citations))
+                citations.append(
+                    V2GeneratedCitation(
+                        source_ref_id=evidence_id,
+                        source_ref_type=str(evidence.get("evidence_type") or ""),
+                        evidence_span_id=evidence_span_id,
+                        source_excerpt=excerpt,
+                    )
+                )
+            claims.append(
+                V2GeneratedClaim(
+                    claim_id=claim.claim_id,
+                    claim_text=claim.claim_text,
+                    citations=citations,
+                )
+            )
         output_payload = {
             "approved_script_text": approved_script_text,
             "language": qualified.language,
@@ -1228,26 +1343,122 @@ class V2SupportAuthorityService:
             "claims": [item.model_dump(mode="json") for item in claims],
         }
         writer = provenance.get("writer") if isinstance(provenance, dict) else {}
+        expected_writer_output_hash = semantic_hash(script_payload)
         try:
-            producer_receipt = V2ProducerReceipt(
-                producer_type="LLM_ROUTER", producer_version=str(writer["prompt_version"]),
-                lane_name=str(writer["lane_name"]), selected_model=str(writer["selected_model"]),
-                fallback_level=str(writer["fallback_level"]), route_attempt_id=uuid.UUID(str(writer["route_attempt_id"])),
-                provider_attempt_id=(uuid.UUID(str(writer["provider_attempt_id"])) if writer.get("provider_attempt_id") else None),
-                llm_run_snapshot_id=(uuid.UUID(str(writer["llm_run_snapshot_id"])) if writer.get("llm_run_snapshot_id") else None),
-                producer_input_hash=str(writer["producer_input_hash"]),
-                producer_output_hash=str(writer["producer_output_hash"]),
-                projected_output_hash=semantic_hash(output_payload),
-                qualification_receipt_hash=str(qualification_receipt.content_hash),
+            if writer.get("producer_type") == "OPENAI_BACKGROUND_NORMALIZED":
+                from app.db.models.script_qualification import (
+                    ScriptQualificationBackgroundAttempt,
+                    ScriptWriterOutputNormalizationReceipt,
+                )
+
+                background_attempt_id = uuid.UUID(
+                    str(writer["source_background_attempt_id"])
+                )
+                normalization_receipt_id = uuid.UUID(
+                    str(writer["normalization_receipt_id"])
+                )
+                attempt = self.session.get(
+                    ScriptQualificationBackgroundAttempt,
+                    background_attempt_id,
+                )
+                normalization = self.session.get(
+                    ScriptWriterOutputNormalizationReceipt,
+                    normalization_receipt_id,
+                )
+                if (
+                    attempt is None
+                    or normalization is None
+                    or attempt.provider_response_id
+                    != writer.get("source_provider_response_id")
+                    or attempt.provider_request_id
+                    != writer.get("source_provider_request_id")
+                    or attempt.input_fingerprint != writer.get("producer_input_hash")
+                    or normalization.receipt_hash
+                    != writer.get("normalization_receipt_hash")
+                    or normalization.normalized_payload_hash
+                    != writer.get("producer_output_hash")
+                ):
+                    raise ValueError("background normalization provenance drift")
+                sealed_script = (
+                    qualification_receipt.content.get("qualified_script")
+                    if isinstance(qualification_receipt.content, dict)
+                    else None
+                )
+                raw_v2_payload = (
+                    {
+                        "language": sealed_script.get("language"),
+                        "sections": sealed_script.get("sections"),
+                        "claims": sealed_script.get("claims"),
+                    }
+                    if isinstance(sealed_script, dict)
+                    and sealed_script.get("script_contract_version")
+                    == "V2_SINGLE_SOURCE"
+                    else None
+                )
+                if (
+                    raw_v2_payload is None
+                    or QualifiedScriptOutputV2.model_validate(
+                        raw_v2_payload
+                    ).model_dump(mode="json")
+                    != normalization.normalized_payload
+                ):
+                    raise ValueError("normalized V2 qualification payload drift")
+                expected_writer_output_hash = semantic_hash(raw_v2_payload)
+                producer_receipt = V2ProducerReceipt(
+                    producer_type="OPENAI_BACKGROUND_NORMALIZED",
+                    producer_version=str(writer["producer_version"]),
+                    lane_name=str(writer["lane_name"]),
+                    selected_model=str(writer["selected_model"]),
+                    background_attempt_id=background_attempt_id,
+                    provider_response_id=str(writer["source_provider_response_id"]),
+                    provider_request_id=str(writer["source_provider_request_id"]),
+                    normalization_receipt_id=normalization_receipt_id,
+                    normalization_receipt_hash=str(
+                        writer["normalization_receipt_hash"]
+                    ),
+                    source_typed_provider_output_hash=str(
+                        writer["source_typed_provider_output_hash"]
+                    ),
+                    producer_input_hash=str(writer["producer_input_hash"]),
+                    producer_output_hash=str(writer["producer_output_hash"]),
+                    projected_output_hash=semantic_hash(output_payload),
+                    qualification_receipt_hash=str(qualification_receipt.content_hash),
+                )
+            else:
+                producer_receipt = V2ProducerReceipt(
+                    producer_type="LLM_ROUTER",
+                    producer_version=str(writer["prompt_version"]),
+                    lane_name=str(writer["lane_name"]),
+                    selected_model=str(writer["selected_model"]),
+                    fallback_level=str(writer["fallback_level"]),
+                    route_attempt_id=uuid.UUID(str(writer["route_attempt_id"])),
+                    provider_attempt_id=(
+                        uuid.UUID(str(writer["provider_attempt_id"]))
+                        if writer.get("provider_attempt_id")
+                        else None
+                    ),
+                    llm_run_snapshot_id=(
+                        uuid.UUID(str(writer["llm_run_snapshot_id"]))
+                        if writer.get("llm_run_snapshot_id")
+                        else None
+                    ),
+                    producer_input_hash=str(writer["producer_input_hash"]),
+                    producer_output_hash=str(writer["producer_output_hash"]),
+                    projected_output_hash=semantic_hash(output_payload),
+                    qualification_receipt_hash=str(qualification_receipt.content_hash),
+                )
+            draft = V2TrustedSupportDraft(
+                **output_payload, producer_receipt=producer_receipt
             )
-            draft = V2TrustedSupportDraft(**output_payload, producer_receipt=producer_receipt)
         except (KeyError, ValidationError, ValueError) as exc:
-            raise ValidationFailureError("V2_SUPPORT_QUALIFIED_WRITER_RECEIPT_INVALID") from exc
+            raise ValidationFailureError(
+                "V2_SUPPORT_QUALIFIED_WRITER_RECEIPT_INVALID"
+            ) from exc
         return self._validate_draft(
             draft=draft,
             context=context,
             expected_producer_input_hash=str(writer.get("producer_input_hash") or ""),
-            expected_producer_output_hash=semantic_hash(script_payload),
+            expected_producer_output_hash=expected_writer_output_hash,
             qualification_receipt_hash=str(qualification_receipt.content_hash),
         )
 
@@ -1283,9 +1494,7 @@ class V2SupportAuthorityService:
             retrieval_id = uuid.UUID(str(digest["retrieval_manifest_id"]))
             record_id = uuid.UUID(str(digest["agent_memory_application_record_id"]))
             scope_status = str(
-                (digest.get("r3d7_influence_manifest_ref") or {}).get(
-                    "scope_status"
-                )
+                (digest.get("r3d7_influence_manifest_ref") or {}).get("scope_status")
             )
             digest_hash = str(digest["digest_hash"])
         except (KeyError, TypeError, ValueError, ValidationFailureError) as exc:
@@ -1618,8 +1827,10 @@ class V2SupportAuthorityService:
             raise ValidationFailureError("V2_SUPPORT_PRODUCER_OUTPUT_HASH_MISMATCH")
         if expected_producer_output_hash is not None and (
             draft.producer_receipt.producer_output_hash != expected_producer_output_hash
-            or draft.producer_receipt.projected_output_hash != semantic_hash(output_payload)
-            or draft.producer_receipt.qualification_receipt_hash != qualification_receipt_hash
+            or draft.producer_receipt.projected_output_hash
+            != semantic_hash(output_payload)
+            or draft.producer_receipt.qualification_receipt_hash
+            != qualification_receipt_hash
         ):
             raise ValidationFailureError("V2_SUPPORT_QUALIFICATION_PROVENANCE_MISMATCH")
         expected_language = context.expected_language.lower()
@@ -1708,14 +1919,11 @@ class V2SupportAuthorityService:
                     source = source_by_identity.get(
                         (citation.source_ref_type, citation.source_ref_id)
                     )
-                if (
-                    source is None
-                    or (
-                        citation.evidence_span_id is None
-                        and (
-                            source.evidence_spans
-                            or citation.source_excerpt not in source.fact_statements
-                        )
+                if source is None or (
+                    citation.evidence_span_id is None
+                    and (
+                        source.evidence_spans
+                        or citation.source_excerpt not in source.fact_statements
                     )
                 ):
                     raise ValidationFailureError(
@@ -1752,7 +1960,9 @@ class V2SupportAuthorityService:
                 "claim_text": claim.claim_text,
                 "source_refs": [item.model_dump(mode="json") for item in exact_refs],
                 "source_excerpts": excerpts,
-                "evidence_span_refs": [item.model_dump(mode="json") for item in evidence_span_refs],
+                "evidence_span_refs": [
+                    item.model_dump(mode="json") for item in evidence_span_refs
+                ],
             }
             bindings.append(
                 V2ClaimSourceBinding(
@@ -2091,7 +2301,9 @@ class V2SupportAuthorityService:
                 else {
                     "gate_key": "qualification_memory_digest",
                     "status": "PASS_EMPTY",
-                    "receipt_hash": str((qualification_memory or {}).get("digest_hash") or ""),
+                    "receipt_hash": str(
+                        (qualification_memory or {}).get("digest_hash") or ""
+                    ),
                 }
             ),
             {
@@ -2113,24 +2325,37 @@ class V2SupportAuthorityService:
         if script_qualification_run_id is not None:
             from app.services.script_qualification import ScriptQualificationService
 
-            receipt = ScriptQualificationService(self.session).require_pass(script_qualification_run_id)
-            receipts.append({
-                "gate_key": "script_qualification",
-                "status": "PASS",
-                "receipt_hash": receipt.content_hash,
-                "script_qualification_run_id": str(script_qualification_run_id),
-                "script_hash": receipt.script_hash,
-                "assignment_hash": receipt.script_assignment_hash,
-                "evidence_pack_hash": receipt.factual_evidence_pack_hash,
-                "memory_digest_hash": str((qualification_memory or {}).get("digest_hash") or ""),
-                "runtime_contract_hash": str(((receipt.content or {}).get("runtime_contract_hash") or "")),
-                "assignment_resolution_hash": str(((receipt.content or {}).get("assignment_resolution_hash") or "")),
-                "research_coverage_ratio": float(
-                    ((receipt.content or {}).get("receipts") or {})
-                    .get("fulfillment", {})
-                    .get("research_coverage_ratio", 0.0)
-                ),
-            })
+            receipt = ScriptQualificationService(self.session).require_pass(
+                script_qualification_run_id
+            )
+            receipts.append(
+                {
+                    "gate_key": "script_qualification",
+                    "status": "PASS",
+                    "receipt_hash": receipt.content_hash,
+                    "script_qualification_run_id": str(script_qualification_run_id),
+                    "script_hash": receipt.script_hash,
+                    "assignment_hash": receipt.script_assignment_hash,
+                    "evidence_pack_hash": receipt.factual_evidence_pack_hash,
+                    "memory_digest_hash": str(
+                        (qualification_memory or {}).get("digest_hash") or ""
+                    ),
+                    "runtime_contract_hash": str(
+                        ((receipt.content or {}).get("runtime_contract_hash") or "")
+                    ),
+                    "assignment_resolution_hash": str(
+                        (
+                            (receipt.content or {}).get("assignment_resolution_hash")
+                            or ""
+                        )
+                    ),
+                    "research_coverage_ratio": float(
+                        ((receipt.content or {}).get("receipts") or {})
+                        .get("fulfillment", {})
+                        .get("research_coverage_ratio", 0.0)
+                    ),
+                }
+            )
         return receipts
 
     def _seal(
@@ -2233,20 +2458,24 @@ class V2SupportAuthorityService:
         try:
             plan = SectionCoveragePlan.model_validate(raw_plan)
         except ValueError as exc:
-            raise ValidationFailureError("V2_CROSS_MODAL_SECTION_COVERAGE_INVALID") from exc
+            raise ValidationFailureError(
+                "V2_CROSS_MODAL_SECTION_COVERAGE_INVALID"
+            ) from exc
         if plan.content_hash != assignment.get("section_coverage_plan_hash"):
-            raise ValidationFailureError("V2_CROSS_MODAL_SECTION_COVERAGE_HASH_MISMATCH")
+            raise ValidationFailureError(
+                "V2_CROSS_MODAL_SECTION_COVERAGE_HASH_MISMATCH"
+            )
         body = {
-            "qualified_script_hash": str(qualification_run.derived_canonical_script_hash or ""),
+            "qualified_script_hash": str(
+                qualification_run.derived_canonical_script_hash or ""
+            ),
             "section_coverage_plan": plan.model_dump(mode="json"),
             "writer_sections": sections,
             "capability_projection_receipts": receipts,
         }
         if not re.fullmatch(_SHA256_PATTERN, body["qualified_script_hash"]):
             raise ValidationFailureError("V2_CROSS_MODAL_QUALIFIED_SCRIPT_HASH_INVALID")
-        return V2CrossModalScriptLineage(
-            **body, content_hash=cross_modal_hash(body)
-        )
+        return V2CrossModalScriptLineage(**body, content_hash=cross_modal_hash(body))
 
     def _existing_artifact(self, video_project_id: uuid.UUID) -> Artifact | None:
         artifacts = list(

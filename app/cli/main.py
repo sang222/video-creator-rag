@@ -1995,16 +1995,23 @@ def production_recover_first_video(
                 "schema_version": "vcos.controlled-recovery-cli.v1",
                 "operator_recovery_id": str(lineage.authority.id),
                 "recovery_receipt_hash": lineage.authority.recovery_receipt_hash,
-                "historical_candidate_id": str(
-                    lineage.authority.replaces_candidate_id
-                ),
+                "historical_candidate_id": str(lineage.authority.replaces_candidate_id),
                 "historical_qualification_id": str(
                     lineage.authority.historical_qualification_id
                 ),
                 "replacement_candidate_id": str(lineage.candidate.id),
                 "replacement_slot_id": str(lineage.slot.id),
                 "replacement_qualification_id": str(lineage.qualification.id),
-                "qualification_state": lineage.qualification.state,
+                "active_qualification_id": (
+                    str(continuation.qualification_id)
+                    if continuation
+                    else str(lineage.qualification.id)
+                ),
+                "qualification_state": (
+                    continuation.qualification_state
+                    if continuation
+                    else lineage.qualification.state
+                ),
                 "logical_deadline_at": (
                     lineage.qualification.logical_deadline_at.isoformat()
                     if lineage.qualification.logical_deadline_at

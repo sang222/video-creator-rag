@@ -73,7 +73,7 @@ from app.services.script_qualification_authority import (
 TOPIC_GATE_VERSION = "editorial-topic-definition-gate.v2"
 QUALIFICATION_POLICY_VERSION = "script-qualification-policy.v2"
 WRITER_PROMPT_VERSION = "script-writer-assignment.v3"
-WRITER_PROMPT_VERSION_V2 = "script-writer-single-source.v4"
+WRITER_PROMPT_VERSION_V2 = "script-writer-single-source.v5"
 VERIFIER_PROMPT_VERSION = "script-semantic-verifier.v4"
 SCRIPT_QUALIFICATION_EVENT_TYPE = "script_qualification.execute.v1"
 SCRIPT_QUALIFICATION_AGGREGATE_TYPE = "script_qualification_run"
@@ -81,7 +81,18 @@ LUNA_MODEL = "gpt-5.6-luna"
 SCRIPT_CONTRACT_V1 = "V1_LEGACY"
 
 _DISCOVERY_PATHS = {"", "/", "/docs", "/docs/", "/index", "/index/"}
-_BROAD_TOPIC_PATH_TERMS = {"api", "apis", "models", "model", "guides", "guide", "reference", "overview", "docs", "documentation"}
+_BROAD_TOPIC_PATH_TERMS = {
+    "api",
+    "apis",
+    "models",
+    "model",
+    "guides",
+    "guide",
+    "reference",
+    "overview",
+    "docs",
+    "documentation",
+}
 _BOILERPLATE_ANGLES = (
     "source-grounded standalone explanation constrained to the fetched official documentation",
     "source grounded standalone explanation",
@@ -93,7 +104,12 @@ def canonical_hash(value: Any) -> str:
 
 
 def canonical_script_bytes(script: str) -> bytes:
-    return unicodedata.normalize("NFC", script).replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    return (
+        unicodedata.normalize("NFC", script)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .encode("utf-8")
+    )
 
 
 def script_hash(script: str) -> str:
@@ -109,9 +125,25 @@ def _clean(value: Any) -> str:
 
 
 _TITLE_ALIGNMENT_STOP_WORDS = {
-    "about", "after", "around", "because", "before", "between", "choosing",
-    "documented", "from", "into", "not", "single", "that", "the", "their",
-    "this", "through", "using", "with",
+    "about",
+    "after",
+    "around",
+    "because",
+    "before",
+    "between",
+    "choosing",
+    "documented",
+    "from",
+    "into",
+    "not",
+    "single",
+    "that",
+    "the",
+    "their",
+    "this",
+    "through",
+    "using",
+    "with",
 }
 
 
@@ -154,7 +186,11 @@ def _proposal_title_is_aligned(candidate: EditorialIdeaCandidate) -> bool:
 
 
 def _string_list(value: Any) -> list[str]:
-    return sorted({_clean(item) for item in value if _clean(item)}) if isinstance(value, list) else []
+    return (
+        sorted({_clean(item) for item in value if _clean(item)})
+        if isinstance(value, list)
+        else []
+    )
 
 
 class ScriptRuntimeContractResolver:
@@ -170,21 +206,46 @@ class ScriptRuntimeContractResolver:
         policy = self.session.get(CompiledChannelPolicySnapshot, policy_snapshot_id)
         if policy is None:
             raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_POLICY_MISSING")
-        profile = self.session.get(ChannelProfileVersion, policy.channel_profile_version_id)
-        if profile is None or profile.channel_workspace_id != policy.channel_workspace_id:
+        profile = self.session.get(
+            ChannelProfileVersion, policy.channel_profile_version_id
+        )
+        if (
+            profile is None
+            or profile.channel_workspace_id != policy.channel_workspace_id
+        ):
             raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_PROFILE_MISSING")
         duration = ChannelDurationContractResolver(self.session).resolve(
             profile_version_id=profile.id,
             policy_snapshot_id=policy.id,
         )
-        compiled = policy.compiled_payload if isinstance(policy.compiled_payload, dict) else {}
-        channel_contract = compiled.get("channel_contract_json") if isinstance(compiled.get("channel_contract_json"), dict) else {}
-        market = channel_contract.get("market_locale") if isinstance(channel_contract.get("market_locale"), dict) else {}
-        editorial = channel_contract.get("editorial_strategy") if isinstance(channel_contract.get("editorial_strategy"), dict) else {}
-        voice = channel_contract.get("voice_style") if isinstance(channel_contract.get("voice_style"), dict) else {}
+        compiled = (
+            policy.compiled_payload if isinstance(policy.compiled_payload, dict) else {}
+        )
+        channel_contract = (
+            compiled.get("channel_contract_json")
+            if isinstance(compiled.get("channel_contract_json"), dict)
+            else {}
+        )
+        market = (
+            channel_contract.get("market_locale")
+            if isinstance(channel_contract.get("market_locale"), dict)
+            else {}
+        )
+        editorial = (
+            channel_contract.get("editorial_strategy")
+            if isinstance(channel_contract.get("editorial_strategy"), dict)
+            else {}
+        )
+        voice = (
+            channel_contract.get("voice_style")
+            if isinstance(channel_contract.get("voice_style"), dict)
+            else {}
+        )
         expected_language = _clean(market.get("content_language"))
         if not expected_language:
-            raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_EXPECTED_LANGUAGE_MISSING")
+            raise ValidationFailureError(
+                "SCRIPT_RUNTIME_CONTRACT_EXPECTED_LANGUAGE_MISSING"
+            )
         body = {
             "schema_version": self.VERSION,
             "expected_language": expected_language,
@@ -210,8 +271,16 @@ class ScriptRuntimeContractResolver:
             typed = ScriptRuntimeContract.model_validate(contract)
         except ValueError as exc:
             raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_INVALID") from exc
-        expected = canonical_hash({key: value for key, value in typed.model_dump(mode="json").items() if key != "contract_hash"})
-        if typed.contract_hash != expected or (expected_hash is not None and typed.contract_hash != expected_hash):
+        expected = canonical_hash(
+            {
+                key: value
+                for key, value in typed.model_dump(mode="json").items()
+                if key != "contract_hash"
+            }
+        )
+        if typed.contract_hash != expected or (
+            expected_hash is not None and typed.contract_hash != expected_hash
+        ):
             raise ValidationFailureError("SCRIPT_RUNTIME_CONTRACT_HASH_MISMATCH")
         return typed.model_dump(mode="json")
 
@@ -259,7 +328,11 @@ def classify_source_specificity(evidence: SearchDemandEvidence) -> str:
     generic_title = title in _BROAD_TOPIC_PATH_TERMS or title.endswith(" overview")
     # A very short navigation-like page is broad even when its URL has a
     # non-root path.  Richer pages can be narrow topic sources.
-    if generic_path or generic_title or (len(excerpt.split()) < 40 and len(segments) <= 2):
+    if (
+        generic_path
+        or generic_title
+        or (len(excerpt.split()) < 40 and len(segments) <= 2)
+    ):
         return "BROAD_TOPIC_CAPABLE"
     return "NARROW_TOPIC_CAPABLE"
 
@@ -270,7 +343,8 @@ def _evidence_ref(evidence: SearchDemandEvidence) -> dict[str, Any]:
         "type": "search_demand_evidence",
         "id": str(evidence.id),
         "ref": evidence.source_ref,
-        "content_hash": _clean(snapshot.get("content_hash")) or canonical_hash(snapshot),
+        "content_hash": _clean(snapshot.get("content_hash"))
+        or canonical_hash(snapshot),
         "source_class": snapshot.get("source_class"),
         "source_classification": classify_source(evidence),
         "source_specificity_class": classify_source_specificity(evidence),
@@ -291,7 +365,9 @@ class TopicDefinitionService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def current_eligibility(self, candidate: EditorialIdeaCandidate) -> TopicEligibility:
+    def current_eligibility(
+        self, candidate: EditorialIdeaCandidate
+    ) -> TopicEligibility:
         definition = self.session.scalar(
             select(EditorialTopicDefinition)
             .where(EditorialTopicDefinition.editorial_idea_candidate_id == candidate.id)
@@ -299,18 +375,31 @@ class TopicDefinitionService:
         )
         if definition is None:
             return TopicEligibility(
-                False, "BLOCK", "EDITORIAL_SUBJECT_NOT_IDENTIFIED",
-                ("EDITORIAL_SUBJECT_NOT_IDENTIFIED", "EDITORIAL_TOPIC_DEFINITION_MISSING"),
+                False,
+                "BLOCK",
+                "EDITORIAL_SUBJECT_NOT_IDENTIFIED",
+                (
+                    "EDITORIAL_SUBJECT_NOT_IDENTIFIED",
+                    "EDITORIAL_TOPIC_DEFINITION_MISSING",
+                ),
             )
         receipt = self.session.scalar(
             select(EditorialTopicDefinitionGateReceipt)
-            .where(EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id == definition.id)
-            .where(EditorialTopicDefinitionGateReceipt.gate_version == TOPIC_GATE_VERSION)
+            .where(
+                EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id
+                == definition.id
+            )
+            .where(
+                EditorialTopicDefinitionGateReceipt.gate_version == TOPIC_GATE_VERSION
+            )
         )
         if receipt is None:
             return TopicEligibility(
-                False, "BLOCK", "EDITORIAL_TOPIC_GATE_RECEIPT_MISSING",
-                ("EDITORIAL_TOPIC_GATE_RECEIPT_MISSING",), definition,
+                False,
+                "BLOCK",
+                "EDITORIAL_TOPIC_GATE_RECEIPT_MISSING",
+                ("EDITORIAL_TOPIC_GATE_RECEIPT_MISSING",),
+                definition,
             )
         if receipt.current_production_eligibility:
             qualification = self.session.scalar(
@@ -376,9 +465,17 @@ class TopicDefinitionService:
                         receipt,
                     )
         return TopicEligibility(
-            bool(receipt.current_production_eligibility), receipt.state,
-            receipt.primary_reason_code or ("EDITORIAL_TOPIC_GATE_PASS" if receipt.state == "PASS" else "EDITORIAL_TOPIC_GATE_BLOCK"),
-            tuple(receipt.reason_codes or []), definition, receipt,
+            bool(receipt.current_production_eligibility),
+            receipt.state,
+            receipt.primary_reason_code
+            or (
+                "EDITORIAL_TOPIC_GATE_PASS"
+                if receipt.state == "PASS"
+                else "EDITORIAL_TOPIC_GATE_BLOCK"
+            ),
+            tuple(receipt.reason_codes or []),
+            definition,
+            receipt,
         )
 
     def create(
@@ -406,52 +503,86 @@ class TopicDefinitionService:
             "production_goal": _clean(fields.get("production_goal")),
             "scope_inclusions": list(fields.get("scope_inclusions") or []),
             "exclusions": list(fields.get("exclusions") or []),
-            "central_question_or_thesis": _clean(fields.get("central_question_or_thesis")),
+            "central_question_or_thesis": _clean(
+                fields.get("central_question_or_thesis")
+            ),
             "learning_outcome": _clean(fields.get("learning_outcome")),
             "viewer_value": _clean(fields.get("viewer_value")),
             "content_mode": _clean(fields.get("content_mode")),
             "channel_contract_ref": dict(fields.get("channel_contract_ref") or {}),
-            "source_classification_refs": list(fields.get("source_classification_refs") or []),
+            "source_classification_refs": list(
+                fields.get("source_classification_refs") or []
+            ),
             "series_binding": fields.get("series_binding"),
-            "standalone_self_containment_required": bool(fields.get("standalone_self_containment_required")),
+            "standalone_self_containment_required": bool(
+                fields.get("standalone_self_containment_required")
+            ),
         }
-        digest = canonical_hash({"candidate_id": str(candidate.id), "version": version, **body})
-        existing = self.session.scalar(select(EditorialTopicDefinition).where(EditorialTopicDefinition.topic_definition_hash == digest))
+        digest = canonical_hash(
+            {"candidate_id": str(candidate.id), "version": version, **body}
+        )
+        existing = self.session.scalar(
+            select(EditorialTopicDefinition).where(
+                EditorialTopicDefinition.topic_definition_hash == digest
+            )
+        )
         if existing is not None:
             return existing
         definition = EditorialTopicDefinition(
-            editorial_idea_candidate_id=candidate.id, company_id=candidate.company_id,
-            channel_workspace_id=candidate.channel_workspace_id, policy_snapshot_id=candidate.policy_snapshot_id,
-            topic_definition_version=version, topic_definition_hash=digest,
-            parent_topic_definition_id=parent_topic_definition_id, **body,
+            editorial_idea_candidate_id=candidate.id,
+            company_id=candidate.company_id,
+            channel_workspace_id=candidate.channel_workspace_id,
+            policy_snapshot_id=candidate.policy_snapshot_id,
+            topic_definition_version=version,
+            topic_definition_hash=digest,
+            parent_topic_definition_id=parent_topic_definition_id,
+            **body,
         )
         self.session.add(definition)
         self.session.flush()
         return definition
 
-    def evaluate(self, definition: EditorialTopicDefinition) -> EditorialTopicDefinitionGateReceipt:
+    def evaluate(
+        self, definition: EditorialTopicDefinition
+    ) -> EditorialTopicDefinitionGateReceipt:
         existing = self.session.scalar(
             select(EditorialTopicDefinitionGateReceipt)
-            .where(EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id == definition.id)
-            .where(EditorialTopicDefinitionGateReceipt.gate_version == TOPIC_GATE_VERSION)
+            .where(
+                EditorialTopicDefinitionGateReceipt.editorial_topic_definition_id
+                == definition.id
+            )
+            .where(
+                EditorialTopicDefinitionGateReceipt.gate_version == TOPIC_GATE_VERSION
+            )
         )
         if existing is not None:
             return existing
-        candidate = self.session.get(EditorialIdeaCandidate, definition.editorial_idea_candidate_id)
+        candidate = self.session.get(
+            EditorialIdeaCandidate, definition.editorial_idea_candidate_id
+        )
         if candidate is None:
-            raise NotFoundError(f"candidate not found: {definition.editorial_idea_candidate_id}")
+            raise NotFoundError(
+                f"candidate not found: {definition.editorial_idea_candidate_id}"
+            )
         reasons: list[str] = []
         required = {
-            "subject_name": definition.subject_name, "subject_canonical_id": definition.subject_canonical_id,
-            "target_audience": definition.target_audience, "audience_problem": definition.audience_problem,
-            "content_pillar": definition.content_pillar, "production_goal": definition.production_goal,
+            "subject_name": definition.subject_name,
+            "subject_canonical_id": definition.subject_canonical_id,
+            "target_audience": definition.target_audience,
+            "audience_problem": definition.audience_problem,
+            "content_pillar": definition.content_pillar,
+            "production_goal": definition.production_goal,
             "central_question_or_thesis": definition.central_question_or_thesis,
-            "learning_outcome": definition.learning_outcome, "viewer_value": definition.viewer_value,
+            "learning_outcome": definition.learning_outcome,
+            "viewer_value": definition.viewer_value,
         }
         for name, value in required.items():
             if not _clean(value):
                 reasons.append(f"EDITORIAL_{name.upper()}_MISSING")
-        if not definition.subject_evidence_refs or not definition.subject_evidence_spans:
+        if (
+            not definition.subject_evidence_refs
+            or not definition.subject_evidence_spans
+        ):
             reasons.append("EDITORIAL_SUBJECT_EVIDENCE_MISSING")
         if not definition.scope_inclusions:
             reasons.append("EDITORIAL_SCOPE_NOT_DEFINED")
@@ -459,7 +590,11 @@ class TopicDefinitionService:
             reasons.append("EDITORIAL_EXCLUSIONS_NOT_DEFINED")
         if not definition.channel_contract_ref:
             reasons.append("EDITORIAL_CHANNEL_BINDING_MISSING")
-        classifications = [item.get("source_classification") for item in definition.source_classification_refs if isinstance(item, dict)]
+        classifications = [
+            item.get("source_classification")
+            for item in definition.source_classification_refs
+            if isinstance(item, dict)
+        ]
         if not classifications or "TOPIC_CAPABLE" not in classifications:
             reasons.append("EDITORIAL_SOURCE_DISCOVERY_ONLY")
         title = _clean(candidate.proposed_title)
@@ -477,24 +612,37 @@ class TopicDefinitionService:
         angle = _clean(candidate.proposed_angle).rstrip(".").casefold()
         if not angle or any(marker in angle for marker in _BOILERPLATE_ANGLES):
             reasons.append("EDITORIAL_ANGLE_BOILERPLATE")
-        if definition.content_mode == "STANDALONE" and not definition.standalone_self_containment_required:
+        if (
+            definition.content_mode == "STANDALONE"
+            and not definition.standalone_self_containment_required
+        ):
             reasons.append("EDITORIAL_STANDALONE_SELF_CONTAINMENT_MISSING")
         if definition.content_mode == "SERIES_EPISODE":
-            reasons.extend(self._series_binding_reasons(definition=definition, candidate=candidate))
+            reasons.extend(
+                self._series_binding_reasons(definition=definition, candidate=candidate)
+            )
         elif definition.content_mode != "STANDALONE":
             reasons.append("EDITORIAL_CONTENT_MODE_INVALID")
         reasons = sorted(set(reasons))
         primary = reasons[0] if reasons else None
         payload = {
-            "definition_hash": definition.topic_definition_hash, "candidate_hash": candidate.canonical_hash,
-            "gate_version": TOPIC_GATE_VERSION, "reason_codes": reasons,
+            "definition_hash": definition.topic_definition_hash,
+            "candidate_hash": candidate.canonical_hash,
+            "gate_version": TOPIC_GATE_VERSION,
+            "reason_codes": reasons,
         }
         receipt = EditorialTopicDefinitionGateReceipt(
-            editorial_topic_definition_id=definition.id, editorial_idea_candidate_id=candidate.id,
-            gate_version=TOPIC_GATE_VERSION, state="PASS" if not reasons else "BLOCK",
-            current_production_eligibility=not reasons, primary_reason_code=primary,
-            reason_codes=reasons or ["EDITORIAL_TOPIC_GATE_PASS"], input_hash=canonical_hash(payload),
-            receipt_hash=canonical_hash({**payload, "state": "PASS" if not reasons else "BLOCK"}),
+            editorial_topic_definition_id=definition.id,
+            editorial_idea_candidate_id=candidate.id,
+            gate_version=TOPIC_GATE_VERSION,
+            state="PASS" if not reasons else "BLOCK",
+            current_production_eligibility=not reasons,
+            primary_reason_code=primary,
+            reason_codes=reasons or ["EDITORIAL_TOPIC_GATE_PASS"],
+            input_hash=canonical_hash(payload),
+            receipt_hash=canonical_hash(
+                {**payload, "state": "PASS" if not reasons else "BLOCK"}
+            ),
         )
         self.session.add(receipt)
         self.session.flush()
@@ -508,7 +656,11 @@ class TopicDefinitionService:
     ) -> list[str]:
         """Validate typed series intent before it can become GREENLIT work."""
 
-        binding = definition.series_binding if isinstance(definition.series_binding, dict) else {}
+        binding = (
+            definition.series_binding
+            if isinstance(definition.series_binding, dict)
+            else {}
+        )
         plan_ref = _clean(binding.get("series_plan_id") or binding.get("series_ref"))
         run_ref = _clean(binding.get("series_run_id") or binding.get("run_ref"))
         reasons: list[str] = []
@@ -572,18 +724,26 @@ class TopicDefinitionService:
             or plan.channel_profile_version_id != run.channel_profile_version_id
             or str(plan.id)
             not in set(
-                str(item) for item in launch_policy.approved_initial_series_plan_ids
-                or []
+                str(item)
+                for item in launch_policy.approved_initial_series_plan_ids or []
             )
         ):
             reasons.append("EDITORIAL_SERIES_LAUNCH_POLICY_NOT_PERMITTED")
         return reasons
 
-    def topic_capable_evidence(self, candidate: EditorialIdeaCandidate) -> SearchDemandEvidence | None:
-        ids = [str(item.get("id")) for item in (candidate.evidence_refs or []) if isinstance(item, dict) and item.get("id")]
+    def topic_capable_evidence(
+        self, candidate: EditorialIdeaCandidate
+    ) -> SearchDemandEvidence | None:
+        ids = [
+            str(item.get("id"))
+            for item in (candidate.evidence_refs or [])
+            if isinstance(item, dict) and item.get("id")
+        ]
         for evidence_id in ids:
             try:
-                evidence = self.session.get(SearchDemandEvidence, uuid.UUID(evidence_id))
+                evidence = self.session.get(
+                    SearchDemandEvidence, uuid.UUID(evidence_id)
+                )
             except ValueError:
                 continue
             if evidence is not None and classify_source(evidence) == "TOPIC_CAPABLE":
@@ -592,7 +752,9 @@ class TopicDefinitionService:
 
     def create_from_topic_capable_evidence(
         self,
-        *, candidate: EditorialIdeaCandidate, parent_topic_definition_id: uuid.UUID | None = None,
+        *,
+        candidate: EditorialIdeaCandidate,
+        parent_topic_definition_id: uuid.UUID | None = None,
     ) -> EditorialTopicDefinition:
         evidence = self.topic_capable_evidence(candidate)
         if evidence is None:
@@ -609,11 +771,21 @@ class TopicDefinitionService:
         canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
         if not canonical_url:
             raise ValidationFailureError("EDITORIAL_TOPIC_CANONICAL_SOURCE_MISSING")
-        audience = (candidate.target_audience_definition or {}).get("primary_persona") or "small professional teams"
+        audience = (candidate.target_audience_definition or {}).get(
+            "primary_persona"
+        ) or "small professional teams"
         pains = (candidate.target_audience_definition or {}).get("pain_points") or []
-        problem = _clean(pains[0] if pains else "need a bounded way to evaluate an official technical document before acting")
+        problem = _clean(
+            pains[0]
+            if pains
+            else "need a bounded way to evaluate an official technical document before acting"
+        )
         excerpt = _clean(snapshot.get("content_excerpt"))
-        subject_span = subject if subject and subject in excerpt else excerpt[: min(len(excerpt), 400)]
+        subject_span = (
+            subject
+            if subject and subject in excerpt
+            else excerpt[: min(len(excerpt), 400)]
+        )
         evidence_ref = _evidence_ref(evidence)
         source_ref = {**evidence_ref, "source_classification": "TOPIC_CAPABLE"}
         return self.create(
@@ -627,17 +799,32 @@ class TopicDefinitionService:
                 # same official document in one editorial territory.
                 "subject_canonical_id": f"official-document:{canonical_hash({'canonical_url': canonical_url})}",
                 "subject_evidence_refs": [evidence_ref],
-                "subject_evidence_spans": [{"evidence_id": str(evidence.id), "text": subject_span, "span_hash": span_hash(subject_span)}],
-                "target_audience": audience, "audience_problem": problem,
+                "subject_evidence_spans": [
+                    {
+                        "evidence_id": str(evidence.id),
+                        "text": subject_span,
+                        "span_hash": span_hash(subject_span),
+                    }
+                ],
+                "target_audience": audience,
+                "audience_problem": problem,
                 "content_pillar": candidate.proposed_pillar or "AI workflows",
                 "production_goal": candidate.proposed_title,
-                "scope_inclusions": [f"Only the documented scope in {snapshot.get('canonical_url') or evidence.source_ref}"],
-                "exclusions": ["Undocumented performance, ROI, market, and product-family claims"],
+                "scope_inclusions": [
+                    f"Only the documented scope in {snapshot.get('canonical_url') or evidence.source_ref}"
+                ],
+                "exclusions": [
+                    "Undocumented performance, ROI, market, and product-family claims"
+                ],
                 "central_question_or_thesis": f"What does the official documentation for {subject} establish, and what should a small team verify before relying on it?",
                 "learning_outcome": f"Viewers can distinguish the documented scope of {subject} from unsupported assumptions.",
                 "viewer_value": "A bounded evidence-first decision frame instead of a broad product overview.",
-                "content_mode": "STANDALONE", "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
-                "source_classification_refs": [source_ref], "standalone_self_containment_required": True,
+                "content_mode": "STANDALONE",
+                "channel_contract_ref": {
+                    "policy_snapshot_id": str(candidate.policy_snapshot_id)
+                },
+                "source_classification_refs": [source_ref],
+                "standalone_self_containment_required": True,
             },
         )
 
@@ -684,7 +871,10 @@ class TopicDefinitionService:
             raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
         if typed.content_mode == "SERIES_EPISODE" and not typed.series_binding:
             raise ValidationFailureError("EDITORIAL_SERIES_BINDING_REQUIRED")
-        if typed.content_mode == "STANDALONE" and candidate.suggested_series_plan_id is not None:
+        if (
+            typed.content_mode == "STANDALONE"
+            and candidate.suggested_series_plan_id is not None
+        ):
             raise ValidationFailureError("EDITORIAL_SERIES_BINDING_REQUIRED")
         snapshot = _source_snapshot(evidence)
         canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
@@ -697,7 +887,10 @@ class TopicDefinitionService:
             if str(item.id)
             in {
                 str(ref.get("id") or "")
-                for ref in [*typed.primary_evidence_refs, *typed.supporting_evidence_refs]
+                for ref in [
+                    *typed.primary_evidence_refs,
+                    *typed.supporting_evidence_refs,
+                ]
                 if isinstance(ref, dict)
             }
         ]
@@ -709,11 +902,17 @@ class TopicDefinitionService:
             quote = _clean(binding.get("quoted_text"))
             if evidence_id in evidence_by_id and quote:
                 evidence_spans.append(
-                    {"evidence_id": evidence_id, "text": quote, "span_hash": span_hash(quote)}
+                    {
+                        "evidence_id": evidence_id,
+                        "text": quote,
+                        "span_hash": span_hash(quote),
+                    }
                 )
         if not evidence_refs or not evidence_spans:
             raise ValidationFailureError("EDITORIAL_PROPOSAL_EVIDENCE_INSUFFICIENT")
-        audience = (candidate.target_audience_definition or {}).get("primary_persona") or "small professional teams"
+        audience = (candidate.target_audience_definition or {}).get(
+            "primary_persona"
+        ) or "small professional teams"
         source_ref = {
             **_evidence_ref(evidence),
             "source_classification": "TOPIC_CAPABLE",
@@ -738,10 +937,13 @@ class TopicDefinitionService:
                 "learning_outcome": typed.learning_outcome,
                 "viewer_value": typed.viewer_value,
                 "content_mode": typed.content_mode,
-                "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
+                "channel_contract_ref": {
+                    "policy_snapshot_id": str(candidate.policy_snapshot_id)
+                },
                 "source_classification_refs": [source_ref],
                 "series_binding": typed.series_binding,
-                "standalone_self_containment_required": typed.content_mode == "STANDALONE",
+                "standalone_self_containment_required": typed.content_mode
+                == "STANDALONE",
             },
         )
 
@@ -775,14 +977,18 @@ class TopicDefinitionService:
             raise ValidationFailureError("EDITORIAL_TOPIC_CAPABLE_SOURCE_REQUIRED")
         snapshot = _source_snapshot(evidence)
         title = _clean(snapshot.get("title"))
-        subject = re.sub(r"\s*\|\s*OpenAI API\s*$", "", title, flags=re.I).strip() or title
+        subject = (
+            re.sub(r"\s*\|\s*OpenAI API\s*$", "", title, flags=re.I).strip() or title
+        )
         canonical_url = _clean(snapshot.get("canonical_url") or evidence.source_ref)
         if not canonical_url:
             raise ValidationFailureError("EDITORIAL_TOPIC_CANONICAL_SOURCE_MISSING")
         excerpt = _clean(snapshot.get("content_excerpt"))
         subject_span = subject if subject and subject in excerpt else excerpt[:400]
         evidence_ref = _evidence_ref(evidence)
-        audience = (candidate.target_audience_definition or {}).get("primary_persona") or "small professional teams"
+        audience = (candidate.target_audience_definition or {}).get(
+            "primary_persona"
+        ) or "small professional teams"
         pains = (candidate.target_audience_definition or {}).get("pain_points") or []
         problem = _clean(pains[0] if pains else "need an evidence-first workflow")
         return self.create(
@@ -793,19 +999,33 @@ class TopicDefinitionService:
                 "subject_name": subject,
                 "subject_canonical_id": f"official-document:{canonical_hash({'canonical_url': canonical_url})}",
                 "subject_evidence_refs": [evidence_ref],
-                "subject_evidence_spans": [{"evidence_id": str(evidence.id), "text": subject_span, "span_hash": span_hash(subject_span)}],
+                "subject_evidence_spans": [
+                    {
+                        "evidence_id": str(evidence.id),
+                        "text": subject_span,
+                        "span_hash": span_hash(subject_span),
+                    }
+                ],
                 "target_audience": audience,
                 "audience_problem": problem,
                 "content_pillar": candidate.proposed_pillar or "AI workflows",
                 "production_goal": candidate.proposed_title,
-                "scope_inclusions": [f"Only the documented scope in {snapshot.get('canonical_url') or evidence.source_ref}"],
-                "exclusions": ["Undocumented performance, ROI, market, and product-family claims"],
+                "scope_inclusions": [
+                    f"Only the documented scope in {snapshot.get('canonical_url') or evidence.source_ref}"
+                ],
+                "exclusions": [
+                    "Undocumented performance, ROI, market, and product-family claims"
+                ],
                 "central_question_or_thesis": f"What does the official documentation for {subject} establish for this episode of {series_plan.display_name}?",
                 "learning_outcome": series_learning_outcome,
                 "viewer_value": "A bounded evidence-first decision frame that advances the active series.",
                 "content_mode": "SERIES_EPISODE",
-                "channel_contract_ref": {"policy_snapshot_id": str(candidate.policy_snapshot_id)},
-                "source_classification_refs": [{**evidence_ref, "source_classification": "TOPIC_CAPABLE"}],
+                "channel_contract_ref": {
+                    "policy_snapshot_id": str(candidate.policy_snapshot_id)
+                },
+                "source_classification_refs": [
+                    {**evidence_ref, "source_classification": "TOPIC_CAPABLE"}
+                ],
                 "series_binding": {
                     "series_plan_id": str(series_plan.id),
                     "series_run_id": str(series_run.id),
@@ -819,8 +1039,12 @@ class TopicDefinitionService:
 
 
 class ScriptQualificationProducer(Protocol):
-    def write(self, context: dict[str, Any], *, idempotency_key: str) -> tuple[dict[str, Any], dict[str, Any]]: ...
-    def verify(self, context: dict[str, Any], *, idempotency_key: str) -> tuple[dict[str, Any], dict[str, Any]]: ...
+    def write(
+        self, context: dict[str, Any], *, idempotency_key: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]: ...
+    def verify(
+        self, context: dict[str, Any], *, idempotency_key: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
 
 class LunaScriptQualificationProducer:
@@ -829,23 +1053,57 @@ class LunaScriptQualificationProducer:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def _route(self, *, lane: str, task: str, context: dict[str, Any], idempotency_key: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _route(
+        self, *, lane: str, task: str, context: dict[str, Any], idempotency_key: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         from app.services.m10_1 import LLMRouterService
-        prompt = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+        prompt = json.dumps(
+            context, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
         response = LLMRouterService(self.session).route(
-            lane_name=lane, requested_task_type=task, response_format="json", prompt=prompt,
-            correlation_id=idempotency_key, idempotency_key=idempotency_key,
+            lane_name=lane,
+            requested_task_type=task,
+            response_format="json",
+            prompt=prompt,
+            correlation_id=idempotency_key,
+            idempotency_key=idempotency_key,
         )
         receipt = response.model_dump(mode="json")
-        if response.status != "SUCCESS" or response.selected_model != LUNA_MODEL or response.fallback_level != "PRIMARY" or not response.structured_output:
+        if (
+            response.status != "SUCCESS"
+            or response.selected_model != LUNA_MODEL
+            or response.fallback_level != "PRIMARY"
+            or not response.structured_output
+        ):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_LUNA_ROUTE_BLOCKED")
         return dict(response.structured_output), receipt
 
-    def write(self, context: dict[str, Any], *, idempotency_key: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        return self._route(lane="long_context_text", task="long_form_script", context={"task": "Return only the typed Script Writer JSON output.", **context}, idempotency_key=idempotency_key)
+    def write(
+        self, context: dict[str, Any], *, idempotency_key: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        return self._route(
+            lane="long_context_text",
+            task="long_form_script",
+            context={
+                "task": "Return only the typed Script Writer JSON output.",
+                **context,
+            },
+            idempotency_key=idempotency_key,
+        )
 
-    def verify(self, context: dict[str, Any], *, idempotency_key: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        return self._route(lane="gatekeeper_soft_review", task="factuality_review", context={"task": "Independently return only the semantic-verifier JSON output. Do not issue a gate PASS.", **context}, idempotency_key=idempotency_key)
+    def verify(
+        self, context: dict[str, Any], *, idempotency_key: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        return self._route(
+            lane="gatekeeper_soft_review",
+            task="factuality_review",
+            context={
+                "task": "Independently return only the semantic-verifier JSON output. Do not issue a gate PASS.",
+                **context,
+            },
+            idempotency_key=idempotency_key,
+        )
 
 
 # Keep the production concrete type stable even when tests replace the public
@@ -856,7 +1114,13 @@ _PRODUCTION_LUNA_SCRIPT_QUALIFICATION_PRODUCER = LunaScriptQualificationProducer
 
 
 class ScriptQualificationService:
-    def __init__(self, session: Session, *, producer: ScriptQualificationProducer | None = None, now: Callable[[], Any] = utc_now) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        producer: ScriptQualificationProducer | None = None,
+        now: Callable[[], Any] = utc_now,
+    ) -> None:
         self.session = session
         self.producer = producer or LunaScriptQualificationProducer(session)
         self.now = now
@@ -888,7 +1152,9 @@ class ScriptQualificationService:
                 or existing_slot.script_contract_version != script_contract_version
                 or existing_slot.replacement_authority_id != replacement_authority_id
             ):
-                raise ValidationFailureError("SCRIPT_QUALIFICATION_SLOT_RESERVATION_CONFLICT")
+                raise ValidationFailureError(
+                    "SCRIPT_QUALIFICATION_SLOT_RESERVATION_CONFLICT"
+                )
             from app.services.series_episode_reservation import (
                 EpisodeReservationAuthorityService,
             )
@@ -928,7 +1194,11 @@ class ScriptQualificationService:
                 "capability_projection_receipts": projections,
             }
             assignment["assignment_hash"] = canonical_hash(
-                {key: value for key, value in assignment.items() if key != "assignment_hash"}
+                {
+                    key: value
+                    for key, value in assignment.items()
+                    if key != "assignment_hash"
+                }
             )
             evidence_pack = {
                 **evidence_pack,
@@ -945,24 +1215,32 @@ class ScriptQualificationService:
         identity_body = {
             "candidate_id": str(candidate.id),
             "topic_definition_hash": topic.definition.topic_definition_hash,
-            "assignment_hash": assignment["assignment_hash"], "evidence_pack_hash": evidence_pack["evidence_pack_hash"],
+            "assignment_hash": assignment["assignment_hash"],
+            "evidence_pack_hash": evidence_pack["evidence_pack_hash"],
             "memory_digest_hash": memory["digest_hash"],
             "writer_prompt_version": (
                 WRITER_PROMPT_VERSION_V2
                 if script_contract_version == SCRIPT_CONTRACT_V2
                 else WRITER_PROMPT_VERSION
             ),
-            "verifier_prompt_version": VERIFIER_PROMPT_VERSION, "gate_policy_version": QUALIFICATION_POLICY_VERSION,
+            "verifier_prompt_version": VERIFIER_PROMPT_VERSION,
+            "gate_policy_version": QUALIFICATION_POLICY_VERSION,
             "runtime_contract_hash": runtime_contract["contract_hash"],
             "assignment_resolution_hash": assignment_resolution["resolution_hash"],
             "model": LUNA_MODEL,
             "launch_run_id": str(launch_run_id),
             "publish_slot_id": str(publish_slot_id),
             "script_contract_version": script_contract_version,
-            "replacement_authority_id": str(replacement_authority_id) if replacement_authority_id else None,
+            "replacement_authority_id": str(replacement_authority_id)
+            if replacement_authority_id
+            else None,
         }
         identity = canonical_hash(identity_body)
-        existing = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.logical_identity_hash == identity))
+        existing = self.session.scalar(
+            select(ScriptQualificationRun).where(
+                ScriptQualificationRun.logical_identity_hash == identity
+            )
+        )
         if existing is not None:
             from app.services.series_episode_reservation import (
                 EpisodeReservationAuthorityService,
@@ -973,21 +1251,34 @@ class ScriptQualificationService:
             )
             return existing
         run = ScriptQualificationRun(
-            editorial_idea_candidate_id=candidate.id, publish_slot_id=publish_slot_id, launch_run_id=launch_run_id,
-            topic_definition_id=topic.definition.id, topic_definition_hash=topic.definition.topic_definition_hash,
-            script_assignment=assignment, script_assignment_hash=assignment["assignment_hash"],
-            factual_evidence_pack=evidence_pack, factual_evidence_pack_hash=evidence_pack["evidence_pack_hash"],
-            memory_digest=memory, memory_digest_hash=memory["digest_hash"],
+            editorial_idea_candidate_id=candidate.id,
+            publish_slot_id=publish_slot_id,
+            launch_run_id=launch_run_id,
+            topic_definition_id=topic.definition.id,
+            topic_definition_hash=topic.definition.topic_definition_hash,
+            script_assignment=assignment,
+            script_assignment_hash=assignment["assignment_hash"],
+            factual_evidence_pack=evidence_pack,
+            factual_evidence_pack_hash=evidence_pack["evidence_pack_hash"],
+            memory_digest=memory,
+            memory_digest_hash=memory["digest_hash"],
             writer_prompt_version=(
                 WRITER_PROMPT_VERSION_V2
                 if script_contract_version == SCRIPT_CONTRACT_V2
                 else WRITER_PROMPT_VERSION
             ),
-            runtime_contract=runtime_contract, runtime_contract_hash=runtime_contract["contract_hash"],
-            assignment_resolution=assignment_resolution, assignment_resolution_hash=assignment_resolution["resolution_hash"],
-            verifier_prompt_version=VERIFIER_PROMPT_VERSION, gate_policy_version=QUALIFICATION_POLICY_VERSION,
-            model=LUNA_MODEL, logical_attempt_number=1, logical_identity_hash=identity, state="RESERVED",
-            writer_attempt_key=f"{identity}:writer", verifier_attempt_key=f"{identity}:verifier",
+            runtime_contract=runtime_contract,
+            runtime_contract_hash=runtime_contract["contract_hash"],
+            assignment_resolution=assignment_resolution,
+            assignment_resolution_hash=assignment_resolution["resolution_hash"],
+            verifier_prompt_version=VERIFIER_PROMPT_VERSION,
+            gate_policy_version=QUALIFICATION_POLICY_VERSION,
+            model=LUNA_MODEL,
+            logical_attempt_number=1,
+            logical_identity_hash=identity,
+            state="RESERVED",
+            writer_attempt_key=f"{identity}:writer",
+            verifier_attempt_key=f"{identity}:verifier",
             script_contract_version=script_contract_version,
             replacement_authority_id=replacement_authority_id,
         )
@@ -1006,36 +1297,80 @@ class ScriptQualificationService:
         # durable attempt identity to that final authority.
         self._refresh_logical_identity_after_allocation(run)
         identity = run.logical_identity_hash
-        payload = {"script_qualification_run_id": str(run.id), "logical_identity_hash": identity}
+        payload = {
+            "script_qualification_run_id": str(run.id),
+            "logical_identity_hash": identity,
+        }
         command_id = f"script-qualification:{identity}"
-        self.session.add(DomainEvent(
-            id=uuid.uuid5(uuid.NAMESPACE_URL, command_id), event_type=SCRIPT_QUALIFICATION_EVENT_TYPE,
-            event_version=1, aggregate_type=SCRIPT_QUALIFICATION_AGGREGATE_TYPE, aggregate_id=run.id,
-            company_id=candidate.company_id, channel_workspace_id=candidate.channel_workspace_id, workflow_run_id=None,
-            correlation_id=f"script-qualification:{run.id}", command_id=command_id, payload_hash=canonical_hash(payload), payload=payload,
-            metadata_={"queue_name": "production-workflow", "retry_policy": {"policy_key": "script-qualification-v1", "automatic_retry_allowed": False, "provider_substitution_allowed": False, "finalization_retry_allowed": True}},
-            # Provider execution is never retried.  The extra bounded attempts
-            # are reserved solely for a zero-provider-spend final-admission
-            # replay after the qualification receipt has already been sealed.
-            attempt_count=0, max_attempts=3, next_attempt_at=self.now(), occurred_at=self.now(),
-        ))
+        self.session.add(
+            DomainEvent(
+                id=uuid.uuid5(uuid.NAMESPACE_URL, command_id),
+                event_type=SCRIPT_QUALIFICATION_EVENT_TYPE,
+                event_version=1,
+                aggregate_type=SCRIPT_QUALIFICATION_AGGREGATE_TYPE,
+                aggregate_id=run.id,
+                company_id=candidate.company_id,
+                channel_workspace_id=candidate.channel_workspace_id,
+                workflow_run_id=None,
+                correlation_id=f"script-qualification:{run.id}",
+                command_id=command_id,
+                payload_hash=canonical_hash(payload),
+                payload=payload,
+                metadata_={
+                    "queue_name": "production-workflow",
+                    "retry_policy": {
+                        "policy_key": "script-qualification-v1",
+                        "automatic_retry_allowed": False,
+                        "provider_substitution_allowed": False,
+                        "finalization_retry_allowed": True,
+                    },
+                },
+                # Provider execution is never retried.  The extra bounded attempts
+                # are reserved solely for a zero-provider-spend final-admission
+                # replay after the qualification receipt has already been sealed.
+                attempt_count=0,
+                max_attempts=3,
+                next_attempt_at=self.now(),
+                occurred_at=self.now(),
+            )
+        )
         self.session.flush()
         return run
 
     def execute(self, run_id: uuid.UUID) -> ScriptQualificationRun:
-        run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run_id).with_for_update())
+        run = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == run_id)
+            .with_for_update()
+        )
         if run is None:
             raise NotFoundError(f"script qualification run not found: {run_id}")
-        if run.state in {"QUALIFIED", "BLOCKED_NON_REPAIRABLE", "BLOCKED_REPAIR_BUDGET_EXHAUSTED", "COOLDOWN", "SUPERSEDED"}:
+        if run.state in {
+            "QUALIFIED",
+            "BLOCKED_NON_REPAIRABLE",
+            "BLOCKED_REPAIR_BUDGET_EXHAUSTED",
+            "COOLDOWN",
+            "SUPERSEDED",
+        }:
             return run
         if isinstance(self.producer, _PRODUCTION_LUNA_SCRIPT_QUALIFICATION_PRODUCER):
             # Production Luna execution is durable Background mode.  Fixtures
             # retain their injected producer and synchronous unit semantics.
-            from app.services.script_qualification_background import ScriptQualificationBackgroundService
-            return ScriptQualificationBackgroundService(self.session, now=self.now).execute(run.id)
+            from app.services.script_qualification_background import (
+                ScriptQualificationBackgroundService,
+            )
+
+            return ScriptQualificationBackgroundService(
+                self.session, now=self.now
+            ).execute(run.id)
         # A previous worker may have reached the provider boundary but not
         # durably recorded its response.  Retrying would risk duplicate spend.
-        if run.state in {"WRITER_DISPATCHED", "VERIFIER_DISPATCHED", "REPAIR_DISPATCHED", "REVERIFYING"}:
+        if run.state in {
+            "WRITER_DISPATCHED",
+            "VERIFIER_DISPATCHED",
+            "REPAIR_DISPATCHED",
+            "REVERIFYING",
+        }:
             return self._block_unknown_provider_outcome(run)
         if run.state != "RESERVED":
             return self._block(run, "SCRIPT_QUALIFICATION_STATE_INVALID")
@@ -1044,20 +1379,26 @@ class ScriptQualificationService:
                 run.runtime_contract, expected_hash=run.runtime_contract_hash
             )
             self._validate_assignment_resolution(run)
-            validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+            validate_memory_digest(
+                run.memory_digest, expected_hash=run.memory_digest_hash
+            )
             from app.services.series_episode_reservation import (
                 EpisodeReservationAuthorityService,
             )
 
             EpisodeReservationAuthorityService(self.session).require_current(run)
         except (ValidationFailureError, ValueError) as exc:
-            return self._block(run, str(exc) or "SCRIPT_QUALIFICATION_CURRENT_AUTHORITY_INVALID")
+            return self._block(
+                run, str(exc) or "SCRIPT_QUALIFICATION_CURRENT_AUTHORITY_INVALID"
+            )
         run.state = "WRITER_DISPATCHED"
         self.session.flush()
         self.session.commit()
         writer_context = self._writer_context(run)
         try:
-            writer_output, writer_receipt = self.producer.write(writer_context, idempotency_key=run.writer_attempt_key)
+            writer_output, writer_receipt = self.producer.write(
+                writer_context, idempotency_key=run.writer_attempt_key
+            )
             self.writer_output_model(run).model_validate(writer_output)
         except Exception as exc:
             return self._block_after_dispatch(run.id, "SCRIPT_WRITER_FAILED", exc)
@@ -1086,7 +1427,9 @@ class ScriptQualificationService:
         self.session.commit()
         verifier_context = self._verifier_context(run, draft)
         try:
-            verifier_output, verifier_receipt = self.producer.verify(verifier_context, idempotency_key=run.verifier_attempt_key)
+            verifier_output, verifier_receipt = self.producer.verify(
+                verifier_context, idempotency_key=run.verifier_attempt_key
+            )
             verifier = SemanticVerificationOutput.model_validate(verifier_output)
         except Exception as exc:
             return self._block_after_dispatch(run.id, "SCRIPT_VERIFIER_FAILED", exc)
@@ -1099,7 +1442,13 @@ class ScriptQualificationService:
             attempt_key=run.verifier_attempt_key,
         )
         receipts = self._semantic_receipts(run, draft, verifier, structural)
-        result = "PASS" if all(item["status"] in {"PASS", "PASS_EMPTY"} for item in receipts.values()) else "BLOCK"
+        result = (
+            "PASS"
+            if all(
+                item["status"] in {"PASS", "PASS_EMPTY"} for item in receipts.values()
+            )
+            else "BLOCK"
+        )
         if result == "PASS":
             run.state = "QUALIFIED"
             run.result_receipts = receipts
@@ -1109,28 +1458,46 @@ class ScriptQualificationService:
         self.session.flush()
         return run
 
-    def require_pass(self, run_id: uuid.UUID, *, candidate_id: uuid.UUID | None = None) -> ScriptQualificationReceipt:
+    def require_pass(
+        self, run_id: uuid.UUID, *, candidate_id: uuid.UUID | None = None
+    ) -> ScriptQualificationReceipt:
         run = self.session.get(ScriptQualificationRun, run_id)
-        receipt = self.session.scalar(select(ScriptQualificationReceipt).where(ScriptQualificationReceipt.script_qualification_run_id == run_id))
-        if run is None or receipt is None or run.state != "QUALIFIED" or receipt.result != "PASS":
+        receipt = self.session.scalar(
+            select(ScriptQualificationReceipt).where(
+                ScriptQualificationReceipt.script_qualification_run_id == run_id
+            )
+        )
+        if (
+            run is None
+            or receipt is None
+            or run.state != "QUALIFIED"
+            or receipt.result != "PASS"
+        ):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_NOT_PASS")
         if candidate_id is not None and run.editorial_idea_candidate_id != candidate_id:
             raise ValidationFailureError("SCRIPT_QUALIFICATION_CANDIDATE_MISMATCH")
-        if receipt.script_assignment_hash != run.script_assignment_hash or receipt.factual_evidence_pack_hash != run.factual_evidence_pack_hash:
+        if (
+            receipt.script_assignment_hash != run.script_assignment_hash
+            or receipt.factual_evidence_pack_hash != run.factual_evidence_pack_hash
+        ):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_STALE")
         try:
             runtime_contract = ScriptRuntimeContractResolver.validate(
                 run.runtime_contract, expected_hash=run.runtime_contract_hash
             )
             resolution = self._validate_assignment_resolution(run)
-            validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+            validate_memory_digest(
+                run.memory_digest, expected_hash=run.memory_digest_hash
+            )
             from app.services.series_episode_reservation import (
                 EpisodeReservationAuthorityService,
             )
 
             EpisodeReservationAuthorityService(self.session).require_current(run)
         except (ValidationFailureError, ValueError) as exc:
-            raise ValidationFailureError(str(exc) or "SCRIPT_QUALIFICATION_RECEIPT_STALE") from exc
+            raise ValidationFailureError(
+                str(exc) or "SCRIPT_QUALIFICATION_RECEIPT_STALE"
+            ) from exc
         content = receipt.content if isinstance(receipt.content, dict) else {}
         if content.get("schema_version") != "script-qualification-receipt.v3":
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_VERSION_STALE")
@@ -1140,11 +1507,16 @@ class ScriptQualificationService:
             or content.get("assignment_hash") != receipt.script_assignment_hash
             or content.get("evidence_pack_hash") != receipt.factual_evidence_pack_hash
             or content.get("runtime_contract_hash") != runtime_contract["contract_hash"]
-            or content.get("assignment_resolution_hash") != resolution["resolution_hash"]
+            or content.get("assignment_resolution_hash")
+            != resolution["resolution_hash"]
         ):
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_CONTENT_HASH_MISMATCH")
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_RECEIPT_CONTENT_HASH_MISMATCH"
+            )
         try:
-            validate_memory_digest(content.get("memory_digest"), expected_hash=run.memory_digest_hash)
+            validate_memory_digest(
+                content.get("memory_digest"), expected_hash=run.memory_digest_hash
+            )
         except ValueError as exc:
             raise ValidationFailureError(str(exc)) from exc
         if self._uses_v2_contract(run):
@@ -1152,7 +1524,9 @@ class ScriptQualificationService:
         return receipt
 
     @staticmethod
-    def qualification_output(receipt: ScriptQualificationReceipt) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def qualification_output(
+        receipt: ScriptQualificationReceipt,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Read the immutable qualification projection carried by its receipt."""
 
         content = receipt.content if isinstance(receipt.content, dict) else {}
@@ -1160,7 +1534,9 @@ class ScriptQualificationService:
         evidence = content.get("factual_evidence_pack")
         memory = content.get("memory_digest")
         provenance = content.get("producer_provenance")
-        if not all(isinstance(item, dict) for item in (script, evidence, memory, provenance)):
+        if not all(
+            isinstance(item, dict) for item in (script, evidence, memory, provenance)
+        ):
             raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_OUTPUT_MISSING")
         # Current packs carry a self-describing hash of their body.  Retain
         # read compatibility for the initial immutable receipt shape, whose
@@ -1170,24 +1546,20 @@ class ScriptQualificationService:
         # present, is never optional or advisory.
         embedded_evidence_hash = evidence.get("evidence_pack_hash")
         evidence_body = {
-            key: value
-            for key, value in evidence.items()
-            if key != "evidence_pack_hash"
+            key: value for key, value in evidence.items() if key != "evidence_pack_hash"
         }
         evidence_hash_matches = (
-            (
-                isinstance(embedded_evidence_hash, str)
-                and embedded_evidence_hash == receipt.factual_evidence_pack_hash
-                and canonical_hash(evidence_body)
-                == receipt.factual_evidence_pack_hash
-            )
-            or (
-                embedded_evidence_hash is None
-                and canonical_hash(evidence) == receipt.factual_evidence_pack_hash
-            )
+            isinstance(embedded_evidence_hash, str)
+            and embedded_evidence_hash == receipt.factual_evidence_pack_hash
+            and canonical_hash(evidence_body) == receipt.factual_evidence_pack_hash
+        ) or (
+            embedded_evidence_hash is None
+            and canonical_hash(evidence) == receipt.factual_evidence_pack_hash
         )
         if not evidence_hash_matches:
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_RECEIPT_EVIDENCE_PACK_MISMATCH")
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_RECEIPT_EVIDENCE_PACK_MISMATCH"
+            )
         try:
             validate_memory_digest(memory)
         except ValueError as exc:
@@ -1220,7 +1592,8 @@ class ScriptQualificationService:
             if (
                 artifact.get("compiler_version") != compiled.compiler_version
                 or artifact.get("ordered_section_ids") != compiled.ordered_section_ids
-                or artifact.get("ordered_section_hashes") != compiled.ordered_section_hashes
+                or artifact.get("ordered_section_hashes")
+                != compiled.ordered_section_hashes
                 or artifact.get("separator_policy") != CANONICAL_SCRIPT_SEPARATOR
                 or artifact.get("normalization_policy")
                 != CANONICAL_SCRIPT_NORMALIZATION_POLICY
@@ -1253,20 +1626,61 @@ class ScriptQualificationService:
         return dict(script), dict(evidence), dict(memory), dict(provenance)
 
     def _locked(self, run_id: uuid.UUID) -> ScriptQualificationRun:
-        run = self.session.scalar(select(ScriptQualificationRun).where(ScriptQualificationRun.id == run_id).with_for_update())
+        run = self.session.scalar(
+            select(ScriptQualificationRun)
+            .where(ScriptQualificationRun.id == run_id)
+            .with_for_update()
+        )
         if run is None:
             raise NotFoundError(f"script qualification run not found: {run_id}")
         return run
 
-    def _assignment(self, candidate: EditorialIdeaCandidate, topic: EditorialTopicDefinition) -> dict[str, Any]:
+    def _assignment(
+        self, candidate: EditorialIdeaCandidate, topic: EditorialTopicDefinition
+    ) -> dict[str, Any]:
         units = [
-            {"requirement_id": "subject", "requirement_type": "SUBJECT_PRESERVATION", "required": True, "obligation": topic.subject_name},
-            {"requirement_id": "accepted-angle", "requirement_type": "ACCEPTED_ANGLE", "required": True, "obligation": candidate.proposed_angle},
-            {"requirement_id": "question", "requirement_type": "CENTRAL_QUESTION_ANSWER", "required": True, "obligation": topic.central_question_or_thesis},
-            {"requirement_id": "audience", "requirement_type": "AUDIENCE_PROBLEM", "required": True, "obligation": topic.audience_problem},
-            {"requirement_id": "outcome", "requirement_type": "LEARNING_OUTCOME", "required": True, "obligation": topic.learning_outcome},
-            {"requirement_id": "viewer-value", "requirement_type": "VIEWER_VALUE", "required": True, "obligation": topic.viewer_value},
-            {"requirement_id": "viewer-action", "requirement_type": "VIEWER_ACTION_OR_DECISION", "required": True, "obligation": "Give the viewer a bounded next verification or adoption decision."},
+            {
+                "requirement_id": "subject",
+                "requirement_type": "SUBJECT_PRESERVATION",
+                "required": True,
+                "obligation": topic.subject_name,
+            },
+            {
+                "requirement_id": "accepted-angle",
+                "requirement_type": "ACCEPTED_ANGLE",
+                "required": True,
+                "obligation": candidate.proposed_angle,
+            },
+            {
+                "requirement_id": "question",
+                "requirement_type": "CENTRAL_QUESTION_ANSWER",
+                "required": True,
+                "obligation": topic.central_question_or_thesis,
+            },
+            {
+                "requirement_id": "audience",
+                "requirement_type": "AUDIENCE_PROBLEM",
+                "required": True,
+                "obligation": topic.audience_problem,
+            },
+            {
+                "requirement_id": "outcome",
+                "requirement_type": "LEARNING_OUTCOME",
+                "required": True,
+                "obligation": topic.learning_outcome,
+            },
+            {
+                "requirement_id": "viewer-value",
+                "requirement_type": "VIEWER_VALUE",
+                "required": True,
+                "obligation": topic.viewer_value,
+            },
+            {
+                "requirement_id": "viewer-action",
+                "requirement_type": "VIEWER_ACTION_OR_DECISION",
+                "required": True,
+                "obligation": "Give the viewer a bounded next verification or adoption decision.",
+            },
         ]
         units.extend(
             {
@@ -1278,17 +1692,49 @@ class ScriptQualificationService:
             for index, inclusion in enumerate(topic.scope_inclusions, start=1)
         )
         if topic.content_mode == "STANDALONE":
-            units.append({"requirement_id": "self-containment", "requirement_type": "STANDALONE_SELF_CONTAINMENT", "required": True, "obligation": "The narration must stand alone without a previous episode."})
+            units.append(
+                {
+                    "requirement_id": "self-containment",
+                    "requirement_type": "STANDALONE_SELF_CONTAINMENT",
+                    "required": True,
+                    "obligation": "The narration must stand alone without a previous episode.",
+                }
+            )
         else:
-            units.append({"requirement_id": "episode-delta", "requirement_type": "EPISODE_DELTA", "required": True, "obligation": _clean((topic.series_binding or {}).get("episode_delta"))})
+            units.append(
+                {
+                    "requirement_id": "episode-delta",
+                    "requirement_type": "EPISODE_DELTA",
+                    "required": True,
+                    "obligation": _clean(
+                        (topic.series_binding or {}).get("episode_delta")
+                    ),
+                }
+            )
         body = {
-            "schema_version": "script-assignment.v1", "topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash,
-            "subject_canonical_id": topic.subject_canonical_id, "subject_name": topic.subject_name, "candidate_title": candidate.proposed_title,
-            "accepted_angle": candidate.proposed_angle, "central_question_or_thesis": topic.central_question_or_thesis,
-            "target_audience": topic.target_audience, "audience_problem": topic.audience_problem,
-            "scope_inclusions": topic.scope_inclusions, "exclusions": topic.exclusions, "learning_outcome": topic.learning_outcome,
-            "viewer_value": topic.viewer_value, "content_mode": topic.content_mode,
-            "section_role_constraints": ["HOOK", "PROBLEM", "MECHANISM", "EVIDENCE", "APPLICATION", "CLOSING_INSIGHT"],
+            "schema_version": "script-assignment.v1",
+            "topic_definition_id": str(topic.id),
+            "topic_definition_hash": topic.topic_definition_hash,
+            "subject_canonical_id": topic.subject_canonical_id,
+            "subject_name": topic.subject_name,
+            "candidate_title": candidate.proposed_title,
+            "accepted_angle": candidate.proposed_angle,
+            "central_question_or_thesis": topic.central_question_or_thesis,
+            "target_audience": topic.target_audience,
+            "audience_problem": topic.audience_problem,
+            "scope_inclusions": topic.scope_inclusions,
+            "exclusions": topic.exclusions,
+            "learning_outcome": topic.learning_outcome,
+            "viewer_value": topic.viewer_value,
+            "content_mode": topic.content_mode,
+            "section_role_constraints": [
+                "HOOK",
+                "PROBLEM",
+                "MECHANISM",
+                "EVIDENCE",
+                "APPLICATION",
+                "CLOSING_INSIGHT",
+            ],
             "required_requirement_units": units,
             "forbidden_scope_units": [
                 {"forbidden_scope_id": f"forbidden-scope:{index}", "scope": exclusion}
@@ -1299,17 +1745,26 @@ class ScriptQualificationService:
         body["assignment_hash"] = canonical_hash(body)
         return body
 
-    def _factual_evidence_pack(self, candidate: EditorialIdeaCandidate, assignment: dict[str, Any]) -> dict[str, Any]:
+    def _factual_evidence_pack(
+        self, candidate: EditorialIdeaCandidate, assignment: dict[str, Any]
+    ) -> dict[str, Any]:
         entries: list[dict[str, Any]] = []
         seen_source_ids: set[uuid.UUID] = set()
         for ref in candidate.evidence_refs or []:
             if not isinstance(ref, dict) or not ref.get("id"):
                 continue
             try:
-                evidence = self.session.get(SearchDemandEvidence, uuid.UUID(str(ref["id"])))
+                evidence = self.session.get(
+                    SearchDemandEvidence, uuid.UUID(str(ref["id"]))
+                )
             except ValueError:
                 evidence = None
-            if evidence is None or evidence.authority_purpose != "CLAIM_SOURCE" or evidence.evidence_source_type not in {"OFFICIAL_DOCUMENT", "OFFICIAL_MANUAL"}:
+            if (
+                evidence is None
+                or evidence.authority_purpose != "CLAIM_SOURCE"
+                or evidence.evidence_source_type
+                not in {"OFFICIAL_DOCUMENT", "OFFICIAL_MANUAL"}
+            ):
                 continue
             if evidence.id in seen_source_ids:
                 continue
@@ -1328,27 +1783,72 @@ class ScriptQualificationService:
                 continue
             seen_source_ids.add(evidence.id)
             excerpt = text[:8000]
-            entries.append({
-                "evidence_span_id": f"search_demand_evidence:{evidence.id}:0", "evidence_type": "search_demand_evidence", "evidence_id": str(evidence.id), "canonical_url": snapshot.get("canonical_url") or evidence.source_ref,
-                "authority_purpose": evidence.authority_purpose, "evidence_source_type": evidence.evidence_source_type,
-                "source_class": snapshot.get("source_class"), "source_classification": classify_source(evidence), "retrieval_receipt": ((evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}).get("fetch_receipt"),
-                "source_snapshot_hash": snapshot_hash, "text": excerpt, "start_byte": 0,
-                "end_byte": len(excerpt.encode("utf-8")), "span_hash": span_hash(excerpt), "freshness_state": "FRESH", "source_quality_state": "PASS",
-                "allowed_claim_boundaries": ["Only claims entailed by this exact snapshot span"],
-                "assignment_requirement_ids": [item["requirement_id"] for item in assignment["required_requirement_units"]],
-            })
+            entries.append(
+                {
+                    "evidence_span_id": f"search_demand_evidence:{evidence.id}:0",
+                    "evidence_type": "search_demand_evidence",
+                    "evidence_id": str(evidence.id),
+                    "canonical_url": snapshot.get("canonical_url")
+                    or evidence.source_ref,
+                    "authority_purpose": evidence.authority_purpose,
+                    "evidence_source_type": evidence.evidence_source_type,
+                    "source_class": snapshot.get("source_class"),
+                    "source_classification": classify_source(evidence),
+                    "retrieval_receipt": (
+                        (evidence.metadata_ or {}).get("editorial_fresh_evidence") or {}
+                    ).get("fetch_receipt"),
+                    "source_snapshot_hash": snapshot_hash,
+                    "text": excerpt,
+                    "start_byte": 0,
+                    "end_byte": len(excerpt.encode("utf-8")),
+                    "span_hash": span_hash(excerpt),
+                    "freshness_state": "FRESH",
+                    "source_quality_state": "PASS",
+                    "allowed_claim_boundaries": [
+                        "Only claims entailed by this exact snapshot span"
+                    ],
+                    "assignment_requirement_ids": [
+                        item["requirement_id"]
+                        for item in assignment["required_requirement_units"]
+                    ],
+                }
+            )
         if not entries:
             raise ValidationFailureError("SCRIPT_FACTUAL_EVIDENCE_AUTHORITY_INCOMPLETE")
-        body = {"schema_version": "script-factual-evidence-pack.v1", "candidate_id": str(candidate.id), "assignment_hash": assignment["assignment_hash"], "spans": entries, "excluded_unsupported_scope": assignment["forbidden_scope_units"]}
+        body = {
+            "schema_version": "script-factual-evidence-pack.v1",
+            "candidate_id": str(candidate.id),
+            "assignment_hash": assignment["assignment_hash"],
+            "spans": entries,
+            "excluded_unsupported_scope": assignment["forbidden_scope_units"],
+        }
         body["evidence_pack_hash"] = canonical_hash(body)
         return body
 
     @staticmethod
-    def _assignment_memory_digest(topic: EditorialTopicDefinition, assignment: dict[str, Any]) -> dict[str, Any]:
+    def _assignment_memory_digest(
+        topic: EditorialTopicDefinition, assignment: dict[str, Any]
+    ) -> dict[str, Any]:
         # Qualification can run before a VideoProject/effective context exists.
         # The explicit safe empty digest is a controlled non-factual authority,
         # never a surrogate factual source or assignment completion signal.
-        body = {"digest_type": "EMPTY_SAFE_DIGEST", "status": "EMPTY_SAFE_DIGEST", "lessons": [], "assignment_query": {"subject": topic.subject_canonical_id, "audience_problem": topic.audience_problem, "requirement_types": [item["requirement_type"] for item in assignment["required_requirement_units"]], "content_mode": topic.content_mode}, "non_factual_guidance_only": True, "no_raw_analytics": True, "no_raw_memory": True}
+        body = {
+            "digest_type": "EMPTY_SAFE_DIGEST",
+            "status": "EMPTY_SAFE_DIGEST",
+            "lessons": [],
+            "assignment_query": {
+                "subject": topic.subject_canonical_id,
+                "audience_problem": topic.audience_problem,
+                "requirement_types": [
+                    item["requirement_type"]
+                    for item in assignment["required_requirement_units"]
+                ],
+                "content_mode": topic.content_mode,
+            },
+            "non_factual_guidance_only": True,
+            "no_raw_analytics": True,
+            "no_raw_memory": True,
+        }
         return hashed_payload(body, "digest_hash")
 
     @staticmethod
@@ -1361,13 +1861,24 @@ class ScriptQualificationService:
                 "assignment_mode": "STANDALONE_REQUIRED",
                 "content_mode": "STANDALONE",
                 "standalone_reason_code": "EXPLICIT_STANDALONE_REQUIRED",
-                "standalone_self_containment_required": bool(topic.standalone_self_containment_required),
-                "series_plan_id": None, "series_run_id": None, "episode_number": None,
-                "episode_role": None, "episode_delta": None, "series_learning_outcome": None,
-                "authority_refs": {"topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash},
+                "standalone_self_containment_required": bool(
+                    topic.standalone_self_containment_required
+                ),
+                "series_plan_id": None,
+                "series_run_id": None,
+                "episode_number": None,
+                "episode_role": None,
+                "episode_delta": None,
+                "series_learning_outcome": None,
+                "authority_refs": {
+                    "topic_definition_id": str(topic.id),
+                    "topic_definition_hash": topic.topic_definition_hash,
+                },
             }
         else:
-            binding = topic.series_binding if isinstance(topic.series_binding, dict) else {}
+            binding = (
+                topic.series_binding if isinstance(topic.series_binding, dict) else {}
+            )
             plan_id = _clean(binding.get("series_plan_id") or binding.get("series_ref"))
             run_id = _clean(binding.get("series_run_id") or binding.get("run_ref"))
             body = {
@@ -1376,14 +1887,20 @@ class ScriptQualificationService:
                 "content_mode": "SERIES_EPISODE",
                 "standalone_reason_code": None,
                 "standalone_self_containment_required": False,
-                "series_plan_id": plan_id or None, "series_run_id": run_id or None,
+                "series_plan_id": plan_id or None,
+                "series_run_id": run_id or None,
                 # Only reserve() may allocate the exact episode under a
                 # locked SeriesRun.  Ignore any historical/topic-proposed
                 # number so two stale candidates cannot both freeze episode 1.
-                "episode_number": None, "episode_role": _clean(binding.get("episode_role")) or None,
+                "episode_number": None,
+                "episode_role": _clean(binding.get("episode_role")) or None,
                 "episode_delta": _clean(binding.get("episode_delta")) or None,
-                "series_learning_outcome": _clean(binding.get("learning_outcome")) or None,
-                "authority_refs": {"topic_definition_id": str(topic.id), "topic_definition_hash": topic.topic_definition_hash},
+                "series_learning_outcome": _clean(binding.get("learning_outcome"))
+                or None,
+                "authority_refs": {
+                    "topic_definition_id": str(topic.id),
+                    "topic_definition_hash": topic.topic_definition_hash,
+                },
             }
         return hashed_payload(body, "resolution_hash")
 
@@ -1420,7 +1937,9 @@ class ScriptQualificationService:
             )
         )
         if conflict is not None:
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_LOGICAL_IDENTITY_CONFLICT")
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_LOGICAL_IDENTITY_CONFLICT"
+            )
         run.logical_identity_hash = identity
         run.writer_attempt_key = f"{identity}:writer"
         run.verifier_attempt_key = f"{identity}:verifier"
@@ -1433,10 +1952,17 @@ class ScriptQualificationService:
         try:
             typed = ScriptAssignmentResolution.model_validate(run.assignment_resolution)
         except ValueError as exc:
-            raise ValidationFailureError("SCRIPT_ASSIGNMENT_RESOLUTION_INVALID") from exc
+            raise ValidationFailureError(
+                "SCRIPT_ASSIGNMENT_RESOLUTION_INVALID"
+            ) from exc
         payload = typed.model_dump(mode="json")
-        expected = canonical_hash({key: value for key, value in payload.items() if key != "resolution_hash"})
-        if typed.resolution_hash != expected or typed.resolution_hash != run.assignment_resolution_hash:
+        expected = canonical_hash(
+            {key: value for key, value in payload.items() if key != "resolution_hash"}
+        )
+        if (
+            typed.resolution_hash != expected
+            or typed.resolution_hash != run.assignment_resolution_hash
+        ):
             raise ValidationFailureError("SCRIPT_ASSIGNMENT_RESOLUTION_HASH_MISMATCH")
         return payload
 
@@ -1445,8 +1971,14 @@ class ScriptQualificationService:
         return run.script_contract_version == SCRIPT_CONTRACT_V2
 
     @classmethod
-    def writer_output_model(cls, run: ScriptQualificationRun) -> type[QualifiedScriptOutput | QualifiedScriptOutputV2]:
-        return QualifiedScriptOutputV2 if cls._uses_v2_contract(run) else QualifiedScriptOutput
+    def writer_output_model(
+        cls, run: ScriptQualificationRun
+    ) -> type[QualifiedScriptOutput | QualifiedScriptOutputV2]:
+        return (
+            QualifiedScriptOutputV2
+            if cls._uses_v2_contract(run)
+            else QualifiedScriptOutput
+        )
 
     def accept_writer_output(
         self, run: ScriptQualificationRun, payload: dict[str, Any]
@@ -1501,7 +2033,9 @@ class ScriptQualificationService:
         else:
             expected = CanonicalScriptCompiler.compile(
                 output,
-                duration_estimation_wpm=int(runtime.get("duration_estimation_wpm") or 150),
+                duration_estimation_wpm=int(
+                    runtime.get("duration_estimation_wpm") or 150
+                ),
                 compiled_at=artifact.compiled_at,
             )
             if (
@@ -1513,7 +2047,9 @@ class ScriptQualificationService:
                 or artifact.canonical_script != expected.canonical_script
                 or artifact.canonical_script_hash != expected.canonical_script_hash
             ):
-                raise ValidationFailureError("SCRIPT_STRUCTURE_CANONICALIZATION_MISMATCH")
+                raise ValidationFailureError(
+                    "SCRIPT_STRUCTURE_CANONICALIZATION_MISMATCH"
+                )
         run.canonical_script_artifact_id = artifact.id
         run.canonical_compiler_version = artifact.compiler_version
         run.derived_canonical_script_hash = artifact.canonical_script_hash
@@ -1550,7 +2086,9 @@ class ScriptQualificationService:
             return QualifiedScriptOutput.model_validate(run.script_payload)
         if run.canonical_script_artifact_id is None:
             raise ValidationFailureError("CANONICAL_SCRIPT_ARTIFACT_MISSING")
-        artifact = self.session.get(CanonicalScriptArtifact, run.canonical_script_artifact_id)
+        artifact = self.session.get(
+            CanonicalScriptArtifact, run.canonical_script_artifact_id
+        )
         if artifact is None or artifact.script_qualification_run_id != run.id:
             raise ValidationFailureError("CANONICAL_SCRIPT_ARTIFACT_MISMATCH")
         output = QualifiedScriptOutputV2.model_validate(run.script_payload)
@@ -1582,7 +2120,9 @@ class ScriptQualificationService:
     def _coverage_plan_from_run(
         run: ScriptQualificationRun,
     ) -> SectionCoveragePlan | None:
-        assignment = run.script_assignment if isinstance(run.script_assignment, dict) else {}
+        assignment = (
+            run.script_assignment if isinstance(run.script_assignment, dict) else {}
+        )
         raw = assignment.get("section_coverage_plan")
         recorded_hash = assignment.get("section_coverage_plan_hash")
         if raw is None and recorded_hash is None:
@@ -1595,9 +2135,15 @@ class ScriptQualificationService:
         try:
             plan = SectionCoveragePlan.model_validate(raw)
         except ValueError as exc:
-            raise ValidationFailureError("SCRIPT_SECTION_COVERAGE_PLAN_INVALID") from exc
+            raise ValidationFailureError(
+                "SCRIPT_SECTION_COVERAGE_PLAN_INVALID"
+            ) from exc
         expected = canonical_hash(
-            {key: value for key, value in plan.model_dump(mode="json").items() if key != "content_hash"}
+            {
+                key: value
+                for key, value in plan.model_dump(mode="json").items()
+                if key != "content_hash"
+            }
         )
         if plan.content_hash != expected or plan.content_hash != recorded_hash:
             raise ValidationFailureError("SCRIPT_SECTION_COVERAGE_PLAN_HASH_MISMATCH")
@@ -1640,7 +2186,9 @@ class ScriptQualificationService:
         self, run: ScriptQualificationRun
     ) -> dict[str, Any] | None:
         coverage = self._coverage_plan_from_run(run)
-        assignment = run.script_assignment if isinstance(run.script_assignment, dict) else {}
+        assignment = (
+            run.script_assignment if isinstance(run.script_assignment, dict) else {}
+        )
         recorded = assignment.get("capability_projection_receipts")
         if coverage is None and recorded is None:
             return None
@@ -1662,10 +2210,16 @@ class ScriptQualificationService:
         try:
             return {
                 "writer": compiler.compile(
-                    role="script_writer", task="long_form_script", content_mode=coverage.content_mode, stage_context=context
+                    role="script_writer",
+                    task="long_form_script",
+                    content_mode=coverage.content_mode,
+                    stage_context=context,
                 ),
                 "verifier": compiler.compile(
-                    role="script_verifier", task="factuality_review", content_mode=coverage.content_mode, stage_context=context
+                    role="script_verifier",
+                    task="factuality_review",
+                    content_mode=coverage.content_mode,
+                    stage_context=context,
                 ),
             }
         except CapabilityCompilationError as exc:
@@ -1703,6 +2257,12 @@ class ScriptQualificationService:
                     "Do not add undocumented fields or provider-authored hashes.",
                     "Return only the strict schema-bound result.",
                 ],
+                "section_reference_rule": (
+                    "For each sections[].required_assignment_unit_refs, copy "
+                    "the same section_id's section_coverage_plan.sections[]."
+                    "primary_requirement_ids exactly. Never place "
+                    "owned_information_unit_ids or iu-* IDs in that field."
+                ),
                 "forbidden": [
                     "Do not use planning authority or memory as factual evidence.",
                     "Do not assert facts outside exact factual evidence spans.",
@@ -1716,7 +2276,12 @@ class ScriptQualificationService:
             "memory_digest": run.memory_digest,
             "writer_output_contract": {
                 "schema_version": "qualified-script-output.v1",
-                "required_top_level_fields": ["language", "canonical_script", "sections", "claims"],
+                "required_top_level_fields": [
+                    "language",
+                    "canonical_script",
+                    "sections",
+                    "claims",
+                ],
                 "canonical_script": "string only; ordered section narration joined by single spaces",
                 "sections": "top-level array of section_id, heading, narration",
                 "claims": "top-level array of claim_id, claim_text, evidence_span_ids",
@@ -1736,7 +2301,9 @@ class ScriptQualificationService:
             ],
         }
 
-    def _verifier_context(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
+    def _verifier_context(
+        self, run: ScriptQualificationRun, draft: QualifiedScriptOutput
+    ) -> dict[str, Any]:
         context = {
             "script_assignment": run.script_assignment,
             "assignment_resolution": run.assignment_resolution,
@@ -1764,11 +2331,19 @@ class ScriptQualificationService:
             if coverage is None or projections is None:
                 raise ValidationFailureError("SCRIPT_CAPABILITY_PROJECTION_MISSING")
             context["section_coverage_plan"] = coverage.model_dump(mode="json")
-            context["capability_projection"] = projections["verifier"].provider_payload()
+            context["capability_projection"] = projections[
+                "verifier"
+            ].provider_payload()
         return context
 
-    def _structural_receipt(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput) -> dict[str, Any]:
-        script = unicodedata.normalize("NFC", draft.canonical_script).replace("\r\n", "\n").replace("\r", "\n")
+    def _structural_receipt(
+        self, run: ScriptQualificationRun, draft: QualifiedScriptOutput
+    ) -> dict[str, Any]:
+        script = (
+            unicodedata.normalize("NFC", draft.canonical_script)
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+        )
         reasons: list[str] = []
         sections = draft.sections
         narrations = [_clean(item.narration) for item in sections]
@@ -1801,11 +2376,16 @@ class ScriptQualificationService:
             reasons.append("SCRIPT_STRUCTURE_CANONICALIZATION_MISMATCH")
         if len(sections) < 3:
             reasons.append("SCRIPT_STRUCTURE_INSUFFICIENT_MAJOR_SECTIONS")
-        if len(section_ids) != len(set(section_ids)) or any(not item for item in section_ids):
+        if len(section_ids) != len(set(section_ids)) or any(
+            not item for item in section_ids
+        ):
             reasons.append("SCRIPT_STRUCTURE_SECTION_IDS_INVALID")
         runtime = run.runtime_contract if isinstance(run.runtime_contract, dict) else {}
         expected_language = _clean(runtime.get("expected_language"))
-        if expected_language and draft.language.casefold() != expected_language.casefold():
+        if (
+            expected_language
+            and draft.language.casefold() != expected_language.casefold()
+        ):
             reasons.append("SCRIPT_LANGUAGE_CONTRACT_MISMATCH")
         minimum_sections = runtime.get("minimum_major_sections")
         if isinstance(minimum_sections, int) and len(sections) < minimum_sections:
@@ -1813,22 +2393,41 @@ class ScriptQualificationService:
         minimum_claims = runtime.get("minimum_material_claims")
         if isinstance(minimum_claims, int) and len(draft.claims) < minimum_claims:
             reasons.append("SCRIPT_MINIMUM_MATERIAL_CLAIM_COUNT_UNMET")
-        duration = runtime.get("duration_contract") if isinstance(runtime.get("duration_contract"), dict) else {}
+        duration = (
+            runtime.get("duration_contract")
+            if isinstance(runtime.get("duration_contract"), dict)
+            else {}
+        )
         wpm = runtime.get("duration_estimation_wpm")
         if isinstance(wpm, int) and wpm > 0 and duration:
             words = re.findall(r"\b[\w'-]+\b", script, flags=re.UNICODE)
             estimated_duration_ms = round(len(words) / wpm * 60_000)
-            if not (
-                isinstance(duration.get("minimum_duration_ms"), int)
-                and isinstance(duration.get("maximum_duration_ms"), int)
-            ) or not duration["minimum_duration_ms"] <= estimated_duration_ms <= duration["maximum_duration_ms"]:
+            if (
+                not (
+                    isinstance(duration.get("minimum_duration_ms"), int)
+                    and isinstance(duration.get("maximum_duration_ms"), int)
+                )
+                or not duration["minimum_duration_ms"]
+                <= estimated_duration_ms
+                <= duration["maximum_duration_ms"]
+            ):
                 reasons.append("SCRIPT_DURATION_CONTRACT_MISMATCH")
         text_folded = script.casefold()
-        if any(term.casefold() in text_folded for term in _string_list(runtime.get("forbidden_claims"))):
+        if any(
+            term.casefold() in text_folded
+            for term in _string_list(runtime.get("forbidden_claims"))
+        ):
             reasons.append("SCRIPT_FORBIDDEN_CLAIM_VIOLATION")
-        if any(term.casefold() in text_folded for term in _string_list(runtime.get("forbidden_style_terms"))):
+        if any(
+            term.casefold() in text_folded
+            for term in _string_list(runtime.get("forbidden_style_terms"))
+        ):
             reasons.append("SCRIPT_FORBIDDEN_STYLE_VIOLATION")
-        normalized = [re.sub(r"\s+", " ", item).casefold() for item in re.split(r"(?<=[.!?])\s+", script) if item.strip()]
+        normalized = [
+            re.sub(r"\s+", " ", item).casefold()
+            for item in re.split(r"(?<=[.!?])\s+", script)
+            if item.strip()
+        ]
         if len(normalized) != len(set(normalized)):
             reasons.append("SCRIPT_STRUCTURE_REPETITION_BLOCK")
         section_sentence_sets: list[set[str]] = []
@@ -1873,14 +2472,30 @@ class ScriptQualificationService:
             if union and len(left & right) / len(union) >= 0.92:
                 reasons.append("SCRIPT_HIGH_LEXICAL_OVERLAP")
                 reasons.append("SCRIPT_SECTION_PROGRESS_STALLED")
-        return {"gate": "A", "status": "PASS" if not reasons else "BLOCK", "script_hash": script_hash(script), "runtime_contract_hash": runtime.get("contract_hash"), "reason_codes": sorted(set(reasons)) or ["SCRIPT_STRUCTURAL_INTEGRITY_PASS"]}
+        return {
+            "gate": "A",
+            "status": "PASS" if not reasons else "BLOCK",
+            "script_hash": script_hash(script),
+            "runtime_contract_hash": runtime.get("contract_hash"),
+            "reason_codes": sorted(set(reasons))
+            or ["SCRIPT_STRUCTURAL_INTEGRITY_PASS"],
+        }
 
-    def _semantic_receipts(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput, verifier: SemanticVerificationOutput, structural: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    def _semantic_receipts(
+        self,
+        run: ScriptQualificationRun,
+        draft: QualifiedScriptOutput,
+        verifier: SemanticVerificationOutput,
+        structural: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
         script = draft.canonical_script
         script_bytes = canonical_script_bytes(script)
         section_bounds = self._section_bounds(draft.sections)
         writer_claims = {item.claim_id: item for item in draft.claims}
-        evidence = {item["evidence_span_id"]: item for item in (run.factual_evidence_pack or {}).get("spans", [])}
+        evidence = {
+            item["evidence_span_id"]: item
+            for item in (run.factual_evidence_pack or {}).get("spans", [])
+        }
         inventory_reasons: list[str] = []
         grounding_reasons: list[str] = []
         seen_claims: set[str] = set()
@@ -1901,34 +2516,62 @@ class ScriptQualificationService:
             else:
                 resolved_observation_spans.append(span)
             if observation.materiality_state == "MATERIAL":
-                if not observation.writer_declared_claim_id or observation.writer_declared_claim_id not in writer_claims:
+                if (
+                    not observation.writer_declared_claim_id
+                    or observation.writer_declared_claim_id not in writer_claims
+                ):
                     inventory_reasons.append("SCRIPT_MATERIAL_CLAIM_UNDECLARED")
                     writer_claim = None
                 else:
                     writer_claim = writer_claims[observation.writer_declared_claim_id]
                 if writer_claim is not None:
-                    observed_text = re.sub(r"\s+", " ", observation.span.text).casefold()
-                    declared_text = re.sub(r"\s+", " ", writer_claim.claim_text).casefold()
-                    if declared_text not in observed_text and observed_text not in declared_text:
+                    observed_text = re.sub(
+                        r"\s+", " ", observation.span.text
+                    ).casefold()
+                    declared_text = re.sub(
+                        r"\s+", " ", writer_claim.claim_text
+                    ).casefold()
+                    if (
+                        declared_text not in observed_text
+                        and observed_text not in declared_text
+                    ):
                         inventory_reasons.append("SCRIPT_WRITER_CLAIM_SPAN_MISMATCH")
-                    if len(writer_claim.evidence_span_ids) != len(set(writer_claim.evidence_span_ids)) or any(evidence_id not in evidence for evidence_id in writer_claim.evidence_span_ids):
+                    if len(writer_claim.evidence_span_ids) != len(
+                        set(writer_claim.evidence_span_ids)
+                    ) or any(
+                        evidence_id not in evidence
+                        for evidence_id in writer_claim.evidence_span_ids
+                    ):
                         inventory_reasons.append("SCRIPT_WRITER_CLAIM_EVIDENCE_UNBOUND")
                 if not observation.factual_evidence_span_ids:
                     inventory_reasons.append("SCRIPT_MATERIAL_CLAIM_UNBOUND")
-                if observation.claim_type in {"NON_FACTUAL_OPINION_OR_FRAMING", "STRUCTURAL_TRANSITION"}:
+                if observation.claim_type in {
+                    "NON_FACTUAL_OPINION_OR_FRAMING",
+                    "STRUCTURAL_TRANSITION",
+                }:
                     inventory_reasons.append("SCRIPT_CLAIM_CLASSIFICATION_INVALID")
                 if observation.semantic_relation != "ENTAILED":
-                    grounding_reasons.append(f"SCRIPT_CLAIM_{observation.semantic_relation}")
+                    grounding_reasons.append(
+                        f"SCRIPT_CLAIM_{observation.semantic_relation}"
+                    )
                 if not observation.assignment_requirement_ids:
                     grounding_reasons.append("SCRIPT_CLAIM_ASSIGNMENT_IRRELEVANT")
-                if len(observation.factual_evidence_span_ids) != len(set(observation.factual_evidence_span_ids)):
+                if len(observation.factual_evidence_span_ids) != len(
+                    set(observation.factual_evidence_span_ids)
+                ):
                     grounding_reasons.append("SCRIPT_MATERIAL_CLAIM_EVIDENCE_DUPLICATE")
-                if writer_claim is not None and set(observation.factual_evidence_span_ids) != set(writer_claim.evidence_span_ids):
-                    grounding_reasons.append("SCRIPT_MATERIAL_CLAIM_EVIDENCE_SPAN_MISMATCH")
+                if writer_claim is not None and set(
+                    observation.factual_evidence_span_ids
+                ) != set(writer_claim.evidence_span_ids):
+                    grounding_reasons.append(
+                        "SCRIPT_MATERIAL_CLAIM_EVIDENCE_SPAN_MISMATCH"
+                    )
                 for evidence_id in observation.factual_evidence_span_ids:
                     if evidence_id not in evidence:
                         grounding_reasons.append("SCRIPT_MATERIAL_CLAIM_UNBOUND")
-        required_sections = {item.section_id for item in draft.sections if item.section_id}
+        required_sections = {
+            item.section_id for item in draft.sections if item.section_id
+        }
         if not required_sections <= seen_sections:
             inventory_reasons.append("SCRIPT_CLAIM_INVENTORY_INCOMPLETE")
         for start, end in self._sentence_bounds(script):
@@ -1937,20 +2580,67 @@ class ScriptQualificationService:
                 for span in resolved_observation_spans
             ):
                 inventory_reasons.append("SCRIPT_CLAIM_INVENTORY_UNCOVERED_SENTENCE")
-        inventory = {"gate": "MATERIAL_CLAIM_INVENTORY", "status": "PASS" if not inventory_reasons else "BLOCK", "script_hash": script_hash(script), "reason_codes": sorted(set(inventory_reasons)) or ["SCRIPT_MATERIAL_CLAIM_INVENTORY_PASS"], "observed_count": len(verifier.material_claim_inventory)}
-        grounding = {"gate": "B", "status": "PASS" if inventory["status"] == "PASS" and not grounding_reasons else "BLOCK", "script_hash": script_hash(script), "assignment_hash": run.script_assignment_hash, "evidence_pack_hash": run.factual_evidence_pack_hash, "reason_codes": sorted(set(grounding_reasons)) or ["SCRIPT_CLAIM_GROUNDING_PASS"]}
+        inventory = {
+            "gate": "MATERIAL_CLAIM_INVENTORY",
+            "status": "PASS" if not inventory_reasons else "BLOCK",
+            "script_hash": script_hash(script),
+            "reason_codes": sorted(set(inventory_reasons))
+            or ["SCRIPT_MATERIAL_CLAIM_INVENTORY_PASS"],
+            "observed_count": len(verifier.material_claim_inventory),
+        }
+        grounding = {
+            "gate": "B",
+            "status": "PASS"
+            if inventory["status"] == "PASS" and not grounding_reasons
+            else "BLOCK",
+            "script_hash": script_hash(script),
+            "assignment_hash": run.script_assignment_hash,
+            "evidence_pack_hash": run.factual_evidence_pack_hash,
+            "reason_codes": sorted(set(grounding_reasons))
+            or ["SCRIPT_CLAIM_GROUNDING_PASS"],
+        }
         fulfillment_reasons, coverage = self._fulfillment_reasons(
             run, verifier, script_bytes, section_bounds, draft.sections
         )
-        fulfillment = {"gate": "C", "status": "PASS" if not fulfillment_reasons else "BLOCK", "script_hash": script_hash(script), "assignment_hash": run.script_assignment_hash, "reason_codes": sorted(set(fulfillment_reasons)) or ["SCRIPT_EDITORIAL_ASSIGNMENT_FULFILLMENT_PASS"], **coverage}
+        fulfillment = {
+            "gate": "C",
+            "status": "PASS" if not fulfillment_reasons else "BLOCK",
+            "script_hash": script_hash(script),
+            "assignment_hash": run.script_assignment_hash,
+            "reason_codes": sorted(set(fulfillment_reasons))
+            or ["SCRIPT_EDITORIAL_ASSIGNMENT_FULFILLMENT_PASS"],
+            **coverage,
+        }
         memory_reasons = self._memory_reasons(run, verifier)
         try:
-            memory_hash = validate_memory_digest(run.memory_digest, expected_hash=run.memory_digest_hash)
+            memory_hash = validate_memory_digest(
+                run.memory_digest, expected_hash=run.memory_digest_hash
+            )
         except ValueError as exc:
             memory_reasons.append(str(exc))
             memory_hash = None
-        memory = {"gate": "D", "status": "PASS_EMPTY" if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST" and not memory_reasons else ("PASS" if not memory_reasons else "BLOCK"), "script_hash": script_hash(script), "memory_digest_hash": memory_hash, "reason_codes": sorted(set(memory_reasons)) or (["SCRIPT_MEMORY_GUIDANCE_PASS_EMPTY"] if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST" else ["SCRIPT_MEMORY_GUIDANCE_PASS"])}
-        return {"structural": structural, "inventory": inventory, "grounding": grounding, "fulfillment": fulfillment, "memory": memory}
+        memory = {
+            "gate": "D",
+            "status": "PASS_EMPTY"
+            if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST"
+            and not memory_reasons
+            else ("PASS" if not memory_reasons else "BLOCK"),
+            "script_hash": script_hash(script),
+            "memory_digest_hash": memory_hash,
+            "reason_codes": sorted(set(memory_reasons))
+            or (
+                ["SCRIPT_MEMORY_GUIDANCE_PASS_EMPTY"]
+                if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST"
+                else ["SCRIPT_MEMORY_GUIDANCE_PASS"]
+            ),
+        }
+        return {
+            "structural": structural,
+            "inventory": inventory,
+            "grounding": grounding,
+            "fulfillment": fulfillment,
+            "memory": memory,
+        }
 
     @staticmethod
     def _section_bounds(sections: list[Any]) -> dict[str, tuple[int, int]]:
@@ -1968,7 +2658,10 @@ class ScriptQualificationService:
     @staticmethod
     def _span_in_section(span: Any, bounds: dict[str, tuple[int, int]]) -> bool:
         bound = bounds.get(span.section_id)
-        return bound is not None and bound[0] <= span.start_byte < span.end_byte <= bound[1]
+        return (
+            bound is not None
+            and bound[0] <= span.start_byte < span.end_byte <= bound[1]
+        )
 
     @staticmethod
     def _resolve_verifier_span(
@@ -2000,8 +2693,7 @@ class ScriptQualificationService:
         if narration is None or bound is None:
             return None
         occurrences = [
-            match.start()
-            for match in re.finditer(re.escape(text), narration)
+            match.start() for match in re.finditer(re.escape(text), narration)
         ]
         if len(occurrences) != 1:
             return None
@@ -2025,7 +2717,9 @@ class ScriptQualificationService:
             if not text:
                 continue
             leading = raw[: len(raw) - len(raw.lstrip())]
-            start = len(script[: match.start()].encode("utf-8")) + len(leading.encode("utf-8"))
+            start = len(script[: match.start()].encode("utf-8")) + len(
+                leading.encode("utf-8")
+            )
             end = start + len(text.encode("utf-8"))
             bounds.append((start, end))
         return bounds
@@ -2039,8 +2733,17 @@ class ScriptQualificationService:
         sections: list[Any],
     ) -> tuple[list[str], dict[str, int | float]]:
         reasons: list[str] = []
-        requirements = {item["requirement_id"] for item in (run.script_assignment or {}).get("required_requirement_units", []) if item.get("required")}
-        observed = {item.requirement_id: item for item in verifier.assignment_fulfillment_observations}
+        requirements = {
+            item["requirement_id"]
+            for item in (run.script_assignment or {}).get(
+                "required_requirement_units", []
+            )
+            if item.get("required")
+        }
+        observed = {
+            item.requirement_id: item
+            for item in verifier.assignment_fulfillment_observations
+        }
         fulfilled = 0
         coverage_owners: dict[tuple[int, int], str] = {}
         if set(observed) - requirements:
@@ -2050,8 +2753,15 @@ class ScriptQualificationService:
                 reasons.append(f"SCRIPT_ASSIGNMENT_OUT_OF_SCOPE:{item.requirement_id}")
         for requirement_id in requirements:
             item = observed.get(requirement_id)
-            if item is None or item.status != "SUFFICIENT" or not item.spans or item.missing_reasoning_step:
-                reasons.append(f"SCRIPT_ASSIGNMENT_REQUIREMENT_UNFULFILLED:{requirement_id}")
+            if (
+                item is None
+                or item.status != "SUFFICIENT"
+                or not item.spans
+                or item.missing_reasoning_step
+            ):
+                reasons.append(
+                    f"SCRIPT_ASSIGNMENT_REQUIREMENT_UNFULFILLED:{requirement_id}"
+                )
                 continue
             fulfilled += 1
             for selected_span in item.spans:
@@ -2061,13 +2771,20 @@ class ScriptQualificationService:
                 if (
                     span is None
                     or span.end_byte > len(script_bytes)
-                    or script_bytes[span.start_byte:span.end_byte]
+                    or script_bytes[span.start_byte : span.end_byte]
                     != span.text.encode("utf-8")
                     or not self._span_in_section(span, bounds)
                 ):
                     reasons.append("SCRIPT_COVERAGE_MANIFEST_SPAN_INVALID")
                     continue
-                if any(evidence_span_id not in {item["evidence_span_id"] for item in (run.factual_evidence_pack or {}).get("spans", [])} for evidence_span_id in item.evidence_span_ids):
+                if any(
+                    evidence_span_id
+                    not in {
+                        item["evidence_span_id"]
+                        for item in (run.factual_evidence_pack or {}).get("spans", [])
+                    }
+                    for evidence_span_id in item.evidence_span_ids
+                ):
                     reasons.append("SCRIPT_ASSIGNMENT_EVIDENCE_SPAN_UNBOUND")
                 key = (span.start_byte, span.end_byte)
                 owner = coverage_owners.setdefault(key, requirement_id)
@@ -2076,7 +2793,10 @@ class ScriptQualificationService:
         observed_roles: dict[str, list[tuple[frozenset[str], str]]] = {}
         observed_sections: set[str] = set()
         for section in verifier.section_purpose_observations:
-            if section.section_id not in bounds or section.section_id in observed_sections:
+            if (
+                section.section_id not in bounds
+                or section.section_id in observed_sections
+            ):
                 reasons.append("SCRIPT_SECTION_PURPOSE_DUPLICATE_OBSERVATION")
             observed_sections.add(section.section_id)
             if section.genericity_state != "SPECIFIC" or not section.editorial_delta:
@@ -2120,7 +2840,8 @@ class ScriptQualificationService:
                 if (
                     span is None
                     or span.end_byte > len(script_bytes)
-                    or script_bytes[span.start_byte:span.end_byte] != span.text.encode("utf-8")
+                    or script_bytes[span.start_byte : span.end_byte]
+                    != span.text.encode("utf-8")
                     or not self._span_in_section(span, bounds)
                 ):
                     reasons.append("SCRIPT_FORBIDDEN_SCOPE_SPAN_INVALID")
@@ -2135,7 +2856,9 @@ class ScriptQualificationService:
         }
 
     @staticmethod
-    def _memory_reasons(run: ScriptQualificationRun, verifier: SemanticVerificationOutput) -> list[str]:
+    def _memory_reasons(
+        run: ScriptQualificationRun, verifier: SemanticVerificationOutput
+    ) -> list[str]:
         reasons: list[str] = []
         if (run.memory_digest or {}).get("status") == "EMPTY_SAFE_DIGEST":
             return reasons
@@ -2173,16 +2896,33 @@ class ScriptQualificationService:
         )
         return body
 
-    def _create_receipt(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput, result: str, receipts: dict[str, Any]) -> ScriptQualificationReceipt:
-        existing = self.session.scalar(select(ScriptQualificationReceipt).where(ScriptQualificationReceipt.script_qualification_run_id == run.id))
+    def _create_receipt(
+        self,
+        run: ScriptQualificationRun,
+        draft: QualifiedScriptOutput,
+        result: str,
+        receipts: dict[str, Any],
+    ) -> ScriptQualificationReceipt:
+        existing = self.session.scalar(
+            select(ScriptQualificationReceipt).where(
+                ScriptQualificationReceipt.script_qualification_run_id == run.id
+            )
+        )
         if existing is not None:
             return existing
         qualified_script: dict[str, Any] = draft.model_dump(mode="json")
         if self._uses_v2_contract(run):
-            if not isinstance(run.script_payload, dict) or run.canonical_script_artifact_id is None:
+            if (
+                not isinstance(run.script_payload, dict)
+                or run.canonical_script_artifact_id is None
+            ):
                 raise ValidationFailureError("CANONICAL_SCRIPT_ARTIFACT_MISSING")
-            artifact = self.session.get(CanonicalScriptArtifact, run.canonical_script_artifact_id)
-            if artifact is None or artifact.canonical_script_hash != script_hash(draft.canonical_script):
+            artifact = self.session.get(
+                CanonicalScriptArtifact, run.canonical_script_artifact_id
+            )
+            if artifact is None or artifact.canonical_script_hash != script_hash(
+                draft.canonical_script
+            ):
                 raise ValidationFailureError("CANONICAL_SCRIPT_ARTIFACT_MISMATCH")
             qualified_script = {
                 "script_contract_version": SCRIPT_CONTRACT_V2,
@@ -2202,27 +2942,70 @@ class ScriptQualificationService:
                     "compiled_at": artifact.compiled_at.isoformat(),
                 },
             }
-        body = {"schema_version": "script-qualification-receipt.v3", "run_id": str(run.id), "result": result, "script_hash": script_hash(draft.canonical_script), "assignment_hash": run.script_assignment_hash, "evidence_pack_hash": run.factual_evidence_pack_hash, "topic_definition_hash": run.topic_definition_hash, "runtime_contract": run.runtime_contract, "runtime_contract_hash": run.runtime_contract_hash, "assignment_resolution": run.assignment_resolution, "assignment_resolution_hash": run.assignment_resolution_hash, "memory_digest_hash": run.memory_digest_hash, "receipts": receipts, "qualified_script": qualified_script, "factual_evidence_pack": run.factual_evidence_pack, "memory_digest": run.memory_digest, "producer_provenance": {"writer": run.writer_receipt, "verifier": run.verifier_receipt}, "repair_attempts": run.repair_attempts}
-        receipt = ScriptQualificationReceipt(script_qualification_run_id=run.id, result=result, script_hash=body["script_hash"], script_assignment_hash=run.script_assignment_hash, factual_evidence_pack_hash=run.factual_evidence_pack_hash, content=body, content_hash=canonical_hash(body))
+        body = {
+            "schema_version": "script-qualification-receipt.v3",
+            "run_id": str(run.id),
+            "result": result,
+            "script_hash": script_hash(draft.canonical_script),
+            "assignment_hash": run.script_assignment_hash,
+            "evidence_pack_hash": run.factual_evidence_pack_hash,
+            "topic_definition_hash": run.topic_definition_hash,
+            "runtime_contract": run.runtime_contract,
+            "runtime_contract_hash": run.runtime_contract_hash,
+            "assignment_resolution": run.assignment_resolution,
+            "assignment_resolution_hash": run.assignment_resolution_hash,
+            "memory_digest_hash": run.memory_digest_hash,
+            "receipts": receipts,
+            "qualified_script": qualified_script,
+            "factual_evidence_pack": run.factual_evidence_pack,
+            "memory_digest": run.memory_digest,
+            "producer_provenance": {
+                "writer": run.writer_receipt,
+                "verifier": run.verifier_receipt,
+            },
+            "repair_attempts": run.repair_attempts,
+        }
+        receipt = ScriptQualificationReceipt(
+            script_qualification_run_id=run.id,
+            result=result,
+            script_hash=body["script_hash"],
+            script_assignment_hash=run.script_assignment_hash,
+            factual_evidence_pack_hash=run.factual_evidence_pack_hash,
+            content=body,
+            content_hash=canonical_hash(body),
+        )
         self.session.add(receipt)
         return receipt
 
-    def _seal_block(self, run: ScriptQualificationRun, draft: QualifiedScriptOutput, receipts: dict[str, Any]) -> ScriptQualificationRun:
+    def _seal_block(
+        self,
+        run: ScriptQualificationRun,
+        draft: QualifiedScriptOutput,
+        receipts: dict[str, Any],
+    ) -> ScriptQualificationRun:
         run.state = "BLOCKED_NON_REPAIRABLE"
         run.result_receipts = receipts
-        run.failure_receipt = {"reason_codes": [code for receipt in receipts.values() for code in receipt.get("reason_codes", [])]}
+        run.failure_receipt = {
+            "reason_codes": [
+                code
+                for receipt in receipts.values()
+                for code in receipt.get("reason_codes", [])
+            ]
+        }
         self._create_receipt(run, draft, "BLOCK", receipts)
         from app.services.script_qualification_recovery import (
             ScriptQualificationRecoveryService,
         )
 
-        ScriptQualificationRecoveryService(self.session, now=self.now).settle_deterministic_block(
-            run, reason_code="SCRIPT_QUALIFICATION_BLOCKED"
-        )
+        ScriptQualificationRecoveryService(
+            self.session, now=self.now
+        ).settle_deterministic_block(run, reason_code="SCRIPT_QUALIFICATION_BLOCKED")
         self.session.flush()
         return run
 
-    def _block_unknown_provider_outcome(self, run: ScriptQualificationRun) -> ScriptQualificationRun:
+    def _block_unknown_provider_outcome(
+        self, run: ScriptQualificationRun
+    ) -> ScriptQualificationRun:
         # A provider may have accepted the call before the worker crashed.
         # Preserve the episode identity until an explicit supersession/manual
         # remediation decision; never silently hand it to another script.
@@ -2241,20 +3024,28 @@ class ScriptQualificationService:
         self.session.flush()
         return run
 
-    def _block_after_dispatch(self, run_id: uuid.UUID, code: str, exc: Exception) -> ScriptQualificationRun:
+    def _block_after_dispatch(
+        self, run_id: uuid.UUID, code: str, exc: Exception
+    ) -> ScriptQualificationRun:
         run = self._locked(run_id)
         return self._block(run, code, detail=str(exc))
 
-    def _block(self, run: ScriptQualificationRun, code: str, detail: str | None = None) -> ScriptQualificationRun:
+    def _block(
+        self, run: ScriptQualificationRun, code: str, detail: str | None = None
+    ) -> ScriptQualificationRun:
         run.state = "BLOCKED_NON_REPAIRABLE"
-        run.failure_receipt = {"reason_codes": [code], "detail": detail[:512] if detail else None, "logical_identity_hash": run.logical_identity_hash}
+        run.failure_receipt = {
+            "reason_codes": [code],
+            "detail": detail[:512] if detail else None,
+            "logical_identity_hash": run.logical_identity_hash,
+        }
         from app.services.script_qualification_recovery import (
             ScriptQualificationRecoveryService,
         )
 
-        ScriptQualificationRecoveryService(self.session, now=self.now).settle_deterministic_block(
-            run, reason_code=code
-        )
+        ScriptQualificationRecoveryService(
+            self.session, now=self.now
+        ).settle_deterministic_block(run, reason_code=code)
         self.session.flush()
         return run
 
@@ -2263,7 +3054,9 @@ class ScriptQualificationService:
 
         run = self._locked(run_id)
         if run.admitted_video_project_id is not None:
-            raise ValidationFailureError("SCRIPT_QUALIFICATION_SUPERSEDE_AFTER_ADMISSION")
+            raise ValidationFailureError(
+                "SCRIPT_QUALIFICATION_SUPERSEDE_AFTER_ADMISSION"
+            )
         if run.state == "SUPERSEDED":
             return run
         if run.state == "QUALIFIED":
@@ -2273,7 +3066,9 @@ class ScriptQualificationService:
             EpisodeReservationAuthorityService,
         )
 
-        EpisodeReservationAuthorityService(self.session).release_for_terminal_qualification(
+        EpisodeReservationAuthorityService(
+            self.session
+        ).release_for_terminal_qualification(
             run,
             reason_code="SCRIPT_QUALIFICATION_SUPERSEDED",
         )

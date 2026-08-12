@@ -84,6 +84,96 @@ class ScriptContractReplacementLineage:
     qualification: ScriptQualificationRun
 
 
+def resolve_replacement_qualification_leaf(
+    session: Session,
+    *,
+    authority: ScriptContractReplacementAuthority,
+    lock: bool = False,
+) -> ScriptQualificationRun:
+    """Resolve the sole reachable qualification leaf under a sealed authority.
+
+    ``replacement_qualification_run_id`` is the immutable root pointer.  A
+    bounded repair may append a child, but may never rewrite that pointer or
+    introduce a fork/unreachable sibling.
+    """
+
+    statement = (
+        select(ScriptQualificationRun)
+        .where(ScriptQualificationRun.replacement_authority_id == authority.id)
+        .order_by(
+            ScriptQualificationRun.logical_attempt_number.asc(),
+            ScriptQualificationRun.created_at.asc(),
+            ScriptQualificationRun.id.asc(),
+        )
+    )
+    if lock:
+        statement = statement.with_for_update()
+    runs = list(session.scalars(statement).all())
+    by_id = {run.id: run for run in runs}
+    root = by_id.get(authority.replacement_qualification_run_id)
+    if (
+        root is None
+        or root.supersedes_qualification_run_id is not None
+        or root.logical_attempt_number != 1
+    ):
+        raise ValidationFailureError("SCOPED_REPLACEMENT_QUALIFICATION_ROOT_DRIFT")
+    for run in runs:
+        if (
+            run.editorial_idea_candidate_id != authority.replacement_candidate_id
+            or run.publish_slot_id != authority.replacement_slot_id
+        ):
+            raise ValidationFailureError(
+                "SCOPED_REPLACEMENT_QUALIFICATION_LINEAGE_DRIFT"
+            )
+    seen: set[uuid.UUID] = set()
+    leaf = root
+    expected_attempt = root.logical_attempt_number
+    while True:
+        if leaf.id in seen:
+            raise ValidationFailureError(
+                "SCOPED_REPLACEMENT_QUALIFICATION_LINEAGE_CYCLE"
+            )
+        seen.add(leaf.id)
+        child_statement = select(ScriptQualificationRun).where(
+            ScriptQualificationRun.supersedes_qualification_run_id == leaf.id
+        )
+        if lock:
+            child_statement = child_statement.with_for_update()
+        next_runs = list(session.scalars(child_statement).all())
+        if len(next_runs) > 1:
+            raise ValidationFailureError(
+                "SCOPED_REPLACEMENT_QUALIFICATION_LINEAGE_FORK"
+            )
+        if not next_runs:
+            break
+        child = next_runs[0]
+        expected_attempt += 1
+        if (
+            child.logical_attempt_number != expected_attempt
+            or child.replacement_authority_id != authority.id
+            or child.editorial_idea_candidate_id != root.editorial_idea_candidate_id
+            or child.publish_slot_id != root.publish_slot_id
+            or child.launch_run_id != root.launch_run_id
+            or child.topic_definition_hash != root.topic_definition_hash
+            or child.script_assignment_hash != root.script_assignment_hash
+            or child.factual_evidence_pack_hash != root.factual_evidence_pack_hash
+            or child.memory_digest_hash != root.memory_digest_hash
+            or child.runtime_contract_hash != root.runtime_contract_hash
+            or child.assignment_resolution_hash != root.assignment_resolution_hash
+            or child.script_contract_version != root.script_contract_version
+            or not child.recovery_key
+        ):
+            raise ValidationFailureError(
+                "SCOPED_REPLACEMENT_QUALIFICATION_ATTEMPT_DRIFT"
+            )
+        leaf = child
+    if seen != set(by_id):
+        raise ValidationFailureError(
+            "SCOPED_REPLACEMENT_QUALIFICATION_UNREACHABLE_NODE"
+        )
+    return leaf
+
+
 class ScriptContractReplacementAuthorityService:
     """Creates only the authority explicitly granted for this contract migration.
 
@@ -116,9 +206,13 @@ class ScriptContractReplacementAuthorityService:
         if parent is None or slot is None:
             raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_SOURCE_MISSING")
         if parent.stage != "REJECTED" or slot.state != "CANCELED":
-            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_PARENT_NOT_TERMINAL")
+            raise ValidationFailureError(
+                "SCRIPT_CONTRACT_REPLACEMENT_PARENT_NOT_TERMINAL"
+            )
         if slot.reserved_candidate_id != parent.id:
-            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_SLOT_PARENT_MISMATCH")
+            raise ValidationFailureError(
+                "SCRIPT_CONTRACT_REPLACEMENT_SLOT_PARENT_MISMATCH"
+            )
         current = self.now()
         deadline = slot.target_start_window_close_at - timedelta(hours=3)
         if current >= deadline or current > slot.target_start_window_close_at:
@@ -146,13 +240,18 @@ class ScriptContractReplacementAuthorityService:
         source_run = self.session.scalar(
             select(ScriptQualificationRun)
             .where(ScriptQualificationRun.editorial_idea_candidate_id == parent.id)
-            .order_by(ScriptQualificationRun.created_at.desc(), ScriptQualificationRun.id.desc())
+            .order_by(
+                ScriptQualificationRun.created_at.desc(),
+                ScriptQualificationRun.id.desc(),
+            )
         )
         if source_run is None or source_run.state not in {
             "BLOCKED_NON_REPAIRABLE",
             "BLOCKED_REPAIR_BUDGET_EXHAUSTED",
         }:
-            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_TERMINAL_QUALIFICATION_REQUIRED")
+            raise ValidationFailureError(
+                "SCRIPT_CONTRACT_REPLACEMENT_TERMINAL_QUALIFICATION_REQUIRED"
+            )
         source_topic = self.session.scalar(
             select(EditorialTopicDefinition)
             .where(EditorialTopicDefinition.editorial_idea_candidate_id == parent.id)
@@ -185,7 +284,9 @@ class ScriptContractReplacementAuthorityService:
             or source_preflight.policy_fit_state != "PASS"
             or not _preflight_demand_authority_valid(source_preflight)
         ):
-            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_SOURCE_AUTHORITY_STALE")
+            raise ValidationFailureError(
+                "SCRIPT_CONTRACT_REPLACEMENT_SOURCE_AUTHORITY_STALE"
+            )
 
         authority_id = uuid.uuid4()
         authority_body = {
@@ -208,7 +309,9 @@ class ScriptContractReplacementAuthorityService:
             "qualification_deadline": deadline.isoformat(),
         }
         if authority_body["old_script_contract_version"] != SCRIPT_CONTRACT_V1:
-            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_OLD_CONTRACT_INVALID")
+            raise ValidationFailureError(
+                "SCRIPT_CONTRACT_REPLACEMENT_OLD_CONTRACT_INVALID"
+            )
         authority = ScriptContractReplacementAuthority(
             id=authority_id,
             operator_authorized_at=current,
@@ -236,11 +339,15 @@ class ScriptContractReplacementAuthorityService:
         self.session.add(candidate)
         self.session.flush()
         topic = self._clone_topic(
-            source=source_topic, candidate=candidate, parent_topic_definition_id=source_topic.id
+            source=source_topic,
+            candidate=candidate,
+            parent_topic_definition_id=source_topic.id,
         )
         gate = TopicDefinitionService(self.session).evaluate(topic)
         if gate.state != "PASS" or not gate.current_production_eligibility:
-            raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_TOPIC_REUSE_BLOCKED")
+            raise ValidationFailureError(
+                "SCRIPT_CONTRACT_REPLACEMENT_TOPIC_REUSE_BLOCKED"
+            )
         preflight = self._clone_preflight(
             source=source_preflight, candidate=candidate, authority=authority
         )
@@ -257,7 +364,9 @@ class ScriptContractReplacementAuthorityService:
                 "vcos-durable-worker", permissions={"editorial.manage"}
             ),
         )
-        replacement_slot = self._clone_slot(slot=slot, candidate=candidate, authority=authority)
+        replacement_slot = self._clone_slot(
+            slot=slot, candidate=candidate, authority=authority
+        )
         self.session.add(replacement_slot)
         self.session.flush()
         qualification = ScriptQualificationService(self.session, now=self.now).reserve(
@@ -307,9 +416,7 @@ class ScriptContractReplacementAuthorityService:
             raise ValidationFailureError("CONTROLLED_RECOVERY_CANDIDATE_MISSING")
         source_run = self.session.scalar(
             select(ScriptQualificationRun)
-            .where(
-                ScriptQualificationRun.editorial_idea_candidate_id == parent.id
-            )
+            .where(ScriptQualificationRun.editorial_idea_candidate_id == parent.id)
             .order_by(
                 ScriptQualificationRun.created_at.desc(),
                 ScriptQualificationRun.id.desc(),
@@ -374,8 +481,7 @@ class ScriptContractReplacementAuthorityService:
         existing_parent = self.session.scalar(
             select(ScriptContractReplacementAuthority)
             .where(
-                ScriptContractReplacementAuthority.replaces_candidate_id
-                == parent.id,
+                ScriptContractReplacementAuthority.replaces_candidate_id == parent.id,
                 ScriptContractReplacementAuthority.new_script_contract_version
                 == SCRIPT_CONTRACT_V2,
             )
@@ -386,7 +492,9 @@ class ScriptContractReplacementAuthorityService:
                 "CONTROLLED_RECOVERY_PARENT_REPLACEMENT_ALREADY_EXISTS"
             )
 
-        source_reasons = set((source_run.failure_receipt or {}).get("reason_codes") or [])
+        source_reasons = set(
+            (source_run.failure_receipt or {}).get("reason_codes") or []
+        )
         source_attempts = list(
             self.session.scalars(
                 select(ScriptQualificationBackgroundAttempt).where(
@@ -443,7 +551,9 @@ class ScriptContractReplacementAuthorityService:
             )
         )
         if conflicting_workflow is not None or target_admission is not None:
-            raise ValidationFailureError("CONTROLLED_RECOVERY_ACTIVE_PRODUCTION_CONFLICT")
+            raise ValidationFailureError(
+                "CONTROLLED_RECOVERY_ACTIVE_PRODUCTION_CONFLICT"
+            )
 
         source_topic = self.session.scalar(
             select(EditorialTopicDefinition)
@@ -488,8 +598,7 @@ class ScriptContractReplacementAuthorityService:
             or not EditorialSpecificityService(self.session).current_pass(parent)
             or current_novelty is None
             or current_novelty.state != "PASS"
-            or persisted_novelty.get("gate_version")
-            != EDITORIAL_NOVELTY_GATE_VERSION
+            or persisted_novelty.get("gate_version") != EDITORIAL_NOVELTY_GATE_VERSION
             or persisted_novelty.get("state") != "PASS"
             or persisted_novelty.get("evaluation_hash")
             != current_novelty.evaluation_hash
@@ -560,9 +669,7 @@ class ScriptContractReplacementAuthorityService:
         deadline_policy_receipt = deadline_policy.receipt()
         authority_versions = {
             "topic_gate": TOPIC_GATE_VERSION,
-            "preflight": (source_preflight.evidence_blob or {}).get(
-                "schema_version"
-            ),
+            "preflight": (source_preflight.evidence_blob or {}).get("schema_version"),
             "specificity": EDITORIAL_SPECIFICITY_GATE_VERSION,
             "novelty": EDITORIAL_NOVELTY_GATE_VERSION,
             "script_qualification": QUALIFICATION_POLICY_VERSION,
@@ -716,9 +823,7 @@ class ScriptContractReplacementAuthorityService:
         )
         self.session.add(replacement_slot)
         self.session.flush()
-        qualification = ScriptQualificationService(
-            self.session, now=self.now
-        ).reserve(
+        qualification = ScriptQualificationService(self.session, now=self.now).reserve(
             candidate=candidate,
             publish_slot_id=replacement_slot.id,
             launch_run_id=launch.id,
@@ -764,9 +869,7 @@ class ScriptContractReplacementAuthorityService:
             candidate.policy_snapshot_id,
         )
         if policy_snapshot is None:
-            raise ValidationFailureError(
-                "CONTROLLED_RECOVERY_EVIDENCE_POLICY_MISSING"
-            )
+            raise ValidationFailureError("CONTROLLED_RECOVERY_EVIDENCE_POLICY_MISSING")
         authority = FreshEvidenceCollector(
             self.session, now=lambda: evaluated_at
         ).inspect_authority(
@@ -784,8 +887,12 @@ class ScriptContractReplacementAuthorityService:
             raise ValidationFailureError(
                 "CONTROLLED_RECOVERY_EVIDENCE_TTL_INVALID"
             ) from exc
-        allowed_classes = set(str(item) for item in policy.get("allowed_source_classes") or [])
-        allowed_domains = [str(item).lower() for item in policy.get("allowed_domains") or []]
+        allowed_classes = set(
+            str(item) for item in policy.get("allowed_source_classes") or []
+        )
+        allowed_domains = [
+            str(item).lower() for item in policy.get("allowed_domains") or []
+        ]
 
         evidence_ids: list[uuid.UUID] = []
         for ref in candidate.evidence_refs or []:
@@ -798,9 +905,7 @@ class ScriptContractReplacementAuthorityService:
             if evidence_id not in evidence_ids:
                 evidence_ids.append(evidence_id)
         if not evidence_ids:
-            raise ValidationFailureError(
-                "CONTROLLED_RECOVERY_EVIDENCE_REFS_MISSING"
-            )
+            raise ValidationFailureError("CONTROLLED_RECOVERY_EVIDENCE_REFS_MISSING")
 
         sources: list[dict[str, Any]] = []
         for evidence_id in evidence_ids:
@@ -854,9 +959,7 @@ class ScriptContractReplacementAuthorityService:
                 or source_class not in allowed_classes
                 or parsed.scheme != "https"
                 or not parsed.hostname
-                or not self._hostname_allowed(
-                    parsed.hostname.lower(), allowed_domains
-                )
+                or not self._hostname_allowed(parsed.hostname.lower(), allowed_domains)
                 or evaluated_at >= expires_at
             ):
                 raise ValidationFailureError(
@@ -871,9 +974,7 @@ class ScriptContractReplacementAuthorityService:
                     "retrieved_at": retrieved_at.isoformat(),
                     "timestamp_source": timestamp_source,
                     "expires_at": expires_at.isoformat(),
-                    "age_seconds": int(
-                        (evaluated_at - retrieved_at).total_seconds()
-                    ),
+                    "age_seconds": int((evaluated_at - retrieved_at).total_seconds()),
                     "state": "FRESH",
                 }
             )
@@ -893,8 +994,7 @@ class ScriptContractReplacementAuthorityService:
     @staticmethod
     def _hostname_allowed(hostname: str, allowed_domains: list[str]) -> bool:
         return any(
-            hostname == item.lstrip("*.")
-            or hostname.endswith(f".{item.lstrip('*.')}")
+            hostname == item.lstrip("*.") or hostname.endswith(f".{item.lstrip('*.')}")
             for item in allowed_domains
             if item
         )
@@ -910,14 +1010,18 @@ class ScriptContractReplacementAuthorityService:
     def _existing_lineage(
         self, authority: ScriptContractReplacementAuthority
     ) -> ScriptContractReplacementLineage:
-        candidate = self.session.get(EditorialIdeaCandidate, authority.replacement_candidate_id)
+        candidate = self.session.get(
+            EditorialIdeaCandidate, authority.replacement_candidate_id
+        )
         slot = self.session.get(LongFormPublishSlot, authority.replacement_slot_id)
         qualification = self.session.get(
             ScriptQualificationRun, authority.replacement_qualification_run_id
         )
         if candidate is None or slot is None or qualification is None:
             raise ValidationFailureError("SCRIPT_CONTRACT_REPLACEMENT_AUTHORITY_DRIFT")
-        return ScriptContractReplacementLineage(authority, candidate, slot, qualification)
+        return ScriptContractReplacementLineage(
+            authority, candidate, slot, qualification
+        )
 
     def _clone_candidate(
         self,
@@ -1040,9 +1144,7 @@ class ScriptContractReplacementAuthorityService:
                 "source_evidence_reused": True,
             },
         }
-        return IdeaMarketPreflight(
-            **values, editorial_idea_candidate_id=candidate.id
-        )
+        return IdeaMarketPreflight(**values, editorial_idea_candidate_id=candidate.id)
 
     @staticmethod
     def _clone_slot(

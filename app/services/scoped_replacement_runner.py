@@ -20,15 +20,24 @@ from app.services.launch_cadence import LongFormCadenceService
 from app.services.script_contract_replacement import (
     OPERATOR_RECOVERY_REASON,
     OPERATOR_RECOVERY_SCHEMA,
+    resolve_replacement_qualification_leaf,
 )
 from app.services.script_qualification import SCRIPT_QUALIFICATION_EVENT_TYPE
-from app.services.script_qualification_background import ScriptQualificationBackgroundService
+from app.services.script_qualification_background import (
+    BACKGROUND_EVENT_TYPE,
+    ScriptQualificationBackgroundService,
+)
+from app.services.script_writer_output_recovery import (
+    V2_OWNERSHIP_FAILURE,
+    ScriptWriterOutputRecoveryService,
+)
 from app.workers.production_workflow import ProductionWorkflowWorker, WorkerRunResult
 
 
 @dataclass(frozen=True, slots=True)
 class ScopedReplacementRunResult:
     authority_id: uuid.UUID
+    qualification_id: uuid.UUID
     qualification_state: str
     workflow_id: uuid.UUID | None
     workflow_state: str | None
@@ -57,9 +66,7 @@ class ScopedReplacementContinuationRunner:
             "vcos-durable-worker", permissions={"production.start"}
         )
 
-    def run_once(
-        self, *, authority_id: uuid.UUID
-    ) -> ScopedReplacementRunResult:
+    def run_once(self, *, authority_id: uuid.UUID) -> ScopedReplacementRunResult:
         authority = self.session.scalar(
             select(ScriptContractReplacementAuthority)
             .where(ScriptContractReplacementAuthority.id == authority_id)
@@ -74,21 +81,27 @@ class ScopedReplacementContinuationRunner:
             raise ValidationFailureError(
                 "SCOPED_REPLACEMENT_FINAL_BOUNDARY_NOT_AUTHORIZED"
             )
-        qualification = self.session.scalar(
-            select(ScriptQualificationRun)
-            .where(
-                ScriptQualificationRun.id == authority.replacement_qualification_run_id
-            )
-            .with_for_update()
+        qualification = resolve_replacement_qualification_leaf(
+            self.session, authority=authority, lock=True
         )
-        if qualification is None or qualification.replacement_authority_id != authority.id:
-            raise ValidationFailureError("SCOPED_REPLACEMENT_QUALIFICATION_DRIFT")
+        if (
+            qualification.state == "BLOCKED_NON_REPAIRABLE"
+            and (qualification.failure_receipt or {}).get("detail")
+            == V2_OWNERSHIP_FAILURE
+        ):
+            qualification = ScriptWriterOutputRecoveryService(
+                self.session, now=self.now
+            ).create_v2_ownership_normalized_recovery(
+                source_qualification_run_id=qualification.id
+            )
 
         initial_event = self.session.scalar(
             select(DomainEvent)
             .where(
                 DomainEvent.aggregate_id == qualification.id,
-                DomainEvent.event_type == SCRIPT_QUALIFICATION_EVENT_TYPE,
+                DomainEvent.event_type.in_(
+                    {SCRIPT_QUALIFICATION_EVENT_TYPE, BACKGROUND_EVENT_TYPE}
+                ),
                 DomainEvent.delivered_at.is_(None),
                 DomainEvent.published_at.is_(None),
                 DomainEvent.dead_lettered_at.is_(None),
@@ -111,12 +124,16 @@ class ScopedReplacementContinuationRunner:
             ).execute(qualification.id)
         workflow: ProductionWorkflowRun | None = None
         if qualification.state == "QUALIFIED":
-            admission, workflow = LongFormCadenceService(self.session, now=self.now).finalize_qualified_script_run(
+            admission, workflow = LongFormCadenceService(
+                self.session, now=self.now
+            ).finalize_qualified_script_run(
                 script_qualification_run_id=qualification.id,
                 actor=self.actor,
             )
             if admission.admitted_video_project_id != workflow.video_project_id:
-                raise ValidationFailureError("SCOPED_REPLACEMENT_ADMISSION_WORKFLOW_DRIFT")
+                raise ValidationFailureError(
+                    "SCOPED_REPLACEMENT_ADMISSION_WORKFLOW_DRIFT"
+                )
             metadata = dict(workflow.metadata_ or {})
             metadata["replacement_authority_id"] = str(authority.id)
             if self.post_render_hold_requested:
@@ -160,23 +177,24 @@ class ScopedReplacementContinuationRunner:
             worker_result = qualification_event_result
         return ScopedReplacementRunResult(
             authority_id=authority.id,
+            qualification_id=qualification.id,
             qualification_state=qualification.state,
             workflow_id=workflow.id if workflow is not None else None,
             workflow_state=workflow.state if workflow is not None else None,
             worker_result=worker_result,
         )
 
-    def _locked_qualification(
-        self, authority_id: uuid.UUID
-    ) -> ScriptQualificationRun:
-        qualification = self.session.scalar(
-            select(ScriptQualificationRun)
-            .where(ScriptQualificationRun.replacement_authority_id == authority_id)
+    def _locked_qualification(self, authority_id: uuid.UUID) -> ScriptQualificationRun:
+        authority = self.session.scalar(
+            select(ScriptContractReplacementAuthority)
+            .where(ScriptContractReplacementAuthority.id == authority_id)
             .with_for_update()
         )
-        if qualification is None:
+        if authority is None:
             raise ValidationFailureError("SCOPED_REPLACEMENT_QUALIFICATION_DRIFT")
-        return qualification
+        return resolve_replacement_qualification_leaf(
+            self.session, authority=authority, lock=True
+        )
 
     def _run_one_scoped_event(self, *, workflow_id: uuid.UUID) -> WorkerRunResult:
         event = self.session.scalar(

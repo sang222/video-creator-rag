@@ -12,13 +12,20 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.contracts.script_qualification import QualifiedScriptOutput
+from app.contracts.cross_modal import SectionCoveragePlan
+from app.contracts.script_qualification import (
+    QualifiedScriptOutput,
+    QualifiedScriptOutputV2,
+)
 from app.services.config_registry import content_hash
 
 
 NORMALIZATION_VERSION = "script-writer-output-normalization.v1"
 CONTRACT_SCHEMA_VERSION = "qualified-script-output.v1"
 LEGACY_WRAPPED_SCHEMA = "LEGACY_WRAPPED_CANONICAL_SCRIPT_V1"
+V2_INFORMATION_UNIT_OWNERSHIP_SCHEMA = "V2_INFORMATION_UNIT_IDS_IN_REQUIREMENT_REFS"
+V2_OWNERSHIP_NORMALIZATION_VERSION = "script-writer-section-ownership-normalization.v1"
+V2_CONTRACT_SCHEMA_VERSION = "qualified-script-output.v2-single-source"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +68,9 @@ def normalize_legacy_writer_output(value: Any) -> NormalizedWriterOutput:
         or not isinstance(wrapped, dict)
         or not isinstance(claims, list)
     ):
-        raise WriterOutputNormalizationError("WRITER_NORMALIZATION_LEGACY_SHAPE_REQUIRED")
+        raise WriterOutputNormalizationError(
+            "WRITER_NORMALIZATION_LEGACY_SHAPE_REQUIRED"
+        )
     source_sections = wrapped.get("sections")
     if not isinstance(source_sections, list) or not source_sections:
         raise WriterOutputNormalizationError("WRITER_NORMALIZATION_SECTIONS_REQUIRED")
@@ -70,7 +79,9 @@ def normalize_legacy_writer_output(value: Any) -> NormalizedWriterOutput:
     preserved_section_metadata: list[dict[str, Any]] = []
     for position, source in enumerate(source_sections, start=1):
         if not isinstance(source, dict):
-            raise WriterOutputNormalizationError("WRITER_NORMALIZATION_SECTION_NOT_OBJECT")
+            raise WriterOutputNormalizationError(
+                "WRITER_NORMALIZATION_SECTION_NOT_OBJECT"
+            )
         heading = source.get("heading")
         narration = source.get("narration")
         claim_ids = source.get("claim_ids")
@@ -104,7 +115,9 @@ def normalize_legacy_writer_output(value: Any) -> NormalizedWriterOutput:
     normalized_claims: list[dict[str, Any]] = []
     for source in claims:
         if not isinstance(source, dict):
-            raise WriterOutputNormalizationError("WRITER_NORMALIZATION_CLAIM_NOT_OBJECT")
+            raise WriterOutputNormalizationError(
+                "WRITER_NORMALIZATION_CLAIM_NOT_OBJECT"
+            )
         claim_id = source.get("claim_id")
         claim_text = source.get("text")
         evidence_ids = source.get("factual_evidence_span_ids")
@@ -127,9 +140,13 @@ def normalize_legacy_writer_output(value: Any) -> NormalizedWriterOutput:
             }
         )
 
-    canonical_script = " ".join(section["narration"].strip() for section in sections).strip()
+    canonical_script = " ".join(
+        section["narration"].strip() for section in sections
+    ).strip()
     if not canonical_script:
-        raise WriterOutputNormalizationError("WRITER_NORMALIZATION_CANONICAL_SCRIPT_EMPTY")
+        raise WriterOutputNormalizationError(
+            "WRITER_NORMALIZATION_CANONICAL_SCRIPT_EMPTY"
+        )
     payload = {
         "language": language,
         "canonical_script": canonical_script,
@@ -139,7 +156,9 @@ def normalize_legacy_writer_output(value: Any) -> NormalizedWriterOutput:
     try:
         typed = QualifiedScriptOutput.model_validate(payload)
     except ValidationError as exc:  # pragma: no cover - defensive contract coupling
-        raise WriterOutputNormalizationError("WRITER_NORMALIZATION_CONTRACT_INVALID") from exc
+        raise WriterOutputNormalizationError(
+            "WRITER_NORMALIZATION_CONTRACT_INVALID"
+        ) from exc
 
     field_mapping = {
         "language": "language",
@@ -175,5 +194,80 @@ def normalize_legacy_writer_output(value: Any) -> NormalizedWriterOutput:
             "WRITER_OUTPUT_LEGACY_WRAPPER_NORMALIZED",
             "NO_SEMANTIC_REWRITE",
             f"NORMALIZED_PAYLOAD_HASH:{content_hash(typed.model_dump(mode='json'))}",
+        ],
+    )
+
+
+def normalize_v2_section_ownership(
+    value: Any,
+    coverage_value: Any,
+) -> NormalizedWriterOutput:
+    """Project one observed V2 ref mix-up through frozen coverage authority.
+
+    This changes no narration, claim, evidence binding, section purpose, or
+    section identity. It is accepted only when every mismatched field contains
+    the exact owned information-unit IDs for that same frozen section; the
+    replacement is the section's exact primary requirement IDs.
+    """
+
+    try:
+        typed = QualifiedScriptOutputV2.model_validate(value)
+        coverage = SectionCoveragePlan.model_validate(coverage_value)
+    except ValidationError as exc:
+        raise WriterOutputNormalizationError(
+            "WRITER_V2_OWNERSHIP_SOURCE_CONTRACT_INVALID"
+        ) from exc
+    by_id = {item.section_id: item for item in typed.sections}
+    coverage_by_id = {item.section_id: item for item in coverage.sections}
+    if len(by_id) != len(typed.sections) or set(by_id) != set(coverage_by_id):
+        raise WriterOutputNormalizationError("WRITER_V2_OWNERSHIP_SECTION_SET_MISMATCH")
+
+    payload = typed.model_dump(mode="json")
+    payload_by_id = {item["section_id"]: item for item in payload["sections"]}
+    mappings: list[dict[str, Any]] = []
+    for section_id, planned in coverage_by_id.items():
+        observed = by_id[section_id]
+        if observed.ordinal != planned.ordinal:
+            raise WriterOutputNormalizationError("WRITER_V2_OWNERSHIP_ORDINAL_MISMATCH")
+        if observed.required_assignment_unit_refs == planned.primary_requirement_ids:
+            continue
+        if observed.required_assignment_unit_refs != planned.owned_information_unit_ids:
+            raise WriterOutputNormalizationError(
+                "WRITER_V2_OWNERSHIP_MAPPING_NOT_EXACT"
+            )
+        payload_by_id[section_id]["required_assignment_unit_refs"] = list(
+            planned.primary_requirement_ids
+        )
+        mappings.append(
+            {
+                "section_id": section_id,
+                "source": list(planned.owned_information_unit_ids),
+                "target": list(planned.primary_requirement_ids),
+            }
+        )
+    if not mappings:
+        raise WriterOutputNormalizationError(
+            "WRITER_V2_OWNERSHIP_NORMALIZATION_NOT_REQUIRED"
+        )
+    try:
+        normalized = QualifiedScriptOutputV2.model_validate(payload)
+    except ValidationError as exc:  # pragma: no cover - defensive coupling
+        raise WriterOutputNormalizationError(
+            "WRITER_V2_OWNERSHIP_NORMALIZED_CONTRACT_INVALID"
+        ) from exc
+
+    normalized_payload = normalized.model_dump(mode="json")
+    return NormalizedWriterOutput(
+        classification=V2_INFORMATION_UNIT_OWNERSHIP_SCHEMA,
+        payload=normalized_payload,
+        field_mapping={
+            "sections[].required_assignment_unit_refs": mappings,
+            "authority": "script_assignment.section_coverage_plan.sections",
+        },
+        removed_wrapper_fields={},
+        reason_codes=[
+            "WRITER_V2_SECTION_OWNERSHIP_REFS_NORMALIZED",
+            "NO_NARRATION_OR_CLAIM_CHANGE",
+            f"NORMALIZED_PAYLOAD_HASH:{content_hash(normalized_payload)}",
         ],
     )
