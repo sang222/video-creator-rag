@@ -20,6 +20,6 @@ COPY config ./config
 COPY docs ./docs
 COPY frontend/src ./frontend/src
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e '.[veo]'
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

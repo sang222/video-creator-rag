@@ -68,6 +68,7 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _MEDIA_ROUTING_POLICY_CATALOG = Path(
     "config/media_provider_routing_policy_catalog.yaml"
 )
+_PRODUCTION_VISUAL_POLICY_CATALOG = Path("config/production_visual_policy_catalog.yaml")
 _SOURCE_TYPES = ("LONG_FORM_PLAN",)
 _LOCAL_PROVIDER_BY_STAGE = {
     "MEDIA": "vcos_caption_timeline",
@@ -273,9 +274,7 @@ class V2ProducerReceipt(_StrictFrozenModel):
     settlement_source_verifier_attempt_id: uuid.UUID | None = None
     settlement_source_verifier_snapshot_id: uuid.UUID | None = None
     settlement_authority_id: uuid.UUID | None = None
-    settlement_authority_hash: str | None = Field(
-        default=None, pattern=_SHA256_PATTERN
-    )
+    settlement_authority_hash: str | None = Field(default=None, pattern=_SHA256_PATTERN)
     settlement_projection_hash: str | None = Field(
         default=None, pattern=_SHA256_PATTERN
     )
@@ -686,12 +685,14 @@ class V2LocalGeneratedCardRights(_StrictFrozenModel):
     schema_version: Literal[
         "vcos.local-generated-card-rights.v1",
         "vcos.visual-asset-request-authority.v2",
+        "vcos.ai-only-visual-asset-authority.v1",
     ] = "vcos.local-generated-card-rights.v1"
     rights_state: Literal["PASS"] = "PASS"
     visual_source_mode: Literal[
         "LOCAL_GENERATED_CARDS_ONLY",
         "NATIVE_BACKBONE_POLICY_ONLY",
         "POLICY_SELECTED_ASSET_REQUESTS",
+        "AI_ONLY_GENERATED_ASSETS",
     ] = "LOCAL_GENERATED_CARDS_ONLY"
     external_asset_refs: list[Any] = Field(default_factory=list, max_length=0)
     stock_asset_refs: list[Any] = Field(default_factory=list, max_length=0)
@@ -748,6 +749,17 @@ class V2LocalGeneratedCardRights(_StrictFrozenModel):
             or self.post_readiness_acquisition_required
         ):
             raise ValueError("V2_NATIVE_BACKBONE_VISUAL_AUTHORITY_INVALID")
+        if self.visual_source_mode == "AI_ONLY_GENERATED_ASSETS" and (
+            self.schema_version != "vcos.ai-only-visual-asset-authority.v1"
+            or self.allowed_provider_keys != ["google_gemini_image", "google_veo"]
+            or not self.policy_refs
+            or not self.asset_request_compiler_required
+            or not self.post_readiness_acquisition_required
+            or self.provider_fallback_allowed
+            or self.external_asset_refs
+            or self.stock_asset_refs
+        ):
+            raise ValueError("V2_AI_ONLY_VISUAL_AUTHORITY_INVALID")
         return self
 
 
@@ -770,12 +782,13 @@ class V2MemoryGuidanceAuthority(_StrictFrozenModel):
 
 
 class V2NativeRouteReceipt(_StrictFrozenModel):
-    stage: Literal["MEDIA", "RENDER", "QC", "ARCHIVE"]
+    stage: Literal["MEDIA", "VISUAL", "RENDER", "QC", "ARCHIVE"]
     operation_id: str = Field(min_length=1, max_length=200)
     adapter_key: Literal[
         "v2-local-native",
         "v2-google-drive-archive",
         "v2-elevenlabs-narration",
+        "v2-ai-visual-production",
         "v2-google-drive-remote",
     ]
     provider_role_id: uuid.UUID
@@ -819,8 +832,8 @@ class V2ZeroCostBudgetAuthority(_StrictFrozenModel):
     monthly_reserved_usd: Decimal | None = Field(default=None, ge=0, le=250)
     reservation_ref: str | None = None
     reservation_evidence: dict[str, Any] | None = None
-    operation_ids: list[str] = Field(min_length=4, max_length=4)
-    route_hashes: list[str] = Field(min_length=4, max_length=4)
+    operation_ids: list[str] = Field(min_length=4, max_length=5)
+    route_hashes: list[str] = Field(min_length=4, max_length=5)
     content_hash: str = Field(pattern=_SHA256_PATTERN)
 
     @model_validator(mode="after")
@@ -973,8 +986,13 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     cross_modal_script_lineage: V2CrossModalScriptLineage | None = None
     claim_source_bindings: list[V2ClaimSourceBinding] = Field(min_length=3)
     local_generated_card_rights: V2LocalGeneratedCardRights
+    production_visual_policy_ref: str | None = None
+    production_visual_policy_hash: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
+    active_primary_visual_routes: list[str] = Field(default_factory=list)
     memory_guidance_authority: V2MemoryGuidanceAuthority | None = None
-    native_routes: list[V2NativeRouteReceipt] = Field(min_length=4, max_length=4)
+    native_routes: list[V2NativeRouteReceipt] = Field(min_length=4, max_length=5)
     zero_cost_budget: V2ZeroCostBudgetAuthority
     # The historical field name remains stable for immutable v2 envelopes.
     # Its second variant is explicitly non-publish and only resolves for the
@@ -985,7 +1003,13 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
     @model_validator(mode="after")
     def validate_cross_bindings(self) -> Self:
         stages = [route.stage for route in self.native_routes]
-        if sorted(stages) != ["ARCHIVE", "MEDIA", "QC", "RENDER"]:
+        ai_visual_bound = self.production_visual_policy_ref is not None
+        expected_stages = (
+            ["ARCHIVE", "MEDIA", "QC", "RENDER", "VISUAL"]
+            if ai_visual_bound
+            else ["ARCHIVE", "MEDIA", "QC", "RENDER"]
+        )
+        if sorted(stages) != expected_stages:
             raise ValueError("NATIVE_ROUTE_STAGE_SET_INVALID")
         route_hashes = sorted(route.route_hash for route in self.native_routes)
         operation_ids = sorted(route.operation_id for route in self.native_routes)
@@ -1005,6 +1029,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
             if self.execution_mode == "QUALIFICATION_LOCAL"
             else {
                 "MEDIA": "v2-elevenlabs-narration",
+                **({"VISUAL": "v2-ai-visual-production"} if ai_visual_bound else {}),
                 "RENDER": "v2-local-native",
                 "QC": "v2-local-native",
                 "ARCHIVE": "v2-google-drive-remote",
@@ -1014,9 +1039,23 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
             route.stage: route.adapter_key for route in self.native_routes
         } != expected_adapters:
             raise ValueError("V2_EXECUTION_ROUTE_MODE_MISMATCH")
-        if isinstance(
-            self.verified_destination, V2FinalReviewOnlyDestinationAuthority
+        if ai_visual_bound:
+            if (
+                self.execution_mode != "REAL_LONG_FORM_PRODUCTION"
+                or self.production_visual_policy_ref
+                != "config://production_visual_policy_catalog/2026-08-13/active-real-long-form-ai-only"
+                or self.production_visual_policy_hash is None
+                or self.active_primary_visual_routes != ["AI_IMAGE", "AI_VIDEO"]
+                or self.local_generated_card_rights.visual_source_mode
+                != "AI_ONLY_GENERATED_ASSETS"
+            ):
+                raise ValueError("V2_AI_ONLY_VISUAL_POLICY_BINDING_INVALID")
+        elif (
+            self.production_visual_policy_hash is not None
+            or self.active_primary_visual_routes
         ):
+            raise ValueError("V2_AI_VISUAL_POLICY_PARTIAL_BINDING_FORBIDDEN")
+        if isinstance(self.verified_destination, V2FinalReviewOnlyDestinationAuthority):
             if self.execution_mode != "REAL_LONG_FORM_PRODUCTION":
                 raise ValueError("FINAL_REVIEW_ONLY_EXECUTION_MODE_INVALID")
             destination_gate = next(
@@ -1037,9 +1076,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
                 or destination_gate.get("publish_policy") != "NO_PUBLISH"
                 or destination_gate.get("publish_execution_allowed") is not False
                 or destination_gate.get("controlled_recovery_authority_id")
-                != str(
-                    self.verified_destination.controlled_recovery_authority_id
-                )
+                != str(self.verified_destination.controlled_recovery_authority_id)
                 or destination_gate.get("controlled_recovery_authority_hash")
                 != self.verified_destination.controlled_recovery_authority_hash
                 or destination_gate.get("settlement_authority_id")
@@ -1047,9 +1084,7 @@ class V2FrozenSupportEnvelope(_StrictFrozenModel):
                 or destination_gate.get("settlement_authority_hash")
                 != self.verified_destination.settlement_authority_hash
                 or destination_gate.get("settlement_qualification_run_id")
-                != str(
-                    self.verified_destination.settlement_qualification_run_id
-                )
+                != str(self.verified_destination.settlement_qualification_run_id)
                 or destination_gate.get("settlement_provenance_hash")
                 != self.verified_destination.settlement_provenance_hash
             ):
@@ -1342,6 +1377,11 @@ class V2SupportAuthorityService:
             ),
             execution_mode=resolved.execution_mode,
         )
+        visual_policy = (
+            _production_visual_policy_projection()
+            if resolved.execution_mode == "REAL_LONG_FORM_PRODUCTION"
+            else None
+        )
         gate_receipts = self._gate_receipts(
             resolved=resolved,
             validated=validated,
@@ -1368,6 +1408,15 @@ class V2SupportAuthorityService:
             cross_modal_script_lineage=cross_modal_lineage,
             claim_source_bindings=validated["claim_bindings"],
             local_generated_card_rights=rights,
+            production_visual_policy_ref=(
+                visual_policy["ref"] if visual_policy is not None else None
+            ),
+            production_visual_policy_hash=(
+                visual_policy["hash"] if visual_policy is not None else None
+            ),
+            active_primary_visual_routes=(
+                visual_policy["routes"] if visual_policy is not None else []
+            ),
             memory_guidance_authority=memory_guidance,
             native_routes=routes,
             zero_cost_budget=budget,
@@ -1560,10 +1609,7 @@ class V2SupportAuthorityService:
         writer = provenance.get("writer") if isinstance(provenance, dict) else {}
         expected_writer_output_hash = semantic_hash(script_payload)
         try:
-            if (
-                writer.get("producer_type")
-                == "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT"
-            ):
+            if writer.get("producer_type") == "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT":
                 producer_receipt, expected_writer_output_hash = (
                     self._verifier_settlement_producer_receipt(
                         writer=writer,
@@ -1801,8 +1847,7 @@ class V2SupportAuthorityService:
         )
         source_receipt_content = (
             source_receipt.content
-            if source_receipt is not None
-            and isinstance(source_receipt.content, dict)
+            if source_receipt is not None and isinstance(source_receipt.content, dict)
             else {}
         )
         terminal = (
@@ -1920,8 +1965,7 @@ class V2SupportAuthorityService:
             or settlement.source_continuation_authority_id != continuation.id
             or settlement.source_qualification_run_id != source.id
             or settlement.source_slot_id != source.publish_slot_id
-            or settlement.settlement_candidate_id
-            != child.editorial_idea_candidate_id
+            or settlement.settlement_candidate_id != child.editorial_idea_candidate_id
             or settlement.settlement_slot_id != child.publish_slot_id
             or settlement.settlement_qualification_run_id != child.id
             or settlement.source_verifier_attempt_id != verifier_attempt.id
@@ -1986,8 +2030,7 @@ class V2SupportAuthorityService:
             != source.derived_canonical_script_hash
             or receipt_content.get("script_hash")
             != child_artifact.canonical_script_hash
-            or script_payload.get("canonical_script")
-            != child_artifact.canonical_script
+            or script_payload.get("canonical_script") != child_artifact.canonical_script
         ):
             raise ValueError("verifier settlement canonical artifact drift")
 
@@ -2002,8 +2045,7 @@ class V2SupportAuthorityService:
         source_snapshots = list(
             self.session.scalars(
                 select(ScriptQualificationProviderResponseSnapshot).where(
-                    ScriptQualificationProviderResponseSnapshot
-                    .script_qualification_run_id
+                    ScriptQualificationProviderResponseSnapshot.script_qualification_run_id
                     == source.id
                 )
             ).all()
@@ -2112,15 +2154,13 @@ class V2SupportAuthorityService:
         ):
             raise ValueError("verifier settlement projection drift")
 
-        original_receipt, producer_output_hash = (
-            self._content_repair_producer_receipt(
-                writer=source_writer,
-                qualification_receipt=source_receipt,
-                script_payload=script_payload,
-                output_payload=output_payload,
-                expected_child_state="BLOCKED_NON_REPAIRABLE",
-                expected_receipt_result="BLOCK",
-            )
+        original_receipt, producer_output_hash = self._content_repair_producer_receipt(
+            writer=source_writer,
+            qualification_receipt=source_receipt,
+            script_payload=script_payload,
+            output_payload=output_payload,
+            expected_child_state="BLOCKED_NON_REPAIRABLE",
+            expected_receipt_result="BLOCK",
         )
         return (
             V2ProducerReceipt(
@@ -2705,9 +2745,7 @@ class V2SupportAuthorityService:
                     "controlled_recovery_authority_hash": (
                         destination.controlled_recovery_authority_hash
                     ),
-                    "settlement_authority_id": str(
-                        destination.settlement_authority_id
-                    ),
+                    "settlement_authority_id": str(destination.settlement_authority_id),
                     "settlement_authority_hash": (
                         destination.settlement_authority_hash
                     ),
@@ -2718,9 +2756,7 @@ class V2SupportAuthorityService:
                         destination.settlement_provenance_hash
                     ),
                 }
-                if isinstance(
-                    destination, V2FinalReviewOnlyDestinationAuthority
-                )
+                if isinstance(destination, V2FinalReviewOnlyDestinationAuthority)
                 else {}
             ),
             "requested_budget_ceiling_usd": _decimal_string(command.max_budget_usd),
@@ -3183,6 +3219,42 @@ class V2SupportAuthorityService:
             ("QC", "vcos_media_qc", "v2-local-native", lane_routes["QC"], False),
         )
         receipts: list[V2NativeRouteReceipt] = []
+        visual_role = roles.require_role("vcos_ai_visual_orchestrator")
+        visual_capability = matrix.find_entry(
+            provider_key="vcos_ai_visual_orchestrator",
+            job_type="AI_VISUAL_ASSET_GENERATION",
+        )
+        visual_routing_item = routing_items.get("AI_VISUAL_ASSET_GENERATION")
+        if (
+            visual_role.is_enabled is not True
+            or visual_role.is_real_provider is not True
+            or visual_role.supports_real_execution is not True
+            or visual_capability is None
+            or visual_capability.capability != "SUPPORTED"
+            or not isinstance(visual_routing_item, dict)
+            or visual_routing_item.get("provider_key") != "vcos_ai_visual_orchestrator"
+        ):
+            raise ValidationFailureError("V2_REAL_AI_VISUAL_ROUTE_INVALID")
+        receipts.append(
+            _route_receipt(
+                stage="VISUAL",
+                project_id=project.id,
+                input_fingerprint=input_fingerprint,
+                role=visual_role,
+                capability=visual_capability,
+                job_type="AI_VISUAL_ASSET_GENERATION",
+                routing_policy_ref=(
+                    "config://media_provider_routing_policy_catalog/"
+                    f"{routing_catalog.catalog_version}/AI_VISUAL_ASSET_GENERATION"
+                ),
+                routing_policy_hash=semantic_hash(visual_routing_item),
+                adapter_key="v2-ai-visual-production",
+                paid_provider_call=True,
+                max_cost_usd=Decimal(
+                    str(scoped.budget_policy.max_estimated_cost_per_video)
+                ),
+            )
+        )
         for stage, provider_key, adapter_key, job_type, paid in route_specs:
             role = roles.require_role(provider_key)
             capability = matrix.find_entry(
@@ -3922,9 +3994,7 @@ def _destination_authority(
     ):
         from app.db.models.script_qualification import ScriptQualificationRun
 
-        qualification = session.get(
-            ScriptQualificationRun, script_qualification_run_id
-        )
+        qualification = session.get(ScriptQualificationRun, script_qualification_run_id)
         writer = (
             qualification.writer_receipt
             if qualification is not None
@@ -4013,8 +4083,7 @@ def _final_review_only_destination(
         or leaf is None
         or qualification.id != leaf.id
         or qualification.state != "QUALIFIED"
-        or qualification.gate_policy_version
-        != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
+        or qualification.gate_policy_version != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
         or qualification.writer_receipt is None
         or qualification.writer_receipt.get("producer_type")
         != "OPENAI_BACKGROUND_VERIFIER_SETTLEMENT"
@@ -4028,8 +4097,7 @@ def _final_review_only_destination(
         or settlement.settlement_slot_id != qualification.publish_slot_id
         or settlement.schema_version != CONTROLLED_VERIFIER_SETTLEMENT_SCHEMA
         or settlement.settlement_reason != CONTROLLED_VERIFIER_SETTLEMENT_REASON
-        or settlement.settlement_policy_version
-        != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
+        or settlement.settlement_policy_version != CONTROLLED_VERIFIER_SETTLEMENT_POLICY
         or settlement.max_provider_submissions != 0
         or child_attempt_count is not None
         or settlement.authority_hash
@@ -4038,14 +4106,11 @@ def _final_review_only_destination(
         or root.operator_recovery_schema_version != OPERATOR_RECOVERY_SCHEMA
         or root.operator_recovery_id != root.id
         or root.operator_recovery_scope_key != f"first-video:{channel.id}"
-        or root.replacement_candidate_id
-        != qualification.editorial_idea_candidate_id
+        or root.replacement_candidate_id != qualification.editorial_idea_candidate_id
         or root.authority_hash != settlement.root_authority_hash
         or root.authority_hash != content_hash(operator_recovery_authority_body(root))
     ):
-        raise ValidationFailureError(
-            "V2_SUPPORT_FINAL_REVIEW_ONLY_AUTHORITY_INVALID"
-        )
+        raise ValidationFailureError("V2_SUPPORT_FINAL_REVIEW_ONLY_AUTHORITY_INVALID")
 
     metadata = channel.metadata_ if isinstance(channel.metadata_, dict) else {}
     governance = metadata.get("destination_governance")
@@ -4204,42 +4269,38 @@ def _build_visual_rights(
     qualification envelopes retain their historical local-only shape for
     backward readability.
     """
+    if execution_mode == "REAL_LONG_FORM_PRODUCTION":
+        policy = _production_visual_policy_projection()
+        payload = {
+            "schema_version": "vcos.ai-only-visual-asset-authority.v1",
+            "rights_state": "PASS",
+            "visual_source_mode": "AI_ONLY_GENERATED_ASSETS",
+            "external_asset_refs": [],
+            "stock_asset_refs": [],
+            "license_evidence_required": False,
+            "synthetic_media_disclosure_required": False,
+            "policy_refs": [policy["ref"]],
+            "allowed_provider_keys": ["google_gemini_image", "google_veo"],
+            "one_source_decision_per_scene": True,
+            "provider_fallback_allowed": False,
+            "asset_request_compiler_required": True,
+            "post_readiness_acquisition_required": True,
+        }
+        return V2LocalGeneratedCardRights(
+            **payload,
+            content_hash=semantic_hash(payload),
+        )
     try:
         scoped = ChannelScopedPolicy.model_validate(
             (policy_snapshot.compiled_payload or {}).get("channel_scoped_policy")
             if policy_snapshot is not None
             else None
         )
-    except ValidationError as exc:
-        if execution_mode == "REAL_LONG_FORM_PRODUCTION":
-            raise ValidationFailureError("V2_REAL_VISUAL_POLICY_INVALID") from exc
+    except ValidationError:
         return _build_local_card_rights()
 
     visual = scoped.visual_source_policy_binding
     if visual is None:
-        if execution_mode == "REAL_LONG_FORM_PRODUCTION":
-            payload = {
-                "schema_version": "vcos.visual-asset-request-authority.v2",
-                "rights_state": "PASS",
-                "visual_source_mode": "NATIVE_BACKBONE_POLICY_ONLY",
-                "external_asset_refs": [],
-                "stock_asset_refs": [],
-                "license_evidence_required": False,
-                "synthetic_media_disclosure_required": False,
-                "policy_refs": [
-                    scoped.approval_ref,
-                    scoped.format_identity_contract.ref,
-                ],
-                "allowed_provider_keys": ["native_ffmpeg_renderer"],
-                "one_source_decision_per_scene": True,
-                "provider_fallback_allowed": False,
-                "asset_request_compiler_required": False,
-                "post_readiness_acquisition_required": False,
-            }
-            return V2LocalGeneratedCardRights(
-                **payload,
-                content_hash=semantic_hash(payload),
-            )
         return _build_local_card_rights()
 
     providers = ["native_ffmpeg_renderer"]
@@ -4277,6 +4338,30 @@ def _build_visual_rights(
         **payload,
         content_hash=semantic_hash(payload),
     )
+
+
+def _production_visual_policy_projection() -> dict[str, Any]:
+    loaded = ConfigRegistryService(None).validate_catalog(
+        _PRODUCTION_VISUAL_POLICY_CATALOG
+    )
+    items = loaded.content.get("items") or []
+    if len(items) != 1 or not isinstance(items[0], dict):
+        raise ValidationFailureError("V2_PRODUCTION_VISUAL_POLICY_INVALID")
+    item = items[0]
+    if (
+        item.get("policy_version") != "vcos.production-visual-policy.ai-only.v1"
+        or item.get("production_visual_origin") != "AI_GENERATED"
+        or item.get("allowed_primary_routes") != ["AI_IMAGE", "AI_VIDEO"]
+    ):
+        raise ValidationFailureError("V2_PRODUCTION_VISUAL_POLICY_INVALID")
+    return {
+        "ref": (
+            "config://production_visual_policy_catalog/"
+            f"{loaded.catalog_version}/{item['key']}"
+        ),
+        "hash": loaded.content_hash,
+        "routes": ["AI_IMAGE", "AI_VIDEO"],
+    }
 
 
 def _build_local_card_rights() -> V2LocalGeneratedCardRights:
@@ -4481,11 +4566,7 @@ def _string_list(value: Any) -> list[str]:
     # in canonical sorted order, while the effective-context projection may
     # preserve authoring order; both consumers must compare the same form.
     return sorted(
-        {
-            str(item).strip()
-            for item in value
-            if isinstance(item, str) and item.strip()
-        }
+        {str(item).strip() for item in value if isinstance(item, str) and item.strip()}
     )
 
 

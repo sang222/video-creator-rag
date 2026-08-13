@@ -104,6 +104,42 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _final_review_candidate_hash_candidates(
+    *,
+    payload: dict[str, Any],
+    target_market_lineage: dict[str, Any],
+    allow_historical_native_payload: bool,
+) -> tuple[str, ...]:
+    """Return current and immutable pre-0079 candidate identities.
+
+    The historical projection is deliberately unavailable to AI replacement
+    candidates.  It exists only so an idempotent replay can find a native
+    candidate whose hash predates the nullable AI lineage columns.
+    """
+
+    variants = [stable_hash(payload)]
+    if target_market_lineage.get("destination_mode") is None:
+        variants.append(
+            stable_hash({**payload, "target_market_lineage": target_market_lineage})
+        )
+    if allow_historical_native_payload:
+        historical = dict(payload)
+        for key in (
+            "ai_visual_production_run_id",
+            "ai_visual_asset_manifest_hash",
+            "ffmpeg_effect_plan_hash",
+        ):
+            historical.pop(key, None)
+        variants.append(stable_hash(historical))
+        if target_market_lineage.get("destination_mode") is None:
+            variants.append(
+                stable_hash(
+                    {**historical, "target_market_lineage": target_market_lineage}
+                )
+            )
+    return tuple(dict.fromkeys(variants))
+
+
 def _destination_lineage_projection(value: dict[str, Any]) -> dict[str, Any]:
     keys = {
         "destination_mode",
@@ -309,6 +345,9 @@ class ProductionPublishService:
             ),
             "canonical_media_timeline_ref": data.canonical_media_timeline_ref,
             "canonical_media_timeline_hash": data.canonical_media_timeline_hash,
+            "ai_visual_production_run_id": data.ai_visual_production_run_id,
+            "ai_visual_asset_manifest_hash": data.ai_visual_asset_manifest_hash,
+            "ffmpeg_effect_plan_hash": data.ffmpeg_effect_plan_hash,
             "native_render_plan_ref": data.native_render_plan_ref,
             "native_render_plan_hash": data.native_render_plan_hash,
             "render_output_ref": data.render_output_ref,
@@ -410,6 +449,88 @@ class ProductionPublishService:
         )
 
         materiality_policy_hash = stable_hash(data.materiality_policy_snapshot)
+        if data.ai_visual_production_run_id is not None:
+            from app.db.models.ai_visual import (
+                AIVisualAssetManifest,
+                AIVisualProductionRun,
+                AIVisualRerenderAuthority,
+            )
+
+            visual_run = self.session.get(
+                AIVisualProductionRun, data.ai_visual_production_run_id
+            )
+            manifest = (
+                self.session.get(AIVisualAssetManifest, visual_run.asset_manifest_id)
+                if visual_run is not None and visual_run.asset_manifest_id is not None
+                else None
+            )
+            rerender = (
+                self.session.get(
+                    AIVisualRerenderAuthority, visual_run.rerender_authority_id
+                )
+                if visual_run is not None
+                and visual_run.rerender_authority_id is not None
+                else None
+            )
+            if (
+                run.ai_visual_production_run_id != data.ai_visual_production_run_id
+                or run.ai_visual_asset_manifest_hash
+                != data.ai_visual_asset_manifest_hash
+                or run.ffmpeg_effect_plan_hash != data.ffmpeg_effect_plan_hash
+                or visual_run is None
+                or visual_run.workflow_run_id != run.id
+                or visual_run.video_project_id != project.id
+                or visual_run.production_package_artifact_version_id
+                != package_version.id
+                or visual_run.production_package_hash != package_version.content_hash
+                or (
+                    visual_run.state,
+                    visual_run.current_phase,
+                )
+                not in {
+                    ("ARCHIVED", "ARCHIVE"),
+                    ("FINAL_REVIEW_READY", "FINALIZE"),
+                }
+                or visual_run.final_media_ref_id != data.final_media_ref_id
+                or visual_run.render_output_checksum != data.render_output_checksum
+                or visual_run.archive_receipt_hash != data.archive_receipt_hash
+                or (
+                    visual_run.state == "FINAL_REVIEW_READY"
+                    and visual_run.final_review_candidate_id
+                    != run.final_review_candidate_id
+                )
+                or manifest is None
+                or visual_run.asset_manifest_hash != manifest.content_hash
+                or manifest.content_hash != data.ai_visual_asset_manifest_hash
+                or manifest.effect_plan_hash != data.ffmpeg_effect_plan_hash
+            ):
+                raise ValidationFailureError(
+                    "FINAL_REVIEW_AI_VISUAL_REPLACEMENT_BINDING_MISMATCH"
+                )
+            if visual_run.execution_kind == "NORMAL_PRODUCTION":
+                if (
+                    visual_run.rerender_authority_id is not None
+                    or rerender is not None
+                    or data.supersedes_final_review_candidate_id is not None
+                ):
+                    raise ValidationFailureError(
+                        "FINAL_REVIEW_NORMAL_AI_VISUAL_SUPERSEDES_FORBIDDEN"
+                    )
+            elif visual_run.execution_kind == "GOVERNED_RERENDER":
+                if (
+                    rerender is None
+                    or rerender.replacement_workflow_run_id != run.id
+                    or rerender.source_workflow_run_id == run.id
+                    or rerender.rejected_final_review_candidate_id
+                    != data.supersedes_final_review_candidate_id
+                ):
+                    raise ValidationFailureError(
+                        "FINAL_REVIEW_AI_VISUAL_REPLACEMENT_BINDING_MISMATCH"
+                    )
+            else:
+                raise ValidationFailureError(
+                    "FINAL_REVIEW_AI_VISUAL_EXECUTION_KIND_INVALID"
+                )
         payload = {
             "schema_version": "vcos.final-review-candidate.v2",
             "workflow_run_id": run.id,
@@ -419,6 +540,15 @@ class ProductionPublishService:
             "channel_profile_version_id": project.channel_profile_version_id,
             "policy_snapshot_id": project.policy_snapshot_id,
             **exact_run_bindings,
+            **(
+                {
+                    "supersedes_final_review_candidate_id": (
+                        data.supersedes_final_review_candidate_id
+                    )
+                }
+                if data.supersedes_final_review_candidate_id is not None
+                else {}
+            ),
             "final_media_hash": final_media.checksum_sha256,
             "destination_platform_channel_id": (data.destination_platform_channel_id),
             "destination_account_identity": data.destination_account_identity,
@@ -437,24 +567,21 @@ class ProductionPublishService:
             "materiality_policy_hash": materiality_policy_hash,
         }
         candidate_hash = stable_hash(payload)
+        candidate_hashes = _final_review_candidate_hash_candidates(
+            payload=payload,
+            target_market_lineage=data.target_market_lineage,
+            allow_historical_native_payload=(
+                data.ai_visual_production_run_id is None
+                and data.ai_visual_asset_manifest_hash is None
+                and data.ffmpeg_effect_plan_hash is None
+                and data.supersedes_final_review_candidate_id is None
+            ),
+        )
         existing = self.session.scalar(
             select(FinalReviewCandidate).where(
-                FinalReviewCandidate.candidate_hash == candidate_hash
+                FinalReviewCandidate.candidate_hash.in_(tuple(candidate_hashes))
             )
         )
-        if (
-            existing is None
-            and data.target_market_lineage.get("destination_mode") is None
-        ):
-            legacy_payload = {
-                **payload,
-                "target_market_lineage": data.target_market_lineage,
-            }
-            existing = self.session.scalar(
-                select(FinalReviewCandidate).where(
-                    FinalReviewCandidate.candidate_hash == stable_hash(legacy_payload)
-                )
-            )
         if existing is not None:
             self._assert_candidate_scope(existing, project)
             return existing
@@ -499,6 +626,12 @@ class ProductionPublishService:
             production_readiness_receipt_hash=readiness_version.content_hash,
             canonical_media_timeline_ref=data.canonical_media_timeline_ref,
             canonical_media_timeline_hash=data.canonical_media_timeline_hash,
+            ai_visual_production_run_id=data.ai_visual_production_run_id,
+            ai_visual_asset_manifest_hash=data.ai_visual_asset_manifest_hash,
+            ffmpeg_effect_plan_hash=data.ffmpeg_effect_plan_hash,
+            supersedes_final_review_candidate_id=(
+                data.supersedes_final_review_candidate_id
+            ),
             native_render_plan_ref=data.native_render_plan_ref,
             native_render_plan_hash=data.native_render_plan_hash,
             render_output_ref=data.render_output_ref,

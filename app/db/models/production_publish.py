@@ -71,6 +71,14 @@ class FinalReviewCandidate(Base):
     canonical_media_timeline_hash: Mapped[str] = mapped_column(
         String(64), nullable=False
     )
+    ai_visual_production_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_visual_production_runs.id")
+    )
+    ai_visual_asset_manifest_hash: Mapped[str | None] = mapped_column(String(64))
+    ffmpeg_effect_plan_hash: Mapped[str | None] = mapped_column(String(64))
+    supersedes_final_review_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("final_review_candidates.id")
+    )
     native_render_plan_ref: Mapped[str] = mapped_column(Text, nullable=False)
     native_render_plan_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     render_output_ref: Mapped[str] = mapped_column(Text, nullable=False)
@@ -222,6 +230,13 @@ class FinalReviewCandidate(Base):
             "production_package_hash ~ '^[0-9a-f]{64}$' "
             "and production_readiness_receipt_hash ~ '^[0-9a-f]{64}$' "
             "and canonical_media_timeline_hash ~ '^[0-9a-f]{64}$' "
+            "and ((ai_visual_production_run_id is null and "
+            "ai_visual_asset_manifest_hash is null and "
+            "ffmpeg_effect_plan_hash is null and "
+            "supersedes_final_review_candidate_id is null) or ("
+            "ai_visual_production_run_id is not null and "
+            "ai_visual_asset_manifest_hash ~ '^[0-9a-f]{64}$' and "
+            "ffmpeg_effect_plan_hash ~ '^[0-9a-f]{64}$')) "
             "and native_render_plan_hash ~ '^[0-9a-f]{64}$' "
             "and render_output_checksum ~ '^[0-9a-f]{64}$' "
             "and technical_qc_receipt_hash ~ '^[0-9a-f]{64}$' "

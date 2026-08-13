@@ -318,6 +318,72 @@ class MR1MonthlyBudgetAuthority:
         self.session.flush()
         return self._evidence(reservation)
 
+    def settle_conservative_success(
+        self,
+        reservation_ref: str,
+        *,
+        conservative_amount_usd: Decimal | int | float | str,
+        provider_conservative_amounts_usd: Mapping[str, Decimal | int | float | str],
+    ) -> dict[str, Any]:
+        """Settle a successful effect when only a safe catalog estimate exists.
+
+        This is intentionally distinct from :meth:`settle_success`: the supplied
+        amounts are conservative accounting evidence, not an assertion that the
+        provider exposed an actual billed amount.  Replaying the exact settlement
+        is idempotent; changed amounts fail closed.
+        """
+
+        self._lock_authority()
+        reservation = self._require_for_update(reservation_ref)
+        conservative = _money(
+            conservative_amount_usd,
+            field="conservative_amount_usd",
+        )
+        provider_conservative = _money_map(
+            provider_conservative_amounts_usd,
+            field="provider_conservative_amounts_usd",
+        )
+        allocations = self._row_money_map(reservation.provider_allocations_json)
+        if set(provider_conservative) != set(allocations):
+            raise ValidationFailureError(
+                "MR1_BUDGET_PROVIDER_CONSERVATIVE_BINDING_MISMATCH"
+            )
+        if sum(provider_conservative.values(), Decimal("0")) != conservative:
+            raise ValidationFailureError(
+                "MR1_BUDGET_PROVIDER_CONSERVATIVE_AMOUNTS_NOT_EXACT"
+            )
+        if conservative > Decimal(reservation.reserved_amount):
+            raise ValidationFailureError(
+                "MR1_BUDGET_CONSERVATIVE_EXCEEDS_RESERVED_CEILING"
+            )
+        if any(provider_conservative[key] > allocations[key] for key in allocations):
+            raise ValidationFailureError(
+                "MR1_BUDGET_PROVIDER_CONSERVATIVE_EXCEEDS_RESERVED_ALLOCATION"
+            )
+        if reservation.status == "SETTLED_CONSERVATIVE":
+            if (
+                reservation.settlement_kind != "CONSERVATIVE_CATALOG_ESTIMATE_SUCCESS"
+                or Decimal(reservation.actual_amount or 0) != conservative
+                or self._row_money_map(reservation.provider_actuals_json)
+                != provider_conservative
+            ):
+                raise ValidationFailureError(
+                    "MR1_BUDGET_CONSERVATIVE_SUCCESS_SETTLEMENT_MISMATCH"
+                )
+            return self._evidence(reservation)
+        if reservation.status != "SUBMITTED":
+            raise ValidationFailureError(
+                "MR1_BUDGET_CONSERVATIVE_SUCCESS_REQUIRES_SUBMITTED"
+            )
+        reservation.status = "SETTLED_CONSERVATIVE"
+        reservation.actual_amount = conservative
+        reservation.provider_actuals_json = _serialized_money_map(provider_conservative)
+        reservation.settlement_kind = "CONSERVATIVE_CATALOG_ESTIMATE_SUCCESS"
+        reservation.settled_at = self._now()
+        reservation.reason_code = "SUCCESS_COST_SETTLED_BY_CATALOG_ESTIMATE"
+        self.session.flush()
+        return self._evidence(reservation)
+
     def settle_consumed_failure(self, reservation_ref: str) -> dict[str, Any]:
         self._lock_authority()
         reservation = self._require_for_update(reservation_ref)

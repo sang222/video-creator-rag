@@ -127,6 +127,12 @@ class ProductionPackageContentV2(BaseModel):
     # Optional only so already-sealed Phase 3 package payloads remain readable.
     # The canonical Phase 4+ compiler always binds this exact authority.
     support_envelope_ref: ExactContentRefV2 | None = None
+    production_visual_policy_version: str | None = None
+    production_visual_policy_ref: str | None = None
+    production_visual_policy_hash: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
+    active_primary_visual_routes: list[str] = Field(default_factory=list)
     research_refs: list[ExactContentRefV2] = Field(min_length=1)
     source_refs: list[ExactContentRefV2] = Field(min_length=1)
     niche_market_gate_refs: list[ExactContentRefV2] = Field(min_length=1)
@@ -145,6 +151,23 @@ class ProductionPackageContentV2(BaseModel):
 
     @model_validator(mode="after")
     def validate_assignment(self) -> Self:
+        visual_policy_values = (
+            self.production_visual_policy_version,
+            self.production_visual_policy_ref,
+            self.production_visual_policy_hash,
+        )
+        if any(value is not None for value in visual_policy_values):
+            if (
+                self.production_visual_policy_version
+                != "vcos.production-visual-policy.ai-only.v1"
+                or self.production_visual_policy_ref
+                != "config://production_visual_policy_catalog/2026-08-13/active-real-long-form-ai-only"
+                or self.production_visual_policy_hash is None
+                or self.active_primary_visual_routes != ["AI_IMAGE", "AI_VIDEO"]
+            ):
+                raise ValueError("PRODUCTION_PACKAGE_AI_VISUAL_POLICY_INVALID")
+        elif self.active_primary_visual_routes:
+            raise ValueError("PRODUCTION_PACKAGE_AI_VISUAL_POLICY_PARTIAL")
         if self.content_mode == ContentMode.SERIES_EPISODE:
             if (
                 self.series_plan_id is None

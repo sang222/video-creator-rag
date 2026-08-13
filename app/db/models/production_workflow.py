@@ -46,6 +46,8 @@ WORKFLOW_STATES = (
     "READY_FOR_PRODUCTION",
     "MEDIA_PENDING",
     "MEDIA_RUNNING",
+    "VISUAL_PENDING",
+    "VISUAL_RUNNING",
     "RENDER_PENDING",
     "RENDER_RUNNING",
     "QC_PENDING",
@@ -70,6 +72,7 @@ WORKFLOW_STAGES = (
     "PACKAGE",
     "READINESS",
     "MEDIA",
+    "VISUAL",
     "RENDER",
     "QC",
     "ARCHIVE",
@@ -128,6 +131,28 @@ class ProductionWorkflowRun(Base):
     production_readiness_receipt_hash: Mapped[str | None] = mapped_column(String(64))
     canonical_media_timeline_ref: Mapped[str | None] = mapped_column(Text)
     canonical_media_timeline_hash: Mapped[str | None] = mapped_column(String(64))
+    ai_visual_production_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "ai_visual_production_runs.id",
+            name="fk_production_workflow_runs_ai_visual_production_run_id",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+    ai_visual_policy_ref: Mapped[str | None] = mapped_column(Text)
+    ai_visual_policy_hash: Mapped[str | None] = mapped_column(String(64))
+    ai_visual_style_bible_ref: Mapped[str | None] = mapped_column(Text)
+    ai_visual_style_bible_hash: Mapped[str | None] = mapped_column(String(64))
+    ai_visual_scene_plan_ref: Mapped[str | None] = mapped_column(Text)
+    ai_visual_scene_plan_hash: Mapped[str | None] = mapped_column(String(64))
+    ai_visual_asset_manifest_ref: Mapped[str | None] = mapped_column(Text)
+    ai_visual_asset_manifest_hash: Mapped[str | None] = mapped_column(String(64))
+    video_motion_grammar_ref: Mapped[str | None] = mapped_column(Text)
+    video_motion_grammar_hash: Mapped[str | None] = mapped_column(String(64))
+    ffmpeg_effect_plan_ref: Mapped[str | None] = mapped_column(Text)
+    ffmpeg_effect_plan_hash: Mapped[str | None] = mapped_column(String(64))
     native_render_plan_ref: Mapped[str | None] = mapped_column(Text)
     native_render_plan_hash: Mapped[str | None] = mapped_column(String(64))
     render_output_ref: Mapped[str | None] = mapped_column(Text)
@@ -263,7 +288,6 @@ class WorkflowCommandReceipt(Base):
         ForeignKey("production_workflow_runs.id"),
         nullable=False,
     )
-
 
     domain_event_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

@@ -1,0 +1,70 @@
+catalog_key: production_visual_policy_catalog
+catalog_version: "2026-08-13"
+schema_version: catalog.v1
+status: active
+items:
+  - key: active-real-long-form-ai-only
+    policy_version: vcos.production-visual-policy.ai-only.v1
+    status: ACTIVE
+    production_lane: REAL_LONG_FORM_PRODUCTION
+    production_visual_origin: AI_GENERATED
+    allowed_primary_routes:
+      - AI_IMAGE
+      - AI_VIDEO
+    forbidden_primary_routes:
+      - NATIVE_GRAPHIC
+      - NATIVE_DIAGRAM
+      - NATIVE_EXPLANATORY_DIAGRAM
+      - NATIVE_TEXT_CARD
+      - NATIVE_MOTION_GRAPHIC
+      - EDITORIAL_TEXT_GRAPHIC
+      - STOCK
+      - STOCK_VIDEO
+      - STOCK_IMAGE
+      - PEXELS_VIDEO
+      - PEXELS_PHOTO
+      - SCREENSHOT
+      - AUTHORIZED_UI_OR_PRODUCT_ASSET
+      - HUMAN_SUPPLIED_ASSET
+      - ARCHIVED_NON_AI_ASSET_REUSE
+    renderer_policy:
+      renderer: NativeFFmpegRenderer
+      assembly_only: true
+      primary_visual_generation: false
+      secondary_semantic_overlays_allowed: true
+      secondary_overlay_requires_ai_primary: true
+      full_screen_native_card_allowed: false
+    caption_policy:
+      srt_sidecar_only: true
+      narration_burn_in: false
+      embedded_narration_subtitle: false
+      narration_drawtext: false
+    motion_policy:
+      motion_pack_version: vcos.native-motion-pack.v2
+      video_motion_grammar_version: vcos.video-motion-grammar.v1
+      motion_intent_required: true
+      ffmpeg_effect_plan_required: true
+      maximum_static_presentation_ms: 14000
+      maximum_ai_video_presentation_ms: 8000
+      maximum_ai_image_asset_exposure_ms: 60000
+      maximum_dead_visual_time_ms: 0
+      maximum_consecutive_same_motion_preset: 2
+      maximum_consecutive_same_transition: 3
+      aggressive_transition_rate_max: 0.1
+    provider_policy:
+      image_provider: google_gemini_image
+      image_model: gemini-3.1-flash-image
+      image_size: 2K
+      image_aspect_ratio: "16:9"
+      video_provider: google_veo
+      video_model: veo-3.1-fast-generate-preview
+      video_duration_seconds: 8
+      video_resolution: 720p
+      provider_audio_policy: DISCARD
+      fallback_allowed: false
+      maximum_attempts_per_scene: 1
+    fallback_policy:
+      block_when_ai_asset_unavailable: true
+      native_fallback_allowed: false
+      stock_fallback_allowed: false
+      screenshot_fallback_allowed: false

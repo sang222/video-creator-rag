@@ -25,6 +25,9 @@ from app.services.scoped_replacement_runner import (
 from app.services.script_contract_replacement import (
     ScriptContractReplacementAuthorityService,
 )
+from app.services.ai_visual_rerender_recovery import (
+    AIVisualRerenderRecoveryService,
+)
 from app.contracts import (
     ApprovalDecisionCreate,
     AnalyticsSyncRunCreate,
@@ -2035,6 +2038,85 @@ def production_recover_first_video(
             typer.echo(json.dumps(payload, default=str, sort_keys=True))
     except Exception as exc:
         _fail(f"production recover-first-video failed: {exc}")
+
+
+@production_app.command("rerender-first-video-ai-only")
+def production_rerender_first_video_ai_only(
+    source_candidate_id: uuid.UUID = typer.Option(..., "--source-candidate-id"),
+    execute_next_step: bool = typer.Option(
+        False,
+        "--execute-next-step",
+        help=(
+            "Execute at most one exact event from only the governed replacement "
+            "workflow. Repeat explicitly until FINAL_REVIEW_READY."
+        ),
+    ),
+) -> None:
+    """Authorize one append-only AI-only replacement; never upload or publish."""
+
+    try:
+        with session_scope() as session:
+            actor = _system_worker_actor(
+                "vcos-controlled-recovery",
+                permissions={
+                    "production.start",
+                    "production.workflow.execute",
+                },
+            )
+            service = AIVisualRerenderRecoveryService(
+                session,
+                settings=get_settings(),
+                now=utc_now,
+            )
+            authorization = service.authorize(source_candidate_id, actor)
+            continuation = (
+                service.run_once(authorization.authority_id, actor)
+                if execute_next_step
+                else None
+            )
+            payload = {
+                "schema_version": "vcos.ai-visual-rerender-cli.v1",
+                "authority_id": str(authorization.authority_id),
+                "authority_hash": authorization.authority_hash,
+                "source_final_review_candidate_id": str(source_candidate_id),
+                "source_workflow_run_id": str(authorization.source_workflow_run_id),
+                "replacement_workflow_run_id": str(
+                    authorization.replacement_workflow_run_id
+                ),
+                "visual_production_run_id": str(authorization.visual_production_run_id),
+                "budget_reservation_id": str(authorization.budget_reservation_id),
+                "budget_reservation_ref": authorization.budget_reservation_ref,
+                "visual_event_id": str(authorization.visual_event_id),
+                "authorization_replayed": authorization.replayed,
+                "workflow_state": (
+                    continuation.workflow_state
+                    if continuation is not None
+                    else authorization.workflow_state
+                ),
+                "visual_run_state": (
+                    continuation.visual_run_state
+                    if continuation is not None
+                    else authorization.visual_run_state
+                ),
+                "executed_event_id": (
+                    str(continuation.event_id)
+                    if continuation is not None and continuation.event_id is not None
+                    else None
+                ),
+                "executed_event_stage": (
+                    continuation.event_stage if continuation is not None else None
+                ),
+                "worker_result": (
+                    asdict(continuation.worker_result)
+                    if continuation is not None
+                    and continuation.worker_result is not None
+                    else None
+                ),
+                "auto_publish": False,
+            }
+            typer.echo(json.dumps(payload, default=str, sort_keys=True))
+    except Exception as exc:
+        _fail(f"production rerender-first-video-ai-only failed: {exc}")
 
 
 @media_app.command("qc-run")

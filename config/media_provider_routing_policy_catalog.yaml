@@ -1,5 +1,5 @@
 catalog_key: media_provider_routing_policy_catalog
-catalog_version: "2.0.0"
+catalog_version: "2.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -87,3 +87,7 @@ items:
     job_type: AI_METAPHOR_GENERATION
     provider_key: google_veo
     reason_code: VEO_AI_HERO_PROVIDER_ROUTED
+  - key: AI_VISUAL_ASSET_GENERATION
+    job_type: AI_VISUAL_ASSET_GENERATION
+    provider_key: vcos_ai_visual_orchestrator
+    reason_code: AI_ONLY_VISUAL_PRODUCTION_ROUTED

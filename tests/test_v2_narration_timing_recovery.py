@@ -8,6 +8,7 @@ import uuid
 from copy import deepcopy
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -19,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.actor import _system_worker_actor
 from app.core.errors import ValidationFailureError
+from app.db.models.ai_visual import AIVisualProductionRun
 from app.db.models.foundation import DomainEvent
 from app.db.models.m10_2 import FinalMediaRef
 from app.db.models.m10_5 import CloudMediaRef
@@ -40,7 +42,11 @@ from app.db.models.v2_effect import (
 )
 from app.services.cqr1_real_provider import ElevenLabsForcedAlignmentClient
 from app.services.cqr1_real_provider import _safe_forced_alignment_response_capture
-from app.services.config_registry import content_hash
+from app.services.config_registry import (
+    ConfigRegistryService,
+    LoadedCatalog,
+    content_hash,
+)
 from app.services.launch_cadence import LongFormCadenceService
 from app.services.mr1_provider_gateways import (
     MR1AlignmentGatewayAdapter,
@@ -196,6 +202,7 @@ def _no_provider_settings(permission: bool | None) -> SimpleNamespace:
         budget_mode="hard_env",
         monthly_ai_budget_usd=250,
         elevenlabs_monthly_cap_usd=22,
+        extra_ai_image_monthly_budget_usd=20,
     )
 
 
@@ -1051,6 +1058,7 @@ def _build_live_shaped_failed_media(
     qualification_factory,
     monkeypatch: pytest.MonkeyPatch,
     workspace_root: Path,
+    enforce_visual_aggregate_budget: bool = False,
 ) -> tuple[uuid.UUID, _AudioThenFailTTSClient, Any]:
     monkeypatch.setattr(
         settlement_test,
@@ -1058,9 +1066,40 @@ def _build_live_shaped_failed_media(
         _compact_live_shaped_payload,
     )
     _install_research_context_source(monkeypatch)
-    lineage = _blocked_live_shaped_source(
-        db_session, qualification_factory, monkeypatch
-    )
+    # This chained source fixture begins at the historical CH1-FLEX profile
+    # boundary, where Gemini image production was still disabled.  Project
+    # finalization and readiness below intentionally run after this scoped
+    # projection is removed so the newly admitted NORMAL workflow receives the
+    # active AI-visual package policy and exercises MEDIA -> VISUAL.
+    with monkeypatch.context() as historical:
+        original_validate = ConfigRegistryService.validate_catalog
+
+        def historical_validate(self, path):
+            loaded = original_validate(self, path)
+            if Path(path).name != "provider_registry_catalog.yaml":
+                return loaded
+            projected = deepcopy(loaded.content)
+            rows = [
+                row
+                for row in projected.get("items", [])
+                if row.get("provider_key") == "google_gemini_image"
+            ]
+            assert len(rows) == 1
+            rows[0]["policy_fit_blob"]["production_enabled_when_configured"] = False
+            return LoadedCatalog(
+                path=loaded.path,
+                content=projected,
+                content_hash=content_hash(projected),
+            )
+
+        historical.setattr(
+            ConfigRegistryService,
+            "validate_catalog",
+            historical_validate,
+        )
+        lineage = _blocked_live_shaped_source(
+            db_session, qualification_factory, monkeypatch
+        )
     _install_ready_finalization_authorities(monkeypatch)
     child = ScriptVerifierSettlementRecoveryService(
         db_session, now=lambda: lineage.settlement_now
@@ -1082,6 +1121,17 @@ def _build_live_shaped_failed_media(
     )
     tts = _AudioThenFailTTSClient()
     settings = _no_provider_settings(True)
+    if not enforce_visual_aggregate_budget:
+        # These recovery tests isolate forced-alignment crash semantics.  The
+        # production aggregate firewall has a separate regression below; this
+        # frozen MEDIA fixture already consumes the full $1 video ceiling.
+        import app.services.v2_ai_visual_authorization as visual_authorization
+
+        monkeypatch.setattr(
+            visual_authorization,
+            "_require_normal_per_video_aggregate_budget",
+            lambda **_kwargs: None,
+        )
     monkeypatch.setenv("ELEVENLABS_API_KEY", "offline-fixture-secret")
     media_adapter = V2ElevenLabsNarrationAdapter(
         workspace_root=workspace_root,
@@ -1248,7 +1298,7 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
     assert replay.replayed is True
     assert replay.authority_id == result.authority_id
     assert replay.receipt_id == result.receipt_id
-    assert result.workflow_state == "RENDER_PENDING"
+    assert result.workflow_state == "VISUAL_PENDING"
     assert result.next_domain_event_id is not None
     assert forced.call_count == 1
     assert tts.call_count == 1
@@ -1318,8 +1368,29 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
         media_receipt = check.get(
             WorkflowCommandReceipt, result.workflow_command_receipt_id
         )
-        assert run.state == "RENDER_PENDING"
-        assert run.current_stage == "RENDER"
+        assert run.state == "VISUAL_PENDING"
+        assert run.current_stage == "VISUAL"
+        assert run.ai_visual_production_run_id is not None
+        visual_run = check.get(AIVisualProductionRun, run.ai_visual_production_run_id)
+        assert visual_run is not None
+        assert visual_run.execution_kind == "NORMAL_PRODUCTION"
+        assert visual_run.state == "AUTHORIZED"
+        assert visual_run.source_timeline_ref == ledger.result_ref
+        assert visual_run.source_timeline_hash == ledger.result_hash
+        visual_budget = check.get(
+            MR1MonthlyBudgetReservation, visual_run.budget_reservation_id
+        )
+        assert visual_budget is not None
+        assert visual_budget.run_id == visual_run.id
+        assert visual_budget.status == "RESERVED"
+        # This ordinary production fixture compiles against the active mixed
+        # route policy to twelve image owners plus one bounded Veo owner.
+        # NORMAL reserves that exact plan rather than a fixed governed quota.
+        assert visual_budget.reserved_amount == Decimal("2.132000")
+        assert visual_budget.provider_allocations_json == {
+            "google_gemini_image": "1.332000",
+            "google_veo": "0.800000",
+        }
         assert run.canonical_media_timeline_ref == ledger.result_ref
         assert ledger.state == "VERIFIED"
         assert ledger.effect_invocation_count == 1
@@ -1404,17 +1475,17 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
             )
             == 1
         )
-        render_events = list(
+        visual_events = list(
             check.scalars(
                 select(DomainEvent).where(
                     DomainEvent.workflow_run_id == workflow_id,
-                    DomainEvent.payload["stage"].astext == "RENDER",
+                    DomainEvent.payload["stage"].astext == "VISUAL",
                 )
             ).all()
         )
-        assert len(render_events) == 1
-        assert render_events[0].id == result.next_domain_event_id
-        assert render_events[0].delivered_at is None
+        assert len(visual_events) == 1
+        assert visual_events[0].id == result.next_domain_event_id
+        assert visual_events[0].delivered_at is None
         assert (
             check.scalar(
                 select(func.count())
@@ -1434,6 +1505,60 @@ def test_live_shaped_timing_recovery_is_one_shot_append_only_and_idempotent(
             UploadedVideo,
         ):
             assert check.scalar(select(func.count()).select_from(forbidden_effect)) == 0
+
+
+def test_normal_visual_aggregate_firewall_blocks_before_second_reservation(
+    db_session,
+    engine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workflow_id, _tts, settings = _build_live_shaped_failed_media(
+        db_session=db_session,
+        engine=engine,
+        qualification_factory=QualificationFactory(db_session),
+        monkeypatch=monkeypatch,
+        workspace_root=tmp_path,
+        enforce_visual_aggregate_budget=True,
+    )
+    factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    forced = _ExactForcedAlignmentClient()
+    with factory() as session:
+        with pytest.raises(
+            ValidationFailureError,
+            match="V2_NORMAL_AI_VISUAL_PER_VIDEO_AGGREGATE_BUDGET_EXCEEDED",
+        ):
+            _recovery_service(
+                factory=factory,
+                session=session,
+                settings=settings,
+                client=forced,
+                workspace_root=tmp_path,
+            ).recover(workflow_id, _controlled_worker_actor())
+
+    assert forced.call_count == 1
+    with factory() as check:
+        run = check.get(ProductionWorkflowRun, workflow_id)
+        assert run is not None
+        assert run.ai_visual_production_run_id is None
+        assert (
+            check.scalar(
+                select(func.count())
+                .select_from(MR1MonthlyBudgetReservation)
+                .where(
+                    MR1MonthlyBudgetReservation.video_project_id == run.video_project_id
+                )
+            )
+            == 1
+        )
+        assert (
+            check.scalar(select(func.count()).select_from(AIVisualProductionRun)) == 0
+        )
 
 
 def test_captured_response_recovers_offline_after_local_parser_crash(
@@ -1478,7 +1603,7 @@ def test_captured_response_recovers_offline_after_local_parser_crash(
             workspace_root=tmp_path,
         ).recover(workflow_id, _controlled_worker_actor())
 
-    assert recovered.workflow_state == "RENDER_PENDING"
+    assert recovered.workflow_state == "VISUAL_PENDING"
     assert offline.call_count == 0
 
 
@@ -1596,7 +1721,7 @@ def test_verified_ledger_crash_resumes_without_second_provider_submission(
             client=offline,
             workspace_root=tmp_path,
         ).recover(workflow_id, _controlled_worker_actor())
-    assert recovered.workflow_state == "RENDER_PENDING"
+    assert recovered.workflow_state == "VISUAL_PENDING"
     assert offline.call_count == 0
 
 

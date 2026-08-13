@@ -33,7 +33,7 @@ V2_EFFECT_STATES = (
     "VERIFIED",
     "FAILED_UNCERTAIN",
 )
-V2_EFFECT_STAGES = ("MEDIA", "RENDER", "QC", "ARCHIVE")
+V2_EFFECT_STAGES = ("MEDIA", "VISUAL", "RENDER", "QC", "ARCHIVE")
 
 
 class V2ProductionEffectLedger(Base):

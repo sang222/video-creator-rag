@@ -53,12 +53,26 @@ from app.contracts.production_workflow import (
     WorkflowEffectState,
     WorkflowStageResult,
 )
+from app.contracts.ai_visual_production import (
+    AIVisualPlanCompilation,
+    FFmpegEffectPlan,
+    VideoMotionGrammar,
+    VideoVisualStyleBible,
+    ai_visual_stable_hash,
+)
 from app.contracts.script_qualification import QualifiedScriptOutputV2
 from app.contracts.workflow import ArtifactCreate, ArtifactVersionCreate
 from app.core.db import get_session_factory
 from app.core.errors import ValidationFailureError
 from app.core.time import utc_now
 from app.db.models.m10_2 import FinalMediaRef
+from app.db.models.ai_visual import (
+    AIVisualAssetEffect,
+    AIVisualAssetManifest,
+    AIVisualProductionRun,
+    AIVisualScenePlanSnapshot,
+    AIVisualStyleBible,
+)
 from app.db.models.m10_5 import CloudMediaRef
 from app.db.models.production_workflow import ProductionWorkflowRun
 from app.db.models.v2_effect import V2ProductionEffectLedger
@@ -67,6 +81,11 @@ from app.db.models.workflow import Artifact, ArtifactVersion, VideoProject
 from app.services.asset_request_compiler import (
     AssetRequestCompiler,
     CompilationEvidence,
+)
+from app.services.ai_visual_cross_modal import (
+    AIVisualCrossModalError,
+    ai_visual_cross_modal_qc_report,
+    verified_ai_visual_effect_evidence,
 )
 from app.services.config_registry import content_hash
 from app.services.cross_modal import (
@@ -82,6 +101,15 @@ from app.services.native_ffmpeg_renderer import (
     NativeFFmpegRenderer,
 )
 from app.services.native_render_plan import stable_hash
+from app.services.v2_ai_visual_renderer import (
+    AIVisualAssetManifestProjection,
+    AIVisualFFmpegAssemblyCompiler,
+    AIVisualFFmpegAssemblyPlan,
+    AIVisualFFmpegAssemblyRenderer,
+    AIVisualRenderExecutionReceipt,
+    AIVisualRenderQC,
+    AIVisualRenderQCEvidence,
+)
 from app.services.production_package import ProductionPackageService
 from app.services.production_workflow import WorkflowStageContext
 from app.services.v2_provider_production import (
@@ -203,6 +231,27 @@ class V2LocalNarrationRuntime:
             "output_format": self.output_format,
             "command_argv_hash": content_hash(command),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _AIVisualRenderAuthority:
+    run: ProductionWorkflowRun
+    project: VideoProject
+    package: ProductionPackageContentV2
+    script: ArtifactVersion
+    visual: ArtifactVersion
+    visual_run: AIVisualProductionRun
+    manifest_row: AIVisualAssetManifest
+    manifest: AIVisualAssetManifestProjection
+    style_bible: VideoVisualStyleBible
+    scene_plan: AIVisualPlanCompilation
+    effect_plan: FFmpegEffectPlan
+    motion_grammar: VideoMotionGrammar
+    asset_effects: tuple[AIVisualAssetEffect, ...]
+    timeline: dict[str, Any]
+    media_journal: dict[str, Any]
+    audio_path: Path
+    caption_path: Path
 
 
 def _resolve_local_narration_runtime() -> V2LocalNarrationRuntime | None:
@@ -446,6 +495,13 @@ class V2LocalNativeProductionAdapter:
             ProductionWorkflowStage.ARCHIVE,
         }:
             raise ValidationFailureError("V2_LOCAL_NATIVE_REAL_FINAL_EFFECT_FORBIDDEN")
+        if (
+            execution_mode == "REAL_LONG_FORM_PRODUCTION"
+            and operation.stage
+            in {ProductionWorkflowStage.RENDER, ProductionWorkflowStage.QC}
+            and getattr(context.run, "ai_visual_production_run_id", None) is None
+        ):
+            raise ValidationFailureError("V2_REAL_AI_VISUAL_AUTHORITY_REQUIRED")
         audio_strategy = operation.parameters.get("audio_strategy")
         if operation.stage in {
             ProductionWorkflowStage.MEDIA,
@@ -638,6 +694,12 @@ class V2LocalNativeProductionAdapter:
             row.effect_journal = journal
             row.state = "VERIFIED"
             row.completed_at = utc_now()
+            self._settle_ai_visual_projection(
+                session=session,
+                ledger=row,
+                result=result,
+                journal=journal,
+            )
             session.commit()
             session.refresh(row)
             return _result_from_ledger(
@@ -661,6 +723,135 @@ class V2LocalNativeProductionAdapter:
                 "last_error_type": type(exc).__name__,
             }
             session.commit()
+
+    @staticmethod
+    def _settle_ai_visual_projection(
+        *,
+        session: Session,
+        ledger: V2ProductionEffectLedger,
+        result: WorkflowStageResult,
+        journal: dict[str, Any],
+    ) -> None:
+        raw_id = journal.get("ai_visual_production_run_id")
+        if raw_id is None:
+            return
+        try:
+            visual_run_id = uuid.UUID(str(raw_id))
+        except ValueError as exc:
+            raise ValidationFailureError("AI_VISUAL_SETTLEMENT_RUN_ID_INVALID") from exc
+        workflow = session.get(ProductionWorkflowRun, ledger.workflow_run_id)
+        visual_run = session.scalar(
+            select(AIVisualProductionRun)
+            .where(AIVisualProductionRun.id == visual_run_id)
+            .with_for_update()
+        )
+        if (
+            workflow is None
+            or visual_run is None
+            or workflow.ai_visual_production_run_id != visual_run.id
+            or visual_run.workflow_run_id != workflow.id
+            or visual_run.video_project_id != workflow.video_project_id
+        ):
+            raise ValidationFailureError("AI_VISUAL_SETTLEMENT_AUTHORITY_MISMATCH")
+        refs = result.authority_refs
+        if ledger.stage == "VISUAL":
+            artifact_prefix = f"ai-visual-runs/{visual_run.id}"
+            if (
+                visual_run.state != "ASSETS_VERIFIED"
+                or visual_run.current_phase != "MANIFEST"
+                or result.result_type != "V2_AI_VISUAL_ASSET_MANIFEST"
+                or result.result_id != visual_run.asset_manifest_id
+                or result.result_ref != f"{artifact_prefix}/asset-manifest.json"
+                or result.result_hash != visual_run.asset_manifest_hash
+                or refs.ai_visual_production_run_id != visual_run.id
+                or refs.ai_visual_policy_ref != visual_run.production_visual_policy_ref
+                or refs.ai_visual_policy_hash
+                != visual_run.production_visual_policy_hash
+                or refs.ai_visual_style_bible_ref
+                != f"{artifact_prefix}/style-bible.json"
+                or refs.ai_visual_style_bible_hash != visual_run.style_bible_hash
+                or refs.ai_visual_scene_plan_ref != f"{artifact_prefix}/scene-plan.json"
+                or refs.ai_visual_scene_plan_hash != visual_run.scene_plan_hash
+                or refs.ai_visual_asset_manifest_ref
+                != f"{artifact_prefix}/asset-manifest.json"
+                or refs.ai_visual_asset_manifest_hash != visual_run.asset_manifest_hash
+                or refs.video_motion_grammar_ref != visual_run.motion_grammar_ref
+                or refs.video_motion_grammar_hash != visual_run.motion_grammar_hash
+                or refs.ffmpeg_effect_plan_ref != visual_run.effect_plan_ref
+                or refs.ffmpeg_effect_plan_hash != visual_run.effect_plan_hash
+                or journal.get("asset_manifest_ref")
+                != f"{artifact_prefix}/asset-manifest.json"
+                or journal.get("asset_manifest_hash") != visual_run.asset_manifest_hash
+                or journal.get("state") != "VERIFIED"
+            ):
+                raise ValidationFailureError("AI_VISUAL_MANIFEST_SETTLEMENT_MISMATCH")
+            # Mirror the already-sealed visual authorities onto the workflow
+            # projection in the same transaction as ledger verification.
+            workflow.ai_visual_policy_ref = refs.ai_visual_policy_ref
+            workflow.ai_visual_policy_hash = refs.ai_visual_policy_hash
+            workflow.ai_visual_style_bible_ref = refs.ai_visual_style_bible_ref
+            workflow.ai_visual_style_bible_hash = refs.ai_visual_style_bible_hash
+            workflow.ai_visual_scene_plan_ref = refs.ai_visual_scene_plan_ref
+            workflow.ai_visual_scene_plan_hash = refs.ai_visual_scene_plan_hash
+            workflow.ai_visual_asset_manifest_ref = refs.ai_visual_asset_manifest_ref
+            workflow.ai_visual_asset_manifest_hash = refs.ai_visual_asset_manifest_hash
+            workflow.video_motion_grammar_ref = refs.video_motion_grammar_ref
+            workflow.video_motion_grammar_hash = refs.video_motion_grammar_hash
+            workflow.ffmpeg_effect_plan_ref = refs.ffmpeg_effect_plan_ref
+            workflow.ffmpeg_effect_plan_hash = refs.ffmpeg_effect_plan_hash
+            return
+        if ledger.stage == "RENDER":
+            if (
+                visual_run.state != "ASSETS_VERIFIED"
+                or visual_run.current_phase != "MANIFEST"
+                or refs.render_output_ref != journal.get("render_output_ref")
+                or refs.render_output_checksum != journal.get("output_checksum")
+                or refs.native_render_plan_ref != journal.get("assembly_plan_ref")
+                or refs.native_render_plan_hash != journal.get("assembly_plan_hash")
+                or journal.get("asset_manifest_hash") != visual_run.asset_manifest_hash
+                or journal.get("effect_plan_hash") != visual_run.effect_plan_hash
+            ):
+                raise ValidationFailureError("AI_VISUAL_RENDER_SETTLEMENT_MISMATCH")
+            visual_run.state = "RENDERING"
+            visual_run.current_phase = "RENDER"
+            visual_run.projection_version += 1
+            session.flush()
+            visual_run.state = "RENDERED"
+            visual_run.render_output_ref = refs.render_output_ref
+            visual_run.render_output_checksum = refs.render_output_checksum
+            visual_run.projection_version += 1
+            return
+        if ledger.stage == "QC":
+            if (
+                visual_run.state != "RENDERED"
+                or visual_run.current_phase != "RENDER"
+                or refs.technical_qc_receipt_ref != journal.get("technical_qc_ref")
+                or refs.technical_qc_receipt_hash != journal.get("technical_qc_hash")
+                or refs.creative_qc_receipt_ref != journal.get("creative_qc_ref")
+                or refs.creative_qc_receipt_hash != journal.get("creative_qc_hash")
+                or not refs.cross_modal_qc_receipt_ref
+                or not refs.cross_modal_qc_receipt_hash
+                or refs.cross_modal_qc_receipt_ref != journal.get("cross_modal_qc_ref")
+                or refs.cross_modal_qc_receipt_hash
+                != journal.get("cross_modal_qc_hash")
+                or journal.get("asset_manifest_hash") != visual_run.asset_manifest_hash
+                or journal.get("effect_plan_hash") != visual_run.effect_plan_hash
+            ):
+                raise ValidationFailureError("AI_VISUAL_QC_SETTLEMENT_MISMATCH")
+            visual_run.state = "QC_RUNNING"
+            visual_run.current_phase = "QC"
+            visual_run.projection_version += 1
+            session.flush()
+            visual_run.state = "QC_VERIFIED"
+            visual_run.technical_qc_ref = refs.technical_qc_receipt_ref
+            visual_run.technical_qc_hash = refs.technical_qc_receipt_hash
+            visual_run.creative_qc_ref = refs.creative_qc_receipt_ref
+            visual_run.creative_qc_hash = refs.creative_qc_receipt_hash
+            visual_run.cross_modal_qc_ref = refs.cross_modal_qc_receipt_ref
+            visual_run.cross_modal_qc_hash = refs.cross_modal_qc_receipt_hash
+            visual_run.projection_version += 1
+            return
+        raise ValidationFailureError("AI_VISUAL_SETTLEMENT_STAGE_INVALID")
 
     def _execute_stage(
         self,
@@ -1071,6 +1262,12 @@ class V2LocalNativeProductionAdapter:
         context: WorkflowStageContext,
         operation: V2AuthorizedAdapterOperation,
     ) -> tuple[WorkflowStageResult, dict[str, Any]]:
+        if context.run.ai_visual_production_run_id is not None:
+            return self._render_ai_visual(
+                ledger_id=ledger_id,
+                context=context,
+                operation=operation,
+            )
         with self._session_factory() as session:
             run, project, package, script, visual = _production_inputs(
                 session, context.run.id
@@ -1280,6 +1477,207 @@ class V2LocalNativeProductionAdapter:
         )
         return result, journal
 
+    def _render_ai_visual(
+        self,
+        *,
+        ledger_id: uuid.UUID,
+        context: WorkflowStageContext,
+        operation: V2AuthorizedAdapterOperation,
+    ) -> tuple[WorkflowStageResult, dict[str, Any]]:
+        authority = self._load_ai_visual_authority(
+            workflow_run_id=context.run.id,
+            expected_states=frozenset({"ASSETS_VERIFIED"}),
+        )
+        run = authority.run
+        visual_run = authority.visual_run
+        timeline = authority.timeline
+        audio_strategy = str(operation.parameters["audio_strategy"])
+        if (
+            audio_strategy != V2_ELEVENLABS_NARRATION_STRATEGY
+            or timeline.get("audio_strategy") != audio_strategy
+            or timeline.get("narration_present") is not True
+        ):
+            raise ValidationFailureError("AI_VISUAL_RENDER_AUDIO_ROUTE_INVALID")
+
+        compiler = AIVisualFFmpegAssemblyCompiler(ffprobe=self._builder.ffprobe)
+        assembly = compiler.compile(
+            manifest=authority.manifest,
+            effect_plan=authority.effect_plan,
+            audio_ref=self._relative(authority.audio_path),
+            audio_checksum=visual_run.audio_checksum,
+            audio_duration_ms=visual_run.audio_duration_ms,
+            srt_ref=self._relative(authority.caption_path),
+            srt_checksum=visual_run.caption_checksum,
+            workspace_root=self.root,
+            asset_manifest_ref=run.ai_visual_asset_manifest_ref,
+            effect_plan_ref=run.ffmpeg_effect_plan_ref,
+        )
+        effect_dir = self._effect_dir(context.command_id)
+        assembly_path = effect_dir / "ai-visual-assembly-plan.json"
+        receipt_path = effect_dir / "ai-visual-render-receipt.json"
+        completion_path = effect_dir / "ai-visual-render-completion-seal.json"
+        command_path = effect_dir / "ai-visual-ffmpeg-command-manifest.json"
+        output_path = effect_dir / "ai-visual-assembled.mp4"
+        _persist_exact_json(assembly_path, assembly.model_dump(mode="json"))
+
+        renderer = AIVisualFFmpegAssemblyRenderer(ffmpeg=self._builder.ffmpeg)
+        reconciled_from_completion_seal = False
+        if receipt_path.exists():
+            receipt = AIVisualRenderExecutionReceipt.model_validate(
+                _load_json(receipt_path)
+            )
+            if completion_path.exists():
+                completion_receipt = AIVisualRenderExecutionReceipt.model_validate(
+                    _load_json(completion_path)
+                )
+                if completion_receipt.model_dump(mode="json") != receipt.model_dump(
+                    mode="json"
+                ):
+                    raise ValidationFailureError(
+                        "AI_VISUAL_RENDER_COMPLETION_SEAL_MISMATCH"
+                    )
+            try:
+                receipt = renderer.reconcile_completion(
+                    assembly,
+                    output_ref=self._relative(output_path),
+                    completion_receipt=receipt,
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                raise ValidationFailureError(
+                    "AI_VISUAL_RENDER_RECEIPT_RECONCILIATION_MISMATCH"
+                ) from exc
+            _persist_exact_json(completion_path, receipt.model_dump(mode="json"))
+            reconciled_from_completion_seal = True
+        elif completion_path.exists():
+            completion_receipt = AIVisualRenderExecutionReceipt.model_validate(
+                _load_json(completion_path)
+            )
+            try:
+                receipt = renderer.reconcile_completion(
+                    assembly,
+                    output_ref=self._relative(output_path),
+                    completion_receipt=completion_receipt,
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                raise ValidationFailureError(
+                    "AI_VISUAL_RENDER_COMPLETION_RECONCILIATION_MISMATCH"
+                ) from exc
+            _persist_exact_json(receipt_path, receipt.model_dump(mode="json"))
+            reconciled_from_completion_seal = True
+        else:
+            if output_path.exists():
+                raise ValidationFailureError("AI_VISUAL_RENDER_UNJOURNALED_OUTPUT")
+            receipt = renderer.execute(
+                assembly,
+                output_ref=self._relative(output_path),
+                seal_completion=lambda sealed: _persist_exact_json(
+                    completion_path,
+                    sealed.model_dump(mode="json"),
+                ),
+            )
+            _persist_exact_json(receipt_path, receipt.model_dump(mode="json"))
+        _persist_exact_json(
+            command_path,
+            receipt.command_manifest.model_dump(mode="json"),
+        )
+
+        measured_render_duration_ms = _probe_duration_ms(
+            self._builder.ffprobe, output_path
+        )
+        if abs(measured_render_duration_ms - visual_run.audio_duration_ms) > 250:
+            raise ValidationFailureError("AI_VISUAL_RENDER_DURATION_MISMATCH")
+        output_checksum = _sha256_file(output_path)
+        if output_checksum != receipt.output_checksum:
+            raise ValidationFailureError("AI_VISUAL_RENDER_OUTPUT_CHECKSUM_MISMATCH")
+        output_ref = f"v2-ai-visual-render://{ledger_id}/{output_checksum}"
+        assembly_ref = f"v2-effect://{ledger_id}/ai-visual-assembly-plan"
+        journal = {
+            "schema_version": "vcos.production-effect-journal.v1",
+            "command_id": context.command_id,
+            "stage": "RENDER",
+            "state": "VERIFIED",
+            "effect_invocation_count": 1,
+            "ffmpeg_invocation_count": 1,
+            "renderer_completion_replay_supported": True,
+            "completion_sealed_before_output_commit": True,
+            "reconciled_from_completion_seal": reconciled_from_completion_seal,
+            "render_mode": "AI_VISUAL_ASSEMBLY_ONLY",
+            "ai_visual_production_run_id": str(visual_run.id),
+            "asset_manifest_ref": run.ai_visual_asset_manifest_ref,
+            "asset_manifest_hash": authority.manifest.content_hash,
+            "effect_plan_ref": run.ffmpeg_effect_plan_ref,
+            "effect_plan_hash": authority.effect_plan.effect_plan_hash,
+            "motion_plan_hash": authority.effect_plan.motion_plan_hash,
+            "assembly_plan_ref": assembly_ref,
+            "assembly_plan_hash": assembly.content_hash,
+            "assembly_plan_relative_path": self._relative(assembly_path),
+            "command_manifest_relative_path": self._relative(command_path),
+            "command_manifest_hash": receipt.command_manifest.content_hash,
+            "render_receipt_relative_path": self._relative(receipt_path),
+            "render_receipt_hash": receipt.content_hash,
+            "render_completion_seal_relative_path": self._relative(completion_path),
+            "render_completion_seal_hash": receipt.content_hash,
+            "renderer_working_directory": self._relative(effect_dir),
+            "output_relative_path": self._relative(output_path),
+            "render_output_ref": output_ref,
+            "output_checksum": output_checksum,
+            "renderer_primary_visual_generation": False,
+            "renderer_effect_composition": True,
+            "provider_calls_made": False,
+            "native_primary_visuals_present": False,
+            "stock_primary_visuals_present": False,
+            "screenshot_primary_visuals_present": False,
+            "audio_strategy": audio_strategy,
+            "audio_asset_ref": visual_run.audio_ref,
+            "audio_checksum": visual_run.audio_checksum,
+            "narration_present": True,
+            "alignment_method": timeline["alignment_method"],
+            "caption_ref": visual_run.caption_ref,
+            "caption_checksum": visual_run.caption_checksum,
+            "subtitle_qc_ref": visual_run.subtitle_qc_ref,
+            "subtitle_qc_state": "PASS",
+            "duration_ms": visual_run.audio_duration_ms,
+            "measured_render_duration_ms": measured_render_duration_ms,
+        }
+        _persist_exact_json(
+            effect_dir / "effect-journal.json",
+            journal,
+            allow_reconciled_update=True,
+        )
+        result = WorkflowStageResult(
+            result_type="V2_AI_VISUAL_RENDER_OUTPUT",
+            result_ref=output_ref,
+            result_hash=output_checksum,
+            result_payload={
+                "production_eligible": True,
+                "renderer": "native_ffmpeg_ai_visual_assembly_only",
+                "provider_calls_made": False,
+                "renderer_primary_visual_generation": False,
+                "renderer_effect_composition": True,
+                "ai_visual_production_run_id": str(visual_run.id),
+                "asset_manifest_hash": authority.manifest.content_hash,
+                "effect_plan_hash": authority.effect_plan.effect_plan_hash,
+                "motion_plan_hash": authority.effect_plan.motion_plan_hash,
+                "audio_strategy": audio_strategy,
+                "audio_asset_ref": visual_run.audio_ref,
+                "audio_checksum": visual_run.audio_checksum,
+                "narration_present": True,
+                "alignment_method": timeline["alignment_method"],
+                "duration_ms": visual_run.audio_duration_ms,
+                "measured_render_duration_ms": measured_render_duration_ms,
+                "width": assembly.width,
+                "height": assembly.height,
+            },
+            authority_refs=WorkflowAuthorityRefs(
+                video_project_id=authority.project.id,
+                native_render_plan_ref=assembly_ref,
+                native_render_plan_hash=assembly.content_hash,
+                render_output_ref=output_ref,
+                render_output_checksum=output_checksum,
+            ),
+        )
+        return result, journal
+
     def _quality_control(
         self,
         *,
@@ -1287,6 +1685,12 @@ class V2LocalNativeProductionAdapter:
         context: WorkflowStageContext,
         operation: V2AuthorizedAdapterOperation,
     ) -> tuple[WorkflowStageResult, dict[str, Any]]:
+        if context.run.ai_visual_production_run_id is not None:
+            return self._quality_control_ai_visual(
+                ledger_id=ledger_id,
+                context=context,
+                operation=operation,
+            )
         with self._session_factory() as session:
             run, project, package, script, visual = _production_inputs(
                 session, context.run.id
@@ -1621,6 +2025,285 @@ class V2LocalNativeProductionAdapter:
                     if cross_modal_report is not None
                     else {}
                 ),
+            ),
+        )
+        return result, journal
+
+    def _quality_control_ai_visual(
+        self,
+        *,
+        ledger_id: uuid.UUID,
+        context: WorkflowStageContext,
+        operation: V2AuthorizedAdapterOperation,
+    ) -> tuple[WorkflowStageResult, dict[str, Any]]:
+        del operation  # The package-bound gateway has already authorized this stage.
+        authority = self._load_ai_visual_authority(
+            workflow_run_id=context.run.id,
+            expected_states=frozenset({"RENDERED"}),
+        )
+        run = authority.run
+        visual_run = authority.visual_run
+        with self._session_factory() as session:
+            render_ledger = session.scalar(
+                select(V2ProductionEffectLedger).where(
+                    V2ProductionEffectLedger.workflow_run_id == run.id,
+                    V2ProductionEffectLedger.stage == "RENDER",
+                    V2ProductionEffectLedger.state == "VERIFIED",
+                )
+            )
+            if render_ledger is None:
+                raise ValidationFailureError("AI_VISUAL_QC_RENDER_REQUIRED")
+            render_journal = dict(render_ledger.effect_journal)
+        if (
+            render_journal.get("render_mode") != "AI_VISUAL_ASSEMBLY_ONLY"
+            or render_journal.get("ai_visual_production_run_id") != str(visual_run.id)
+            or render_journal.get("asset_manifest_hash")
+            != authority.manifest.content_hash
+            or render_journal.get("effect_plan_hash")
+            != authority.effect_plan.effect_plan_hash
+            or render_journal.get("output_checksum") != run.render_output_checksum
+        ):
+            raise ValidationFailureError("AI_VISUAL_QC_RENDER_BINDING_MISMATCH")
+
+        assembly = AIVisualFFmpegAssemblyPlan.model_validate(
+            _load_json(
+                self._from_relative(
+                    _required_text(render_journal, "assembly_plan_relative_path")
+                )
+            )
+        )
+        receipt = AIVisualRenderExecutionReceipt.model_validate(
+            _load_json(
+                self._from_relative(
+                    _required_text(render_journal, "render_receipt_relative_path")
+                )
+            )
+        )
+        if (
+            assembly.content_hash != run.native_render_plan_hash
+            or receipt.content_hash != render_journal.get("render_receipt_hash")
+            or receipt.output_checksum != run.render_output_checksum
+            or assembly.asset_manifest_hash != authority.manifest.content_hash
+            or assembly.effect_plan_hash != authority.effect_plan.effect_plan_hash
+        ):
+            raise ValidationFailureError("AI_VISUAL_QC_ARTIFACT_BINDING_MISMATCH")
+
+        ai_qc = AIVisualRenderQC(
+            ffprobe=self._builder.ffprobe,
+            ffmpeg=self._builder.ffmpeg,
+        ).inspect(plan=assembly, receipt=receipt)
+        if ai_qc.result != "PASS":
+            raise ValidationFailureError(
+                "AI_VISUAL_RENDER_QC_FAILED:" + ",".join(ai_qc.reason_codes)
+            )
+        timeline_hash = content_hash(authority.timeline)
+        try:
+            cross_modal_report = ai_visual_cross_modal_qc_report(
+                timeline=authority.timeline,
+                timeline_hash=timeline_hash,
+                scene_plan=authority.scene_plan,
+                scene_plan_artifact_hash=authority.visual_run.scene_plan_hash or "",
+                style_bible=authority.style_bible,
+                motion_grammar=authority.motion_grammar,
+                manifest=authority.manifest,
+                effect_evidence=verified_ai_visual_effect_evidence(
+                    authority.asset_effects
+                ),
+                workspace_root=self.root,
+            ).model_dump(mode="json")
+        except AIVisualCrossModalError as exc:
+            raise ValidationFailureError(exc.reason_code) from exc
+        checks = _ai_visual_creative_gate_checks(
+            authority=authority,
+            assembly=assembly,
+            receipt=receipt,
+            ai_qc=ai_qc,
+            render_journal=render_journal,
+            cross_modal_report=cross_modal_report,
+        )
+        failed_checks = sorted(name for name, passed in checks.items() if not passed)
+        if failed_checks:
+            raise ValidationFailureError(
+                "AI_VISUAL_CREATIVE_QC_GATE_FAILED:" + ",".join(failed_checks)
+            )
+
+        technical_ref = f"v2-effect://{ledger_id}/ai-visual-technical-qc"
+        creative_ref = f"v2-effect://{ledger_id}/ai-visual-creative-qc"
+        cross_modal_ref = f"v2-effect://{ledger_id}/cross-modal-qc"
+        ai_qc_ref = f"v2-effect://{ledger_id}/ai-visual-render-qc"
+        technical = {
+            "schema_version": "vcos.ai-visual-technical-media-qc.v1",
+            "workflow_run_id": str(run.id),
+            "ai_visual_production_run_id": str(visual_run.id),
+            "video_project_id": str(authority.project.id),
+            "render_output_checksum": run.render_output_checksum,
+            "result": "PASS",
+            "ai_visual_render_qc_ref": ai_qc_ref,
+            "ai_visual_render_qc_hash": ai_qc.content_hash,
+            "ai_visual_render_qc": ai_qc.model_dump(mode="json"),
+            "asset_manifest_ref": run.ai_visual_asset_manifest_ref,
+            "asset_manifest_hash": authority.manifest.content_hash,
+            "effect_plan_ref": run.ffmpeg_effect_plan_ref,
+            "effect_plan_hash": authority.effect_plan.effect_plan_hash,
+            "motion_plan_hash": authority.effect_plan.motion_plan_hash,
+            "audio_strategy": render_journal["audio_strategy"],
+            "audio_asset_ref": visual_run.audio_ref,
+            "audio_checksum": visual_run.audio_checksum,
+            "narration_present": True,
+            "alignment_method": authority.timeline["alignment_method"],
+            "caption_ref": visual_run.caption_ref,
+            "caption_checksum": visual_run.caption_checksum,
+            "subtitle_qc_ref": visual_run.subtitle_qc_ref,
+            "subtitle_qc_hash": visual_run.subtitle_qc_hash,
+            "cross_modal_qc_ref": cross_modal_ref,
+            "cross_modal_qc_hash": cross_modal_report["content_hash"],
+            "renderer_primary_visual_generation": False,
+            "renderer_effect_composition": True,
+            "production_eligible": True,
+            "human_final_review_required": True,
+        }
+        technical_hash = content_hash(technical)
+        creative = {
+            "schema_version": "vcos.ai-visual-creative-qc.v1",
+            "workflow_run_id": str(run.id),
+            "ai_visual_production_run_id": str(visual_run.id),
+            "video_project_id": str(authority.project.id),
+            "render_output_checksum": run.render_output_checksum,
+            "result": "PASS",
+            "gate_results": [
+                {
+                    "gate_name": name,
+                    "result": "PASS" if passed else "BLOCK",
+                    "reason_codes": [],
+                    "evidence_refs": [
+                        ai_qc_ref,
+                        run.ai_visual_asset_manifest_ref,
+                        run.ffmpeg_effect_plan_ref,
+                        authority.timeline["timeline_ref"],
+                    ],
+                    "measured": passed,
+                }
+                for name, passed in checks.items()
+            ],
+            "automated_scope": list(checks),
+            "ai_visual_render_qc": ai_qc.model_dump(mode="json"),
+            "cross_modal_qc": cross_modal_report,
+            "automated_result_scope": "TECHNICAL_AND_LINEAGE_ONLY",
+            "actual_asset_description_source": cross_modal_report[
+                "actual_asset_description_source"
+            ],
+            "same_interaction_model_output_semantic_inspection_performed": (
+                cross_modal_report[
+                    "same_interaction_model_output_semantic_inspection_performed"
+                ]
+            ),
+            "actual_asset_semantic_inspection_performed": cross_modal_report[
+                "actual_asset_semantic_inspection_performed"
+            ],
+            "independent_multimodal_inspection_performed": cross_modal_report[
+                "independent_multimodal_inspection_performed"
+            ],
+            "actual_asset_semantic_disposition": cross_modal_report[
+                "actual_asset_semantic_disposition"
+            ],
+            "automated_semantic_conformity_asserted": cross_modal_report[
+                "automated_semantic_conformity_asserted"
+            ],
+            "automated_pass_is_not_independent_semantic_conformity": (
+                cross_modal_report[
+                    "automated_pass_is_not_independent_semantic_conformity"
+                ]
+            ),
+            "human_semantic_review_required": cross_modal_report[
+                "human_semantic_review_required"
+            ],
+            "technical_pass_does_not_imply_human_watchability": True,
+            "human_final_review_required": True,
+            "automatic_publish": False,
+            "production_eligible": True,
+        }
+        creative_hash = content_hash(creative)
+        effect_dir = self._effect_dir(context.command_id)
+        technical_path = effect_dir / "ai-visual-technical-qc.json"
+        creative_path = effect_dir / "ai-visual-creative-qc.json"
+        ai_qc_path = effect_dir / "ai-visual-render-qc.json"
+        cross_modal_path = effect_dir / "cross-modal-qc.json"
+        _persist_ai_visual_qc_artifact_set(
+            technical_path=technical_path,
+            technical=technical,
+            creative_path=creative_path,
+            creative=creative,
+            render_qc_path=ai_qc_path,
+            render_qc=ai_qc.model_dump(mode="json"),
+            cross_modal_path=cross_modal_path,
+            cross_modal=cross_modal_report,
+        )
+        journal = {
+            "schema_version": "vcos.production-effect-journal.v1",
+            "command_id": context.command_id,
+            "stage": "QC",
+            "state": "VERIFIED",
+            "effect_invocation_count": 1,
+            "qc_invocation_count": 1,
+            "qc_mode": "AI_VISUAL_ONLY",
+            "ai_visual_production_run_id": str(visual_run.id),
+            "technical_qc_ref": technical_ref,
+            "technical_qc_relative_path": self._relative(technical_path),
+            "technical_qc_hash": technical_hash,
+            "creative_qc_ref": creative_ref,
+            "creative_qc_relative_path": self._relative(creative_path),
+            "creative_qc_hash": creative_hash,
+            "ai_visual_render_qc_ref": ai_qc_ref,
+            "ai_visual_render_qc_relative_path": self._relative(ai_qc_path),
+            "ai_visual_render_qc_hash": ai_qc.content_hash,
+            "cross_modal_qc_ref": cross_modal_ref,
+            "cross_modal_qc_relative_path": self._relative(cross_modal_path),
+            "cross_modal_qc_hash": cross_modal_report["content_hash"],
+            "asset_manifest_hash": authority.manifest.content_hash,
+            "effect_plan_hash": authority.effect_plan.effect_plan_hash,
+            "motion_plan_hash": authority.effect_plan.motion_plan_hash,
+            "audio_strategy": render_journal["audio_strategy"],
+            "audio_asset_ref": visual_run.audio_ref,
+            "audio_checksum": visual_run.audio_checksum,
+            "narration_present": True,
+            "alignment_method": authority.timeline["alignment_method"],
+            "caption_ref": visual_run.caption_ref,
+            "caption_checksum": visual_run.caption_checksum,
+            "subtitle_qc_ref": visual_run.subtitle_qc_ref,
+            "subtitle_qc_state": "PASS",
+        }
+        _persist_exact_json(
+            effect_dir / "effect-journal.json",
+            journal,
+            allow_reconciled_update=True,
+        )
+        result = WorkflowStageResult(
+            result_type="V2_AUTOMATED_AI_VISUAL_QC",
+            result_ref=creative_ref,
+            result_hash=creative_hash,
+            result_payload={
+                "technical_result": "PASS",
+                "creative_result": "PASS",
+                "ai_visual_result": "PASS",
+                "human_final_review_required": True,
+                "automatic_publish": False,
+                "asset_manifest_hash": authority.manifest.content_hash,
+                "effect_plan_hash": authority.effect_plan.effect_plan_hash,
+                "motion_plan_hash": authority.effect_plan.motion_plan_hash,
+                "cross_modal_result": cross_modal_report["deterministic_disposition"],
+                "cross_modal_evidence_scope": cross_modal_report["evidence_scope"],
+                "actual_asset_semantic_disposition": cross_modal_report[
+                    "actual_asset_semantic_disposition"
+                ],
+            },
+            authority_refs=WorkflowAuthorityRefs(
+                video_project_id=authority.project.id,
+                technical_qc_receipt_ref=technical_ref,
+                technical_qc_receipt_hash=technical_hash,
+                creative_qc_receipt_ref=creative_ref,
+                creative_qc_receipt_hash=creative_hash,
+                cross_modal_qc_receipt_ref=cross_modal_ref,
+                cross_modal_qc_receipt_hash=cross_modal_report["content_hash"],
             ),
         )
         return result, journal
@@ -2259,6 +2942,292 @@ class V2LocalNativeProductionAdapter:
             )
             session.commit()
             return final_media
+
+    def _load_ai_visual_authority(
+        self,
+        *,
+        workflow_run_id: uuid.UUID,
+        expected_states: frozenset[str],
+    ) -> _AIVisualRenderAuthority:
+        with self._session_factory() as session:
+            run, project, package, script, visual = _production_inputs(
+                session, workflow_run_id
+            )
+            if run.ai_visual_production_run_id is None:
+                raise ValidationFailureError("AI_VISUAL_PRODUCTION_RUN_REQUIRED")
+            visual_run = session.get(
+                AIVisualProductionRun, run.ai_visual_production_run_id
+            )
+            if visual_run is None or visual_run.state not in expected_states:
+                raise ValidationFailureError("AI_VISUAL_RUN_STATE_INVALID")
+            if visual_run.asset_manifest_id is None:
+                raise ValidationFailureError("AI_VISUAL_ASSET_MANIFEST_REQUIRED")
+            manifest_row = session.get(
+                AIVisualAssetManifest, visual_run.asset_manifest_id
+            )
+            style_row = (
+                session.get(AIVisualStyleBible, visual_run.style_bible_id)
+                if visual_run.style_bible_id is not None
+                else None
+            )
+            scene_plan_row = (
+                session.get(AIVisualScenePlanSnapshot, visual_run.scene_plan_id)
+                if visual_run.scene_plan_id is not None
+                else None
+            )
+            effects = tuple(
+                session.scalars(
+                    select(AIVisualAssetEffect)
+                    .where(
+                        AIVisualAssetEffect.visual_production_run_id == visual_run.id
+                    )
+                    .order_by(AIVisualAssetEffect.ordinal)
+                ).all()
+            )
+            media_rows = session.execute(
+                select(V2ProductionEffectLedger, ProductionWorkflowRun)
+                .join(
+                    ProductionWorkflowRun,
+                    ProductionWorkflowRun.id
+                    == V2ProductionEffectLedger.workflow_run_id,
+                )
+                .where(
+                    V2ProductionEffectLedger.stage == "MEDIA",
+                    V2ProductionEffectLedger.state == "VERIFIED",
+                    ProductionWorkflowRun.video_project_id == run.video_project_id,
+                    ProductionWorkflowRun.production_package_artifact_version_id
+                    == run.production_package_artifact_version_id,
+                    ProductionWorkflowRun.production_package_hash
+                    == run.production_package_hash,
+                    ProductionWorkflowRun.canonical_media_timeline_ref
+                    == visual_run.source_timeline_ref,
+                    ProductionWorkflowRun.canonical_media_timeline_hash
+                    == visual_run.source_timeline_hash,
+                )
+            ).all()
+        if manifest_row is None:
+            raise ValidationFailureError("AI_VISUAL_ASSET_MANIFEST_REQUIRED")
+        _validate_ai_visual_run_bindings(
+            run=run,
+            project=project,
+            visual_run=visual_run,
+            manifest_row=manifest_row,
+        )
+
+        manifest_path = self._ai_visual_run_artifact(
+            visual_run.id,
+            _required_run_text(run, "ai_visual_asset_manifest_ref"),
+            expected_name="asset-manifest.json",
+        )
+        manifest_payload = _load_json(manifest_path)
+        if manifest_payload != manifest_row.content:
+            raise ValidationFailureError("AI_VISUAL_MANIFEST_DB_FILE_MISMATCH")
+        try:
+            manifest = AIVisualAssetManifestProjection.model_validate(manifest_payload)
+        except ValueError as exc:
+            raise ValidationFailureError("AI_VISUAL_MANIFEST_INVALID") from exc
+        if (
+            manifest.content_hash != manifest_row.content_hash
+            or manifest.content_hash != run.ai_visual_asset_manifest_hash
+            or manifest.content_hash != visual_run.asset_manifest_hash
+            or manifest.manifest_id != str(manifest_row.id)
+            or manifest.production_visual_policy_ref
+            != visual_run.production_visual_policy_ref
+            or manifest.production_visual_policy_hash
+            != visual_run.production_visual_policy_hash
+            or manifest.scene_plan_ref != run.ai_visual_scene_plan_ref
+            or manifest.scene_plan_hash != visual_run.scene_plan_hash
+            or manifest.style_bible_ref != run.ai_visual_style_bible_ref
+            or manifest.style_bible_hash != visual_run.style_bible_hash
+            or manifest.motion_grammar_ref != visual_run.motion_grammar_ref
+            or manifest.motion_grammar_hash != visual_run.motion_grammar_hash
+            or manifest.effect_plan_ref != visual_run.effect_plan_ref
+            or manifest.effect_plan_hash != visual_run.effect_plan_hash
+            or manifest_row.schema_version != manifest.schema_version
+            or manifest_row.scene_count != manifest.scene_count
+            or manifest_row.ai_image_scene_count != manifest.ai_image_scene_count
+            or manifest_row.ai_video_scene_count != manifest.ai_video_scene_count
+            or manifest_row.asset_count != manifest.asset_count
+            or manifest_row.ai_image_asset_count != manifest.ai_image_asset_count
+            or manifest_row.ai_video_asset_count != manifest.ai_video_asset_count
+            or manifest_row.total_provider_call_count
+            != sum(row.provider_call_count for row in effects)
+        ):
+            raise ValidationFailureError("AI_VISUAL_MANIFEST_AUTHORITY_MISMATCH")
+
+        style_path = self._ai_visual_run_artifact(
+            visual_run.id,
+            _required_run_text(run, "ai_visual_style_bible_ref"),
+            expected_name="style-bible.json",
+        )
+        scene_plan_path = self._ai_visual_run_artifact(
+            visual_run.id,
+            _required_run_text(run, "ai_visual_scene_plan_ref"),
+            expected_name="scene-plan.json",
+        )
+        style_payload = _load_json(style_path)
+        scene_plan_payload = _load_json(scene_plan_path)
+        try:
+            style_bible = VideoVisualStyleBible.model_validate(style_payload)
+            scene_plan = AIVisualPlanCompilation.model_validate(
+                scene_plan_payload.get("compilation")
+            )
+        except ValueError as exc:
+            raise ValidationFailureError("AI_VISUAL_SCENE_AUTHORITY_INVALID") from exc
+        if (
+            ai_visual_stable_hash(scene_plan_payload) != visual_run.scene_plan_hash
+            or ai_visual_stable_hash(scene_plan_payload) != manifest.scene_plan_hash
+            or scene_plan_payload.get("schema_version")
+            != "vcos.ai-visual-scene-plan-set.v1"
+            or scene_plan_payload.get("source_timeline_hash")
+            != visual_run.source_timeline_hash
+            or scene_plan_payload.get("style_bible_hash") != style_bible.content_hash
+            or style_bible.content_hash != visual_run.style_bible_hash
+            or style_bible.content_hash != manifest.style_bible_hash
+            or scene_plan.style_bible_hash != style_bible.content_hash
+            or scene_plan.canonical_duration_ms != visual_run.audio_duration_ms
+            or style_row is None
+            or style_row.id != visual_run.style_bible_id
+            or style_row.visual_production_run_id != visual_run.id
+            or style_row.content_hash != style_bible.content_hash
+            or style_row.content != style_payload
+            or scene_plan_row is None
+            or scene_plan_row.id != visual_run.scene_plan_id
+            or scene_plan_row.visual_production_run_id != visual_run.id
+            or scene_plan_row.style_bible_id != style_row.id
+            or scene_plan_row.style_bible_hash != style_bible.content_hash
+            or scene_plan_row.content_hash != visual_run.scene_plan_hash
+            or scene_plan_row.content != scene_plan_payload
+        ):
+            raise ValidationFailureError("AI_VISUAL_SCENE_AUTHORITY_MISMATCH")
+
+        effect_path = self._ai_visual_run_artifact(
+            visual_run.id,
+            _required_run_text(run, "ffmpeg_effect_plan_ref"),
+            expected_name="ffmpeg-effect-plan.json",
+        )
+        try:
+            effect_plan = FFmpegEffectPlan.model_validate(_load_json(effect_path))
+        except ValueError as exc:
+            raise ValidationFailureError("AI_VISUAL_EFFECT_PLAN_INVALID") from exc
+        grammar_path = self._ai_visual_run_artifact(
+            visual_run.id,
+            _required_run_text(run, "video_motion_grammar_ref"),
+            expected_name="video-motion-grammar.json",
+        )
+        try:
+            motion_grammar = VideoMotionGrammar.model_validate(_load_json(grammar_path))
+        except ValueError as exc:
+            raise ValidationFailureError("AI_VISUAL_MOTION_GRAMMAR_INVALID") from exc
+        if (
+            effect_plan.effect_plan_hash != visual_run.effect_plan_hash
+            or effect_plan.effect_plan_hash != run.ffmpeg_effect_plan_hash
+            or effect_plan.motion_grammar_ref != visual_run.motion_grammar_ref
+            or effect_plan.motion_grammar_hash != visual_run.motion_grammar_hash
+            or effect_plan.canonical_duration_ms != visual_run.audio_duration_ms
+            or motion_grammar.content_hash != visual_run.motion_grammar_hash
+            or motion_grammar.content_hash != effect_plan.motion_grammar_hash
+            or motion_grammar.content_hash != manifest.motion_grammar_hash
+            or not effect_plan.production_eligible
+        ):
+            raise ValidationFailureError("AI_VISUAL_EFFECT_PLAN_AUTHORITY_MISMATCH")
+        _validate_ai_visual_effect_rows(
+            visual_run=visual_run,
+            manifest=manifest,
+            effects=effects,
+        )
+
+        matched_media: dict[
+            tuple[str, str, str], tuple[dict[str, Any], dict[str, Any], Path, Path]
+        ] = {}
+        for media_ledger, _source_run in media_rows:
+            media_journal = dict(media_ledger.effect_journal or {})
+            try:
+                timeline_path = self._from_relative(
+                    _required_text(media_journal, "timeline_relative_path")
+                )
+                timeline = _load_json(timeline_path)
+                audio_path = self._from_relative(
+                    _required_text(media_journal, "audio_relative_path")
+                )
+                caption_path = self._from_relative(
+                    _required_text(media_journal, "caption_relative_path")
+                )
+            except (ValidationFailureError, ValueError):
+                continue
+            if not _ai_visual_media_authority_matches(
+                visual_run=visual_run,
+                timeline=timeline,
+                media_journal=media_journal,
+                audio_path=audio_path,
+                caption_path=caption_path,
+            ):
+                continue
+            matched_media[
+                (
+                    str(timeline_path.resolve()),
+                    str(audio_path.resolve()),
+                    str(caption_path.resolve()),
+                )
+            ] = (timeline, media_journal, audio_path, caption_path)
+        if len(matched_media) != 1:
+            raise ValidationFailureError("AI_VISUAL_SOURCE_MEDIA_AUTHORITY_AMBIGUOUS")
+        timeline, media_journal, audio_path, caption_path = next(
+            iter(matched_media.values())
+        )
+        _require_render_sidecar(
+            caption_path=caption_path,
+            media_journal=media_journal,
+            timeline=timeline,
+        )
+        return _AIVisualRenderAuthority(
+            run=run,
+            project=project,
+            package=package,
+            script=script,
+            visual=visual,
+            visual_run=visual_run,
+            manifest_row=manifest_row,
+            manifest=manifest,
+            style_bible=style_bible,
+            scene_plan=scene_plan,
+            effect_plan=effect_plan,
+            motion_grammar=motion_grammar,
+            asset_effects=effects,
+            timeline=timeline,
+            media_journal=media_journal,
+            audio_path=audio_path,
+            caption_path=caption_path,
+        )
+
+    def _ai_visual_run_artifact(
+        self,
+        visual_run_id: uuid.UUID,
+        value: str,
+        *,
+        expected_name: str,
+    ) -> Path:
+        if "://" in value:
+            raise ValidationFailureError("AI_VISUAL_ARTIFACT_URL_FORBIDDEN")
+        raw = Path(value)
+        required_prefix = ("ai-visual-runs", str(visual_run_id))
+        if (
+            raw.is_absolute()
+            or ".." in raw.parts
+            or "~" in raw.parts
+            or raw.parts[:2] != required_prefix
+            or raw.name != expected_name
+        ):
+            raise ValidationFailureError("AI_VISUAL_ARTIFACT_PATH_INVALID")
+        cursor = self.root
+        for part in raw.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise ValidationFailureError("AI_VISUAL_ARTIFACT_SYMLINK_FORBIDDEN")
+        try:
+            return self._from_relative(value)
+        except ValueError as exc:
+            raise ValidationFailureError("AI_VISUAL_ARTIFACT_PATH_INVALID") from exc
 
     def _effect_dir(self, command_id: str) -> Path:
         key = hashlib.sha256(command_id.encode("utf-8")).hexdigest()
@@ -3512,6 +4481,336 @@ def _required_text(value: dict[str, Any], key: str) -> str:
     return result
 
 
+def _required_run_text(run: ProductionWorkflowRun, field: str) -> str:
+    value = getattr(run, field, None)
+    if not isinstance(value, str) or not value:
+        raise ValidationFailureError(f"AI_VISUAL_RUN_FIELD_REQUIRED:{field}")
+    return value
+
+
+def _validate_ai_visual_run_bindings(
+    *,
+    run: ProductionWorkflowRun,
+    project: VideoProject,
+    visual_run: AIVisualProductionRun,
+    manifest_row: AIVisualAssetManifest,
+) -> None:
+    exact = (
+        run.ai_visual_production_run_id == visual_run.id
+        and visual_run.workflow_run_id == run.id
+        and visual_run.video_project_id == project.id == run.video_project_id
+        and visual_run.production_package_artifact_version_id
+        == run.production_package_artifact_version_id
+        and visual_run.production_package_hash == run.production_package_hash
+        and visual_run.source_timeline_ref == run.canonical_media_timeline_ref
+        and visual_run.source_timeline_hash == run.canonical_media_timeline_hash
+        and visual_run.production_visual_policy_ref == run.ai_visual_policy_ref
+        and visual_run.production_visual_policy_hash == run.ai_visual_policy_hash
+        and visual_run.style_bible_hash == run.ai_visual_style_bible_hash
+        and visual_run.scene_plan_hash == run.ai_visual_scene_plan_hash
+        and visual_run.asset_manifest_hash == run.ai_visual_asset_manifest_hash
+        and visual_run.motion_grammar_ref == run.video_motion_grammar_ref
+        and visual_run.motion_grammar_hash == run.video_motion_grammar_hash
+        and visual_run.effect_plan_ref == run.ffmpeg_effect_plan_ref
+        and visual_run.effect_plan_hash == run.ffmpeg_effect_plan_hash
+        and manifest_row.id == visual_run.asset_manifest_id
+        and manifest_row.visual_production_run_id == visual_run.id
+        and manifest_row.scene_plan_snapshot_id == visual_run.scene_plan_id
+        and manifest_row.scene_plan_hash == visual_run.scene_plan_hash
+        and manifest_row.style_bible_hash == visual_run.style_bible_hash
+        and manifest_row.motion_grammar_hash == visual_run.motion_grammar_hash
+        and manifest_row.effect_plan_hash == visual_run.effect_plan_hash
+        and manifest_row.content_hash == visual_run.asset_manifest_hash
+        and manifest_row.production_eligible is True
+        and manifest_row.renderer_primary_visual_generation is False
+    )
+    if not exact:
+        raise ValidationFailureError("AI_VISUAL_RUN_AUTHORITY_MISMATCH")
+
+
+def _json_contains_scalar(value: Any, target: str) -> bool:
+    if value == target:
+        return True
+    if isinstance(value, dict):
+        return any(_json_contains_scalar(item, target) for item in value.values())
+    if isinstance(value, list):
+        return any(_json_contains_scalar(item, target) for item in value)
+    return False
+
+
+def _validate_ai_visual_effect_rows(
+    *,
+    visual_run: AIVisualProductionRun,
+    manifest: AIVisualAssetManifestProjection,
+    effects: tuple[AIVisualAssetEffect, ...],
+) -> None:
+    if len(effects) != manifest.asset_count:
+        raise ValidationFailureError("AI_VISUAL_ASSET_EFFECT_COUNT_MISMATCH")
+    by_identity = {row.effect_identity_hash: row for row in effects}
+    if len(by_identity) != len(effects):
+        raise ValidationFailureError("AI_VISUAL_ASSET_EFFECT_IDENTITY_DUPLICATE")
+    for asset in manifest.assets:
+        row = by_identity.get(asset.asset_effect_identity_hash)
+        fps_matches = (
+            asset.fps is None and row is not None and row.output_fps is None
+        ) or (
+            asset.fps is not None
+            and row is not None
+            and row.output_fps is not None
+            and abs(float(row.output_fps) - asset.fps) < 0.001
+        )
+        if row is None or not (
+            row.visual_production_run_id == visual_run.id
+            and row.state == "VERIFIED"
+            and row.retry_allowed is False
+            and row.fallback_allowed is False
+            and row.asset_slot_id == asset.asset_slot_id
+            and row.primary_asset_owner_scene_id == asset.primary_asset_owner_scene_id
+            and row.bound_scene_ids == asset.bound_scene_ids
+            and row.bound_scene_plan_hashes == asset.bound_scene_plan_hashes
+            and row.bound_scene_count == len(asset.bound_scene_ids)
+            and row.route == asset.route
+            and row.asset_acquisition_mode == asset.asset_acquisition_mode
+            and row.provider_key == asset.provider_key
+            and row.model_id == asset.model_id
+            and row.effect_identity_hash == asset.asset_effect_identity_hash
+            and row.output_ref == asset.output_ref
+            and row.output_checksum == asset.output_checksum
+            and row.output_checksum == asset.primary_asset_hash
+            and row.output_size_bytes == asset.output_size_bytes
+            and row.output_content_type == asset.output_content_type
+            and row.output_width == asset.width
+            and row.output_height == asset.height
+            and row.output_duration_ms == asset.duration_ms
+            and fps_matches
+            and (row.output_audio_stream_count or 0) == 0
+            and row.qc_ref == asset.qc_ref
+            and row.qc_hash == asset.qc_hash
+            and row.completed_at is not None
+            and _json_contains_scalar(row.qc_evidence, asset.asset_receipt_hash)
+        ):
+            raise ValidationFailureError("AI_VISUAL_ASSET_EFFECT_BINDING_MISMATCH")
+
+
+def _ai_visual_media_authority_matches(
+    *,
+    visual_run: AIVisualProductionRun,
+    timeline: dict[str, Any],
+    media_journal: dict[str, Any],
+    audio_path: Path,
+    caption_path: Path,
+) -> bool:
+    return bool(
+        content_hash(timeline) == visual_run.source_timeline_hash
+        and timeline.get("timeline_ref") == visual_run.source_timeline_ref
+        and timeline.get("duration_ms") == visual_run.audio_duration_ms
+        and timeline.get("audio_strategy") == V2_ELEVENLABS_NARRATION_STRATEGY
+        and timeline.get("audio_asset_ref") == media_journal.get("audio_asset_ref")
+        and timeline.get("audio_checksum") == visual_run.audio_checksum
+        and timeline.get("caption_ref") == media_journal.get("caption_ref")
+        and timeline.get("caption_checksum") == visual_run.caption_checksum
+        and timeline.get("timed_words_ref") == visual_run.timed_words_ref
+        and timeline.get("subtitle_qc_ref") == visual_run.subtitle_qc_ref
+        and timeline.get("subtitle_qc_hash") == visual_run.subtitle_qc_hash
+        and timeline.get("subtitle_qc_state") == "PASS"
+        and timeline.get("narration_present") is True
+        and media_journal.get("audio_relative_path") == visual_run.audio_ref
+        and media_journal.get("audio_checksum") == visual_run.audio_checksum
+        and media_journal.get("caption_relative_path") == visual_run.caption_ref
+        and media_journal.get("caption_checksum") == visual_run.caption_checksum
+        and media_journal.get("caption_artifact_hash") == visual_run.caption_hash
+        and media_journal.get("timed_words_ref") == visual_run.timed_words_ref
+        and media_journal.get("timed_words_hash") == visual_run.timed_words_hash
+        and media_journal.get("subtitle_qc_ref") == visual_run.subtitle_qc_ref
+        and media_journal.get("subtitle_qc_hash") == visual_run.subtitle_qc_hash
+        and media_journal.get("subtitle_qc_state") == "PASS"
+        and audio_path.is_file()
+        and not audio_path.is_symlink()
+        and _sha256_file(audio_path) == visual_run.audio_checksum
+        and caption_path.is_file()
+        and not caption_path.is_symlink()
+        and _sha256_file(caption_path) == visual_run.caption_checksum
+    )
+
+
+def _ai_visual_creative_gate_checks(
+    *,
+    authority: _AIVisualRenderAuthority,
+    assembly: AIVisualFFmpegAssemblyPlan,
+    receipt: AIVisualRenderExecutionReceipt,
+    ai_qc: AIVisualRenderQCEvidence,
+    render_journal: dict[str, Any],
+    cross_modal_report: dict[str, Any] | None,
+) -> dict[str, bool]:
+    effects = assembly.effect_plan.scene_effect_plans
+    ai_gates = {item.gate: item.verdict == "PASS" for item in ai_qc.gate_results}
+    routes = {asset.route for asset in assembly.asset_manifest.assets}
+    providers_valid = all(
+        asset.origin == "AI_GENERATED"
+        and asset.verification_state == "VERIFIED"
+        and (
+            (asset.route == "AI_IMAGE" and asset.provider_key == "google_gemini_image")
+            or (asset.route == "AI_VIDEO" and asset.provider_key == "google_veo")
+        )
+        for asset in assembly.asset_manifest.assets
+    )
+    contiguous = (
+        bool(effects)
+        and effects[0].presentation_start_ms == 0
+        and all(
+            left.presentation_end_ms == right.presentation_start_ms
+            for left, right in zip(effects, effects[1:])
+        )
+    )
+    exact_duration = bool(effects) and (
+        effects[-1].presentation_end_ms
+        == authority.visual_run.audio_duration_ms
+        == assembly.canonical_duration_ms
+    )
+    output_path = Path(receipt.output_ref)
+    return {
+        "AIVisualSceneCoverageGate": (
+            len(effects) == assembly.asset_manifest.scene_count
+            and len({item.scene_id for item in effects}) == len(effects)
+            and contiguous
+            and exact_duration
+        ),
+        "AIVisualProviderProvenanceGate": providers_valid,
+        "AIVisualAssetIntegrityGate": (
+            receipt.output_checksum == authority.run.render_output_checksum
+            and output_path.is_file()
+            and not output_path.is_symlink()
+            and _sha256_file(output_path) == receipt.output_checksum
+        ),
+        "AIVisualAuthorityBindingGate": (
+            assembly.asset_manifest_hash == authority.manifest.content_hash
+            and assembly.effect_plan_hash == authority.effect_plan.effect_plan_hash
+            and assembly.motion_plan_hash == authority.effect_plan.motion_plan_hash
+            and receipt.assembly_plan_hash == assembly.content_hash
+            and render_journal.get("ai_visual_production_run_id")
+            == str(authority.visual_run.id)
+        ),
+        "AIVisualTemporalAlignmentGate": contiguous and exact_duration,
+        "AIVisualDiversityGate": ai_gates.get("MotionDiversityGate", False),
+        "ForbiddenPrimaryVisualSourceGate": (
+            routes.issubset({"AI_IMAGE", "AI_VIDEO"})
+            and providers_valid
+            and render_journal.get("native_primary_visuals_present") is False
+            and render_journal.get("stock_primary_visuals_present") is False
+            and render_journal.get("screenshot_primary_visuals_present") is False
+        ),
+        "AssemblerOnlyGate": ai_gates.get("AssemblerOnlyGate", False),
+        "AudioAuthorityGate": (
+            receipt.narration_audio_checksum == authority.visual_run.audio_checksum
+            and render_journal.get("audio_asset_ref") == authority.visual_run.audio_ref
+            and render_journal.get("audio_checksum")
+            == authority.visual_run.audio_checksum
+        ),
+        "SubtitleSidecarGate": ai_gates.get("SRTSidecarOnlyGate", False),
+        "TechnicalMediaGate": ai_gates.get("TechnicalMediaGate", False),
+        "CrossModalLineageGate": (
+            cross_modal_report is not None
+            and cross_modal_report.get("schema_version")
+            == "vcos.ai-visual-cross-modal-qc.v1"
+            and bool(cross_modal_report.get("asset_attestations"))
+            and bool(cross_modal_report.get("scene_bindings"))
+            and isinstance(cross_modal_report.get("content_hash"), str)
+            and bool(
+                re.fullmatch(
+                    r"[0-9a-f]{64}", str(cross_modal_report.get("content_hash"))
+                )
+            )
+            and cross_modal_report.get("evidence_scope") == "LINEAGE_AND_SCENE_BINDING"
+            and cross_modal_report.get("automated_disposition_scope")
+            == "LINEAGE_SCENE_TIMING_TECHNICAL_AND_MOTION_ONLY"
+            and cross_modal_report.get("deterministic_disposition") == "PASS"
+            and isinstance(cross_modal_report.get("image_asset_count"), int)
+            and isinstance(cross_modal_report.get("video_asset_count"), int)
+            and cross_modal_report.get("image_asset_count", -1) >= 0
+            and cross_modal_report.get("video_asset_count", -1) >= 0
+            and cross_modal_report.get("image_asset_count", 0)
+            + cross_modal_report.get("video_asset_count", 0)
+            == len(cross_modal_report.get("asset_attestations") or [])
+            and cross_modal_report.get(
+                "image_same_interaction_semantic_attestation_count"
+            )
+            == cross_modal_report.get("image_asset_count")
+            and cross_modal_report.get("video_technical_motion_inspection_count")
+            == cross_modal_report.get("video_asset_count")
+            and cross_modal_report.get(
+                "image_same_interaction_semantic_attestations_verified"
+            )
+            is True
+            and cross_modal_report.get("independent_multimodal_inspection_performed")
+            is False
+            and cross_modal_report.get(
+                "video_actual_asset_semantic_inspection_performed"
+            )
+            is False
+            and cross_modal_report.get("video_provider_semantic_match_asserted")
+            is False
+            and cross_modal_report.get("video_technical_motion_evidence_verified")
+            is True
+            and cross_modal_report.get("automated_semantic_conformity_asserted")
+            is False
+            and (
+                (
+                    cross_modal_report.get("video_asset_count") == 0
+                    and cross_modal_report.get("actual_asset_description_source")
+                    == "SAME_INTERACTION_MODEL_OUTPUT"
+                    and cross_modal_report.get(
+                        "actual_asset_semantic_inspection_performed"
+                    )
+                    is True
+                    and cross_modal_report.get(
+                        "same_interaction_model_output_semantic_inspection_performed"
+                    )
+                    is True
+                    and cross_modal_report.get("actual_asset_semantic_disposition")
+                    == "PASS_SAME_INTERACTION_ATTESTED_PENDING_HUMAN_REVIEW"
+                )
+                or (
+                    cross_modal_report.get("video_asset_count", 0) > 0
+                    and cross_modal_report.get(
+                        "actual_asset_semantic_inspection_performed"
+                    )
+                    is False
+                    and cross_modal_report.get(
+                        "same_interaction_model_output_semantic_inspection_performed"
+                    )
+                    is False
+                    and cross_modal_report.get("actual_asset_description_source")
+                    in {
+                        "NO_AUTOMATED_ASSET_DESCRIPTION",
+                        "MIXED_IMAGE_ATTESTATION_AND_VIDEO_TECHNICAL_EVIDENCE",
+                    }
+                    and cross_modal_report.get("actual_asset_semantic_disposition")
+                    in {
+                        "NOT_AUTOMATICALLY_INSPECTED_PENDING_HUMAN_SEMANTIC_REVIEW",
+                        "MIXED_IMAGE_ATTESTED_VIDEO_PENDING_HUMAN_SEMANTIC_REVIEW",
+                    }
+                )
+            )
+            and cross_modal_report.get("human_semantic_review_required") is True
+            and cross_modal_report.get("human_final_review_required") is True
+            and cross_modal_report.get(
+                "automated_pass_is_not_independent_semantic_conformity"
+            )
+            is True
+        ),
+        "MotionCoverageGate": ai_gates.get("MotionCoverageGate", False),
+        "MotionBoundsGate": ai_gates.get("MotionBoundsGate", False),
+        "MotionMeaningAlignmentGate": ai_gates.get("MotionMeaningAlignmentGate", False),
+        "MotionDiversityGate": ai_gates.get("MotionDiversityGate", False),
+        "TransitionContinuityGate": ai_gates.get("TransitionContinuityGate", False),
+        "StaticDurationGate": ai_gates.get("StaticDurationGate", False),
+        "DeadVisualTimeGate": ai_gates.get("DeadVisualTimeGate", False),
+        "RenderedMotionObservationGate": ai_gates.get(
+            "RenderedMotionObservationGate", False
+        ),
+    }
+
+
 def _persist_exact_json(
     path: Path,
     payload: dict[str, Any],
@@ -3534,6 +4833,28 @@ def _persist_exact_json(
         raise ValidationFailureError("V2_EFFECT_FILE_IDENTITY_CONFLICT")
     _write_json_atomic(path, payload)
     return False
+
+
+def _persist_ai_visual_qc_artifact_set(
+    *,
+    technical_path: Path,
+    technical: dict[str, Any],
+    creative_path: Path,
+    creative: dict[str, Any],
+    render_qc_path: Path,
+    render_qc: dict[str, Any],
+    cross_modal_path: Path,
+    cross_modal: dict[str, Any],
+) -> None:
+    """Resume the deterministic QC artifact set after any interrupted write."""
+
+    for path, payload in (
+        (technical_path, technical),
+        (creative_path, creative),
+        (render_qc_path, render_qc),
+        (cross_modal_path, cross_modal),
+    ):
+        _persist_exact_json(path, payload)
 
 
 def _load_json(path: Path) -> dict[str, Any]:

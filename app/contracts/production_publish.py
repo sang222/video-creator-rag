@@ -68,6 +68,12 @@ class FinalReviewCandidateCreateV2(BaseModel):
     production_readiness_receipt_hash: str = Field(pattern=SHA256_PATTERN)
     canonical_media_timeline_ref: str = Field(min_length=1)
     canonical_media_timeline_hash: str = Field(pattern=SHA256_PATTERN)
+    ai_visual_production_run_id: uuid.UUID | None = None
+    ai_visual_asset_manifest_hash: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
+    ffmpeg_effect_plan_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    supersedes_final_review_candidate_id: uuid.UUID | None = None
     native_render_plan_ref: str = Field(min_length=1)
     native_render_plan_hash: str = Field(pattern=SHA256_PATTERN)
     render_output_ref: str = Field(min_length=1)
@@ -116,6 +122,19 @@ class FinalReviewCandidateCreateV2(BaseModel):
         required_metadata = {"title", "privacy_status"}
         if not required_metadata.issubset(self.publish_metadata_snapshot):
             raise ValueError("PUBLISH_METADATA_SNAPSHOT_INCOMPLETE")
+        ai_visual_values = (
+            self.ai_visual_production_run_id,
+            self.ai_visual_asset_manifest_hash,
+            self.ffmpeg_effect_plan_hash,
+        )
+        if (
+            any(value is not None for value in ai_visual_values)
+            and not all(value is not None for value in ai_visual_values)
+        ) or (
+            self.supersedes_final_review_candidate_id is not None
+            and not all(value is not None for value in ai_visual_values)
+        ):
+            raise ValueError("AI_VISUAL_REPLACEMENT_LINEAGE_PARTIAL")
         destination = self.target_market_lineage
         mode = destination.get("destination_mode")
         status = destination.get("destination_status")
@@ -183,9 +202,7 @@ class FinalReviewCandidateCreateV2(BaseModel):
                     SHA256_PATTERN,
                     destination["settlement_authority_hash"],
                 )
-                or not isinstance(
-                    destination.get("settlement_provenance_hash"), str
-                )
+                or not isinstance(destination.get("settlement_provenance_hash"), str)
                 or not re.fullmatch(
                     SHA256_PATTERN,
                     destination["settlement_provenance_hash"],
@@ -240,6 +257,10 @@ class FinalReviewCandidateRead(BaseModel):
     production_readiness_receipt_hash: str
     canonical_media_timeline_ref: str
     canonical_media_timeline_hash: str
+    ai_visual_production_run_id: uuid.UUID | None
+    ai_visual_asset_manifest_hash: str | None
+    ffmpeg_effect_plan_hash: str | None
+    supersedes_final_review_candidate_id: uuid.UUID | None
     native_render_plan_ref: str
     native_render_plan_hash: str
     render_output_ref: str

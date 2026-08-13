@@ -21,6 +21,17 @@ tests/*
 !tests/test_script_qualification.py
 !tests/test_cross_modal_lineage.py
 !tests/test_v2_renderer_reconciliation.py
+!tests/test_v2_ai_visual_provider.py
+!tests/test_v2_veo_visual_provider.py
+!tests/test_ai_visual_planner.py
+!tests/test_native_motion_compiler_v2.py
+!tests/test_v2_ai_visual_renderer.py
+!tests/test_v2_ai_visual_workflow_integration.py
+!tests/test_ai_visual_migration.py
+!tests/test_v2_ai_visual_stage.py
+!tests/test_ai_visual_rerender_recovery.py
+!tests/test_ai_visual_cross_modal.py
+!tests/test_v2_drive_archive_crash_recovery.py
 var/generated/
 var/credentials/
 var/logs/

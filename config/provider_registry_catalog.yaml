@@ -1,5 +1,5 @@
 catalog_key: provider_registry_catalog
-catalog_version: "4.0.0"
+catalog_version: "4.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -107,15 +107,16 @@ items:
       supported_aspect_ratios: ["16:9", "1:1"]
       output_count: 1
     policy_fit_blob:
-      production_enabled_when_configured: false
-      execution_disabled_by_default: true
-      fixture_only_by_default: true
+      production_enabled_when_configured: true
+      execution_disabled_by_default: false
+      fixture_only_by_default: false
       explicit_provider_route_approval_required: true
+      production_visual_policy_ref: config://production_visual_policy_catalog/2026-08-13/active-real-long-form-ai-only
       provider_fallback_allowed: false
       distinct_from_google_veo: true
-      native_overlay_authority: native_ffmpeg
+      native_overlay_authority: native_ffmpeg_secondary_only
     cost_model_blob:
-      catalog_ref: config://google_gemini_image_model_price_catalog/2026-07-17
+      catalog_ref: config://google_gemini_image_model_price_catalog/2026-07-30
       actual_cost_nullable_until_execution: true
     quota_model_blob:
       maximum_outputs_per_request: 1

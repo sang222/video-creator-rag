@@ -498,6 +498,18 @@ class V2NarrationTimingRecoveryService:
         self.session.add(recovery_receipt)
         self.session.flush()
 
+        from app.services.v2_ai_visual_authorization import (
+            authorize_normal_ai_visual_after_verified_media,
+        )
+
+        authorize_normal_ai_visual_after_verified_media(
+            session=self.session,
+            workflow_run_id=workflow_run_id,
+            media_result=result,
+            workspace_root=self.adapter.root,
+            settings=self.settings,
+            clock=self.now,
+        )
         command_receipt = WorkflowCommandReceipt(
             workflow_run_id=workflow_run_id,
             domain_event_id=scope.event.id,
@@ -534,11 +546,16 @@ class V2NarrationTimingRecoveryService:
         self.session.flush()
         self.session.commit()
         self.session.refresh(run)
+        expected_next_stage = (
+            ProductionWorkflowStage.VISUAL
+            if run.ai_visual_production_run_id is not None
+            else ProductionWorkflowStage.RENDER
+        )
         next_event = self.session.scalar(
             select(DomainEvent).where(
                 DomainEvent.workflow_run_id == workflow_run_id,
                 DomainEvent.command_id
-                == command_id_for(workflow_run_id, ProductionWorkflowStage.RENDER),
+                == command_id_for(workflow_run_id, expected_next_stage),
             )
         )
         if (
@@ -548,10 +565,10 @@ class V2NarrationTimingRecoveryService:
             or next_event.aggregate_type != WORKFLOW_AGGREGATE_TYPE
             or next_event.aggregate_id != workflow_run_id
             or next_event.payload_hash != semantic_hash(next_event.payload or {})
-            or (next_event.payload or {}).get("stage") != "RENDER"
+            or (next_event.payload or {}).get("stage") != expected_next_stage.value
         ):
             raise ValidationFailureError(
-                "V2_NARRATION_TIMING_RECOVERY_RENDER_EVENT_DRIFT"
+                "V2_NARRATION_TIMING_RECOVERY_NEXT_EVENT_DRIFT"
             )
         return V2NarrationTimingRecoveryResult(
             workflow_run_id=workflow_run_id,
@@ -996,11 +1013,16 @@ class V2NarrationTimingRecoveryService:
             != receipt.canonical_media_timeline_hash
         ):
             raise ValidationFailureError("V2_NARRATION_TIMING_RECOVERY_RECEIPT_DRIFT")
+        expected_next_stage = (
+            ProductionWorkflowStage.VISUAL
+            if run.ai_visual_production_run_id is not None
+            else ProductionWorkflowStage.RENDER
+        )
         next_event = self.session.scalar(
             select(DomainEvent).where(
                 DomainEvent.workflow_run_id == workflow_run_id,
                 DomainEvent.command_id
-                == command_id_for(workflow_run_id, ProductionWorkflowStage.RENDER),
+                == command_id_for(workflow_run_id, expected_next_stage),
             )
         )
         if (
@@ -1010,10 +1032,10 @@ class V2NarrationTimingRecoveryService:
             or next_event.aggregate_type != WORKFLOW_AGGREGATE_TYPE
             or next_event.aggregate_id != workflow_run_id
             or next_event.payload_hash != semantic_hash(next_event.payload or {})
-            or (next_event.payload or {}).get("stage") != "RENDER"
+            or (next_event.payload or {}).get("stage") != expected_next_stage.value
         ):
             raise ValidationFailureError(
-                "V2_NARRATION_TIMING_RECOVERY_RENDER_EVENT_DRIFT"
+                "V2_NARRATION_TIMING_RECOVERY_NEXT_EVENT_DRIFT"
             )
         return V2NarrationTimingRecoveryResult(
             workflow_run_id=workflow_run_id,

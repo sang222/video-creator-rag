@@ -31,6 +31,8 @@ class ProductionWorkflowState(StrEnum):
     READY_FOR_PRODUCTION = "READY_FOR_PRODUCTION"
     MEDIA_PENDING = "MEDIA_PENDING"
     MEDIA_RUNNING = "MEDIA_RUNNING"
+    VISUAL_PENDING = "VISUAL_PENDING"
+    VISUAL_RUNNING = "VISUAL_RUNNING"
     RENDER_PENDING = "RENDER_PENDING"
     RENDER_RUNNING = "RENDER_RUNNING"
     QC_PENDING = "QC_PENDING"
@@ -55,6 +57,7 @@ class ProductionWorkflowStage(StrEnum):
     PACKAGE = "PACKAGE"
     READINESS = "READINESS"
     MEDIA = "MEDIA"
+    VISUAL = "VISUAL"
     RENDER = "RENDER"
     QC = "QC"
     ARCHIVE = "ARCHIVE"
@@ -140,6 +143,21 @@ class WorkflowAuthorityRefs(BaseModel):
     canonical_media_timeline_hash: str | None = Field(
         default=None, pattern=SHA256_PATTERN
     )
+    ai_visual_production_run_id: uuid.UUID | None = None
+    ai_visual_policy_ref: str | None = None
+    ai_visual_policy_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    ai_visual_style_bible_ref: str | None = None
+    ai_visual_style_bible_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    ai_visual_scene_plan_ref: str | None = None
+    ai_visual_scene_plan_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    ai_visual_asset_manifest_ref: str | None = None
+    ai_visual_asset_manifest_hash: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
+    video_motion_grammar_ref: str | None = None
+    video_motion_grammar_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    ffmpeg_effect_plan_ref: str | None = None
+    ffmpeg_effect_plan_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     native_render_plan_ref: str | None = None
     native_render_plan_hash: str | None = Field(default=None, pattern=SHA256_PATTERN)
     render_output_ref: str | None = None
@@ -193,6 +211,36 @@ class WorkflowAuthorityRefs(BaseModel):
                 self.canonical_media_timeline_ref,
                 self.canonical_media_timeline_hash,
                 "canonical media timeline",
+            ),
+            (
+                self.ai_visual_policy_ref,
+                self.ai_visual_policy_hash,
+                "AI visual policy",
+            ),
+            (
+                self.ai_visual_style_bible_ref,
+                self.ai_visual_style_bible_hash,
+                "AI visual style bible",
+            ),
+            (
+                self.ai_visual_scene_plan_ref,
+                self.ai_visual_scene_plan_hash,
+                "AI visual scene plan",
+            ),
+            (
+                self.ai_visual_asset_manifest_ref,
+                self.ai_visual_asset_manifest_hash,
+                "AI visual asset manifest",
+            ),
+            (
+                self.video_motion_grammar_ref,
+                self.video_motion_grammar_hash,
+                "video motion grammar",
+            ),
+            (
+                self.ffmpeg_effect_plan_ref,
+                self.ffmpeg_effect_plan_hash,
+                "FFmpeg effect plan",
             ),
             (
                 self.native_render_plan_ref,

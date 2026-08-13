@@ -189,8 +189,8 @@ class ChannelProfileCompiler:
         if policy.visual_source_policy_binding is None:
             return policy
         raw = deepcopy(policy.model_dump(mode="json"))
-        raw["visual_source_policy_binding"] = self._qualified_visual_source_binding().model_dump(
-            mode="json"
+        raw["visual_source_policy_binding"] = (
+            self._qualified_visual_source_binding().model_dump(mode="json")
         )
         raw["provider_usage_policy"]["google_gemini_image"] = (
             GeminiImageUsagePolicy().model_dump(mode="json")
@@ -1074,16 +1074,21 @@ class ChannelProfileCompiler:
         if len(provider_rows) != 1:
             raise ValidationFailureError("CH1_FLEX_V2_GEMINI_IMAGE_PROVIDER_NOT_UNIQUE")
         provider_row = provider_rows[0]
+        provider_policy = provider_row.get("policy_fit_blob", {})
+        production_enabled = provider_policy.get("production_enabled_when_configured")
+        production_authority_is_safe = production_enabled is False or (
+            production_enabled is True
+            and provider_policy.get("production_visual_policy_ref")
+            == "config://production_visual_policy_catalog/2026-08-13/active-real-long-form-ai-only"
+            and provider_policy.get("explicit_provider_route_approval_required") is True
+            and provider_policy.get("provider_fallback_allowed") is False
+        )
         if (
             provider_row.get("status") != "ACTIVE"
             or provider_row.get("capability_blob", {}).get("capability")
             != "AI_IMAGE_GENERATION"
-            or provider_row.get("policy_fit_blob", {}).get("provider_fallback_allowed")
-            is not False
-            or provider_row.get("policy_fit_blob", {}).get(
-                "production_enabled_when_configured"
-            )
-            is not False
+            or provider_policy.get("provider_fallback_allowed") is not False
+            or not production_authority_is_safe
         ):
             raise ValidationFailureError(
                 "CH1_FLEX_V2_GEMINI_IMAGE_PROVIDER_POLICY_INVALID"

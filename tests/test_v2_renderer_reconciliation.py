@@ -300,7 +300,9 @@ def test_real_long_form_render_requires_elevenlabs_and_never_local_fallback() ->
     adapter._narration_runtime = None
     context = SimpleNamespace(
         run=SimpleNamespace(
-            production_lane="LONG_FORM", planning_source_type="LONG_FORM_PLAN"
+            production_lane="LONG_FORM",
+            planning_source_type="LONG_FORM_PLAN",
+            ai_visual_production_run_id=uuid.uuid4(),
         )
     )
 

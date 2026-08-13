@@ -297,6 +297,59 @@ class CreativeQualityPolicyCatalogItem(BaseModel):
         return self
 
 
+class ProductionVisualPolicyCatalogItem(BaseModel):
+    """Global active-production visual-origin and motion authority."""
+
+    key: str = Field(min_length=1)
+    policy_version: str = Field(min_length=1)
+    status: str
+    production_lane: str
+    production_visual_origin: str
+    allowed_primary_routes: list[str] = Field(min_length=2, max_length=2)
+    forbidden_primary_routes: list[str] = Field(min_length=1)
+    renderer_policy: dict[str, Any]
+    caption_policy: dict[str, Any]
+    motion_policy: dict[str, Any]
+    provider_policy: dict[str, Any]
+    fallback_policy: dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_ai_only_production(self) -> "ProductionVisualPolicyCatalogItem":
+        if (
+            self.key != "active-real-long-form-ai-only"
+            or self.policy_version != "vcos.production-visual-policy.ai-only.v1"
+            or self.status != "ACTIVE"
+            or self.production_lane != "REAL_LONG_FORM_PRODUCTION"
+            or self.production_visual_origin != "AI_GENERATED"
+            or self.allowed_primary_routes != ["AI_IMAGE", "AI_VIDEO"]
+            or not {
+                "NATIVE_GRAPHIC",
+                "NATIVE_DIAGRAM",
+                "NATIVE_EXPLANATORY_DIAGRAM",
+                "NATIVE_TEXT_CARD",
+                "STOCK",
+                "PEXELS_VIDEO",
+                "PEXELS_PHOTO",
+                "SCREENSHOT",
+                "AUTHORIZED_UI_OR_PRODUCT_ASSET",
+                "HUMAN_SUPPLIED_ASSET",
+                "ARCHIVED_NON_AI_ASSET_REUSE",
+            }.issubset(set(self.forbidden_primary_routes))
+            or self.renderer_policy.get("assembly_only") is not True
+            or self.renderer_policy.get("primary_visual_generation") is not False
+            or self.caption_policy.get("srt_sidecar_only") is not True
+            or self.caption_policy.get("narration_burn_in") is not False
+            or self.motion_policy.get("motion_pack_version")
+            != "vcos.native-motion-pack.v2"
+            or self.provider_policy.get("fallback_allowed") is not False
+            or self.fallback_policy.get("block_when_ai_asset_unavailable") is not True
+        ):
+            raise ValueError("PRODUCTION_VISUAL_POLICY_AI_ONLY_INVALID")
+        return self
+
+
 class RetryPolicyCatalogItem(BaseModel):
     policy_key: str
     provider_key: str | None = None
@@ -550,6 +603,7 @@ class ConfigRegistryService:
             "google_veo_model_price_catalog": GoogleVeoModelPriceCatalogItem,
             "google_gemini_image_model_price_catalog": GoogleGeminiImageModelPriceCatalogItem,
             "creative_quality_policy_catalog": CreativeQualityPolicyCatalogItem,
+            "production_visual_policy_catalog": ProductionVisualPolicyCatalogItem,
             "channel_scoped_policy_catalog": ChannelScopedPolicy,
             "visual_source_routing_policy_catalog": VisualSourceRoutingPolicyCatalogItem,
             "provider_capability_catalog": SimpleKeyCatalogItem,
@@ -682,9 +736,17 @@ class ConfigRegistryService:
                 raise ValidationFailureError(
                     "google_gemini_image registry aspect ratios are invalid"
                 )
-            if policy.get("production_enabled_when_configured") is not False:
+            if (
+                policy.get("production_enabled_when_configured") is not True
+                or policy.get("execution_disabled_by_default") is not False
+                or policy.get("fixture_only_by_default") is not False
+                or policy.get("explicit_provider_route_approval_required") is not True
+                or policy.get("provider_fallback_allowed") is not False
+                or policy.get("production_visual_policy_ref")
+                != "config://production_visual_policy_catalog/2026-08-13/active-real-long-form-ai-only"
+            ):
                 raise ValidationFailureError(
-                    "google_gemini_image production execution must default false"
+                    "google_gemini_image production execution policy is invalid"
                 )
             if policy.get("distinct_from_google_veo") is not True:
                 raise ValidationFailureError(
@@ -692,7 +754,7 @@ class ConfigRegistryService:
                 )
             if (
                 cost.get("catalog_ref")
-                != "config://google_gemini_image_model_price_catalog/2026-07-17"
+                != "config://google_gemini_image_model_price_catalog/2026-07-30"
             ):
                 raise ValidationFailureError(
                     "google_gemini_image registry price catalog ref is invalid"

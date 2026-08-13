@@ -9,10 +9,14 @@ can treat a local recovery copy as a real archive.
 
 from __future__ import annotations
 
+import hashlib
+import mimetypes
+import os
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import parse_qs, urlparse
 
@@ -36,8 +40,11 @@ from app.services.config_registry import content_hash
 from app.services.m10_2 import FinalMediaRefService
 from app.services.m10_5 import (
     GOOGLE_DRIVE_SCOPE,
+    CloudMediaRefService,
     GoogleDriveConfigService,
+    GoogleDriveUploadResult,
     GoogleDriveUploadService,
+    GoogleDriveVerificationResult,
 )
 from app.services.production_package import ProductionPackageService
 from app.services.production_workflow import WorkflowStageContext, WorkflowStageError
@@ -62,10 +69,96 @@ V2_DRIVE_ARCHIVE_LINEAGE_ARTIFACT_TYPE = "v2_drive_final_media_lineage_receipt"
 V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA = "vcos.v2-drive-final-media-lineage.v1"
 V2_DRIVE_ARCHIVE_RECEIPT_SCHEMA = "vcos.v2-drive-archive-receipt.v1"
 V2_DRIVE_CAPTION_REVIEW_SCHEMA = "vcos.v2-drive-caption-review.v1"
+V2_DRIVE_ARCHIVE_RECONCILIATION_SCHEMA = (
+    "vcos.v2-google-drive-archive-get-only-reconciliation.v1"
+)
 V2_DRIVE_CAPTION_SIDECAR_LABEL = (
     "Tệp phụ đề SRT rời đã xác minh trên Google Drive (sidecar, không phải chữ "
     "được chèn vào khung hình)."
 )
+
+
+def _media_workflow_run_id_for_ai_visual_archive(
+    *,
+    session: Session,
+    run: Any,
+) -> uuid.UUID:
+    """Resolve caption lineage without conflating normal and governed runs."""
+
+    visual_run_id = run.ai_visual_production_run_id
+    if visual_run_id is None:
+        return run.id
+
+    from app.db.models.ai_visual import AIVisualProductionRun
+
+    visual_run = session.get(AIVisualProductionRun, visual_run_id)
+    if (
+        visual_run is None
+        or visual_run.id != visual_run_id
+        or visual_run.workflow_run_id != run.id
+        or visual_run.video_project_id != run.video_project_id
+    ):
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_REMOTE_AI_VISUAL_AUTHORITY_REQUIRED"
+        )
+    if visual_run.execution_kind == "NORMAL_PRODUCTION":
+        if visual_run.rerender_authority_id is not None:
+            raise ValidationFailureError(
+                "V2_GOOGLE_DRIVE_REMOTE_AI_VISUAL_AUTHORITY_REQUIRED"
+            )
+        return run.id
+    if (
+        visual_run.execution_kind == "GOVERNED_RERENDER"
+        and visual_run.rerender_authority_id is not None
+    ):
+        from app.services.ai_visual_rerender_authority import (
+            resolve_governed_ai_visual_rerender_execution_authority,
+        )
+
+        governed = resolve_governed_ai_visual_rerender_execution_authority(
+            session,
+            workflow_run_id=run.id,
+            required=True,
+        )
+        if governed is None or governed.source_workflow.id == run.id:
+            raise ValidationFailureError(
+                "V2_GOOGLE_DRIVE_REMOTE_AI_VISUAL_AUTHORITY_REQUIRED"
+            )
+        return governed.source_workflow.id
+    raise ValidationFailureError("V2_GOOGLE_DRIVE_REMOTE_AI_VISUAL_AUTHORITY_REQUIRED")
+
+
+def _remote_archive_request_identity(
+    *,
+    command_id: str,
+    operation_id: str,
+    idempotency_key: str,
+    source_relative_path: str,
+    source_checksum: str,
+    source_size_bytes: int,
+    measured_render_duration_ms: int,
+    caption_relative_path: str,
+    sidecar: Mapping[str, str],
+) -> dict[str, Any]:
+    """Canonical identity sealed before either Google Drive submission."""
+
+    return {
+        "schema_version": "vcos.v2-google-drive-archive-request.v1",
+        "command_id": command_id,
+        "operation_id": operation_id,
+        "idempotency_key": idempotency_key,
+        "source_relative_path": source_relative_path,
+        "source_checksum": source_checksum,
+        "source_size_bytes": source_size_bytes,
+        "measured_render_duration_ms": measured_render_duration_ms,
+        "caption_relative_path": caption_relative_path,
+        "caption_checksum": sidecar["caption_checksum"],
+        "caption_ref": sidecar["caption_ref"],
+        "caption_artifact_hash": sidecar["caption_artifact_hash"],
+        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+        "attempt_limit": 1,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +283,18 @@ class V2VerifiedDriveArchiveArtifact:
     archive_receipt_hash: str
     archive_object_ref: str
     caption_archive_object_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class _V2DriveGETOnlyFileProof:
+    """One exact remote Drive object resolved without a provider write."""
+
+    media_type: str
+    idempotency_key: str
+    folder_path: tuple[str, ...]
+    upload_result: GoogleDriveUploadResult
+    verification: GoogleDriveVerificationResult
+    checksum_readback_performed: bool
 
 
 class V2GoogleDriveArchiveAdapter:
@@ -367,6 +472,10 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             run, project, _package, _script, _visual = _production_inputs(
                 session, context.run.id
             )
+            media_workflow_run_id = _media_workflow_run_id_for_ai_visual_archive(
+                session=session,
+                run=run,
+            )
             render_ledger = session.scalar(
                 select(V2ProductionEffectLedger).where(
                     V2ProductionEffectLedger.workflow_run_id == run.id,
@@ -379,7 +488,7 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             render_journal = dict(render_ledger.effect_journal or {})
             media_ledger = session.scalar(
                 select(V2ProductionEffectLedger).where(
-                    V2ProductionEffectLedger.workflow_run_id == run.id,
+                    V2ProductionEffectLedger.workflow_run_id == media_workflow_run_id,
                     V2ProductionEffectLedger.stage == "MEDIA",
                     V2ProductionEffectLedger.state == "VERIFIED",
                 )
@@ -512,42 +621,66 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
                 context=context,
                 operation=operation,
                 external_effect_performed=True,
+                caption_sidecar_authority=sidecar,
             )
         except WorkflowStageError as exc:
-            if exc.error_code != "V2_DRIVE_ARCHIVE_ARTIFACT_REQUIRED":
+            if exc.error_code not in {
+                "V2_DRIVE_ARCHIVE_ARTIFACT_REQUIRED",
+                "V2_DRIVE_ARCHIVE_CAPTION_ARTIFACT_REQUIRED",
+            }:
                 raise
 
         details = dict(operation.parameters["provider_execution"])
         effect_dir = self._effect_dir(context.command_id)
         request_path = effect_dir / "google-drive-archive-request-journal.json"
-        identity = {
-            "schema_version": "vcos.v2-google-drive-archive-request.v1",
-            "command_id": context.command_id,
-            "operation_id": operation.operation_id,
-            "idempotency_key": details["idempotency_key"],
-            "source_relative_path": self._relative(source),
-            "source_checksum": checksum,
-            "source_size_bytes": source.stat().st_size,
-            "measured_render_duration_ms": measured_duration_ms,
-            "caption_relative_path": self._relative(caption_source),
-            "caption_checksum": sidecar["caption_checksum"],
-            "caption_ref": sidecar["caption_ref"],
-            "caption_artifact_hash": sidecar["caption_artifact_hash"],
-            "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
-            "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
-            "attempt_limit": 1,
-        }
+        identity = _remote_archive_request_identity(
+            command_id=context.command_id,
+            operation_id=operation.operation_id,
+            idempotency_key=details["idempotency_key"],
+            source_relative_path=self._relative(source),
+            source_checksum=checksum,
+            source_size_bytes=source.stat().st_size,
+            measured_render_duration_ms=measured_duration_ms,
+            caption_relative_path=self._relative(caption_source),
+            sidecar=sidecar,
+        )
         if request_path.exists():
-            prior = _load_json(request_path)
-            if any(prior.get(key) != value for key, value in identity.items()):
+            if not request_path.is_file() or request_path.is_symlink():
                 raise ValidationFailureError("V2_GOOGLE_DRIVE_REQUEST_JOURNAL_MISMATCH")
+            prior = _load_json(request_path)
+            if prior != {**identity, "state": "SUBMITTED"}:
+                raise ValidationFailureError("V2_GOOGLE_DRIVE_REQUEST_JOURNAL_MISMATCH")
+            self._reconcile_submitted_remote_archive_get_only(
+                context=context,
+                operation=operation,
+                source=source,
+                checksum=checksum,
+                measured_duration_ms=measured_duration_ms,
+                caption_source=caption_source,
+                sidecar=sidecar,
+                request_identity=identity,
+            )
+            artifact = _resolve_or_create_v2_drive_archive(
+                session=context.session,
+                context=context,
+                operation=operation,
+                external_effect_performed=True,
+                caption_sidecar_authority=sidecar,
+            )
+            context.session.commit()
+            return artifact
+        attempt_count = context.event.attempt_count
+        if (
+            isinstance(attempt_count, bool)
+            or not isinstance(attempt_count, int)
+            or attempt_count != 1
+        ):
             raise WorkflowStageError(
                 classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
-                error_code="V2_GOOGLE_DRIVE_OUTCOME_UNCERTAIN",
+                error_code="V2_GOOGLE_DRIVE_RESUBMISSION_FORBIDDEN",
                 summary=(
-                    "A Google Drive archive request was submitted without a "
-                    "sealed checksum-verified authority; no duplicate upload "
-                    "was attempted."
+                    "An ARCHIVE replay has no exact prior request journal; no "
+                    "Google Drive upload or replacement journal was attempted."
                 ),
                 incident_type="PROVIDER_OUTCOME_UNCERTAIN",
                 retry_eligible=False,
@@ -563,18 +696,7 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
                 video_project_id=context.run.video_project_id,
                 uploaded_video_id=None,
                 render_package_id=None,
-                source_refs=[
-                    {
-                        "type": "v2_render_output",
-                        "workflow_run_id": str(context.run.id),
-                        "render_output_ref": context.run.render_output_ref,
-                        "render_output_checksum": context.run.render_output_checksum,
-                        "production_package_artifact_version_id": str(
-                            context.run.production_package_artifact_version_id
-                        ),
-                        "production_package_hash": context.run.production_package_hash,
-                    }
-                ],
+                source_refs=[_v2_render_output_source_ref(context.run)],
                 retention_policy={
                     "keep_local": True,
                     "cleanup_authorized": False,
@@ -649,9 +771,440 @@ class V2GoogleDriveRemoteArchiveAdapter(V2LocalNativeProductionAdapter):
             context=context,
             operation=operation,
             external_effect_performed=True,
+            caption_sidecar_authority=sidecar,
         )
         context.session.commit()
         return artifact
+
+    def _reconcile_submitted_remote_archive_get_only(
+        self,
+        *,
+        context: WorkflowStageContext,
+        operation: V2AuthorizedAdapterOperation,
+        source: Path,
+        checksum: str,
+        measured_duration_ms: int,
+        caption_source: Path,
+        sidecar: dict[str, str],
+        request_identity: Mapping[str, Any],
+    ) -> None:
+        """Adopt an accepted prior MP4+SRT pair without any Drive write.
+
+        The pre-submit request journal proves the first invocation crossed the
+        submission boundary, so this path may only use exact remote reads.  It
+        resolves and verifies both objects before materializing either DB row;
+        an absent, partial, ambiguous, or mismatched pair remains uncertain.
+        """
+
+        details = dict(operation.parameters["provider_execution"])
+        try:
+            upload_service = self._upload_service_factory(context.session)
+            proofs = _probe_submitted_drive_archive_get_only(
+                upload_service=upload_service,
+                company_id=context.run.company_id,
+                channel_workspace_id=context.run.channel_workspace_id,
+                video_project_id=context.run.video_project_id,
+                source=source,
+                source_checksum=checksum,
+                source_idempotency_key=details["idempotency_key"],
+                caption_source=caption_source,
+                caption_checksum=sidecar["caption_checksum"],
+                caption_idempotency_key=details["idempotency_key"] + ".caption",
+            )
+            media_source_ref = _v2_render_output_source_ref(context.run)
+            caption_source_ref = _caption_sidecar_source_ref(context.run, sidecar)
+            cloud = _materialize_reconciled_drive_cloud_ref(
+                session=context.session,
+                run=context.run,
+                local_path=source,
+                proof=proofs["media"],
+                source_ref=media_source_ref,
+                retention_policy={
+                    "keep_local": True,
+                    "cleanup_authorized": False,
+                    "source": "v2-real-archive",
+                },
+            )
+            caption_cloud = _materialize_reconciled_drive_cloud_ref(
+                session=context.session,
+                run=context.run,
+                local_path=caption_source,
+                proof=proofs["caption"],
+                source_ref=caption_source_ref,
+                retention_policy={
+                    "keep_local": True,
+                    "cleanup_authorized": False,
+                    "source": "v2-real-archive-sidecar",
+                    "sidecar_only": True,
+                },
+            )
+            cloud.technical_appendix = {
+                **(cloud.technical_appendix or {}),
+                "measured_render_duration_ms": measured_duration_ms,
+                "v2_archive_command_id": context.command_id,
+                "v2_archive_idempotency_key": details["idempotency_key"],
+                "v2_remote_archive": True,
+                "v2_remote_archive_reconciliation_mode": "GET_ONLY",
+            }
+            caption_cloud.technical_appendix = {
+                **(caption_cloud.technical_appendix or {}),
+                "v2_caption_sidecar": True,
+                "caption_ref": sidecar["caption_ref"],
+                "caption_artifact_hash": sidecar["caption_artifact_hash"],
+                "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+                "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+                "v2_archive_command_id": context.command_id,
+                "v2_archive_idempotency_key": details["idempotency_key"] + ".caption",
+                "v2_remote_archive_reconciliation_mode": "GET_ONLY",
+            }
+            context.session.flush()
+            receipt = _get_only_reconciliation_receipt(
+                command_id=context.command_id,
+                operation_id=operation.operation_id,
+                request_identity=request_identity,
+                media=proofs["media"],
+                caption=proofs["caption"],
+            )
+            receipt_path = (
+                self._effect_dir(context.command_id)
+                / "google-drive-archive-get-only-reconciliation.json"
+            )
+            _write_or_require_exact_json(receipt_path, receipt)
+        except Exception as exc:
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_GOOGLE_DRIVE_OUTCOME_UNCERTAIN",
+                summary=(
+                    "The prior Google Drive request could not be reconciled as "
+                    "one exact checksum-verified MP4 and SRT pair using reads "
+                    "only; no provider upload was attempted."
+                ),
+                incident_type="PROVIDER_OUTCOME_UNCERTAIN",
+                retry_eligible=False,
+            ) from exc
+
+
+def _probe_submitted_drive_archive_get_only(
+    *,
+    upload_service: GoogleDriveUploadService,
+    company_id: uuid.UUID,
+    channel_workspace_id: uuid.UUID,
+    video_project_id: uuid.UUID,
+    source: Path,
+    source_checksum: str,
+    source_idempotency_key: str,
+    caption_source: Path,
+    caption_checksum: str,
+    caption_idempotency_key: str,
+) -> dict[str, _V2DriveGETOnlyFileProof]:
+    """Resolve an exact previously submitted pair using Drive reads only."""
+
+    if (
+        not upload_service.config_service.offload_enabled()
+        or not source.is_file()
+        or source.is_symlink()
+        or not caption_source.is_file()
+        or caption_source.is_symlink()
+        or _sha256_file(source) != source_checksum
+        or _sha256_file(caption_source) != caption_checksum
+    ):
+        raise ValidationFailureError("V2_GOOGLE_DRIVE_RECONCILIATION_INPUT_INVALID")
+    root_folder_id = str(upload_service.config_service.root_folder_id() or "").strip()
+    reference = upload_service.credential_service.get_connected_reference(
+        company_id=company_id,
+        channel_workspace_id=channel_workspace_id,
+    )
+    access_token = (
+        upload_service.credential_service.get_valid_access_token(reference)
+        if reference is not None
+        else None
+    )
+    if not root_folder_id or not access_token:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_CREDENTIAL_REQUIRED"
+        )
+
+    media = _probe_submitted_drive_file_get_only(
+        upload_service=upload_service,
+        access_token=access_token,
+        root_folder_id=root_folder_id,
+        company_id=company_id,
+        channel_workspace_id=channel_workspace_id,
+        video_project_id=video_project_id,
+        local_path=source,
+        media_type="LONG_FORM_FINAL",
+        expected_checksum=source_checksum,
+        idempotency_key=source_idempotency_key,
+    )
+    caption = _probe_submitted_drive_file_get_only(
+        upload_service=upload_service,
+        access_token=access_token,
+        root_folder_id=root_folder_id,
+        company_id=company_id,
+        channel_workspace_id=channel_workspace_id,
+        video_project_id=video_project_id,
+        local_path=caption_source,
+        media_type="CAPTION",
+        expected_checksum=caption_checksum,
+        idempotency_key=caption_idempotency_key,
+    )
+    if (
+        media.upload_result.drive_file_id == caption.upload_result.drive_file_id
+        or media.upload_result.drive_folder_id == caption.upload_result.drive_folder_id
+    ):
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_REMOTE_IDENTITY_COLLISION"
+        )
+    return {"media": media, "caption": caption}
+
+
+def _probe_submitted_drive_file_get_only(
+    *,
+    upload_service: GoogleDriveUploadService,
+    access_token: str,
+    root_folder_id: str,
+    company_id: uuid.UUID,
+    channel_workspace_id: uuid.UUID,
+    video_project_id: uuid.UUID,
+    local_path: Path,
+    media_type: str,
+    expected_checksum: str,
+    idempotency_key: str,
+) -> _V2DriveGETOnlyFileProof:
+    archive_path = upload_service.archive_path_builder.build(
+        company_id=company_id,
+        channel_workspace_id=channel_workspace_id,
+        video_project_id=video_project_id,
+        uploaded_video_id=None,
+        media_type=media_type,
+    )
+    folder_path = tuple(archive_path.folder_path)
+    folder_id = upload_service.provider.find_folder_path(
+        access_token=access_token,
+        root_folder_id=root_folder_id,
+        folder_path=list(folder_path),
+    )
+    if not folder_id:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_REMOTE_FOLDER_ABSENT"
+        )
+    found = upload_service.provider.find_file_by_idempotency_key(
+        access_token=access_token,
+        folder_id=folder_id,
+        idempotency_key=idempotency_key,
+    )
+    if found is None:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_REMOTE_FILE_ABSENT"
+        )
+    metadata = upload_service.provider.get_file_metadata(
+        access_token=access_token,
+        drive_file_id=found.drive_file_id,
+    )
+    expected_mime_type = (
+        mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+    )
+    expected_size_bytes = local_path.stat().st_size
+    common_identity = (
+        found.drive_file_id
+        and metadata.drive_file_id == found.drive_file_id
+        and found.drive_folder_id == folder_id
+        and metadata.drive_folder_id == folder_id
+        and found.web_view_link
+        and metadata.web_view_link == found.web_view_link
+        and found.file_name == local_path.name
+        and metadata.file_name == local_path.name
+        and found.mime_type == expected_mime_type
+        and metadata.mime_type == expected_mime_type
+        and found.size_bytes == expected_size_bytes
+        and metadata.size_bytes == expected_size_bytes
+    )
+    if not common_identity:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_REMOTE_IDENTITY_MISMATCH"
+        )
+    found_checksum = found.checksum_sha256
+    metadata_checksum = metadata.checksum_sha256
+    if found_checksum and metadata_checksum and found_checksum != metadata_checksum:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_REMOTE_CHECKSUM_CONFLICT"
+        )
+    checksum_readback_performed = False
+    remote_checksum = metadata_checksum or found_checksum
+    if not remote_checksum:
+        remote_checksum = upload_service.provider.readback_sha256(
+            access_token=access_token,
+            drive_file_id=found.drive_file_id,
+        )
+        checksum_readback_performed = True
+    if remote_checksum != expected_checksum:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_REMOTE_CHECKSUM_MISMATCH"
+        )
+    upload_result = GoogleDriveUploadResult(
+        drive_file_id=metadata.drive_file_id,
+        drive_folder_id=metadata.drive_folder_id,
+        web_view_link=metadata.web_view_link,
+        file_name=metadata.file_name,
+        mime_type=metadata.mime_type,
+        size_bytes=metadata.size_bytes,
+        checksum_sha256=remote_checksum,
+        upload_mode="reconciled",
+        technical_appendix={
+            "folder_path": list(folder_path),
+            "folder_path_mode": archive_path.mode,
+            "upload_mode": "reconciled",
+            "root_folder_configured": True,
+            "idempotency_key": idempotency_key,
+            "checksum_readback_performed": checksum_readback_performed,
+            "remote_request_reconciliation_mode": "GET_ONLY",
+            "provider_write_count": 0,
+        },
+    )
+    verification = upload_service.verifier.verify(
+        upload_result=upload_result,
+        local_size_bytes=expected_size_bytes,
+        local_sha256=expected_checksum,
+    )
+    if (
+        not verification.ok
+        or verification.verification_status != "CHECKSUM_VERIFIED"
+        or verification.size_verified is not True
+        or verification.checksum_verified is not True
+        or verification.checksum_unavailable is not False
+    ):
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_CHECKSUM_READBACK_REQUIRED"
+        )
+    return _V2DriveGETOnlyFileProof(
+        media_type=media_type,
+        idempotency_key=idempotency_key,
+        folder_path=folder_path,
+        upload_result=upload_result,
+        verification=verification,
+        checksum_readback_performed=checksum_readback_performed,
+    )
+
+
+def _materialize_reconciled_drive_cloud_ref(
+    *,
+    session: Session,
+    run: Any,
+    local_path: Path,
+    proof: _V2DriveGETOnlyFileProof,
+    source_ref: dict[str, str],
+    retention_policy: dict[str, Any],
+) -> CloudMediaRef:
+    """Create or reuse only the DB row for the exact GET-only remote proof."""
+
+    result = proof.upload_result
+    rows = list(
+        session.scalars(
+            select(CloudMediaRef).where(
+                CloudMediaRef.storage_provider == "GOOGLE_DRIVE",
+                CloudMediaRef.drive_file_id == result.drive_file_id,
+            )
+        )
+    )
+    if len(rows) > 1:
+        raise ValidationFailureError(
+            "V2_GOOGLE_DRIVE_RECONCILIATION_CLOUD_REF_AMBIGUOUS"
+        )
+    path_hash = hashlib.sha256(str(local_path.resolve()).encode("utf-8")).hexdigest()
+    if rows:
+        cloud = rows[0]
+        appendix = cloud.technical_appendix or {}
+        if (
+            cloud.company_id != run.company_id
+            or cloud.channel_workspace_id != run.channel_workspace_id
+            or cloud.video_project_id != run.video_project_id
+            or cloud.uploaded_video_id is not None
+            or cloud.render_package_id is not None
+            or cloud.media_type != proof.media_type
+            or cloud.storage_provider != "GOOGLE_DRIVE"
+            or cloud.drive_folder_id != result.drive_folder_id
+            or cloud.web_view_link != result.web_view_link
+            or cloud.mime_type != result.mime_type
+            or cloud.file_name != result.file_name
+            or cloud.size_bytes != result.size_bytes
+            or cloud.checksum_sha256 != result.checksum_sha256
+            or cloud.local_source_path_hash != path_hash
+            or cloud.upload_status != "VERIFIED"
+            or cloud.verification_status != "CHECKSUM_VERIFIED"
+            or cloud.source_refs != [source_ref]
+            or cloud.retention_policy != retention_policy
+            or appendix.get("idempotency_key") != proof.idempotency_key
+            or appendix.get("drive_file_id_verified") is not True
+            or appendix.get("size_verified") is not True
+            or appendix.get("checksum_verified") is not True
+        ):
+            raise ValidationFailureError(
+                "V2_GOOGLE_DRIVE_RECONCILIATION_CLOUD_REF_MISMATCH"
+            )
+        return cloud
+    return CloudMediaRefService(session).create_verified_ref(
+        company_id=run.company_id,
+        channel_workspace_id=run.channel_workspace_id,
+        video_project_id=run.video_project_id,
+        uploaded_video_id=None,
+        render_package_id=None,
+        media_type=proof.media_type,
+        upload_result=result,
+        verification=proof.verification,
+        local_source_path_hash=path_hash,
+        checksum_sha256=result.checksum_sha256,
+        source_refs=[source_ref],
+        retention_policy=retention_policy,
+    )
+
+
+def _get_only_reconciliation_receipt(
+    *,
+    command_id: str,
+    operation_id: str,
+    request_identity: Mapping[str, Any],
+    media: _V2DriveGETOnlyFileProof,
+    caption: _V2DriveGETOnlyFileProof,
+) -> dict[str, Any]:
+    def item(proof: _V2DriveGETOnlyFileProof) -> dict[str, Any]:
+        result = proof.upload_result
+        return {
+            "media_type": proof.media_type,
+            "idempotency_key": proof.idempotency_key,
+            "folder_path": list(proof.folder_path),
+            "drive_folder_id": result.drive_folder_id,
+            "drive_file_id": result.drive_file_id,
+            "web_view_link": result.web_view_link,
+            "file_name": result.file_name,
+            "mime_type": result.mime_type,
+            "size_bytes": result.size_bytes,
+            "checksum_sha256": result.checksum_sha256,
+            "verification_status": proof.verification.verification_status,
+            "checksum_readback_performed": proof.checksum_readback_performed,
+        }
+
+    payload = {
+        "schema_version": V2_DRIVE_ARCHIVE_RECONCILIATION_SCHEMA,
+        "command_id": command_id,
+        "operation_id": operation_id,
+        "request_identity_hash": content_hash(dict(request_identity)),
+        "provider": "google_drive",
+        "reconciliation_mode": "GET_ONLY",
+        "provider_write_count": 0,
+        "media": item(media),
+        "caption": item(caption),
+    }
+    return {**payload, "reconciliation_receipt_hash": content_hash(payload)}
+
+
+def _write_or_require_exact_json(path: Path, payload: dict[str, Any]) -> None:
+    if path.exists():
+        if path.is_symlink() or _load_json(path) != payload:
+            raise ValidationFailureError(
+                "V2_GOOGLE_DRIVE_RECONCILIATION_RECEIPT_MISMATCH"
+            )
+        return
+    _write_json_atomic(path, payload)
 
 
 def require_v2_google_drive_final_media(
@@ -764,6 +1317,221 @@ def require_v2_google_drive_final_media(
     )
 
 
+def has_exact_drive_archive_get_only_reconciliation_authority(
+    session: Session,
+    *,
+    run: Any,
+    source_workflow_run_id: uuid.UUID,
+    ledger: V2ProductionEffectLedger,
+    input_hash: str,
+    operation: Mapping[str, Any],
+    workspace_root: Path | None = None,
+) -> bool:
+    """Prove an interrupted ARCHIVE can only resolve or reconcile read-only.
+
+    This gate never creates authority or constructs a Drive client.  It admits
+    an ``EFFECT_STARTED`` or ``FAILED_UNCERTAIN`` ledger only when its exact
+    immutable request journal and both local source hashes remain intact.  The
+    adapter must therefore either resolve already-durable DB authority or take
+    its request-present branch, which permits Drive GETs and DB materialization
+    but contains no upload call.  Remote absence, partial acceptance,
+    ambiguity, or checksum drift then fails closed inside that branch.
+    """
+
+    if not _preverified_archive_ledger_identity(
+        run=run,
+        ledger=ledger,
+        input_hash=input_hash,
+        operation=operation,
+    ):
+        return False
+    parameters = operation.get("parameters")
+    details = (
+        parameters.get("provider_execution")
+        if isinstance(parameters, Mapping)
+        else None
+    )
+    operation_id = operation.get("operation_id")
+    idempotency_key = (
+        details.get("idempotency_key") if isinstance(details, Mapping) else None
+    )
+    if (
+        operation.get("stage") != "ARCHIVE"
+        or operation.get("adapter_key") != V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY
+        or operation.get("paid_provider_call") is not False
+        or not isinstance(parameters, Mapping)
+        or parameters.get("mode") != "GOOGLE_DRIVE_REMOTE_ARCHIVE"
+        or not isinstance(details, Mapping)
+        or details.get("provider") != "google_drive"
+        or details.get("attempt_limit") != 1
+        or details.get("remote_object_required") is not True
+        or details.get("checksum_readback_required") is not True
+        or not isinstance(operation_id, str)
+        or not operation_id
+        or not isinstance(idempotency_key, str)
+        or not idempotency_key
+    ):
+        return False
+    try:
+        if Decimal(str(operation.get("max_cost_usd"))) != Decimal("0"):
+            return False
+        render_ledger = session.scalar(
+            select(V2ProductionEffectLedger).where(
+                V2ProductionEffectLedger.workflow_run_id == run.id,
+                V2ProductionEffectLedger.stage == "RENDER",
+                V2ProductionEffectLedger.state == "VERIFIED",
+            )
+        )
+        media_ledger = session.scalar(
+            select(V2ProductionEffectLedger).where(
+                V2ProductionEffectLedger.workflow_run_id == source_workflow_run_id,
+                V2ProductionEffectLedger.stage == "MEDIA",
+                V2ProductionEffectLedger.state == "VERIFIED",
+            )
+        )
+        if render_ledger is None or media_ledger is None:
+            return False
+        render_journal = dict(render_ledger.effect_journal or {})
+        sidecar = _sidecar_archive_authority(dict(media_ledger.effect_journal or {}))
+        root = _read_only_archive_workspace_root(workspace_root)
+        source_relative_path = _required_text(render_journal, "output_relative_path")
+        caption_relative_path = sidecar["caption_relative_path"]
+        source = _read_only_relative_file(root, source_relative_path)
+        caption = _read_only_relative_file(root, caption_relative_path)
+        measured_duration_ms = int(
+            render_journal.get("measured_render_duration_ms") or 0
+        )
+        if (
+            measured_duration_ms <= 0
+            or _sha256_file(source) != run.render_output_checksum
+            or _sha256_file(caption) != sidecar["caption_checksum"]
+        ):
+            return False
+        request_identity = _remote_archive_request_identity(
+            command_id=ledger.command_id,
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            source_relative_path=source_relative_path,
+            source_checksum=run.render_output_checksum,
+            source_size_bytes=source.stat().st_size,
+            measured_render_duration_ms=measured_duration_ms,
+            caption_relative_path=caption_relative_path,
+            sidecar=sidecar,
+        )
+        request_path = (
+            root
+            / "effects"
+            / hashlib.sha256(ledger.command_id.encode("utf-8")).hexdigest()
+            / "google-drive-archive-request-journal.json"
+        )
+        if (
+            not request_path.is_file()
+            or request_path.is_symlink()
+            or _load_json(request_path) != {**request_identity, "state": "SUBMITTED"}
+        ):
+            return False
+        return True
+    except (OSError, TypeError, ValueError, ValidationFailureError):
+        return False
+
+
+def has_exact_governed_drive_archive_reconciliation_authority(
+    session: Session,
+    *,
+    run: Any,
+    source_workflow_run_id: uuid.UUID,
+    ledger: V2ProductionEffectLedger,
+    input_hash: str,
+    operation: Mapping[str, Any],
+    workspace_root: Path | None = None,
+) -> bool:
+    """Compatibility name for the governed recovery reader."""
+
+    return has_exact_drive_archive_get_only_reconciliation_authority(
+        session,
+        run=run,
+        source_workflow_run_id=source_workflow_run_id,
+        ledger=ledger,
+        input_hash=input_hash,
+        operation=operation,
+        workspace_root=workspace_root,
+    )
+
+
+def _preverified_archive_ledger_identity(
+    *,
+    run: Any,
+    ledger: V2ProductionEffectLedger,
+    input_hash: str,
+    operation: Mapping[str, Any],
+) -> bool:
+    if (
+        ledger.workflow_run_id != run.id
+        or ledger.video_project_id != run.video_project_id
+        or ledger.production_package_artifact_version_id
+        != run.production_package_artifact_version_id
+        or ledger.production_package_hash != run.production_package_hash
+        or ledger.stage != "ARCHIVE"
+        or ledger.operation_id != operation.get("operation_id")
+        or ledger.adapter_key != operation.get("adapter_key")
+        or ledger.input_hash != input_hash
+        or ledger.effect_invocation_count != 1
+        or ledger.state not in {"EFFECT_STARTED", "FAILED_UNCERTAIN"}
+        or ledger.started_at is None
+        or ledger.completed_at is not None
+        or ledger.result_type is not None
+        or ledger.result_id is not None
+        or ledger.result_ref is not None
+        or ledger.result_hash is not None
+        or bool(ledger.result_payload)
+        or bool(ledger.authority_refs)
+    ):
+        return False
+    base = {
+        "schema_version": "vcos.production-effect-journal.v1",
+        "command_id": ledger.command_id,
+        "stage": "ARCHIVE",
+        "state": ledger.state,
+    }
+    journal = dict(ledger.effect_journal or {})
+    if ledger.state == "EFFECT_STARTED":
+        return journal == base
+    last_error_type = journal.pop("last_error_type", None)
+    return (
+        journal == base and isinstance(last_error_type, str) and bool(last_error_type)
+    )
+
+
+def _read_only_archive_workspace_root(workspace_root: Path | None) -> Path:
+    configured = os.getenv("VCOS_V2_PRODUCTION_ROOT")
+    root = (
+        workspace_root
+        or (
+            Path(configured)
+            if configured
+            else Path(__file__).resolve().parents[2] / "var" / "v2-production"
+        )
+    ).resolve()
+    if not root.is_dir() or root.is_symlink():
+        raise ValidationFailureError("V2_EFFECT_WORKSPACE_AUTHORITY_MISSING")
+    return root
+
+
+def _read_only_relative_file(root: Path, value: str) -> Path:
+    raw = Path(value)
+    if raw.is_absolute() or ".." in raw.parts or not raw.parts:
+        raise ValidationFailureError("V2_EFFECT_RELATIVE_PATH_INVALID")
+    cursor = root
+    for part in raw.parts:
+        cursor /= part
+        if cursor.is_symlink():
+            raise ValidationFailureError("V2_EFFECT_FILE_INVALID")
+    resolved = (root / raw).resolve()
+    if root not in resolved.parents or not resolved.is_file() or resolved.is_symlink():
+        raise ValidationFailureError("V2_EFFECT_FILE_INVALID")
+    return resolved
+
+
 def v2_drive_caption_sidecar_review_metadata(
     artifact: V2VerifiedDriveArchiveArtifact,
 ) -> dict[str, Any]:
@@ -829,12 +1597,113 @@ def v2_drive_caption_sidecar_review_metadata(
     }
 
 
+def _drive_archive_receipt_content(
+    *,
+    run: Any,
+    project: VideoProject,
+    command_id: str,
+    operation_id: str,
+    cloud: CloudMediaRef,
+    caption_cloud: CloudMediaRef,
+    sidecar: Mapping[str, str],
+    measured_duration_ms: int,
+    external_effect_performed: bool,
+) -> dict[str, Any]:
+    archive_object_ref = _drive_object_ref(cloud.drive_file_id)
+    caption_archive_object_ref = _drive_caption_object_ref(caption_cloud.drive_file_id)
+    return {
+        "schema_version": V2_DRIVE_ARCHIVE_RECEIPT_SCHEMA,
+        "workflow_run_id": str(run.id),
+        "archive_command_id": command_id,
+        "provider_operation_id": operation_id,
+        "video_project_id": str(project.id),
+        "production_package_artifact_version_id": str(
+            run.production_package_artifact_version_id
+        ),
+        "production_package_hash": run.production_package_hash,
+        "render_output_ref": run.render_output_ref,
+        "render_output_checksum": run.render_output_checksum,
+        "cloud_media_ref_id": str(cloud.id),
+        "drive_file_id": cloud.drive_file_id,
+        "archive_object_ref": archive_object_ref,
+        "size_bytes": cloud.size_bytes,
+        "checksum_sha256": cloud.checksum_sha256,
+        "measured_render_duration_ms": measured_duration_ms,
+        "caption_ref": sidecar["caption_ref"],
+        "caption_checksum": sidecar["caption_checksum"],
+        "caption_artifact_hash": sidecar["caption_artifact_hash"],
+        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+        "caption_cloud_media_ref_id": str(caption_cloud.id),
+        "caption_drive_file_id": caption_cloud.drive_file_id,
+        "caption_archive_object_ref": caption_archive_object_ref,
+        "verification_status": cloud.verification_status,
+        "archive_state": "VERIFIED",
+        "invokes_mr1": False,
+        "automatic_publish": False,
+        "external_effect_performed": external_effect_performed,
+    }
+
+
+def _drive_archive_lineage_content(
+    *,
+    run: Any,
+    project: VideoProject,
+    package: Any,
+    command_id: str,
+    operation_id: str,
+    cloud: CloudMediaRef,
+    caption_cloud: CloudMediaRef,
+    sidecar: Mapping[str, str],
+    measured_duration_ms: int,
+    archive_receipt_hash: str,
+    external_effect_performed: bool,
+) -> dict[str, Any]:
+    return {
+        "schema_version": V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA,
+        "workflow_run_id": str(run.id),
+        "archive_command_id": command_id,
+        "provider_operation_id": operation_id,
+        "video_project_id": str(project.id),
+        "production_package_artifact_version_id": str(
+            run.production_package_artifact_version_id
+        ),
+        "production_package_hash": run.production_package_hash,
+        "duration_contract": package.duration_contract.model_dump(mode="json"),
+        "canonical_media_timeline_hash": run.canonical_media_timeline_hash,
+        "native_render_plan_hash": run.native_render_plan_hash,
+        "render_output_ref": run.render_output_ref,
+        "render_output_checksum": run.render_output_checksum,
+        "measured_render_duration_ms": measured_duration_ms,
+        "technical_qc_hash": run.technical_qc_receipt_hash,
+        "creative_qc_hash": run.creative_qc_receipt_hash,
+        "archive_receipt_hash": archive_receipt_hash,
+        "archive_state": "VERIFIED",
+        "cloud_media_ref_id": str(cloud.id),
+        "archive_object_ref": _drive_object_ref(cloud.drive_file_id),
+        "storage_provider": "GOOGLE_DRIVE",
+        "caption_ref": sidecar["caption_ref"],
+        "caption_checksum": sidecar["caption_checksum"],
+        "caption_artifact_hash": sidecar["caption_artifact_hash"],
+        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
+        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
+        "caption_cloud_media_ref_id": str(caption_cloud.id),
+        "caption_archive_object_ref": _drive_caption_object_ref(
+            caption_cloud.drive_file_id
+        ),
+        "invokes_mr1": False,
+        "automatic_publish": False,
+        "external_effect_performed": external_effect_performed,
+    }
+
+
 def _resolve_or_create_v2_drive_archive(
     *,
     session: Session,
     context: WorkflowStageContext,
     operation: V2AuthorizedAdapterOperation,
     external_effect_performed: bool = False,
+    caption_sidecar_authority: dict[str, str] | None = None,
 ) -> V2VerifiedDriveArchiveArtifact:
     run = context.run
     project = session.get(VideoProject, run.video_project_id)
@@ -855,7 +1724,11 @@ def _resolve_or_create_v2_drive_archive(
         or package.production_lane.value != run.production_lane
     ):
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_PACKAGE_MISMATCH")
-    sidecar = _sidecar_archive_authority_for_run(session, run)
+    sidecar = (
+        _sidecar_archive_authority(dict(caption_sidecar_authority))
+        if caption_sidecar_authority is not None
+        else _sidecar_archive_authority_for_run(session, run)
+    )
     candidates = list(
         session.scalars(
             select(CloudMediaRef).where(
@@ -928,74 +1801,31 @@ def _resolve_or_create_v2_drive_archive(
     ):
         raise ValidationFailureError("V2_DRIVE_ARCHIVE_DURATION_OUTSIDE_CONTRACT")
     archive_object_ref = _drive_object_ref(cloud.drive_file_id)
-    caption_archive_object_ref = _drive_caption_object_ref(caption_cloud.drive_file_id)
-    receipt = {
-        "schema_version": V2_DRIVE_ARCHIVE_RECEIPT_SCHEMA,
-        "workflow_run_id": str(run.id),
-        "archive_command_id": context.command_id,
-        "provider_operation_id": operation.operation_id,
-        "video_project_id": str(project.id),
-        "production_package_artifact_version_id": str(
-            run.production_package_artifact_version_id
-        ),
-        "production_package_hash": run.production_package_hash,
-        "render_output_ref": run.render_output_ref,
-        "render_output_checksum": run.render_output_checksum,
-        "cloud_media_ref_id": str(cloud.id),
-        "drive_file_id": cloud.drive_file_id,
-        "archive_object_ref": archive_object_ref,
-        "size_bytes": cloud.size_bytes,
-        "checksum_sha256": cloud.checksum_sha256,
-        "measured_render_duration_ms": measured_duration_ms,
-        "caption_ref": sidecar["caption_ref"],
-        "caption_checksum": sidecar["caption_checksum"],
-        "caption_artifact_hash": sidecar["caption_artifact_hash"],
-        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
-        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
-        "caption_cloud_media_ref_id": str(caption_cloud.id),
-        "caption_drive_file_id": caption_cloud.drive_file_id,
-        "caption_archive_object_ref": caption_archive_object_ref,
-        "verification_status": cloud.verification_status,
-        "archive_state": "VERIFIED",
-        "invokes_mr1": False,
-        "automatic_publish": False,
-        "external_effect_performed": external_effect_performed,
-    }
+    receipt = _drive_archive_receipt_content(
+        run=run,
+        project=project,
+        command_id=context.command_id,
+        operation_id=operation.operation_id,
+        cloud=cloud,
+        caption_cloud=caption_cloud,
+        sidecar=sidecar,
+        measured_duration_ms=measured_duration_ms,
+        external_effect_performed=external_effect_performed,
+    )
     receipt_hash = content_hash(receipt)
-    lineage_content = {
-        "schema_version": V2_DRIVE_ARCHIVE_LINEAGE_SCHEMA,
-        "workflow_run_id": str(run.id),
-        "archive_command_id": context.command_id,
-        "provider_operation_id": operation.operation_id,
-        "video_project_id": str(project.id),
-        "production_package_artifact_version_id": str(
-            run.production_package_artifact_version_id
-        ),
-        "production_package_hash": run.production_package_hash,
-        "duration_contract": package.duration_contract.model_dump(mode="json"),
-        "canonical_media_timeline_hash": run.canonical_media_timeline_hash,
-        "native_render_plan_hash": run.native_render_plan_hash,
-        "render_output_ref": run.render_output_ref,
-        "render_output_checksum": run.render_output_checksum,
-        "measured_render_duration_ms": measured_duration_ms,
-        "technical_qc_hash": run.technical_qc_receipt_hash,
-        "creative_qc_hash": run.creative_qc_receipt_hash,
-        "archive_receipt_hash": receipt_hash,
-        "archive_state": "VERIFIED",
-        "cloud_media_ref_id": str(cloud.id),
-        "archive_object_ref": archive_object_ref,
-        "storage_provider": "GOOGLE_DRIVE",
-        "caption_ref": sidecar["caption_ref"],
-        "caption_checksum": sidecar["caption_checksum"],
-        "caption_artifact_hash": sidecar["caption_artifact_hash"],
-        "subtitle_qc_ref": sidecar["subtitle_qc_ref"],
-        "subtitle_qc_hash": sidecar["subtitle_qc_hash"],
-        "caption_cloud_media_ref_id": str(caption_cloud.id),
-        "caption_archive_object_ref": caption_archive_object_ref,
-        "invokes_mr1": False,
-        "automatic_publish": False,
-        "external_effect_performed": external_effect_performed,
-    }
+    lineage_content = _drive_archive_lineage_content(
+        run=run,
+        project=project,
+        package=package,
+        command_id=context.command_id,
+        operation_id=operation.operation_id,
+        cloud=cloud,
+        caption_cloud=caption_cloud,
+        sidecar=sidecar,
+        measured_duration_ms=measured_duration_ms,
+        archive_receipt_hash=receipt_hash,
+        external_effect_performed=external_effect_performed,
+    )
     lineage = _ensure_lineage(
         session=session,
         project=project,
@@ -1270,7 +2100,23 @@ def _sidecar_archive_authority(journal: dict[str, Any]) -> dict[str, str]:
         not isinstance(value, str) or not value for value in values.values()
     ):
         raise ValidationFailureError("SUBTITLE_QC_FAILED")
-    return {key: str(value) for key, value in values.items()}
+    return {
+        **{key: str(value) for key, value in values.items()},
+        "subtitle_qc_state": "PASS",
+    }
+
+
+def _v2_render_output_source_ref(run: Any) -> dict[str, str]:
+    return {
+        "type": "v2_render_output",
+        "workflow_run_id": str(run.id),
+        "render_output_ref": str(run.render_output_ref),
+        "render_output_checksum": str(run.render_output_checksum),
+        "production_package_artifact_version_id": str(
+            run.production_package_artifact_version_id
+        ),
+        "production_package_hash": str(run.production_package_hash),
+    }
 
 
 def _caption_sidecar_source_ref(run: Any, sidecar: dict[str, str]) -> dict[str, str]:

@@ -75,6 +75,17 @@ _DURABLE_WORKER_ACTOR_ID = uuid.UUID("95428dc2-b989-5a1c-8f49-8dd64e99f00e")
 WORKFLOW_COMMAND_NAMESPACE = uuid.UUID("405e3478-32c3-5c88-b231-226757d0fd70")
 WORKFLOW_CORRELATION_PREFIX = "production-workflow"
 WORKFLOW_HANDLER_VERSION = "production-workflow.v1"
+_QUALIFICATION_LOCAL_EXECUTION_MODE = "QUALIFICATION_LOCAL"
+_REAL_LONG_FORM_EXECUTION_MODE = "REAL_LONG_FORM_PRODUCTION"
+_POST_MEDIA_EXECUTION_MODES = frozenset(
+    {_QUALIFICATION_LOCAL_EXECUTION_MODE, _REAL_LONG_FORM_EXECUTION_MODE}
+)
+_AI_VISUAL_AUTHORITY_REQUIRED_STAGES = frozenset(
+    {
+        ProductionWorkflowStage.RENDER,
+        ProductionWorkflowStage.QC,
+    }
+)
 
 TERMINAL_WORKFLOW_STATES = frozenset(
     {
@@ -96,6 +107,7 @@ RESUMABLE_WORKFLOW_STATES = frozenset(
         ProductionWorkflowState.PACKAGE_PENDING.value,
         ProductionWorkflowState.READY_FOR_PRODUCTION.value,
         ProductionWorkflowState.MEDIA_PENDING.value,
+        ProductionWorkflowState.VISUAL_PENDING.value,
         ProductionWorkflowState.RENDER_PENDING.value,
         ProductionWorkflowState.QC_PENDING.value,
         ProductionWorkflowState.ARCHIVE_PENDING.value,
@@ -110,6 +122,7 @@ STAGE_SEQUENCE: tuple[ProductionWorkflowStage, ...] = (
     ProductionWorkflowStage.PACKAGE,
     ProductionWorkflowStage.READINESS,
     ProductionWorkflowStage.MEDIA,
+    ProductionWorkflowStage.VISUAL,
     ProductionWorkflowStage.RENDER,
     ProductionWorkflowStage.QC,
     ProductionWorkflowStage.ARCHIVE,
@@ -124,6 +137,7 @@ RUNNING_STATE_BY_STAGE: Mapping[ProductionWorkflowStage, ProductionWorkflowState
     ProductionWorkflowStage.PACKAGE: ProductionWorkflowState.PACKAGE_RUNNING,
     ProductionWorkflowStage.READINESS: ProductionWorkflowState.PACKAGE_RUNNING,
     ProductionWorkflowStage.MEDIA: ProductionWorkflowState.MEDIA_RUNNING,
+    ProductionWorkflowStage.VISUAL: ProductionWorkflowState.VISUAL_RUNNING,
     ProductionWorkflowStage.RENDER: ProductionWorkflowState.RENDER_RUNNING,
     ProductionWorkflowStage.QC: ProductionWorkflowState.QC_RUNNING,
     ProductionWorkflowStage.ARCHIVE: ProductionWorkflowState.ARCHIVE_RUNNING,
@@ -139,6 +153,7 @@ PENDING_STATE_BY_NEXT_STAGE: Mapping[
     ProductionWorkflowStage.PACKAGE: ProductionWorkflowState.PACKAGE_PENDING,
     ProductionWorkflowStage.READINESS: ProductionWorkflowState.PACKAGE_PENDING,
     ProductionWorkflowStage.MEDIA: ProductionWorkflowState.MEDIA_PENDING,
+    ProductionWorkflowStage.VISUAL: ProductionWorkflowState.VISUAL_PENDING,
     ProductionWorkflowStage.RENDER: ProductionWorkflowState.RENDER_PENDING,
     ProductionWorkflowStage.QC: ProductionWorkflowState.QC_PENDING,
     ProductionWorkflowStage.ARCHIVE: ProductionWorkflowState.ARCHIVE_PENDING,
@@ -188,6 +203,23 @@ _STAGE_OUTPUT_AUTHORITY_FIELDS: Mapping[
         {
             "canonical_media_timeline_ref",
             "canonical_media_timeline_hash",
+        }
+    ),
+    ProductionWorkflowStage.VISUAL: frozenset(
+        {
+            "ai_visual_production_run_id",
+            "ai_visual_policy_ref",
+            "ai_visual_policy_hash",
+            "ai_visual_style_bible_ref",
+            "ai_visual_style_bible_hash",
+            "ai_visual_scene_plan_ref",
+            "ai_visual_scene_plan_hash",
+            "ai_visual_asset_manifest_ref",
+            "ai_visual_asset_manifest_hash",
+            "video_motion_grammar_ref",
+            "video_motion_grammar_hash",
+            "ffmpeg_effect_plan_ref",
+            "ffmpeg_effect_plan_hash",
         }
     ),
     ProductionWorkflowStage.RENDER: frozenset(
@@ -443,7 +475,12 @@ class PostReadinessProductionGateway(Protocol):
         """Produce the canonical media timeline authority."""
 
     def render_media(self, context: WorkflowStageContext) -> WorkflowStageResult:
-        """Produce the approved native plan and exact render output."""
+        """Assemble verified AI assets into the exact render output."""
+
+    def produce_visual_assets(
+        self, context: WorkflowStageContext
+    ) -> WorkflowStageResult:
+        """Generate and verify all package-authorized primary AI visuals."""
 
     def run_quality_control(self, context: WorkflowStageContext) -> WorkflowStageResult:
         """Produce exact passing technical and creative QC authorities."""
@@ -600,6 +637,8 @@ class GatewayBackedPostReadinessStageHandler:
         context.heartbeat()
         if self.stage == ProductionWorkflowStage.MEDIA:
             result = self.gateway.produce_media(context)
+        elif self.stage == ProductionWorkflowStage.VISUAL:
+            result = self.gateway.produce_visual_assets(context)
         elif self.stage == ProductionWorkflowStage.RENDER:
             result = self.gateway.render_media(context)
         elif self.stage == ProductionWorkflowStage.QC:
@@ -645,6 +684,11 @@ class GatewayBackedPostReadinessStageHandler:
         candidate = ProductionPublishService(
             context.session
         ).create_final_review_candidate(data)
+        _settle_ai_visual_final_review_projection(
+            context=context,
+            candidate=candidate,
+            completed_at=utc_now(),
+        )
         return WorkflowStageResult(
             result_type="final_review_candidate",
             result_id=candidate.id,
@@ -656,6 +700,171 @@ class GatewayBackedPostReadinessStageHandler:
             ),
             reason_codes=["FINAL_REVIEW_CANDIDATE_CREATED"],
         )
+
+
+def _settle_ai_visual_final_review_projection(
+    *,
+    context: WorkflowStageContext,
+    candidate: FinalReviewCandidate,
+    completed_at: datetime,
+) -> None:
+    """Seal exact AI provenance and, for rerenders, replacement lineage."""
+
+    run = context.run
+    if run.ai_visual_production_run_id is None:
+        return
+    from app.db.models.ai_visual import (
+        AIVisualAssetManifest,
+        AIVisualProductionRun,
+        AIVisualReplacementLineage,
+        AIVisualRerenderAuthority,
+    )
+
+    visual_run = context.session.get(
+        AIVisualProductionRun,
+        run.ai_visual_production_run_id,
+        with_for_update=True,
+    )
+    manifest = (
+        context.session.get(AIVisualAssetManifest, visual_run.asset_manifest_id)
+        if visual_run is not None and visual_run.asset_manifest_id is not None
+        else None
+    )
+    if (
+        visual_run is None
+        or manifest is None
+        or visual_run.workflow_run_id != run.id
+        or visual_run.video_project_id != run.video_project_id
+        or visual_run.execution_kind not in {"NORMAL_PRODUCTION", "GOVERNED_RERENDER"}
+        or candidate.workflow_run_id != run.id
+        or candidate.ai_visual_production_run_id != visual_run.id
+        or candidate.ai_visual_asset_manifest_hash != manifest.content_hash
+        or candidate.ffmpeg_effect_plan_hash != manifest.effect_plan_hash
+        or candidate.final_media_ref_id != visual_run.final_media_ref_id
+        or candidate.render_output_checksum != visual_run.render_output_checksum
+        or candidate.archive_receipt_hash != visual_run.archive_receipt_hash
+    ):
+        raise ProductionWorkflowCoordinator._integrity_error(
+            "AI_VISUAL_FINAL_REVIEW_SETTLEMENT_MISMATCH"
+        )
+    existing = context.session.scalar(
+        select(AIVisualReplacementLineage).where(
+            AIVisualReplacementLineage.visual_production_run_id == visual_run.id
+        )
+    )
+
+    if visual_run.execution_kind == "NORMAL_PRODUCTION":
+        if (
+            visual_run.rerender_authority_id is not None
+            or candidate.supersedes_final_review_candidate_id is not None
+            or existing is not None
+        ):
+            raise ProductionWorkflowCoordinator._integrity_error(
+                "AI_VISUAL_NORMAL_FINAL_REVIEW_LINEAGE_FORBIDDEN"
+            )
+        if visual_run.state == "FINAL_REVIEW_READY":
+            if (
+                visual_run.current_phase != "FINALIZE"
+                or visual_run.final_review_candidate_id != candidate.id
+            ):
+                raise ProductionWorkflowCoordinator._integrity_error(
+                    "AI_VISUAL_FINAL_REVIEW_REPLAY_MISMATCH"
+                )
+            return
+        if visual_run.state != "ARCHIVED" or visual_run.current_phase != "ARCHIVE":
+            raise ProductionWorkflowCoordinator._integrity_error(
+                "AI_VISUAL_FINAL_REVIEW_SOURCE_STATE_INVALID"
+            )
+        visual_run.final_review_candidate_id = candidate.id
+        visual_run.state = "FINAL_REVIEW_READY"
+        visual_run.current_phase = "FINALIZE"
+        visual_run.completed_at = completed_at
+        visual_run.projection_version += 1
+        context.session.flush()
+        return
+
+    authority = (
+        context.session.get(AIVisualRerenderAuthority, visual_run.rerender_authority_id)
+        if visual_run.rerender_authority_id is not None
+        else None
+    )
+    if (
+        authority is None
+        or authority.replacement_workflow_run_id != run.id
+        or authority.source_workflow_run_id == run.id
+        or candidate.supersedes_final_review_candidate_id
+        != authority.rejected_final_review_candidate_id
+    ):
+        raise ProductionWorkflowCoordinator._integrity_error(
+            "AI_VISUAL_FINAL_REVIEW_SETTLEMENT_MISMATCH"
+        )
+    if visual_run.state == "FINAL_REVIEW_READY":
+        if (
+            visual_run.current_phase != "FINALIZE"
+            or visual_run.final_review_candidate_id != candidate.id
+            or existing is None
+            or existing.replacement_final_review_candidate_id != candidate.id
+        ):
+            raise ProductionWorkflowCoordinator._integrity_error(
+                "AI_VISUAL_FINAL_REVIEW_REPLAY_MISMATCH"
+            )
+        return
+    if (
+        visual_run.state != "ARCHIVED"
+        or visual_run.current_phase != "ARCHIVE"
+        or existing is not None
+    ):
+        raise ProductionWorkflowCoordinator._integrity_error(
+            "AI_VISUAL_FINAL_REVIEW_SOURCE_STATE_INVALID"
+        )
+    visual_run.final_review_candidate_id = candidate.id
+    visual_run.state = "FINAL_REVIEW_READY"
+    visual_run.current_phase = "FINALIZE"
+    visual_run.completed_at = completed_at
+    visual_run.projection_version += 1
+    context.session.flush()
+
+    lineage_id = uuid.uuid5(
+        authority.id,
+        f"ai-visual-replacement-lineage:{candidate.id}",
+    )
+    values = {
+        "id": lineage_id,
+        "rerender_authority_id": authority.id,
+        "visual_production_run_id": visual_run.id,
+        "asset_manifest_id": manifest.id,
+        "asset_manifest_hash": manifest.content_hash,
+        "rejected_final_media_ref_id": authority.rejected_final_media_ref_id,
+        "replacement_final_media_ref_id": candidate.final_media_ref_id,
+        "rejected_final_review_candidate_id": (
+            authority.rejected_final_review_candidate_id
+        ),
+        "replacement_final_review_candidate_id": candidate.id,
+        "replacement_render_checksum": candidate.render_output_checksum,
+        "replacement_archive_receipt_hash": candidate.archive_receipt_hash,
+        "automatic_publish": False,
+        "created_at": completed_at,
+    }
+    hash_payload = {
+        "schema_version": "vcos.ai-visual-replacement-lineage.v1",
+        **{
+            key: (
+                str(value)
+                if isinstance(value, uuid.UUID)
+                else value.isoformat()
+                if isinstance(value, datetime)
+                else value
+            )
+            for key, value in values.items()
+        },
+    }
+    context.session.add(
+        AIVisualReplacementLineage(
+            **values,
+            lineage_hash=semantic_hash(hash_payload),
+        )
+    )
+    context.session.flush()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1136,6 +1345,54 @@ def _require_gateway_execution_authority(
         )
     assert package_id is not None
     assert package_hash is not None
+    from app.services.ai_visual_rerender_authority import (
+        resolve_governed_ai_visual_rerender_execution_authority,
+    )
+
+    governed = resolve_governed_ai_visual_rerender_execution_authority(
+        context.session,
+        workflow_run_id=run.id,
+    )
+    if governed is not None:
+        provider_content = governed.provider_plan
+        budget_content = governed.budget_plan
+        if (
+            not _support_authority_is_positive(provider_content)
+            or not _support_authority_is_positive(budget_content)
+            or _contains_forbidden_fixture_marker(provider_content)
+            or _contains_forbidden_fixture_marker(budget_content)
+        ):
+            raise ProductionWorkflowCoordinator._integrity_error(
+                "WORKFLOW_AI_VISUAL_RERENDER_AUTHORIZATION_MISMATCH"
+            )
+        _require_real_ai_visual_execution_authority(
+            run=run,
+            stage=stage,
+            provider_content=provider_content,
+        )
+        if (
+            context.event.attempt_count > 1
+            and _stage_requires_package_bound_retry_authority(stage)
+        ):
+            if not (
+                stage == ProductionWorkflowStage.ARCHIVE
+                and _is_proven_drive_archive_get_only_reconciliation(
+                    context=context,
+                    provider_content=provider_content,
+                    source_workflow_run_id=governed.source_workflow.id,
+                )
+            ):
+                _require_package_bound_retry_authority(
+                    attempt_count=context.event.attempt_count,
+                    provider_content=provider_content,
+                    budget_content=budget_content,
+                )
+        if context.event.attempt_count > 1 and stage == ProductionWorkflowStage.VISUAL:
+            _require_visual_resume_authority(
+                provider_content=provider_content,
+                budget_content=budget_content,
+            )
+        return
     content = ProductionPackageService(context.session).validate_for_readiness(
         package_id
     )
@@ -1195,12 +1452,30 @@ def _require_gateway_execution_authority(
                 incident_type="INTEGRITY_MISMATCH",
                 retry_eligible=False,
             )
+    _require_real_ai_visual_execution_authority(
+        run=run,
+        stage=stage,
+        provider_content=provider_content,
+    )
     if (
         context.event.attempt_count > 1
         and _stage_requires_package_bound_retry_authority(stage)
     ):
-        _require_package_bound_retry_authority(
-            attempt_count=context.event.attempt_count,
+        if not (
+            stage == ProductionWorkflowStage.ARCHIVE
+            and _is_proven_drive_archive_get_only_reconciliation(
+                context=context,
+                provider_content=provider_content,
+                source_workflow_run_id=context.run.id,
+            )
+        ):
+            _require_package_bound_retry_authority(
+                attempt_count=context.event.attempt_count,
+                provider_content=provider_content,
+                budget_content=budget_content,
+            )
+    if context.event.attempt_count > 1 and stage == ProductionWorkflowStage.VISUAL:
+        _require_visual_resume_authority(
             provider_content=provider_content,
             budget_content=budget_content,
         )
@@ -1211,9 +1486,11 @@ def _stage_requires_package_bound_retry_authority(
 ) -> bool:
     """Keep provider at-most-once policy separate from local reconciliation.
 
-    MEDIA and ARCHIVE can cross external provider boundaries, so every retry
-    remains subject to the immutable package/provider attempt ceiling. RENDER
-    and QC are code-pinned, zero-cost local effects with their own durable
+    MEDIA and ARCHIVE are single external effects, so every retry remains
+    subject to the immutable package/provider attempt ceiling. VISUAL owns a
+    separately sealed one-shot effect per asset slot; a stage retry may only
+    reconcile completed/uncertain slots and execute previously uncalled slots.
+    RENDER and QC are code-pinned, zero-cost local effects with their own durable
     effect ledgers, while FINALIZE is a database-only projection. Their
     bounded retries are governed by the exact outbox event policy instead.
     """
@@ -1224,6 +1501,7 @@ def _stage_requires_package_bound_retry_authority(
     }:
         return True
     if stage in {
+        ProductionWorkflowStage.VISUAL,
         ProductionWorkflowStage.RENDER,
         ProductionWorkflowStage.QC,
         ProductionWorkflowStage.FINALIZE,
@@ -1232,6 +1510,131 @@ def _stage_requires_package_bound_retry_authority(
     raise ProductionWorkflowCoordinator._integrity_error(
         "WORKFLOW_POST_READINESS_RETRY_STAGE_INVALID"
     )
+
+
+def _is_proven_drive_archive_get_only_reconciliation(
+    *,
+    context: WorkflowStageContext,
+    provider_content: Mapping[str, Any],
+    source_workflow_run_id: uuid.UUID,
+) -> bool:
+    """Allow only a zero-submit reconciliation of one exact Drive effect.
+
+    A sealed ledger replays its immutable result.  An interrupted ledger may
+    pass only when the exact request journal and local MP4/SRT hashes prove the
+    adapter must take its GET-only recovery branch.  Missing or drifted
+    evidence reaches the normal fail-closed package retry gate.
+    """
+
+    from app.db.models.v2_effect import V2ProductionEffectLedger
+
+    operations = provider_content.get("adapter_operations")
+    operation = operations.get("ARCHIVE") if isinstance(operations, Mapping) else None
+    if not isinstance(operation, Mapping):
+        return False
+    row = context.session.scalar(
+        select(V2ProductionEffectLedger).where(
+            V2ProductionEffectLedger.workflow_run_id == context.run.id,
+            V2ProductionEffectLedger.command_id == context.command_id,
+            V2ProductionEffectLedger.stage == "ARCHIVE",
+        )
+    )
+    exact_identity = bool(
+        row is not None
+        and row.video_project_id == context.run.video_project_id
+        and row.production_package_artifact_version_id
+        == context.run.production_package_artifact_version_id
+        and row.production_package_hash == context.run.production_package_hash
+        and row.effect_invocation_count == 1
+        and operation.get("stage") == "ARCHIVE"
+        and row.operation_id == operation.get("operation_id")
+        and row.adapter_key == operation.get("adapter_key")
+        and row.adapter_key == "v2-google-drive-remote"
+        and row.input_hash == context.input_hash
+    )
+    if not exact_identity or row is None:
+        return False
+    if row.state == "VERIFIED":
+        payload = row.result_payload if isinstance(row.result_payload, dict) else {}
+        refs = row.authority_refs if isinstance(row.authority_refs, dict) else {}
+        journal = row.effect_journal if isinstance(row.effect_journal, dict) else {}
+        parameters = operation.get("parameters")
+        details = (
+            parameters.get("provider_execution")
+            if isinstance(parameters, Mapping)
+            else None
+        )
+        return bool(
+            row.result_type == "V2_VERIFIED_GOOGLE_DRIVE_REMOTE_ARCHIVE"
+            and row.result_id is not None
+            and row.result_ref is not None
+            and row.result_hash is not None
+            and row.started_at is not None
+            and row.completed_at is not None
+            and payload.get("archive_state") == "VERIFIED"
+            and payload.get("storage_provider") == "GOOGLE_DRIVE"
+            and payload.get("checksum_sha256") == context.run.render_output_checksum
+            and payload.get("external_effect_performed") is True
+            and payload.get("automatic_publish") is False
+            and refs.get("final_media_ref_id") == str(row.result_id)
+            and refs.get("final_media_ref_hash") == context.run.render_output_checksum
+            and refs.get("archive_receipt_hash") == row.result_hash
+            and refs.get("archive_object_ref") == row.result_ref
+            and refs.get("archive_verification_state") == "VERIFIED"
+            and journal.get("schema_version") == "vcos.production-effect-journal.v1"
+            and journal.get("command_id") == row.command_id
+            and journal.get("stage") == "ARCHIVE"
+            and journal.get("state") == "VERIFIED"
+            and journal.get("effect_invocation_count") == 1
+            and journal.get("provider_call_count") == 1
+            and journal.get("provider") == "google_drive"
+            and isinstance(details, Mapping)
+            and journal.get("idempotency_key") == details.get("idempotency_key")
+            and journal.get("archive_receipt_hash") == row.result_hash
+            and journal.get("archive_object_ref") == row.result_ref
+            and journal.get("cloud_media_ref_id") == payload.get("cloud_media_ref_id")
+            and journal.get("caption_cloud_media_ref_id")
+            == payload.get("caption_cloud_media_ref_id")
+            and journal.get("external_effect_performed") is True
+        )
+    from app.services.v2_drive_archive import (
+        has_exact_drive_archive_get_only_reconciliation_authority,
+    )
+
+    return has_exact_drive_archive_get_only_reconciliation_authority(
+        context.session,
+        run=context.run,
+        source_workflow_run_id=source_workflow_run_id,
+        ledger=row,
+        input_hash=context.input_hash,
+        operation=operation,
+    )
+
+
+def _require_visual_resume_authority(
+    *,
+    provider_content: Mapping[str, Any],
+    budget_content: Mapping[str, Any],
+) -> None:
+    """Authorize only reconciliation/resumption of durable one-shot asset slots."""
+
+    if (
+        provider_content.get("visual_resume_authorized") is not True
+        or provider_content.get("scene_effect_max_attempts") != 1
+        or provider_content.get("provider_retry_authorized") is not False
+        or budget_content.get("visual_resume_authorized") is not True
+        or budget_content.get("scene_effect_max_attempts") != 1
+    ):
+        raise WorkflowStageError(
+            classification=WorkflowFailureClassification.FAIL_PERMANENT_POLICY,
+            error_code="WORKFLOW_VISUAL_RESUME_NOT_AUTHORIZED_BY_PACKAGE",
+            summary=(
+                "VISUAL resumption requires exact package authority for durable "
+                "one-shot asset-slot reconciliation."
+            ),
+            incident_type="CONFIG_ERROR",
+            retry_eligible=False,
+        )
 
 
 def _require_package_bound_retry_authority(
@@ -1347,6 +1750,107 @@ def _require_package_support_authority(
             f"WORKFLOW_{label}_AUTHORITY_MISMATCH"
         )
     return dict(version.content)
+
+
+def _execution_mode_from_provider_authority(
+    provider_content: Mapping[str, Any],
+) -> str:
+    execution_mode = provider_content.get("execution_mode")
+    if execution_mode not in _POST_MEDIA_EXECUTION_MODES:
+        raise ProductionWorkflowCoordinator._integrity_error(
+            "WORKFLOW_PROVIDER_EXECUTION_MODE_INVALID"
+        )
+    return str(execution_mode)
+
+
+def _post_readiness_execution_mode(
+    session: Session,
+    run: ProductionWorkflowRun,
+) -> str:
+    """Resolve the sealed mode used to choose the post-MEDIA route.
+
+    Only an explicit qualification authority may retain the historical local
+    MEDIA -> RENDER path.  Missing or ambiguous authority never defaults to a
+    native production route.
+    """
+
+    from app.services.ai_visual_rerender_authority import (
+        resolve_governed_ai_visual_rerender_execution_authority,
+    )
+
+    governed = resolve_governed_ai_visual_rerender_execution_authority(
+        session,
+        workflow_run_id=run.id,
+    )
+    if governed is not None:
+        return _execution_mode_from_provider_authority(governed.provider_plan)
+    if run.production_package_artifact_version_id is None:
+        raise ProductionWorkflowCoordinator._integrity_error(
+            "WORKFLOW_PROVIDER_EXECUTION_MODE_PACKAGE_REQUIRED"
+        )
+    package = ProductionPackageService(session).validate_for_readiness(
+        run.production_package_artifact_version_id
+    )
+    provider_content = _require_package_support_authority(
+        session,
+        project_id=run.video_project_id,
+        artifact_version_id=package.provider_execution_plan_ref.artifact_version_id,
+        expected_hash=package.provider_execution_plan_ref.content_hash,
+        expected_type="provider_execution_plan",
+        label="PROVIDER_PLAN",
+    )
+    return _execution_mode_from_provider_authority(provider_content)
+
+
+def _next_stage_after_receipt_authority(
+    session: Session,
+    run: ProductionWorkflowRun,
+    completed_stage: ProductionWorkflowStage,
+) -> ProductionWorkflowStage | None:
+    """Choose one post-receipt edge without reviving pre-cutover REAL visuals."""
+
+    if (
+        completed_stage == ProductionWorkflowStage.MEDIA
+        and run.ai_visual_production_run_id is None
+    ):
+        # Historical pre-cutover fixtures and migration replays may explicitly
+        # restore the sealed stage graph that predates VISUAL.  That graph has
+        # no VISUAL edge to project; active production always retains VISUAL in
+        # STAGE_SEQUENCE and continues through the fail-closed authority path.
+        if ProductionWorkflowStage.VISUAL not in STAGE_SEQUENCE:
+            return ProductionWorkflowStage.RENDER
+        execution_mode = _post_readiness_execution_mode(session, run)
+        if execution_mode == _QUALIFICATION_LOCAL_EXECUTION_MODE:
+            return ProductionWorkflowStage.RENDER
+        return ProductionWorkflowStage.VISUAL
+    return _next_stage(completed_stage)
+
+
+def _require_real_ai_visual_execution_authority(
+    *,
+    run: ProductionWorkflowRun,
+    stage: ProductionWorkflowStage,
+    provider_content: Mapping[str, Any],
+) -> None:
+    """Make native pre-cutover output unreachable from active real production."""
+
+    if stage not in _AI_VISUAL_AUTHORITY_REQUIRED_STAGES:
+        return
+    execution_mode = _execution_mode_from_provider_authority(provider_content)
+    if (
+        execution_mode == _REAL_LONG_FORM_EXECUTION_MODE
+        and run.ai_visual_production_run_id is None
+    ):
+        raise WorkflowStageError(
+            classification=WorkflowFailureClassification.FAIL_PERMANENT_POLICY,
+            error_code="WORKFLOW_REAL_AI_VISUAL_AUTHORITY_REQUIRED",
+            summary=(
+                "Active real long-form production cannot render or run render QC "
+                "without its sealed AI visual production authority."
+            ),
+            incident_type="POLICY_BLOCK",
+            retry_eligible=False,
+        )
 
 
 def _support_authority_is_positive(value: Mapping[str, Any]) -> bool:
@@ -1553,10 +2057,57 @@ def _validate_gateway_stage_result(
             refs.canonical_media_timeline_ref,
             refs.canonical_media_timeline_hash,
         )
+    elif stage == ProductionWorkflowStage.VISUAL:
+        require_run_fields(
+            "production_package_artifact_version_id",
+            "production_package_hash",
+            "canonical_media_timeline_ref",
+            "canonical_media_timeline_hash",
+        )
+        require_ref_fields(
+            "ai_visual_production_run_id",
+            "ai_visual_policy_ref",
+            "ai_visual_policy_hash",
+            "ai_visual_style_bible_ref",
+            "ai_visual_style_bible_hash",
+            "ai_visual_scene_plan_ref",
+            "ai_visual_scene_plan_hash",
+            "ai_visual_asset_manifest_ref",
+            "ai_visual_asset_manifest_hash",
+            "video_motion_grammar_ref",
+            "video_motion_grammar_hash",
+            "ffmpeg_effect_plan_ref",
+            "ffmpeg_effect_plan_hash",
+        )
+        from app.db.models.ai_visual import AIVisualAssetManifest
+
+        manifest = (
+            session.get(AIVisualAssetManifest, result.result_id)
+            if result.result_id is not None
+            else None
+        )
+        if (
+            refs.ai_visual_production_run_id != run.ai_visual_production_run_id
+            or manifest is None
+            or manifest.visual_production_run_id != refs.ai_visual_production_run_id
+            or manifest.content_hash != refs.ai_visual_asset_manifest_hash
+        ):
+            raise ProductionWorkflowCoordinator._integrity_error(
+                "WORKFLOW_VISUAL_MANIFEST_IDENTITY_MISMATCH"
+            )
+        expected_identity = (
+            refs.ai_visual_asset_manifest_ref,
+            refs.ai_visual_asset_manifest_hash,
+        )
     elif stage == ProductionWorkflowStage.RENDER:
         require_run_fields(
             "canonical_media_timeline_ref",
             "canonical_media_timeline_hash",
+            "ai_visual_production_run_id",
+            "ai_visual_asset_manifest_ref",
+            "ai_visual_asset_manifest_hash",
+            "ffmpeg_effect_plan_ref",
+            "ffmpeg_effect_plan_hash",
         )
         require_ref_fields(
             "native_render_plan_ref",
@@ -1754,6 +2305,7 @@ def build_default_stage_handler_registry(
             )
     for stage in (
         ProductionWorkflowStage.MEDIA,
+        ProductionWorkflowStage.VISUAL,
         ProductionWorkflowStage.RENDER,
         ProductionWorkflowStage.QC,
         ProductionWorkflowStage.ARCHIVE,
@@ -2356,6 +2908,25 @@ class ProductionWorkflowCoordinator:
         refreshed_context.ensure_active()
         if not isinstance(result, WorkflowStageResult):
             result = WorkflowStageResult.model_validate(result)
+        if (
+            payload.stage == ProductionWorkflowStage.MEDIA
+            and result.result_type == "V2_ELEVENLABS_CANONICAL_MEDIA_TIMELINE"
+        ):
+            # MEDIA is the last point where the exact narration/timing/SRT
+            # lineage exists while VISUAL has not yet been scheduled.  Seal
+            # the ordinary AI-visual run and its separate Gemini reservation
+            # in this same transaction; this authorization performs no
+            # provider call.
+            from app.services.v2_ai_visual_authorization import (
+                authorize_normal_ai_visual_after_verified_media,
+            )
+
+            authorize_normal_ai_visual_after_verified_media(
+                session=self.session,
+                workflow_run_id=run.id,
+                media_result=result,
+                clock=self.now,
+            )
         _assert_no_sensitive_payload(result.result_payload)
         completed_at = self.now()
         receipt = WorkflowCommandReceipt(
@@ -2459,7 +3030,11 @@ class ProductionWorkflowCoordinator:
                 run.state = ProductionWorkflowState.FINAL_REVIEW_READY.value
                 run.completed_at = latest.completed_at
             elif run.state not in TERMINAL_WORKFLOW_STATES:
-                next_stage = _next_stage(latest_stage)
+                next_stage = _next_stage_after_receipt_authority(
+                    self.session,
+                    run,
+                    latest_stage,
+                )
                 if next_stage is not None:
                     run.current_stage = next_stage.value
                     run.state = _pending_state_for_stage(next_stage).value
@@ -2646,6 +3221,15 @@ class ProductionWorkflowCoordinator:
             "canonical_media_timeline_hash": (
                 refs.canonical_media_timeline_hash or run.canonical_media_timeline_hash
             ),
+            "ai_visual_production_run_id": (
+                refs.ai_visual_production_run_id or run.ai_visual_production_run_id
+            ),
+            "ai_visual_asset_manifest_hash": (
+                refs.ai_visual_asset_manifest_hash or run.ai_visual_asset_manifest_hash
+            ),
+            "ffmpeg_effect_plan_hash": (
+                refs.ffmpeg_effect_plan_hash or run.ffmpeg_effect_plan_hash
+            ),
             "native_render_plan_ref": (
                 refs.native_render_plan_ref or run.native_render_plan_ref
             ),
@@ -2775,7 +3359,12 @@ class ProductionWorkflowCoordinator:
             run.last_progress_at = now
             run.projection_version += 1
             return
-        next_stage = _next_stage(stage)
+        # Only explicit non-production qualification authority may retain the
+        # historical MEDIA -> RENDER route.  Active real production always
+        # enters VISUAL; if its MEDIA transaction failed to bind an
+        # AIVisualProductionRun, the VISUAL gateway then blocks before any
+        # renderer/provider effect instead of silently reviving native cards.
+        next_stage = _next_stage_after_receipt_authority(self.session, run, stage)
         now = self.now()
         if next_stage is None:
             self._require_final_review_authorities(run)
@@ -2838,6 +3427,22 @@ class ProductionWorkflowCoordinator:
             "destination_binding_fingerprint": (run.destination_binding_fingerprint),
         }
         missing = sorted(key for key, value in required.items() if value is None)
+        if run.ai_visual_production_run_id is not None:
+            ai_required = {
+                "ai_visual_policy_ref": run.ai_visual_policy_ref,
+                "ai_visual_policy_hash": run.ai_visual_policy_hash,
+                "ai_visual_style_bible_ref": run.ai_visual_style_bible_ref,
+                "ai_visual_style_bible_hash": run.ai_visual_style_bible_hash,
+                "ai_visual_scene_plan_ref": run.ai_visual_scene_plan_ref,
+                "ai_visual_scene_plan_hash": run.ai_visual_scene_plan_hash,
+                "ai_visual_asset_manifest_ref": run.ai_visual_asset_manifest_ref,
+                "ai_visual_asset_manifest_hash": run.ai_visual_asset_manifest_hash,
+                "video_motion_grammar_ref": run.video_motion_grammar_ref,
+                "video_motion_grammar_hash": run.video_motion_grammar_hash,
+                "ffmpeg_effect_plan_ref": run.ffmpeg_effect_plan_ref,
+                "ffmpeg_effect_plan_hash": run.ffmpeg_effect_plan_hash,
+            }
+            missing.extend(key for key, value in ai_required.items() if value is None)
         if run.archive_verification_state != "VERIFIED":
             missing.append("archive_verification_state=VERIFIED")
         if missing:

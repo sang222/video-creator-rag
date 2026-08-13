@@ -285,6 +285,15 @@ from app.db.models.v2_effect import (
     V2NarrationTimingRecoveryReceipt,
     V2ProductionEffectLedger,
 )
+from app.db.models.ai_visual import (
+    AIVisualAssetEffect,
+    AIVisualAssetManifest,
+    AIVisualProductionRun,
+    AIVisualReplacementLineage,
+    AIVisualRerenderAuthority,
+    AIVisualScenePlanSnapshot,
+    AIVisualStyleBible,
+)
 
 __all__ = [
     "ClaimEvidenceLedger",
@@ -511,4 +520,11 @@ __all__ = [
     "V2NarrationTimingRecoveryAuthority",
     "V2NarrationTimingRecoveryReceipt",
     "V2ProductionEffectLedger",
+    "AIVisualAssetEffect",
+    "AIVisualAssetManifest",
+    "AIVisualProductionRun",
+    "AIVisualReplacementLineage",
+    "AIVisualRerenderAuthority",
+    "AIVisualScenePlanSnapshot",
+    "AIVisualStyleBible",
 ]

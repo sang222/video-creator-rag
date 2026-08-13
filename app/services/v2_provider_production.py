@@ -10,6 +10,7 @@ idempotency key.
 
 from __future__ import annotations
 
+import copy
 import uuid
 import os
 from collections.abc import Mapping
@@ -50,6 +51,7 @@ V2_REAL_PRODUCTION_MODE = "REAL_LONG_FORM_PRODUCTION"
 _V2_EXECUTION_MODES = frozenset({V2_QUALIFICATION_MODE, V2_REAL_PRODUCTION_MODE})
 _V2_REAL_ADAPTERS_BY_STAGE = {
     ProductionWorkflowStage.MEDIA: "v2-elevenlabs-narration",
+    ProductionWorkflowStage.VISUAL: "v2-ai-visual-production",
     ProductionWorkflowStage.RENDER: "v2-local-native",
     ProductionWorkflowStage.QC: "v2-local-native",
     ProductionWorkflowStage.ARCHIVE: "v2-google-drive-remote",
@@ -57,6 +59,7 @@ _V2_REAL_ADAPTERS_BY_STAGE = {
 V2_EFFECT_STAGES = frozenset(
     {
         ProductionWorkflowStage.MEDIA,
+        ProductionWorkflowStage.VISUAL,
         ProductionWorkflowStage.RENDER,
         ProductionWorkflowStage.QC,
         ProductionWorkflowStage.ARCHIVE,
@@ -144,6 +147,13 @@ class V2RenderGateway(Protocol):
 
 
 @runtime_checkable
+class V2VisualProviderGateway(Protocol):
+    def produce_visual_assets(
+        self, context: WorkflowStageContext
+    ) -> WorkflowStageResult: ...
+
+
+@runtime_checkable
 class V2QualityControlGateway(Protocol):
     def run_quality_control(
         self, context: WorkflowStageContext
@@ -167,6 +177,7 @@ class V2ProviderProductionGateway:
     """Concrete composition root for all post-readiness v2 stages."""
 
     media: V2MediaProviderGateway
+    visual: V2VisualProviderGateway
     renderer: V2RenderGateway
     quality_control: V2QualityControlGateway
     archive: V2ArchiveGateway
@@ -187,6 +198,7 @@ class V2ProviderProductionGateway:
     def __post_init__(self) -> None:
         dependencies = (
             (self.media, V2MediaProviderGateway),
+            (self.visual, V2VisualProviderGateway),
             (self.renderer, V2RenderGateway),
             (self.quality_control, V2QualityControlGateway),
             (self.archive, V2ArchiveGateway),
@@ -203,6 +215,11 @@ class V2ProviderProductionGateway:
 
     def render_media(self, context: WorkflowStageContext) -> WorkflowStageResult:
         return self.renderer.render_media(context)
+
+    def produce_visual_assets(
+        self, context: WorkflowStageContext
+    ) -> WorkflowStageResult:
+        return self.visual.produce_visual_assets(context)
 
     def run_quality_control(self, context: WorkflowStageContext) -> WorkflowStageResult:
         return self.quality_control.run_quality_control(context)
@@ -266,6 +283,11 @@ class PackageBoundV2StageGateway:
     def render_media(self, context: WorkflowStageContext) -> WorkflowStageResult:
         return self._execute_operation(context, ProductionWorkflowStage.RENDER)
 
+    def produce_visual_assets(
+        self, context: WorkflowStageContext
+    ) -> WorkflowStageResult:
+        return self._execute_operation(context, ProductionWorkflowStage.VISUAL)
+
     def run_quality_control(self, context: WorkflowStageContext) -> WorkflowStageResult:
         return self._execute_operation(context, ProductionWorkflowStage.QC)
 
@@ -315,6 +337,7 @@ class PackageBoundV2StageGateway:
             or refs.destination_binding != expected_destination
         ):
             raise ValidationFailureError("V2_PROVIDER_ARCHIVE_DESTINATION_MISMATCH")
+        _settle_ai_visual_archive_projection(context, result)
         return result
 
     def _execute_operation(
@@ -429,6 +452,60 @@ class PackageBoundV2StageGateway:
             raise ValidationFailureError("V2_PROVIDER_FINAL_REVIEW_AUTHORITY_REQUIRED")
         destination_version = _destination_authority(context)
         destination = _normalized_destination(destination_version.content)
+        supersedes_candidate_id = None
+        if run.ai_visual_production_run_id is not None:
+            from app.db.models.ai_visual import (
+                AIVisualProductionRun,
+                AIVisualRerenderAuthority,
+            )
+
+            visual_run = context.session.get(
+                AIVisualProductionRun, run.ai_visual_production_run_id
+            )
+            if (
+                visual_run is None
+                or visual_run.workflow_run_id != run.id
+                or visual_run.video_project_id != run.video_project_id
+                or (
+                    visual_run.state,
+                    visual_run.current_phase,
+                )
+                not in {
+                    ("ARCHIVED", "ARCHIVE"),
+                    ("FINAL_REVIEW_READY", "FINALIZE"),
+                }
+                or run.ai_visual_asset_manifest_hash is None
+                or run.ffmpeg_effect_plan_hash is None
+            ):
+                raise ValidationFailureError(
+                    "V2_PROVIDER_AI_VISUAL_FINAL_REVIEW_AUTHORITY_REQUIRED"
+                )
+            if visual_run.execution_kind == "NORMAL_PRODUCTION":
+                if visual_run.rerender_authority_id is not None:
+                    raise ValidationFailureError(
+                        "V2_PROVIDER_NORMAL_AI_VISUAL_RERENDER_FORBIDDEN"
+                    )
+            elif visual_run.execution_kind == "GOVERNED_RERENDER":
+                rerender = (
+                    context.session.get(
+                        AIVisualRerenderAuthority, visual_run.rerender_authority_id
+                    )
+                    if visual_run.rerender_authority_id is not None
+                    else None
+                )
+                if (
+                    rerender is None
+                    or rerender.replacement_workflow_run_id != run.id
+                    or rerender.source_workflow_run_id == run.id
+                ):
+                    raise ValidationFailureError(
+                        "V2_PROVIDER_AI_VISUAL_RERENDER_AUTHORITY_REQUIRED"
+                    )
+                supersedes_candidate_id = rerender.rejected_final_review_candidate_id
+            else:
+                raise ValidationFailureError(
+                    "V2_PROVIDER_AI_VISUAL_EXECUTION_KIND_INVALID"
+                )
         if final_review.get("target_surface", "LONG_FORM") != "LONG_FORM":
             raise ValidationFailureError("V2_PROVIDER_LONG_FORM_SURFACE_REQUIRED")
         target_surface = "LONG_FORM"
@@ -503,6 +580,10 @@ class PackageBoundV2StageGateway:
                 run.canonical_media_timeline_hash,
                 "canonical_media_timeline_hash",
             ),
+            ai_visual_production_run_id=run.ai_visual_production_run_id,
+            ai_visual_asset_manifest_hash=run.ai_visual_asset_manifest_hash,
+            ffmpeg_effect_plan_hash=run.ffmpeg_effect_plan_hash,
+            supersedes_final_review_candidate_id=supersedes_candidate_id,
             native_render_plan_ref=_required_run_text(
                 run.native_render_plan_ref, "native_render_plan_ref"
             ),
@@ -559,6 +640,67 @@ class PackageBoundV2StageGateway:
         )
 
 
+def _settle_ai_visual_archive_projection(
+    context: WorkflowStageContext,
+    result: WorkflowStageResult,
+) -> None:
+    """Advance the AI run only after exact remote archive verification.
+
+    The two legal state edges are flushed inside the coordinator transaction.
+    A replay after the archive adapter's independent effect commit validates
+    and returns the already sealed projection without creating a second Drive
+    operation.
+    """
+
+    if context.run.ai_visual_production_run_id is None:
+        return
+    from app.db.models.ai_visual import AIVisualProductionRun
+
+    visual_run = context.session.get(
+        AIVisualProductionRun,
+        context.run.ai_visual_production_run_id,
+        with_for_update=True,
+    )
+    refs = result.authority_refs
+    if (
+        visual_run is None
+        or visual_run.workflow_run_id != context.run.id
+        or visual_run.video_project_id != context.run.video_project_id
+        or visual_run.render_output_ref != context.run.render_output_ref
+        or visual_run.render_output_checksum != context.run.render_output_checksum
+        or refs.archive_receipt_ref is None
+        or refs.archive_receipt_hash is None
+        or refs.final_media_ref_id is None
+        or refs.final_media_ref_hash != visual_run.render_output_checksum
+        or refs.archive_verification_state != "VERIFIED"
+    ):
+        raise ValidationFailureError("AI_VISUAL_ARCHIVE_SETTLEMENT_MISMATCH")
+    if visual_run.state == "ARCHIVED":
+        if (
+            visual_run.current_phase != "ARCHIVE"
+            or visual_run.archive_receipt_ref != refs.archive_receipt_ref
+            or visual_run.archive_receipt_hash != refs.archive_receipt_hash
+            or visual_run.final_media_ref_id != refs.final_media_ref_id
+        ):
+            raise ValidationFailureError("AI_VISUAL_ARCHIVE_REPLAY_MISMATCH")
+        return
+    if visual_run.state == "QC_VERIFIED":
+        if visual_run.current_phase != "QC":
+            raise ValidationFailureError("AI_VISUAL_ARCHIVE_SOURCE_STATE_INVALID")
+        visual_run.state = "ARCHIVING"
+        visual_run.current_phase = "ARCHIVE"
+        visual_run.projection_version += 1
+        context.session.flush()
+    if visual_run.state != "ARCHIVING" or visual_run.current_phase != "ARCHIVE":
+        raise ValidationFailureError("AI_VISUAL_ARCHIVE_SOURCE_STATE_INVALID")
+    visual_run.archive_receipt_ref = refs.archive_receipt_ref
+    visual_run.archive_receipt_hash = refs.archive_receipt_hash
+    visual_run.final_media_ref_id = refs.final_media_ref_id
+    visual_run.state = "ARCHIVED"
+    visual_run.projection_version += 1
+    context.session.flush()
+
+
 def build_v2_provider_production_gateway(
     *,
     adapters: Mapping[str, V2ProductionOperationAdapter] | None = None,
@@ -583,9 +725,14 @@ def build_v2_provider_production_gateway(
             V2_LOCAL_ADAPTER_KEY,
             V2LocalNativeProductionAdapter,
         )
+        from app.services.v2_ai_visual_stage import (
+            V2_AI_VISUAL_PRODUCTION_ADAPTER_KEY,
+            V2AIVisualProductionAdapter,
+        )
 
         configured_adapters = {
             V2_LOCAL_ADAPTER_KEY: V2LocalNativeProductionAdapter(),
+            V2_AI_VISUAL_PRODUCTION_ADAPTER_KEY: V2AIVisualProductionAdapter(),
             V2_GOOGLE_DRIVE_ARCHIVE_ADAPTER_KEY: V2GoogleDriveArchiveAdapter(),
             V2_ELEVENLABS_NARRATION_ADAPTER_KEY: V2ElevenLabsNarrationAdapter(),
             V2_GOOGLE_DRIVE_REMOTE_ADAPTER_KEY: V2GoogleDriveRemoteArchiveAdapter(),
@@ -593,6 +740,7 @@ def build_v2_provider_production_gateway(
     package_bound = PackageBoundV2StageGateway(configured_adapters)
     return V2ProviderProductionGateway(
         media=package_bound,
+        visual=package_bound,
         renderer=package_bound,
         quality_control=package_bound,
         archive=package_bound,
@@ -613,6 +761,16 @@ def build_v2_provider_production_gateway(
 def _provider_plan(context: WorkflowStageContext) -> dict[str, Any]:
     _require_long_form_context(context)
     run = context.run
+    from app.services.ai_visual_rerender_authority import (
+        resolve_governed_ai_visual_rerender_execution_authority,
+    )
+
+    governed = resolve_governed_ai_visual_rerender_execution_authority(
+        context.session,
+        workflow_run_id=run.id,
+    )
+    if governed is not None:
+        return copy.deepcopy(governed.provider_plan)
     if run.production_package_artifact_version_id is None:
         raise ValidationFailureError("V2_PROVIDER_PACKAGE_REQUIRED")
     package = ProductionPackageService(context.session).validate_for_readiness(
@@ -654,6 +812,20 @@ def _provider_plan(context: WorkflowStageContext) -> dict[str, Any]:
         raise ValidationFailureError("V2_PROVIDER_EXECUTION_PLAN_NOT_AUTHORIZED")
     if str(plan.get("production_lane")) != run.production_lane:
         raise ValidationFailureError("V2_PROVIDER_EXECUTION_PLAN_LANE_MISMATCH")
+    if plan.get("execution_mode") == V2_REAL_PRODUCTION_MODE and (
+        package.production_visual_policy_version
+        != "vcos.production-visual-policy.ai-only.v1"
+        or package.production_visual_policy_ref
+        != "config://production_visual_policy_catalog/2026-08-13/active-real-long-form-ai-only"
+        or package.production_visual_policy_hash is None
+        or package.active_primary_visual_routes != ["AI_IMAGE", "AI_VIDEO"]
+        or plan.get("production_visual_policy_ref")
+        != package.production_visual_policy_ref
+        or plan.get("production_visual_policy_hash")
+        != package.production_visual_policy_hash
+        or plan.get("active_primary_visual_routes") != ["AI_IMAGE", "AI_VIDEO"]
+    ):
+        raise ValidationFailureError("V2_REAL_AI_ONLY_VISUAL_POLICY_REQUIRED")
     return plan
 
 
@@ -675,6 +847,7 @@ def _require_real_provider_operation(operation: V2AuthorizedAdapterOperation) ->
 
     external_stage = operation.stage in {
         ProductionWorkflowStage.MEDIA,
+        ProductionWorkflowStage.VISUAL,
         ProductionWorkflowStage.ARCHIVE,
     }
     details = operation.parameters.get("provider_execution")
@@ -730,6 +903,29 @@ def _require_real_provider_operation(operation: V2AuthorizedAdapterOperation) ->
                     "Cấu hình lại ElevenLabs credential cho worker rồi tạo "
                     "một natural cadence run mới; không thay bằng local TTS."
                 ),
+            )
+    elif operation.stage == ProductionWorkflowStage.VISUAL:
+        if (
+            details.get("provider") != "ai_visual_scene_effects"
+            or details.get("credential_ref") != "env://GEMINI_API_KEY"
+            or details.get("active_primary_visual_routes") != ["AI_IMAGE", "AI_VIDEO"]
+            or details.get("native_fallback_allowed") is not False
+            or details.get("stock_fallback_allowed") is not False
+            or details.get("screenshot_fallback_allowed") is not False
+            or not operation.paid_provider_call
+            or operation.max_cost_usd <= 0
+        ):
+            raise ValidationFailureError("V2_REAL_AI_VISUAL_OPERATION_INVALID")
+        if not str(os.getenv("GEMINI_API_KEY") or "").strip():
+            raise WorkflowStageError(
+                classification=WorkflowFailureClassification.BLOCK_EXTERNAL_FAILURE,
+                error_code="V2_REAL_AI_VISUAL_BLOCKED_CREDENTIAL",
+                summary=(
+                    "The AI-only visual plan requires the Gemini credential; "
+                    "no native, stock, or screenshot fallback was attempted."
+                ),
+                incident_type="CREDENTIAL_BLOCK",
+                retry_eligible=False,
             )
     elif operation.stage == ProductionWorkflowStage.ARCHIVE:
         if (
@@ -828,11 +1024,30 @@ def _authorized_adapter_operation(
         remaining = Decimal(str(budget["remaining_budget_usd"]))
     except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
         raise ValidationFailureError("V2_PROVIDER_OPERATION_BUDGET_INVALID") from exc
+    governed_visual_reconciliation = False
+    if stage == ProductionWorkflowStage.VISUAL:
+        lineage = plan.get("lineage")
+        try:
+            reconciliation_ceiling = Decimal(
+                str(budget.get("visual_reconciliation_ceiling_usd", "-1"))
+            )
+        except (InvalidOperation, TypeError, ValueError):
+            reconciliation_ceiling = Decimal("-1")
+        governed_visual_reconciliation = bool(
+            isinstance(lineage, dict)
+            and lineage.get("schema_version")
+            == "vcos.ai-visual-rerender-execution-lineage.v1"
+            and budget.get("budget_status") == "SETTLED_CONSERVATIVE"
+            and budget.get("visual_resume_authorized") is True
+            and budget.get("scene_effect_max_attempts") == 1
+            and reconciliation_ceiling >= max_cost
+            and remaining == 0
+        )
     if (
         authorized_cost < 0
         or remaining < 0
         or authorized_cost < max_cost
-        or remaining < max_cost
+        or (remaining < max_cost and not governed_visual_reconciliation)
     ):
         raise ValidationFailureError("V2_PROVIDER_OPERATION_BUDGET_EXHAUSTED")
     return V2AuthorizedAdapterOperation(
@@ -847,6 +1062,16 @@ def _authorized_adapter_operation(
 
 
 def _budget_authority(context: WorkflowStageContext) -> dict[str, Any]:
+    from app.services.ai_visual_rerender_authority import (
+        resolve_governed_ai_visual_rerender_execution_authority,
+    )
+
+    governed = resolve_governed_ai_visual_rerender_execution_authority(
+        context.session,
+        workflow_run_id=context.run.id,
+    )
+    if governed is not None:
+        return copy.deepcopy(governed.budget_plan)
     package_id = context.run.production_package_artifact_version_id
     if package_id is None:
         raise ValidationFailureError("V2_PROVIDER_PACKAGE_REQUIRED")

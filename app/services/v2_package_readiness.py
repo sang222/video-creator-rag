@@ -223,6 +223,28 @@ class CanonicalV2SupportCompiler:
                     if authority.support_envelope_version is not None
                     else None
                 ),
+                production_visual_policy_version=(
+                    "vcos.production-visual-policy.ai-only.v1"
+                    if authority.support_envelope is not None
+                    and authority.support_envelope.production_visual_policy_ref
+                    is not None
+                    else None
+                ),
+                production_visual_policy_ref=(
+                    authority.support_envelope.production_visual_policy_ref
+                    if authority.support_envelope is not None
+                    else None
+                ),
+                production_visual_policy_hash=(
+                    authority.support_envelope.production_visual_policy_hash
+                    if authority.support_envelope is not None
+                    else None
+                ),
+                active_primary_visual_routes=(
+                    authority.support_envelope.active_primary_visual_routes
+                    if authority.support_envelope is not None
+                    else []
+                ),
                 research_refs=[_exact_ref("research", versions["research_pack"])],
                 source_refs=[_exact_ref("source", versions["source_pack"])],
                 niche_market_gate_refs=[
@@ -266,7 +288,9 @@ class CanonicalV2SupportCompiler:
                     assignment_integrity_pass=True,
                     # These values are projections from the immutable current
                     # qualification receipt, never caller/package assertions.
-                    editorial_depth_sufficient=qualification["editorial_depth_sufficient"],
+                    editorial_depth_sufficient=qualification[
+                        "editorial_depth_sufficient"
+                    ],
                     supported_claim_count=len(claims),
                     distinct_editorial_section_count=len(sections),
                     research_coverage_ratio=qualification["research_coverage_ratio"],
@@ -673,8 +697,7 @@ def _require_frozen_support_envelope(
         (
             item
             for item in envelope.gate_receipts
-            if isinstance(item, dict)
-            and item.get("gate_key") == "script_qualification"
+            if isinstance(item, dict) and item.get("gate_key") == "script_qualification"
         ),
         None,
     )
@@ -928,9 +951,7 @@ def _validate_memory_guidance_authority(
         or application.memory_digest_hash != authority.digest_hash
         or application.agent_key != "ScriptWriterAgent"
     ):
-        raise _support_envelope_integrity_error(
-            "V2_MEMORY_GUIDANCE_AUTHORITY_DRIFT"
-        )
+        raise _support_envelope_integrity_error("V2_MEMORY_GUIDANCE_AUTHORITY_DRIFT")
 
 
 def _validate_frozen_gate_receipts(
@@ -1216,6 +1237,7 @@ def _support_payloads(
     stage_modes = (
         {
             "MEDIA": "ELEVENLABS_FINAL_NARRATION",
+            "VISUAL": "AI_ONLY_PRIMARY_VISUAL_GENERATION",
             "RENDER": "NATIVE_FFMPEG_LOCAL",
             "QC": "AUTOMATED_NATIVE_QC",
         }
@@ -1240,7 +1262,10 @@ def _support_payloads(
         else None
     )
     visual_source_policy = (
-        "POLICY_SELECTED_ASSET_REQUEST_REQUIRED"
+        "AI_ONLY_GENERATED_ASSETS_REQUIRED"
+        if visual_rights is not None
+        and visual_rights.visual_source_mode == "AI_ONLY_GENERATED_ASSETS"
+        else "POLICY_SELECTED_ASSET_REQUEST_REQUIRED"
         if visual_rights is not None
         and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
         else "LOCAL_GENERATED_CARDS_ONLY"
@@ -1254,6 +1279,9 @@ def _support_payloads(
         visual_source_policy = "NATIVE_BACKBONE_POLICY_ONLY"
     visual_provider_plan = (
         list(visual_rights.allowed_provider_keys)
+        if visual_rights is not None
+        and visual_rights.visual_source_mode == "AI_ONLY_GENERATED_ASSETS"
+        else list(visual_rights.allowed_provider_keys)
         if visual_rights is not None
         and visual_rights.visual_source_mode == "POLICY_SELECTED_ASSET_REQUESTS"
         else ["NATIVE_FFMPEG"]
@@ -1310,6 +1338,31 @@ def _support_payloads(
                 "credential_ref": "env://ELEVENLABS_API_KEY",
                 "attempt_limit": scoped_policy.provider_usage_policy.elevenlabs.initial_tts_attempts,
                 "idempotency_key": f"{operation_id}:elevenlabs-final-narration",
+                "estimated_cost_usd": max_cost_usd,
+                "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
+                "package_support_envelope_hash": support_envelope_hash,
+            }
+        if real_production and stage == "VISUAL":
+            assert envelope is not None
+            parameters["provider_execution"] = {
+                "provider": "ai_visual_scene_effects",
+                "credential_ref": "env://GEMINI_API_KEY",
+                "routes": ["AI_IMAGE", "AI_VIDEO"],
+                "active_primary_visual_routes": ["AI_IMAGE", "AI_VIDEO"],
+                "image_provider": "google_gemini_image",
+                "video_provider": "google_veo",
+                "attempt_limit": 1,
+                "attempt_limit_per_asset_slot": 1,
+                "automatic_provider_retry": False,
+                "fallback_allowed": False,
+                "native_fallback_allowed": False,
+                "stock_fallback_allowed": False,
+                "screenshot_fallback_allowed": False,
+                "production_visual_policy_ref": (envelope.production_visual_policy_ref),
+                "production_visual_policy_hash": (
+                    envelope.production_visual_policy_hash
+                ),
+                "idempotency_key": f"{operation_id}:ai-visual-asset-set",
                 "estimated_cost_usd": max_cost_usd,
                 "budget_reservation_ref": envelope.zero_cost_budget.reservation_ref,
                 "package_support_envelope_hash": support_envelope_hash,
@@ -1497,9 +1550,7 @@ def _support_payloads(
                         "memory_influence_manifest_id": str(
                             envelope.memory_guidance_authority.memory_influence_manifest_id
                         ),
-                        "digest_hash": (
-                            envelope.memory_guidance_authority.digest_hash
-                        ),
+                        "digest_hash": (envelope.memory_guidance_authority.digest_hash),
                         "non_factual_guidance_only": True,
                         "no_raw_analytics": True,
                         "no_raw_memory": True,
@@ -1513,9 +1564,7 @@ def _support_payloads(
                 {
                     "asset_request_policy": {
                         "authority_hash": visual_rights.content_hash,
-                        "allowed_provider_keys": (
-                            visual_rights.allowed_provider_keys
-                        ),
+                        "allowed_provider_keys": (visual_rights.allowed_provider_keys),
                         "asset_request_compiler_required": True,
                         "execution_phase": "POST_READINESS_ONLY",
                         "provider_fallback_allowed": False,
@@ -1552,9 +1601,7 @@ def _support_payloads(
                 if envelope is not None
                 else "APPROVED_PLANNING_AUTHORITY"
             ),
-            "asset_policy": (
-                visual_source_policy
-            ),
+            "asset_policy": (visual_source_policy),
             "audio_strategy": audio_strategy,
             "unresolved_exceptions": [],
             "disclosures": [],
@@ -1575,6 +1622,9 @@ def _support_payloads(
             "result": "PASS",
             "execution_authorized": True,
             "retry_authorized": not real_production,
+            "visual_resume_authorized": real_production,
+            "scene_effect_max_attempts": 1,
+            "provider_retry_authorized": False,
             "max_attempts": 1 if real_production else 5,
             "retry_cost_usd": "0",
             "production_lane": authority.project.production_lane,
@@ -1590,6 +1640,15 @@ def _support_payloads(
                 "GOOGLE_DRIVE" if real_production else "QUALIFICATION_ONLY"
             ),
             "visual_provider_plan": visual_provider_plan,
+            "production_visual_policy_ref": (
+                envelope.production_visual_policy_ref if envelope is not None else None
+            ),
+            "production_visual_policy_hash": (
+                envelope.production_visual_policy_hash if envelope is not None else None
+            ),
+            "active_primary_visual_routes": (
+                envelope.active_primary_visual_routes if envelope is not None else []
+            ),
             "visual_asset_acquisition": (
                 {
                     "authority": visual_rights.model_dump(mode="json"),
@@ -1622,9 +1681,7 @@ def _support_payloads(
                     "destination_mode": destination.get("destination_mode"),
                     "destination_status": destination.get("destination_status"),
                     "destination_handle": destination.get("destination_handle"),
-                    "destination_binding_ref": destination.get(
-                        "active_binding_ref"
-                    ),
+                    "destination_binding_ref": destination.get("active_binding_ref"),
                     "destination_binding_hash": (
                         envelope.verified_destination.content_hash
                         if envelope is not None
@@ -1689,6 +1746,8 @@ def _support_payloads(
             "result": "PASS",
             "budget_authorized": True,
             "retry_authorized": not real_production,
+            "visual_resume_authorized": real_production,
+            "scene_effect_max_attempts": 1,
             "max_attempts": 1 if real_production else 5,
             "retry_cost_usd": "0",
             "remaining_budget_usd": (
@@ -1722,20 +1781,14 @@ def _support_payloads(
         "destination_binding": {
             "schema_version": "vcos.destination-binding-artifact.v2",
             "result": (
-                "PASS_FOR_FINAL_REVIEW_ONLY"
-                if review_only_destination
-                else "PASS"
+                "PASS_FOR_FINAL_REVIEW_ONLY" if review_only_destination else "PASS"
             ),
             "destination_mode": destination.get("destination_mode"),
             "destination_status": destination.get("destination_status"),
             "destination_handle": destination.get("destination_handle"),
-            "destination_binding_hash": destination.get(
-                "destination_binding_hash"
-            ),
+            "destination_binding_hash": destination.get("destination_binding_hash"),
             "destination_model_hash": destination.get("destination_model_hash"),
-            "destination_authority_hash": destination.get(
-                "destination_authority_hash"
-            ),
+            "destination_authority_hash": destination.get("destination_authority_hash"),
             "publish_execution_allowed": (
                 destination.get("publish_execution_allowed") is True
             ),
@@ -1888,7 +1941,9 @@ def _script_payload(
         **(
             {
                 "cross_modal_script_lineage": cross_modal.model_dump(mode="json"),
-                "section_coverage_plan": cross_modal.section_coverage_plan.model_dump(mode="json"),
+                "section_coverage_plan": cross_modal.section_coverage_plan.model_dump(
+                    mode="json"
+                ),
                 "capability_projection_receipts": cross_modal.capability_projection_receipts,
                 "single_source_sections": cross_modal.writer_sections,
             }
@@ -1927,10 +1982,18 @@ def _qualification_projection(
             "research_coverage_ratio": 0.0,
         }
     gate = next(
-        (item for item in envelope.gate_receipts if item.get("gate_key") == "script_qualification"),
+        (
+            item
+            for item in envelope.gate_receipts
+            if item.get("gate_key") == "script_qualification"
+        ),
         None,
     )
-    if not isinstance(gate, dict) or gate.get("status") != "PASS" or not gate.get("script_qualification_run_id"):
+    if (
+        not isinstance(gate, dict)
+        or gate.get("status") != "PASS"
+        or not gate.get("script_qualification_run_id")
+    ):
         raise ValidationFailureError("V2_REAL_PROVIDER_SCRIPT_QUALIFICATION_REQUIRED")
     from app.services.script_qualification import ScriptQualificationService
 
@@ -1970,7 +2033,9 @@ def _qualification_projection(
         "editorial_depth_sufficient": True,
         "anti_padding_pass": True,
         "script_gates_pass": True,
-        "research_coverage_ratio": float(fulfillment.get("research_coverage_ratio", 0.0)),
+        "research_coverage_ratio": float(
+            fulfillment.get("research_coverage_ratio", 0.0)
+        ),
     }
 
 
@@ -1983,7 +2048,14 @@ def _qualification_projection_value(
     envelope = authority.support_envelope
     if envelope is None:
         return default
-    gate = next((item for item in envelope.gate_receipts if item.get("gate_key") == "script_qualification"), None)
+    gate = next(
+        (
+            item
+            for item in envelope.gate_receipts
+            if item.get("gate_key") == "script_qualification"
+        ),
+        None,
+    )
     # The authoritative check occurs above when a package is created.  This
     # helper only prevents the support artifact itself from hardcoding 1.0.
     if not isinstance(gate, dict):

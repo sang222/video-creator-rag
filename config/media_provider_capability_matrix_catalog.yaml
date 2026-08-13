@@ -1,5 +1,5 @@
 catalog_key: media_provider_capability_matrix_catalog
-catalog_version: "2.0.0"
+catalog_version: "2.1.0"
 schema_version: catalog.v1
 status: active
 items:
@@ -153,6 +153,16 @@ items:
     supported_outputs: ["video_clip"]
     plan_requirement: GOOGLE_VEO_3_1_8S_OUTPUT_ONE_APPROVAL_BUDGET_IDEMPOTENCY
     capability_reason: Google Veo is the sole external provider for approved AI metaphor clips.
+  - key: vcos_ai_visual_orchestrator_AI_VISUAL_ASSET_GENERATION
+    provider_key: vcos_ai_visual_orchestrator
+    provider_type: WORKFLOW_ORCHESTRATOR
+    job_type: AI_VISUAL_ASSET_GENERATION
+    capability: SUPPORTED
+    max_duration_seconds: null
+    supported_aspect_ratios: ["16:9"]
+    supported_outputs: ["ai_image", "ai_video", "verified_asset_manifest"]
+    plan_requirement: AI_ONLY_POLICY_STYLE_PLAN_PROMPT_BUDGET_JOURNAL_QC
+    capability_reason: VCOS orchestrates only approved AI_IMAGE and AI_VIDEO effects and emits a verified manifest before rendering.
   - key: llm_router_LONG_SCRIPT_GENERATION
     provider_key: llm_router
     provider_type: LLM_SCRIPT_ENGINE
