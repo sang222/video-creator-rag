@@ -7,7 +7,7 @@ import socket
 import uuid
 import hashlib
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -79,6 +79,40 @@ class _NetworkForbidden(AssertionError):
 
 class _SimulatedCrash(RuntimeError):
     pass
+
+
+def test_0078_authority_seal_preserves_0077_predicates_except_clock() -> None:
+    root = Path(__file__).resolve().parents[1]
+    old_source = (
+        root / "alembic/versions/0077_v2_drive_archive_property_limit_recovery.py"
+    ).read_text()
+    new_source = (
+        root / "alembic/versions/0078_v2_drive_archive_observed_at_clock.py"
+    ).read_text()
+    end = "        END; $$ LANGUAGE plpgsql;"
+    old_start = "        CREATE FUNCTION seal_v2_drive_archive_recovery_authority()"
+    new_start = (
+        "        CREATE OR REPLACE FUNCTION seal_v2_drive_archive_recovery_authority()"
+    )
+    old_body = old_source[
+        old_source.index(old_start) : old_source.index(end, old_source.index(old_start))
+        + len(end)
+    ]
+    new_body = new_source[
+        new_source.index(new_start) : new_source.index(end, new_source.index(new_start))
+        + len(end)
+    ]
+    restored_body = new_body.replace(
+        "CREATE OR REPLACE FUNCTION", "CREATE FUNCTION"
+    ).replace(
+        "__OBSERVED_AT_FUTURE_GUARD__",
+        "(absence->>'observed_at')::timestamptz > now()",
+    )
+
+    assert restored_body == old_body
+    assert (
+        "\"(absence->>'observed_at')::timestamptz > clock_timestamp()\"" in new_source
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -893,6 +927,84 @@ def test_authority_seals_exact_live_defect_and_replays_without_upload(
             )
         ).authority_hash
         == authority.authority_hash
+    )
+
+
+def test_authority_seal_accepts_evidence_observed_after_transaction_start(
+    db_session: Any,
+    engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    scope, _old_failure = _seed_blocked_archive_scope(
+        db_session=db_session,
+        engine=engine,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+    )
+    transaction_started_at = db_session.scalar(text("select now()"))
+    observed_at = db_session.scalar(text("select clock_timestamp()"))
+    assert observed_at > transaction_started_at
+    boundary = _FakeDriveBoundary(
+        credential_id=scope.credential_id,
+        observed_at=observed_at,
+    )
+    service = _recovery_service(
+        db_session=db_session,
+        engine=engine,
+        scope=scope,
+        boundary=boundary,
+    )
+
+    authority = service.authorize(scope.workflow_id, _controlled_recovery_actor())
+
+    assert authority.absence_reconciliation_evidence["observed_at"] == (
+        observed_at.isoformat()
+    )
+    assert boundary.upload_file_calls == []
+
+
+def test_authority_seal_rejects_evidence_observed_in_the_future(
+    db_session: Any,
+    engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    scope, _old_failure = _seed_blocked_archive_scope(
+        db_session=db_session,
+        engine=engine,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+    )
+    observed_at = db_session.scalar(text("select clock_timestamp()")) + timedelta(
+        hours=1
+    )
+    boundary = _FakeDriveBoundary(
+        credential_id=scope.credential_id,
+        observed_at=observed_at,
+    )
+    service = _recovery_service(
+        db_session=db_session,
+        engine=engine,
+        scope=scope,
+        boundary=boundary,
+    )
+
+    with pytest.raises(
+        Exception, match="V2 Drive archive recovery authority seal mismatch"
+    ):
+        service.authorize(scope.workflow_id, _controlled_recovery_actor())
+    db_session.rollback()
+
+    assert boundary.upload_file_calls == []
+    assert (
+        db_session.scalar(
+            select(V2DriveArchivePropertyLimitRecoveryAuthority.id).where(
+                V2DriveArchivePropertyLimitRecoveryAuthority.workflow_run_id
+                == scope.workflow_id
+            )
+        )
+        is None
     )
 
 
